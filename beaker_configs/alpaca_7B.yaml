@@ -1,0 +1,63 @@
+version: v2
+description: open-instruct-alpaca-7B
+tasks:
+  - name: open-instruct-alpaca-7B
+    image:
+      beaker: Yizhongw03/open-instruct
+    command: [
+      '/bin/sh', '-c'
+    ]
+    arguments: ['deepspeed
+      open_instruct/finetune_trainer.py
+      --deepspeed ds_configs/stage3_no_offloading.conf
+      --model_name_or_path /hf_llama_models/
+      --tokenizer_name /hf_llama_models/
+      --use_fast_tokenizer False
+      --train_file /data/alpaca_data_original_template.jsonl
+      --max_seq_length 512
+      --per_device_train_batch_size 4
+      --gradient_accumulation_steps 8
+      --num_train_epochs 3
+      --do_train
+      --learning_rate 2e-5
+      --lr_scheduler_type linear
+      --warmup_ratio 0.03
+      --weight_decay 0.
+      --evaluation_strategy "no"
+      --logging_steps 1
+      --save_strategy epoch
+      --save_total_limit 1
+      --output_dir /output/
+      --bf16
+      --tf32 True
+      --overwrite_output_dir
+    ']
+    envVars:
+      - name: CUDA_DEVICE_ORDER
+        value: PCI_BUS_ID
+      - name: TRANSFORMERS_CACHE
+        value: ./cache/
+      - name: WANDB_PROJECT
+        value: open-instruct
+      - name: WANDB_WATCH
+        value: false
+      - name: WANDB_LOG_MODEL
+        value: false
+      - name: WANDB_DISABLED
+        value: true
+    datasets:
+      - mountPath: /data
+        source:
+          beaker: Yizhongw03/processed_open_instruct_data
+      - mountPath: /hf_llama_models
+        source:
+          beaker: Yizhongw03/hf_llama_model_7B
+    result:
+      # Beaker will capture anything that's written to this location and store it in the results
+      # dataset.
+      path: /output
+    resources:
+      gpuCount: 4
+    context:
+      cluster: ai2/allennlp-cirrascale
+      priority: high

@@ -1,0 +1,73 @@
+version: v2
+description: open-instruct-alpaca-7B-lora-rank-64-lr5e-5
+tasks:
+  - name: open-instruct-alpaca-7B-lora-rank-64-lr5e-5
+    image:
+      beaker: Yizhongw03/open-instruct
+    command: [
+      '/bin/sh', '-c'
+    ]
+    arguments: ['accelerate launch
+      --mixed_precision bf16
+      --num_machines 1
+      --num_processes 4
+      --use_deepspeed
+      --deepspeed_config_file ds_configs/stage3_no_offloading_accelerate.conf
+      open_instruct/finetune.py
+      --model_name_or_path /hf_llama_models
+      --use_lora
+      --lora_rank 64
+      --lora_alpha 16
+      --lora_dropout 0.05
+      --tokenizer_name /hf_llama_models
+      --use_slow_tokenizer
+      --train_file /data/alpaca_data_original_template.jsonl
+      --max_seq_length 512
+      --per_device_train_batch_size 8
+      --gradient_accumulation_steps 4
+      --learning_rate 5e-5
+      --lr_scheduler_type linear
+      --warmup_ratio 0.03
+      --weight_decay 0.
+      --num_train_epochs 3
+      --output_dir /output/
+      --with_tracking
+      --report_to tensorboard
+      --logging_steps 1 &&
+      python open_instruct/merge_lora.py
+      --base_model_name_or_path /hf_llama_models
+      --lora_model_name_or_path /output
+    ']
+    envVars:
+      - name: CUDA_DEVICE_ORDER
+        value: PCI_BUS_ID
+      - name: TRANSFORMERS_CACHE
+        value: ./cache/
+      - name: WANDB_PROJECT
+        value: open-instruct
+      - name: WANDB_WATCH
+        value: false
+      - name: WANDB_LOG_MODEL
+        value: false
+      - name: WANDB_DISABLED
+        value: true
+    datasets:
+      - mountPath: /data
+        source:
+          beaker: Yizhongw03/processed_open_instruct_data
+      - mountPath: /mmlu
+        source:
+          beaker: Yizhongw03/mmlu
+      - mountPath: /hf_llama_models
+        source:
+          beaker: Yizhongw03/hf_llama_model_7B
+    result:
+      # Beaker will capture anything that's written to this location and store it in the results
+      # dataset.
+      path: /output
+    resources:
+      gpuCount: 4
+    context:
+      # cluster: ai2/allennlp-cirrascale
+      cluster: ai2/yizhongw-4xa100-80gb
+      priority: high

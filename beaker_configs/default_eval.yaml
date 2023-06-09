@@ -1,0 +1,48 @@
+version: v2
+description: open-instruct-eval-default
+tasks:
+  - name: open-instruct-eval-default
+    image:
+      beaker: Yizhongw03/open-instruct
+    command: [
+      '/bin/sh', '-c'
+    ]
+    arguments: ['python -m eval.mmlu_eval.evaluate_hf_lm
+      --ntrain 5
+      --data_dir /data/mmlu/
+      --save_dir /output/
+      --model /model
+      --tokenizer /model
+      --eval_batch_size 4
+      --load_in_8bit
+      --use_chat_format
+    ']
+    envVars:
+      - name: CUDA_DEVICE_ORDER
+        value: PCI_BUS_ID
+      - name: TRANSFORMERS_CACHE
+        value: ./cache/
+      - name: WANDB_PROJECT
+        value: open-instruct
+      - name: WANDB_WATCH
+        value: false
+      - name: WANDB_LOG_MODEL
+        value: false
+      - name: WANDB_DISABLED
+        value: true
+    datasets:
+      - mountPath: /data/
+        source:
+          beaker: Yizhongw03/open_instruct_eval_data
+      - mountPath: /model
+        source:
+          beaker: 01GVYXDGJC6DV0JW9JZ16YM07G
+    result:
+      # Beaker will capture anything that's written to this location and store it in the results
+      # dataset.
+      path: /output
+    resources:
+      gpuCount: 1
+    context:
+      cluster: ai2/general-cirrascale
+      priority: high

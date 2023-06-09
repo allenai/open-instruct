@@ -1,0 +1,7 @@
+fire
+torch
+tqdm
+transformers
+accelerate
+sentencepiece
+protobuf==3.20.0
