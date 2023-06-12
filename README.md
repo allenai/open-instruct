@@ -31,7 +31,7 @@ pip install -r weight-diff-requirements.txt
 
 ### Model preparation
 
-To get LLaMa checkpoints, please acquire them via Meta [here](https://docs.google.com/forms/d/e/1FAIpQLSfqNECQnMkycAp2jP4Z9TFX0cGR4uf7b_fBxjY_OjhJILlKGA/viewform) and consult [the huggingface documentation](https://huggingface.co/docs/transformers/model_doc/llama) for converting them to a huggingface-compatible format.
+To get LLaMa checkpoints, please acquire them via Meta [here](https://docs.google.com/forms/d/e/1FAIpQLSfqNECQnMkycAp2jP4Z9TFX0cGR4uf7b_fBxjY_OjhJILlKGA/viewform) and consult [the Hugging Face documentation](https://huggingface.co/docs/transformers/model_doc/llama) for converting them to a huggingface-compatible format.
 
 Generally, most huggingface-compatible models should work fine, potentially with some adjusting for different tokenizers etc.
 
@@ -41,7 +41,7 @@ Generally, most huggingface-compatible models should work fine, potentially with
 We use a slightly modified form of the [Alpaca weight diff script](https://github.com/tatsu-lab/stanford_alpaca/blob/main/weight_diff.py), which runs the same.
 
 To merge a model:
-1. Download the relevant LLaMa model and convert it to huggingface format (see above).
+1. Download the relevant LLaMa model and convert it to Hugging Face format (see above).
 2. Download our repository and install the right dependencies (see above).
 3. Download the model diff you want.
 4. Run the command below:
@@ -73,7 +73,7 @@ Adjust `model_name_or_path`, `tokenizer_name`, `train_file`, and `output_dir` to
 
 ## Model Checkpoints
 
-We provide a number of model checkpoints as diffs. You can find them on huggingface [here](https://huggingface.co/models?other=arxiv:2306.04751). They are also all here:
+We provide a number of model checkpoints as diffs. You can find them on Hugging Face [here](https://huggingface.co/models?other=arxiv:2306.04751). They are also all here:
 
 | **Model**                | **7B**                                                                         | **13B**                                                                         | **30B**                                                            | **65B**                                                            |
 |--------------------------|--------------------------------------------------------------------------------|---------------------------------------------------------------------------------|--------------------------------------------------------------------|--------------------------------------------------------------------|
