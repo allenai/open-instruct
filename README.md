@@ -92,8 +92,9 @@ We provide a number of model checkpoints as diffs. You can find them on Hugging 
 | Human-Mix                | [link](https://huggingface.co/allenai/open-instruct-human-mix-7b)              | [link](https://huggingface.co/allenai/open-instruct-human-mix-13b)              | [link](https://huggingface.co/allenai/open-instruct-human-mix-30b) | [link](https://huggingface.co/allenai/open-instruct-human-mix-65b) |
 | **Tulu**                 | [link](https://huggingface.co/allenai/tulu-7b)                                 | [link](https://huggingface.co/allenai/tulu-13b)                                 | [link](https://huggingface.co/allenai/tulu-30b)                    | [link](https://huggingface.co/allenai/tulu-65b)                    |
 
-
-Pythia and OPT models (and more...?) coming soon!
+We also trained Pythia and OPT models on the Tulu mixture (aka the Human+GPT mixture), and they are available here:
+- [Pythia 6.9B Tulu](https://huggingface.co/allenai/open-instruct-pythia-6.9b-tulu)
+- [OPT 6.7B Tulu](https://huggingface.co/allenai/open-instruct-opt-6.7b-tulu)
 
 ## Evaluation
 
