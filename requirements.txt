@@ -21,7 +21,7 @@ jsonlines
 mecab-python3
 unidic-lite
 einops
-flash-attn
+flash-attn==1.0.5
 auto-gptq
 fire
 # alpaca-farm eval - my fork with some fixes.
