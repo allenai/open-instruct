@@ -126,7 +126,7 @@ def recover(
         low_cpu_mem_usage=True,
     )
 
-    tokenizer_raw: transformers.PreTrainedTokenizer = transformers.AutoTokenizer.from_pretrained(
+    tokenizer_raw: transformers.PreTrainedTokenizer = transformers.LlamaTokenizer.from_pretrained(
         path_raw
     )
     if tokenizer_raw.pad_token is None:
@@ -135,7 +135,7 @@ def recover(
             model=model_raw,
             tokenizer=tokenizer_raw,
         )
-    tokenizer_recovered: transformers.PreTrainedTokenizer = transformers.AutoTokenizer.from_pretrained(
+    tokenizer_recovered: transformers.PreTrainedTokenizer = transformers.LlamaTokenizer.from_pretrained(
         path_diff
     )
 
