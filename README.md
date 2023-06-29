@@ -10,7 +10,6 @@ We explore instruction-tuning popular base models on publicly available datasets
 
 As part of this work we introduce Tülu, a suite of LLaMa models fully-finetuned on a strong mix of datasets!
 
-The license we release these models under (along with the base model licenses) can be found in `licenses/license.txt` - just replace `<MODELNAME>` with the actual model name (i.e., the name on HuggingFace).
 
 <p align="center">
 <img src="images/tulu_logo.png" width="200" />
@@ -124,6 +123,12 @@ Please check the script for more details on the script itself!
 ### Human Evaluation Interface
 
 Coming soon!
+
+### Licensing
+
+The is licensed under Apache 2.0 as given in `LICENSE`.
+
+The license we use for the models released (along with the base model licenses) can be found in `model_licenses/license.txt` - just replace `<MODELNAME>` with the actual model name (i.e., the name on HuggingFace).
 
 # Citation
 
