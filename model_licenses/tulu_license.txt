@@ -1,0 +1,179 @@
+AI MODEL LICENSE AGREEMENT
+
+
+This License Agreement (as may be amended in accordance with this License Agreement, “License”), between you, or your employer or other entity (if you are entering into this agreement on behalf of your employer or other entity) (“Licensee” or “you”) and The Allen Institute for Artificial Intelligence a Washington nonprofit corporation recognized as tax exempt under Section 501(c)(3) of the Internal Revenue Code (“AI2” or “we”) applies to your use of any algorithm, and/or parameters that are made available by AI2 under this License (the “Model(s)”) and any specifications, manuals, documentation, and other written information provided by AI2 related to the Model (“Documentation”).
+
+
+By clicking “I Accept” below or by using the Model, you agree to the terms of this License. If you do not agree to this License, then you do not have any rights to use the Model or Documentation (collectively, the “Model Components”), and you must immediately cease using the Model Components. If you are agreeing to be bound by the terms of this License on behalf of your employer or other entity, you represent and warrant to AI2 that you have full legal authority to bind your employer or such entity to this License. If you do not have the requisite authority, you may not accept the License or access the Model Components on behalf of your employer or other entity.
+
+
+1. LICENSE GRANT
+
+
+   1. Subject to your compliance with the Documentation and Sections 2, 3, and 5, AI2 grants you a non-exclusive, worldwide, non-transferable, non-sublicensable, revocable, royalty free and limited license under AI2’s copyright interests to reproduce, distribute, and create derivative works of the Model solely for your non-commercial research purposes. The foregoing license is personal to you, and you may not assign or sublicense this License or any other rights or obligations under this License without AI2’s prior written consent; any such assignment or sublicense will be void and will automatically and immediately terminate this License.
+
+
+   2. You may make a reasonable number of copies of the Documentation solely for use in connection with the license to the Model granted above.
+
+
+   3. The grant of rights expressly set forth in this Section 1 (License Grant) are the complete grant of rights to you in the Model Components, and no other licenses are granted, whether by waiver, estoppel, implication, equity or otherwise. AI2 and its licensors reserve all rights not expressly granted by this License.
+
+
+   4. Except as set forth herein, AI2 claims no rights in the results you may produce or generate from the Model Components using informational content from any source (the “Output”). You are accountable for the Output you produce or generate from the Model Components and the subsequent use of that Output. No use of the Output can contravene any provision as stated in this License.
+
+
+2. RESTRICTIONS 
+
+
+You will not, and will not permit, assist or cause any third party to:
+
+
+   5. Use, modify, copy, reproduce, create derivative works of, or distribute the Model Components (or any derivative works thereof, works incorporating the Model Components, or any data produced by the Model), in whole or in part, for (i) any commercial or production purposes, (ii) military purposes or in the service of nuclear technology, (iii) purposes of surveillance, including any research or development relating to surveillance, (iv) biometric processing, (v) in any manner that infringes, misappropriates, or otherwise violates any third-party rights, or (vi) in any manner that violates any applicable law and violating any privacy or security laws, rules, regulations, directives, or governmental requirements (including the General Data Privacy Regulation (Regulation (EU) 2016/679), the California Consumer Privacy Act, and any and all laws governing the processing of biometric information), as well as all amendments and successor laws to any of the foregoing;
+
+
+   6. Alter or remove copyright and other proprietary notices which appear on or in the Model Components; 
+
+
+   7. Utilize any equipment, device, software, or other means to circumvent or remove any security or protection used by AI2 in connection with the Model, or to circumvent or remove any usage restrictions, or to enable functionality disabled by AI2;
+
+
+   8. Offer or impose any terms on the Model Components that alter, restrict, or are inconsistent with the terms of this License; 
+
+
+   9. Use the Model in service of any of the Restricted Uses identified in Appendix A to this Agreement; or
+
+
+   10. Violate any applicable U.S. and non-U.S. export control and trade sanctions laws (“Export Laws”), including by, for example but without limitation:
+
+
+      1. directly or indirectly exporting, re-exporting, providing, or otherwise transferring Model Components: 
+
+
+         1. to any individual, entity, or country prohibited by Export Laws; 
+         2. to anyone on U.S. or non-U.S. government restricted parties lists; or 
+         3. for any purpose prohibited by Export Laws, including nuclear, chemical or biological weapons, or missile technology applications; 
+
+
+      2. using or downloading Model Components if you or they are
+         1. located in a comprehensively sanctioned jurisdiction;
+         2. currently listed on any U.S. or non-U.S. restricted parties list; or
+         3. for any purpose prohibited by Export Laws; and/or
+
+
+      3. disguising your location through IP proxying or other methods.
+
+   3. ATTRIBUTION
+
+Together with any copies of the Model Components (as well as derivative works thereof or works incorporating the Model Components) that you distribute, you must provide
+      1. a copy of this License; and
+      2. the following attribution notice: <MODELNAME> is licensed under the AI Model License, Copyright © The Allen Institute for Artificial Intelligence. All Rights Reserved.”
+
+
+         4. DISCLAIMERS
+
+THE MODEL COMPONENTS ARE PROVIDED “AS IS” and “WITH ALL FAULTS” WITH NO WARRANTY OF ANY KIND, EXPRESS OR IMPLIED. AI2 EXPRESSLY DISCLAIMS ALL REPRESENTATIONS AND WARRANTIES, EXPRESS OR IMPLIED, WHETHER BY STATUTE, CUSTOM, USAGE OR OTHERWISE AS TO ANY MATTERS RELATED TO THE MODEL COMPONENTS, INCLUDING BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, SATISFACTORY QUALITY, OR NON-INFRINGEMENT. AI2 MAKES NO WARRANTIES OR REPRESENTATIONS THAT THE MODEL COMPONENTS WILL BE ERROR FREE OR FREE OF VIRUSES OR OTHER HARMFUL COMPONENTS, OR PRODUCE ANY PARTICULAR RESULTS.
+
+
+         5. LIMITATION OF LIABILITY/YOUR RESPONSIBILITIES
+
+
+            3. TO THE FULLEST EXTENT PERMITTED BY LAW, IN NO EVENT WILL AI2 BE LIABLE TO YOU (i) UNDER ANY THEORY OF LIABILITY, WHETHER BASED IN CONTRACT, TORT, NEGLIGENCE, STRICT LIABILITY, WARRANTY, OR OTHERWISE UNDER THIS LICENSE, OR (ii) FOR ANY INDIRECT, CONSEQUENTIAL, EXEMPLARY, INCIDENTAL, PUNITIVE OR SPECIAL DAMAGES OR LOST PROFITS, EVEN IF YOU HAVE BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. THE MODEL COMPONENTS, THEIR CONSTITUENT COMPONENTS, AND ANY OUTPUT (COLLECTIVELY, “MODEL MATERIALS”) ARE NOT DESIGNED OR INTENDED FOR USE IN ANY APPLICATION OR SITUATION WHERE FAILURE OR FAULT OF THE MODEL MATERIALS COULD REASONABLY BE ANTICIPATED TO LEAD TO SERIOUS INJURY OF ANY PERSON, INCLUDING POTENTIAL DISCRIMINATION OR VIOLATION OF AN INDIVIDUAL’S PRIVACY RIGHTS, OR TO SEVERE PHYSICAL, PROPERTY, OR ENVIRONMENTAL DAMAGE (EACH, A “HIGH-RISK USE”). 
+
+
+            4. IF YOU ELECT TO USE ANY OF THE MODEL MATERIALS FOR A HIGH-RISK USE, YOU DO SO AT YOUR OWN RISK. YOU AGREE TO DESIGN AND IMPLEMENT APPROPRIATE DECISION-MAKING AND RISK-MITIGATION PROCEDURES AND POLICIES IN CONNECTION WITH A HIGH-RISK USE SUCH THAT EVEN IF THERE IS A FAILURE OR FAULT IN ANY OF THE MODEL MATERIALS, THE SAFETY OF PERSONS OR PROPERTY AFFECTED BY THE ACTIVITY STAYS AT A LEVEL THAT IS REASONABLE, APPROPRIATE, AND LAWFUL FOR THE FIELD OF THE HIGH-RISK USE.
+
+               6. INDEMNIFICATION
+
+You will indemnify, defend and hold harmless AI2 and our subsidiaries and affiliates, and each of our respective shareholders, directors, officers, employees, agents, successors, and assigns (collectively, the “AI2 Parties”) from and against any losses, liabilities, damages, fines, penalties, and expenses (including reasonable attorneys’ fees) incurred by any AI2 Party in connection with any claim, demand, allegation, lawsuit, proceeding, or investigation (collectively, “Claims”) arising out of or related to: (a) your access to or use of the Model Components (as well as any results or data generated from such access or use), including any High-Risk Use (defined below); (b) your violation of this License; or (c) your violation, misappropriation or infringement of any rights of another (including intellectual property or other proprietary rights and privacy rights). You will promptly notify the AI2 Parties of any such Claims, and cooperate with AI2 Parties in defending such Claims. You will also grant the AI2 Parties sole control of the defense or settlement, at AI2’s sole option, of any Claims. This indemnity is in addition to, and not in lieu of, any other indemnities or remedies set forth in a written agreement between you and AI2 or the other AI2 Parties.
+
+               7. TERMINATION; SURVIVAL
+
+
+                  5. This License will automatically terminate upon any breach by you of the terms of this License.
+
+b. We may terminate this License, in whole or in part, at any time upon notice (including electronic) to you.
+
+c. The following sections survive termination of this License: 2 (Restrictions), 3 (Attribution), 4 (Disclaimers), 5 (Limitation on Liability), 6 (Indemnification) 7 (Termination; Survival), 8 (Third Party Materials), 9 (Trademarks), 10 (Applicable Law; Dispute Resolution), and 11 (Miscellaneous). 
+
+                     8. THIRD PARTY MATERIALS
+
+The Model Components may contain third-party software or other components (including free and open source software) (all of the foregoing, “Third Party Materials”), which are subject to the license terms of the respective third-party licensors. Your dealings or correspondence with third parties and your use of or interaction with any Third Party Materials are solely between you and the third party. AI2 does not control or endorse, and makes no representations or warranties regarding, any Third Party Materials, and your access to and use of such Third Party Materials are at your own risk.
+
+                     9. TRADEMARKS
+
+Licensee has not been granted any trademark license as part of this License and may not use any name or mark associated with AI2 without the prior written permission of AI2, except to the extent necessary to make the reference required by the “ATTRIBUTION” section of this Agreement.
+
+                     10. APPLICABLE LAW; DISPUTE RESOLUTION
+
+
+This License will be governed and construed under the laws of the State of Washington without regard to conflicts of law provisions.
+
+
+                        11. MISCELLANEOUS
+
+If any provision or part of a provision of this License is unlawful, void or unenforceable, that provision or part of the provision is deemed severed from this License and will not affect the validity and enforceability of any remaining provisions. The failure of AI2 to exercise or enforce any right or provision of this License will not operate as a waiver of such right or provision. This License does not confer any third-party beneficiary rights upon any other person or entity. This License, together with the Documentation, contains the entire understanding between you and AI2 regarding the subject matter of this License, and supersedes all other written or oral agreements and understandings between you and AI2 regarding such subject matter. No change or addition to any provision of this License will be binding unless it is in writing and signed by an authorized representative of both you and AI2.
+
+
+________________
+Appendix A
+
+
+                           1. USE-BASED RESTRICTIONS 
+
+
+You agree not to use the Model:
+
+
+                           6. In any way that violates any applicable national, federal, state, local or international law or regulation;
+                           7. For the purpose of exploiting, harming or attempting to exploit or harm minors in any way;
+                           8. To generate or disseminate verifiably false information with the purpose of harming others;
+                           9. To generate or disseminate personal identifiable information that can be used to harm an individual;
+                           10. To generate or disseminate information or content, in any context (e.g. posts, articles, tweets, chatbots or other kinds of automated bots) without expressly and intelligibly disclaiming that the text is machine generated;
+                           11. To defame, disparage or otherwise harass others;
+                           12. To impersonate or attempt to impersonate others;
+                           13. For fully automated decision making that adversely impacts an individual’s legal rights or otherwise creates or modifies a binding, enforceable obligation;
+                           14. For any use intended to or which has the effect of discriminating against or harming individuals or groups based on online or offline social behavior or known or predicted personal or personality characteristics
+                           15. To exploit any of the vulnerabilities of a specific group of persons based on their age, social, physical or mental characteristics, in order to materially distort the behavior of a person pertaining to that group in a manner that causes or is likely to cause that person or another person physical or psychological harm;
+                           16. For any use intended to or which has the effect of discriminating against individuals or groups based on legally protected characteristics or categories;
+                           17. To provide medical advice and medical results interpretation;
+                           18. To generate or disseminate information for the purpose to be used for administration of justice, law enforcement, immigration or asylum processes, such as predicting an individual will commit fraud/crime commitment (e.g. by text profiling, drawing causal relationships between assertions made in documents, indiscriminate and arbitrarily-targeted use).
+
+
+                           2. DOMAIN-SPECIFIC RESTRICTIONS:
+
+
+You agree not to use the Model to:
+
+
+                           1. Surveillance: 
+
+
+                           4. Detect or infer any legally protected class or aspect of any person, as defined by U.S. Federal Law; or
+                           5. Detect or infer aspects and/or features of an identity any person, such as name, family name, address, gender, sexual orientation, race, religion, age, location (at any geographical level), skin color, society or political affiliations, employment status and/or employment history, and health and medical conditions. Age and medical conditions may be inferred solely for the purpose of improving software/hardware accessibility and such data should not be cached or stored without the explicit and time limited permission of the data subject.
+
+
+                           2. Computer Generated Media: 
+
+
+                           1. Synthesize and/or modify audio-realistic and/or video-realistic representations (indistinguishable from photo/video recordings) of people and events, without including a caption and/or watermark or other similar notation indicating that the audio-realistic and/or video-realistic representations were generated using the Model.
+ 
+                           3. Insurance. 
+
+
+                           1. Predict the likelihood that any person will request to file an insurance claim;
+                           2. Determine an insurance premium or deny insurance applications or claims; 
+                           3. Predict the likelihood that any person request to file an insurance claim based on determining a lifestyle of a person, medical-test reports, demographic details of a person and/or online activity of a person;
+                           4. Determine an insurance premium or deny insurance applications or claims based on data determining a lifestyle of a person, medical-test reports, demographic details of a person, and/or online activity of a person;
+                           5. Deny an insurance claim based on any predicted likelihood of the possibility of insurance fraud.
+
+
+                           4. Medical. 
+
+
+                           1. diagnose or fail to diagnose a medical condition without human oversight. 
+
+
+                           5. Criminal. 
+
+
+                           2. use personal data or characteristics, physical attributes or traits, or other social or behavioral information to predict the likelihood a person will engage or has engaged in criminal behavior, including without limitation: name, family name, address, gender, sexual orientation, race, religion, age, location (at any geographical level), skin color, society or political affiliations, employment status and/or history, health and medical conditions (including physical, mental), family history, social media and publicly available data, image or video analysis of an individual or a group(s) of individuals, heart-rate, perspiration, breathing, and brain imaging and other metabolic data.

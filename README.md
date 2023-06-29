@@ -123,6 +123,12 @@ Please check the script for more details on the script itself!
 
 Coming soon!
 
+### Licensing
+
+The is licensed under Apache 2.0 as given in `LICENSE`.
+
+The license we use for the models released (along with the base model licenses) can be found in `model_licenses/tulu_license.txt` - just replace `<MODELNAME>` with the actual model name (i.e., the name on HuggingFace).
+
 # Citation
 
 If you used this repository or our models, please cite our work:
