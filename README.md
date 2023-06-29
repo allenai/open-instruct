@@ -10,7 +10,6 @@ We explore instruction-tuning popular base models on publicly available datasets
 
 As part of this work we introduce Tülu, a suite of LLaMa models fully-finetuned on a strong mix of datasets!
 
-
 <p align="center">
 <img src="images/tulu_logo.png" width="200" />
 </p>
