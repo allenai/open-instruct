@@ -5,13 +5,13 @@ Thanks to Graham Neubig for sharing the original code.
 
 import openai
 import asyncio
-from typing import Any
+from typing import Any, List, Dict
 
 async def dispatch_openai_chat_requesets(
-    messages_list: list[list[dict[str,Any]]],
+    messages_list: List[List[Dict[str,Any]]],
     model: str,
     **completion_kwargs: Any,
-) -> list[str]:
+) -> List[str]:
     """Dispatches requests to OpenAI chat completion API asynchronously.
     
     Args:
@@ -33,10 +33,10 @@ async def dispatch_openai_chat_requesets(
 
 
 async def dispatch_openai_prompt_requesets(
-    prompt_list: list[str],
+    prompt_list: List[str],
     model: str,
     **completion_kwargs: Any,
-) -> list[str]:
+) -> List[str]:
     """Dispatches requests to OpenAI text completion API asynchronously.
     
     Args:
