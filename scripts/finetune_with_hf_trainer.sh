@@ -1,5 +1,5 @@
 MODEL_SIZE=7B
-NUM_GPUS=8
+NUM_GPUS=1
 BATCH_SIZE_PER_GPU=4
 TOTAL_BATCH_SIZE=128
 GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
@@ -7,8 +7,8 @@ echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs, $BATCH_SIZE_PER_G
 
 deepspeed open_instruct/finetune_trainer.py \
     --deepspeed ds_configs/stage3_no_offloading.conf \
-    --model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama_models/${MODEL_SIZE} \
-    --tokenizer_name /net/nfs.cirrascale/allennlp/yizhongw/hf_llama_models/${MODEL_SIZE} \
+    --model_name_or_path models/${MODEL_SIZE} \
+    --tokenizer_name models/${MODEL_SIZE} \
     --use_fast_tokenizer False \
     --train_file data/processed/alpaca_data_original_template.jsonl \
     --max_seq_length 512 \

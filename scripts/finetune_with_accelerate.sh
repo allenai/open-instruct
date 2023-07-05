@@ -1,7 +1,7 @@
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+export CUDA_VISIBLE_DEVICES=0
 
 MODEL_SIZE=7B
-NUM_GPUS=4
+NUM_GPUS=1
 BATCH_SIZE_PER_GPU=2
 TOTAL_BATCH_SIZE=128
 GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
@@ -14,9 +14,9 @@ accelerate launch \
     --use_deepspeed \
     --deepspeed_config_file ds_configs/stage3_no_offloading_accelerate.conf \
     open_instruct/finetune.py \
-    --model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama_models/${MODEL_SIZE} \
+    --model_name_or_path models/${MODEL_SIZE} \
     --use_flash_attn \
-    --tokenizer_name /net/nfs.cirrascale/allennlp/yizhongw/hf_llama_models/${MODEL_SIZE} \
+    --tokenizer_name models/${MODEL_SIZE} \
     --use_slow_tokenizer \
     --train_file data/processed/oasst1/oasst1_data.jsonl\
     --max_seq_length 2048 \
