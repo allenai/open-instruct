@@ -267,7 +267,7 @@ def main():
             "unk_token": "<unk>",
             "pad_token": "<pad>",
         })
-        assert num_added_tokens == 1, "LlamaTokenizer should only add one special token - the pad_token."
+        assert num_added_tokens in [0, 1], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
     elif isinstance(tokenizer, GPTNeoXTokenizerFast):
         num_added_tokens = tokenizer.add_special_tokens({
             "pad_token": "<pad>",
