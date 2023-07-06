@@ -9,7 +9,7 @@ bitsandbytes==0.37.2
 evaluate==0.4.0
 tokenizers==0.13.3
 protobuf==3.20.0
-transformers>=4.28.1
+transformers==4.28.1
 openai
 tiktoken
 rouge_score
