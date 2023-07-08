@@ -12,9 +12,10 @@ RUN apt-get -y install git-lfs
 
 WORKDIR /stage/
 
-COPY requirements.txt .
 RUN pip install --upgrade pip setuptools wheel
 RUN pip install packaging
+
+COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY open_instruct open_instruct
