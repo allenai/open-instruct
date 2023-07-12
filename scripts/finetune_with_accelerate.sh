@@ -14,9 +14,7 @@ accelerate launch \
     --use_deepspeed \
     --deepspeed_config_file ds_configs/stage3_no_offloading_accelerate.conf \
     open_instruct/finetune.py \
-    --model_name_or_path models/${MODEL_SIZE} \
     --use_flash_attn \
-    --tokenizer_name models/${MODEL_SIZE} \
     --use_slow_tokenizer \
     --train_file data/processed/oasst1/oasst1_data.jsonl\
     --max_seq_length 2048 \
@@ -31,4 +29,8 @@ accelerate launch \
     --output_dir output/oasst1_${MODEL_SIZE}/ \
     --with_tracking \
     --report_to tensorboard \
-    --logging_steps 1
+    --logging_steps 1 \
+    --model_name_or_path models/${MODEL_SIZE} \
+    --tokenizer_name models/${MODEL_SIZE}
+    #--model_name_or_path "openlm-research/open_llama_3b" \
+    #--tokenizer_name "openlm-research/open_llama_3b"
