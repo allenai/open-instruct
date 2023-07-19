@@ -7,8 +7,6 @@ echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs, $BATCH_SIZE_PER_G
 
 deepspeed open_instruct/finetune_trainer.py \
     --deepspeed ds_configs/stage3_no_offloading.conf \
-    --model_name_or_path models/${MODEL_SIZE} \
-    --tokenizer_name models/${MODEL_SIZE} \
     --use_fast_tokenizer False \
     --train_file data/processed/alpaca_data_original_template.jsonl \
     --max_seq_length 512 \
@@ -29,3 +27,7 @@ deepspeed open_instruct/finetune_trainer.py \
     --tf32 True \
     --overwrite_output_dir \
     --report_to "none" \
+    --model_name_or_path models/${MODEL_SIZE} \
+    --tokenizer_name models/${MODEL_SIZE} 
+    #--model_name_or_path "openlm-research/open_llama_3b" \
+    #--tokenizer_name "openlm-research/open_llama_3b"
