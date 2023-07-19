@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.0.0-cuda11.7-cudnn8-devel
+FROM nvcr.io/nvidia/pytorch:23.06-py3
 
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
