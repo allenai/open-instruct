@@ -2,7 +2,7 @@ export CUDA_VISIBLE_DEVICES=0
 
 MODEL_SIZE=7B
 NUM_GPUS=1
-BATCH_SIZE_PER_GPU=2
+BATCH_SIZE_PER_GPU=3
 TOTAL_BATCH_SIZE=128
 GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
 echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs, $BATCH_SIZE_PER_GPU batch size per GPU, $GRADIENT_ACC_STEPS gradient accumulation steps"
@@ -12,7 +12,7 @@ accelerate launch \
     --num_machines 1 \
     --num_processes $NUM_GPUS \
     --use_deepspeed \
-    --deepspeed_config_file ds_configs/stage3_no_offloading_accelerate.conf \
+    --deepspeed_config_file ds_configs/stage3_offloading_accelerate.conf \
     open_instruct/finetune.py \
     --use_flash_attn \
     --use_slow_tokenizer \
