@@ -11,6 +11,7 @@ services:
         volumes:
             - ./models:/stage/models
             - ./data:/stage/data
+            - ./output:/stage/output  # save outputs to host filesystem
         networks:
             - stack
         ipc: host
