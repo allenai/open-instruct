@@ -1,0 +1,30 @@
+version: '2'
+
+# run something with `docker-compose run -it open_instruct /scripts/_____`
+
+services:
+    open_instruct:
+        build:
+            context: .
+        container_name: open-instruct
+        hostname: open-instruct
+        volumes:
+            - ./models:/stage/models
+            - ./data:/stage/data
+        networks:
+            - stack
+        ipc: host
+        ulimits:
+            # values suggested by Nvidia image for better performance
+            memlock: -1
+            stack: 67108864
+        deploy: # requires minimum docker-compose v1.28
+            resources:
+                reservations:
+                    devices:
+                        - capabilities:
+                            - gpu
+
+networks:
+    stack:
+        driver: bridge
