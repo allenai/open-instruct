@@ -18,11 +18,12 @@ class KeyWordsCriteria(StoppingCriteria):
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
         sequences_should_be_stopped = []
         for i in range(input_ids.shape[0]):
+            sequence_should_be_stopped = False
             for stop_sequence in self.stop_sequences:
                 if input_ids[i][-len(stop_sequence):].tolist() == stop_sequence:
-                    sequences_should_be_stopped.append(True)
+                    sequence_should_be_stopped = True
                     break
-            sequences_should_be_stopped.append(False)
+            sequences_should_be_stopped.append(sequence_should_be_stopped)
         return all(sequences_should_be_stopped)
     
     
