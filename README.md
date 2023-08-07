@@ -85,7 +85,7 @@ We also trained Pythia and OPT models on the Tulu mixture (aka the Human+GPT mix
 - [OPT 6.7B Tulu](https://huggingface.co/allenai/open-instruct-opt-6.7b-tulu)
 
 
-### Weight Diff Script
+### Weight diff script
 
 Some of the checkpoints are released as weight diffs to the base model (mostly for LLaMa 1). We use a slightly modified form of the [Alpaca weight diff script](https://github.com/tatsu-lab/stanford_alpaca/blob/main/weight_diff.py), which runs the same.
 
