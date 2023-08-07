@@ -1,24 +1,27 @@
 torch
+scipy
+packaging
 sentencepiece
 datasets
-deepspeed==0.9.1
-# accelerate==0.18.0
-git+https://github.com/huggingface/accelerate.git@e06e7b35e7c49563ed70f31b78126bf70b0252b9  # this version fixes a bug about gradient accumulation in 0.18.0 
-git+https://github.com/huggingface/peft.git@49a20c16dcd9de5716feee717e8eb742efb9eff9
-bitsandbytes==0.37.2
-evaluate==0.4.0
-tokenizers==0.13.3
-protobuf==3.20.0
-transformers>=4.28.1
+deepspeed>=0.10.0
+accelerate>=0.21.0
+peft>=0.4.0
+bitsandbytes>=0.41.1
+evaluate>=0.4.0
+tokenizers>=0.13.3
+protobuf
+# transformers>=4.31.0
+# Follwing is a temporary fix for a bug in the left padding in the transformers library
+# See https://github.com/huggingface/transformers/pull/25284
+git+https://github.com/Randolph-zeng/transformers.git@Randolph-zeng-patch-1
 openai
 tiktoken
 rouge_score
+tensorboard
 wandb
 gradio
-markupsafe==2.0.1
 termcolor
 jsonlines
-mecab-python3
 unidic-lite
 einops
 flash-attn
