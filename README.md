@@ -141,9 +141,9 @@ We will release our human evaluation interface and data soon!
 
 ## Licensing
 
-This codebase is licensed under Apache 2.0 as given in `LICENSE`.
+This codebase is licensed under Apache 2.0 as given in [LICENSE](./LICENSE).
 
-The license we use for the models released (along with the base model licenses) can be found in `model_licenses/tulu_license.txt` - just replace `<MODELNAME>` with the actual model name (i.e., the name on HuggingFace).
+The license we use for the models released (along with the base model licenses) can be found in [model_licenses/tulu_license.txt](./model_licenses/tulu_license.txt) - just replace `<MODELNAME>` with the actual model name (i.e., the name on HuggingFace).
 
 ## Citation
 
