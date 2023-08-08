@@ -390,9 +390,11 @@ def convert_oasst1_data(data_dir, output_dir):
             messages.append(
                 {"role": "assistant", "content": reply["text"]}
             )
-            valid_sequences.append(messages[:])
-            for child in reply["replies"]:
-                dfs(child, messages, valid_sequences)
+            if not reply["replies"]:  # leaf node
+                valid_sequences.append(messages[:])
+            else:
+                for child in reply["replies"]:
+                    dfs(child, messages, valid_sequences)
             messages.pop()
         elif reply["role"] == "prompter":
             messages.append(
