@@ -1,3 +1,11 @@
+# check if there is $HF_TOKEN in the environment variables
+if [ -z "$HF_TOKEN" ]
+then
+    echo "Warning: HuggingFace dataset LIMA requires permissive access."
+    echo "Warning: Please request the access at https://huggingface.co/datasets/GAIR/lima and set the HF_TOKEN environment variable before running this script."
+    exit 1
+fi
+
 echo "Downloading Super-NaturalInstructions dataset..."
 wget -P data/raw_train/super_ni/ https://github.com/allenai/natural-instructions/archive/refs/heads/master.zip
 unzip data/raw_train/super_ni/master.zip -d data/raw_train/super_ni/ && rm data/raw_train/super_ni/master.zip
@@ -60,5 +68,53 @@ python scripts/split_sharegpt_conversations.py \
     --out-file data/raw_train/sharegpt/sharegpt_html_cleaned_and_split.json \
     --model-name-or-path ../hf_llama_models/7B/
 
+
+echo "Downloading LIMA dataset..."
+wget --header="Authorization: Bearer $HF_TOKEN" -P data/raw_train/lima/ https://huggingface.co/datasets/GAIR/lima/raw/main/train.jsonl
+
+
+echo "Downloading WizardLM dataset..."
+wget -P data/raw_train/wizardlm/ https://huggingface.co/datasets/WizardLM/WizardLM_evol_instruct_V2_196k/resolve/main/WizardLM_evol_instruct_V2_143k.json
+
+
+echo "Downloading the OpenOrca dataset..."
+wget -P data/raw_train/open_orca/ https://huggingface.co/datasets/Open-Orca/OpenOrca/resolve/main/1M-GPT4-Augmented.parquet
+wget -P data/raw_train/open_orca/ https://huggingface.co/datasets/Open-Orca/OpenOrca/resolve/main/3_5M-GPT3_5-Augmented.parquet
+
+
 echo "Reformatting the datasets..."
 python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train/ --output_dir data/processed/
+
+
+echo "Creating Tulu data mixtures..."
+mkdir -p data/processed/tulu/
+cat data/processed/flan_v2/flan_v2_data.jsonl \
+    data/processed/cot/cot_data.jsonl \
+    data/processed/dolly/dolly_data.jsonl \
+    data/processed/oasst1/oasst1_data.jsonl \
+    data/processed/gpt4_alpaca/gpt4_alpaca_data.jsonl \
+    data/processed/code_alpaca/code_alpaca_data.jsonl \
+    data/processed/sharegpt/sharegpt_data.jsonl \
+    > data/processed/tulu/tulu_v1_mix.jsonl
+
+cat data/processed/flan_v2/flan_v2_data.jsonl \
+    data/processed/cot/cot_data.jsonl \
+    data/processed/dolly/dolly_data.jsonl \
+    data/processed/oasst1/oasst1_data.jsonl \
+    > data/processed/tulu/tulu_v1_human_mix.jsonl
+
+cat data/processed/flan_v2/flan_v2_data.jsonl \
+    data/processed/cot/cot_data.jsonl \
+    data/processed/oasst1/oasst1_data.jsonl \
+    data/processed/lima/lima_data.jsonl \
+    data/processed/code_alpaca/code_alpaca_data.jsonl \
+    data/processed/sharegpt/sharegpt_data.jsonl \
+    data/processed/wizardlm/wizardlm_data.jsonl \
+    data/processed/open_orca/open_orca_data.jsonl \
+    > data/processed/tulu/tulu_v2_mix.jsonl
+
+cat data/processed/flan_v2/flan_v2_data.jsonl \
+    data/processed/cot/cot_data.jsonl \
+    data/processed/oasst1/oasst1_data.jsonl \
+    data/processed/lima/lima_data.jsonl \
+    > data/processed/tulu/tulu_v2_human_mix.jsonl

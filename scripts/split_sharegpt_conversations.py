@@ -95,7 +95,6 @@ def main(args):
         content.extend(json.load(open(file)))
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         args.model_name_or_path,
-        padding_side="right",
         use_fast=False,
     )
     new_content = split_all(content, args.begin, args.end, tokenizer, args.max_length)
