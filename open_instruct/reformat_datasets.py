@@ -21,6 +21,7 @@ import json
 import random
 import re
 import os
+import pandas as pd
 import argparse
 from instruction_encode_templates import encode_instruction_example, encode_few_shot_example
 
@@ -384,8 +385,17 @@ def convert_oasst1_data(data_dir, output_dir):
 
     output_path = os.path.join(output_dir, "oasst1_data.jsonl")
 
+    # we filter out the sequences that mention the creator information
+    filter_strings = [
+        "LAION",
+        "Open Asssistant",
+        "OpenAssistant",               
+    ]
+
     # tranvers the conversation tree, and collect all valid sequences
     def dfs(reply, messages, valid_sequences):
+        if any([filter_string in reply["text"] for filter_string in filter_strings]):
+            return
         if reply["role"] == "assistant":
             messages.append(
                 {"role": "assistant", "content": reply["text"]}
@@ -405,7 +415,7 @@ def convert_oasst1_data(data_dir, output_dir):
             messages.pop()
         else:
             raise ValueError(f"Unknown role: {reply['role']}")
-
+        
     with open(output_path, "w") as fout:
         example_cnt = 0
         for _, conversation in enumerate(conversations):
@@ -419,6 +429,93 @@ def convert_oasst1_data(data_dir, output_dir):
                 }) + "\n")
                 example_cnt += 1
 
+
+def convert_lima_data(data_dir, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+    examples = []
+    with open(os.path.join(data_dir, "train.jsonl"), "r") as fin:
+        for line in fin:
+            examples.append(json.loads(line))
+    output_path = os.path.join(output_dir, "lima_data.jsonl")
+    with open(output_path, "w") as fout:
+        for idx, example in enumerate(examples):
+            messages = []
+            if not len(example["conversations"]) % 2 == 0:
+                print(f"Waring: example {idx} in LIMA has odd number of messages. Cutting off the last message.")
+                example["conversations"] = example["conversations"][:-1]
+            
+            for i in range(0, len(example["conversations"]), 2):
+                messages.append({
+                    "role": "user",
+                    "content": example["conversations"][i]
+                })
+                messages.append({
+                    "role": "assistant",
+                    "content": example["conversations"][i+1]
+                })
+            fout.write(json.dumps({
+                "dataset": "lima",
+                "id": f"lima_{idx}",
+                "messages": messages,
+            }) + "\n")
+
+
+def convert_wizardlm_data(data_dir, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+    examples = []
+    with open(os.path.join(data_dir, "WizardLM_evol_instruct_V2_143k.json"), "r") as fin:
+        examples = json.load(fin)
+
+    output_path = os.path.join(output_dir, "wizardlm_data.jsonl")
+    with open(output_path, "w") as fout:
+        for idx, example in enumerate(examples):
+            messages = []
+            assert len(example["conversations"]) % 2 == 0
+            for i in range(0, len(example["conversations"]), 2):
+                assert example["conversations"][i]["from"] == "human"
+                assert example["conversations"][i+1]["from"] == "gpt"
+                messages.append({
+                    "role": "user",
+                    "content": example["conversations"][i]["value"]
+                })
+                messages.append({
+                    "role": "assistant",
+                    "content": example["conversations"][i+1]["value"]
+                })
+            fout.write(json.dumps({
+                "dataset": "wizardlm",
+                "id": f"wizardlm_{example['idx']}",
+                "messages": messages,
+            }) + "\n")
+
+
+def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=100000, num_gpt35_examples=0):
+    os.makedirs(output_dir, exist_ok=True)
+    examples = []
+
+    df = pd.read_parquet(os.path.join(data_dir, "1M-GPT4-Augmented.parquet"))    
+    gpt4_examples = [row.to_dict() for _, row in df.iterrows()]
+    random.shuffle(gpt4_examples)
+    examples.extend(gpt4_examples[:num_gpt4_examples])
+
+    df = pd.read_parquet(os.path.join(data_dir, "3_5M-GPT3_5-Augmented.parquet"))
+    gpt35_examples = [row.to_dict() for _, row in df.iterrows()]
+    random.shuffle(gpt35_examples)
+    examples.extend(gpt35_examples[:num_gpt35_examples])
+
+    output_path = os.path.join(output_dir, "open_orca_data.jsonl")
+    with open(output_path, "w") as fout:
+        for idx, example in enumerate(examples):
+            messages = [
+                {"role": "system", "content": example["system_prompt"]},
+                {"role": "user", "content": example["question"]},
+                {"role": "assistant", "content": example["response"]}
+            ]
+            fout.write(json.dumps({
+                "dataset": "open_orca",
+                "id": f"open_orca_{example['id']}",
+                "messages": messages,
+            }) + "\n")    
         
 
 if __name__ == "__main__":
