@@ -111,7 +111,7 @@ def get_next_word_predictions(model, tokenizer, prompts, candidate_token_ids=Non
             batch_input_ids = batch_input_ids.cuda()
             attention_mask = attention_mask.cuda()
 
-        batch_logits = model(batch_input_ids, attention_mask).logits[:, -1, :]
+        batch_logits = model(input_ids=batch_input_ids, attention_mask=attention_mask).logits[:, -1, :]
         if candidate_token_ids is not None:
             batch_logits = batch_logits[:, candidate_token_ids]
         batch_probs = torch.softmax(batch_logits, dim=-1)
@@ -197,17 +197,7 @@ def load_hf_lm_and_tokenizer(
         padding_side="left",
     ):
     
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-
-    if not tokenizer_name_or_path:
-        tokenizer_name_or_path = model_name_or_path
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=use_fast_tokenizer)
-    # set padding side to left for batch generation
-    tokenizer.padding_side = padding_side
-    # set pad token to eos token if pad token is not set (as is the case for llama models)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-        tokenizer.pad_token_id = tokenizer.eos_token_id
+    from transformers import AutoModelForCausalLM, AutoTokenizer, OPTForCausalLM, GPTNeoXForCausalLM
 
     if gptq_model:
         from auto_gptq import AutoGPTQForCausalLM
@@ -231,6 +221,27 @@ def load_hf_lm_and_tokenizer(
         if convert_to_half:
             model = model.half()
     model.eval()
+
+    if not tokenizer_name_or_path:
+        tokenizer_name_or_path = model_name_or_path
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=use_fast_tokenizer)
+    except:
+        # some tokenizers (e.g., GPTNeoXTokenizer) don't have the slow or fast version, so we just roll back to the default one
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path)
+    # set padding side to left for batch generation
+    tokenizer.padding_side = padding_side
+    # set pad token to eos token if pad token is not set (as is the case for llama models)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+
+    # for OPT and Pythia models, we need to set tokenizer.model_max_length to model.config.max_position_embeddings 
+    # to avoid wrong embedding index.    
+    if isinstance(model, GPTNeoXForCausalLM) or isinstance(model, OPTForCausalLM):
+        tokenizer.model_max_length = model.config.max_position_embeddings
+        print("Set tokenizer.model_max_length to model.config.max_position_embeddings: {}".format(model.config.max_position_embeddings))
+        
     return model, tokenizer
 
 

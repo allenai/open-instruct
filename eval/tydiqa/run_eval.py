@@ -2,6 +2,7 @@ import argparse
 import os
 import json
 import random
+import torch
 import evaluate
 import numpy as np
 from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model

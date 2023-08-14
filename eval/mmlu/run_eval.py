@@ -51,18 +51,18 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
         prompt_end = format_example(test_df, i, include_answer=False)
         train_prompt = gen_prompt(dev_df, subject, k)
         prompt = train_prompt + prompt_end
-        
-        tokenized_prompt = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).input_ids
+        if args.use_chat_format:
+            prompt = "<|user|>\n" + prompt.strip() + "\n<|assistant|>\nThe answer is:"
+
+        tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
         # make sure every prompt is less than 2048 tokens
-        while tokenized_prompt.shape[-1] > 2048:
+        while len(tokenized_prompt) > 2048:
             k -= 1
             train_prompt = gen_prompt(dev_df, subject, k)
             prompt = train_prompt + prompt_end
-            tokenized_prompt = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).input_ids
-
-        if args.use_chat_format:
-            prompt = "<|user|>\n" + prompt.strip() + "\n<|assistant|>\nThe answer is:"
-            
+            if args.use_chat_format:
+                prompt = "<|user|>\n" + prompt.strip() + "\n<|assistant|>\nThe answer is:"
+            tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
         prompts.append(prompt)
 
     # get the answer for all examples
