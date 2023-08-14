@@ -189,6 +189,7 @@ def load_hf_lm_and_tokenizer(
         model_name_or_path, 
         tokenizer_name_or_path=None, 
         device_map="auto", 
+        torch_dtype="auto",
         load_in_8bit=False, 
         convert_to_half=False,
         gptq_model=False,
@@ -222,9 +223,9 @@ def load_hf_lm_and_tokenizer(
         )
     else:
         if device_map:
-            model = AutoModelForCausalLM.from_pretrained(model_name_or_path, device_map=device_map)
+            model = AutoModelForCausalLM.from_pretrained(model_name_or_path, device_map=device_map, torch_dtype=torch_dtype)
         else:
-            model = AutoModelForCausalLM.from_pretrained(model_name_or_path)
+            model = AutoModelForCausalLM.from_pretrained(model_name_or_path, torch_dtype=torch_dtype)
             if torch.cuda.is_available():
                 model = model.cuda()
         if convert_to_half:
