@@ -14,6 +14,7 @@ Please see our first paper [How Far Can Camels Go? Exploring the State of Instru
 
 ## News
 
+- [2023-08-16] Added support for ToxiGen evaluation.
 - [2023-08-08] Supported several new instruction dataset, including [LIMA](https://huggingface.co/datasets/GAIR/lima) / [WizardLM](https://github.com/nlpxucan/WizardLM) / [Open-Orca](https://huggingface.co/datasets/Open-Orca/OpenOrca). See the [preparation script](./scripts/prepare_train_data.sh) for details. Performance hasn't been evaluated yet.
 - [2023-08-06] Supported LLaMa 2 finetuning and FlashAttention-2 by bumping the version of transformers and many other dependencies.
 - [2023-06-29] Added [licensing info](#licensing) for our released models.
@@ -111,6 +112,7 @@ We provide the scripts for running evaluation of Huggingface/OpenAI models on a 
 - [Big-Bench Hard (BBH)](https://github.com/suzgunmirac/BIG-Bench-Hard/tree/main)
 - [TydiQA](https://github.com/google-research-datasets/tydiqa)
 - [Codex HumanEval](https://github.com/openai/human-eval/tree/master)
+- [ToxiGen](https://github.com/microsoft/TOXIGEN), using the cleaned version found [here](https://github.com/microsoft/SafeNLP).
 
 We are working on including more promising benchmarks into this list. Please stay tuned!
 
