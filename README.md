@@ -112,7 +112,7 @@ We provide the scripts for running evaluation of Huggingface/OpenAI models on a 
 - [Big-Bench Hard (BBH)](https://github.com/suzgunmirac/BIG-Bench-Hard/tree/main)
 - [TydiQA](https://github.com/google-research-datasets/tydiqa)
 - [Codex HumanEval](https://github.com/openai/human-eval/tree/master)
-- [ToxiGen](https://github.com/microsoft/TOXIGEN), using the cleaned version found [here](https://github.com/microsoft/SafeNLP).
+- [ToxiGen](https://github.com/microsoft/TOXIGEN)
 
 We are working on including more promising benchmarks into this list. Please stay tuned!
 
