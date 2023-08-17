@@ -18,24 +18,38 @@ from eval.utils import (
 
 
 @torch.no_grad()
-def score_generations(generations, batch_size=32):
+def score_generations(
+    hate_classifier_tokenizer, hate_classifier_model, generations, batch_size=32
+):
     classifications = []
     for i in trange(0, len(generations), batch_size):
-        batch = generations[i: i + batch_size]
-        inputs = toxigenRobertaTokenizer(
+        batch = generations[i : i + batch_size]
+        inputs = hate_classifier_tokenizer(
             batch, padding=True, truncation=True, return_tensors="pt"
         ).to("cuda")
-        outputs = toxigenRobertaModel(**inputs)
+        outputs = hate_classifier_model(**inputs)
         classifications.extend(outputs.logits.argmax(dim=-1).tolist())
     return classifications
 
 
 @torch.no_grad()
-def eval_vllm_model(args, model, examples, save_path=None):
+def eval_vllm_model(
+    args,
+    model,
+    examples,
+    hate_classifier_tokenizer,
+    hate_classifier_model,
+    classifer_batch_size=32,
+    tokenizer=None,
+    save_path=None,
+):
     if save_path:
         fout = open(save_path, "w")
 
-    model = vllm.LLM(model=args.model_name_or_path)
+    model = vllm.LLM(
+        model=args.model_name_or_path,
+        tokenizer=tokenizer if tokenizer else args.model_name_or_path,
+    )
     prompts = [it["text"] for it in examples]
     if args.use_llama_chat_format:
         prompts = [llama2_prompting_template.format(prompt=x) for x in prompts]
@@ -45,7 +59,12 @@ def eval_vllm_model(args, model, examples, save_path=None):
     )
     outputs = model.generate(prompts, sampling_params)
     outputs = [it.outputs[0].text for it in outputs]
-    classifications = score_generations(outputs)
+    classifications = score_generations(
+        hate_classifier_tokenizer,
+        hate_classifier_model,
+        outputs,
+        batch_size=classifer_batch_size,
+    )
 
     all_groups_scores = defaultdict(list)
     for example, output, classification in zip(examples, outputs, classifications):
@@ -69,7 +88,16 @@ def eval_vllm_model(args, model, examples, save_path=None):
 
 
 @torch.no_grad()
-def eval_hf_model(args, model, tokenizer, examples, save_path=None):
+def eval_hf_model(
+    args,
+    model,
+    tokenizer,
+    examples,
+    hate_classifier_tokenizer,
+    hate_classifier_model,
+    classifer_batch_size=32,
+    save_path=None,
+):
     if save_path:
         fout = open(save_path, "w")
 
@@ -89,7 +117,12 @@ def eval_hf_model(args, model, tokenizer, examples, save_path=None):
         batch_size=args.eval_batch_size if args.eval_batch_size else 1,
     )
 
-    classifications = score_generations(outputs)
+    classifications = score_generations(
+        hate_classifier_tokenizer,
+        hate_classifier_model,
+        outputs,
+        batch_size=classifer_batch_size,
+    )
 
     all_groups_scores = defaultdict(list)
     for example, output, classification in zip(examples, outputs, classifications):
@@ -112,7 +145,14 @@ def eval_hf_model(args, model, tokenizer, examples, save_path=None):
     return performance
 
 
-def eval_openai_chat_engine(args, examples, save_path=None):
+def eval_openai_chat_engine(
+    args,
+    examples,
+    hate_classifier_tokenizer,
+    hate_classifier_model,
+    classifer_batch_size=32,
+    save_path=None,
+):
     instances = []
     for i, example in enumerate(examples):
         prompt = example["text"]
@@ -138,7 +178,12 @@ def eval_openai_chat_engine(args, examples, save_path=None):
 
     outputs = [result["output"] for result in results]
 
-    classifications = score_generations(outputs)
+    classifications = score_generations(
+        hate_classifier_tokenizer,
+        hate_classifier_model,
+        outputs,
+        batch_size=classifer_batch_size,
+    )
 
     if save_path:
         fout = open(save_path, "w")
@@ -184,6 +229,10 @@ def main(args):
                 args,
                 args.model_name_or_path,
                 all_prompts,
+                toxigenRobertaTokenizer,
+                toxigenRobertaModel,
+                args.classifier_batch_size,
+                tokenizer=args.tokenizer_name_or_path,
                 save_path=os.path.join(args.save_dir, "predictions", "toxigen.jsonl"),
             )
         else:
@@ -202,12 +251,18 @@ def main(args):
                 model,
                 tokenizer,
                 all_prompts,
+                toxigenRobertaTokenizer,
+                toxigenRobertaModel,
+                args.classifier_batch_size,
                 save_path=os.path.join(args.save_dir, "predictions", "toxigen.jsonl"),
             )
     else:
         results = eval_openai_chat_engine(
             args,
             all_prompts,
+            toxigenRobertaTokenizer,
+            toxigenRobertaModel,
+            args.classifier_batch_size,
             save_path=os.path.join(args.save_dir, "predictions", "toxigen.jsonl"),
         )
 
