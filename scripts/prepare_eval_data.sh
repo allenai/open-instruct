@@ -54,3 +54,11 @@ mkdir -p data/eval/creative_tasks
 wget -O data/eval/creative_tasks/self_instruct_test.jsonl https://github.com/yizhongw/self-instruct/raw/main/human_eval/user_oriented_instructions.jsonl
 wget -O data/eval/creative_tasks/vicuna_test.jsonl https://github.com/lm-sys/FastChat/raw/main/fastchat/eval/table/question.jsonl
 wget -O data/eval/creative_tasks/koala_test.jsonl https://github.com/arnav-gudibande/koala-test-set/raw/main/koala_test_set.jsonl
+
+
+# Toxigen data
+mkdir -p data/eval/toxigen
+for minority_group in asian black chinese jewish latino lgbtq mental_disability mexican middle_east muslim native_american physical_disability trans women
+do
+    wget -O data/eval/toxigen/hate_${minority_group}.txt https://raw.githubusercontent.com/microsoft/TOXIGEN/main/prompts/hate_${minority_group}_1k.txt
+done
