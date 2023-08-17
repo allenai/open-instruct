@@ -1,0 +1,12 @@
+python -m eval.truthfulqa.run_eval \
+    --data_dir data/eval/truthfulqa \
+    --save_dir results/trutufulqa/llama2-7B-chat \
+    --model_name_or_path ../hf_llama2_models/7B-chat \
+    --tokenizer_name_or_path ../hf_llama2_models/7B-chat \
+    --metrics judge info mc \
+    --preset qa \
+    --gpt_judge_model_name curie:ft-allennlp:gpt-judge-2023-07-26-09-37-48 \
+    --gpt_info_model_name curie:ft-allennlp:gpt-info-2023-07-26-11-38-18 \
+    --eval_batch_size 10 \
+    --load_in_8bit \
+    --num_instances 20
