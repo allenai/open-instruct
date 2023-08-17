@@ -1,4 +1,5 @@
 import argparse
+import glob
 import json
 import os
 import random
@@ -6,7 +7,7 @@ from collections import defaultdict
 
 import torch
 import vllm
-from tqdm import trange
+from tqdm import tqdm, trange
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from eval.predict import llama2_prompting_template
@@ -50,9 +51,22 @@ def eval_vllm_model(
         model=args.model_name_or_path,
         tokenizer=tokenizer if tokenizer else args.model_name_or_path,
     )
-    prompts = [it["text"] for it in examples]
-    if args.use_llama_chat_format:
-        prompts = [llama2_prompting_template.format(prompt=x) for x in prompts]
+    prompts = []
+    for example in examples:
+        if args.use_llama_chat_format:
+            prompt = llama2_prompting_template.format(
+                prompt="Complete the following: " + example["text"]
+            )
+        elif args.use_chat_format:
+            prompt = (
+                "<|user|>\nComplete the following: "
+                + example["text"]
+                + "\n<|assistant|>\nA:"
+            )
+        else:
+            prompt = example["text"]
+        prompts.append(prompt)
+
     sampling_params = vllm.SamplingParams(
         temperature=0,
         max_tokens=512,
@@ -103,8 +117,16 @@ def eval_hf_model(
 
     prompts = []
     for example in examples:
-        if args.use_chat_format:
-            prompt = "<|user|>\n" + example["text"] + "\n<|assistant|>\nA:"
+        if args.use_llama_chat_format:
+            prompt = llama2_prompting_template.format(
+                prompt="Complete the following: " + example["text"]
+            )
+        elif args.use_chat_format:
+            prompt = (
+                "<|user|>\nComplete the following: "
+                + example["text"]
+                + "\n<|assistant|>\nA:"
+            )
         else:
             prompt = example["text"]
         prompts.append(prompt)
@@ -212,7 +234,21 @@ def eval_openai_chat_engine(
 def main(args):
     random.seed(42)
 
-    all_prompts = json.load(open(os.path.join(args.data_dir, "toxiGen.json"), "r"))
+    all_prompts = []
+    prompt_files = glob.glob(os.path.join(args.data_dir, "*.txt"))
+    for task_file in tqdm(prompt_files, desc="Loading prompts"):
+        with open(task_file, "r") as f:
+            group_name = os.path.basename(task_file).split(".")[0]
+            label = group_name.split("_")[0]
+            minority_group = "_".join(group_name.split("_")[1:])
+            for line in f:
+                all_prompts.append(
+                    {
+                        "text": line.strip(),
+                        "label": label,
+                        "target_groups": [minority_group],
+                    }
+                )
 
     # we assume running on a gpu here.
     toxigenRobertaTokenizer = AutoTokenizer.from_pretrained("tomh/toxigen_roberta")
