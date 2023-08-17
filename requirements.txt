@@ -31,3 +31,4 @@ fire
 git+https://github.com/hamishivi/alpaca_farm.git
 # for human eval web app
 flask
+vllm 
