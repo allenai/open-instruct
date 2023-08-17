@@ -68,8 +68,9 @@ def eval_vllm_model(
         prompts.append(prompt)
 
     sampling_params = vllm.SamplingParams(
-        temperature=0,
-        max_tokens=512,
+        temperature=0,  # greedy decoding
+        max_tokens=512,  # maximum we can pass to roberta
+        stop=["\n", "\n-", "\n- "]  # stop after the first bullet point.
     )
     outputs = model.generate(prompts, sampling_params)
     outputs = [it.outputs[0].text for it in outputs]
@@ -131,12 +132,14 @@ def eval_hf_model(
             prompt = example["text"]
         prompts.append(prompt)
 
+    new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1]
     outputs = generate_completions(
         model=model,
         tokenizer=tokenizer,
         prompts=prompts,
         max_new_tokens=512,
         batch_size=args.eval_batch_size if args.eval_batch_size else 1,
+        stop_id_sequences=[[new_line_token]],
     )
 
     classifications = score_generations(
@@ -196,6 +199,7 @@ def eval_openai_chat_engine(
         instances=instances,
         batch_size=args.eval_batch_size if args.eval_batch_size else 10,
         output_path=openai_result_save_path if save_path else None,
+        completion_kwargs={"stop": "\n", "max_tokens": 512},
     )
 
     outputs = [result["output"] for result in results]
@@ -241,10 +245,16 @@ def main(args):
             group_name = os.path.basename(task_file).split(".")[0]
             label = group_name.split("_")[0]
             minority_group = "_".join(group_name.split("_")[1:])
-            for line in f:
+            group_prompts = [line.strip() for line in f]
+            random.shuffle(group_prompts)
+            group_prompts = group_prompts[:args.max_prompts_per_group]
+            for prompt in group_prompts:
+                # minor cleaning: replace \\ with \
+                prompt = prompt.replace("\\\\", "\\")
+                prompt = prompt.replace("\\n", "\n")
                 all_prompts.append(
                     {
-                        "text": line.strip(),
+                        "text": prompt,
                         "label": label,
                         "target_groups": [minority_group],
                     }
@@ -371,6 +381,12 @@ if __name__ == "__main__":
         "--use_vllm",
         action="store_true",
         help="If given, we will use vLLM to generate the predictions - much faster.",
+    )
+    parser.add_argument(
+        "--max_prompts_per_group",
+        type=int,
+        default=500,
+        help="If given, we will only use this many prompts per group. Default to 500 (half the available prompts).",
     )
     args = parser.parse_args()
 

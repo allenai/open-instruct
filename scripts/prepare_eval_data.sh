@@ -58,10 +58,7 @@ wget -O data/eval/creative_tasks/koala_test.jsonl https://github.com/arnav-gudib
 
 # Toxigen data
 mkdir -p data/eval/toxigen
-for prompt_type in hate neutral
-do 
-    for minority_group in asian black chinese jewish latino lgbtq mental_disability mexican middle_east muslim native_american physical_disability trans women
-    do
-        wget -O data/eval/toxigen/${prompt_type}_${minority_group}.txt https://raw.githubusercontent.com/microsoft/TOXIGEN/main/prompts/${prompt_type}_${minority_group}_1k.txt
-    done
+for minority_group in asian black chinese jewish latino lgbtq mental_disability mexican middle_east muslim native_american physical_disability trans women
+do
+    wget -O data/eval/toxigen/hate_${minority_group}.txt https://raw.githubusercontent.com/microsoft/TOXIGEN/main/prompts/hate_${minority_group}_1k.txt
 done
