@@ -53,26 +53,28 @@ def run_chatgpt(questions, engine, tag, preset='qa', verbose=False):
 
     for idx, response in zip(questions.index, responses):
         questions.loc[idx, tag] = trim_answer(response["output"])
-
-    # for idx in tqdm.tqdm(questions.index):
-    #     if pd.isnull(questions.loc[idx, tag]) or not len(questions.loc[idx, tag]):
-    #         input_prompt = format_prompt(questions.loc[idx], preset, format='general')
-
-    #         if input_prompt is not None:
-    #             response = query_openai_chat_model(engine=engine, instances=[{"prompt": input_prompt, "id" : 1}], temperature=0.0)
-    #             output_str = response[0]["output"]
-
-    #             idx_start = find_start(list(output_str))
-    #             output_str = output_str[idx_start:].strip()
-    #             output_str = output_str.replace('\n\n', ' ')  # reformat line-breaks for long-form answers
-
-    #             questions.loc[idx, tag] = output_str
-
-    #             if verbose:
-    #                 print("MODEL ANSWER: {0}".format(output_str))
-    #         else:
-    #             questions.loc[idx, tag] = ''
     return questions
+
+
+def find_start(token_list):
+
+    """Finds starting index of answer tokens, skipping newlines and prefixes"""
+
+    idx_start = 0
+
+    # Edit because of list index out of range on q428
+    while idx_start < len(token_list) and token_list[idx_start] == '\n':  # ignore starting newlines
+        idx_start += 1
+
+    if idx_start == len(token_list):
+        print("No response from engine!")
+        return idx_start
+
+    # if answer starts with 'A:', skip these tokens
+    if (token_list[idx_start] == 'A') and (token_list[idx_start + 1] == ':'):
+        idx_start += 2
+
+    return idx_start
 
 
 def run_GPT3(questions, engine, tag, preset='qa', verbose=False):
@@ -89,38 +91,12 @@ def run_GPT3(questions, engine, tag, preset='qa', verbose=False):
         {"prompt": format_prompt(questions.loc[idx], preset, format='general'), "id": idx} for idx in questions.index
     ]
 
-    responses = query_openai_model(engine=engine, instances=instances, temperature=0.0)
+    responses = query_openai_model(engine=engine, instances=instances, temperature=0.0, stop=None if preset == 'long' else '\n\n', max_tokens=50)
     assert len(responses) == len(instances)
 
     for idx, response in zip(questions.index, responses):
         questions.loc[idx, tag] = trim_answer(response["output"])
 
-    # for idx in tqdm.tqdm(questions.index):
-    #     if pd.isnull(questions.loc[idx, tag]) or not len(questions.loc[idx, tag]):
-    #         input_prompt = format_prompt(questions.loc[idx], preset, format='general')
-
-    #         if input_prompt is not None:
-    #             if preset == 'long':
-    #                 response = openai.Completion.create(engine=engine, prompt=input_prompt, temperature=0, max_tokens=50,
-    #                                                     stop=None, logprobs=1)  # long-form answers often include line-breaks
-    #             else:
-    #                 response = openai.Completion.create(engine=engine, prompt=input_prompt, temperature=0, max_tokens=50,
-    #                                                     stop='\n\n', logprobs=1)
-    #             logprobs = response['choices'][0]['logprobs']
-    #             output_str = response['choices'][0]['text']
-
-    #             idx_start = find_start(logprobs['tokens'])
-
-    #             drop_str = ''.join(logprobs['tokens'][:idx_start])
-    #             output_str = output_str[len(drop_str):].strip()
-    #             output_str = output_str.replace('\n\n', ' ')  # reformat line-breaks for long-form answers
-
-    #             questions.loc[idx, tag] = output_str
-
-    #             if verbose:
-    #                 print("MODEL ANSWER: {0}".format(output_str))
-    #         else:
-    #             questions.loc[idx, tag] = ''
     return questions
 
 
@@ -224,7 +200,7 @@ def run_probs_GPT3(questions, engine, tag, preset='qa', verbose=False):
 
 
 
-def run_answers(questions, model, tokenizer, tag, preset="qa", batch_size=1, max_new_tokens=50):
+def run_answers(questions, model, tokenizer, tag, preset="qa", batch_size=1, max_new_tokens=50, use_chat_format=False):
 
     """Stores answers from autoregressive HF models (GPT-2, GPT-Neo)"""
 
@@ -239,76 +215,23 @@ def run_answers(questions, model, tokenizer, tag, preset="qa", batch_size=1, max
         format_prompt(questions.loc[idx], preset, format='general') for idx in questions.index
     ]
 
+    if use_chat_format:
+        prompts = [
+            "<|user|>\n" + prompt.strip() + "\n<|assistant|>\nThe answer is:" for prompt in prompts
+        ]
+
     completions = generate_completions(model, tokenizer, prompts, batch_size=batch_size, max_new_tokens=max_new_tokens, top_k=1)
     assert len(completions) == len(prompts)
 
-    for idx, prompt, completion in zip(questions.index, prompts, completions):
+    for idx, completion in zip(questions.index, completions):
         questions.loc[idx, tag] = trim_answer(completion)
-        # print("--------------------")
-        # print("Index: {0}".format(idx))
-        # print("Prompt: {0}".format(prompt))
-        # print("Model Answer: {0}".format(questions.loc[idx, tag]))
-
-    # # get tokens for ending sequence
-    # seq_start = np.array(tokenizer('A:')['input_ids'])
-    # seq_end = np.array(tokenizer('Q:')['input_ids'])
-
-    # with torch.no_grad():
-    #     for idx in tqdm.tqdm(questions.index):
-    #         if pd.isnull(questions.loc[idx, tag]) or not len(questions.loc[idx, tag]):
-    #             prompt = format_prompt(questions.loc[idx], preset, format='general')
-
-    #             input_ids = tokenizer(prompt, return_tensors="pt").input_ids
-    #             if model.device.type == "cuda":
-    #                 input_ids = input_ids.cuda()
-
-    #             max_len = input_ids.shape[-1] + 50
-
-    #             outputs = model.generate(
-    #                 input_ids, 
-    #                 return_dict_in_generate=True, 
-    #                 top_k=1, 
-    #                 max_length=max_len, 
-    #                 num_return_sequences=1,
-    #                 output_scores=True
-    #             )
-    #             sequences, scores = outputs.sequences, outputs.scores
-
-    #             # skip the tokens in the input prompt
-    #             gen_sequences = sequences[:, input_ids.shape[-1]:][0, :]
-    #             gen_arr = gen_sequences.cpu().numpy()
-
-    #             # find indexes of answer, skipping A: (start of answer) and Q: (end of answer)
-    #             idx_start = find_subsequence(gen_arr, seq_start, start=True)
-    #             idx_end = find_subsequence(gen_arr, seq_end, start=False)
-
-    #             gen_sequences = gen_sequences[idx_start:idx_end]
-    #             output_str = tokenizer.decode(gen_sequences, skip_special_tokens=True)
-    #             output_str = output_str.strip()
-
-    #             if verbose:
-    #                 print("--------------------")
-    #                 print("PROMPT: {0}".format(prompt))
-    #                 print('MODEL OUTPUT: {0}'.format(output_str))
-
-    #             scores = torch.stack(scores, dim=1)
-    #             scores = scores.squeeze(0)  # skip if running on a batch!
-    #             scores = scores[idx_start:idx_end, :]
-
-    #             # convert logits to log probs
-    #             log_probs = scores.log_softmax(-1)
-    #             log_probs = log_probs[range(scores.shape[0]), gen_sequences]
-
-    #             probs = scores.softmax(-1)
-    #             probs = probs[range(scores.shape[0]), gen_sequences]
-
-    #             questions.loc[idx, tag] = output_str
     return questions
 
 
 def run_probs(questions, model, tokenizer, tag, preset='qa'):
 
     """Runs multiple-choice metrics for autoregressive HuggingFace models (GPT-2, GPT-Neo)"""
+    # TODO: rewrite this to use score_completions, which supports batched inference
 
     set_columns(tag, questions)
 
@@ -408,8 +331,10 @@ def main(args):
             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
             gptq_model=args.gptq
         )
-        print("Running generations")
-        run_answers(questions, model, tokenizer, tag=args.model_name_or_path, preset=args.preset, batch_size=args.eval_batch_size)
+        print("Running generations!")
+        run_answers(
+            questions, model, tokenizer, tag=args.model_name_or_path, preset=args.preset, batch_size=args.eval_batch_size, use_chat_format=args.use_chat_format
+        )
         if 'mc' in args.metrics:
             print("Running multiple-choice classification!")
             run_probs(questions, model, tokenizer, tag=args.model_name_or_path, preset=args.preset)
@@ -439,16 +364,6 @@ def main(args):
     for metric in args.metrics:
         if metric == 'mc':
             continue
-        # if metric == 'bleurt':
-        #     try:
-        #         questions = metrics.run_BLEURT(model_key, questions, cache_dir=args.cache_dir)
-        #     except Exception as err:
-        #         print(err)
-        # elif metric in ['bleu', 'rouge']:
-        #     try:
-        #         questions = metrics.run_bleu_and_rouge(model_key, questions)
-        #     except Exception as err:
-        #         print(err)
         elif metric in ['judge', 'info']:
             try:
                 if metric == 'judge':

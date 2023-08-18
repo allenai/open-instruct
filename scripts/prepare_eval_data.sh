@@ -49,6 +49,10 @@ mv data/downloads/url-nlp/url-nlp-main/mgsm data/eval/mgsm && rm -r data/downloa
 wget -P data/eval/codex_humaneval https://github.com/openai/human-eval/raw/master/data/HumanEval.jsonl.gz
 
 
+# TruthfulQA
+wget -P data/eval/truthfulqa https://github.com/sylinrl/TruthfulQA/raw/main/TruthfulQA.csv
+
+
 # Self-instruct eval, Vicuna eval, and Koala eval for creative instructions/tasks
 mkdir -p data/eval/creative_tasks 
 wget -O data/eval/creative_tasks/self_instruct_test.jsonl https://github.com/yizhongw/self-instruct/raw/main/human_eval/user_oriented_instructions.jsonl
