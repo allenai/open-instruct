@@ -483,7 +483,11 @@ def main():
             "weight_decay": 0.0,
         },
     ]
-    optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
+    
+    if args.use_lora: ## When using LORA with deepspeed, we run into an error "ValueError: max() arg is an empty sequence" when using accelerate.
+        optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
+    else:
+        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
