@@ -580,10 +580,29 @@ def main():
         for step, batch in enumerate(train_dataloader):
             # We need to skip steps until we reach the resumed step
             if args.resume_from_checkpoint and epoch == starting_epoch:
-                if resume_step is not None and completed_steps < resume_step:
-                    if step % args.gradient_accumulation_steps == 0:
+                # Note 1: `completed_steps` update as the optimizer steps,
+                # while `step` as the dataloader,
+                # so there is a scaling factor of `gradient_accumulation_steps` between them.
+                # Note 2: `step` starts from 0, while `completed_steps` starts from 1,
+                # so we need to add 1 to `step` to decide whether to add 1 to `completed_steps`.
+                # Otherwise, e.g. "step_300" , resume_step = 4800, args.gradient_accumulation_steps = 16,
+                # completed_steps < 300 should be skipped, while completed_steps >= 300 should not;
+                # 0 <= step < 4800 should be skipped, while step >= 4800 should not be skipped.
+                # When step = 4784 (0 = 0 * 16, ..., 4784 = 299 * 16) => completed_steps = 299;
+                # after `completed_steps += 1`, completed_steps = 300;
+                # then step = 4785, completed_steps = 300, and this step batch would not be skipped,
+                # which is not what we expect.
+                if (
+                    resume_step is not None
+                    and completed_steps * args.gradient_accumulation_steps < resume_step
+                ):
+                    if (
+                        step + 1
+                    ) % args.gradient_accumulation_steps == 0:  # e.g. step = 15(0->1), 31(1->2), ..., 4783(298->299), 4799(299->300)
                         progress_bar.update(1)
+                        # e.g. when step = 4799, completed_steps = 299, which is going to become 300
                         completed_steps += 1
+                        # e.g. when completed_steps becomes 300, step = 4799, which is going to become 4800
                     continue
 
             with accelerator.accumulate(model):
