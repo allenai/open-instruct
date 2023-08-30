@@ -28,9 +28,10 @@ from transformers import (
     get_scheduler,
     GPTNeoXTokenizerFast,
     GPT2Tokenizer,
-    OPTForCausalLM
+    OPTForCausalLM,
+    BitsAndBytesConfig,
 )
-from peft import LoraConfig, TaskType, get_peft_model
+from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 
 logger = get_logger(__name__)
 
@@ -200,6 +201,20 @@ def parse_args():
         help=(
             "It is an option to create the model as an empty shell, then only materialize its parameters when the pretrained weights are loaded."
             "If passed, LLM loading time and RAM consumption will be benefited."
+        ),
+    )
+    parser.add_argument(
+        "--gradient_checkpointing",
+        action="store_true",
+        help=(
+            "Turn on gradient checkpointing. Saves memory but slows training."
+        ),
+    )
+    parser.add_argument(
+        "--use_qlora",
+        action="store_true",
+        help=(
+            "Use qLoRA training - main thing is initialising model in quantised form. Not compatible with deepspeed."
         ),
     )
     args = parser.parse_args()
@@ -381,12 +396,31 @@ def main():
         )
 
     if args.model_name_or_path:
-        model = AutoModelForCausalLM.from_pretrained(
-            args.model_name_or_path,
-            from_tf=bool(".ckpt" in args.model_name_or_path),
-            config=config,
-            low_cpu_mem_usage=args.low_cpu_mem_usage,
-        )
+        if args.use_qlora:
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16,
+            )
+            device_index = Accelerator().process_index
+            device_map = {"": device_index} # force data-parallel training.
+            model = AutoModelForCausalLM.from_pretrained(
+                args.model_name_or_path,
+                from_tf=bool(".ckpt" in args.model_name_or_path),
+                config=config,
+                quantization_config=bnb_config,
+                device_map=device_map,
+                load_in_4bit=True,
+                torch_dtype=torch.bfloat16,
+            )
+        else:
+            model = AutoModelForCausalLM.from_pretrained(
+                args.model_name_or_path,
+                from_tf=bool(".ckpt" in args.model_name_or_path),
+                config=config,
+                low_cpu_mem_usage=args.low_cpu_mem_usage
+            )
     else:
         logger.info("Training new model from scratch")
         model = AutoModelForCausalLM.from_config(config)
@@ -417,16 +451,22 @@ def main():
         model.resize_token_embeddings(len(tokenizer))
 
     if args.use_lora:
+        if args.use_qlora:
+            model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
+            if args.use_qlora:
+                from llama_flash_attn_monkey_patch import upcast_layer_for_flash_attention
+                model = upcast_layer_for_flash_attention(model, torch.bfloat16)
         logger.info("Initializing LORA model...")
         peft_config = LoraConfig(
             task_type=TaskType.CAUSAL_LM, 
             inference_mode=False, 
             r=args.lora_rank, 
             lora_alpha=args.lora_alpha, 
-            lora_dropout=args.lora_dropout
+            lora_dropout=args.lora_dropout,
+            target_modules=["q_proj", "o_proj", "v_proj", "k_proj", "gate_proj", "up_proj", "down_proj"]
         )
         model = get_peft_model(model, peft_config)
-        model.print_trainable_parameters()
+        model.print_trainable_parameters()            
 
     # Preprocessing the datasets.
     if "prompt" in raw_datasets["train"].column_names and "completion" in raw_datasets["train"].column_names:
@@ -475,14 +515,22 @@ def main():
     no_decay = ["bias", "layer_norm.weight"]
     optimizer_grouped_parameters = [
         {
-            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay) and p.requires_grad],
             "weight_decay": args.weight_decay,
         },
         {
-            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay) and p.requires_grad],
             "weight_decay": 0.0,
         },
     ]
+    # if args.use_qlora:
+    #     from bitsandbytes.optim import AdamW
+    #     optimizer = AdamW(
+    #         optimizer_grouped_parameters,
+    #         lr=args.learning_rate,
+    #         is_paged=True
+    #     )
+    # else:
     optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
 
     # Scheduler and math around the number of training steps.
@@ -647,6 +695,8 @@ def main():
             # We have to mannually specify the is_main_process outside the save_pretrained function.
             if accelerator.is_main_process:
                 unwrapped_model.save_pretrained(args.output_dir, state_dict=state_dict)
+                # quick generation test
+                print(tokenizer.decode(unwrapped_model.generate(input_ids=tokenizer("<|user|>\nAnswer 2+2\n<|assistant|>", return_tensors="pt").input_ids.cuda(), use_cache=False)[0]))
         else:
             unwrapped_model.save_pretrained(
                 args.output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save, state_dict=state_dict
