@@ -7,6 +7,7 @@ import torch
 import evaluate
 from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model
 from eval.gsm.examplars import EXAMPLARS as GSM_EXAMPLARS
+from eval.templates import llama2_prompting_template, tulu_prompting_template
 
 
 exact_match = evaluate.load("exact_match")
@@ -57,10 +58,13 @@ def main(args):
 
     prompts = []
     for example in test_data:
-        if args.use_chat_format:
-            prompt = "<|user|>\n" + prompt_prefix + "Question: " + example["question"].strip() + "\n<|assistant|>\n" + "Answer:"
+        prompt = prompt_prefix + "Question: " + example["question"].strip()
+        if args.prompt_format == "tulu-chat":
+            prompt = tulu_prompting_template.format(prompt=prompt) + "Answer:"
+        elif args.prompt_format == "llama2-chat":
+            prompt = llama2_prompting_template.format(prompt=prompt) + " Answer:"
         else:
-            prompt = prompt_prefix + "Question: " + example["question"].strip() + "\nAnswer:"
+            prompt += "\nAnswer:" 
         prompts.append(prompt)
 
     if args.model_name_or_path:
@@ -137,7 +141,7 @@ if __name__ == "__main__":
     parser.add_argument("--eval_batch_size", type=int, default=1, help="batch size for evaluation.")
     parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
     parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
-    parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
+    parser.add_argument("--prompt_format", type=str, default="plain", choices=["plain", "tulu-chat", "llama2-chat"], help="encoding format of the prompt; this is only effective for local huggingface models.")
     args = parser.parse_args()
 
     # model_name_or_path and openai_engine cannot be both None or both not None.

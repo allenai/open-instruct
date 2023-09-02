@@ -8,6 +8,7 @@ import torch
 import random
 import evaluate
 from eval.utils import load_hf_lm_and_tokenizer, generate_completions, query_openai_chat_model
+from eval.templates import llama2_prompting_template, tulu_prompting_template
 
 
 exact_match = evaluate.load("exact_match")
@@ -21,10 +22,13 @@ def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None)
 
     prompts = []
     for example in examples:
-        if args.use_chat_format:
-            prompt = "<|user|>\n" + task_prompt.strip() + "\n\nQ: " + example["input"] + "\n<|assistant|>\nA:"
+        prompt = task_prompt.strip() + "\n\nQ: " + example["input"]
+        if args.prompt_format == "tulu-chat":
+            prompt = tulu_prompting_template.format(prompt=prompt) + "A:"
+        elif args.prompt_format == "llama2-chat":
+            prompt = llama2_prompting_template.format(prompt=prompt) + " A:"
         else:
-            prompt = task_prompt.strip() + "\n\nQ: " + example["input"] + "\nA:"
+            prompt += "\nA:"
         prompts.append(prompt)
 
     if args.no_cot:
@@ -47,15 +51,14 @@ def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None)
     for example, output in zip(examples, outputs):
         example["raw_output"] = output
         
-        # only keep the first part of the output - this is mainly for vanilla language models.
-        output = output.strip().split("\n\n")[0].strip()
-
         # extract the first answer after `So the answer is` and before the next period.
         # if there is no such answer, we will just use the raw output.
         results = re.search(r"So the answer is (.*?)\.", output)
         if results:
             prediction = results.group(1).strip()
         else:
+            # only keep the first part of the output - this is mainly for vanilla language models.
+            output = output.strip().split("\n\n")[0].strip()
             prediction = output.strip()
 
         example["prediction"] = prediction
@@ -201,7 +204,7 @@ if __name__ == "__main__":
     parser.add_argument("--eval_batch_size", type=int, default=1, help="batch size for evaluation.")
     parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
     parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
-    parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
+    parser.add_argument("--prompt_format", type=str, default="plain", choices=["plain", "tulu-chat", "llama2-chat"], help="encoding format of the prompt; this is only effective for local huggingface models.")
     args = parser.parse_args()
 
     # model_name_or_path and openai_engine cannot be both None or both not None.

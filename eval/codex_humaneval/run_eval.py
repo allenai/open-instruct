@@ -6,6 +6,7 @@ import torch
 from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model
 from eval.codex_humaneval.data import write_jsonl, read_problems
 from eval.codex_humaneval.evaluation import evaluate_functional_correctness
+from eval.templates import llama2_prompting_template, tulu_prompting_template
 
 
 def main(args):
@@ -19,10 +20,19 @@ def main(args):
         test_data = random.sample(test_data, args.max_num_examples)
     print("Number of examples:", len(test_data))
 
-    if args.use_chat_format:
+    if args.prompt_format == "tulu-chat":
+        prompt = tulu_prompting_template.format(prompt=prompt) + "The answer is:"
         prompts = [
-            "<|user|>\n" + "Complete the following python function.\n\n\n" 
-            + example["prompt"] + "\n<|assistant|>\n" + "Here is the completed function:\n\n\n" + example["prompt"]
+            tulu_prompting_template.format(
+                prompt="Complete the following python function.\n\n\n" + example["prompt"]
+            ) + "Here is the completed function:\n\n\n" + example["prompt"]
+            for example in test_data
+        ]
+    elif args.prompt_format == "llama2-chat":
+        prompts = [
+            llama2_prompting_template.format(
+                prompt="Complete the following python function.\n\n\n" + example["prompt"]
+            ) + " Here is the completed function:\n\n\n" + example["prompt"]
             for example in test_data
         ]
     else:
@@ -177,10 +187,11 @@ if __name__ == "__main__":
         action="store_true", 
         help="If given, we're evaluating a 4-bit quantized GPTQ model.")
     parser.add_argument(
-        "--use_chat_format", 
-        action="store_true", 
-        help="If given, the prompt will be encoded as a chat format with the roles in prompt."
-    )
+        "--prompt_format",
+        type=str,
+        default="plain",
+        choices=["plain", "tulu-chat", "llama2-chat"], 
+        help="encoding format of the prompt; this is only effective for local huggingface models.") 
     args = parser.parse_args()
     # model_name_or_path and openai_engine cannot be both None or both not None.
     assert (args.model_name_or_path is None) != (args.openai_engine is None), "Either model_name_or_path or openai_engine should be specified."

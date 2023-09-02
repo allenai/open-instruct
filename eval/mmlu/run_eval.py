@@ -9,6 +9,8 @@ from tqdm import tqdm
 import time
 from eval.mmlu.categories import subcategories, categories
 from eval.utils import get_next_word_predictions, load_hf_lm_and_tokenizer, query_openai_chat_model
+from eval.templates import llama2_prompting_template, tulu_prompting_template
+
 
 choices = ["A", "B", "C", "D"]
 
@@ -51,8 +53,11 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
         prompt_end = format_example(test_df, i, include_answer=False)
         train_prompt = gen_prompt(dev_df, subject, k)
         prompt = train_prompt + prompt_end
-        if args.use_chat_format:
-            prompt = "<|user|>\n" + prompt.strip() + "\n<|assistant|>\nThe answer is:"
+         
+        if args.prompt_format == "tulu-chat":
+            prompt = tulu_prompting_template.format(prompt=prompt.strip()) + "The answer is:"
+        elif args.prompt_format == "llama2-chat":
+            prompt = llama2_prompting_template.format(prompt=prompt.strip()) + " The answer is:"
 
         tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
         # make sure every prompt is less than 2048 tokens
@@ -60,8 +65,10 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
             k -= 1
             train_prompt = gen_prompt(dev_df, subject, k)
             prompt = train_prompt + prompt_end
-            if args.use_chat_format:
-                prompt = "<|user|>\n" + prompt.strip() + "\n<|assistant|>\nThe answer is:"
+            if args.prompt_format == "tulu-chat":
+                prompt = tulu_prompting_template.format(prompt=prompt.strip()) + "The answer is:"
+            elif args.prompt_format == "llama2-chat":
+                prompt = llama2_prompting_template.format(prompt=prompt.strip()) + " The answer is:"
             tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
         prompts.append(prompt)
 
@@ -154,8 +161,6 @@ def main(args):
 
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
-    if not os.path.exists(os.path.join(args.save_dir)):
-        os.makedirs(os.path.join(args.save_dir))
 
     all_cors = []
     subcat_cors = {
@@ -239,7 +244,7 @@ if __name__ == "__main__":
     parser.add_argument("--eval_batch_size", type=int, default=1, help="batch size for evaluation.")
     parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
     parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
-    parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
+    parser.add_argument("--prompt_format", type=str, default="plain", choices=["plain", "tulu-chat", "llama2-chat"], help="encoding format of the prompt; this is only effective for local huggingface models.")
     args = parser.parse_args()
 
     # model_name_or_path and openai_engine cannot be both None or both not None.
