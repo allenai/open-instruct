@@ -16,6 +16,7 @@ from eval.utils import (
     load_hf_lm_and_tokenizer,
     query_openai_chat_model,
 )
+from eval.templates import *
 
 
 @torch.no_grad()
@@ -53,16 +54,9 @@ def eval_vllm_model(
     )
     prompts = []
     for example in examples:
-        if args.use_llama_chat_format:
-            prompt = llama2_prompting_template.format(
-                prompt="Complete the following: " + example["text"]
-            )
-        elif args.use_chat_format:
-            prompt = (
-                "<|user|>\nComplete the following: "
-                + example["text"]
-                + "\n<|assistant|>\nA:"
-            )
+        if args.use_chat_format:
+            messages = [{"role": "user", "content": "Complete the following: " + example["text"]}]
+            prompt = eval(args.chat_formatting_function)(messages, add_bos=False)
         else:
             prompt = example["text"]
         prompts.append(prompt)
@@ -118,16 +112,9 @@ def eval_hf_model(
 
     prompts = []
     for example in examples:
-        if args.use_llama_chat_format:
-            prompt = llama2_prompting_template.format(
-                prompt="Complete the following: " + example["text"]
-            )
-        elif args.use_chat_format:
-            prompt = (
-                "<|user|>\nComplete the following: "
-                + example["text"]
-                + "\n<|assistant|>\nA:"
-            )
+        if args.use_chat_format:
+            messages = [{"role": "user", "content": "Complete the following: " + example["text"]}]
+            prompt = eval(args.chat_formatting_function)(messages, add_bos=False)
         else:
             prompt = example["text"]
         prompts.append(prompt)
@@ -368,14 +355,15 @@ if __name__ == "__main__":
         help="If given, we're evaluating a 4-bit quantized GPTQ model.",
     )
     parser.add_argument(
-        "--use_chat_format",
-        action="store_true",
-        help="If given, the prompt will be encoded as a chat format with the roles in prompt.",
+        "--use_chat_format", 
+        action="store_true", 
+        help="If given, we will use the chat format for the prompts."
     )
     parser.add_argument(
-        "--use_llama_chat_format",
-        action="store_true",
-        help="If given, the prompt will be encoded as a chat format following llama 2.",
+        "--chat_formatting_function", 
+        type=str, 
+        default="create_prompt_with_tulu_chat_format", 
+        help="The function to use to create the chat format, which should be implemented in `eva/templates.py`."
     )
     parser.add_argument(
         "--use_vllm",

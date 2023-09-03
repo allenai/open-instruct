@@ -6,7 +6,7 @@ import torch
 from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model
 from eval.codex_humaneval.data import write_jsonl, read_problems
 from eval.codex_humaneval.evaluation import evaluate_functional_correctness
-from eval.templates import llama2_prompting_template, tulu_prompting_template
+from eval.templates import *
 
 
 def main(args):
@@ -20,24 +20,36 @@ def main(args):
         test_data = random.sample(test_data, args.max_num_examples)
     print("Number of examples:", len(test_data))
 
-    if args.prompt_format == "tulu-chat":
-        prompt = tulu_prompting_template.format(prompt=prompt) + "The answer is:"
-        prompts = [
-            tulu_prompting_template.format(
-                prompt="Complete the following python function.\n\n\n" + example["prompt"]
-            ) + "Here is the completed function:\n\n\n" + example["prompt"]
-            for example in test_data
-        ]
-    elif args.prompt_format == "llama2-chat":
-        prompts = [
-            llama2_prompting_template.format(
-                prompt="Complete the following python function.\n\n\n" + example["prompt"]
-            ) + " Here is the completed function:\n\n\n" + example["prompt"]
-            for example in test_data
-        ]
+    # if args.prompt_format == "tulu-chat":
+    #     prompt = tulu_prompting_template.format(prompt=prompt) + "The answer is:"
+    #     prompts = [
+    #         tulu_prompting_template.format(
+    #             prompt="Complete the following python function.\n\n\n" + example["prompt"]
+    #         ) + "Here is the completed function:\n\n\n" + example["prompt"]
+    #         for example in test_data
+    #     ]
+    # elif args.prompt_format == "llama2-chat":
+    #     prompts = [
+    #         llama2_prompting_template.format(
+    #             prompt="Complete the following python function.\n\n\n" + example["prompt"]
+    #         ) + " Here is the completed function:\n\n\n" + example["prompt"]
+    #         for example in test_data
+    #     ]
+    # else:
+    #     prompts = [example["prompt"] for example in test_data]
+    if args.use_chat_format:
+        prompts = []
+        for example in test_data:
+            messages = [{"role": "user", "content": "Complete the following python function.\n\n\n" + example["prompt"]}]
+            prompt = eval(args.chat_formatting_function)(messages, add_bos=False)
+            if prompt[-1] in ["\n", " "]:
+                prompt += "Here is the completed function:\n\n\n" + example["prompt"]
+            else:
+                prompt += " Here is the completed function:\n\n\n" + example["prompt"]
+            prompts.append(prompt)
     else:
         prompts = [example["prompt"] for example in test_data]
-
+        
     if args.model_name_or_path:
         print("Loading model and tokenizer...")
         model, tokenizer = load_hf_lm_and_tokenizer(
@@ -187,11 +199,16 @@ if __name__ == "__main__":
         action="store_true", 
         help="If given, we're evaluating a 4-bit quantized GPTQ model.")
     parser.add_argument(
-        "--prompt_format",
-        type=str,
-        default="plain",
-        choices=["plain", "tulu-chat", "llama2-chat"], 
-        help="encoding format of the prompt; this is only effective for local huggingface models.") 
+        "--use_chat_format", 
+        action="store_true", 
+        help="If given, we will use the chat format for the prompts."
+    )
+    parser.add_argument(
+        "--chat_formatting_function", 
+        type=str, 
+        default="create_prompt_with_tulu_chat_format", 
+        help="The function to use to create the chat format, which should be implemented in `eva/templates.py`."
+    )
     args = parser.parse_args()
     # model_name_or_path and openai_engine cannot be both None or both not None.
     assert (args.model_name_or_path is None) != (args.openai_engine is None), "Either model_name_or_path or openai_engine should be specified."

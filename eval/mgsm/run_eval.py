@@ -9,7 +9,7 @@ import evaluate
 from eval.utils import generate_completions, load_hf_lm_and_tokenizer
 from eval.mgsm.examplars import MGSM_EXEMPLARS
 import pandas as pd
-from eval.templates import llama2_prompting_template, tulu_prompting_template
+from eval.templates import *
 
 
 cot_question_encoding_templates = {
@@ -68,12 +68,14 @@ def main(args):
         for example in test_data:
             question = q_template.format(example["question"])
             prompt = demonstration_prompt + "\n\n" + question.strip()
-            if args.prompt_format == "tulu-chat":
-                prompt = tulu_prompting_template.format(prompt=prompt) + a_template
-            elif args.prompt_format == "llama2-chat":
-                prompt = llama2_prompting_template.format(prompt=prompt) + " " + a_template
+            if args.use_chat_format:
+                prompt = eval(args.chat_formatting_function)(prompt)
+                if prompt[-1] in ["\n", " "]:
+                    prompt += a_template
+                else:
+                    prompt += " " + a_template
             else:
-                prompt = prompt + "\n" + a_template
+                prompt += "\n" + a_template
             prompts.append(prompt)
 
         new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1] # get the last token because the tokenizer may add space tokens at the start.
@@ -120,15 +122,63 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", type=str, default="data/mgsm")
-    parser.add_argument("--max_num_examples_per_lang", type=int, default=None, help="maximum number of examples per language to evaluate.")
-    parser.add_argument("--save_dir", type=str, default="results/mgsm")
-    parser.add_argument("--model_name_or_path", type=str, default="../hf_llama_models/7B")
-    parser.add_argument("--tokenizer_name_or_path", type=str, default=None)
-    parser.add_argument("--n_shot", type=int, default=2, help="max number of examples to use for demonstration.")
-    parser.add_argument("--eval_batch_size", type=int, default=1, help="batch size for evaluation.")
-    parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
-    parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
-    parser.add_argument("--prompt_format", type=str, default="plain", choices=["plain", "tulu-chat", "llama2-chat"], help="encoding format of the prompt; this is only effective for local huggingface models.")
+    parser.add_argument(
+        "--data_dir", 
+        type=str, 
+        default="data/mgsm"
+    )
+    parser.add_argument(
+        "--max_num_examples_per_lang", 
+        type=int, 
+        default=None, 
+        help="maximum number of examples per language to evaluate.")
+    parser.add_argument(
+        "--save_dir", 
+        type=str, 
+        default="results/mgsm"
+    )
+    parser.add_argument(
+        "--model_name_or_path", 
+        type=str, 
+        default="../hf_llama_models/7B"
+    )
+    parser.add_argument(
+        "--tokenizer_name_or_path", 
+        type=str, 
+        default=None
+    )
+    parser.add_argument(
+        "--n_shot", 
+        type=int, 
+        default=2, 
+        help="max number of examples to use for demonstration."
+    )
+    parser.add_argument(
+        "--eval_batch_size", 
+        type=int, 
+        default=1, 
+        help="batch size for evaluation."
+    )
+    parser.add_argument(
+        "--load_in_8bit", 
+        action="store_true", 
+        help="load model in 8bit mode, which will reduce memory and speed up inference."
+    )
+    parser.add_argument(
+        "--gptq", 
+        action="store_true", 
+        help="If given, we're evaluating a 4-bit quantized GPTQ model."
+    )
+    parser.add_argument(
+        "--use_chat_format", 
+        action="store_true", 
+        help="If given, we will use the chat format for the prompts."
+    )
+    parser.add_argument(
+        "--chat_formatting_function", 
+        type=str, 
+        default="create_prompt_with_tulu_chat_format", 
+        help="The function to use to create the chat format, which should be implemented in `eva/templates.py`."
+    )
     args = parser.parse_args()
     main(args)

@@ -9,7 +9,7 @@ from tqdm import tqdm
 import time
 from eval.mmlu.categories import subcategories, categories
 from eval.utils import get_next_word_predictions, load_hf_lm_and_tokenizer, query_openai_chat_model
-from eval.templates import llama2_prompting_template, tulu_prompting_template
+from eval.templates import * 
 
 
 choices = ["A", "B", "C", "D"]
@@ -53,11 +53,14 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
         prompt_end = format_example(test_df, i, include_answer=False)
         train_prompt = gen_prompt(dev_df, subject, k)
         prompt = train_prompt + prompt_end
-         
-        if args.prompt_format == "tulu-chat":
-            prompt = tulu_prompting_template.format(prompt=prompt.strip()) + "The answer is:"
-        elif args.prompt_format == "llama2-chat":
-            prompt = llama2_prompting_template.format(prompt=prompt.strip()) + " The answer is:"
+
+        if args.use_chat_format:
+            messages = [{"role": "user", "content": prompt}]
+            prompt = eval(args.chat_formatting_function)(messages, add_bos=False)
+            if prompt[-1] in ["\n", " "]:
+                prompt += "The answer is:"
+            else:
+                prompt += " The answer is:"
 
         tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
         # make sure every prompt is less than 2048 tokens
@@ -65,10 +68,15 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
             k -= 1
             train_prompt = gen_prompt(dev_df, subject, k)
             prompt = train_prompt + prompt_end
-            if args.prompt_format == "tulu-chat":
-                prompt = tulu_prompting_template.format(prompt=prompt.strip()) + "The answer is:"
-            elif args.prompt_format == "llama2-chat":
-                prompt = llama2_prompting_template.format(prompt=prompt.strip()) + " The answer is:"
+
+            if args.use_chat_format:
+                messages = [{"role": "user", "content": prompt}]
+                prompt = eval(args.chat_formatting_function)(messages, add_bos=False)
+                if prompt[-1] in ["\n", " "]:
+                    prompt += "The answer is:"
+                else:
+                    prompt += " The answer is:"
+                    
             tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
         prompts.append(prompt)
 
@@ -233,18 +241,76 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ntrain", type=int, default=5)
-    parser.add_argument("--data_dir", type=str, default="data/mmlu")
-    parser.add_argument("--save_dir", type=str, default="results/mmlu/llama-7B/")
-    parser.add_argument("--model_name_or_path", type=str, default=None, help="if specified, we will load the model to generate the predictions.")
-    parser.add_argument("--tokenizer_name_or_path", type=str, default=None, help="if specified, we will load the tokenizer from here.")
-    parser.add_argument("--openai_engine", type=str, default=None, help="if specified, we will use the OpenAI API to generate the predictions.")
-    parser.add_argument("--subjects", nargs="*", help="which subjects to evaluate. If not specified, all the 57 subjects will be evaluated.")
-    parser.add_argument("--n_instances", type=int, help="if specified, a maximum of n_instances per subject will be used for the evaluation.")
-    parser.add_argument("--eval_batch_size", type=int, default=1, help="batch size for evaluation.")
-    parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
-    parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
-    parser.add_argument("--prompt_format", type=str, default="plain", choices=["plain", "tulu-chat", "llama2-chat"], help="encoding format of the prompt; this is only effective for local huggingface models.")
+    parser.add_argument(
+        "--ntrain",
+        type=int,
+        default=5
+    )
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        default="data/mmlu"
+    )
+    parser.add_argument(
+        "--save_dir",
+        type=str,
+        default="results/mmlu/llama-7B/"
+    )
+    parser.add_argument(
+        "--model_name_or_path",
+        type=str,
+        default=None,
+        help="if specified, we will load the model to generate the predictions."
+    )
+    parser.add_argument(
+        "--tokenizer_name_or_path",
+        type=str,
+        default=None,
+        help="if specified, we will load the tokenizer from here."
+    )
+    parser.add_argument(
+        "--openai_engine",
+        type=str,
+        default=None,
+        help="if specified, we will use the OpenAI API to generate the predictions."
+    )
+    parser.add_argument(
+        "--subjects",
+        nargs="*",
+        help="which subjects to evaluate. If not specified, all the 57 subjects will be evaluated."
+    )
+    parser.add_argument(
+        "--n_instances",
+        type=int,
+        help="if specified, a maximum of n_instances per subject will be used for the evaluation."
+    )
+    parser.add_argument(
+        "--eval_batch_size",
+        type=int,
+        default=1,
+        help="batch size for evaluation."
+    )
+    parser.add_argument(
+        "--load_in_8bit",
+        action="store_true",
+        help="load model in 8bit mode, which will reduce memory and speed up inference."
+    )
+    parser.add_argument(
+        "--gptq",
+        action="store_true",
+        help="If given, we're evaluating a 4-bit quantized GPTQ model."
+    )
+    parser.add_argument(
+        "--use_chat_format", 
+        action="store_true", 
+        help="If given, we will use the chat format for the prompts."
+    )
+    parser.add_argument(
+        "--chat_formatting_function", 
+        type=str, 
+        default="create_prompt_with_tulu_chat_format", 
+        help="The function to use to create the chat format, which should be implemented in `eva/templates.py`."
+    )
     args = parser.parse_args()
 
     # model_name_or_path and openai_engine cannot be both None or both not None.

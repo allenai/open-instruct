@@ -1,9 +1,13 @@
 
 '''
-This script is used to get models' predictions on a set of prompts (put in files with *.jsonl format, with the prompt in a `prompt` field).
+This script is used to get models' predictions on a set of prompts (put in files with *.jsonl format, 
+with the prompt in a `prompt` field or the conversation history in a `messages` field).
 
 For example, to get predictions on a set of prompts, you should put them in a file with the following format:
     {"id": <uniq_id>, "prompt": "Plan a trip to Paris."}
+    ...
+Or you can use the messages format:
+    {"id": <uniq_id>, "messages": [{"role": "user", "content": "Plan a trip to Paris."}]}
     ...
 
 Then you can run this script with the following command:
@@ -21,8 +25,8 @@ import json
 import os
 import vllm
 import torch
-from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_mode
-from eval.templates import llama2_prompting_template, tulu_prompting_template
+from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model
+from eval.templates import * 
 
 
 def parse_args():
@@ -41,12 +45,12 @@ def parse_args():
         "--input_files", 
         type=str, 
         nargs="+",
-        help="Input .jsonl files containing `id`s and `prompt`s.")
+        help="Input .jsonl files, with each line containing `id` and `prompt` or `messages`.")
     parser.add_argument(
         "--output_file",
         type=str,
         default="output/model_outputs.jsonl",
-        help="Output .jsonl file containing `id`s, `prompt`s, and `output`s.")
+        help="Output .jsonl file, with each line containing `id`, `prompt` or `messages`, and `output`.")
     parser.add_argument(
         "--batch_size",
         type=int,
@@ -70,11 +74,16 @@ def parse_args():
         action="store_true", 
         help="If given, we will use the vllm library, which will likely increase the inference throughput.")
     parser.add_argument(
-        "--prompt_format",
-        type=str,
-        default="plain",
-        choices=["plain", "tulu-chat", "llama2-chat"], 
-        help="encoding format of the prompt; this is only effective for local huggingface models.")
+        "--use_chat_format", 
+        action="store_true", 
+        help="If given, we will use the chat format for the prompts."
+    )
+    parser.add_argument(
+        "--chat_formatting_function", 
+        type=str, 
+        default="create_prompt_with_tulu_chat_format", 
+        help="The function to use to create the chat format, which should be implemented in `eva/templates.py`."
+    )
     parser.add_argument(
         "--max_new_tokens",
         type=int,
@@ -116,16 +125,23 @@ if __name__ == "__main__":
             instances = [json.loads(x) for x in f.readlines()]
 
     if args.model_name_or_path is not None:
-        if args.prompt_format == "tulu-chat":
-            prompts = [
-                tulu_prompting_template.format(prompt=x["prompt"]) for x in instances
-            ]
-        elif args.prompt_format == "llama2-chat":
-            prompts = [
-                llama2_prompting_template.format(prompt=x["prompt"]) for x in instances
-            ]
-        else:
-            prompts = [x["prompt"] for x in instances]
+        prompts = []
+        for instance in instances:
+            if "messages" in instances:
+                if not args.use_chat_format:
+                    raise ValueError("If `messages` is in the instance, `use_chat_format` should be True.")
+                assert all("role" in message and "content" in message for message in instance["messages"]), \
+                    "Each message should have a `role` and a `content` field."
+                prompt = eval(args.chat_formatting_function)(instance["messages"], add_bos=False)
+            elif "prompt" in instances:
+                if args.use_chat_format:
+                    messages = [{"role": "user", "content": instance["prompt"]}]
+                    prompt = eval(args.chat_formatting_function)(messages, add_bos=False)
+                else:
+                    prompt = instance["prompt"]
+            else:
+                raise ValueError("Either `messages` or `prompt` should be in the instance.")
+            prompts.append(prompt)
         if args.use_vllm:
             model = vllm.LLM(model=args.model_name_or_path)
             sampling_params = vllm.SamplingParams(

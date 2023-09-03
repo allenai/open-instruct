@@ -25,14 +25,14 @@ d1['tasks'][0]['resources']['gpuCount'] = num_gpus
 # modify here for different set of experiments
 experiment_groups = [
     # "mmlu_0shot",
-    # "mmlu_5shot",
-    # "gsm_direct",
-    # "gsm_cot",
-    # "bbh_direct",
-    # "bbh_cot",
-    # "tydiqa_goldp_1shot",
+    "mmlu_5shot",
+    "gsm_direct",
+    "gsm_cot",
+    "bbh_direct",
+    "bbh_cot",
+    "tydiqa_goldp_1shot",
     # "tydiqa_no_context_1shot",
-    # "codex_eval_temp_0.1",
+    "codex_eval_temp_0.1",
     # "codex_eval_temp_0.8",
     "trutufulqa",
     # "creative_chatgpt_ppl",
@@ -83,9 +83,9 @@ models = [
     # ("finetuned_65B_flanv2_cot_oasst1_dolly_lumi", "01H0P3BKSC389DSK8KBPXW8JDF", None),
     # ("finetuned_65B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H0MHPS7Y3YTND66KCP16E4AC", None),
     ("finetuned_llama2_7B_tulu_mix_v1", "01H7ABFYB84N9TN8MYXAVSMJ68", None),
-    ("finetuned_llama2_7B_tulu_mix_v2", "01H7DHPX5071J86XVP39Y35F4D", None),
-    ("finetuned_llama2_13B_tulu_mix_v1", "01H7AC0KXGRDH9ACJ24WTSK7SR", None),
-    ("finetuned_llama2_13B_tulu_mix_v2", "01H7AC0M1X81FW8VTN6MGJ3EK8", None),
+    # ("finetuned_llama2_7B_tulu_mix_v2", "01H7DHPX5071J86XVP39Y35F4D", None),
+    # ("finetuned_llama2_13B_tulu_mix_v1", "01H7AC0KXGRDH9ACJ24WTSK7SR", None),
+    # ("finetuned_llama2_13B_tulu_mix_v2", "01H7AC0M1X81FW8VTN6MGJ3EK8", None),
 
 
     # other causal models
@@ -102,12 +102,12 @@ models = [
 
 
     # llama2 models
-    ("llama2-7B", "01H7A3707SXDKQRHSK2477HQP8", None),
-    ("llama2-13B", "01H7A4BSRR95XN6PZ89TS7C9GD", None),
-    ("llama2-70B", "01H7A5RTRCSQ81CWGZ7VZFDC74", None),
+    # ("llama2-7B", "01H7A3707SXDKQRHSK2477HQP8", None),
+    # ("llama2-13B", "01H7A4BSRR95XN6PZ89TS7C9GD", None),
+    # ("llama2-70B", "01H7A5RTRCSQ81CWGZ7VZFDC74", None),
     ("llama2-chat-7B", "01H83SJBZET3ZNZ8PSBSP2A17A", None),
-    ("llama2-chat-13B", "01H83T5XSGZGS9XE9MZEE28194", None),
-    ("llama2-chat-70B", "01H7AC0KXGRDH9ACJ24WTSK7SR", None),
+    # ("llama2-chat-13B", "01H83T5XSGZGS9XE9MZEE28194", None),
+    # ("llama2-chat-70B", "01H7AC0KXGRDH9ACJ24WTSK7SR", None),
 ]
 
 #--------------- experiments about number of supervision tasks -------------------------
@@ -132,7 +132,8 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --tokenizer_name_or_path /model \
             --eval_batch_size 4 \
             --load_in_8bit \
-            --prompt_format tulu-chat
+            --use_chat_format \
+            --chat_formatting_function create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "mmlu_5shot":
         d['tasks'][0]['arguments'][0] = '''
@@ -144,7 +145,8 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --tokenizer_name_or_path /model \
             --eval_batch_size 4 \
             --load_in_8bit \
-            --prompt_format tulu-chat
+            --use_chat_format \
+            --chat_formatting_function create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "bbh_direct":
         d['tasks'][0]['arguments'][0] = '''
@@ -157,7 +159,8 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --max_num_examples_per_task 40 \
             --load_in_8bit \
             --no_cot \
-            --prompt_format tulu-chat
+            --use_chat_format \
+            --chat_formatting_function create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "bbh_cot":
         d['tasks'][0]['arguments'][0] = '''
@@ -169,7 +172,8 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --eval_batch_size 10 \
             --max_num_examples_per_task 40 \
             --load_in_8bit \
-            --prompt_format tulu-chat
+            --use_chat_format \
+            --chat_formatting_function create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "gsm_direct":
         d['tasks'][0]['arguments'][0] = '''
@@ -183,7 +187,8 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --n_shot 8 \
             --load_in_8bit \
             --no_cot \
-            --prompt_format tulu-chat
+            --use_chat_format \
+            --chat_formatting_function create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "gsm_cot":
         d['tasks'][0]['arguments'][0] = '''
@@ -196,7 +201,8 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --eval_batch_size 20 \
             --n_shot 8 \
             --load_in_8bit \
-            --prompt_format tulu-chat
+            --use_chat_format \
+            --chat_formatting_function create_prompt_with_tulu_chat_format
         ''' 
     elif experiment_group == "tydiqa_goldp_1shot":
         d["tasks"][0]["arguments"][0] = '''
@@ -210,7 +216,8 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --tokenizer /model \
             --eval_batch_size 20 \
             --load_in_8bit \
-            --prompt_format tulu-chat
+            --use_chat_format \
+            --chat_formatting_function create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "tydiqa_no_context_1shot":
         d["tasks"][0]["arguments"][0] = '''
@@ -225,7 +232,8 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --tokenizer /model \
             --eval_batch_size 40 \
             --load_in_8bit \
-            --prompt_format tulu-chat
+            --use_chat_format \
+            --chat_formatting_function create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "xorqa_0shot":
         d['tasks'][0]['arguments'][0] = '''
@@ -238,7 +246,8 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --tokenizer /model \
             --eval_batch_size 16 \
             --load_in_8bit \
-            --prompt_format tulu-chat
+            --use_chat_format \
+            --chat_formatting_function create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "xorqa_5shot":
         d['tasks'][0]['arguments'][0] = '''
@@ -251,7 +260,8 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --tokenizer /model \
             --eval_batch_size 16 \
             --load_in_8bit \
-            --prompt_format tulu-chat
+            --use_chat_format \
+            --chat_formatting_function create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "codex_eval_temp_0.1":
         d['tasks'][0]['arguments'][0] = '''
@@ -304,7 +314,8 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --eval_batch_size 10 \
             --n_shot 6 \
             --load_in_8bit \
-            --prompt_format tulu-chat
+            --use_chat_format \
+            --chat_formatting_function create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "creative_chatgpt_ppl":
         d['tasks'][0]['arguments'][0] = '''
@@ -339,7 +350,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path /model/"+model_info[2])]
 
     if model_info[0] in ["llama-7B", "llama-13B", "llama-30B", "llama-65B", "llama2-7B", "llama2-13B", "llama2-70B"]:
-        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--prompt_format tulu-chat", "")]
+        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--use_chat_format", "")]
 
     if "13B" in model_info[0]:
         # find the batch size argument, and reduce by 4x
@@ -372,14 +383,17 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             d['tasks'][0]['resources']['gpuCount'] = 2 * d['tasks'][0]['resources']['gpuCount']
 
     if model_info[0].startswith("hf-"):  # if it's a huggingface model, load it from the model hub
-        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--prompt_format tulu-chat", "")]
+        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--use_chat_format", "")]
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--tokenizer_name_or_path /model", "--model_name_or_path "+model_info[1])]
     else:  # if it's a beaker model, mount the beaker dataset to `/model`
         d['tasks'][0]['datasets'][1]['source']['beaker'] = model_info[1]
 
         if "llama2-chat" in model_info[0]:
-            d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--prompt_format tulu-chat", "--prompt_format llama2-chat")]
+            d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
+                "--chat_formatting_function create_prompt_with_tulu_chat_format", 
+                "--chat_formatting_function create_prompt_with_llama2_chat_format")
+            ]
 
     # print(d)
 
