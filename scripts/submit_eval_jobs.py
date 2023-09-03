@@ -36,8 +36,6 @@ experiment_groups = [
     # "codex_eval_temp_0.8",
     "trutufulqa",
     "toxigen",
-    # "creative_chatgpt_ppl",
-    # "creative_gpt4_ppl",
 ]
 
 # model to evaluate, each in the followng format: model name, their beaker id, checkpoint subfolder
@@ -236,34 +234,6 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --use_chat_format \
             --chat_formatting_function create_prompt_with_tulu_chat_format
         '''
-    elif experiment_group == "xorqa_0shot":
-        d['tasks'][0]['arguments'][0] = '''
-            python -m eval.xorqa.run_eval \
-            --data_dir /data/xorqa/ \
-            --n_shot 0 \
-            --max_num_examples_per_lang 50 \
-            --save_dir /output/ \
-            --model /model \
-            --tokenizer /model \
-            --eval_batch_size 16 \
-            --load_in_8bit \
-            --use_chat_format \
-            --chat_formatting_function create_prompt_with_tulu_chat_format
-        '''
-    elif experiment_group == "xorqa_5shot":
-        d['tasks'][0]['arguments'][0] = '''
-            python -m eval.xorqa.run_eval \
-            --data_dir /data/xorqa/ \
-            --n_shot 5 \
-            --max_num_examples_per_lang 50 \
-            --save_dir /output/ \
-            --model /model \
-            --tokenizer /model \
-            --eval_batch_size 16 \
-            --load_in_8bit \
-            --use_chat_format \
-            --chat_formatting_function create_prompt_with_tulu_chat_format
-        '''
     elif experiment_group == "codex_eval_temp_0.1":
         d['tasks'][0]['arguments'][0] = '''
             python -m eval.codex_humaneval.run_eval \
@@ -314,42 +284,6 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --use_vllm \
             --use_chat_format \
             --chat_formatting_function create_prompt_with_tulu_chat_format
-        '''
-    elif experiment_group == "mgsm_6shot":
-        d['tasks'][0]['arguments'][0] = '''
-            python -m eval.mgsm.run_eval \
-            --data_dir /data/mgsm/ \
-            --max_num_examples_per_lang 40 \
-            --save_dir /output/ \
-            --model /model \
-            --tokenizer /model \
-            --eval_batch_size 10 \
-            --n_shot 6 \
-            --load_in_8bit \
-            --use_chat_format \
-            --chat_formatting_function create_prompt_with_tulu_chat_format
-        '''
-    elif experiment_group == "creative_chatgpt_ppl":
-        d['tasks'][0]['arguments'][0] = '''
-            python -m eval.creative_tasks.perplexity_eval \
-            --data_file /data/creative_tasks/chatgpt_outputs.jsonl \
-            --output_field_name gpt-3.5-turbo-0301_output \
-            --eval_batch_size 1 \
-            --save_dir /output/ \
-            --model /model \
-            --tokenizer /model \
-            --load_in_8bit
-        '''
-    elif experiment_group == "creative_gpt4_ppl":
-        d['tasks'][0]['arguments'][0] = '''
-            python -m eval.creative_tasks.perplexity_eval \
-            --data_file /data/creative_tasks/gpt4_outputs.jsonl \
-            --output_field_name gpt-4-0314_output \
-            --eval_batch_size 1 \
-            --save_dir /output/ \
-            --model /model \
-            --tokenizer /model \
-            --load_in_8bit
         '''
     else:
         raise ValueError("experiment_group not supported")
