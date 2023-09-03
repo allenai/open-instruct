@@ -1,50 +1,76 @@
+# Here we use 1 GPU for demonstration, but you can use multiple GPUs and larger eval_batch_size to speed up the evaluation.
 export CUDA_VISIBLE_DEVICES=0
 
-# # cot
-# python -m eval.bbh.run_eval \
-#     --data_dir data/eval/bbh \
-#     --save_dir results/bbh/llama-7B-cot/ \
-#     --model /net/nfs.cirrascale/allennlp/yizhongw/checkpoints/llama_7B_cot_0508 \
-#     --tokenizer /net/nfs.cirrascale/allennlp/yizhongw/checkpoints/llama_7B_cot_0508 \
-#     --eval_batch_size 10 \
-#     --max_num_examples_per_task 40 \
-#     --load_in_8bit \
-#     --use_chat_format
+
+# evaluating llama 7B model using chain-of-thought
+python -m eval.bbh.run_eval \
+    --data_dir data/eval/bbh \
+    --save_dir results/bbh/llama-7B-cot/ \
+    --model ../hf_llama_models/7B \
+    --tokenizer ../hf_llama_models/7B \
+    --eval_batch_size 10 \
+    --max_num_examples_per_task 40 \
+    --load_in_8bit
 
 
-# # direct answer
-# python -m eval.bbh.run_eval \
-#     --data_dir data/eval/bbh \
-#     --save_dir results/bbh/llama-7B-no-cot/ \
-#     --model /net/nfs.cirrascale/allennlp/yizhongw/hf_llama_models/7B/ \
-#     --tokenizer /net/nfs.cirrascale/allennlp/yizhongw/hf_llama_models/7B/ \
-#     --eval_batch_size 10 \
-#     --max_num_examples_per_task 40 \
-#     --load_in_8bit \
-#     --no_cot \
-#     --use_chat_format
+# evaluating llama 7B model using direct answering (no chain-of-thought)
+python -m eval.bbh.run_eval \
+    --data_dir data/eval/bbh \
+    --save_dir results/bbh/llama-7B-no-cot/ \
+    --model ../hf_llama_models/7B \
+    --tokenizer ../hf_llama_models/7B \
+    --eval_batch_size 10 \
+    --max_num_examples_per_task 40 \
+    --load_in_8bit \
+    --no_cot
 
 
-# # cot with gpt-3.5-turbo-0301
-# python -m eval.bbh.run_eval \
-#     --data_dir data/eval/bbh \
-#     --save_dir results/bbh/chatgpt-cot/ \
-#     --openai_engine "gpt-3.5-turbo-0301" \
-#     --eval_batch_size 10 \
-#     --max_num_examples_per_task 40
+# evaluating tulu 7B model using chain-of-thought and chat format
+python -m eval.bbh.run_eval \
+    --data_dir data/eval/bbh \
+    --save_dir results/bbh/tulu-7B-cot/ \
+    --model ../checkpoint/tulu_7B \
+    --tokenizer ../checkpoints/tulu_7B \
+    --eval_batch_size 10 \
+    --max_num_examples_per_task 40 \
+    --load_in_8bit \
+    --use_chat_format \
+    --chat_formatting_function create_prompt_with_tulu_chat_format
 
 
-# # direct answer with gpt-3.5-turbo-0301
-# python -m eval.bbh.run_eval \
-#     --data_dir data/eval/bbh \
-#     --save_dir results/bbh/chatgpt-no-cot/ \
-#     --openai_engine "gpt-3.5-turbo-0301" \
-#     --eval_batch_size 10 \
-#     --max_num_examples_per_task 40 \
-#     --no_cot
+# evaluating llama2 chat model using chain-of-thought and chat format
+python -m eval.bbh.run_eval \
+    --data_dir data/eval/bbh \
+    --save_dir results/bbh/llama2-chat-7B-cot \
+    --model ../hf_llama2_models/7B-chat \
+    --tokenizer ../hf_llama2_models/7B-chat \
+    --eval_batch_size 10 \
+    --max_num_examples_per_task 40 \
+    --load_in_8bit \
+    --use_chat_format \
+    --chat_formatting_function create_prompt_with_llama2_chat_format
 
 
-# cot with gpt-4
+# evaluating gpt-3.5-turbo-0301 using chain-of-thought
+python -m eval.bbh.run_eval \
+    --data_dir data/eval/bbh \
+    --save_dir results/bbh/chatgpt-cot/ \
+    --openai_engine "gpt-3.5-turbo-0301" \
+    --eval_batch_size 10 \
+    --max_num_examples_per_task 40
+
+
+# evaluating gpt-3.5-turbo-0301 using direct answering (no chain-of-thought)
+python -m eval.bbh.run_eval \
+    --data_dir data/eval/bbh \
+    --save_dir results/bbh/chatgpt-no-cot/ \
+    --openai_engine "gpt-3.5-turbo-0301" \
+    --eval_batch_size 10 \
+    --max_num_examples_per_task 40 \
+    --no_cot
+
+
+# evaluating gpt-4 using chain-of-thought
 python -m eval.bbh.run_eval \
     --data_dir data/eval/bbh \
     --save_dir results/bbh/gpt4-cot/ \
@@ -53,7 +79,7 @@ python -m eval.bbh.run_eval \
     --max_num_examples_per_task 40
 
 
-# direct answer with gpt-4
+# evaluating gpt-4 using direct answering (no chain-of-thought)
 python -m eval.bbh.run_eval \
     --data_dir data/eval/bbh \
     --save_dir results/bbh/gpt4-no-cot/ \
