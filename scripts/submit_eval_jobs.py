@@ -35,6 +35,7 @@ experiment_groups = [
     "codex_eval_temp_0.1",
     # "codex_eval_temp_0.8",
     "trutufulqa",
+    "toxigen",
     # "creative_chatgpt_ppl",
     # "creative_gpt4_ppl",
 ]
@@ -302,6 +303,17 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --gpt_info_model_name curie:ft-allennlp:gpt-info-2023-07-26-11-38-18 \
             --eval_batch_size 20 \
             --load_in_8bit
+        '''
+    elif experiment_group == "toxigen":
+        d['tasks'][0]['arguments'][0] = '''
+        python -m eval.toxigen.run_eval \
+            --data_dir /data/toxigen/ \
+            --save_dir /output/ \
+            --model_name_or_path /model \
+            --eval_batch_size 32 \
+            --use_vllm \
+            --use_chat_format \
+            --chat_formatting_function create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "mgsm_6shot":
         d['tasks'][0]['arguments'][0] = '''
