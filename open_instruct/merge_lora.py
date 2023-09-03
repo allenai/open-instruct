@@ -22,7 +22,7 @@ if __name__ == "__main__":
     print("Merging the lora modules...")
     merged_model = lora_model.base_model.merge_and_unload()
     output_dir = args.output_dir if args.output_dir else args.lora_model_name_or_path
-    tokenizer = AutoTokenizer.from_pretrained(args.lora_model_name_or_path)
+    tokenizer = AutoTokenizer.from_pretrained(args.base_model_name_or_path)
     embedding_size = merged_model.get_input_embeddings().weight.shape[0]
     if len(tokenizer) > embedding_size:
         print(f"The vocabulary size of the tokenizer in the lora model folder contains {len(tokenizer)-embedding_size} more tokens than the base model.")
