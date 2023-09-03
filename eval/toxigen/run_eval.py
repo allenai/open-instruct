@@ -167,7 +167,7 @@ def eval_openai_chat_engine(
 ):
     instances = []
     for i, example in enumerate(examples):
-        prompt = example["text"]
+        prompt = "Complete the following: " + example["text"]
         instances.append(
             {
                 "id": example["id"] if "id" in example else i,
@@ -186,7 +186,6 @@ def eval_openai_chat_engine(
         instances=instances,
         batch_size=args.eval_batch_size if args.eval_batch_size else 10,
         output_path=openai_result_save_path if save_path else None,
-        completion_kwargs={"stop": "\n", "max_tokens": 512},
     )
 
     outputs = [result["output"] for result in results]
