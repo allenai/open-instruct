@@ -20,23 +20,6 @@ def main(args):
         test_data = random.sample(test_data, args.max_num_examples)
     print("Number of examples:", len(test_data))
 
-    # if args.prompt_format == "tulu-chat":
-    #     prompt = tulu_prompting_template.format(prompt=prompt) + "The answer is:"
-    #     prompts = [
-    #         tulu_prompting_template.format(
-    #             prompt="Complete the following python function.\n\n\n" + example["prompt"]
-    #         ) + "Here is the completed function:\n\n\n" + example["prompt"]
-    #         for example in test_data
-    #     ]
-    # elif args.prompt_format == "llama2-chat":
-    #     prompts = [
-    #         llama2_prompting_template.format(
-    #             prompt="Complete the following python function.\n\n\n" + example["prompt"]
-    #         ) + " Here is the completed function:\n\n\n" + example["prompt"]
-    #         for example in test_data
-    #     ]
-    # else:
-    #     prompts = [example["prompt"] for example in test_data]
     if args.use_chat_format:
         prompts = []
         for example in test_data:
