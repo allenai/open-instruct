@@ -3,7 +3,12 @@ import os
 import json
 import random
 import torch
-from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model
+from eval.utils import (
+    generate_completions, 
+    load_hf_lm_and_tokenizer, 
+    query_openai_chat_model,
+    dynamic_import_function,
+)
 from eval.codex_humaneval.data import write_jsonl, read_problems
 from eval.codex_humaneval.evaluation import evaluate_functional_correctness
 
@@ -20,14 +25,19 @@ def main(args):
     print("Number of examples:", len(test_data))
 
     if args.use_chat_format:
-        prompts = [
-            "<|user|>\n" + "Complete the following python function.\n\n\n" 
-            + example["prompt"] + "\n<|assistant|>\n" + "Here is the completed function:\n\n\n" + example["prompt"]
-            for example in test_data
-        ]
+        prompts = []
+        chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
+        for example in test_data:
+            messages = [{"role": "user", "content": "Complete the following python function.\n\n\n" + example["prompt"]}]
+            prompt = chat_formatting_function(messages, add_bos=False)
+            if prompt[-1] in ["\n", " "]:
+                prompt += "Here is the completed function:\n\n\n" + example["prompt"]
+            else:
+                prompt += " Here is the completed function:\n\n\n" + example["prompt"]
+            prompts.append(prompt)
     else:
         prompts = [example["prompt"] for example in test_data]
-
+        
     if args.model_name_or_path:
         print("Loading model and tokenizer...")
         model, tokenizer = load_hf_lm_and_tokenizer(
@@ -179,7 +189,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--use_chat_format", 
         action="store_true", 
-        help="If given, the prompt will be encoded as a chat format with the roles in prompt."
+        help="If given, we will use the chat format for the prompts."
+    )
+    parser.add_argument(
+        "--chat_formatting_function", 
+        type=str, 
+        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
     )
     args = parser.parse_args()
     # model_name_or_path and openai_engine cannot be both None or both not None.

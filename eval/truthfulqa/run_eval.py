@@ -7,7 +7,13 @@ import pandas as pd
 
 import openai
 import warnings
-from eval.utils import load_hf_lm_and_tokenizer, query_openai_chat_model, query_openai_model, generate_completions, score_completions
+from eval.utils import (
+    load_hf_lm_and_tokenizer, 
+    query_openai_chat_model, 
+    query_openai_model, 
+    generate_completions, 
+    dynamic_import_function,
+)
 from eval.truthfulqa.utilities import (
     format_prompt,
     format_prompt_with_answer_strings,
@@ -17,7 +23,6 @@ from eval.truthfulqa.utilities import (
 )
 from eval.truthfulqa.metrics import run_end2end_GPT3, MC_calcs
 from eval.truthfulqa.configs import BEST_COL, ANSWER_COL, INCORRECT_COL
-
 
 
 def trim_answer(answer):
@@ -216,9 +221,14 @@ def run_answers(questions, model, tokenizer, tag, preset="qa", batch_size=1, max
     ]
 
     if use_chat_format:
-        prompts = [
-            "<|user|>\n" + prompt.strip() + "\n<|assistant|>\nThe answer is:" for prompt in prompts
-        ]
+        chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
+        for idx, prompt in enumerate(prompts):
+            messages = [{"role": "user", "content": prompt}]
+            prompts[idx] = chat_formatting_function(messages, add_bos=False)
+            if prompts[idx][-1] in ["\n", " "]:
+                prompts[idx] += "The answer is:"
+            else:
+                prompts[idx] += " The answer is:"
 
     completions = generate_completions(model, tokenizer, prompts, batch_size=batch_size, max_new_tokens=max_new_tokens, top_k=1)
     assert len(completions) == len(prompts)
@@ -405,19 +415,90 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_name_or_path", type=str, help="The HuggingFace model to be evaluated.")
-    parser.add_argument("--tokenizer_name_or_path", type=str, default=None, help="If specified, we will load the tokenizer from here.")
-    parser.add_argument("--openai_engine", type=str, default=None, help="If specified, we will evaluate the OpenAI engine.")
-    parser.add_argument("--data_dir", type=str, default="data/eval/truthfulqa", help="The directory containing the truthfulqa data. Download from https://github.com/sylinrl/TruthfulQA/tree/main/data.")
-    parser.add_argument("--save_dir", type=str, default="results/truthfulqa/", help="The directory to save the results.")
-    parser.add_argument("--num_instances", type=int, default=None, help="The number of instances to evaluate. If not given, we will evaluate all instances.")
-    parser.add_argument("--load_in_8bit", action="store_true", help="Load model in 8bit mode, which will reduce memory and speed up inference.")
-    parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
-    parser.add_argument("--eval_batch_size", type=int, default=1, help="batch size for evaluation.")
-    parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
-    parser.add_argument('--metrics', nargs='+', default=['judge', 'info', 'mc'], choices=['judge', 'info', 'mc'], help='Metrics to run')
-    parser.add_argument('--preset', type=str, default='qa', help='Preset to use for prompt generation. Please see presets.py for options.')
-    parser.add_argument('--gpt_judge_model_name', type=str, help='If `judge` metric is used, the trained GPT judge model name should be provided.')
-    parser.add_argument('--gpt_info_model_name', type=str, help='If `info` metric is used, the trained GPT info model name should be provided.')
+    parser.add_argument(
+        "--model_name_or_path", 
+        type=str, 
+        help="The HuggingFace model to be evaluated."
+    )
+    parser.add_argument(
+        "--tokenizer_name_or_path", 
+        type=str, 
+        default=None, 
+        help="If specified, we will load the tokenizer from here."
+    )
+    parser.add_argument(
+        "--openai_engine", 
+        type=str, 
+        default=None, 
+        help="If specified, we will evaluate the OpenAI engine."
+    )
+    parser.add_argument(
+        "--data_dir", 
+        type=str, 
+        default="data/eval/truthfulqa", 
+        help="The directory containing the truthfulqa data. Download from https://github.com/sylinrl/TruthfulQA/tree/main/data."
+    )
+    parser.add_argument(
+        "--save_dir", 
+        type=str, 
+        default="results/truthfulqa/", 
+        help="The directory to save the results."
+    )
+    parser.add_argument(
+        "--num_instances", 
+        type=int, 
+        default=None, 
+        help="The number of instances to evaluate. If not given, we will evaluate all instances."
+    )
+    parser.add_argument(
+        "--load_in_8bit", 
+        action="store_true", 
+        help="Load model in 8bit mode, which will reduce memory and speed up inference."
+    )
+    parser.add_argument(
+        "--gptq", 
+        action="store_true", 
+        help="If given, we're evaluating a 4-bit quantized GPTQ model."
+    )
+    parser.add_argument(
+        "--eval_batch_size", 
+        type=int, 
+        default=1, 
+        help="batch size for evaluation."
+    )
+    parser.add_argument(
+        "--use_chat_format", 
+        action="store_true", 
+        help="If given, we will use the chat format for the prompts."
+    )
+    parser.add_argument(
+        "--chat_formatting_function", 
+        type=str, 
+        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
+    )
+    parser.add_argument(
+        '--metrics', 
+        nargs='+', 
+        default=['judge', 'info', 'mc'], 
+        choices=['judge', 'info', 'mc'], 
+        help='Metrics to run'
+    )
+    parser.add_argument(
+        '--preset', 
+        type=str, 
+        default='qa', 
+        help='Preset to use for prompt generation. Please see presets.py for options.'
+    )
+    parser.add_argument(
+        '--gpt_judge_model_name', 
+        type=str, 
+        help='If `judge` metric is used, the trained GPT judge model name should be provided.'
+    )
+    parser.add_argument(
+        '--gpt_info_model_name', 
+        type=str, 
+        help='If `info` metric is used, the trained GPT info model name should be provided.'
+    )
     args = parser.parse_args()
     main(args)
