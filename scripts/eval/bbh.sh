@@ -35,7 +35,7 @@ python -m eval.bbh.run_eval \
     --max_num_examples_per_task 40 \
     --load_in_8bit \
     --use_chat_format \
-    --chat_formatting_function create_prompt_with_tulu_chat_format
+    --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
 
 
 # evaluating llama2 chat model using chain-of-thought and chat format
@@ -48,7 +48,7 @@ python -m eval.bbh.run_eval \
     --max_num_examples_per_task 40 \
     --load_in_8bit \
     --use_chat_format \
-    --chat_formatting_function create_prompt_with_llama2_chat_format
+    --chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format
 
 
 # evaluating gpt-3.5-turbo-0301 using chain-of-thought

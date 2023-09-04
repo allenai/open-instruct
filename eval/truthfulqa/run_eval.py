@@ -7,7 +7,13 @@ import pandas as pd
 
 import openai
 import warnings
-from eval.utils import load_hf_lm_and_tokenizer, query_openai_chat_model, query_openai_model, generate_completions, score_completions
+from eval.utils import (
+    load_hf_lm_and_tokenizer, 
+    query_openai_chat_model, 
+    query_openai_model, 
+    generate_completions, 
+    dynamic_import_function,
+)
 from eval.truthfulqa.utilities import (
     format_prompt,
     format_prompt_with_answer_strings,
@@ -17,7 +23,6 @@ from eval.truthfulqa.utilities import (
 )
 from eval.truthfulqa.metrics import run_end2end_GPT3, MC_calcs
 from eval.truthfulqa.configs import BEST_COL, ANSWER_COL, INCORRECT_COL
-from eval.templates import *
 
 
 def trim_answer(answer):
@@ -215,14 +220,11 @@ def run_answers(questions, model, tokenizer, tag, preset="qa", batch_size=1, max
         format_prompt(questions.loc[idx], preset, format='general') for idx in questions.index
     ]
 
-    # if use_chat_format:
-    #     prompts = [
-    #         "<|user|>\n" + prompt.strip() + "\n<|assistant|>\nThe answer is:" for prompt in prompts
-    #     ]
     if use_chat_format:
+        chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
         for idx, prompt in enumerate(prompts):
             messages = [{"role": "user", "content": prompt}]
-            prompts[idx] = eval(args.chat_formatting_function)(messages, add_bos=False)
+            prompts[idx] = chat_formatting_function(messages, add_bos=False)
             if prompts[idx][-1] in ["\n", " "]:
                 prompts[idx] += "The answer is:"
             else:
@@ -472,8 +474,8 @@ if __name__ == '__main__':
     parser.add_argument(
         "--chat_formatting_function", 
         type=str, 
-        default="create_prompt_with_tulu_chat_format", 
-        help="The function to use to create the chat format, which should be implemented in `eva/templates.py`."
+        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
     )
     parser.add_argument(
         '--metrics', 

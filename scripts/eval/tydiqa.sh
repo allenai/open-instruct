@@ -43,7 +43,7 @@ python -m eval.tydiqa.run_eval \
     --eval_batch_size 20 \
     --load_in_8bit \
     --use_chat_format \
-    --chat_formatting_function create_prompt_with_tulu_chat_format
+    --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
 
 
 # Evaluating Tulu 7B model, with no context provided (closed-book QA)
@@ -60,7 +60,7 @@ python -m eval.tydiqa.run_eval \
     --load_in_8bit \
     --no_context \
     --use_chat_format \
-    --chat_formatting_function create_prompt_with_tulu_chat_format
+    --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
 
 
 # Evaluating llama2 chat model, with gold passage provided
@@ -76,7 +76,7 @@ python -m eval.tydiqa.run_eval \
     --eval_batch_size 20 \
     --load_in_8bit \
     --use_chat_format \
-    --chat_formatting_function create_prompt_with_llama2_chat_format
+    --chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format
 
 
 # Evaluating llama2 chat model, with no context provided (closed-book QA)
@@ -93,7 +93,7 @@ python -m eval.tydiqa.run_eval \
     --load_in_8bit \
     --no_context \
     --use_chat_format \
-    --chat_formatting_function create_prompt_with_llama2_chat_format
+    --chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format
 
 
 # Evaluating chatgpt, with gold passage provided

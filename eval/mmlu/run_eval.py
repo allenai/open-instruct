@@ -8,8 +8,7 @@ import json
 from tqdm import tqdm
 import time
 from eval.mmlu.categories import subcategories, categories
-from eval.utils import get_next_word_predictions, load_hf_lm_and_tokenizer, query_openai_chat_model
-from eval.templates import * 
+from eval.utils import get_next_word_predictions, load_hf_lm_and_tokenizer, query_openai_chat_model, dynamic_import_function
 
 
 choices = ["A", "B", "C", "D"]
@@ -48,6 +47,7 @@ def gen_prompt(train_df, subject, k=-1):
 @torch.no_grad()
 def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1):
     prompts = []
+    chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
     for i in range(0, test_df.shape[0]):
         k = args.ntrain
         prompt_end = format_example(test_df, i, include_answer=False)
@@ -56,7 +56,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
 
         if args.use_chat_format:
             messages = [{"role": "user", "content": prompt}]
-            prompt = eval(args.chat_formatting_function)(messages, add_bos=False)
+            prompt = chat_formatting_function(messages, add_bos=False)
             if prompt[-1] in ["\n", " "]:
                 prompt += "The answer is:"
             else:
@@ -71,7 +71,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
 
             if args.use_chat_format:
                 messages = [{"role": "user", "content": prompt}]
-                prompt = eval(args.chat_formatting_function)(messages, add_bos=False)
+                prompt = chat_formatting_function(messages, add_bos=False)
                 if prompt[-1] in ["\n", " "]:
                     prompt += "The answer is:"
                 else:
@@ -308,8 +308,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--chat_formatting_function", 
         type=str, 
-        default="create_prompt_with_tulu_chat_format", 
-        help="The function to use to create the chat format, which should be implemented in `eva/templates.py`."
+        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
     )
     args = parser.parse_args()
 

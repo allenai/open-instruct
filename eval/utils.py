@@ -4,6 +4,7 @@ import json
 import time
 import asyncio
 import os
+from importlib import import_module
 from transformers import StoppingCriteria
 
 from open_instruct.finetune import encode_with_prompt_completion_format
@@ -378,4 +379,14 @@ def query_openai_model(engine, instances, output_path=None, batch_size=10, retry
                 fout.flush()
         progress_bar.update(batch_size)
     return results
+
+
+def dynamic_import_function(function_path):
+    '''
+    Dynamically import a function from a path string (e.g., "module.submodule.my_function")
+    '''
+    module_path, function_name = function_path.rsplit(".", 1)
+    module = import_module(module_path)
+    function = getattr(module, function_name)
+    return function
  

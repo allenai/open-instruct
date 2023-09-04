@@ -132,7 +132,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --eval_batch_size 4 \
             --load_in_8bit \
             --use_chat_format \
-            --chat_formatting_function create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "mmlu_5shot":
         d['tasks'][0]['arguments'][0] = '''
@@ -145,7 +145,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --eval_batch_size 4 \
             --load_in_8bit \
             --use_chat_format \
-            --chat_formatting_function create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "bbh_direct":
         d['tasks'][0]['arguments'][0] = '''
@@ -159,7 +159,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --load_in_8bit \
             --no_cot \
             --use_chat_format \
-            --chat_formatting_function create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "bbh_cot":
         d['tasks'][0]['arguments'][0] = '''
@@ -172,7 +172,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --max_num_examples_per_task 40 \
             --load_in_8bit \
             --use_chat_format \
-            --chat_formatting_function create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "gsm_direct":
         d['tasks'][0]['arguments'][0] = '''
@@ -187,7 +187,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --load_in_8bit \
             --no_cot \
             --use_chat_format \
-            --chat_formatting_function create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "gsm_cot":
         d['tasks'][0]['arguments'][0] = '''
@@ -201,7 +201,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --n_shot 8 \
             --load_in_8bit \
             --use_chat_format \
-            --chat_formatting_function create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         ''' 
     elif experiment_group == "tydiqa_goldp_1shot":
         d["tasks"][0]["arguments"][0] = '''
@@ -216,7 +216,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --eval_batch_size 20 \
             --load_in_8bit \
             --use_chat_format \
-            --chat_formatting_function create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "tydiqa_no_context_1shot":
         d["tasks"][0]["arguments"][0] = '''
@@ -232,7 +232,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --eval_batch_size 40 \
             --load_in_8bit \
             --use_chat_format \
-            --chat_formatting_function create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "codex_eval_temp_0.1":
         d['tasks'][0]['arguments'][0] = '''
@@ -283,7 +283,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --eval_batch_size 32 \
             --use_vllm \
             --use_chat_format \
-            --chat_formatting_function create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''
     else:
         raise ValueError("experiment_group not supported")
@@ -337,8 +337,8 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
 
         if "llama2-chat" in model_info[0]:
             d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
-                "--chat_formatting_function create_prompt_with_tulu_chat_format", 
-                "--chat_formatting_function create_prompt_with_llama2_chat_format")
+                "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+                "--chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format")
             ]
 
     # print(d)

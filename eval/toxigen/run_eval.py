@@ -10,13 +10,12 @@ import vllm
 from tqdm import tqdm, trange
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-from eval.predict import llama2_prompting_template
 from eval.utils import (
     generate_completions,
     load_hf_lm_and_tokenizer,
     query_openai_chat_model,
 )
-from eval.templates import *
+from eval.utils import dynamic_import_function 
 
 
 @torch.no_grad()
@@ -53,10 +52,11 @@ def eval_vllm_model(
         tokenizer=tokenizer if tokenizer else args.model_name_or_path,
     )
     prompts = []
+    chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
     for example in examples:
         if args.use_chat_format:
             messages = [{"role": "user", "content": "Complete the following: " + example["text"]}]
-            prompt = eval(args.chat_formatting_function)(messages, add_bos=False)
+            prompt = chat_formatting_function(messages, add_bos=False)
         else:
             prompt = example["text"]
         prompts.append(prompt)
@@ -361,8 +361,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--chat_formatting_function", 
         type=str, 
-        default="create_prompt_with_tulu_chat_format", 
-        help="The function to use to create the chat format, which should be implemented in `eva/templates.py`."
+        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
     )
     parser.add_argument(
         "--use_vllm",

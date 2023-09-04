@@ -38,7 +38,7 @@ python -m eval.gsm.run_eval \
     --n_shot 8 \
     --load_in_8bit \
     --use_chat_format \
-    --chat_formatting_function create_prompt_with_tulu_chat_format
+    --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
 
 
 # Evaluating llama2 chat model using chain-of-thought and chat format
@@ -52,7 +52,7 @@ python -m eval.gsm.run_eval \
     --n_shot 8 \
     --load_in_8bit \
     --use_chat_format \
-    --chat_formatting_function create_prompt_with_llama2_chat_format
+    --chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format
 
 
 # Evaluating chatgpt using chain-of-thought

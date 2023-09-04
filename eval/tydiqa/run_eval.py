@@ -5,8 +5,12 @@ import random
 import torch
 import evaluate
 import numpy as np
-from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model
-from eval.templates import * 
+from eval.utils import (
+    generate_completions, 
+    load_hf_lm_and_tokenizer, 
+    query_openai_chat_model,
+    dynamic_import_function,
+)
 
 
 encoding_templates_with_context = {
@@ -122,6 +126,7 @@ def main(args):
         os.makedirs(args.save_dir, exist_ok=True)
 
     prompts = []
+    chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
     for example in test_data:
         lang = example["lang"]
 
@@ -153,7 +158,7 @@ def main(args):
 
         if args.use_chat_format:
             messages = [{"role": "user", "content": prompt}]
-            prompt = eval(args.chat_formatting_function)(messages, add_bos=False)
+            prompt = chat_formatting_function(messages, add_bos=False)
             if prompt[-1] in ["\n", " "]:
                 prompt += a_template
             else:
@@ -285,8 +290,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--chat_formatting_function", 
         type=str, 
-        default="create_prompt_with_tulu_chat_format", 
-        help="The function to use to create the chat format, which should be implemented in `eva/templates.py`."
+        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
     )
     args = parser.parse_args()
     # model_name_or_path and openai_engine cannot be both None or both not None.

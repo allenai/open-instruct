@@ -34,7 +34,7 @@ python -m eval.mmlu.run_eval \
     --eval_batch_size 4 \
     --load_in_8bit \
     --use_chat_format \
-    --chat_formatting_function create_prompt_with_tulu_chat_format
+    --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
 
 
 # Evaluating Tulu 7B model using 5 shot and chat format
@@ -47,7 +47,7 @@ python -m eval.mmlu.run_eval \
     --eval_batch_size 4 \
     --load_in_8bit \
     --use_chat_format \
-    --chat_formatting_function create_prompt_with_tulu_chat_format
+    --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
 
 
 # Evaluating llama2 chat model using 0-shot and chat format
@@ -60,7 +60,7 @@ python -m eval.mmlu.run_eval \
     --eval_batch_size 4 \
     --load_in_8bit \
     --use_chat_format \
-    --chat_formatting_function create_prompt_with_llama2_chat_format
+    --chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format
 
 
 # Evaluating llama2 chat model using 5-shot and chat format
@@ -73,7 +73,7 @@ python -m eval.mmlu.run_eval \
     --eval_batch_size 4 \
     --load_in_8bit \
     --use_chat_format \
-    --chat_formatting_function create_prompt_with_llama2_chat_format
+    --chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format
 
 
 # Evaluating chatgpt using 0 shot

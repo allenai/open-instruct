@@ -7,8 +7,12 @@ import glob
 import torch
 import random
 import evaluate
-from eval.utils import load_hf_lm_and_tokenizer, generate_completions, query_openai_chat_model
-from eval.templates import *
+from eval.utils import (
+    load_hf_lm_and_tokenizer,
+    generate_completions,
+    query_openai_chat_model,
+    dynamic_import_function,
+)
 
 
 exact_match = evaluate.load("exact_match")
@@ -21,11 +25,12 @@ def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None)
         fout = open(save_path, "w")
 
     prompts = []
+    chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
     for example in examples:
         prompt = task_prompt.strip() + "\n\nQ: " + example["input"]
         if args.use_chat_format:
             messages = [{"role": "user", "content": prompt}]
-            prompt = eval(args.chat_formatting_function)(messages, add_bos=False)
+            prompt = chat_formatting_function(messages, add_bos=False)
             if prompt[-1] in ["\n", " "]:
                 prompt += "A:"
             else:
@@ -260,8 +265,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--chat_formatting_function", 
         type=str, 
-        default="create_prompt_with_tulu_chat_format", 
-        help="The function to use to create the chat format, which should be implemented in `eva/templates.py`."
+        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
     )
     args = parser.parse_args()
 
