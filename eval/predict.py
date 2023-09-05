@@ -25,8 +25,7 @@ import json
 import os
 import vllm
 import torch
-from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model
-from eval.templates import * 
+from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model, dynamic_import_function
 
 
 def parse_args():
@@ -81,8 +80,8 @@ def parse_args():
     parser.add_argument(
         "--chat_formatting_function", 
         type=str, 
-        default="create_prompt_with_tulu_chat_format", 
-        help="The function to use to create the chat format, which should be implemented in `eva/templates.py`."
+        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
     )
     parser.add_argument(
         "--max_new_tokens",
@@ -126,6 +125,7 @@ if __name__ == "__main__":
 
     if args.model_name_or_path is not None:
         prompts = []
+        chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
         for instance in instances:
             if "messages" in instances:
                 if not args.use_chat_format:
@@ -136,7 +136,7 @@ if __name__ == "__main__":
             elif "prompt" in instances:
                 if args.use_chat_format:
                     messages = [{"role": "user", "content": instance["prompt"]}]
-                    prompt = eval(args.chat_formatting_function)(messages, add_bos=False)
+                    prompt = chat_formatting_function(messages, add_bos=False)
                 else:
                     prompt = instance["prompt"]
             else:
