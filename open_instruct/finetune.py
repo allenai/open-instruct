@@ -524,6 +524,8 @@ def main():
     else:
         raise ValueError("You need to have either 'prompt'&'completion' or 'messages' in your column names.")
     
+    print('about to remove columns maybe???')
+
     with accelerator.main_process_first():
         lm_datasets = raw_datasets.map(
             encode_function,
