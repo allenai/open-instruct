@@ -405,6 +405,10 @@ def main():
         dataset_args = {}
         if args.train_file is not None:
             data_files["train"] = args.train_file
+            print('Train file is not none: ' + str(args.train_file))
+        else:
+            print('Train file was none!!')
+            print(args)
         raw_datasets = load_dataset(
             "json",
             data_files=data_files,
