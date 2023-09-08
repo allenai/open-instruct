@@ -10,7 +10,7 @@ echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs, $BATCH_SIZE_PER_G
 # Lora training
 gantry run --beaker-image 'hamishivi/open-instruct-peft' \
 --workspace ai2/jacobm-default-workspace --cluster ai2/allennlp-cirrascale --cluster ai2/general-cirrascale  \
---pip requirements.txt --gpus 4 --priority high \
+--gpus 4 --priority high \
 -- accelerate launch \
     --mixed_precision bf16 \
     --num_machines 1 \
@@ -38,10 +38,11 @@ gantry run --beaker-image 'hamishivi/open-instruct-peft' \
     --save_merged_lora_model \
     --with_tracking \
     --report_to tensorboard \
-    --logging_steps 1 &&
+    --logging_steps 1 
+    # &&
 
-python open_instruct/merge_lora.py \
-    --base_model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/${MODEL_SIZE} \
-    --lora_model_name_or_path /results \
-    --qlora \
-    --output_dir /results/
+# python open_instruct/merge_lora.py \
+#     --base_model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/${MODEL_SIZE} \
+#     --lora_model_name_or_path /results \
+#     --qlora \
+#     --output_dir /results/
