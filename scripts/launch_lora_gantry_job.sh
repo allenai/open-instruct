@@ -9,7 +9,7 @@ echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs, $BATCH_SIZE_PER_G
 
 # Lora training
 gantry run --beaker-image 'hamishivi/open-instruct-peft' \
---workspace ai2/jacobm-default-workspace --cluster ai2/allennlp-cirrascale --cluster ai2/general-cirrascale --cluster  \
+--workspace ai2/jacobm-default-workspace --cluster ai2/allennlp-cirrascale --cluster ai2/general-cirrascale  \
 --pip requirements.txt --gpus 4 --priority high \
 -- accelerate launch \
     --mixed_precision bf16 \
