@@ -36,13 +36,13 @@ accelerate launch \
     --save_merged_lora_model \
     --with_tracking \
     --report_to tensorboard \
-    --logging_steps 1 &&
+    --logging_steps 1
 
-python open_instruct/merge_lora.py \
-    --base_model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/${MODEL_SIZE} \
-    --lora_model_name_or_path output/tulu_${MODEL_SIZE}_qlora_exp/ \
-    --qlora \
-    --output_dir output/tulu_${MODEL_SIZE}_qlora_merged_exp/
+# python open_instruct/merge_lora.py \
+#     --base_model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/${MODEL_SIZE} \
+#     --lora_model_name_or_path output/tulu_${MODEL_SIZE}_qlora_exp/ \
+#     --qlora \
+#     --output_dir output/tulu_${MODEL_SIZE}_qlora_merged_exp/
 
 #    --use_deepspeed \
 #    --deepspeed_config_file ds_configs/stage3_no_offloading_accelerate.conf \
