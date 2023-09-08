@@ -39,3 +39,9 @@ gantry run --beaker-image 'hamishivi/open-instruct-peft' \
     --with_tracking \
     --report_to tensorboard \
     --logging_steps 1 &&
+
+python open_instruct/merge_lora.py \
+    --base_model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/${MODEL_SIZE} \
+    --lora_model_name_or_path /results \
+    --qlora \
+    --output_dir /results/
