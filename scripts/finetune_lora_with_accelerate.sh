@@ -31,7 +31,7 @@ accelerate launch \
     --warmup_ratio 0.03 \
     --weight_decay 0. \
     --num_train_epochs 3 \
-    --output_dir output/tulu_${MODEL_SIZE}_lora_exp/ \
+    --output_dir /results/tulu_${MODEL_SIZE}_lora_exp/ \
     --save_merged_lora_model \
     --with_tracking \
     --report_to tensorboard \
