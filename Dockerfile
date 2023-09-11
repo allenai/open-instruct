@@ -1,5 +1,5 @@
 # ai2/cuda11.8-cudnn8-dev-ubuntu20.04
-FROM gcr.io/ai2-beaker-core/public/cjrndq098cug8u33mbbg:latest
+FROM gcr.io/ai2-beaker-core/public/cjvktq5s0r0fr8pb7470:latest
 
 RUN apt update && apt install -y openjdk-8-jre-headless
 
