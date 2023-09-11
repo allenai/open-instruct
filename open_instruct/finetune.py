@@ -506,11 +506,11 @@ def main():
             target_modules=["q_proj", "o_proj", "v_proj", "k_proj", "gate_proj", "up_proj", "down_proj"]
         )
         model = get_peft_model(model, peft_config)
-        # # peft breaks flash attention due to casting norms to fp32. This fixes it back up.
-        # # See https://github.com/huggingface/peft/issues/790
-        # from llama_flash_attn_monkey_patch import upcast_layer_for_flash_attention
-        # model = upcast_layer_for_flash_attention(model, torch.bfloat16)
-        # model.print_trainable_parameters()
+        # peft breaks flash attention due to casting norms to fp32. This fixes it back up.
+        # See https://github.com/huggingface/peft/issues/790
+        from llama_flash_attn_monkey_patch import upcast_layer_for_flash_attention
+        model = upcast_layer_for_flash_attention(model, torch.bfloat16)
+        model.print_trainable_parameters()
 
     # Preprocessing the datasets.
     if "prompt" in raw_datasets["train"].column_names and "completion" in raw_datasets["train"].column_names:
