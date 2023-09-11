@@ -23,7 +23,7 @@ accelerate launch \
     --lora_dropout 0.05 \
     --tokenizer_name /net/nfs.cirrascale/allennlp/yizhongw/hf_llama_models/${MODEL_SIZE} \
     --use_slow_tokenizer \
-    --train_file data/processed/oasst1/oasst1_data.jsonl \
+    --train_file /net/nfs.cirrascale/allennlp/hamishi/open-instruct/tulu_data/tulu_v1_mix.jsonl \
     --max_seq_length 2048 \
     --preprocessing_num_workers 16 \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \
