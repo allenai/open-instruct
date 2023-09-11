@@ -15,7 +15,6 @@ accelerate launch \
     open_instruct/finetune.py \
     --model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/${MODEL_SIZE} \
     --use_lora \
-    --use_flash_attn \
     --lora_rank 256 \
     --lora_alpha 256 \
     --lora_dropout 0.05 \
