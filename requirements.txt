@@ -13,8 +13,7 @@ protobuf
 # transformers>=4.31.0
 # Follwing is a temporary fix for a bug in the left padding in the transformers library
 # See https://github.com/huggingface/transformers/pull/25284
-# git+https://github.com/Randolph-zeng/transformers.git@Randolph-zeng-patch-1
-git+https://github.com/huggingface/transformers.git@df04959
+git+https://github.com/Randolph-zeng/transformers.git@Randolph-zeng-patch-1
 openai
 tiktoken
 rouge_score

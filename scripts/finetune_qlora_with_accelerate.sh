@@ -1,6 +1,6 @@
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 
-MODEL_SIZE=7B
+MODEL_SIZE=13B
 NUM_GPUS=4
 BATCH_SIZE_PER_GPU=1
 TOTAL_BATCH_SIZE=128
@@ -16,13 +16,13 @@ accelerate launch \
     --model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/${MODEL_SIZE} \
     --use_lora \
     --use_flash_attn \
-    --lora_rank 256 \
-    --lora_alpha 256 \
-    --lora_dropout 0.05 \
+    --lora_rank 64 \
+    --lora_alpha 16 \
+    --lora_dropout 0.1 \
     --use_qlora \
     --tokenizer_name /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/${MODEL_SIZE} \
     --use_slow_tokenizer \
-    --train_file /net/nfs.cirrascale/allennlp/hamishi/open-instruct/tulu_data/tulu_v1_mix.jsonl \
+    --train_file tulu_data/tulu_v1_mix.jsonl \
     --max_seq_length 2048 \
     --preprocessing_num_workers 16 \
     --per_device_train_batch_size $BATCH_SIZE_PER_GPU \

@@ -405,10 +405,6 @@ def main():
         dataset_args = {}
         if args.train_file is not None:
             data_files["train"] = args.train_file
-            print('Train file is not none: ' + str(args.train_file))
-        else:
-            print('Train file was none!!')
-            print(args)
         raw_datasets = load_dataset(
             "json",
             data_files=data_files,
@@ -527,7 +523,7 @@ def main():
         )
     else:
         raise ValueError("You need to have either 'prompt'&'completion' or 'messages' in your column names.")
-
+    
     with accelerator.main_process_first():
         lm_datasets = raw_datasets.map(
             encode_function,
