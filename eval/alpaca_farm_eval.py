@@ -16,6 +16,8 @@ parser.add_argument("--batch_size", "-b", type=int, default=8)
 parser.add_argument("--openai_engine", "-o", type=str, default=None)
 # where to save generations - default current directory
 parser.add_argument("--save_folder", "-s", type=str, default="")
+parser.add_argument("--tokenizer", "-t", type=str, default=None)
+parser.add_argument("--padding_side", "-p", type=str, default="right")  # llama2 requires left padding
 args = parser.parse_args()
 
 assert not (args.model and args.openai_engine), "only provide one of --model or --openai"
@@ -35,19 +37,23 @@ sample_filename = f"{model_name}-greedy-long-output.json"
 my_outputs = []
 if not os.path.exists(os.path.join(args.save_folder, sample_filename)):
     if args.openai_engine is None:
-        model = AutoModelForCausalLM.from_pretrained(args.model, device_map="auto", torch_dtype=torch.bfloat16)
-        tokenizer = AutoTokenizer.from_pretrained(args.model)
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model,
+            device_map="auto",
+            torch_dtype=torch.bfloat16,)
+        tokenizer = AutoTokenizer.from_pretrained(args.model if args.tokenizer is None else args.tokenizer, legacy=True, use_fast=False)
         # add padding token if not already there
         if tokenizer.pad_token is None:
             tokenizer.add_special_tokens({"pad_token": "<pad>"})
             model.resize_token_embeddings(len(tokenizer))
+        tokenizer.padding_side = args.padding_side
         logging.info("model and data loaded!")
         logging.info("generating...")
         generation_config = GenerationConfig.from_pretrained(
             args.model,
             max_new_tokens=2048,
             # top_p=0.9,
-            # do_sample=True,
+            # do_sample=False,
             # num_return_sequences=1,
             # temperature=1.0,
             # top_k=0
