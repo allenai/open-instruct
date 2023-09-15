@@ -228,11 +228,6 @@ def parse_args():
         action='store_true',
         help='Use 8bit optimizer from bitsandbytes. Not compatible with deepspeed (use deepspeed config instead).',
     )
-    parser.add_argument(
-        '--llama2',
-        action='store_true',
-        help='Use llama2 model instead of llama. Used to determine what monkey patch fn to use.',
-    )
     args = parser.parse_args()
 
     # Sanity checks
@@ -353,11 +348,8 @@ def main():
     args = parse_args()
 
     # A hacky way to make llama work with flash attention
-    if args.use_flash_attn and args.llama2:
+    if args.use_flash_attn:
         from llama2_flash_attn_monkey_patch import replace_llama_attn_with_flash_attn
-        replace_llama_attn_with_flash_attn()
-    elif args.use_flash_attn:
-        from llama_flash_attn_monkey_patch import replace_llama_attn_with_flash_attn
         replace_llama_attn_with_flash_attn()
 
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
@@ -451,13 +443,11 @@ def main():
                 torch_dtype=torch.bfloat16,
             )
         else:
-            device_index = accelerator.process_index
-            device_map = {"": device_index} # force data-parallel training.
             model = AutoModelForCausalLM.from_pretrained(
                 args.model_name_or_path,
                 from_tf=bool(".ckpt" in args.model_name_or_path),
                 config=config,
-                device_map=device_map,
+                low_cpu_mem_usage=args.low_cpu_mem_usage,
             )
     else:
         logger.info("Training new model from scratch")
