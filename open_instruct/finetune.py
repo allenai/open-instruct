@@ -681,15 +681,15 @@ def main():
                 # We keep track of the loss at each logged step
                 total_loss += loss.detach().float()
                 accelerator.backward(loss)
+                # clip gradient norm. don't do this with deepspeed
+                if accelerator.sync_gradients and args.clip_grad_norm > 0:
+                    accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad()
                 lr_scheduler.step()       
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
-                # if set, clip the gradient norm. Don't do this with deepspeed.
-                if args.clip_grad_norm > 0:
-                    accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
                 progress_bar.update(1)
                 completed_steps += 1
                 if args.logging_steps and completed_steps % args.logging_steps == 0:
