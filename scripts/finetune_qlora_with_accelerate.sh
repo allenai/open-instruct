@@ -31,7 +31,7 @@ accelerate launch \
     --lr_scheduler_type linear \
     --warmup_ratio 0.03 \
     --weight_decay 0. \
-    --num_train_epochs 3 \
+    --num_train_epochs 5 \
     --output_dir output/tulu_${MODEL_SIZE}_qlora_exp/ \
     --save_merged_lora_model \
     --with_tracking \
