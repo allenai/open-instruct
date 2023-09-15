@@ -12,6 +12,8 @@ accelerate launch \
     --mixed_precision bf16 \
     --num_machines 1 \
     --num_processes $NUM_GPUS \
+    --use_deepspeed \
+    --deepspeed_config_file ds_configs/stage3_no_offloading_accelerate.conf \
     open_instruct/finetune.py \
     --model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama_models/${MODEL_SIZE} \
     --use_flash_attn \
@@ -21,7 +23,7 @@ accelerate launch \
     --lora_dropout 0.1 \
     --tokenizer_name /net/nfs.cirrascale/allennlp/yizhongw/hf_llama_models/${MODEL_SIZE} \
     --use_slow_tokenizer \
-    --train_file tulu_data/tulu_mix_v1.jsonl \
+    --train_file oasst1_data.jsonl \
     --max_seq_length 2048 \
     --preprocessing_num_workers 16 \
     --checkpointing_steps epoch \
