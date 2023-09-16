@@ -349,7 +349,7 @@ def main():
 
     # A hacky way to make llama work with flash attention
     if args.use_flash_attn:
-        from llama2_flash_attn_monkey_patch import replace_llama_attn_with_flash_attn
+        from open_instruct.llama_flash_attn_monkey_patch import replace_llama_attn_with_flash_attn
         replace_llama_attn_with_flash_attn()
 
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.

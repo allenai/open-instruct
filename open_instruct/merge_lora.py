@@ -43,6 +43,7 @@ def parse_args():
     parser.add_argument("--base_model_name_or_path", type=str)
     parser.add_argument("--output_dir", type=str)
     parser.add_argument("--qlora", action="store_true")  # qlora requires special treatment.
+    parser.add_argument("--use_fast_tokenizer", action="store_true")
     return parser.parse_args()
 
 
@@ -74,7 +75,11 @@ if __name__ == "__main__":
     print("Merging the lora modules...")
     merged_model = lora_model.merge_and_unload()
     output_dir = args.output_dir if args.output_dir else args.lora_model_name_or_path
-    tokenizer = AutoTokenizer.from_pretrained(args.base_model_name_or_path, use_fast=False)
+    # Thanks to @TJKlein for the suggestion.
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(args.lora_model_name_or_path, use_fast=args.use_fast_tokenizer)
+    except:
+        tokenizer = AutoTokenizer.from_pretrained(args.base_model_name_or_path, use_fast=args.use_fast_tokenizer)
     embedding_size = merged_model.get_input_embeddings().weight.shape[0]
     if len(tokenizer) > embedding_size:
         print(f"The vocabulary size of the tokenizer in the lora model folder contains {len(tokenizer)-embedding_size} more tokens than the base model.")
