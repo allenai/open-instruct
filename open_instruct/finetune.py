@@ -349,7 +349,7 @@ def main():
 
     # A hacky way to make llama work with flash attention
     if args.use_flash_attn:
-        from open_instruct.llama_flash_attn_monkey_patch import replace_llama_attn_with_flash_attn
+        from llama_flash_attn_monkey_patch import replace_llama_attn_with_flash_attn
         replace_llama_attn_with_flash_attn()
 
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
@@ -431,7 +431,7 @@ def main():
                 bnb_4bit_quant_type="nf4",
                 bnb_4bit_compute_dtype=torch.bfloat16,
             )
-            device_index = accelerator.process_index
+            device_index = accelerator.local_process_index
             device_map = {"": device_index} # force data-parallel training.
             model = AutoModelForCausalLM.from_pretrained(
                 args.model_name_or_path,
