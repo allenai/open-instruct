@@ -89,11 +89,6 @@ def parse_args():
         help="The dropout rate of lora modules.",
     )
     parser.add_argument(
-        "--save_merged_lora_model",
-        action="store_true",
-        help="If passed, will merge the lora modules and save the entire model.",
-    )
-    parser.add_argument(
         "--use_flash_attn",
         action="store_true",
         help="If passed, will use flash attention to train the model.",

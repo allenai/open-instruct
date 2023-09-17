@@ -33,10 +33,9 @@ accelerate launch \
     --weight_decay 0. \
     --num_train_epochs 5 \
     --output_dir output/tulu_${MODEL_SIZE}_qlora_exp/ \
-    --save_merged_lora_model \
     --with_tracking \
     --report_to tensorboard \
-    --logging_steps 1
+    --logging_steps 1 &&
 
 python open_instruct/merge_lora.py \
     --base_model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/${MODEL_SIZE} \
