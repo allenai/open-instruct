@@ -80,7 +80,7 @@ def convert_super_ni_data(data_dir, output_dir, zero_shot_examples_per_task=60, 
                 }) + "\n")
             
             
-def convert_cot_data(data_dir, output_dir, num_zero_shot_examples=50000, num_few_shot_examples=50000):
+def convert_cot_data(data_dir, output_dir, num_zero_shot_examples=25000, num_few_shot_examples=25000):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
     if num_few_shot_examples > 0:
@@ -115,7 +115,7 @@ def convert_cot_data(data_dir, output_dir, num_zero_shot_examples=50000, num_few
 def convert_flan_v2_data(data_dir, output_dir):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
-    with open(os.path.join(data_dir, "flan_v2_resampled_100k.jsonl"), "r") as fin:
+    with open(os.path.join(data_dir, "flan_v2_resampled_50k.jsonl"), "r") as fin:
         for line in fin:
             examples.append(json.loads(line))
     output_path = os.path.join(output_dir, "flan_v2_data.jsonl")
@@ -217,11 +217,13 @@ def convert_unnatural_instructions_data(data_dir, output_dir):
                 instance_cnt += 1
 
 
-def convert_stanford_alpaca_data(data_dir, output_dir):
+def convert_stanford_alpaca_data(data_dir, output_dir, num_examples=None):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
     with open(os.path.join(data_dir, "alpaca_data.json"), "r") as fin:
         examples.extend(json.load(fin))
+    if num_examples:
+        examples = random.sample(examples, k=num_examples)
     output_path = os.path.join(output_dir, "stanford_alpaca_data.jsonl")
     with open(output_path, "w") as fout:
         for idx, example in enumerate(examples):
@@ -242,11 +244,13 @@ def convert_stanford_alpaca_data(data_dir, output_dir):
             }) + "\n")
 
 
-def convert_code_alpaca_data(data_dir, output_dir):
+def convert_code_alpaca_data(data_dir, output_dir, num_examples=None):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
     with open(os.path.join(data_dir, "code_alpaca_20k.json"), "r") as fin:
         examples.extend(json.load(fin))
+    if num_examples:
+        examples = random.sample(examples, k=num_examples)
     output_path = os.path.join(output_dir, "code_alpaca_data.jsonl")
     with open(output_path, "w") as fout:
         for idx, example in enumerate(examples):
@@ -267,7 +271,7 @@ def convert_code_alpaca_data(data_dir, output_dir):
             }) + "\n")
 
 
-def convert_gpt4_alpaca_data(data_dir, output_dir, load_en=True, load_zh=False):
+def convert_gpt4_alpaca_data(data_dir, output_dir, load_en=True, load_zh=False, num_examples=20000):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
     if load_en:
@@ -276,6 +280,8 @@ def convert_gpt4_alpaca_data(data_dir, output_dir, load_en=True, load_zh=False):
     if load_zh:
         with open(os.path.join(data_dir, "alpaca_gpt4_data_zh.json"), "r") as fin:
             examples.extend(json.load(fin))
+    if num_examples:
+        examples = random.sample(examples, k=num_examples)
     output_path = os.path.join(output_dir, "gpt4_alpaca_data.jsonl")
     with open(output_path, "w") as fout:
         for idx, example in enumerate(examples):
@@ -296,11 +302,13 @@ def convert_gpt4_alpaca_data(data_dir, output_dir, load_en=True, load_zh=False):
             }) + "\n")
 
 
-def convert_sharegpt_data(data_dir, output_dir):
+def convert_sharegpt_data(data_dir, output_dir, num_examples=100000):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
     with open(os.path.join(data_dir, "sharegpt_html_cleaned_and_split.json"), "r") as fin:
         examples.extend(json.load(fin))
+    if num_examples:
+        examples = random.sample(examples, k=num_examples)
 
     output_path = os.path.join(output_dir, "sharegpt_data.jsonl")
     with open(output_path, "w") as fout:
@@ -370,12 +378,13 @@ def convert_baize_data(data_dir, output_dir):
             }) + "\n")
 
 
-def convert_oasst1_data(data_dir, output_dir):
+def convert_oasst1_data(data_dir, output_dir, top_k_reply=1):
     '''
     For OASST1, because it's in a tree structure, where every user input might get multiple replies, 
     we have to save every path from the root node to the assistant reply (including both leaf node and intemediate node).
     This results in some of the messages being duplicated among different paths (instances).
-    Be careful when using this dataset for training. Ideally, you should only minimize the loss of the last message in each path.
+    You can set top_k_reply to control how many replies to consider when traversing the tree, which will consider the replies with 
+    the highest human-rewviewed quality scores.
     '''
     os.makedirs(output_dir, exist_ok=True)
     conversations = []
@@ -396,6 +405,8 @@ def convert_oasst1_data(data_dir, output_dir):
     def dfs(reply, messages, valid_sequences):
         if any([filter_string in reply["text"] for filter_string in filter_strings]):
             return
+        if reply["deleted"]:
+            return
         if reply["role"] == "assistant":
             messages.append(
                 {"role": "assistant", "content": reply["text"]}
@@ -403,14 +414,30 @@ def convert_oasst1_data(data_dir, output_dir):
             if not reply["replies"]:  # leaf node
                 valid_sequences.append(messages[:])
             else:
-                for child in reply["replies"]:
+                child_replies = [child for child in reply["replies"] if not child["deleted"]]
+                for child in child_replies:
+                    if not "quality" in child["labels"]:
+                        child["labels"]["quality"] = {
+                            "value": 0.0,
+                            "count": 0,
+                        }
+                child_replies = child_replies if top_k_reply is None else sorted(child_replies, key=lambda x: x["labels"]["quality"]["value"], reverse=True)[:top_k_reply]
+                for child in child_replies:
                     dfs(child, messages, valid_sequences)
             messages.pop()
         elif reply["role"] == "prompter":
             messages.append(
                 {"role": "user", "content": reply["text"]}
             )
-            for child in reply["replies"]:
+            child_replies = [child for child in reply["replies"] if not child["deleted"]]
+            for child in child_replies:
+                if not "quality" in child["labels"]:
+                    child["labels"]["quality"] = {
+                        "value": 0.0,
+                        "count": 0,
+                    }
+            child_replies = child_replies if top_k_reply is None else sorted(child_replies, key=lambda x: x["labels"]["quality"]["value"], reverse=True)[:top_k_reply]
+            for child in child_replies:
                 dfs(child, messages, valid_sequences)
             messages.pop()
         else:
@@ -460,11 +487,13 @@ def convert_lima_data(data_dir, output_dir):
             }) + "\n")
 
 
-def convert_wizardlm_data(data_dir, output_dir):
+def convert_wizardlm_data(data_dir, output_dir, num_examples=30000):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
     with open(os.path.join(data_dir, "WizardLM_evol_instruct_V2_143k.json"), "r") as fin:
         examples = json.load(fin)
+    if num_examples:
+        examples = random.sample(examples, k=num_examples)
 
     output_path = os.path.join(output_dir, "wizardlm_data.jsonl")
     with open(output_path, "w") as fout:
@@ -489,7 +518,7 @@ def convert_wizardlm_data(data_dir, output_dir):
             }) + "\n")
 
 
-def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=100000, num_gpt35_examples=0):
+def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=30000, num_gpt35_examples=0):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
 
@@ -515,7 +544,42 @@ def convert_open_orca_data(data_dir, output_dir, num_gpt4_examples=100000, num_g
                 "dataset": "open_orca",
                 "id": f"open_orca_{example['id']}",
                 "messages": messages,
-            }) + "\n")    
+            }) + "\n")
+
+
+def convert_hard_coded_data(data_dir, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+    data = pd.read_excel(os.path.join(data_dir, "hard_coded_examples.xlsx"), header=0)
+    output_path = os.path.join(output_dir, "hard_coded_data.jsonl")
+    with open(output_path, "w") as fout:
+        for idx, row in data.iterrows():
+            fout.write(json.dumps({
+                "dataset": "hard_coded",
+                "id": f"hard_coded_{idx}",
+                "messages": [
+                    {"role": "user", "content": row["Prompt"]},
+                    {"role": "assistant", "content": row["Output"]}
+                ]
+            }) + "\n")
+
+
+def convert_science_data(data_dir, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+    examples = []
+    with open(os.path.join(data_dir, "science_train.jsonl"), "r") as fin:
+        for line in fin:
+            examples.append(json.loads(line))
+    output_path = os.path.join(output_dir, "science_data.jsonl")
+    with open(output_path, "w") as fout:
+        for idx, example in enumerate(examples):
+            fout.write(json.dumps({
+                "dataset": f"science.{example['dataset']}",
+                "id": f"science_{idx}",
+                "messages": [
+                    {"role": "user", "content": example["input"]},
+                    {"role": "assistant", "content": example["output"]}
+                ],
+            }) + "\n")
         
 
 if __name__ == "__main__":
