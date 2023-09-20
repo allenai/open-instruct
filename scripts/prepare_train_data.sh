@@ -66,7 +66,8 @@ echo "Splitting the ShareGPT dataset..."
 python scripts/split_sharegpt_conversations.py \
     --in-files data/raw_train/sharegpt/sg_90k_part1_html_cleaned.json data/raw_train/sharegpt/sg_90k_part2_html_cleaned.json \
     --out-file data/raw_train/sharegpt/sharegpt_html_cleaned_and_split.json \
-    --model-name-or-path ../hf_llama_models/7B/
+    --model-name-or-path ../hf_llama_models/7B/ \
+    --max-length 4096
 
 
 echo "Downloading LIMA dataset..."
@@ -88,20 +89,14 @@ python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train/ --outpu
 
 echo "Creating Tulu data mixtures..."
 mkdir -p data/processed/tulu/
-cat data/processed/flan_v2/flan_v2_data.jsonl \
-    data/processed/cot/cot_data.jsonl \
-    data/processed/dolly/dolly_data.jsonl \
-    data/processed/oasst1/oasst1_data.jsonl \
-    data/processed/gpt4_alpaca/gpt4_alpaca_data.jsonl \
-    data/processed/code_alpaca/code_alpaca_data.jsonl \
-    data/processed/sharegpt/sharegpt_data.jsonl \
-    > data/processed/tulu/tulu_v1_mix.jsonl
 
 cat data/processed/flan_v2/flan_v2_data.jsonl \
     data/processed/cot/cot_data.jsonl \
-    data/processed/dolly/dolly_data.jsonl \
     data/processed/oasst1/oasst1_data.jsonl \
-    > data/processed/tulu/tulu_v1_human_mix.jsonl
+    data/processed/code_alpaca/code_alpaca_data.jsonl \
+    data/processed/sharegpt/sharegpt_data.jsonl \
+    data/processed/gpt4_alpaca/gpt4_alpaca_data.jsonl \
+    > data/processed/tulu/tulu_v1_removal.jsonl
 
 cat data/processed/flan_v2/flan_v2_data.jsonl \
     data/processed/cot/cot_data.jsonl \
@@ -109,12 +104,21 @@ cat data/processed/flan_v2/flan_v2_data.jsonl \
     data/processed/lima/lima_data.jsonl \
     data/processed/code_alpaca/code_alpaca_data.jsonl \
     data/processed/sharegpt/sharegpt_data.jsonl \
+    data/processed/gpt4_alpaca/gpt4_alpaca_data.jsonl \
     data/processed/wizardlm/wizardlm_data.jsonl \
     data/processed/open_orca/open_orca_data.jsonl \
+    data/processed/hard_coded/hard_coded_data.jsonl \
+    data/processed/science/science_data.jsonl \
     > data/processed/tulu/tulu_v2_mix.jsonl
 
 cat data/processed/flan_v2/flan_v2_data.jsonl \
     data/processed/cot/cot_data.jsonl \
     data/processed/oasst1/oasst1_data.jsonl \
     data/processed/lima/lima_data.jsonl \
-    > data/processed/tulu/tulu_v2_human_mix.jsonl
+    data/processed/code_alpaca/code_alpaca_data.jsonl \
+    data/processed/sharegpt/sharegpt_data.jsonl \
+    data/processed/gpt4_alpaca/gpt4_alpaca_data.jsonl \
+    data/processed/wizardlm/wizardlm_data.jsonl \
+    data/processed/open_orca/open_orca_data.jsonl \
+    data/processed/hard_coded/hard_coded_data.jsonl \
+    > data/processed/tulu/tulu_v2_no_science.jsonl
