@@ -46,7 +46,8 @@ def main(args):
             load_in_8bit=args.load_in_8bit, 
             # device map is determined by the number of gpus available.
             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
-            gptq_model=args.gptq
+            gptq_model=args.gptq,
+            use_fast_tokenizer=not args.use_slow_tokenizer,
         )
 
         # these stop sequences are those mentioned in the codex paper.
@@ -140,6 +141,11 @@ if __name__ == "__main__":
         type=str, 
         default=None, 
         help="If specified, we will load the tokenizer from here."
+    )
+    parser.add_argument(
+        "--use_slow_tokenizer",
+        action="store_true",
+        help="If given, we will use the slow tokenizer."
     )
     parser.add_argument(
         "--openai_engine", 

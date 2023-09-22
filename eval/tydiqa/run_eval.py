@@ -103,7 +103,8 @@ def main(args):
             tokenizer_name_or_path=args.tokenizer_name_or_path, 
             load_in_8bit=args.load_in_8bit, 
             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
-            gptq_model=args.gptq
+            gptq_model=args.gptq,
+            use_fast_tokenizer=not args.use_slow_tokenizer,
         )
     else:
         import tiktoken
@@ -259,6 +260,11 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="if specified, we will load the tokenizer from here."
+    )
+    parser.add_argument(
+        "--use_slow_tokenizer",
+        action="store_true",
+        help="If given, we will use the slow tokenizer."
     )
     parser.add_argument(
         "--openai_engine",

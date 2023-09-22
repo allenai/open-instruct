@@ -40,9 +40,14 @@ def parse_args():
         help="Huggingface tokenizer name or path."
     )
     parser.add_argument(
+        "--use_slow_tokenizer",
+        action="store_true",
+        help="If given, we will use the slow tokenizer."
+    )
+    parser.add_argument(
         "--openai_engine", 
         type=str,
-        help="OpenAI engine name.")
+        help="OpenAI engine name. This should be exclusive with `model_name_or_path`.")
     parser.add_argument(
         "--input_files", 
         type=str, 
@@ -146,7 +151,11 @@ if __name__ == "__main__":
                 raise ValueError("Either `messages` or `prompt` should be in the instance.")
             prompts.append(prompt)
         if args.use_vllm:
-            model = vllm.LLM(model=args.model_name_or_path)
+            model = vllm.LLM(
+                model=args.model_name_or_path,
+                tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
+                tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
+            )
             sampling_params = vllm.SamplingParams(
                 temperature=args.temperature if args.do_sample else 0, 
                 top_p=args.top_p,
@@ -160,7 +169,8 @@ if __name__ == "__main__":
                 tokenizer_name_or_path=args.tokenizer_name_or_path,
                 load_in_8bit=args.load_in_8bit, 
                 device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
-                gptq_model=args.gptq
+                gptq_model=args.gptq,
+                use_fast_tokenizer=not args.use_slow_tokenizer,
             )
             outputs = generate_completions(
                 model=model,

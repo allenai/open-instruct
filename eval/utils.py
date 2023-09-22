@@ -194,7 +194,7 @@ def load_hf_lm_and_tokenizer(
         load_in_8bit=False, 
         convert_to_half=False,
         gptq_model=False,
-        use_fast_tokenizer=False,
+        use_fast_tokenizer=True,
         padding_side="left",
     ):
     
