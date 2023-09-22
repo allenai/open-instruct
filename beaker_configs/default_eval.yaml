@@ -7,7 +7,7 @@ tasks:
     command: [
       '/bin/sh', '-c'
     ]
-    arguments: ['python -m eval.mmlu_eval.evaluate_hf_lm
+    arguments: ['python -m eval.mmlu.run_eval
       --ntrain 5
       --data_dir /data/mmlu/
       --save_dir /output/
@@ -16,6 +16,7 @@ tasks:
       --eval_batch_size 4
       --load_in_8bit
       --use_chat_format
+      --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
     ']
     envVars:
       - name: CUDA_DEVICE_ORDER
@@ -30,6 +31,8 @@ tasks:
         value: false
       - name: WANDB_DISABLED
         value: true
+      - name: OPENAI_API_KEY
+        secret: openai_api_key
     datasets:
       - mountPath: /data/
         source:

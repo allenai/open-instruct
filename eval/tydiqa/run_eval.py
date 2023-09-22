@@ -2,9 +2,15 @@ import argparse
 import os
 import json
 import random
+import torch
 import evaluate
 import numpy as np
-from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model
+from eval.utils import (
+    generate_completions, 
+    load_hf_lm_and_tokenizer, 
+    query_openai_chat_model,
+    dynamic_import_function,
+)
 
 
 encoding_templates_with_context = {
@@ -96,7 +102,7 @@ def main(args):
             model_name_or_path=args.model_name_or_path, 
             tokenizer_name_or_path=args.tokenizer_name_or_path, 
             load_in_8bit=args.load_in_8bit, 
-            load_in_half=True,
+            device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
             gptq_model=args.gptq
         )
     else:
@@ -120,6 +126,7 @@ def main(args):
         os.makedirs(args.save_dir, exist_ok=True)
 
     prompts = []
+    chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
     for example in test_data:
         lang = example["lang"]
 
@@ -150,10 +157,14 @@ def main(args):
             prompt += p_template + " " + format(example["context"]) + "\n" + q_template + " " + format(example["question"]) + "\n"
 
         if args.use_chat_format:
-            prompt = "<|user|>\n" + prompt.strip() + "\n<|assistant|>\n" + a_template
+            messages = [{"role": "user", "content": prompt}]
+            prompt = chat_formatting_function(messages, add_bos=False)
+            if prompt[-1] in ["\n", " "]:
+                prompt += a_template
+            else:
+                prompt += " " + a_template
         else:
             prompt += a_template
-        
         prompts.append(prompt)
 
     if args.model_name_or_path:
@@ -204,19 +215,84 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", type=str, default="data/xorqa/")
-    parser.add_argument("--max_num_examples_per_lang", type=int, default=None, help="maximum number of examples per language to evaluate.")
-    parser.add_argument("--n_shot", type=int, default=1, help="number of examples to use for few-shot evaluation.")
-    parser.add_argument("--no_context", action="store_true", help="If given, we're evaluating a model without the gold context passage.")
-    parser.add_argument("--max_context_length", type=int, default=512, help="maximum number of tokens in the context passage.")
-    parser.add_argument("--save_dir", type=str, default="results/tydiqa/")
-    parser.add_argument("--model_name_or_path", type=str, default=None, help="if specified, we will load the model to generate the predictions.")
-    parser.add_argument("--tokenizer_name_or_path", type=str, default=None, help="if specified, we will load the tokenizer from here.")
-    parser.add_argument("--openai_engine", type=str, default=None, help="if specified, we will use the OpenAI API to generate the predictions.")
-    parser.add_argument("--eval_batch_size", type=int, default=1, help="batch size for evaluation.")
-    parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
-    parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
-    parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        default="data/xorqa/"
+    )
+    parser.add_argument(
+        "--max_num_examples_per_lang",
+        type=int,
+        default=None,
+        help="maximum number of examples per language to evaluate."
+    )
+    parser.add_argument(
+        "--n_shot",
+        type=int,
+        default=1,
+        help="number of examples to use for few-shot evaluation."
+    )
+    parser.add_argument(
+        "--no_context",
+        action="store_true",
+        help="If given, we're evaluating a model without the gold context passage."
+    )
+    parser.add_argument(
+        "--max_context_length",
+        type=int,
+        default=512,
+        help="maximum number of tokens in the context passage."
+    )
+    parser.add_argument(
+        "--save_dir",
+        type=str,
+        default="results/tydiqa/"
+    )
+    parser.add_argument(
+        "--model_name_or_path",
+        type=str,
+        default=None,
+        help="if specified, we will load the model to generate the predictions."
+    )
+    parser.add_argument(
+        "--tokenizer_name_or_path",
+        type=str,
+        default=None,
+        help="if specified, we will load the tokenizer from here."
+    )
+    parser.add_argument(
+        "--openai_engine",
+        type=str,
+        default=None,
+        help="if specified, we will use the OpenAI API to generate the predictions."
+    )
+    parser.add_argument(
+        "--eval_batch_size",
+        type=int,
+        default=1,
+        help="batch size for evaluation."
+    )
+    parser.add_argument(
+        "--load_in_8bit",
+        action="store_true",
+        help="load model in 8bit mode, which will reduce memory and speed up inference."
+    )
+    parser.add_argument(
+        "--gptq",
+        action="store_true",
+        help="If given, we're evaluating a 4-bit quantized GPTQ model."
+    )
+    parser.add_argument(
+        "--use_chat_format", 
+        action="store_true", 
+        help="If given, we will use the chat format for the prompts."
+    )
+    parser.add_argument(
+        "--chat_formatting_function", 
+        type=str, 
+        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
+    )
     args = parser.parse_args()
     # model_name_or_path and openai_engine cannot be both None or both not None.
     assert (args.model_name_or_path is None) != (args.openai_engine is None), "Either model_name_or_path or openai_engine should be specified."

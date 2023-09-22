@@ -49,24 +49,20 @@ mv data/downloads/url-nlp/url-nlp-main/mgsm data/eval/mgsm && rm -r data/downloa
 wget -P data/eval/codex_humaneval https://github.com/openai/human-eval/raw/master/data/HumanEval.jsonl.gz
 
 
-# combination of self-instruct eval, vicuna eval, and koala eval
+# TruthfulQA
+wget -P data/eval/truthfulqa https://github.com/sylinrl/TruthfulQA/raw/main/TruthfulQA.csv
+
+
+# Self-instruct eval, Vicuna eval, and Koala eval for creative instructions/tasks
 mkdir -p data/eval/creative_tasks 
 wget -O data/eval/creative_tasks/self_instruct_test.jsonl https://github.com/yizhongw/self-instruct/raw/main/human_eval/user_oriented_instructions.jsonl
 wget -O data/eval/creative_tasks/vicuna_test.jsonl https://github.com/lm-sys/FastChat/raw/main/fastchat/eval/table/question.jsonl
 wget -O data/eval/creative_tasks/koala_test.jsonl https://github.com/arnav-gudibande/koala-test-set/raw/main/koala_test_set.jsonl
-# check openai api key
-if [ -z "$OPENAI_API_KEY" ]
-then
-    echo "Please set OPENAI_API_KEY in your environment variables in order to prepare the outputs for creative tasks."
-    exit 1
-fi
-python -m eval.creative_eval.get_gpt_outputs \
-    --engine gpt-3.5-turbo-0301 \
-    --input_files data/eval/creative_tasks/self_instruct_test.jsonl data/eval/creative_tasks/vicuna_test.jsonl data/eval/creative_tasks/koala_test.jsonl \
-    --output_file data/eval/creative_tasks/chatgpt_outputs.jsonl
-echo "Finished chatgpt_outputs.jsonl"
-python -m eval.creative_eval.get_gpt_outputs \
-    --engine gpt-4-0314 \
-    --input_files data/eval/creative_tasks/self_instruct_test.jsonl data/eval/creative_tasks/vicuna_test.jsonl data/eval/creative_tasks/koala_test.jsonl \
-    --output_file data/eval/creative_tasks/gpt4_outputs.jsonl 
-echo "Finished gpt4_outputs.jsonl"
+
+
+# Toxigen data
+mkdir -p data/eval/toxigen
+for minority_group in asian black chinese jewish latino lgbtq mental_disability mexican middle_east muslim native_american physical_disability trans women
+do
+    wget -O data/eval/toxigen/hate_${minority_group}.txt https://raw.githubusercontent.com/microsoft/TOXIGEN/main/prompts/hate_${minority_group}_1k.txt
+done

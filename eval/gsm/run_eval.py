@@ -3,8 +3,14 @@ import os
 import re
 import json
 import random
+import torch
 import evaluate
-from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model
+from eval.utils import (
+    generate_completions,
+    load_hf_lm_and_tokenizer,
+    query_openai_chat_model,
+    dynamic_import_function,
+)
 from eval.gsm.examplars import EXAMPLARS as GSM_EXAMPLARS
 
 
@@ -55,11 +61,18 @@ def main(args):
         prompt_prefix = "Answer the following question.\n\n"
 
     prompts = []
+    chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
     for example in test_data:
+        prompt = prompt_prefix + "Question: " + example["question"].strip()
         if args.use_chat_format:
-            prompt = "<|user|>\n" + prompt_prefix + "Question: " + example["question"].strip() + "\n<|assistant|>\n" + "Answer:"
+            messages = [{"role": "user", "content": prompt}]
+            prompt = chat_formatting_function(messages, add_bos=False)
+            if prompt[-1] in ["\n", " "]:
+                prompt += "Answer:"
+            else:
+                prompt += " Answer:"
         else:
-            prompt = prompt_prefix + "Question: " + example["question"].strip() + "\nAnswer:"
+            prompt += "\nAnswer:"
         prompts.append(prompt)
 
     if args.model_name_or_path:
@@ -68,7 +81,7 @@ def main(args):
             model_name_or_path=args.model_name_or_path, 
             tokenizer_name_or_path=args.tokenizer_name_or_path, 
             load_in_8bit=args.load_in_8bit, 
-            load_in_half=True,
+            device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
             gptq_model=args.gptq
         )
         new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1] # get the last token because the tokenizer may add space tokens at the start.
@@ -125,18 +138,77 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", type=str, default="data/mgsm")
-    parser.add_argument("--max_num_examples", type=int, default=None, help="maximum number of examples to evaluate.")
-    parser.add_argument("--save_dir", type=str, default="results/mgsm")
-    parser.add_argument("--model_name_or_path", type=str, default=None, help="if specified, we will load the model to generate the predictions.")
-    parser.add_argument("--tokenizer_name_or_path", type=str, default=None, help="if specified, we will load the tokenizer from here.")
-    parser.add_argument("--openai_engine", type=str, default=None, help="if specified, we will use the OpenAI API to generate the predictions.")
-    parser.add_argument("--n_shot", type=int, default=8, help="max number of examples to use for demonstration.")
-    parser.add_argument("--no_cot", action="store_true", help="If given, we're evaluating a model without chain-of-thought.")
-    parser.add_argument("--eval_batch_size", type=int, default=1, help="batch size for evaluation.")
-    parser.add_argument("--load_in_8bit", action="store_true", help="load model in 8bit mode, which will reduce memory and speed up inference.")
-    parser.add_argument("--gptq", action="store_true", help="If given, we're evaluating a 4-bit quantized GPTQ model.")
-    parser.add_argument("--use_chat_format", action="store_true", help="If given, the prompt will be encoded as a chat format with the roles in prompt.")
+    parser.add_argument(
+        "--data_dir", 
+        type=str, 
+        default="data/gsm"
+    )
+    parser.add_argument(
+        "--max_num_examples", 
+        type=int, 
+        default=None, 
+        help="maximum number of examples to evaluate."
+    )
+    parser.add_argument(
+        "--save_dir", 
+        type=str, 
+        default="results/gsm"
+    )
+    parser.add_argument(
+        "--model_name_or_path", 
+        type=str, 
+        default=None, 
+        help="if specified, we will load the model to generate the predictions."
+    )
+    parser.add_argument(
+        "--tokenizer_name_or_path", 
+        type=str, 
+        default=None, 
+        help="if specified, we will load the tokenizer from here."
+    )
+    parser.add_argument(
+        "--openai_engine", 
+        type=str, 
+        default=None, help="if specified, we will use the OpenAI API to generate the predictions."
+    )
+    parser.add_argument(
+        "--n_shot", 
+        type=int, 
+        default=8, 
+        help="max number of examples to use for demonstration."
+    )
+    parser.add_argument(
+        "--no_cot", 
+        action="store_true", 
+        help="If given, we're evaluating a model without chain-of-thought."
+    )
+    parser.add_argument(
+        "--eval_batch_size", 
+        type=int, 
+        default=1, 
+        help="batch size for evaluation."
+    )
+    parser.add_argument(
+        "--load_in_8bit", 
+        action="store_true", 
+        help="load model in 8bit mode, which will reduce memory and speed up inference."
+    )
+    parser.add_argument(
+        "--gptq", 
+        action="store_true", 
+        help="If given, we're evaluating a 4-bit quantized GPTQ model."
+    )
+    parser.add_argument(
+        "--use_chat_format", 
+        action="store_true", 
+        help="If given, we will use the chat format for the prompts."
+    )
+    parser.add_argument(
+        "--chat_formatting_function", 
+        type=str, 
+        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
+    )
     args = parser.parse_args()
 
     # model_name_or_path and openai_engine cannot be both None or both not None.
