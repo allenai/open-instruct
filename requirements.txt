@@ -27,8 +27,8 @@ einops
 flash-attn
 auto-gptq
 fire
-# alpaca-farm eval - my fork with some fixes.
-git+https://github.com/hamishivi/alpaca_farm.git
+alpaca-eval==0.3.1
 # for human eval web app
 flask
 vllm 
+openpyxl
