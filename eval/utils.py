@@ -113,9 +113,9 @@ def get_next_word_predictions(model, tokenizer, prompts, candidate_token_ids=Non
             attention_mask = attention_mask.cuda()
 
         batch_logits = model(input_ids=batch_input_ids, attention_mask=attention_mask).logits[:, -1, :]
-        if candidate_token_ids is not None:
-            batch_logits = batch_logits[:, candidate_token_ids]
         batch_probs = torch.softmax(batch_logits, dim=-1)
+        if candidate_token_ids is not None:
+            batch_probs = batch_probs[:, candidate_token_ids]
         batch_prediction_indices = torch.argmax(batch_probs, dim=-1)
         if return_token_predictions:
             if candidate_token_ids is not None:
