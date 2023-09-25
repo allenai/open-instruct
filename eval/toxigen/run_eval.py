@@ -27,7 +27,7 @@ def score_generations(
         batch = generations[i : i + batch_size]
         inputs = hate_classifier_tokenizer(
             batch, padding=True, truncation=True, return_tensors="pt"
-        ).to("cuda")
+        ).to(hate_classifier_model.device)
         outputs = hate_classifier_model(**inputs)
         classifications.extend(outputs.logits.argmax(dim=-1).tolist())
     return classifications
@@ -37,14 +37,6 @@ def main(args):
     random.seed(42)
     os.makedirs(args.save_dir, exist_ok=True)
     
-    # Load the toxigen classifier
-    toxigen_roberta_tokenizer = AutoTokenizer.from_pretrained("tomh/toxigen_roberta")
-    toxigen_roberta_classifier = AutoModelForSequenceClassification.from_pretrained(
-        "tomh/toxigen_roberta"
-    )
-    if torch.cuda.is_available():
-        toxigen_roberta_classifier = toxigen_roberta_classifier.cuda()
-
     # Load the testing data
     examples = []
     prompt_files = glob.glob(os.path.join(args.data_dir, "*.txt"))
@@ -127,6 +119,13 @@ def main(args):
 
 
     # Run the toxicity classifier
+    toxigen_roberta_tokenizer = AutoTokenizer.from_pretrained("tomh/toxigen_roberta")
+    toxigen_roberta_classifier = AutoModelForSequenceClassification.from_pretrained(
+        "tomh/toxigen_roberta"
+    )
+    if torch.cuda.is_available():
+        toxigen_roberta_classifier = toxigen_roberta_classifier.cuda()
+
     classifications = score_generations(
         toxigen_roberta_tokenizer,
         toxigen_roberta_classifier,
