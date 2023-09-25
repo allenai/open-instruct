@@ -3,6 +3,7 @@ import os
 import json
 import random
 import torch
+import vllm
 import evaluate
 import numpy as np
 from eval.utils import (
@@ -98,14 +99,24 @@ def main(args):
         
     if args.model_name_or_path:
         print("Loading model and tokenizer...")
-        model, tokenizer = load_hf_lm_and_tokenizer(
-            model_name_or_path=args.model_name_or_path, 
-            tokenizer_name_or_path=args.tokenizer_name_or_path, 
-            load_in_8bit=args.load_in_8bit, 
-            device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
-            gptq_model=args.gptq,
-            use_fast_tokenizer=not args.use_slow_tokenizer,
-        )
+        if args.use_vllm:
+            model = vllm.LLM(
+                model=args.model_name_or_path,
+                tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
+                tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
+                tensor_parallel_size=torch.cuda.device_count(),
+                max_num_batched_tokens=4096,
+            )
+            tokenizer = model.llm_engine.tokenizer
+        else:
+            model, tokenizer = load_hf_lm_and_tokenizer(
+                model_name_or_path=args.model_name_or_path, 
+                tokenizer_name_or_path=args.tokenizer_name_or_path, 
+                load_in_8bit=args.load_in_8bit, 
+                device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
+                gptq_model=args.gptq,
+                use_fast_tokenizer=not args.use_slow_tokenizer,
+            )
     else:
         import tiktoken
         tokenizer = tiktoken.get_encoding("cl100k_base")
@@ -169,17 +180,30 @@ def main(args):
         prompts.append(prompt)
 
     if args.model_name_or_path:
-        new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1] # get the last token because the tokenizer may add space tokens at the start.
-        test_predictions = generate_completions(
-            model=model,
-            tokenizer=tokenizer,
-            prompts=prompts,
-            max_new_tokens=50,
-            batch_size=args.eval_batch_size,
-            stop_id_sequences=[[new_line_token]]
-        )
-        # remove unnecessary space
-        test_predictions = [prediction.strip() for prediction in test_predictions]
+        if args.use_vllm:
+            sampling_params = vllm.SamplingParams(
+                temperature=0,
+                max_tokens=50,
+                stop=["\n"],
+            )
+            # We need to remap the outputs to the prompts because vllm might not return outputs for some prompts (e.g., if the prompt is too long)
+            generations = model.generate(prompts, sampling_params)
+            prompt_to_output = {
+                g.prompt: g.outputs[0].text for g in generations
+            }
+            outputs = [prompt_to_output[prompt].strip() if prompt in prompt_to_output else "" for prompt in prompts]
+        else:
+            new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1] # get the last token because the tokenizer may add space tokens at the start.
+            outputs = generate_completions(
+                model=model,
+                tokenizer=tokenizer,
+                prompts=prompts,
+                max_new_tokens=50,
+                batch_size=args.eval_batch_size,
+                stop_id_sequences=[[new_line_token]]
+            )
+            # remove unnecessary space
+            outputs = [output.strip() for output in outputs]
     else:
         instances = [{"id": example["id"], "prompt": prompt} for example, prompt in zip(test_data, prompts)]
         results = query_openai_chat_model(
@@ -188,11 +212,11 @@ def main(args):
             output_path=os.path.join(args.save_dir, "tydiaqa_openai_results.jsonl"),
             batch_size=args.eval_batch_size,
         )
-        test_predictions = [result["output"].strip().split("\n")[0].strip() for result in results]
+        outputs = [result["output"].strip().split("\n")[0].strip() for result in results]
     
     with open(os.path.join(args.save_dir, "tydiaqa_predictions.jsonl"), "w") as fout:
-        for example, prediction in zip(test_data, test_predictions):
-            example["prediction_text"] = prediction
+        for example, output in zip(test_data, outputs):
+            example["prediction_text"] = output
             fout.write(json.dumps(example) + "\n")
 
     print("Calculating F1, EM ...")
@@ -200,7 +224,7 @@ def main(args):
     
     eval_scores = {}
     for lang in data_languages:
-        lang_predictions = [{"id": example["id"], "prediction_text": prediction} for example, prediction in zip(test_data, test_predictions) if example["lang"] == lang]
+        lang_predictions = [{"id": example["id"], "prediction_text": output} for example, output in zip(test_data, outputs) if example["lang"] == lang]
         lang_references = [{"id": example["id"], "answers": example["answers"]} for example in test_data if example["lang"] == lang]
         eval_scores[lang] = metric.compute(predictions=lang_predictions, references=lang_references)
 
@@ -287,6 +311,11 @@ if __name__ == "__main__":
         "--gptq",
         action="store_true",
         help="If given, we're evaluating a 4-bit quantized GPTQ model."
+    )
+    parser.add_argument(
+        "--use_vllm",
+        action="store_true", 
+        help="If given, we will use the vllm library, which will likely increase the inference throughput."
     )
     parser.add_argument(
         "--use_chat_format", 
