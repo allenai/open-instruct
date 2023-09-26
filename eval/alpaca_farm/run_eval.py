@@ -19,12 +19,10 @@ def main(args):
     prompts = []
     chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
     for example in alpaca_eval_data:
-        input_text = example["instruction"] + "\n\n" + example["input"] if example["input"] != "" else example["instruction"]
+        prompt = example["instruction"] + "\n\n" + example["input"] if example["input"] != "" else example["instruction"]
         if args.use_chat_format:
-            messages = [{"role": "user", "content": input_text}]
+            messages = [{"role": "user", "content": prompt}]
             prompt = chat_formatting_function(messages, add_bos=False)
-        else:
-            prompt = example["instruction"] + "\n\n" + example["input"] if example["input"] != "" else example["instruction"]
         prompts.append(prompt)
 
     if args.model_name_or_path is not None:
