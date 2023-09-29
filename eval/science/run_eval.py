@@ -8,6 +8,7 @@ import argparse
 import vllm
 import json
 import evaluate
+import torch
 
 from eval.utils import dynamic_import_function
 
@@ -100,6 +101,8 @@ def main():
         model=args.model_name_or_path,
         tokenizer=args.model_name_or_path,
         tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
+        tensor_parallel_size=torch.cuda.device_count(),
+        max_num_batched_tokens=4096,
     )
 
     examples = load_jsonl(args.eval_file)
@@ -123,19 +126,22 @@ def main():
         prompts.append(prompt)
 
     sampling_params = vllm.SamplingParams(
-        temperature=args.temperature, max_tokens=args.max_tokens
+        temperature=args.temperature, max_tokens=args.max_tokens, 
     )
-    outputs = model.generate(prompts, sampling_params)
-    output_text = [it.outputs[0].text for it in outputs]
+    generations = model.generate(prompts, sampling_params)
+    prompt_to_output = {
+        g.prompt: g.outputs[0].text for g in generations
+    }
+    outputs = [prompt_to_output[prompt] if prompt in prompt_to_output else "" for prompt in prompts]
 
     # Add model output to examples and write to file.
-    for example, output_instance in zip(examples, output_text):
+    for example, output_instance in zip(examples, outputs):
         example["model_output"] = output_instance
     write_jsonl(examples, args.prediction_file)
 
     # Compute metrics.
     targets = [entry["output"] for entry in examples]
-    metrics = compute_metrics(output_text, targets)
+    metrics = compute_metrics(outputs, targets)
     with open(args.metrics_file, "w") as f:
         json.dump(metrics, f, indent=2)
 
