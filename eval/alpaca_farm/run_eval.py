@@ -102,7 +102,7 @@ if __name__ == "__main__":
         default="data/eval/alpaca_farm/davinci_003_outputs_2048_token.json",
         help="Path to the reference outputs. "
              "Alpaca_eval leaderboard use davinci_003 to generate the reference outputs, "
-             "but they limit the max_tokens to 300. Here regenerated reference outputs with max_tokens=2048.",
+             "but they limit the max_tokens to 300. Here we regenerated reference outputs with max_tokens=2048.",
     )
     parser.add_argument(
         "--save_dir",
