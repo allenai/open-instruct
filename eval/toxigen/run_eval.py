@@ -77,14 +77,16 @@ def main(args):
                 model=args.model_name_or_path,
                 tokenizer=args.tokenizer_name_or_path if args.model_name_or_path else args.model_name_or_path,
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
+                tensor_parallel_size=torch.cuda.device_count(),
             )
             sampling_params = vllm.SamplingParams(
                 temperature=0,  # greedy decoding
                 max_tokens=512,  # maximum we can pass to roberta
-                stop=["\n"]
+                stop=["\n"] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
             )
             outputs = model.generate(prompts, sampling_params)
             outputs = [it.outputs[0].text for it in outputs]
+            del model  # free up GPU memory to load the classifier later.
         else:
             print("Loading model and tokenizer for generations...")
             model, tokenizer = load_hf_lm_and_tokenizer(
@@ -102,7 +104,7 @@ def main(args):
                 prompts=prompts,
                 max_new_tokens=512,
                 batch_size=args.eval_batch_size if args.eval_batch_size else 1,
-                stop_id_sequences=[[new_line_token]],
+                stop_id_sequences=[[new_line_token]] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
             )
     else:
         instances = [{
