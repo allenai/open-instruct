@@ -4,7 +4,7 @@ packaging
 sentencepiece
 datasets
 deepspeed>=0.10.0
-accelerate>=0.21.0
+accelerate>=0.21.0,<0.23.0  # 0.23.0 will cause an incorrect learning rate schedule when using deepspeed, which is likely caused by https://github.com/huggingface/accelerate/commit/727d624322c67db66a43c559d8c86414d5ffb537
 peft>=0.4.0
 bitsandbytes>=0.41.1
 evaluate>=0.4.0
@@ -27,8 +27,8 @@ einops
 flash-attn
 auto-gptq
 fire
-# alpaca-farm eval - my fork with some fixes.
-git+https://github.com/hamishivi/alpaca_farm.git
+alpaca-eval==0.3.1
 # for human eval web app
 flask
 vllm 
+openpyxl

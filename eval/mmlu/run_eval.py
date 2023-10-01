@@ -81,8 +81,9 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
         prompts.append(prompt)
 
     # get the answer for all examples
-    # note: here we cannot directly use convert_tokens_to_ids because the some tokenizers will automatically add space prefix.
-    answer_choice_ids = [tokenizer.encode(answer_choice, add_special_tokens=False)[0] for answer_choice in choices]
+    # adding a prefix space here, as that's expected from the prompt
+    # TODO: should raise a warning if this returns more than one token
+    answer_choice_ids = [tokenizer.encode(" " + answer_choice, add_special_tokens=False)[-1] for answer_choice in choices]
     pred_indices, all_probs = get_next_word_predictions(
         model, tokenizer, prompts, candidate_token_ids=answer_choice_ids, return_token_predictions=False, batch_size=batch_size
     )
@@ -152,7 +153,8 @@ def main(args):
             tokenizer_name_or_path=args.tokenizer_name_or_path,
             load_in_8bit=args.load_in_8bit, 
             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
-            gptq_model=args.gptq
+            gptq_model=args.gptq,
+            use_fast_tokenizer=not args.use_slow_tokenizer,
         )
     
     subjects = sorted(
@@ -267,6 +269,11 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="if specified, we will load the tokenizer from here."
+    )
+    parser.add_argument(
+        "--use_slow_tokenizer",
+        action="store_true",
+        help="If given, we will use the slow tokenizer."
     )
     parser.add_argument(
         "--openai_engine",
