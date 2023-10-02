@@ -1,53 +1,39 @@
 version: v2
-description: open-instruct-finetune-multinode-70B-qlora-data-mix-v2
+description: open-instruct-finetune-full-13B-data-mix-v2
 tasks:
-  - name: open-instruct-finetune-multinode-70B-qlora-data-mix-v2
-    replicas: 4
-    leaderSelection: true
-    hostNetworking: true
+  - name: open-instruct-finetune-full-13B-data-mix-v2
     image:
       beaker: Yizhongw03/open-instruct-multi-node
     command: [
       '/bin/sh', '-c'
     ]
     arguments: ['
-        unset CUDA_LAUNCH_BLOCKING && accelerate launch
+        accelerate launch
         --mixed_precision bf16
-        --num_machines 4
-        --num_processes 32
-        --machine_rank $BEAKER_REPLICA_RANK
-        --main_process_ip $BEAKER_LEADER_REPLICA_HOSTNAME
-        --main_process_port 29400
+        --num_machines 1
+        --num_processes 8
+        --use_deepspeed
+        --deepspeed_config_file ds_configs/stage3_no_offloading_accelerate.conf
         open_instruct/finetune.py
-        --model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/70B
-        --tokenizer_name /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/70B
+        --model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/13B
+        --tokenizer_name /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/13B
         --use_slow_tokenizer
         --train_file /net/nfs.cirrascale/allennlp/yizhongw/open-instruct-public/data/processed/tulu/tulu_v2_mix.jsonl
         --use_flash_attn
-        --gradient_checkpointing
-        --use_lora
-        --use_qlora
-        --lora_rank 64
-        --lora_alpha 16
-        --lora_dropout 0.1
-        --max_seq_length 4096
+        --max_seq_length 2048
         --preprocessing_num_workers 64
         --per_device_train_batch_size 1
-        --gradient_accumulation_steps 4
-        --learning_rate 1e-4
+        --gradient_accumulation_steps 16
+        --learning_rate 2e-5
         --lr_scheduler_type linear
         --warmup_ratio 0.03
         --weight_decay 0.
-        --num_train_epochs 5
+        --num_train_epochs 2
         --output_dir /output/
         --with_tracking
         --report_to wandb
         --checkpointing_steps epoch
-        --logging_steps 1 &&
-        python open_instruct/merge_lora.py 
-        --base_model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/70B 
-        --lora_model_name_or_path /output/
-        --output_dir /output/ 
+        --logging_steps 1
     ']
     envVars:
       - name: CUDA_DEVICE_ORDER
@@ -59,7 +45,7 @@ tasks:
       - name: WANDB_PROJECT
         value: open-instruct
       - name: WANDB_NAME
-        value: open-instruct-finetune-multinode-70B-qlora-data-mix-v2
+        value: open-instruct-finetune-full-13B-data-mix-v2
       - name: WANDB_WATCH
         value: false
       - name: WANDB_LOG_MODEL
