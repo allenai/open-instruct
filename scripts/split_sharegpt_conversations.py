@@ -63,7 +63,7 @@ def split_all(content, begin, end, tokenizer_, max_length_):
     content = content[begin:end]
     new_content = []
 
-    with ProcessPoolExecutor() as executor:
+    with ProcessPoolExecutor(max_workers=128) as executor:
         for result in tqdm(executor.map(split_one_sample, content), total=len(content)):
             new_content.extend(result)
 
