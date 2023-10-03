@@ -6,8 +6,6 @@ import asyncio
 import os
 from importlib import import_module
 from transformers import StoppingCriteria
-
-from open_instruct.finetune import encode_with_prompt_completion_format
 from eval.dispatch_openai_requests import dispatch_openai_chat_requesets, dispatch_openai_prompt_requesets
 
 
@@ -136,16 +134,13 @@ def get_next_word_predictions(model, tokenizer, prompts, candidate_token_ids=Non
 
 
 @torch.no_grad()
-def score_completions(model, tokenizer, scoring_examples, disable_tqdm=False):
+def score_completions(model, tokenizer, scoring_examples, batch_size=1, aggregation="sum", disable_tqdm=False):
     '''
     Each scoring example is a dict, which contains the following keys:
     - prompt: the prompt to score
     - completions: a list of completions to score
     '''
     
-    if not disable_tqdm:
-        progress = tqdm.tqdm(total=len(scoring_examples), desc="Scoring Completions")
-
     # unroll the scoring examples
     unrolled_examples = []
     for scoring_example in scoring_examples:
@@ -155,23 +150,51 @@ def score_completions(model, tokenizer, scoring_examples, disable_tqdm=False):
                 "prompt": prompt,
                 "completion": completion
             })
+    
+    if not disable_tqdm:
+        progress = tqdm.tqdm(total=len(unrolled_examples), desc="Scoring Completions")
 
     scores = []
-    # currently we don't support batching, because we want to directly use the loss returned by the model to score each completion.
-    for unrolled_example in unrolled_examples:
-        encoded_example = encode_with_prompt_completion_format(unrolled_example, tokenizer, max_seq_length=None)
-        # unsqueeze the batch dimension
-        for key, value in encoded_example.items():
-            encoded_example[key] = value.unsqueeze(0)
+    for i in range(0, len(unrolled_examples), batch_size):
+        batch_prompts = [example["prompt"] for example in unrolled_examples[i:i+batch_size]]
+        batch_examples = [
+            (example["prompt"] if example["prompt"][-1] in ["\n", " "] else example["prompt"] + " ")
+            + example["completion"] for example in unrolled_examples[i:i+batch_size]
+        ]
+        tokenized_batch = tokenizer(batch_examples, padding="longest", return_tensors="pt")
         if model.device.type == "cuda":
-            encoded_example = {
-                key: value.cuda() for key, value in encoded_example.items()
+            tokenized_batch = {
+                key: value.cuda() for key, value in tokenized_batch.items()
             }
-        outputs = model(**encoded_example)
-        loss = outputs.loss
-        scores.append(-loss.item())
+        outputs = model(**tokenized_batch)
+
+        for example_idx, (prompt, example) in enumerate(zip(batch_prompts, batch_examples)):
+            tokenized_prompt = tokenizer(prompt, padding=False, return_tensors="pt").input_ids.squeeze(0)
+            tokenized_example = tokenizer(example, padding=False, return_tensors="pt").input_ids.squeeze(0)
+            completion_ids = tokenized_example[len(tokenized_prompt):]
+            
+            # get the logits for the entire example, removing the padding logits
+            if tokenizer.padding_side == "right":
+                example_logits = outputs.logits[example_idx, :len(tokenized_example), :]
+            else:            
+                example_logits = outputs.logits[example_idx, -len(tokenized_example):, :]
+
+            # get the logits for the completion portion - note we need to shift the index left by 1 because logits are computed for the next token
+            completion_logits = example_logits[len(tokenized_prompt)-1:len(tokenized_example)-1, :]
+            completion_log_probs = torch.log_softmax(completion_logits, dim=-1)[range(len(completion_ids)), completion_ids]
+
+            if aggregation == "sum":
+                score = completion_log_probs.sum().item()
+            elif aggregation == "mean":
+                score = completion_log_probs.mean().item()
+            elif aggregation == "max":
+                score = completion_log_probs.max().item()
+            else:
+                raise ValueError("Invalid aggregation method: {}".format(aggregation))
+            scores.append(score)
+
         if not disable_tqdm:
-            progress.update(1)
+            progress.update(len(batch_examples))
 
     # roll up the scores
     rolled_up_scores = {}
