@@ -394,7 +394,7 @@ def convert_oasst1_data(data_dir, output_dir, top_k_reply=None):
     we have to save every path from the root node to the assistant reply (including both leaf node and intemediate node).
     This results in some of the messages being duplicated among different paths (instances).
     You can set top_k_reply to control how many replies to consider when traversing the tree, which will consider the replies with 
-    the highest human-rewviewed quality scores.
+    the highest human-reviewed quality scores.
     '''
     os.makedirs(output_dir, exist_ok=True)
     conversations = []
@@ -599,7 +599,7 @@ def should_be_filtered(example):
         "GPT-3",
         "GPT3",
         "GPT 3",
-        "GPT-4"
+        "GPT-4",
         "GPT4",
         "GPT 4",
         "GPT-3.5",
