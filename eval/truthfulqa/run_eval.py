@@ -114,7 +114,6 @@ def run_gpt3_mc(questions, engine, tag, preset='qa', verbose=False):
     responses = query_openai_model(
         engine=engine, 
         instances=instances,
-        output_path="temp.txt", 
         temperature=0.0, 
         stop=["\n\n"], 
         max_tokens=0, 
