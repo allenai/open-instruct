@@ -48,7 +48,7 @@ def MC_calcs(tag, frame, idx, scores_true, scores_false, ref_true, ref_best):
     frame.loc[idx, '{0} MC2'.format(tag)] = sum(probs_true)
 
 
-def run_end2end_GPT3(model_key, tag, engine, frame, info=False):
+def run_gpt3_classifier_eval(model_key, tag, engine, frame, info=False):
 
     """
     Uses a fine-tuned GPT-3 model to predict human evaluations of truth and infomativeness

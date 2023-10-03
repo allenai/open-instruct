@@ -1,17 +1,16 @@
 import argparse
 import os
 import json
-import tqdm
 import torch
 import pandas as pd
 
-import openai
 import warnings
 from eval.utils import (
-    load_hf_lm_and_tokenizer, 
-    query_openai_chat_model, 
-    query_openai_model, 
-    generate_completions, 
+    load_hf_lm_and_tokenizer,
+    query_openai_chat_model,
+    query_openai_model,
+    generate_completions,
+    score_completions,
     dynamic_import_function,
 )
 from eval.truthfulqa.utilities import (
@@ -21,7 +20,7 @@ from eval.truthfulqa.utilities import (
     format_best,
     set_columns,
 )
-from eval.truthfulqa.metrics import run_end2end_GPT3, MC_calcs
+from eval.truthfulqa.metrics import run_gpt3_classifier_eval, MC_calcs
 from eval.truthfulqa.configs import BEST_COL, ANSWER_COL, INCORRECT_COL
 
 
@@ -61,29 +60,7 @@ def run_chatgpt(questions, engine, tag, preset='qa', verbose=False):
     return questions
 
 
-def find_start(token_list):
-
-    """Finds starting index of answer tokens, skipping newlines and prefixes"""
-
-    idx_start = 0
-
-    # Edit because of list index out of range on q428
-    while idx_start < len(token_list) and token_list[idx_start] == '\n':  # ignore starting newlines
-        idx_start += 1
-
-    if idx_start == len(token_list):
-        print("No response from engine!")
-        return idx_start
-
-    # if answer starts with 'A:', skip these tokens
-    if (token_list[idx_start] == 'A') and (token_list[idx_start + 1] == ':'):
-        idx_start += 2
-
-    return idx_start
-
-
-def run_GPT3(questions, engine, tag, preset='qa', verbose=False):
-
+def run_gpt3(questions, engine, tag, preset='qa', verbose=False):
     """Stores answers from GPT-3 models (requires an API key)"""
 
     if tag not in questions.columns:
@@ -105,213 +82,161 @@ def run_GPT3(questions, engine, tag, preset='qa', verbose=False):
     return questions
 
 
-def run_probs_GPT3(questions, engine, tag, preset='qa', verbose=False):
-
+def run_gpt3_mc(questions, engine, tag, preset='qa', verbose=False):
     """Runs multiple-choice metrics for GPT-3 models (requires an API key)"""
 
     set_columns(tag, questions)
+    examples = []
+    for idx in questions.index:
+        # check that candidate answer exists
+        if pd.isnull(questions.loc[idx, INCORRECT_COL]):
+            warnings.warn("References missing for {0}!".format(idx), stacklevel=2)
+            continue
+        if not len(questions.loc[idx, INCORRECT_COL]):
+            warnings.warn("References missing for {0}!".format(idx), stacklevel=2)
+            continue
 
-    for idx in tqdm.tqdm(questions.index):
-        if pd.isnull(questions.loc[idx, '{0} lprob diff'.format(tag)]):
+        # reference answers
+        ref_true = split_multi_answer(questions.loc[idx, ANSWER_COL])
+        ref_false = split_multi_answer(questions.loc[idx, INCORRECT_COL])
 
-            # check that answer exists
-            if pd.isnull(questions.loc[idx, INCORRECT_COL]):
-                warnings.warn("References missing for {0}!".format(idx), stacklevel=2)
-                continue
-            if not len(questions.loc[idx, INCORRECT_COL]):
-                warnings.warn("References missing for {0}!".format(idx), stacklevel=2)
-                continue
+        # prompt for all answers
+        prompt = format_prompt(questions.loc[idx], preset, format='general') + "\nA:"
 
-            # reference answers
-            ref_best = format_best(questions.loc[idx, BEST_COL])
-            ref_true = split_multi_answer(questions.loc[idx, ANSWER_COL])
-            ref_false = split_multi_answer(questions.loc[idx, INCORRECT_COL])
+        # candidate completions
+        examples.append({"prompt": prompt, "completions": ref_true + ref_false})
 
-            scores_true = []
-            scores_false = []
+    instances, instance_id = [], 0
+    for example in examples:
+        for completion in example["completions"]:
+            instances.append({"prompt": example["prompt"] + " " + completion, "id": instance_id})
+            instance_id += 1
+    responses = query_openai_model(
+        engine=engine, 
+        instances=instances,
+        output_path="temp.txt", 
+        temperature=0.0, 
+        stop=["\n\n"], 
+        max_tokens=0, 
+        echo=True, 
+        logprobs=1
+    )
+    assert len(responses) == len(instances)
+    responses = {response["id"]: response for response in responses}
+    
+    all_scores, instance_id = {}, 0
+    for example in examples:
+        all_scores[example["prompt"]] = {}
+        for completion in example["completions"]:
+            response = responses[instance_id]
+            logprobs = response["response_metadata"]['choices'][0]['logprobs']
+            # iterate through response to find the indexes of the start / end tokens for the ref answer
+            idx_start = 0
+            while idx_start < len(logprobs['text_offset']) - 1:
+                if (logprobs['text_offset'][idx_start] >= len(example["prompt"])):
+                    break
+                idx_start += 1
+            idx_end = idx_start
+            while idx_end < len(logprobs['text_offset']) - 1:
+                if (logprobs['text_offset'][idx_end] >= len(example["prompt"] + " " + completion)):
+                    break
+                idx_end += 1
+            logprob_vals = logprobs['token_logprobs'][idx_start: idx_end]
+            text_vals = logprobs['tokens'][idx_start + 3:idx_end]
+            if True:
+                print("LOGPROBS AND ANSWER TOKENS")
+                print(logprob_vals)
+                print(text_vals)
+            all_scores[example["prompt"]][completion] = sum(logprob_vals)
+            instance_id += 1
 
-            for temp_ans in ref_true:
-                # input_prompt appends the current answer choice to the prompt
-                query_prompt = format_prompt(questions.loc[idx], preset, format='general')
-                input_prompt = format_prompt_with_answer_strings(questions.loc[idx, 'Question'], temp_ans, preset, format='general')
-
-                if input_prompt is not None:
-                    response = openai.Completion.create(engine=engine, prompt=input_prompt, temperature=0, max_tokens=50, stop='\n\n', echo=True, logprobs=1)
-                    logprobs = response['choices'][0]['logprobs']
-                    output_str = response['choices'][0]['text']
-
-                    # iterate through response to find the indexes of the start / end tokens for the ref answer
-                    idx_start = 0
-                    while idx_start < len(logprobs['text_offset']) - 1:
-                        if (logprobs['text_offset'][idx_start] >= len(query_prompt)):
-                            break
-                        idx_start += 1
-
-                    idx_end = idx_start
-                    while idx_end < len(logprobs['text_offset']) - 1:
-                        if (logprobs['text_offset'][idx_end] >= len(input_prompt)):
-                            break
-                        idx_end += 1
-
-                    # increment indexes by +3 to skip the "\nA:" tokens before the answer
-                    logprob_vals = logprobs['token_logprobs'][idx_start + 3:idx_end]
-                    text_vals = logprobs['tokens'][idx_start + 3:idx_end]
-
-                    if verbose:
-                        print("LOGPROBS AND ANSWER TOKENS")
-                        print(logprob_vals)
-                        print(text_vals)
-
-                    scores_true.append(sum(logprob_vals))
-
-            for temp_ans in ref_false:
-                query_prompt = format_prompt(questions.loc[idx], preset, format='general')
-                input_prompt = format_prompt_with_answer_strings(questions.loc[idx, 'Question'],
-                                                                 temp_ans,
-                                                                 preset,
-                                                                 format='general')
-
-                if input_prompt is not None:
-                    response = openai.Completion.create(engine=engine, prompt=input_prompt, temperature=0, max_tokens=50, stop='\n\n', echo=True, logprobs=1)
-                    logprobs = response['choices'][0]['logprobs']
-                    output_str = response['choices'][0]['text']
-
-                    # iterate through response to find the indexes of the start / end tokens for the ref answer
-                    idx_start = 0
-                    while idx_start < len(logprobs['text_offset']) - 1:
-                        if (logprobs['text_offset'][idx_start] >= len(query_prompt)):
-                            break
-                        idx_start += 1
-
-                    idx_end = idx_start
-                    while idx_end < len(logprobs['text_offset']) - 1:
-                        if (logprobs['text_offset'][idx_end] >= len(input_prompt)):
-                            break
-                        idx_end += 1
-
-                    # increment indexes by +3 to skip the "\nA:" tokens before the answer
-                    logprob_vals = logprobs['token_logprobs'][idx_start + 3:idx_end]
-                    text_vals = logprobs['tokens'][idx_start + 3:idx_end]
-
-                    if verbose:
-                        print("LOGPROBS AND ANSWER TOKENS")
-                        print(logprob_vals)
-                        print(text_vals)
-
-                    scores_false.append(sum(logprob_vals))
-
-            MC_calcs(tag, questions, idx, scores_true, scores_false, ref_true, ref_best)
+    for idx, example in zip(questions.index, examples):
+        ref_best = format_best(questions.loc[idx, BEST_COL])
+        ref_true = split_multi_answer(questions.loc[idx, ANSWER_COL])
+        ref_false = split_multi_answer(questions.loc[idx, INCORRECT_COL])
+        completion_scores = all_scores[example["prompt"]]
+        scores_true = [completion_scores[ref] for ref in ref_true]
+        scores_false = [completion_scores[ref] for ref in ref_false]
+        
+        MC_calcs(tag, questions, idx, scores_true, scores_false, ref_true, ref_best) 
     return questions
 
 
 
-def run_answers(questions, model, tokenizer, tag, preset="qa", batch_size=1, max_new_tokens=50, use_chat_format=False):
-
+def run_hf_model(questions, model, tokenizer, tag, preset="qa", batch_size=1, max_new_tokens=50, use_chat_format=False):
     """Stores answers from autoregressive HF models (GPT-2, GPT-Neo)"""
 
-    
     if tag not in questions.columns:
         questions[tag] = ''
-
     questions[tag].fillna('', inplace=True)
     questions[tag] = questions[tag].astype(str)
-
+    
     prompts = [
         format_prompt(questions.loc[idx], preset, format='general') for idx in questions.index
     ]
-
     if use_chat_format:
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
         for idx, prompt in enumerate(prompts):
             messages = [{"role": "user", "content": prompt}]
             prompts[idx] = chat_formatting_function(messages, add_bos=False)
-            if prompts[idx][-1] in ["\n", " "]:
-                prompts[idx] += "The answer is:"
-            else:
-                prompts[idx] += " The answer is:"
-
-    completions = generate_completions(model, tokenizer, prompts, batch_size=batch_size, max_new_tokens=max_new_tokens, top_k=1)
+            prompt += "A:" if prompt[-1] in ["\n", " "] else " A:"
+    
+    stop_sequence = tokenizer.encode("\n\n", add_special_tokens=False)[-2:] # get the last token because the tokenizer may add space tokens at the start.
+    completions = generate_completions(
+        model, tokenizer, prompts, batch_size=batch_size, max_new_tokens=max_new_tokens, 
+        stop_id_sequences=stop_sequence if not use_chat_format else None,
+    )
     assert len(completions) == len(prompts)
-
     for idx, completion in zip(questions.index, completions):
         questions.loc[idx, tag] = trim_answer(completion)
     return questions
 
 
-def run_probs(questions, model, tokenizer, tag, preset='qa'):
-
+def run_hf_model_mc(questions, model, tokenizer, tag, preset='qa'):
     """Runs multiple-choice metrics for autoregressive HuggingFace models (GPT-2, GPT-Neo)"""
-    # TODO: rewrite this to use score_completions, which supports batched inference
 
     set_columns(tag, questions)
+    
+    examples = []
+    for idx in questions.index:
+        # check that candidate answer exists
+        if pd.isnull(questions.loc[idx, INCORRECT_COL]):
+            warnings.warn("References missing for {0}!".format(idx), stacklevel=2)
+            continue
+        if not len(questions.loc[idx, INCORRECT_COL]):
+            warnings.warn("References missing for {0}!".format(idx), stacklevel=2)
+            continue
 
-    with torch.no_grad():
-        for idx in tqdm.tqdm(questions.index):
-            if pd.isnull(questions.loc[idx, '{0} lprob max'.format(tag)]):
+        # reference answers
+        ref_true = split_multi_answer(questions.loc[idx, ANSWER_COL])
+        ref_false = split_multi_answer(questions.loc[idx, INCORRECT_COL])
 
-                # check that answer exists
-                if pd.isnull(questions.loc[idx, INCORRECT_COL]):
-                    warnings.warn("References missing for {0}!".format(idx), stacklevel=2)
-                    continue
-                if not len(questions.loc[idx, INCORRECT_COL]):
-                    warnings.warn("References missing for {0}!".format(idx), stacklevel=2)
-                    continue
+        # prompt for all answers
+        prompt = format_prompt(questions.loc[idx], preset, format='general')
+        if args.use_chat_format:
+            chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
+            messages = [{"role": "user", "content": prompt}]
+            prompt = chat_formatting_function(messages, add_bos=False)
+            prompt += "A:" if prompt[-1] in ["\n", " "] else " A:"
+        else:
+            prompt += "\nA:"
 
-                # reference answers
-                ref_best = format_best(questions.loc[idx, BEST_COL])
-                ref_true = split_multi_answer(questions.loc[idx, ANSWER_COL])
-                ref_false = split_multi_answer(questions.loc[idx, INCORRECT_COL])
+        # candidate completions
+        examples.append({"prompt": prompt, "completions": ref_true + ref_false})
 
-                scores_true = []
-                scores_false = []
+    all_scores = score_completions(model, tokenizer, examples, batch_size=args.eval_batch_size, aggregation="sum")
+    assert len(all_scores) == len(examples)
 
-                input_prompt = format_prompt(questions.loc[idx], preset, format='general')
+    for idx, example in zip(questions.index, examples):
+        ref_best = format_best(questions.loc[idx, BEST_COL])
+        ref_true = split_multi_answer(questions.loc[idx, ANSWER_COL])
+        ref_false = split_multi_answer(questions.loc[idx, INCORRECT_COL])
 
-                for temp_ans in ref_true:
-                    # append the current answer choice to the prompt
-                    prompt = format_prompt_with_answer_strings(questions.loc[idx, 'Question'], temp_ans, preset, format='general')
-                    input_ids = tokenizer(input_prompt, return_tensors="pt").input_ids
-                    prompt_ids = tokenizer(prompt, return_tensors="pt").input_ids
-                    if model.device.type == "cuda":
-                        input_ids = input_ids.cuda()
-                        prompt_ids = prompt_ids.cuda()
-
-                    outputs = model(prompt_ids)[0].squeeze(0)
-                    outputs = outputs.log_softmax(-1)  # logits to log probs
-
-                    # skip tokens in the prompt -- we only care about the answer
-                    outputs = outputs[input_ids.shape[-1] - 1: -1, :]
-                    prompt_ids = prompt_ids[0, input_ids.shape[-1]:]
-
-                    # get logprobs for each token in the answer
-                    log_probs = outputs[range(outputs.shape[0]), prompt_ids.squeeze(0)]
-                    log_probs = log_probs[3:]  # drop the '\nA:' prefix
-
-                    scores_true.append(log_probs.sum().item())
-
-                for temp_ans in ref_false:
-                    # append the current answer choice to the prompt
-                    prompt = format_prompt_with_answer_strings(questions.loc[idx, 'Question'], temp_ans, preset, format='general')
-                    input_ids = tokenizer(input_prompt, return_tensors="pt").input_ids
-                    prompt_ids = tokenizer(prompt, return_tensors="pt").input_ids
-                    if model.device.type == "cuda":
-                        input_ids = input_ids.cuda()
-                        prompt_ids = prompt_ids.cuda()
-
-                    outputs = model(prompt_ids)[0].squeeze(0)
-                    outputs = outputs.log_softmax(-1)  # logits to log probs
-
-                    # skip tokens in the prompt -- we only care about the answer
-                    outputs = outputs[input_ids.shape[-1] - 1: -1, :]
-                    prompt_ids = prompt_ids[0, input_ids.shape[-1]:]
-
-                    # get logprobs for each token in the answer
-                    log_probs = outputs[range(outputs.shape[0]), prompt_ids.squeeze(0)]
-                    log_probs = log_probs[3:] # drop the '\nA:' prefix
-
-                    scores_false.append(log_probs.sum().item())
-
-                MC_calcs(tag, questions, idx, scores_true, scores_false, ref_true, ref_best)
+        completion_scores = all_scores[example["prompt"]]
+        scores_true = [completion_scores[ref] for ref in ref_true]
+        scores_false = [completion_scores[ref] for ref in ref_false]
+        
+        MC_calcs(tag, questions, idx, scores_true, scores_false, ref_true, ref_best)
     return questions
 
 
@@ -342,45 +267,46 @@ def main(args):
             gptq_model=args.gptq,
             use_fast_tokenizer=not args.use_slow_tokenizer,
         )
-        print("Running generations!")
-        run_answers(
-            questions, model, tokenizer, tag=args.model_name_or_path, preset=args.preset, batch_size=args.eval_batch_size, use_chat_format=args.use_chat_format
-        )
-        if 'mc' in args.metrics:
+        if "judge" in args.metrics or "info" in args.metrics:
+            print("Running generations!")
+            run_hf_model(
+                questions, model, tokenizer, tag=args.model_name_or_path, preset=args.preset, batch_size=args.eval_batch_size, use_chat_format=args.use_chat_format
+            )
+        if "mc" in args.metrics:
             print("Running multiple-choice classification!")
-            run_probs(questions, model, tokenizer, tag=args.model_name_or_path, preset=args.preset)
+            run_hf_model_mc(questions, model, tokenizer, tag=args.model_name_or_path, preset=args.preset)
     elif args.openai_engine:
         # gpt-3 language models
         if args.openai_engine in ['ada', 'babbage', 'curie', 'davinci', 'text-davinci-003', 'text-davinci-002', 'code-davinci-002']:
-            print("Running generations")
-            run_GPT3(questions, args.openai_engine, args.openai_engine, args.preset)
+            if "judge" in args.metrics or "info" in args.metrics:
+                print("Running generations")
+                run_gpt3(questions, args.openai_engine, args.openai_engine, args.preset)
             if 'mc' in args.metrics:
                 print("Running multiple-choice classification!")
-                run_probs_GPT3(questions, args.openai_engine, args.openai_engine, preset=args.preset)
+                run_gpt3_mc(questions, args.openai_engine, args.openai_engine, preset=args.preset)
         # other openai engines
-        else:  
+        else:
+            if "judge" in args.metrics or "info" in args.metrics:
+                print("Running generations")
+                run_chatgpt(questions, args.openai_engine, args.openai_engine, args.preset)
             if "mc" in args.metrics:
                 raise ValueError("OpenAI Chat engines does not support MC metrics.")
-            print("Running generations")
-            run_chatgpt(questions, args.openai_engine, args.openai_engine, args.preset)
 
     # run metrics
     print("Running metrics!")
 
     model_key = args.model_name_or_path if args.model_name_or_path else args.openai_engine
-    
-    if model_key not in questions.columns:
-        raise ValueError("Answers missing for {0}!".format(model_key))
-
     for metric in args.metrics:
         if metric == 'mc':
             continue
         elif metric in ['judge', 'info']:
+            if model_key not in questions.columns:
+                raise ValueError("Answers missing for {0}!".format(model_key))
             try:
                 if metric == 'judge':
-                    questions = run_end2end_GPT3(model_key, 'GPT-judge', args.gpt_judge_model_name, questions, info=False)
+                    questions = run_gpt3_classifier_eval(model_key, 'GPT-judge', args.gpt_judge_model_name, questions, info=False)
                 else:
-                    questions = run_end2end_GPT3(model_key, 'GPT-info', args.gpt_info_model_name, questions, info=True)
+                    questions = run_gpt3_classifier_eval(model_key, 'GPT-info', args.gpt_info_model_name, questions, info=True)
             except Exception as err:
                 print(err)
         else:
