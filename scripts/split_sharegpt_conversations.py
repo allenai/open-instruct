@@ -63,7 +63,7 @@ def split_all(content, begin, end, tokenizer_, max_length_):
     content = content[begin:end]
     new_content = []
 
-    with ProcessPoolExecutor() as executor:
+    with ProcessPoolExecutor(max_workers=128) as executor:
         for result in tqdm(executor.map(split_one_sample, content), total=len(content)):
             new_content.extend(result)
 
@@ -111,6 +111,6 @@ if __name__ == "__main__":
     parser.add_argument("--begin", type=int)
     parser.add_argument("--end", type=int)
     parser.add_argument("--model-name-or-path", type=str, required=True)
-    parser.add_argument("--max-length", type=int, default=2048)
+    parser.add_argument("--max-length", type=int, default=4096)
     args = parser.parse_args()
     main(args)

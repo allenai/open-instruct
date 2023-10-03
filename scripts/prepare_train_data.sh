@@ -17,8 +17,10 @@ wget -P data/raw_train/cot/ https://beaker.org/api/v3/datasets/01GXZ52K2Q932H6KZ
 wget -P data/raw_train/cot/ https://beaker.org/api/v3/datasets/01GXZ51ZV283RAZW7J3ECM4S58/files/cot_fsopt.jsonl
 
 
-echo "Downloading the flan_v2 collection, here we subsampled only 100K instances..."
-wget -P data/raw_train/flan_v2/ https://beaker.org/api/v3/datasets/01GZTTS2EJFPA83PXS4FQCS1SA/files/flan_v2_resampled_100k.jsonl
+echo "Downloading the flan_v2 collection, here we use two subsampled versions: for tulu v1 we subsampled 100K, for tulu v2 we subsampled 50K..."
+mkdir -p data/raw_train/flan_v2/
+wget -O data/raw_train/flan_v2/tulu_v1_resampled_flan_100k.jsonl https://beaker.org/api/v3/datasets/01GZTTS2EJFPA83PXS4FQCS1SA/files/flan_v2_resampled_100k.jsonl
+wget -O data/raw_train/flan_v2/tulu_v2_resampled_flan_50k.jsonl https://beaker.org/api/v3/datasets/01HBS0N5ZSDF5AECA9VMB1RKXQ/files/flan_v2_resampled_50k.jsonl
 
 
 echo "Downloading self-instruct data..."
@@ -62,11 +64,18 @@ wget -P data/raw_train/baize/ https://github.com/project-baize/baize-chatbot/raw
 echo "Downloading ShareGPT dataset..."
 wget -P data/raw_train/sharegpt/ https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/HTML_cleaned_raw_dataset/sg_90k_part1_html_cleaned.json
 wget -P data/raw_train/sharegpt/ https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/HTML_cleaned_raw_dataset/sg_90k_part2_html_cleaned.json
-echo "Splitting the ShareGPT dataset..."
+echo "Splitting the ShareGPT dataset with 2048 max tokens per conversation..."
 python scripts/split_sharegpt_conversations.py \
     --in-files data/raw_train/sharegpt/sg_90k_part1_html_cleaned.json data/raw_train/sharegpt/sg_90k_part2_html_cleaned.json \
-    --out-file data/raw_train/sharegpt/sharegpt_html_cleaned_and_split.json \
-    --model-name-or-path ../hf_llama_models/7B/
+    --out-file data/raw_train/sharegpt/sharegpt_html_cleaned_and_split_2048.json \
+    --model-name-or-path ../hf_llama_models/7B/ \
+    --max-length 2048
+echo "Splitting the ShareGPT dataset with 4096 max tokens per conversation..."
+python scripts/split_sharegpt_conversations.py \
+    --in-files data/raw_train/sharegpt/sg_90k_part1_html_cleaned.json data/raw_train/sharegpt/sg_90k_part2_html_cleaned.json \
+    --out-file data/raw_train/sharegpt/sharegpt_html_cleaned_and_split_4096.json \
+    --model-name-or-path ../hf_llama_models/7B/ \
+    --max-length 4096
 
 
 echo "Downloading LIMA dataset..."
@@ -82,39 +91,13 @@ wget -P data/raw_train/open_orca/ https://huggingface.co/datasets/Open-Orca/Open
 wget -P data/raw_train/open_orca/ https://huggingface.co/datasets/Open-Orca/OpenOrca/resolve/main/3_5M-GPT3_5-Augmented.parquet
 
 
-echo "Reformatting the datasets..."
+echo "Downloading the Science Instructions dataset..."
+wget -P data/raw_train/science https://beaker.org/api/v3/datasets/01HBS3G7TA8AT15C7RWTJAN66X/files/science_train.jsonl
+
+
+echo "Downloading the HardCoded dataset..."
+wget -P data/raw_train/hard_coded/ https://beaker.org/api/v3/datasets/01HBS14BBV16K45MMFSYJR86CA/files/hard_coded_examples.xlsx
+
+
+echo "Processing datasets..."
 python open_instruct/reformat_datasets.py --raw_data_dir data/raw_train/ --output_dir data/processed/
-
-
-echo "Creating Tulu data mixtures..."
-mkdir -p data/processed/tulu/
-cat data/processed/flan_v2/flan_v2_data.jsonl \
-    data/processed/cot/cot_data.jsonl \
-    data/processed/dolly/dolly_data.jsonl \
-    data/processed/oasst1/oasst1_data.jsonl \
-    data/processed/gpt4_alpaca/gpt4_alpaca_data.jsonl \
-    data/processed/code_alpaca/code_alpaca_data.jsonl \
-    data/processed/sharegpt/sharegpt_data.jsonl \
-    > data/processed/tulu/tulu_v1_mix.jsonl
-
-cat data/processed/flan_v2/flan_v2_data.jsonl \
-    data/processed/cot/cot_data.jsonl \
-    data/processed/dolly/dolly_data.jsonl \
-    data/processed/oasst1/oasst1_data.jsonl \
-    > data/processed/tulu/tulu_v1_human_mix.jsonl
-
-cat data/processed/flan_v2/flan_v2_data.jsonl \
-    data/processed/cot/cot_data.jsonl \
-    data/processed/oasst1/oasst1_data.jsonl \
-    data/processed/lima/lima_data.jsonl \
-    data/processed/code_alpaca/code_alpaca_data.jsonl \
-    data/processed/sharegpt/sharegpt_data.jsonl \
-    data/processed/wizardlm/wizardlm_data.jsonl \
-    data/processed/open_orca/open_orca_data.jsonl \
-    > data/processed/tulu/tulu_v2_mix.jsonl
-
-cat data/processed/flan_v2/flan_v2_data.jsonl \
-    data/processed/cot/cot_data.jsonl \
-    data/processed/oasst1/oasst1_data.jsonl \
-    data/processed/lima/lima_data.jsonl \
-    > data/processed/tulu/tulu_v2_human_mix.jsonl
