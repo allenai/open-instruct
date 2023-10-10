@@ -13,9 +13,9 @@ with open("beaker_configs/default_eval.yaml", 'r') as f:
 d1 = yaml.load(default_yaml, Loader=yaml.FullLoader)
 
 # cluster = "ai2/general-cirrascale"
-# cluster = "ai2/yizhongw-a100-80gb"
 cluster = "ai2/allennlp-cirrascale"
 # cluster = "ai2/general-cirrascale-a100-80g-ib"
+# cluster = "ai2/prior-elanding"
 num_gpus = 1
 d1['tasks'][0]['context']['cluster'] = cluster
 d1['tasks'][0]['context']['priority'] = "high"
@@ -24,89 +24,101 @@ d1['tasks'][0]['resources']['gpuCount'] = num_gpus
 
 # modify here for different set of experiments
 experiment_groups = [
-    # "mmlu_0shot",
+    "mmlu_0shot",
     "mmlu_5shot",
     "gsm_direct",
     "gsm_cot",
     "bbh_direct",
     "bbh_cot",
     "tydiqa_goldp_1shot",
-    # "tydiqa_no_context_1shot",
+    "tydiqa_no_context_1shot",
     "codex_eval_temp_0.1",
-    # "codex_eval_temp_0.8",
+    "codex_eval_temp_0.8",
     "trutufulqa",
     "toxigen",
+    "alpaca_farm",
 ]
 
 # model to evaluate, each in the followng format: model name, their beaker id, checkpoint subfolder
 models = [
-    # ("llama-7B", "01GYJG4WEQFNZ5SA2YCATZY5EY", None),
-    # ("llama-13B", "01GYJGFBHDTQC3F9SKW7HMYABB", None),
-    # ("llama-30B", "01GYJGVRX1E9ZZVESAT644292M", None),
-    # ("llama-65B", "01GYJHM0RSXWRW1KDB2D0Y9JTJ", None),
-    # ("finetuned_7B_dolly", "01GZVKGQZAMQMVG9307KWS4GMN", None),
-    # ("finetuned_7B_flan_v2", "01GZVKGR5DW1SXXWSMWE2QYWYR", None),
-    # ("finetuned_7B_cot", "01GZVKGRA3X4SYQF1PZ29DSZFE", None),
-    # ("finetuned_7B_code_alpaca", "01GZVKGREPDJ6FZM3S4B0J8VB9", None),
-    # ("finetuned_7B_baize", "01GZVKGRKAHJW2AK3ZF88G13HA", None),
-    # ("finetuned_7B_oasst1", "01GZVKGRQZ4359W31CAEHWFVSB", None),
-    # ("finetuned_7B_gpt4_alpaca", "01GZVKGRWJ2VVCXY5KP46814JP", None),
-    # ("finetuned_7B_super_ni", "01GZVKGS1S527GYKRA4Y26ZP5S", None),
-    # ("finetuned_7B_self_instruct", "01GZVKGS7JTYK0M35AFXHY0CD0", None),
-    # ("finetuned_7B_stanford_alpaca", "01GZVKGSHNPRFSJBS4K74FTRDC", None),
-    # ("finetuned_7B_unnatural_instructions", "01GZVKGSP9BAW8XTWB9509SPDB", None),
-    # ("finetuned_7B_sharegpt", "01GZWDNED8KP28SAR1159WZ366", None),
-    # ("finetuned_7B_combined", "01GZWHSK7DC46NKSSJNN05FEPN", None),
-    # ("finetuned_7B_free_mixture_lumi", "01H0CNG1PNQKGRVMWHTB7X5D4Y", None),
-    # ("finetuned_7B_flan_dolly_oasst_sharegpt_gpt4alpaca_codealpaca_lumi", "01H0F3Q5R1HYTRW6Z10JCSK0R7", None),
-    # ("finetuned_7B_flanv2_cot_oasst1_dolly_lumi", "01H0K4049XMFGD8PW7BB6KVGBZ", None),
-    # ("finetuned_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H0K6A8P9TC25F5D0NMN8NTG7", None),
-    # ("finetuned_13B_oasst1", "01GZWN5FRTGJKEZR890MQRXZZ9", None),
-    # ("finetuned_13B_dolly", "01GZWN5FXP2ZEKJ8HBBWHK58TZ", None),
-    # ("finetuned_13B_super_ni", "01GZWN5G71CT6GFC9VC6T6RT5V", None),
-    # ("finetuned_13B_self_instruct", "01H0JSB1QDQDYPEG8AX127XMND", None),
-    # ("finetuned_13B_flan_v2", "01H04RBP7F545WC5APZK5DE58T", None),
-    # ("finetuned_13B_sharegpt", "01GZWN5G2DVDTSM508CW34V1FT", None),
-    # ("finetuned_13B_free_mixture_lumi", "01H0CPG2QPZHEY6M1C27EVA4CV", None),
-    # ("finetuned_13B_cot_lumi", "01H0F09XR3PNABMPD7X95PSR8H", None),
-    # ("finetuned_13B_baize_lumi", "01H0F123TJG9BXZ9WT42XTSDPS", None),
-    # ("finetuned_13B_code_alpaca_lumi", "01H0F1SF5WX84RXWJYZFS4CBW5", None),
-    # ("finetuned_13B_gpt4_alpaca_lumi", "01H0F43FKA2J7YY8N3K9A0CHFD", None),
-    # ("finetuned_13B_stanford_alpaca_lumi", "01H0F4TWK7YNB2YRK1TG5JEXZ5", None),
-    # ("finetuned_13B_unnatural_instructions_lumi", "01H0F5JTDM9WMKSPDBYH141089", None),
-    # ("finetuned_13B_flan_dolly_oasst_sharegpt_gpt4alpaca_codealpaca_lumi", "01H0F2ZE09ZWTPK1Q50KNVZEA2", None),
-    # ("finetuned_13B_flanv2_cot_oasst1_dolly_lumi", "01H0KJ3ZFCDBGGV4FGS8RZXCXA", None),
-    # ("finetuned_13B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H0JW5D7ETX8252T2AHKN6S94", None),
-    # ("finetuned_30B_flanv2_cot_oasst1_dolly_lumi", "01H0NF25QSBTVDWYV7JJNKDYCV", None),
-    # ("finetuned_30B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H0PHQSWP1CYHBYF4EG8ABX3E", None),
-    # ("finetuned_65B_flanv2_cot_oasst1_dolly_lumi", "01H0P3BKSC389DSK8KBPXW8JDF", None),
-    # ("finetuned_65B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H0MHPS7Y3YTND66KCP16E4AC", None),
-    ("finetuned_llama2_7B_tulu_mix_v1", "01H7ABFYB84N9TN8MYXAVSMJ68", None),
-    # ("finetuned_llama2_7B_tulu_mix_v2", "01H7DHPX5071J86XVP39Y35F4D", None),
-    # ("finetuned_llama2_13B_tulu_mix_v1", "01H7AC0KXGRDH9ACJ24WTSK7SR", None),
-    # ("finetuned_llama2_13B_tulu_mix_v2", "01H7AC0M1X81FW8VTN6MGJ3EK8", None),
+    # llama1 models
+    # ("llama1-7B", "01HCCBK1MYKXKQC0C6CSVW1F22", None, "vanilla_lm"),
+    # ("llama1-13B", "01HCCBWB4TWNS35N9R35K47BH8", None, "vanilla_lm"),
+    # ("llama1-30B", "01HCCC7FNXFCQ2TFWGS2HA683Y", None, "vanilla_lm"),
+    # ("llama1-65B", "01HCCCWQTPKS23W7MRFH5PXNHA", None, "vanilla_lm"),
+    
+    # llama2 models
+    # ("llama2-7B", "01H7A3707SXDKQRHSK2477HQP8", None, "vanilla_lm"),
+    # ("llama2-13B", "01H7A4BSRR95XN6PZ89TS7C9GD", None, "vanilla_lm"),
+    # ("llama2-70B", "01H7A5RTRCSQ81CWGZ7VZFDC74", None, "vanilla_lm"),
+    # ("llama2-chat-7B", "01H83SJBZET3ZNZ8PSBSP2A17A", None, "tuned_lm"),
+    # ("llama2-chat-13B", "01H83T5XSGZGS9XE9MZEE28194", None, "tuned_lm"),
+    # ("llama2-chat-70B", "01H7AC0KXGRDH9ACJ24WTSK7SR", None, "tuned_lm"),
+    
+    # our ablation models
+    # ("finetuned_llama1_7B_dolly", "01GZVKGQZAMQMVG9307KWS4GMN", None, "tuned_lm"),
+    # ("finetuned_llama1_7B_flan_v2", "01GZVKGR5DW1SXXWSMWE2QYWYR", None, "tuned_lm"),
+    # ("finetuned_llama1_7B_cot", "01GZVKGRA3X4SYQF1PZ29DSZFE", None, "tuned_lm"),
+    # ("finetuned_llama1_7B_code_alpaca", "01GZVKGREPDJ6FZM3S4B0J8VB9", None, "tuned_lm"),
+    # ("finetuned_llama1_7B_baize", "01GZVKGRKAHJW2AK3ZF88G13HA", None, "tuned_lm"),
+    # ("finetuned_llama1_7B_oasst1", "01GZVKGRQZ4359W31CAEHWFVSB", None, "tuned_lm"),
+    # ("finetuned_llama1_7B_gpt4_alpaca", "01GZVKGRWJ2VVCXY5KP46814JP", None, "tuned_lm"),
+    # ("finetuned_llama1_7B_super_ni", "01GZVKGS1S527GYKRA4Y26ZP5S", None, "tuned_lm"),
+    # ("finetuned_llama1_7B_self_instruct", "01GZVKGS7JTYK0M35AFXHY0CD0", None, "tuned_lm"),
+    # ("finetuned_llama1_7B_stanford_alpaca", "01GZVKGSHNPRFSJBS4K74FTRDC", None, "tuned_lm"),
+    # ("finetuned_llama1_7B_unnatural_instructions", "01GZVKGSP9BAW8XTWB9509SPDB", None, "tuned_lm"),
+    # ("finetuned_llama1_7B_sharegpt", "01GZWDNED8KP28SAR1159WZ366", None, "tuned_lm"),
+    
+    # ("finetuned_llama1_13B_oasst1", "01GZWN5FRTGJKEZR890MQRXZZ9", None, "tuned_lm"),
+    # ("finetuned_llama1_13B_dolly", "01GZWN5FXP2ZEKJ8HBBWHK58TZ", None, "tuned_lm"),
+    # ("finetuned_llama1_13B_super_ni", "01GZWN5G71CT6GFC9VC6T6RT5V", None, "tuned_lm"),
+    # ("finetuned_llama1_13B_self_instruct", "01H0JSB1QDQDYPEG8AX127XMND", None, "tuned_lm"),
+    # ("finetuned_llama1_13B_flan_v2", "01H04RBP7F545WC5APZK5DE58T", None, "tuned_lm"),
+    # ("finetuned_llama1_13B_sharegpt", "01GZWN5G2DVDTSM508CW34V1FT", None, "tuned_lm"),
+    # ("finetuned_llama1_13B_cot_lumi", "01H0F09XR3PNABMPD7X95PSR8H", None, "tuned_lm"),
+    # ("finetuned_llama1_13B_baize_lumi", "01H0F123TJG9BXZ9WT42XTSDPS", None, "tuned_lm"),
+    # ("finetuned_llama1_13B_code_alpaca_lumi", "01H0F1SF5WX84RXWJYZFS4CBW5", None, "tuned_lm"),
+    # ("finetuned_llama1_13B_gpt4_alpaca_lumi", "01H0F43FKA2J7YY8N3K9A0CHFD", None, "tuned_lm"),
+    # ("finetuned_llama1_13B_stanford_alpaca_lumi", "01H0F4TWK7YNB2YRK1TG5JEXZ5", None, "tuned_lm"),
+    # ("finetuned_llama1_13B_unnatural_instructions_lumi", "01H0F5JTDM9WMKSPDBYH141089", None, "tuned_lm"),
 
+    # ("finetuned_llama1_7B_flanv2_cot_oasst1_dolly_lumi", "01H0K4049XMFGD8PW7BB6KVGBZ", None, "tuned_lm"),
+    # ("finetuned_llama1_13B_flanv2_cot_oasst1_dolly_lumi", "01H0KJ3ZFCDBGGV4FGS8RZXCXA", None, "tuned_lm"),
+    # ("finetuned_llama1_30B_flanv2_cot_oasst1_dolly_lumi", "01H0NF25QSBTVDWYV7JJNKDYCV", None, "tuned_lm"),
+    # ("finetuned_llama1_65B_flanv2_cot_oasst1_dolly_lumi", "01H0P3BKSC389DSK8KBPXW8JDF", None, "tuned_lm"),
+    
+    # tulu v1 models
+    # ("tulu_v1_7B", "01H0K6A8P9TC25F5D0NMN8NTG7", None, "tuned_lm"),
+    # ("tulu_v1_13B", "01H0JW5D7ETX8252T2AHKN6S94", None, "tuned_lm"),
+    # ("tulu_v1_30B", "01H0PHQSWP1CYHBYF4EG8ABX3E", None, "tuned_lm"),
+    # ("tulu_v1_65B", "01H0MHPS7Y3YTND66KCP16E4AC", None, "tuned_lm"),
+
+    # tulu v2 ablation models
+    # ("finetuned_llama2_7B_on_v1_data", "01H7ABFYB84N9TN8MYXAVSMJ68", None, "tuned_lm"),
+    # ("finetuned_llama2_13B_on_v1_data", "01H7AC0KXGRDH9ACJ24WTSK7SR", None, "tuned_lm"),
+    # ("finetuned_llama2_7B_on_v1_data_qlora", "", None, "tuned_lm"),
+    # ("finetuned_llama2_13B_on_v1_data_qlora", "", None, "tuned_lm"),
+
+    # tulu v2 models
+    # ("tulu_v2_7B_qlora", "01HC68D92TWTWBX55EY4N22P0N", None, "tuned_lm"),
+    # ("tulu_v2_13B_qlora", "01HC8HN28F7XH3RWYZX6J1PFRJ", None, "tuned_lm"),
+    # ("tulu_v2_70B_qlora", "01HC80Q3GTSGW4B5HZSDC7TT2K", None, "tuned_lm"),
+    # ("tulu_v2_7B_jax", "01HBXTF305QARZ7P4T6ASXXVAM", None, "tuned_lm"),
+    # ("tulu_v2_13B_jax", "01HBWE5NHC3M30HH63339HS8BE", None, "tuned_lm"),
+    # ("tulu_v2_70B_jax", "01HCB2VZJ2T2JXZX0R1SJBRSB2", None, "tuned_lm"),
 
     # other causal models
-    # ("hf-opt-7B", "facebook/opt-6.7b", None),
-    # ("finetuned_opt_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H13EBXSADXXJCRERART90ZKJ", None),
-    # ("hf-pythia-7B", "EleutherAI/pythia-6.9b", None),
-    # ("fintuned_pythia_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H1359QTQZCXFTW4KY4WVKF0C", None),
-    # ("hf-falcon-40B", "tiiuae/falcon-40b", None),
-    # ("finetuned_falcon_40B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H2TRXD9TE80W61PABE26785P", None),
-    # ("hf-falcon-7B", "tiiuae/falcon-7b", None),
-    # ("finetuned_falcon_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H356X9ZYY8HX1C7HFH6JYWNW", None),
-    # ("hf-falcon-rw-7B", "tiiuae/falcon-rw-7b", None),
-    # ("finetuned_falcon_rw_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H37QXWFK095588W6GCMVGFKB", None),
+    # ("hf-opt-7B", "facebook/opt-6.7b", None, "vanilla_lm"),
+    # ("finetuned_opt_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H13EBXSADXXJCRERART90ZKJ", None, "tuned_lm"),
+    # ("hf-pythia-7B", "EleutherAI/pythia-6.9b", None, "vanilla_lm"),
+    # ("fintuned_pythia_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H1359QTQZCXFTW4KY4WVKF0C", None, "tuned_lm"),
+    # ("hf-falcon-40B", "tiiuae/falcon-40b", None, "vanilla_lm"),
+    # ("finetuned_falcon_40B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H2TRXD9TE80W61PABE26785P", None, "tuned_lm"),
+    # ("hf-falcon-7B", "tiiuae/falcon-7b", None, "vanilla_lm"),
+    # ("finetuned_falcon_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H356X9ZYY8HX1C7HFH6JYWNW", None, "tuned_lm"),
+    # ("hf-falcon-rw-7B", "tiiuae/falcon-rw-7b", None, "vanilla_lm"),
+    # ("finetuned_falcon_rw_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H37QXWFK095588W6GCMVGFKB", None, "tuned_lm"),
 
-
-    # llama2 models
-    # ("llama2-7B", "01H7A3707SXDKQRHSK2477HQP8", None),
-    # ("llama2-13B", "01H7A4BSRR95XN6PZ89TS7C9GD", None),
-    # ("llama2-70B", "01H7A5RTRCSQ81CWGZ7VZFDC74", None),
-    ("llama2-chat-7B", "01H83SJBZET3ZNZ8PSBSP2A17A", None),
-    # ("llama2-chat-13B", "01H83T5XSGZGS9XE9MZEE28194", None),
-    # ("llama2-chat-70B", "01H7AC0KXGRDH9ACJ24WTSK7SR", None),
 ]
 
 #--------------- experiments about number of supervision tasks -------------------------
@@ -152,11 +164,10 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             python -m eval.bbh.run_eval \
             --data_dir /data/bbh \
             --save_dir /output/ \
+            --use_vllm \
             --model /model \
-            --tokenizer /model \
-            --eval_batch_size 10 \
+            --tokenizer_name_or_path /model \
             --max_num_examples_per_task 40 \
-            --load_in_8bit \
             --no_cot \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
@@ -166,11 +177,10 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             python -m eval.bbh.run_eval \
             --data_dir /data/bbh \
             --save_dir /output/ \
+            --use_vllm \
             --model /model \
-            --tokenizer /model \
-            --eval_batch_size 10 \
+            --tokenizer_name_or_path /model \
             --max_num_examples_per_task 40 \
-            --load_in_8bit \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''
@@ -180,11 +190,10 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --data_dir /data/gsm/ \
             --max_num_examples 200 \
             --save_dir /output/ \
+            --use_vllm \
             --model /model \
-            --tokenizer /model \
-            --eval_batch_size 20 \
+            --tokenizer_name_or_path /model \
             --n_shot 8 \
-            --load_in_8bit \
             --no_cot \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
@@ -195,11 +204,10 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --data_dir /data/gsm/ \
             --max_num_examples 200 \
             --save_dir /output/ \
+            --use_vllm \
             --model /model \
-            --tokenizer /model \
-            --eval_batch_size 20 \
+            --tokenizer_name_or_path /model \
             --n_shot 8 \
-            --load_in_8bit \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         ''' 
@@ -211,10 +219,9 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --max_num_examples_per_lang 100 \
             --max_context_length 512 \
             --save_dir /output/ \
+            --use_vllm \
             --model /model \
-            --tokenizer /model \
-            --eval_batch_size 20 \
-            --load_in_8bit \
+            --tokenizer_name_or_path /model \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''
@@ -227,10 +234,9 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --max_num_examples_per_lang 100 \
             --max_context_length 512 \
             --save_dir /output/ \
+            --use_vllm \
             --model /model \
-            --tokenizer /model \
-            --eval_batch_size 40 \
-            --load_in_8bit \
+            --tokenizer_name_or_path /model \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''
@@ -242,10 +248,9 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --unbiased_sampling_size_n 20 \
             --temperature 0.1 \
             --save_dir /output/ \
+            --use_vllm \
             --model /model \
-            --tokenizer /model \
-            --eval_batch_size 32 \
-            --load_in_8bit
+            --tokenizer_name_or_path /model
         '''
     elif experiment_group == "codex_eval_temp_0.8":
         d['tasks'][0]['arguments'][0] = '''
@@ -255,10 +260,9 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --unbiased_sampling_size_n 20 \
             --temperature 0.8 \
             --save_dir /output/ \
+            --use_vllm \
             --model /model \
-            --tokenizer /model \
-            --eval_batch_size 32 \
-            --load_in_8bit
+            --tokenizer_name_or_path /model
         '''
     elif experiment_group == "trutufulqa":
         d['tasks'][0]['arguments'][0] = '''
@@ -267,12 +271,14 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --save_dir /output/ \
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
-            --metrics judge info \
+            --metrics judge info mc \
             --preset qa \
             --gpt_judge_model_name curie:ft-allennlp:gpt-judge-2023-07-26-09-37-48 \
             --gpt_info_model_name curie:ft-allennlp:gpt-info-2023-07-26-11-38-18 \
             --eval_batch_size 20 \
-            --load_in_8bit
+            --load_in_8bit \
+            --use_chat_format \
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''
     elif experiment_group == "toxigen":
         d['tasks'][0]['arguments'][0] = '''
@@ -280,8 +286,19 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --data_dir /data/toxigen/ \
             --save_dir /output/ \
             --model_name_or_path /model \
+            --tokenizer_name_or_path /model \
             --eval_batch_size 32 \
             --use_vllm \
+            --use_chat_format \
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+        '''
+    elif experiment_group == "alpaca_farm":
+        d['tasks'][0]['arguments'][0] = '''
+        python -m eval.alpaca_farm.run_eval \
+            --use_vllm \
+            --model_name_or_path /model \
+            --tokenizer_name_or_path /model \
+            --save_dir /output/ \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''
@@ -295,21 +312,24 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
         assert "--tokenizer_name_or_path /model" in d['tasks'][0]['arguments'][0]
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path /model/"+model_info[2])]
 
-    if model_info[0] in ["llama-7B", "llama-13B", "llama-30B", "llama-65B", "llama2-7B", "llama2-13B", "llama2-70B"]:
+    # for vanilla_lm, remove the chat formatting function
+    if model_info[3] == "vanilla_lm":
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--use_chat_format", "")]
 
     if "13B" in model_info[0]:
         # find the batch size argument, and reduce by 4x
-        original_batch_size = re.search("--eval_batch_size (\d+)", d['tasks'][0]['arguments'][0]).group(1)
-        new_batch_size = max(1, int(original_batch_size) // 2)
-        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--eval_batch_size {}".format(original_batch_size), "--eval_batch_size {}".format(new_batch_size))]
+        if "--eval_batch_size" in d['tasks'][0]['arguments'][0]:
+            original_batch_size = re.search("--eval_batch_size (\d+)", d['tasks'][0]['arguments'][0]).group(1)
+            new_batch_size = max(1, int(original_batch_size) // 2)
+            d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--eval_batch_size {}".format(original_batch_size), "--eval_batch_size {}".format(new_batch_size))]
 
 
     if "30B" in model_info[0]:
         # find the batch size argument, and reduce by 4x
-        original_batch_size = re.search("--eval_batch_size (\d+)", d['tasks'][0]['arguments'][0]).group(1)
-        new_batch_size = max(1, int(original_batch_size) // 4)
-        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--eval_batch_size {}".format(original_batch_size), "--eval_batch_size {}".format(new_batch_size))]
+        if "--eval_batch_size" in d['tasks'][0]['arguments'][0]:
+            original_batch_size = re.search("--eval_batch_size (\d+)", d['tasks'][0]['arguments'][0]).group(1)
+            new_batch_size = max(1, int(original_batch_size) // 4)
+            d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--eval_batch_size {}".format(original_batch_size), "--eval_batch_size {}".format(new_batch_size))]
 
         if "codex_eval" in experiment_group:
             # request 2x more GPUs
@@ -317,9 +337,10 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
     
     elif "65B" in model_info[0] or "40B" in model_info[0]:
         # find the batch size argument, and reduce by 4x
-        original_batch_size = re.search("--eval_batch_size (\d+)", d['tasks'][0]['arguments'][0]).group(1)
-        new_batch_size = max(1, int(original_batch_size) // 4)
-        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--eval_batch_size {}".format(original_batch_size), "--eval_batch_size {}".format(new_batch_size))]
+        if "--eval_batch_size" in d['tasks'][0]['arguments'][0]:
+            original_batch_size = re.search("--eval_batch_size (\d+)", d['tasks'][0]['arguments'][0]).group(1)
+            new_batch_size = max(1, int(original_batch_size) // 4)
+            d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--eval_batch_size {}".format(original_batch_size), "--eval_batch_size {}".format(new_batch_size))]
 
         if "codex_eval" in experiment_group:
             # request 4x more GPUs
@@ -335,11 +356,11 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
     else:  # if it's a beaker model, mount the beaker dataset to `/model`
         d['tasks'][0]['datasets'][1]['source']['beaker'] = model_info[1]
 
-        if "llama2-chat" in model_info[0]:
-            d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
-                "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
-                "--chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format")
-            ]
+    if "llama2-chat" in model_info[0]:
+        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format")
+        ]
 
     # print(d)
 
