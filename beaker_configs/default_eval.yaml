@@ -40,6 +40,9 @@ tasks:
       - mountPath: /model
         source:
           beaker: 01GVYXDGJC6DV0JW9JZ16YM07G
+      - mountPath: /net/nfs.cirrascale
+        source:
+          hostPath: /net/nfs.cirrascale
     result:
       # Beaker will capture anything that's written to this location and store it in the results
       # dataset.
