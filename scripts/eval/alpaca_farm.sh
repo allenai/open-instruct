@@ -3,7 +3,6 @@
 # use vllm for generation
 python -m eval.alpaca_farm.run_eval \
     --model_name_or_path ../checkpoints/tulu_v1_7B/ \
-    --reference_path data/eval/alpaca_farm/davinci_003_outputs_2048_token.json \
     --save_dir results/alpaca_farm/tulu_v1_7B/ \
     --eval_batch_size 20 \
     --use_vllm \
@@ -14,7 +13,6 @@ python -m eval.alpaca_farm.run_eval \
 # use normal huggingface generation function
 python -m eval.alpaca_farm.run_eval \
     --model_name_or_path ../checkpoints/tulu_v1_7B/ \
-    --reference_path data/eval/alpaca_farm/davinci_003_outputs_2048_token.json \
     --save_dir results/alpaca_farm/tulu_v1_7B/ \
     --eval_batch_size 20 \
     --use_chat_format \
