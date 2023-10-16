@@ -34,7 +34,7 @@ def main(args):
             )
             sampling_params = vllm.SamplingParams(
                 temperature=0,  # greedy decoding
-                max_tokens=2048,  # maximum we can pass to roberta
+                max_tokens=2048,
             )
             outputs = model.generate(prompts, sampling_params)
             outputs = [it.outputs[0].text for it in outputs]
