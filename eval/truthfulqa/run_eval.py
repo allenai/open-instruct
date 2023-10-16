@@ -183,7 +183,8 @@ def run_hf_model(questions, model, tokenizer, tag, preset="qa", batch_size=1, ma
     stop_sequence = tokenizer.encode("\n\n", add_special_tokens=False)[-2:] # get the last token because the tokenizer may add space tokens at the start.
     completions = generate_completions(
         model, tokenizer, prompts, batch_size=batch_size, max_new_tokens=max_new_tokens, 
-        stop_id_sequences=stop_sequence if not use_chat_format else None,
+        stop_id_sequences=[stop_sequence] if not use_chat_format else None,
+        do_sample=False,
     )
     assert len(completions) == len(prompts)
     for idx, completion in zip(questions.index, completions):
