@@ -48,12 +48,12 @@ models = [
     # ("llama1-65B", "01HCCCWQTPKS23W7MRFH5PXNHA", None, "vanilla_lm"),
     
     # llama2 models
-    # ("llama2-7B", "01H7A3707SXDKQRHSK2477HQP8", None, "vanilla_lm"),
-    # ("llama2-13B", "01H7A4BSRR95XN6PZ89TS7C9GD", None, "vanilla_lm"),
-    # ("llama2-70B", "01H7A5RTRCSQ81CWGZ7VZFDC74", None, "vanilla_lm"),
-    # ("llama2-chat-7B", "01H83SJBZET3ZNZ8PSBSP2A17A", None, "tuned_lm"),
-    # ("llama2-chat-13B", "01H83T5XSGZGS9XE9MZEE28194", None, "tuned_lm"),
-    # ("llama2-chat-70B", "01H7AC0KXGRDH9ACJ24WTSK7SR", None, "tuned_lm"),
+    # ("llama2-7B", "01HCJYBBWA629B8GJTHPT496TT", None, "vanilla_lm"),
+    # ("llama2-13B", "01HCJZQBM2KGQZSZRPF4HKVBZX", None, "vanilla_lm"),
+    # ("llama2-70B", "01HCK281AFAXV2Y7T54NMNSC55", None, "vanilla_lm"),
+    # ("llama2-chat-7B", "01HCT5D48MSRF0PCNAWNSJDN54", None, "tuned_lm"),
+    # ("llama2-chat-13B", "01HCT5Q7A6FE8RZKY8TYN64ZW2", None, "tuned_lm"),
+    # ("llama2-chat-70B", "01HCT63DVK7YPT6P9SN35XH417", None, "tuned_lm"),
     
     # our ablation models
     # ("finetuned_llama1_7B_dolly", "01GZVKGQZAMQMVG9307KWS4GMN", None, "tuned_lm"),
@@ -335,7 +335,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             # request 2x more GPUs
             d['tasks'][0]['resources']['gpuCount'] = 2 * d['tasks'][0]['resources']['gpuCount']
     
-    elif "65B" in model_info[0] or "40B" in model_info[0]:
+    elif "70B" in model_info[0] or "65B" in model_info[0] or "40B" in model_info[0]:
         # find the batch size argument, and reduce by 4x
         if "--eval_batch_size" in d['tasks'][0]['arguments'][0]:
             original_batch_size = re.search("--eval_batch_size (\d+)", d['tasks'][0]['arguments'][0]).group(1)
