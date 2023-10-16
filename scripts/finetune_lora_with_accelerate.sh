@@ -34,13 +34,13 @@ accelerate launch \
     --warmup_ratio 0.03 \
     --weight_decay 0. \
     --num_train_epochs 5 \
-    --output_dir output/tulu2_${MODEL_SIZE}_lora/ \
+    --output_dir output/tulu_v2_${MODEL_SIZE}_lora/ \
     --with_tracking \
     --report_to tensorboard \
     --logging_steps 1 &&
 
 python open_instruct/merge_lora.py \
     --base_model_name_or_path ../hf_llama2_models/${MODEL_SIZE} \
-    --lora_model_name_or_path output/tulu2_${MODEL_SIZE}_lora/ \
-    --output_dir output/tulu2_${MODEL_SIZE}_lora_merged/ \
+    --lora_model_name_or_path output/tulu_v2_${MODEL_SIZE}_lora/ \
+    --output_dir output/tulu_v2_${MODEL_SIZE}_lora_merged/ \
     --save_tokenizer

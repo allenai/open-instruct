@@ -28,7 +28,7 @@ accelerate launch \
     --warmup_ratio 0.03 \
     --weight_decay 0. \
     --num_train_epochs 2 \
-    --output_dir output/oasst1_${MODEL_SIZE}/ \
+    --output_dir output/tulu_v1_${MODEL_SIZE}/ \
     --with_tracking \
     --report_to tensorboard \
     --logging_steps 1
