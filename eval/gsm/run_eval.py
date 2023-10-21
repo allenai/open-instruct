@@ -80,7 +80,6 @@ def main(args):
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
-                max_num_batched_tokens=4096,
             )
             sampling_params = vllm.SamplingParams(
                 temperature=0,
