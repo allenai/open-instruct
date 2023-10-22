@@ -34,7 +34,7 @@ def main(args):
             )
             sampling_params = vllm.SamplingParams(
                 temperature=0,  # greedy decoding
-                max_tokens=2048,
+                max_tokens=args.max_new_tokens,
             )
             outputs = model.generate(prompts, sampling_params)
             outputs = [it.outputs[0].text for it in outputs]
@@ -50,7 +50,7 @@ def main(args):
                 model=model,
                 tokenizer=tokenizer,
                 prompts=prompts,
-                max_new_tokens=2048,
+                max_new_tokens=args.max_new_tokens,
                 do_sample=False,
                 temperature=0,
                 batch_size=args.eval_batch_size if args.eval_batch_size else 1,
@@ -63,7 +63,7 @@ def main(args):
             instances=[{"id": str(i), "prompt": prompt} for i, prompt in enumerate(prompts)],
             batch_size=args.eval_batch_size if args.eval_batch_size else 10,
             output_path=openai_query_cache_path,
-            max_tokens=2048,
+            max_tokens=args.max_new_tokens,
             temperature=0,
             reuse_existing_outputs=True,
         )
@@ -135,6 +135,12 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="If specified, we will use the OpenAI API to generate the predictions.",
+    )
+    parser.add_argument(
+        "--max_new_tokens",
+        type=int,
+        default=8192,
+        help="Maximum number of new tokens to generate."
     )
     parser.add_argument(
         "--eval_batch_size", 
