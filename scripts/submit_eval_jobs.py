@@ -82,6 +82,9 @@ models = [
     # ("finetuned_llama1_13B_stanford_alpaca_lumi", "01H0F4TWK7YNB2YRK1TG5JEXZ5", None, "tuned_lm"),
     # ("finetuned_llama1_13B_unnatural_instructions_lumi", "01H0F5JTDM9WMKSPDBYH141089", None, "tuned_lm"),
 
+    # ("finetuned_llama1_30B_sharegpt_lumi", "01H1SHNQXG8GSXNATQPN7GKE3T", None, "tuned_lm"),
+    # ("finetuned_llama1_65B_sharegpt_lumi", "01H1SWN595ASF1NH0RBX12X96W", None, "tuned_lm"),
+
     # ("finetuned_llama1_7B_flanv2_cot_oasst1_dolly_lumi", "01H0K4049XMFGD8PW7BB6KVGBZ", None, "tuned_lm"),
     # ("finetuned_llama1_13B_flanv2_cot_oasst1_dolly_lumi", "01H0KJ3ZFCDBGGV4FGS8RZXCXA", None, "tuned_lm"),
     # ("finetuned_llama1_30B_flanv2_cot_oasst1_dolly_lumi", "01H0NF25QSBTVDWYV7JJNKDYCV", None, "tuned_lm"),
@@ -96,28 +99,40 @@ models = [
     # tulu v2 ablation models
     # ("finetuned_llama2_7B_on_v1_data", "01H7ABFYB84N9TN8MYXAVSMJ68", None, "tuned_lm"),
     # ("finetuned_llama2_13B_on_v1_data", "01H7AC0KXGRDH9ACJ24WTSK7SR", None, "tuned_lm"),
-    # ("finetuned_llama2_7B_on_v1_data_qlora", "", None, "tuned_lm"),
-    # ("finetuned_llama2_13B_on_v1_data_qlora", "", None, "tuned_lm"),
 
     # tulu v2 models
-    # ("tulu_v2_7B_qlora", "01HC68D92TWTWBX55EY4N22P0N", None, "tuned_lm"),
-    # ("tulu_v2_13B_qlora", "01HC8HN28F7XH3RWYZX6J1PFRJ", None, "tuned_lm"),
-    # ("tulu_v2_70B_qlora", "01HC80Q3GTSGW4B5HZSDC7TT2K", None, "tuned_lm"),
+    # ("tulu_v2_7B_qlora", "01HDCNBNJS56BWKP5AHV4YNCSJ", None, "tuned_lm"),
+    # ("tulu_v2_13B_qlora", "01HDCNNENVNZP37VSYR3AZSMYT", None, "tuned_lm"),
+    # ("tulu_v2_70B_qlora", "01HDG3YXJD6TKNFW6WV19NE7A0", None, "tuned_lm"),
     # ("tulu_v2_7B_jax", "01HBXTF305QARZ7P4T6ASXXVAM", None, "tuned_lm"),
     # ("tulu_v2_13B_jax", "01HBWE5NHC3M30HH63339HS8BE", None, "tuned_lm"),
     # ("tulu_v2_70B_jax", "01HCB2VZJ2T2JXZX0R1SJBRSB2", None, "tuned_lm"),
 
+    # code llama models
+    # ("code_llama_7B", "01HD9Z1MJ9K3ZK494KGTVD1063", None, "vanilla_lm"),
+    # ("code_llama_13B", "01HD9Z9TNEFWS5E8MQJMDY6N0P", None, "vanilla_lm"),
+    # ("code_llama_34B", "01HD9ZQF6PRAMC0ANVPFJFEJHR", None, "vanilla_lm"),
+    # ("code_llama_instruct_7B", "01HDA0SGJ0GB2ZF6D6RXS6NREZ", None, "tuned_lm"),
+    # ("code_llama_instruct_13B", "01HDA141K4SEDPXFY749092FNZ", None, "tuned_lm"),
+    # ("code_llama_instruct_34B", "01HDA1GNSCCNDQ4FNQ2FPPRBSD", None, "tuned_lm"),
+    
+    # code tulu models
+    # ("code_tulu_7B_jax", "01HD57SA48PBKD30FKB2F55S7H", None, "tuned_lm"),
+    # ("code_tulu_13B_jax", "01HCTQG860G68C2486K1QNSY3S", None, "tuned_lm"),
+    # ("code_tulu_34B_jax", "01HD7J73FJ7299VQKPKBS8RSJB", None, "tuned_lm"),
+
+
     # other causal models
     # ("hf-opt-7B", "facebook/opt-6.7b", None, "vanilla_lm"),
-    # ("finetuned_opt_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H13EBXSADXXJCRERART90ZKJ", None, "tuned_lm"),
+    # ("finetuned_opt_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca", "01H13EBXSADXXJCRERART90ZKJ", None, "tuned_lm"),
     # ("hf-pythia-7B", "EleutherAI/pythia-6.9b", None, "vanilla_lm"),
-    # ("fintuned_pythia_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H1359QTQZCXFTW4KY4WVKF0C", None, "tuned_lm"),
+    # ("fintuned_pythia_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca", "01H1359QTQZCXFTW4KY4WVKF0C", None, "tuned_lm"),
     # ("hf-falcon-40B", "tiiuae/falcon-40b", None, "vanilla_lm"),
-    # ("finetuned_falcon_40B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H2TRXD9TE80W61PABE26785P", None, "tuned_lm"),
+    # ("finetuned_falcon_40B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca", "01H2TRXD9TE80W61PABE26785P", None, "tuned_lm"),
     # ("hf-falcon-7B", "tiiuae/falcon-7b", None, "vanilla_lm"),
-    # ("finetuned_falcon_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H356X9ZYY8HX1C7HFH6JYWNW", None, "tuned_lm"),
+    # ("finetuned_falcon_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca", "01H356X9ZYY8HX1C7HFH6JYWNW", None, "tuned_lm"),
     # ("hf-falcon-rw-7B", "tiiuae/falcon-rw-7b", None, "vanilla_lm"),
-    # ("finetuned_falcon_rw_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca_lumi", "01H37QXWFK095588W6GCMVGFKB", None, "tuned_lm"),
+    # ("finetuned_falcon_rw_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca", "01H37QXWFK095588W6GCMVGFKB", None, "tuned_lm"),
 
 ]
 
@@ -324,7 +339,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--eval_batch_size {}".format(original_batch_size), "--eval_batch_size {}".format(new_batch_size))]
 
 
-    if "30B" in model_info[0]:
+    if "30B" in model_info[0] or "34B" in model_info[0]:
         # find the batch size argument, and reduce by 4x
         if "--eval_batch_size" in d['tasks'][0]['arguments'][0]:
             original_batch_size = re.search("--eval_batch_size (\d+)", d['tasks'][0]['arguments'][0]).group(1)
@@ -361,6 +376,16 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
             "--chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format")
         ]
+    elif "code_llama_instruct" in model_info[0]:
+        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format")
+        ] 
+
+    if any([x in model_info[0] for x in ["opt", "pythia", "falcon"]]):
+        if "--use_vllm" in d['tasks'][0]['arguments'][0]:
+            print(f"Removing --use_vllm for {model_info[0]}")
+            d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--use_vllm", "")] 
 
     # print(d)
 
