@@ -10,8 +10,7 @@ python -m eval.codex_humaneval.run_eval \
     --save_dir results/codex_humaneval/llama_7B_temp_0_1 \
     --model ../hf_llama_models/7B/ \
     --tokenizer ../hf_llama_models/7B/ \
-    --eval_batch_size 32 \
-    --load_in_8bit
+    --use_vllm
 
 
 # Evaluating llama 7B model using temperature 0.8 to get the pass@10 score
@@ -23,8 +22,7 @@ python -m eval.codex_humaneval.run_eval \
     --save_dir results/codex_humaneval/llama_7B_temp_0_8 \
     --model ../hf_llama_models/7B/ \
     --tokenizer ../hf_llama_models/7B/ \
-    --eval_batch_size 32 \
-    --load_in_8bit
+    --use_vllm
 
 
 # Evaluating tulu 7B model using temperature 0.1 to get the pass@1 score
@@ -38,8 +36,7 @@ python -m eval.codex_humaneval.run_eval \
     --save_dir results/codex_humaneval/tulu_7B_temp_0_1 \
     --model ../checkpoints/tulu_7B/ \
     --tokenizer ../checkpoints/tulu_7B/ \
-    --eval_batch_size 32 \
-    --load_in_8bit
+    --use_vllm
 
 
 # Evaluating tulu 7B model using temperature 0.8 to get the pass@10 score
@@ -53,8 +50,7 @@ python -m eval.codex_humaneval.run_eval \
     --save_dir results/codex_humaneval/tulu_7B_temp_0_8 \
     --model ../checkpoints/tulu_7B/ \
     --tokenizer ../checkpoints/tulu_7B/ \
-    --eval_batch_size 32 \
-    --load_in_8bit
+    --use_vllm
 
 
 # Evaluating chatgpt using temperature 0.1 to get the pass@1 score

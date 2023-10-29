@@ -8,9 +8,8 @@ python -m eval.bbh.run_eval \
     --save_dir results/bbh/llama-7B-cot/ \
     --model ../hf_llama_models/7B \
     --tokenizer ../hf_llama_models/7B \
-    --eval_batch_size 10 \
     --max_num_examples_per_task 40 \
-    --load_in_8bit
+    --use_vllm
 
 
 # evaluating llama 7B model using direct answering (no chain-of-thought)
@@ -19,9 +18,8 @@ python -m eval.bbh.run_eval \
     --save_dir results/bbh/llama-7B-no-cot/ \
     --model ../hf_llama_models/7B \
     --tokenizer ../hf_llama_models/7B \
-    --eval_batch_size 10 \
     --max_num_examples_per_task 40 \
-    --load_in_8bit \
+    --use_vllm \
     --no_cot
 
 
@@ -31,9 +29,8 @@ python -m eval.bbh.run_eval \
     --save_dir results/bbh/tulu-7B-cot/ \
     --model ../checkpoint/tulu_7B \
     --tokenizer ../checkpoints/tulu_7B \
-    --eval_batch_size 10 \
     --max_num_examples_per_task 40 \
-    --load_in_8bit \
+    --use_vllm \
     --use_chat_format \
     --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
 
@@ -44,9 +41,8 @@ python -m eval.bbh.run_eval \
     --save_dir results/bbh/llama2-chat-7B-cot \
     --model ../hf_llama2_models/7B-chat \
     --tokenizer ../hf_llama2_models/7B-chat \
-    --eval_batch_size 10 \
     --max_num_examples_per_task 40 \
-    --load_in_8bit \
+    --use_vllm \
     --use_chat_format \
     --chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format
 

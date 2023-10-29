@@ -9,9 +9,8 @@ python -m eval.gsm.run_eval \
     --save_dir results/gsm/llama-7B-cot-8shot \
     --model ../hf_llama_models/7B \
     --tokenizer ../hf_llama_models/7B \
-    --eval_batch_size 20 \
     --n_shot 8 \
-    --load_in_8bit
+    --use_vllm
 
 
 # Evaluating llama 7B model using direct answering (no chain-of-thought)
@@ -21,10 +20,9 @@ python -m eval.gsm.run_eval \
     --save_dir results/gsm/llama-7B-no-cot-8shot \
     --model ../hf_llama_models/7B \
     --tokenizer ../hf_llama_models/7B \
-    --eval_batch_size 20 \
     --n_shot 8 \
-    --load_in_8bit \
-    --no_cot
+    --no_cot \
+    --use_vllm
 
 
 # Evaluating tulu 7B model using chain-of-thought and chat format
@@ -34,11 +32,10 @@ python -m eval.gsm.run_eval \
     --save_dir results/gsm/tulu-7B-cot-8shot \
     --model ../checkpoints/tulu_7B \
     --tokenizer ../checkpoints/tulu_7B \
-    --eval_batch_size 20 \
     --n_shot 8 \
-    --load_in_8bit \
     --use_chat_format \
-    --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+    --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
+    --use_vllm
 
 
 # Evaluating llama2 chat model using chain-of-thought and chat format
@@ -48,11 +45,10 @@ python -m eval.gsm.run_eval \
     --save_dir results/gsm/llama2-chat-7B-cot-8shot \
     --model ../hf_llama2_models/7B-chat \
     --tokenizer ../hf_llama2_models/7B-chat \
-    --eval_batch_size 20 \
     --n_shot 8 \
-    --load_in_8bit \
     --use_chat_format \
-    --chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format
+    --chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format \
+    --use_vllm
 
 
 # Evaluating chatgpt using chain-of-thought

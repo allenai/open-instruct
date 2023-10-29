@@ -7,7 +7,7 @@ export CUDA_VISIBLE_DEVICES=0
 # which are the names of the GPT models trained following https://github.com/sylinrl/TruthfulQA#fine-tuning-gpt-3-for-evaluation
 python -m eval.truthfulqa.run_eval \
     --data_dir data/eval/truthfulqa \
-    --save_dir results/trutufulqa/llama2-7B \
+    --save_dir results/trutufulqa/llama-7B \
     --model_name_or_path ../hf_llama_models/7B \
     --tokenizer_name_or_path ../hf_llama_models/7B \
     --metrics judge info mc \
@@ -60,9 +60,7 @@ python -m eval.truthfulqa.run_eval \
     --preset qa \
     --gpt_judge_model_name curie:ft-allennlp:gpt-judge-2023-07-26-09-37-48 \
     --gpt_info_model_name curie:ft-allennlp:gpt-info-2023-07-26-11-38-18 \
-    --eval_batch_size 20 \
-    --load_in_8bit
-
+    --eval_batch_size 20
 
 # Evaluating gpt-4, getting the judge and info scores
 # Multiple choice accuracy is not supported for gpt-4, since we cannot get the probabilities from gpt-4
@@ -74,5 +72,4 @@ python -m eval.truthfulqa.run_eval \
     --preset qa \
     --gpt_judge_model_name curie:ft-allennlp:gpt-judge-2023-07-26-09-37-48 \
     --gpt_info_model_name curie:ft-allennlp:gpt-info-2023-07-26-11-38-18 \
-    --eval_batch_size 20 \
-    --load_in_8bit
+    --eval_batch_size 20
