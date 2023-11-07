@@ -1,6 +1,7 @@
 packaging
 psutil
 py-cpuinfo
+pandas
 torch<=2.0.1
 scipy
 packaging
