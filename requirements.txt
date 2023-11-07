@@ -1,4 +1,6 @@
 packaging
+psutil
+py-cpuinfo
 torch<=2.0.1
 scipy
 packaging
