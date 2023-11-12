@@ -67,7 +67,8 @@ if __name__ == "__main__":
             quantization_config=quantization_config,
             device_map={"": 0} if torch.cuda.is_available() else None,
         )
-        base_model = dequantize_model(base_model, device=base_model.device)
+        # base_model = dequantize_model(base_model, device=base_model.device)
+        base_model = dequantize_model(base_model, device="cpu")
     else:
         base_model = AutoModelForCausalLM.from_pretrained(
             args.base_model_name_or_path if args.base_model_name_or_path else peft_config.base_model_name_or_path,
