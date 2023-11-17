@@ -86,6 +86,8 @@ def main(args):
             output_path=args.save_dir,
             is_return_instead_of_print=True,
             caching_path=os.path.join(args.save_dir, "alpaca_eval_annotator_cache.json"),
+            precomputed_leaderboard=None,
+            is_cache_leaderboard=False
         )
     else:
         df_leaderboard, annotations = alpaca_farm_evaluate(
@@ -94,6 +96,8 @@ def main(args):
             output_path=args.save_dir,
             is_return_instead_of_print=True,
             caching_path=os.path.join(args.save_dir, "alpaca_eval_annotator_cache.json"),
+            precomputed_leaderboard=None,
+            is_cache_leaderboard=False
         )
 
     print(df_leaderboard.to_string(float_format="%.2f"))
