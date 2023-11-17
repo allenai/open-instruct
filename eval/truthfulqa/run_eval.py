@@ -38,7 +38,7 @@ def trim_answer(answer):
     return answer
 
 
-def run_chatgpt(questions, engine, tag, preset='qa', verbose=False):
+def run_chatgpt(questions, engine, tag, preset='qa', batch_size=1, cache_path=None, verbose=False):
 
     """Stores answers from ChatGPT / GPT4 models (requires an API key)"""
 
@@ -52,7 +52,13 @@ def run_chatgpt(questions, engine, tag, preset='qa', verbose=False):
         {"prompt": format_prompt(questions.loc[idx], preset, format='general'), "id": idx} for idx in questions.index
     ]
 
-    responses = query_openai_chat_model(engine=engine, instances=instances, temperature=0.0)
+    responses = query_openai_chat_model(
+        engine=engine,
+        output_path=cache_path, 
+        instances=instances, 
+        batch_size=batch_size,
+        temperature=0.0
+    )
     assert len(responses) == len(instances)
 
     for idx, response in zip(questions.index, responses):
@@ -60,7 +66,7 @@ def run_chatgpt(questions, engine, tag, preset='qa', verbose=False):
     return questions
 
 
-def run_gpt3(questions, engine, tag, preset='qa', verbose=False):
+def run_gpt3(questions, engine, tag, preset='qa', batch_size=1, cache_path=None, verbose=False):
     """Stores answers from GPT-3 models (requires an API key)"""
 
     if tag not in questions.columns:
@@ -73,7 +79,15 @@ def run_gpt3(questions, engine, tag, preset='qa', verbose=False):
         {"prompt": format_prompt(questions.loc[idx], preset, format='general'), "id": idx} for idx in questions.index
     ]
 
-    responses = query_openai_model(engine=engine, instances=instances, temperature=0.0, stop=None if preset == 'long' else '\n\n', max_tokens=50)
+    responses = query_openai_model(
+        engine=engine, 
+        instances=instances, 
+        output_path=cache_path,
+        batch_size=batch_size,
+        temperature=0.0, 
+        stop=None if preset == 'long' else '\n\n', 
+        max_tokens=50
+    )
     assert len(responses) == len(instances)
 
     for idx, response in zip(questions.index, responses):
@@ -82,7 +96,7 @@ def run_gpt3(questions, engine, tag, preset='qa', verbose=False):
     return questions
 
 
-def run_gpt3_mc(questions, engine, tag, preset='qa', verbose=False):
+def run_gpt3_mc(questions, engine, tag, preset='qa', batch_size=1, cache_path=None, verbose=False):
     """Runs multiple-choice metrics for GPT-3 models (requires an API key)"""
 
     set_columns(tag, questions)
@@ -114,6 +128,8 @@ def run_gpt3_mc(questions, engine, tag, preset='qa', verbose=False):
     responses = query_openai_model(
         engine=engine, 
         instances=instances,
+        output_path=cache_path,
+        batch_size=batch_size,
         temperature=0.0, 
         stop=["\n\n"], 
         max_tokens=0, 
@@ -277,18 +293,19 @@ def main(args):
             run_hf_model_mc(questions, model, tokenizer, tag=args.model_name_or_path, batch_size=args.eval_batch_size, preset=args.preset)
     elif args.openai_engine:
         # gpt-3 language models
+        cache_path = os.path.join(args.save_dir, "openai_query_cache.jsonl")
         if args.openai_engine in ['ada', 'babbage', 'curie', 'davinci', 'text-davinci-003', 'text-davinci-002', 'code-davinci-002']:
             if "judge" in args.metrics or "info" in args.metrics:
                 print("Running generations")
-                run_gpt3(questions, args.openai_engine, args.openai_engine, args.preset)
+                run_gpt3(questions, args.openai_engine, args.openai_engine, cache_path=cache_path, batch_size=args.eval_batch_size, preset=args.preset)
             if 'mc' in args.metrics:
                 print("Running multiple-choice classification!")
-                run_gpt3_mc(questions, args.openai_engine, args.openai_engine, preset=args.preset)
+                run_gpt3_mc(questions, args.openai_engine, args.openai_engine, cache_path=cache_path, batch_size=args.eval_batch_size, preset=args.preset)
         # other openai engines
         else:
             if "judge" in args.metrics or "info" in args.metrics:
                 print("Running generations")
-                run_chatgpt(questions, args.openai_engine, args.openai_engine, args.preset)
+                run_chatgpt(questions, args.openai_engine, args.openai_engine, cache_path=cache_path, batch_size=args.eval_batch_size, preset=args.preset)
             if "mc" in args.metrics:
                 raise ValueError("OpenAI Chat engines does not support MC metrics.")
 
