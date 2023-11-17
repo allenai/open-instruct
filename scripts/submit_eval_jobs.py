@@ -36,7 +36,7 @@ experiment_groups = [
     "codex_eval_temp_0.8",
     "trutufulqa",
     "toxigen",
-    "alpaca_farm",
+    "alpaca_eval",
 ]
 
 # model to evaluate, each in the followng format: model name, their beaker id, checkpoint subfolder
@@ -98,7 +98,10 @@ models = [
 
     # tulu v2 ablation models
     # ("finetuned_llama2_7B_on_v1_data", "01H7ABFYB84N9TN8MYXAVSMJ68", None, "tuned_lm"),
+    # ("finetuned_llama2_7B_on_sharegpt", "01HEXQK5YHNWG6RW1RS1H32XXA", None, "tuned_lm"),
     # ("finetuned_llama2_13B_on_v1_data", "01H7AC0KXGRDH9ACJ24WTSK7SR", None, "tuned_lm"),
+    # ("finetuned_llama2_70B_on_v1_data", "01HE9NVD58XX6G9ZYA61JZKJ7N", None, "tuned_lm"),
+    # ("finetuned_llama2_7B_on_sharegpt_dpo", "01HEXR0R515HKPKTN4TNAC408A", None, "tuned_lm"),
 
     # tulu v2 models
     # ("tulu_v2_7B_qlora", "01HDCNBNJS56BWKP5AHV4YNCSJ", None, "tuned_lm"),
@@ -107,6 +110,11 @@ models = [
     # ("tulu_v2_7B_jax", "01HBXTF305QARZ7P4T6ASXXVAM", None, "tuned_lm"),
     # ("tulu_v2_13B_jax", "01HBWE5NHC3M30HH63339HS8BE", None, "tuned_lm"),
     # ("tulu_v2_70B_jax", "01HCB2VZJ2T2JXZX0R1SJBRSB2", None, "tuned_lm"),
+    # ("tulu_v2_7B_dpo", "01HE8H1MBSVN09ZZ82X6K90NTF", None, "tuend_lm"),
+    # ("tulu_v2_13B_dpo", "01HE8YMBMJSTJV49QWA6TF2NTE", None, "tuend_lm"),
+    # ("tulu_v2_70B_dpo_first_epoch", "01HES1TCSJCPTPV50HQZHSN319", None, "tuend_lm"),
+    # ("tulu_v2_70B_dpo_second_epoch", "/net/nfs.cirrascale/allennlp/hamishi/EasyLM/tulu_2_70b_dpo/", None, "tuend_lm"),
+    # ("tulu_v2_70B_dpo", "01HEXKXP0MFM60PT7SY71XXSWD", None, "tuend_lm"),
 
     # code llama models
     # ("code_llama_7B", "01HD9Z1MJ9K3ZK494KGTVD1063", None, "vanilla_lm"),
@@ -133,7 +141,8 @@ models = [
     # ("finetuned_falcon_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca", "01H356X9ZYY8HX1C7HFH6JYWNW", None, "tuned_lm"),
     # ("hf-falcon-rw-7B", "tiiuae/falcon-rw-7b", None, "vanilla_lm"),
     # ("finetuned_falcon_rw_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca", "01H37QXWFK095588W6GCMVGFKB", None, "tuned_lm"),
-
+    # ("zephyr-7B", "/net/nfs.cirrascale/allennlp/yizhongw/checkpoints/zephyr-7b-beta", None, "tuned_lm"),
+    # ("xwin-70B", "/net/nfs.cirrascale/allennlp/yizhongw/checkpoints/Xwin-LM-70B-V0.1", None, "tuned_lm"),
 ]
 
 #--------------- experiments about number of supervision tasks -------------------------
@@ -307,7 +316,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''
-    elif experiment_group == "alpaca_farm":
+    elif experiment_group == "alpaca_eval":
         d['tasks'][0]['arguments'][0] = '''
         python -m eval.alpaca_farm.run_eval \
             --use_vllm \
@@ -320,12 +329,23 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
     else:
         raise ValueError("experiment_group not supported")
 
+    if model_info[0].startswith("hf-"):  # if it's a huggingface model, load it from the model hub
+        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
+        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--tokenizer_name_or_path /model", "--model_name_or_path "+model_info[1])]
+    if model_info[1].startswith("/"):  # if it's a local model, load it from the local directory
+        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
+        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--tokenizer_name_or_path /model", "--model_name_or_path "+model_info[1])]
+    else:  # if it's a beaker model, mount the beaker dataset to `/model`
+        d['tasks'][0]['datasets'][1]['source']['beaker'] = model_info[1]
+
     # if a specific checkpoint is specified, load model from that checkpoint
     if model_info[2] is not None:
-        assert "--model_name_or_path /model" in d['tasks'][0]['arguments'][0]
-        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path /model/"+model_info[2])]
-        assert "--tokenizer_name_or_path /model" in d['tasks'][0]['arguments'][0]
-        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path /model/"+model_info[2])]
+        # extract existing model path
+        model_name_or_path = re.search("--model_name_or_path (\S+)", d['tasks'][0]['arguments'][0]).group(1)
+        # replace the model path with the checkpoint subfolder
+        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(model_name_or_path, model_name_or_path+"/"+model_info[2])]
+        # replace the tokenizer path with the checkpoint subfolder
+        tokenizer_name_or_path = re.search("--tokenizer_name_or_path (\S+)", d['tasks'][0]['arguments'][0]).group(1)
 
     # for vanilla_lm, remove the chat formatting function
     if model_info[3] == "vanilla_lm":
@@ -364,12 +384,6 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             # request 2x more GPUs
             d['tasks'][0]['resources']['gpuCount'] = 2 * d['tasks'][0]['resources']['gpuCount']
 
-    if model_info[0].startswith("hf-"):  # if it's a huggingface model, load it from the model hub
-        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--use_chat_format", "")]
-        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
-        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--tokenizer_name_or_path /model", "--model_name_or_path "+model_info[1])]
-    else:  # if it's a beaker model, mount the beaker dataset to `/model`
-        d['tasks'][0]['datasets'][1]['source']['beaker'] = model_info[1]
 
     if "llama2-chat" in model_info[0]:
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
@@ -380,7 +394,17 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
             "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
             "--chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format")
-        ] 
+        ]
+    elif "zephyr" in model_info[0]:
+        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_zephyr_chat_format")
+        ]
+    elif "xwin" in model_info[0]:
+        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_xwin_chat_format")
+        ]
 
     if any([x in model_info[0] for x in ["opt", "pythia", "falcon"]]):
         if "--use_vllm" in d['tasks'][0]['arguments'][0]:

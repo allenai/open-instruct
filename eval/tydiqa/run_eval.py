@@ -58,7 +58,7 @@ def main(args):
                         "answers": qa["answers"]
                     }
                     test_data.append(example)
-    data_languages = set([example["lang"] for example in test_data])
+    data_languages = sorted(list(set([example["lang"] for example in test_data]))) 
     if args.max_num_examples_per_lang:
         sampled_examples = []
         for lang in data_languages:
