@@ -78,9 +78,9 @@ def create_prompt_with_zephyr_chat_format(messages, bos="<s>", eos="</s>", add_b
 
     for message in messages:
         if message["role"] == "system":
-            formatted_text += "<|system|>\n" + message["content"] + "\n"
+            formatted_text += "<|system|>\n" + message["content"] + eos + "\n"
         elif message["role"] == "user":
-            formatted_text += "<|user|>\n" + message["content"] + "\n"
+            formatted_text += "<|user|>\n" + message["content"] + eos + "\n"
         elif message["role"] == "assistant":
             formatted_text += "<|assistant|>\n" + message["content"] + eos + "\n"
         else:

@@ -68,13 +68,13 @@ echo "Splitting the ShareGPT dataset with 2048 max tokens per conversation..."
 python scripts/split_sharegpt_conversations.py \
     --in-files data/raw_train/sharegpt/sg_90k_part1_html_cleaned.json data/raw_train/sharegpt/sg_90k_part2_html_cleaned.json \
     --out-file data/raw_train/sharegpt/sharegpt_html_cleaned_and_split_2048.json \
-    --model-name-or-path ../hf_llama_models/7B/ \
+    --model-name-or-path oobabooga/llama-tokenizer \
     --max-length 2048
 echo "Splitting the ShareGPT dataset with 4096 max tokens per conversation..."
 python scripts/split_sharegpt_conversations.py \
     --in-files data/raw_train/sharegpt/sg_90k_part1_html_cleaned.json data/raw_train/sharegpt/sg_90k_part2_html_cleaned.json \
     --out-file data/raw_train/sharegpt/sharegpt_html_cleaned_and_split_4096.json \
-    --model-name-or-path ../hf_llama_models/7B/ \
+    --model-name-or-path oobabooga/llama-tokenizer \
     --max-length 4096
 
 
