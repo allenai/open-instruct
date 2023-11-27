@@ -58,9 +58,9 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
             messages = [{"role": "user", "content": prompt}]
             prompt = chat_formatting_function(messages, add_bos=False)
             if prompt[-1] in ["\n", " "]:
-                prompt += "The answer is:"
+                prompt += "The answer is "
             else:
-                prompt += " The answer is:"
+                prompt += " The answer is "
 
         tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
         # make sure every prompt is less than 2048 tokens
@@ -73,9 +73,9 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
                 messages = [{"role": "user", "content": prompt}]
                 prompt = chat_formatting_function(messages, add_bos=False)
                 if prompt[-1] in ["\n", " "]:
-                    prompt += "The answer is:"
+                    prompt += "The answer is "
                 else:
-                    prompt += " The answer is:"
+                    prompt += " The answer is "
                     
             tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
         prompts.append(prompt)
