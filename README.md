@@ -6,7 +6,7 @@ This repo serves as an open effort on instruction-tuning popular pretrained lang
 2. Code for running standard evaluation on a range of benchmarks, targeting for differnt capabilities of these language models.
 3. Checkpoints or other useful artifacts that we build in our exploration.
 
-Please see our first paper [How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources](https://arxiv.org/abs/2306.04751) for more thoughts behind this project and our initial findings.
+Please see our first paper [How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources](https://arxiv.org/abs/2306.04751) for more thoughts behind this project and our initial findings. Please see our second paper [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702) for newer results using Llama-2 models and direct preference optimization. We are still working on more models, so stay tuned for future work!
 
 <p align="center" width="100%">
       <img src="images/tulu_logo.png" alt="Tülu (a hybrid camel) represents a suite of LLaMa models that we built by fully-finetuning them on a strong mix of datasets." style="width: 20%; min-width: 200px; display: block; margin: auto;">
@@ -14,6 +14,7 @@ Please see our first paper [How Far Can Camels Go? Exploring the State of Instru
 
 ## News
 
+- [2023-11-27] We released [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702). Check out our models [here](https://huggingface.co/collections/allenai/tulu-v2-suite-6551b56e743e6349aab45101). We have added a DPO finetuning script for replicating our results.
 - [2023-09-26] We switched to use the official [alpaca-eval](https://github.com/tatsu-lab/alpaca_eval) library to run AlpacaFarm evaluation but use regenerated longer reference outputs. This will change our numbers reported in the paper. We will update the paper soon.
 - [2023-09-25] Supported using [vLLM](https://github.com/vllm-project/vllm/) for our evaluations, which speeds up the evaluation by 10x.
 - [2023-09-17] Supported [LoRA](https://arxiv.org/abs/2106.09685) and [QLoRA](https://arxiv.org/abs/2305.14314) finetuning. See [here](#parameter-efficient-finetuning) for more details.
@@ -69,38 +70,25 @@ We support [LoRA](https://arxiv.org/abs/2106.09685) finetuning, wherein only a s
 
 Please also note you cannot currently run QLoRA with model parallelism - only data-parallel training is supported, so you cannot train a model that does not fit on one GPU. For LoRA, you can use deepspeed + zero-3 to achieve model parallelism (and FSDP is not currently supported).
 
-Please see `./scripts/finetune_lora_with_accelerate.sh` and `./scripts/finetune_qlora_with_accelerate.sh` for example hyperparameters. We found a larger rank (e.g. 256) and higher learning rate (e.g. 2e-4) worked best. Additionally, we found that QLoRA tended to always achieve similar results to LoRA, while LoRA itself sometimes fell behind full-finetuning, especially in long, complex generation tasks. However, for most purposes, LoRA training essentially matches full-finetuning performance. Curiously, we found that merging QLoRA modules back into the non-quantised model tended to result in slightly better performance.
+Please see `./scripts/finetune_lora_with_accelerate.sh` and `./scripts/finetune_qlora_with_accelerate.sh` for example hyperparameters. We found a larger rank (e.g. 256) and higher learning rate (e.g. 2e-4) worked best. Additionally, we found that QLoRA tended to always achieve similar results to LoRA, while LoRA itself sometimes fell behind full-finetuning, especially in long, complex generation tasks. However, for most purposes, LoRA training essentially matches full-finetuning performance. We recommend merging modules learnt with QLoRA into a dequantised model (run our merge script with the `--qlora` flag).
+
+## DPO Finetuning
+
+For an example of how to fully finetune a model with DPO, see `scripts/dpo_train_with_accelerate.sh`. Note you will require at least 8 80GB A100s to be able to train a 7b size model, and will require more compute for anything larger. We have not tested multi-node training with this script, but it should work.
+
+Our script also supports PEFT training with QLoRA. See `scripts/dpo_train_with_qlora.sh` for an example. We have not trained models with this, so it may require additional hyperparameter tuning to achieve reasonable results.
 
 ## Released Checkpoints
 
-We provide a number of model checkpoints that we trained. You can find them on Hugging Face [here](https://huggingface.co/models?other=arxiv:2306.04751). Here are some quick links to the checkpoints that are finetuned from LLaMa 1:
+Our checkpoints can be found:
 
-| **Datasets ↓ Model Sizes →**                | **7B**                                                                         | **13B**                                                                         | **30B**                                                            | **65B**                                                            |
-|--------------------------|--------------------------------------------------------------------------------|---------------------------------------------------------------------------------|--------------------------------------------------------------------|--------------------------------------------------------------------|
-| SuperNI                  | [link](https://huggingface.co/allenai/open-instruct-sni-7b)                    | [link](https://huggingface.co/allenai/open-instruct-sni-13b)                    |                                                                    |                                                                    |
-| CoT                      | [link](https://huggingface.co/allenai/open-instruct-cot-7b)                    | [link](https://huggingface.co/allenai/open-instruct-cot-13b)                    |                                                                    |                                                                    |
-| Flan V2                  | [link](https://huggingface.co/allenai/open-instruct-flan-v2-7b)                | [link](https://huggingface.co/allenai/open-instruct-flan-v2-13b)                |                                                                    |                                                                    |
-| Dolly                    | [link](https://huggingface.co/allenai/open-instruct-dolly-7b)                  | [link](https://huggingface.co/allenai/open-instruct-dolly-13b)                  |                                                                    |                                                                    |
-| Open Assistant 1         | [link](https://huggingface.co/allenai/open-instruct-oasst1-7b)                 | [link](https://huggingface.co/allenai/open-instruct-oasst1-13b)                 |                                                                    |                                                                    |
-| ShareGPT                 | [link](https://huggingface.co/allenai/open-instruct-sharegpt-7b)               | [link](https://huggingface.co/allenai/open-instruct-sharegpt-13b)               | [link](https://huggingface.co/allenai/open-instruct-sharegpt-30b)  | [link](https://huggingface.co/allenai/open-instruct-sharegpt-65b)  |
-| Self-instruct (original) | [link](https://huggingface.co/allenai/open-instruct-self-instruct-7b)          | [link](https://huggingface.co/allenai/open-instruct-self-instruct-13b)          |                                                                    |                                                                    |
-| Unnatural Instructions   | [link](https://huggingface.co/allenai/open-instruct-unnatural-instructions-7b) | [link](https://huggingface.co/allenai/open-instruct-unnatural-instructions-13b) |                                                                    |                                                                    |
-| Alpaca                   | [link](https://huggingface.co/allenai/open-instruct-stanford-alpaca-7b)        | [link](https://huggingface.co/allenai/open-instruct-stanford-alpaca-13b)        |                                                                    |                                                                    |
-| Code-Alpaca              | [link](https://huggingface.co/allenai/open-instruct-code-alpaca-7b)            | [link](https://huggingface.co/allenai/open-instruct-code-alpaca-13b)            |                                                                    |                                                                    |
-| GPT4-Alpaca              | [link](https://huggingface.co/allenai/open-instruct-gpt4-alpaca-7b)            | [link](https://huggingface.co/allenai/open-instruct-gpt4-alpaca-13b)            |                                                                    |                                                                    |
-| Baize                    | [link](https://huggingface.co/allenai/open-instruct-baize-7b)                  | [link](https://huggingface.co/allenai/open-instruct-baize-13b)                  |                                                                    |                                                                    |
-| Human-Mix                | [link](https://huggingface.co/allenai/open-instruct-human-mix-7b)              | [link](https://huggingface.co/allenai/open-instruct-human-mix-13b)              | [link](https://huggingface.co/allenai/open-instruct-human-mix-30b) | [link](https://huggingface.co/allenai/open-instruct-human-mix-65b) |
-| **Tulu**                 | [link](https://huggingface.co/allenai/tulu-7b)                                 | [link](https://huggingface.co/allenai/tulu-13b)                                 | [link](https://huggingface.co/allenai/tulu-30b)                    | [link](https://huggingface.co/allenai/tulu-65b)                    |
-
-We also trained Pythia and OPT models on the Tulu mixture (aka the Human+GPT mixture), and they are available here:
-
-- [Pythia 6.9B Tulu](https://huggingface.co/allenai/open-instruct-pythia-6.9b-tulu)
-- [OPT 6.7B Tulu](https://huggingface.co/allenai/open-instruct-opt-6.7b-tulu)
+- [Here](https://huggingface.co/collections/hamishivi/tulu-v1-suite-655138c3743e6349aaa07d7d) for all Tulu v1 models.
+- [Here](https://huggingface.co/collections/allenai/tulu-v2-suite-6551b56e743e6349aab45101) for all Tulu v2 models.
 
 
 ### Weight diff script
 
-Some of the checkpoints are released as weight diffs to the base model (mostly for LLaMa 1). We use a slightly modified form of the [Alpaca weight diff script](https://github.com/tatsu-lab/stanford_alpaca/blob/main/weight_diff.py), which runs the same.
+Our Tulu V1 models were released as weight diffs (due to LLaMa 1 license). We use a slightly modified form of the [Alpaca weight diff script](https://github.com/tatsu-lab/stanford_alpaca/blob/main/weight_diff.py), which runs the same.
 
 To merge a model:
 1. Download the relevant LLaMa model and convert it to Hugging Face format (see above).
@@ -124,6 +112,8 @@ We provide the scripts for running evaluation of Huggingface/OpenAI models on a 
 - [TydiQA](https://github.com/google-research-datasets/tydiqa)
 - [Codex HumanEval](https://github.com/openai/human-eval/tree/master)
 - [ToxiGen](https://github.com/microsoft/TOXIGEN)
+- [TruthfulQA](https://github.com/sylinrl/TruthfulQA)
+- [AlpacaEval](https://github.com/tatsu-lab/alpaca_eval)
 
 We are working on including more promising benchmarks into this list. Please stay tuned!
 
@@ -139,16 +129,6 @@ Evaluation scripts for different datasets are put under `./scripts`. For example
 ./scripts/eval/mmlu.sh
 ```
 
-### Model-based eval
-
-We support using GPT4 to evaluate the quality of model's response following the GPT4 evaluation protocol proposed in [AlpacaFarm](https://arxiv.org/abs/2305.14387). To run this AlpacaFarm eval, please make sure you install our fork of AlpacaFarm (https://github.com/hamishivi/alpaca_farm) and use the following script:
-
-```bash
-python eval/alpaca_farm_eval.py --model <model> --batch_size 8
-```
-
-Please check the script for more details on the script itself!
-
 ### Human evaluation
 
 We will release our human evaluation interface and data soon!
@@ -157,7 +137,9 @@ We will release our human evaluation interface and data soon!
 
 This codebase is licensed under Apache 2.0 as given in [LICENSE](./LICENSE).
 
-The license we use for the models released (along with the base model licenses) can be found in [model_licenses/tulu_license.txt](./model_licenses/tulu_license.txt) - just replace `<MODELNAME>` with the actual model name (i.e., the name on HuggingFace).
+The license we use for V1 models released (along with the base model licenses) can be found in [model_licenses/tulu_license.txt](./model_licenses/tulu_license.txt) - just replace `<MODELNAME>` with the actual model name (i.e., the name on HuggingFace).
+
+V2 models are licensed under the [low-risk AI2 ImpACT license](https://allenai.org/licenses/impact-lr). See [here](https://allenai.org/impact-license) for more details.
 
 ## Citation
 
@@ -171,5 +153,16 @@ If you used this repository or our models, please cite our work:
    eprint={2306.04751},
    archivePrefix={arXiv},
    primaryClass={cs.CL}
+}
+```
+
+```bibtex
+@misc{ivison2023camels,
+      title={Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2}, 
+      author={Hamish Ivison and Yizhong Wang and Valentina Pyatkin and Nathan Lambert and Matthew Peters and Pradeep Dasigi and Joel Jang and David Wadden and Noah A. Smith and Iz Beltagy and Hannaneh Hajishirzi},
+      year={2023},
+      eprint={2311.10702},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL}
 }
 ```
