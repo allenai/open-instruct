@@ -35,3 +35,4 @@ alpaca-eval==0.3.1
 flask
 vllm 
 openpyxl
+ai2-olmo
