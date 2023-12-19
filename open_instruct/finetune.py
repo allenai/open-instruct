@@ -7,14 +7,16 @@ import math
 import os
 import random
 import datasets
+from datetime import timedelta
 import torch
 from functools import partial
 from accelerate import Accelerator
 from accelerate.logging import get_logger
-from accelerate.utils import set_seed
+from accelerate.utils import set_seed, InitProcessGroupKwargs
 from datasets import load_dataset
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
+import deepspeed
 
 import transformers
 from transformers import (
@@ -31,6 +33,7 @@ from transformers import (
     OPTForCausalLM,
     BitsAndBytesConfig,
 )
+from hf_olmo import OLMoTokenizerFast
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 
 logger = get_logger(__name__)
@@ -223,6 +226,22 @@ def parse_args():
         action='store_true',
         help='Use 8bit optimizer from bitsandbytes. Not compatible with deepspeed (use deepspeed config instead).',
     )
+    parser.add_argument(
+        '--add_bos',
+        action='store_true',
+        help='Forcibly add bos token to the beginning of the input sequence. Use only when tokenizer does not add bos token by default (e.g., olmo).',
+    )
+    parser.add_argument(
+        '--timeout',
+        type=int,
+        default=1800,
+        help='Timeout for the training process. Useful if tokenization process is long. Default is 1800 seconds (30 minutes).',
+    )
+    parser.add_argument(
+        '--trust_remote_code',
+        action='store_true',
+        help='Trust remote code when loading pretrained models and tokenizers. Use only when you trust the remote code.',
+    )
     args = parser.parse_args()
 
     # Sanity checks
@@ -235,7 +254,7 @@ def parse_args():
     return args
 
 
-def encode_with_prompt_completion_format(example, tokenizer, max_seq_length):
+def encode_with_prompt_completion_format(example, tokenizer, max_seq_length, add_bos=False):
     '''
     Here we assume each example has 'prompt' and 'completion' fields.
     We concatenate prompt and completion and tokenize them together because otherwise prompt will be padded/trancated 
@@ -247,6 +266,8 @@ def encode_with_prompt_completion_format(example, tokenizer, max_seq_length):
     else:
         example_text = example['prompt'] + example['completion']
     example_text = example_text + tokenizer.eos_token
+    if add_bos:
+        example_text = tokenizer.bos_token + example_text
     tokenized_example = tokenizer(example_text, return_tensors='pt', max_length=max_seq_length, truncation=True)
     input_ids = tokenized_example.input_ids
     labels = input_ids.clone()
@@ -261,7 +282,7 @@ def encode_with_prompt_completion_format(example, tokenizer, max_seq_length):
     }
 
 
-def encode_with_messages_format(example, tokenizer, max_seq_length):
+def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=False):
     '''
     Here we assume each example has a 'messages' field Each message is a dict with 'role' and 'content' fields.
     We concatenate all messages with the roles as delimiters and tokenize them together.
@@ -284,6 +305,8 @@ def encode_with_messages_format(example, tokenizer, max_seq_length):
         return message_text
         
     example_text = _concat_messages(messages).strip()
+    if add_bos:
+        example_text = tokenizer.bos_token + example_text
     tokenized_example = tokenizer(example_text, return_tensors='pt', max_length=max_seq_length, truncation=True)
     input_ids = tokenized_example.input_ids
     labels = input_ids.clone()
@@ -334,8 +357,10 @@ def save_with_accelerate(accelerator, model, tokenizer, output_dir, args):
         if accelerator.is_main_process:
             unwrapped_model.save_pretrained(output_dir, state_dict=state_dict)
     else:
+        # don't use safetensors for saving for now
         unwrapped_model.save_pretrained(
-            output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save, state_dict=state_dict
+            output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save, state_dict=state_dict,
+            safe_serialization=False
         )
         
 
@@ -351,7 +376,14 @@ def main():
         accelerator_log_kwargs["log_with"] = args.report_to
         accelerator_log_kwargs["project_dir"] = args.output_dir
 
-    accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, **accelerator_log_kwargs)
+    # if you get timeouts (e.g. due to long tokenization) increase this.
+    timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
+
+    accelerator = Accelerator(
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        **accelerator_log_kwargs,
+        kwargs_handlers=[timeout_kwargs]
+    )
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -395,18 +427,18 @@ def main():
 
     # Load pretrained model and tokenizer
     if args.config_name:
-        config = AutoConfig.from_pretrained(args.config_name)
+        config = AutoConfig.from_pretrained(args.config_name, trust_remote_code=args.trust_remote_code)
     elif args.model_name_or_path:
-        config = AutoConfig.from_pretrained(args.model_name_or_path)
+        config = AutoConfig.from_pretrained(args.model_name_or_path, trust_remote_code=args.trust_remote_code)
     else:
         raise ValueError(
             "You are instantiating a new config instance from scratch. This is not supported by this script."
         )
 
     if args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, use_fast=not args.use_slow_tokenizer)
+        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, trust_remote_code=args.trust_remote_code, use_fast=not args.use_slow_tokenizer)
     elif args.model_name_or_path:
-        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=not args.use_slow_tokenizer)
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=args.trust_remote_code, use_fast=not args.use_slow_tokenizer)
     else:
         raise ValueError(
             "You are instantiating a new tokenizer from scratch. This is not supported by this script."
@@ -430,6 +462,7 @@ def main():
                 load_in_4bit=True,
                 quantization_config=bnb_config,
                 device_map=device_map,
+                trust_remote_code=args.trust_remote_code,
                 torch_dtype=torch.bfloat16,
                 use_flash_attention_2=True if args.use_flash_attn else False,
             )
@@ -438,6 +471,7 @@ def main():
                 args.model_name_or_path,
                 from_tf=bool(".ckpt" in args.model_name_or_path),
                 config=config,
+                trust_remote_code=args.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 use_flash_attention_2=True if args.use_flash_attn else False,
             )
@@ -463,12 +497,19 @@ def main():
         assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
     elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
         num_added_tokens = tokenizer.add_special_tokens({'unk_token': '<unk>'})
+    elif isinstance(tokenizer, OLMoTokenizerFast):
+        # only the eos for olmo, but we use it as bos
+        tokenizer.bos_token = tokenizer.eos_token
+        assert args.add_bos, "For OLMo, you must add bos token to the beginning of the input sequence."
+    
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
-    embedding_size = model.get_input_embeddings().weight.shape[0]
-    if len(tokenizer) > embedding_size:
-        model.resize_token_embeddings(len(tokenizer))
+    # gather deepspeed to get "real" embedding size    
+    embeddings = model.get_input_embeddings()
+    with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
+        if len(tokenizer) > embeddings.weight.shape[0]:
+            model.resize_token_embeddings(len(tokenizer))
 
     if args.use_lora:
         if args.use_qlora:
@@ -492,12 +533,14 @@ def main():
             encode_with_prompt_completion_format,
             tokenizer=tokenizer,
             max_seq_length=args.max_seq_length,
+            add_bos=args.add_bos,
         )
     elif "messages" in raw_datasets["train"].column_names:
         encode_function = partial(
             encode_with_messages_format,
             tokenizer=tokenizer,
             max_seq_length=args.max_seq_length,
+            add_bos=args.add_bos,
         )
     else:
         raise ValueError("You need to have either 'prompt'&'completion' or 'messages' in your column names.")

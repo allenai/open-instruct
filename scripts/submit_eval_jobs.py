@@ -332,7 +332,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
     if model_info[0].startswith("hf-"):  # if it's a huggingface model, load it from the model hub
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--tokenizer_name_or_path /model", "--model_name_or_path "+model_info[1])]
-    if model_info[1].startswith("/"):  # if it's a local model, load it from the local directory
+    elif model_info[1].startswith("/"):  # if it's a local model, load it from the local directory
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--tokenizer_name_or_path /model", "--model_name_or_path "+model_info[1])]
     else:  # if it's a beaker model, mount the beaker dataset to `/model`
@@ -405,6 +405,16 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
             "--chat_formatting_function eval.templates.create_prompt_with_xwin_chat_format")
         ]
+    elif "olmo" in model_info[0]:
+        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format_olmo_format")
+        ]
+        # no vllm for olmo yet
+        if "--use_vllm" in d['tasks'][0]['arguments'][0]:
+            print(f"Removing --use_vllm for {model_info[0]}")
+            d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--use_vllm", "")] 
+
 
     if any([x in model_info[0] for x in ["opt", "pythia", "falcon"]]):
         if "--use_vllm" in d['tasks'][0]['arguments'][0]:
@@ -418,5 +428,5 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
     yaml.dump(d, file, default_flow_style=True)
     file.close()
 
-    cmd = "beaker experiment create {} --workspace ai2/yizhong_default".format(fn)
+    cmd = "beaker experiment create {} --workspace ai2/hamishivi".format(fn)
     subprocess.Popen(cmd, shell=True)
