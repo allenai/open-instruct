@@ -42,7 +42,9 @@ You can open the app in your browser at http://localhost:5001. When doing the an
 
 Here is a screenshot of the annotation interface:
 
-![screenshot](screenshot.png)
+<p align="center" width="100%">
+      <img src="screenshot.png" alt="Screenshot of the human evaluation interface." style="width: 80%; display: block; margin: auto;">
+</p>
 
 ## Post-processing and Analysis
 
@@ -50,18 +52,17 @@ The annotation results are saved in a database file `data/evaluation.db` by defa
 
 ```bash
 python export_db.py
-```bash
+```
 
 Then, you can use the following command to compute the evaluation metrics and agreements:
-    
-```bash 
+
+```bash
 python compute_metrics.py
 ```
 
 ## Tulu 1 Annotation Results
 
 We release the annotations that we collected for the Tulu 1 paper in `data/eval_annotations_tulu_1.xlsx`. The results include comparison of three models pairs: Tulu 65B vs ChatGPT, Tulu 65B vs Tulu 7B, and Tulu 65B vs Tulu (human only) 65B.
-
 
 ## Citation
 
