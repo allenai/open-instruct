@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Open-Instruct Human Evaluation</title>
+    <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.png') }}">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-kenU1KFdBIe4zVF0s0G1M5b4hcpxyD9F7jL+jjXkk+Q2h455rYXK/7HAuoJl+0I4" crossorigin="anonymous"></script>
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js" integrity="sha256-2Pmvv0kuTBOenSvLm6bvfBSSHrUJ+3A7x6P5Ebd07/g=" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="row">
+        <div id="nav" class="col-md-3">
+            <!-- Title -->
+            <h2 class="text-center" id="title"><a href="/" style="text-decoration: none">🕵 Human Evaluation</a></h2>
+
+            <!-- Log-in info -->
+            <div class="row mb-4" id="login-info">
+                <div class="col-12 text-center">
+                    <!-- check if logged in -->
+                    {% if current_user.is_authenticated %}
+                        You are logged in as <b>{{ current_user.username }}</b>. [<a href="{{ url_for('logout') }}">Log out</a>]
+                    {% else %}
+                        You need to log in to submit evaluation. [<a href="{{ url_for('login') }}">Log in</a>]
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="row" id="instance-info">
+                <div class="col-2 text-center">
+                    <button id="prev-button" class="btn btn-sm btn-primary"><</button>
+                </div> 
+                <div class="col-8 text-center">
+                    <h4 id="instance-id" class="mb-5 text-center">Instance {{ index }}</h4>
+                </div>
+                <div class="col-2 text--center">
+                    <button id="next-button" class="btn btn-sm btn-primary">></button>
+                </div>
+            </div>
+
+            <form>
+                <div class="form-group">
+                    <p>Do you find the instance interesting, invalid, or too hard to complete? Please let us know by giving feedback here! (Optional)</p>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="instance-quality" id="instance-quality-good" value="good">
+                        <label class="form-check-label" for="instance-quality-good">This example is interesting.</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="instance-quality" id="instance-quality-bad" value="bad">
+                        <label class="form-check-label" for="instance-quality-bad">This example is invalid.</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="instance-quality" id="instance-quality-hard" value="hard">
+                        <label class="form-check-label" for="instance-quality-bad">This example is too hard for me.</label>
+                    </div>
+                </div>
+                <div class="form-group mt-4">
+                    <label for="comment">Comment:</label>
+                    <textarea class="form-control" id="comment" name="comment" rows="4"></textarea>
+                </div>
+                <div class="mt-2 text-center">
+                    <button id="feedback-submit" type="submit" class="btn btn-primary mt-2">Provide feedback</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="col-md-9">
+            <div id="history-message-region">
+                <!-- add messages dynamically here. Following is the initial one. -->
+                <div class="row">
+                    <div class="col icon-col">
+                        <button class="role-icon">🧑</button>
+                    </div>
+                    <div class="col message-col history-message-col">
+                        <xmp class="message-text">Loading instance.</xmp>
+                    </div>
+                </div>
+            </div>
+            <div id="model-outputs-region">
+                <div class="row">
+                    <div class="col icon-col">
+                        <button class="role-icon">🤖</button>
+                    </div>
+                    <div class="col message-col">
+                        <p class="message-text">Here are responses from two AI models.</p>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-6 ">
+                        <div class="row text-center">
+                            <div class="d-flex justify-content-center">
+                                <button class="completion-icon">A</button>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col completion-col" id="completion-A-col">
+                                <xmp class="message-text">Loading model outputs ... </xmp>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 ">
+                        <div class="row text-center">
+                            <div class="d-flex justify-content-center">
+                                <button class="completion-icon">B</button>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col completion-col" id="completion-B-col">
+                                <xmp class="message-text">Loading model outputs ... </xmp>
+                            </div>
+                        </div> 
+                    </div>
+                </div>
+            </div>
+            <div id="evaluation-region">
+                <div class="row">
+                    <div class="col icon-col">
+                        <button class="role-icon">📝</button>
+                    </div>
+                    <div class="col message-col">
+                        <h5>Now please evaluate the two outputs based on your knowledge, preference, and any external tools (e.g., Google Search or Translate).</h5>
+                    </div>
+                </div>
+
+                <div class="row mt-3">
+                    <div class="col icon-col">
+                    </div>
+                    <div class="col">
+                        <form style="font-size: 18px;">
+                            <div class="form-group eval-form-item">
+                                <p>Q1: Is output A an acceptable response? An acceptable response should ① answer the user requests ② have no significant errors ③ have no meaningless text (e.g., repetition).</p>
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="a-is-acceptable" id="a-is-acceptable-yes" value="yes">
+                                    <label class="form-check-label" for="a-is-acceptable-yes">Yes</label>
+                                </div>
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="a-is-acceptable" id="a-is-acceptable-no" value="no">
+                                    <label class="form-check-label" for="a-is-acceptable-no">No</label>
+                                </div>
+                            </div>
+                            <div class="form-group eval-form-item">
+                                <p>Q2: Is output B an acceptable response? An acceptable response should ① answer the user requests ② have no significant errors ③ have no meaningless text (e.g., repetition).</p>
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="b-is-acceptable" id="b-is-acceptable-yes" value="yes">
+                                    <label class="form-check-label" for="b-is-acceptable-yes">Yes</label>
+                                </div>
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="b-is-acceptable" id="b-is-acceptable-no" value="no">
+                                    <label class="form-check-label" for="b-is-acceptable-no">No</label>
+                                </div>
+                            </div>
+                            <div class="form-group eval-form-item">
+                                <p>Q3: Please choose the response that you prefer (based on helpfulness).</p>
+                                <div class="btn-group" role="group">
+                                    <input type="radio" class="btn-check" name="preference-selection" id="preference-selection-a-better" value="a-is-better" autocomplete="off">
+                                    <label class="btn btn-secondary" for="preference-selection-a-better" style="font-size: 15px;">A is clearly better</label>
+                                  
+                                    <input type="radio" class="btn-check" name="preference-selection" id="preference-selection-a-slightly-better" value="a-is-slightly-better" autocomplete="off">
+                                    <label class="btn btn-secondary" for="preference-selection-a-slightly-better" style="font-size: 15px;">A is slightly better</label>
+
+                                    <input type="radio" class="btn-check" name="preference-selection" id="preference-selection-tie" value="tie" autocomplete="off">
+                                    <label class="btn btn-secondary" for="preference-selection-tie" style="font-size: 15px;">Tie</label>
+
+                                    <input type="radio" class="btn-check" name="preference-selection" id="preference-selection-b-slightly-better" value="b-is-slightly-better" autocomplete="off">
+                                    <label class="btn btn-secondary" for="preference-selection-b-slightly-better" style="font-size: 15px;">B is slightly better</label>
+
+                                    <input type="radio" class="btn-check" name="preference-selection" id="preference-selection-b-better" value="b-is-better" autocomplete="off">
+                                    <label class="btn btn-secondary" for="preference-selection-b-better" style="font-size: 15px;">B is clearly better</label>
+                                </div>
+                            </div>
+                            <div class="mt-5" style="text-align: center;">
+                                <button type="submit" class="btn btn-primary" id="evaluation-submit">Submit</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+
+<script type="text/javascript">
+    var instance_index = {{ index }};
+    {% if current_user.is_authenticated %}
+        var is_authenticated = true;
+        var username = "{{ current_user.username }}";
+    {% else %}
+        var is_authenticated = false;
+        var username = "";
+    {% endif %}
+</script>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+
+</html>
