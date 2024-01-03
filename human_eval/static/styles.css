@@ -1,0 +1,84 @@
+body {
+    font-family: Arial, Helvetica, sans-serif;
+}
+html {
+    overflow-y:scroll;
+}
+xmp {
+    font-family: Arial, Helvetica, sans-serif;
+}
+#nav {
+    padding: 50px;
+    border-radius: 5px;
+    background-color: aliceblue;
+    min-height: 100vh;
+}
+#history-message-region {
+    padding: 20px;
+    border-radius: 5px;
+    margin: 10px 10px 10px 0;
+    background: oldlace;
+    height: 25vh;
+    min-height: 150px;
+    overflow: auto;
+    resize: vertical;
+}
+#model-outputs-region {
+    padding: 20px;
+    border-radius: 5px;
+    margin: 10px 10px 10px 0;
+    background: #cecefa;
+}
+#evaluation-region {
+    padding: 20px;
+    border-radius: 5px;
+    margin: 10px 10px 10px 0;
+    background: lavenderblush;
+}
+.message {
+    margin-bottom: 20px;
+}
+.icon-col {
+    max-width: 70px;
+}
+.role-icon {
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    font-size: 20px;
+    border: 1px solid #ddd;
+    background-color: white;
+}
+.message-col {
+    padding-top: 10px;
+}
+.message-text {
+    font-size: 18px;
+    margin: 0;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+}
+/* .history-message-col {
+    border: #ddd solid 2px;
+} */
+.completion-icon {
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    font-size: 15px;
+    border: 1px solid #ddd;
+    background-color: #3e4cf1;
+    color: white;
+}
+.completion-col {
+    padding: 10px;
+    margin: 15px;
+    background-color: white;
+    height: 50vh;
+    overflow: auto;
+    min-height: 200px;
+    resize: vertical;
+}
+.eval-form-item {
+    margin-bottom: 20px;
+}

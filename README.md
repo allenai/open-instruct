@@ -131,7 +131,7 @@ Evaluation scripts for different datasets are put under `./scripts`. For example
 
 ### Human evaluation
 
-We will release our human evaluation interface and data soon!
+We release our human evaluation interface and collected annotations in the `./human_eval` folder. Please see the corresponding [README](./human_eval/README.md) for more details.
 
 ## Licensing
 
