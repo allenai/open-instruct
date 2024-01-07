@@ -29,6 +29,7 @@ def main(args):
         prompts = []
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
         for example in test_data:
+            # For better instructions you may want to use HumanEvalSynthesize here: https://github.com/bigcode-project/bigcode-evaluation-harness/tree/main/docs#humanevalpack
             messages = [{"role": "user", "content": "Complete the following python function.\n\n\n" + example["prompt"]}]
             prompt = chat_formatting_function(messages, add_bos=False)
             if prompt[-1] in ["\n", " "]:
