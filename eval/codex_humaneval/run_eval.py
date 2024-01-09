@@ -25,6 +25,9 @@ def main(args):
         test_data = random.sample(test_data, args.max_num_examples)
     print("Number of examples:", len(test_data))
 
+    # these stop sequences are those mentioned in the codex paper.
+    stop_sequences = ["\nclass", "\ndef", "\n#", "\nif", "\nprint"]
+
     if args.use_chat_format:
         prompts = []
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
@@ -35,7 +38,8 @@ def main(args):
                 instructions_dict = {
                     x["task_id"].replace("Python", "HumanEval"): x["instruction"] for x in instructions
                 }
-            answer = "Here is the function:\n\n\n"
+            answer = "Here is the function:\n\n```python\n"
+            stop_sequences.append("\n```")
         else:
             instructions_dict = None
             answer = "Here is the completed function:\n\n\n"
@@ -67,7 +71,7 @@ def main(args):
                 temperature=args.temperature, 
                 top_p=0.95,
                 max_tokens=512,
-                stop=["\nclass", "\ndef", "\n#", "\nif", "\nprint"]
+                stop=stop_sequences,
             )
             generations = model.generate(prompts, sampling_params)
             outputs = [output.text for it in generations for output in it.outputs]
@@ -86,9 +90,6 @@ def main(args):
                 gptq_model=args.gptq,
                 use_fast_tokenizer=not args.use_slow_tokenizer,
             )
-
-            # these stop sequences are those mentioned in the codex paper.
-            stop_sequences = ["\nclass", "\ndef", "\n#", "\nif", "\nprint"]
             # Because many tokenizers will treat the word after space differently from the original word alone, 
             # to be consistent, we add a space before tokenization and remove it after tokenization.
             stop_sequences = [tokenizer.encode(" " + x, add_special_tokens=False)[1:] for x in stop_sequences]
