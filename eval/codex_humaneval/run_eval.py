@@ -29,7 +29,7 @@ def main(args):
         prompts = []
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
         # If available use more realistic instructions from HumanEvalPack (https://hf.co/datasets/bigcode/humanevalpack)
-        if os.ispath(args.data_file_hep):
+        if os.path.exists(args.data_file_hep):
             with open(args.data_file_hep, "r") as f:
                 instructions = [json.loads(l) for l in f]
                 instructions_dict = {
