@@ -17,7 +17,7 @@ def create_prompt_with_tulu_chat_format(messages, bos="<s>", eos="</s>", add_bos
     return formatted_text
 
 # weirdness with olmo tokenizer means IP_ADDR is the eos token.
-def create_prompt_with_tulu_chat_format_olmo_format(messages, bos="|||IP_ADDRESS|||", eos="|||IP_ADDRESS|||", add_bos=True):
+def create_prompt_with_olmo_chat_format(messages, bos="|||IP_ADDRESS|||", eos="|||IP_ADDRESS|||", add_bos=True):
     formatted_text = ""
     for message in messages:
         if message["role"] == "system":
@@ -28,7 +28,7 @@ def create_prompt_with_tulu_chat_format_olmo_format(messages, bos="|||IP_ADDRESS
             formatted_text += "<|assistant|>\n" + message["content"].strip() + eos + "\n"
         else:
             raise ValueError(
-                "Tulu chat template only supports 'system', 'user' and 'assistant' roles. Invalid role: {}.".format(message["role"])
+                "Olmo chat template only supports 'system', 'user' and 'assistant' roles. Invalid role: {}.".format(message["role"])
                 )
     formatted_text += "<|assistant|>\n"
     formatted_text = bos + formatted_text  # forcibly add bos

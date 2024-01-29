@@ -724,8 +724,13 @@ def main():
                 if args.reduce_loss == 'mean':
                     loss = outputs.loss
                 else:
-                    # we are going to calculate the loss ourself for sum avging.
-                    # we use a sum to ensure that tokenwise weighting is real.
+                    # reduce loss is sum
+                    # this ensures that we weight all tokens in the dataset equally,
+                    # rather than weighting each overall example equally when
+                    # using high amounts of gradient accumulation.
+                    # this can result in > 5 point improvements in AlpacaEval
+                    # see https://github.com/huggingface/transformers/issues/24725 for
+                    # more discussion and details.
                     logits = outputs.logits
                     labels = batch["labels"]
                     # Shift so that tokens < n predict n
