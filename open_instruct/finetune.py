@@ -242,6 +242,12 @@ def parse_args():
         action='store_true',
         help='Trust remote code when loading pretrained models and tokenizers. Use only when you trust the remote code.',
     )
+    parser.add_argument(
+        '--reduce_loss',
+        default='mean',
+        choices=['mean', 'sum'],
+        help='How to reduce loss over tokens. Default is mean, but using sum can improve chat model performance.',
+    )
     args = parser.parse_args()
 
     # Sanity checks
@@ -508,6 +514,7 @@ def main():
     # gather deepspeed to get "real" embedding size    
     embeddings = model.get_input_embeddings()
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
+        embedding_size = embeddings.weight.shape[0]
         if len(tokenizer) > embeddings.weight.shape[0]:
             model.resize_token_embeddings(len(tokenizer))
 
@@ -710,8 +717,24 @@ def main():
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
             with accelerator.accumulate(model):
-                outputs = model(**batch, use_cache=False)                
-                loss = outputs.loss
+                outputs = model(**batch, use_cache=False)
+                if args.reduce_loss == 'mean':
+                    loss = outputs.loss
+                else:
+                    # we are going to calculate the loss ourself for sum avging.
+                    # we use a sum to ensure that tokenwise weighting is real.
+                    logits = outputs.logits
+                    labels = batch["labels"]
+                    # Shift so that tokens < n predict n
+                    shift_logits = logits[..., :-1, :].contiguous()
+                    shift_labels = labels[..., 1:].contiguous()
+                    # Flatten the tokens
+                    loss_fct = torch.nn.CrossEntropyLoss(reduction='sum')
+                    shift_logits = shift_logits.view(-1, embedding_size)
+                    shift_labels = shift_labels.view(-1)
+                    # Enable model parallelism
+                    shift_labels = shift_labels.to(shift_logits.device)
+                    loss = loss_fct(shift_logits, shift_labels)
                 # We keep track of the loss at each logged step
                 total_loss += loss.detach().float()
                 accelerator.backward(loss)
