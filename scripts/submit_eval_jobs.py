@@ -143,7 +143,6 @@ models = [
     # ("finetuned_falcon_rw_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca", "01H37QXWFK095588W6GCMVGFKB", None, "tuned_lm"),
     # ("zephyr-7B", "/net/nfs.cirrascale/allennlp/yizhongw/checkpoints/zephyr-7b-beta", None, "tuned_lm"),
     # ("xwin-70B", "/net/nfs.cirrascale/allennlp/yizhongw/checkpoints/Xwin-LM-70B-V0.1", None, "tuned_lm"),
-    ("olmo_deepspeed_2e5_reducesum_bf16", "/net/nfs.cirrascale/allennlp/hamishi/checkpoints/olmo_7b_557k_tulu_deepspeed_2e6_amp_reduce_sum", None, "tuned_lm"),
 ]
 
 #--------------- experiments about number of supervision tasks -------------------------
