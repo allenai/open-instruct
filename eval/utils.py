@@ -225,7 +225,6 @@ def load_hf_lm_and_tokenizer(
     ):
     
     from transformers import AutoModelForCausalLM, AutoTokenizer, OPTForCausalLM, GPTNeoXForCausalLM
-    import hf_olmo # so olmo is available
     if gptq_model:
         from auto_gptq import AutoGPTQForCausalLM
         model_wrapper = AutoGPTQForCausalLM.from_quantized(

@@ -33,11 +33,14 @@ from transformers import (
     OPTForCausalLM,
     BitsAndBytesConfig,
 )
-from hf_olmo import OLMoTokenizerFast
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 
 logger = get_logger(__name__)
 
+try:
+    from hf_olmo import OLMoTokenizerFast
+except ImportError:
+    logger.warning("OLMo not installed. Ignore if using a different model.")
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Finetune a transformers model on a causal language modeling task")

@@ -35,11 +35,15 @@ from transformers import (
     OPTForCausalLM,
     BitsAndBytesConfig,
 )
-from hf_olmo import OLMoTokenizerFast
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from dpo_utils import dpo_loss, concatenated_forward, DataCollatorForSeq2SeqDPO
 
 logger = get_logger(__name__)
+
+try:
+    from hf_olmo import OLMoTokenizerFast
+except ImportError:
+    logger.warning("OLMo not installed. Ignore if using a different model.")
 
 
 def parse_args():

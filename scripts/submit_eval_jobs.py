@@ -143,6 +143,7 @@ models = [
     # ("finetuned_falcon_rw_7B_flanv2_cot_oasst1_dolly_sharegpt_gpt4alpaca_codealpaca", "01H37QXWFK095588W6GCMVGFKB", None, "tuned_lm"),
     # ("zephyr-7B", "/net/nfs.cirrascale/allennlp/yizhongw/checkpoints/zephyr-7b-beta", None, "tuned_lm"),
     # ("xwin-70B", "/net/nfs.cirrascale/allennlp/yizhongw/checkpoints/Xwin-LM-70B-V0.1", None, "tuned_lm"),
+    ("olmo_deepspeed_2e5_reducesum_bf16", "/net/nfs.cirrascale/allennlp/hamishi/checkpoints/olmo_7b_557k_tulu_deepspeed_2e6_amp_reduce_sum", None, "tuned_lm"),
 ]
 
 #--------------- experiments about number of supervision tasks -------------------------
@@ -408,7 +409,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
     elif "olmo" in model_info[0]:
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
             "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
-            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format_olmo_format")
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format_force_bos")
         ]
         # no vllm for olmo yet
         if "--use_vllm" in d['tasks'][0]['arguments'][0]:
@@ -428,5 +429,5 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
     yaml.dump(d, file, default_flow_style=True)
     file.close()
 
-    cmd = "beaker experiment create {} --workspace ai2/hamishivi".format(fn)
+    cmd = "beaker experiment create {} --workspace ai2/yizhong_default".format(fn)
     subprocess.Popen(cmd, shell=True)
