@@ -408,7 +408,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
     elif "olmo" in model_info[0]:
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
             "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
-            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format_force_bos")
+            "--chat_formatting_function eval.templates.create_prompt_with_olmo_chat_format")
         ]
         # no vllm for olmo yet
         if "--use_vllm" in d['tasks'][0]['arguments'][0]:
