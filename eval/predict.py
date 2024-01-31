@@ -128,9 +128,15 @@ if __name__ == "__main__":
 
     # load the data
     for input_file in args.input_files:
-        with open(input_file, "r") as f:
-            instances = [json.loads(x) for x in f.readlines()]
 
+        with open(input_file, "r") as f:
+            try:
+                instances = [json.loads(x) for x in f.readlines()]
+            except:
+                instances = json.load(open(input_file))["instructions"]
+                instances = [{"prompt": ex} for ex in instances]
+
+    # import pdb; pdb.set_trace()
     if args.model_name_or_path is not None:
         prompts = []
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
@@ -149,6 +155,7 @@ if __name__ == "__main__":
                     prompt = instance["prompt"]
             else:
                 raise ValueError("Either `messages` or `prompt` should be in the instance.")
+
             prompts.append(prompt)
         if args.use_vllm:
             model = vllm.LLM(
