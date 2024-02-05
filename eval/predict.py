@@ -137,6 +137,7 @@ if __name__ == "__main__":
                 instances = [{"prompt": ex} for ex in instances]
 
     # import pdb; pdb.set_trace()
+    n_gpu = torch.cuda.device_count()
     if args.model_name_or_path is not None:
         prompts = []
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
@@ -162,6 +163,7 @@ if __name__ == "__main__":
                 model=args.model_name_or_path,
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
+                tensor_parallel_size=n_gpu
             )
             sampling_params = vllm.SamplingParams(
                 temperature=args.temperature if args.do_sample else 0, 
