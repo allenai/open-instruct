@@ -56,7 +56,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
 
         if args.use_chat_format:
             messages = [{"role": "user", "content": prompt}]
-            prompt = chat_formatting_function(messages, add_bos=False)
+            prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
             if prompt[-1] in ["\n", " "]:
                 prompt += "The answer is:"
             else:
@@ -71,7 +71,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
 
             if args.use_chat_format:
                 messages = [{"role": "user", "content": prompt}]
-                prompt = chat_formatting_function(messages, add_bos=False)
+                prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
                 if prompt[-1] in ["\n", " "]:
                     prompt += "The answer is:"
                 else:

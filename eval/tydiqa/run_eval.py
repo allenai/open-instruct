@@ -169,7 +169,7 @@ def main(args):
 
         if args.use_chat_format:
             messages = [{"role": "user", "content": prompt}]
-            prompt = chat_formatting_function(messages, add_bos=False)
+            prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
             prompt += a_template if prompt[-1] in ["\n", " "] else " " + a_template
         else:
             prompt += a_template

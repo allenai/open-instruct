@@ -193,7 +193,7 @@ def run_hf_model(questions, model, tokenizer, tag, preset="qa", batch_size=1, ma
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
         for idx, prompt in enumerate(prompts):
             messages = [{"role": "user", "content": prompt}]
-            prompts[idx] = chat_formatting_function(messages, add_bos=False)
+            prompts[idx] = chat_formatting_function(messages, tokenizer, add_bos=False)
             prompt += "A:" if prompt[-1] in ["\n", " "] else " A:"
     
     stop_sequence = tokenizer.encode("\n\n", add_special_tokens=False)[-2:] # get the last token because the tokenizer may add space tokens at the start.
@@ -232,7 +232,7 @@ def run_hf_model_mc(questions, model, tokenizer, tag, batch_size=1, preset='qa')
         if args.use_chat_format:
             chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
             messages = [{"role": "user", "content": prompt}]
-            prompt = chat_formatting_function(messages, add_bos=False)
+            prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
             prompt += "A:" if prompt[-1] in ["\n", " "] else " A:"
         else:
             prompt += "\nA:"

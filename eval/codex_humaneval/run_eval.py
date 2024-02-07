@@ -4,6 +4,7 @@ import json
 import random
 import torch
 import vllm
+from transformers import AutoTokenizer
 from eval.utils import (
     generate_completions, 
     load_hf_lm_and_tokenizer, 
@@ -28,14 +29,17 @@ def main(args):
     if args.use_chat_format:
         prompts = []
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
-        for example in test_data:
+        def apply_chat_format(example, tokenizer):
             messages = [{"role": "user", "content": "Complete the following python function.\n\n\n" + example["prompt"]}]
-            prompt = chat_formatting_function(messages, add_bos=False)
+            prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
             if prompt[-1] in ["\n", " "]:
                 prompt += "Here is the completed function:\n\n\n" + example["prompt"]
             else:
                 prompt += " Here is the completed function:\n\n\n" + example["prompt"]
-            prompts.append(prompt)
+            return prompt
+        # return partials that we will finalise once we have the tokenizer.
+        for example in test_data:
+            prompts.append(lambda tokenizer: apply_chat_format(example, tokenizer))
     else:
         prompts = [example["prompt"] for example in test_data]
         
@@ -54,6 +58,11 @@ def main(args):
                 max_tokens=512,
                 stop=["\nclass", "\ndef", "\n#", "\nif", "\nprint"]
             )
+            if args.use_chat_format:
+                formatted_prompts = []
+                for prompt in prompts:
+                    formatted_prompts.append(prompt(model.llm_engine.tokenizer))
+                prompts = formatted_prompts
             generations = model.generate(prompts, sampling_params)
             outputs = [output.text for it in generations for output in it.outputs]
             # Note: early vllm might ignore the first space in the generation, because the processing of _token.
@@ -71,6 +80,11 @@ def main(args):
                 gptq_model=args.gptq,
                 use_fast_tokenizer=not args.use_slow_tokenizer,
             )
+            if args.use_chat_format:
+                formatted_prompts = []
+                for prompt in prompts:
+                    formatted_prompts.append(prompt(model.llm_engine.tokenizer))
+                prompts = formatted_prompts
 
             # these stop sequences are those mentioned in the codex paper.
             stop_sequences = ["\nclass", "\ndef", "\n#", "\nif", "\nprint"]
