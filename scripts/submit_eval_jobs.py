@@ -14,8 +14,8 @@ parser.add_argument("--model_name", type=str, default="hf-opt-7B")
 parser.add_argument("--location", type=str, default=None)
 parser.add_argument("--beaker_subfolder", type=str, default=None)
 parser.add_argument("--cluster", type=str, default="ai2/allennlp-cirrascale")
-parser.add_argument("--num_gpus", type=int, default=1)
 parser.add_argument("--is_tuned", action="store_true")
+parser.add_argument("--use_hf_tokenizer_template", action="store_true")
 args = parser.parse_args()
 
 
@@ -300,7 +300,12 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             # request 2x more GPUs
             d['tasks'][0]['resources']['gpuCount'] = 2 * d['tasks'][0]['resources']['gpuCount']
 
-
+    # if using huggingface tokenizer template, replace the chat formatting function with hf tokenizer one
+    if args.use_hf_tokenizer_template:
+        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_huggingface_tokenizer_template")
+        ]
     if "llama2-chat" in model_info[0]:
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
             "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
