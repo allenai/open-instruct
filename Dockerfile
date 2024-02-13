@@ -123,6 +123,9 @@ RUN pip install packaging
 RUN pip install flash-attn==2.2.2 --no-build-isolation
 RUN pip install -r requirements.txt
 
+# Use v1 of alpaca eval.
+ENV IS_ALPACA_EVAL_2=False
+
 COPY open_instruct open_instruct
 COPY eval eval
 COPY ds_configs ds_configs
