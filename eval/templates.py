@@ -1,5 +1,5 @@
 
-def create_prompt_with_tulu_chat_format(messages, bos="<s>", eos="</s>", add_bos=True):
+def create_prompt_with_tulu_chat_format(messages, tokenizer, bos="<s>", eos="</s>", add_bos=True):
     formatted_text = ""
     for message in messages:
         if message["role"] == "system":
@@ -17,7 +17,7 @@ def create_prompt_with_tulu_chat_format(messages, bos="<s>", eos="</s>", add_bos
     return formatted_text
 
 # weirdness with olmo tokenizer means IP_ADDR is the eos token.
-def create_prompt_with_olmo_chat_format(messages, bos="|||IP_ADDRESS|||", eos="|||IP_ADDRESS|||", add_bos=True):
+def create_prompt_with_olmo_chat_format(messages, tokenizer, bos="|||IP_ADDRESS|||", eos="|||IP_ADDRESS|||", add_bos=True):
     formatted_text = ""
     for message in messages:
         if message["role"] == "system":
@@ -35,7 +35,7 @@ def create_prompt_with_olmo_chat_format(messages, bos="|||IP_ADDRESS|||", eos="|
     return formatted_text
 
 
-def create_prompt_with_llama2_chat_format(messages, bos="<s>", eos="</s>", add_bos=True):
+def create_prompt_with_llama2_chat_format(messages, tokenizer, bos="<s>", eos="</s>", add_bos=True):
     '''
     This function is adapted from the official llama2 chat completion script: 
     https://github.com/facebookresearch/llama/blob/7565eb6fee2175b2d4fe2cfb45067a61b35d7f5e/llama/generation.py#L274
@@ -66,7 +66,7 @@ def create_prompt_with_llama2_chat_format(messages, bos="<s>", eos="</s>", add_b
     return formatted_text
 
 
-def create_prompt_with_xwin_chat_format(messages, bos="<s>", eos="</s>", add_bos=True):
+def create_prompt_with_xwin_chat_format(messages, tokenizer, bos="<s>", eos="</s>", add_bos=True):
     '''
     This function is adapted from the official xwin chat completion script:
     https://huggingface.co/Xwin-LM/Xwin-LM-70B-V0.1
@@ -82,7 +82,7 @@ def create_prompt_with_xwin_chat_format(messages, bos="<s>", eos="</s>", add_bos
     return formatted_text
 
 
-def create_prompt_with_zephyr_chat_format(messages, bos="<s>", eos="</s>", add_bos=True):
+def create_prompt_with_zephyr_chat_format(messages, tokenizer, bos="<s>", eos="</s>", add_bos=True):
     '''
     This function is adapted from the official zephyr chat completion script:
     https://huggingface.co/HuggingFaceH4/zephyr-7b-beta
@@ -106,11 +106,11 @@ def create_prompt_with_zephyr_chat_format(messages, bos="<s>", eos="</s>", add_b
                 "Zephyr chat template only supports 'system', 'user' and 'assistant' roles. Invalid role: {}.".format(message["role"])
                 )
     formatted_text += "<|assistant|>\n"
+    return formatted_text    
+
+# helper for just using the huggingface tokenizer
+def create_prompt_with_huggingface_tokenizer_template(messages, tokenizer, add_bos=False):
+    formatted_text = tokenizer.apply_chat_template(messages, tokenize=False)
+    if add_bos:
+        formatted_text = tokenizer.bos_token + formatted_text
     return formatted_text
-
-            
-
-
-
-    
-

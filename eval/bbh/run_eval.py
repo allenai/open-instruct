@@ -67,6 +67,7 @@ def main(args):
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
             )
+            tokenizer = model.llm_engine.tokenizer
         else:
             print("Loading model and tokenizer with huggingface...")
             model, tokenizer = load_hf_lm_and_tokenizer(
@@ -90,7 +91,7 @@ def main(args):
                 for example in task_examples:
                     prompt = task_prompt.strip() + "\n\nQ: " + example["input"]
                     messages = [{"role": "user", "content": prompt}]
-                    prompt = chat_formatting_function(messages, add_bos=False)
+                    prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
                     prompt += "A:" if prompt[-1] in ["\n", " "] else " A:"
                     prompts.append(prompt)
             else:

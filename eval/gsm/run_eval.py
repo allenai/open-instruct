@@ -6,6 +6,7 @@ import random
 import torch
 import vllm
 import evaluate
+from transformers import AutoTokenizer
 from eval.utils import (
     generate_completions,
     load_hf_lm_and_tokenizer,
@@ -64,11 +65,13 @@ def main(args):
     if args.use_chat_format:
         prompts = []
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
-        for example in test_data:
+        def apply_chat_format(example, tokenizer):
             messages = [{"role": "user", "content": prompt_prefix + "Question: " + example["question"].strip()}]
-            prompt = chat_formatting_function(messages, add_bos=False)
+            prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
             prompt += "Answer:" if prompt[-1] in ["\n", " "] else " Answer:"
-            prompts.append(prompt)
+            return prompt
+        for example in test_data:
+            prompts.append(lambda tokenizer: apply_chat_format(example, tokenizer))
     else:
         prompts = [prompt_prefix + "Question: " + example["question"].strip() + "\nAnswer:" for example in test_data]
 
@@ -86,6 +89,7 @@ def main(args):
                 max_tokens=512,
                 stop=["\n"] if not args.use_chat_format else None, # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
             )
+            prompts = [prompt(model.llm_engine.tokenizer) for prompt in prompts]
             # We need to remap the outputs to the prompts because vllm might not return outputs for some prompts (e.g., if the prompt is too long)
             generations = model.generate(prompts, sampling_params)
             prompt_to_output = {
@@ -101,6 +105,7 @@ def main(args):
                 gptq_model=args.gptq,
                 use_fast_tokenizer=not args.use_slow_tokenizer,
             )
+            prompts = [prompt(tokenizer) for prompt in prompts]
             new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1] # get the last token because the tokenizer may add space tokens at the start.
             outputs = generate_completions(
                 model=model,
