@@ -211,10 +211,10 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --save_dir /output/ \
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
-            --metrics judge info mc \
+            --metrics truth info mc \
             --preset qa \
-            --gpt_judge_model_name curie:ft-allennlp:gpt-judge-2023-07-26-09-37-48 \
-            --gpt_info_model_name curie:ft-allennlp:gpt-info-2023-07-26-11-38-18 \
+            --hf_truth_model_name_or_path allenai/truthfulqa-truth-judge-llama2-7B \
+            --hf_info_model_name_or_path allenai/truthfulqa-info-judge-llama2-7B \
             --eval_batch_size 20 \
             --load_in_8bit \
             --use_chat_format \
