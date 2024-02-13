@@ -3,8 +3,14 @@ export CUDA_VISIBLE_DEVICES=0
 
 
 # Evaluating llama 7B model, getting the truth and info scores and multiple choice accuracy
-# To get the truth and info scores, you need to specify the gpt_truth_model_name and gpt_info_model_name,
+
+# To get the truth and info scores, the original TruthfulQA paper trained 2 judge models based on GPT3 curie engine.
+# If you have or trained those judges, you can specify the `gpt_truth_model_name`` and `gpt_info_model_name`,
 # which are the names of the GPT models trained following https://github.com/sylinrl/TruthfulQA#fine-tuning-gpt-3-for-evaluation
+# But recently Openai has deprecated the GPT3 curie engine, so we also provide the option to use the HF models as the judges.
+# The two models provided here are trained based on the llama2 7B model.
+# We have the training details in https://github.com/allenai/truthfulqa_reeval, and verified these two models have similar performance as the original GPT3 judges.
+
 python -m eval.truthfulqa.run_eval \
     --data_dir data/eval/truthfulqa \
     --save_dir results/trutufulqa/llama2-7B \

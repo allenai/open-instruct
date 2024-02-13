@@ -19,7 +19,7 @@ from eval.truthfulqa.utilities import (
     format_best,
     set_columns,
 )
-from eval.truthfulqa.metrics import run_gpt3_classifier_eval, run_hf_classifier_eval, MC_calcs
+from eval.truthfulqa.metrics import run_gpt_classifier_eval, run_hf_classifier_eval, MC_calcs
 from eval.truthfulqa.configs import BEST_COL, ANSWER_COL, INCORRECT_COL
 
 
@@ -185,7 +185,7 @@ def run_hf_model(questions, model, tokenizer, tag, preset="qa", batch_size=1, ma
     prompts = [
         format_prompt(questions.loc[idx], preset, format='general') for idx in questions.index
     ]
-    if chat_formatting_function:
+    if chat_formatting_function is not None:
         for idx, prompt in enumerate(prompts):
             messages = [{"role": "user", "content": prompt}]
             prompts[idx] = chat_formatting_function(messages, tokenizer, add_bos=False)
@@ -195,7 +195,7 @@ def run_hf_model(questions, model, tokenizer, tag, preset="qa", batch_size=1, ma
     stop_sequence = tokenizer.encode("\n\n", add_special_tokens=False)[-2:] 
     completions = generate_completions(
         model, tokenizer, prompts, batch_size=batch_size, max_new_tokens=max_new_tokens,
-        stop_id_sequences=[stop_sequence] if not chat_formatting_function else None, 
+        stop_id_sequences=[stop_sequence] if chat_formatting_function is None else None, 
         do_sample=False,
     )
     assert len(completions) == len(prompts)
@@ -228,7 +228,7 @@ def run_hf_model_mc(questions, model, tokenizer, tag, batch_size=1, preset='qa',
 
         # prompt for all answers
         prompt = format_prompt(questions.loc[idx], preset, format='general')
-        if chat_formatting_function:
+        if chat_formatting_function is not None:
             messages = [{"role": "user", "content": prompt}]
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
             prompt += "A:" if prompt[-1] in ["\n", " "] else " A:"
@@ -334,7 +334,7 @@ def main(args):
             try:
                 if metric == 'truth':
                     if args.gpt_truth_model_name:
-                        questions = run_gpt3_classifier_eval(model_key, 'truth', args.gpt_truth_model_name, questions, info=False)
+                        questions = run_gpt_classifier_eval(model_key, 'truth', args.gpt_truth_model_name, questions, info=False)
                     elif args.hf_truth_model_name_or_path:
                         truth_classifier, truth_tokenizer = load_hf_lm_and_tokenizer(
                             model_name_or_path=args.hf_truth_model_name_or_path, 
@@ -344,7 +344,7 @@ def main(args):
                         questions = run_hf_classifier_eval(model_key, 'truth', truth_classifier, truth_tokenizer, questions, info=False)
                 else:
                     if args.gpt_info_model_name:
-                        questions = run_gpt3_classifier_eval(model_key, 'info', args.gpt_info_model_name, questions, info=True)
+                        questions = run_gpt_classifier_eval(model_key, 'info', args.gpt_info_model_name, questions, info=True)
                     elif args.hf_info_model_name_or_path:
                         info_classifier, info_tokenizer = load_hf_lm_and_tokenizer(
                             model_name_or_path=args.hf_info_model_name_or_path, 
