@@ -122,6 +122,10 @@ RUN pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url h
 RUN pip install packaging
 RUN pip install flash-attn==2.2.2 --no-build-isolation
 RUN pip install -r requirements.txt
+RUN pip install ai2-olmo
+
+# Use v1 of alpaca eval.
+ENV IS_ALPACA_EVAL_2=False
 
 COPY open_instruct open_instruct
 COPY eval eval

@@ -44,6 +44,12 @@ If you'd like to experiment with AI2's [OLMo](https://huggingface.co/allenai/OLM
 pip install ai2-olmo
 ```
 
+If you'd like to run experiments within a Docker environment, you can create one using:
+
+```bash
+docker build --build-arg CUDA=11.8.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 . -t <your tag here>
+```
+
 ## Training
 
 ### Dataset preparation

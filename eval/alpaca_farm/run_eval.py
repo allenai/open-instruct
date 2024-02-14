@@ -20,9 +20,6 @@ def main(args):
     chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
     for example in alpaca_eval_data:
         prompt = example["instruction"]
-        if args.use_chat_format:
-            messages = [{"role": "user", "content": prompt}]
-            prompt = chat_formatting_function(messages, add_bos=False)
         prompts.append(prompt)
 
     if args.model_name_or_path is not None:
@@ -32,10 +29,20 @@ def main(args):
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path is not None else args.model_name_or_path,
                 tensor_parallel_size=torch.cuda.device_count(),
             )
+            tokenizer = model.llm_engine.tokenizer
             sampling_params = vllm.SamplingParams(
                 temperature=0,  # greedy decoding
                 max_tokens=args.max_new_tokens,
             )
+            # apply chat formatting
+            if args.use_chat_format:
+                formatted_prompts = []
+                for prompt in prompts:
+                    messages = [{"role": "user", "content": prompt}]
+                    formatted_prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
+                    formatted_prompts.append(formatted_prompt)
+                prompts = formatted_prompts
+                    
             outputs = model.generate(prompts, sampling_params)
             outputs = [it.outputs[0].text for it in outputs]
         else:
@@ -46,6 +53,14 @@ def main(args):
                 device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                 gptq_model=args.gptq,
             )
+            # apply chat formatting
+            if args.use_chat_format:
+                formatted_prompts = []
+                for prompt in prompts:
+                    messages = [{"role": "user", "content": prompt}]
+                    formatted_prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
+                    formatted_prompts.append(formatted_prompt)
+                prompts = formatted_prompts
             outputs = generate_completions(
                 model=model,
                 tokenizer=tokenizer,
@@ -135,6 +150,11 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="If specified, we will load the tokenizer from here.",
+    )
+    parser.add_argument(
+        "--use_slow_tokenizer",
+        action="store_true",
+        help="If given, we will use the slow tokenizer."
     )
     parser.add_argument(
         "--openai_engine",
