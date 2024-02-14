@@ -38,6 +38,12 @@ If you just want the dependencies for the weight diff script, use:
 pip install -r weight-diff-requirements.txt
 ```
 
+If you'd like to experiment with AI2's [OLMo](https://huggingface.co/allenai/OLMo-7B) models, you should also install:
+
+```bash
+pip install ai2-olmo
+```
+
 ## Training
 
 ### Dataset preparation
