@@ -274,7 +274,7 @@ def encode_with_prompt_completion_format(example, tokenizer, max_seq_length, add
         example_text = example['prompt'] + ' ' + example['completion']
     else:
         example_text = example['prompt'] + example['completion']
-    example_text = example_text + tokenizer.eos_token
+    example_text = example_text + " " + tokenizer.eos_token
     if add_bos:
         example_text = tokenizer.bos_token + example_text
     tokenized_example = tokenizer(example_text, return_tensors='pt', max_length=max_seq_length, truncation=True)
@@ -308,7 +308,7 @@ def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=Fals
             elif message["role"] == "user":
                 message_text += "<|user|>\n" + message["content"].strip() + "\n"
             elif message["role"] == "assistant":
-                message_text += "<|assistant|>\n" + message["content"].strip() + tokenizer.eos_token + "\n"
+                message_text += "<|assistant|>\n" + message["content"].strip() + " " + tokenizer.eos_token + "\n"
             else:
                 raise ValueError("Invalid role: {}".format(message["role"]))
         return message_text
