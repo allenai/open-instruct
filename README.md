@@ -57,7 +57,7 @@ We include a collection of representative instruction datasets in our exploratio
 
 Please check these datasets for licenses and restrictions around their use!
 
-You can also find the processed [Tulu v1](https://huggingface.co/datasets/allenai/tulu-v1-sft-mixture) and [Tulu v2](https://huggingface.co/datasets/allenai/tulu-v2-sft-mixture) SFT datasets on Hugging Face.
+You can also find the processed [Tulu v1](https://huggingface.co/datasets/allenai/tulu-v1-sft-mixture) and [Tulu v2](https://huggingface.co/datasets/allenai/tulu-v2-sft-mixture) SFT datasets on HuggingFace.
 
 ### Model preparation
 
