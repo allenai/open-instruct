@@ -55,6 +55,7 @@ def main(args):
         for example in test_data:
             if instructions_dict is not None:
                 instruction = instructions_dict[example["task_id"]]
+            # return partials that we will finalise once we have the tokenizer.
             prompts.append(lambda tokenizer: apply_chat_format(example, tokenizer, instruction, answer))
     else:
         prompts = [example["prompt"] for example in test_data]
