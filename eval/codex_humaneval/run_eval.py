@@ -42,7 +42,7 @@ def main(args):
             answer = "Here is the function:\n\n```python\n"
             stop_sequences.append("\n```")
         else:
-            print(f"Could not find HumanEvalPack file at {args.data_file_hep}, using default instructions. This will result in significantly worse performance. You can download it at https://hf.co/datasets/bigcode/humanevalpack/blob/main/data/python/data/humanevalpack.jsonl")
+            print(f"Could not find HumanEvalPack file at {args.data_file_hep}, which will result in significantly worse performance. You can download it at https://hf.co/datasets/bigcode/humanevalpack/blob/main/data/python/data/humanevalpack.jsonl")
             instructions_dict = None
             answer = "Here is the completed function:\n\n\n"
 
