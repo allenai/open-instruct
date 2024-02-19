@@ -4,6 +4,7 @@ import json
 import random
 import torch
 import vllm
+from transformers import AutoTokenizer
 from eval.utils import (
     generate_completions, 
     load_hf_lm_and_tokenizer, 
@@ -43,18 +44,18 @@ def main(args):
         else:
             instructions_dict = None
             answer = "Here is the completed function:\n\n\n"
-        
+
+        def apply_chat_format(example, tokenizer, instruction, answer):
+            messages = [{"role": "user", "content": instruction + example["prompt"]}]
+            prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
+            prefix = " " if prompt[-1] in ["\n", " "] else ""
+            return prompt + prefix + answer + example["prompt"]      
+            
         instruction = "Complete the following python function.\n\n\n"
         for example in test_data:
             if instructions_dict is not None:
                 instruction = instructions_dict[example["task_id"]]
-            messages = [{"role": "user", "content": instruction + example["prompt"]}]
-            prompt = chat_formatting_function(messages, add_bos=False)
-            if prompt[-1] in ["\n", " "]:
-                prompt += answer + example["prompt"]
-            else:
-                prompt += " " + answer + example["prompt"]
-            prompts.append(prompt)
+            prompts.append(lambda tokenizer: apply_chat_format(example, tokenizer, instruction, answer))
     else:
         prompts = [example["prompt"] for example in test_data]
         
@@ -73,6 +74,11 @@ def main(args):
                 max_tokens=512,
                 stop=stop_sequences,
             )
+            if args.use_chat_format:
+                formatted_prompts = []
+                for prompt in prompts:
+                    formatted_prompts.append(prompt(model.llm_engine.tokenizer))
+                prompts = formatted_prompts
             generations = model.generate(prompts, sampling_params)
             outputs = [output.text for it in generations for output in it.outputs]
             # Note: early vllm might ignore the first space in the generation, because the processing of _token.
@@ -90,6 +96,14 @@ def main(args):
                 gptq_model=args.gptq,
                 use_fast_tokenizer=not args.use_slow_tokenizer,
             )
+            if args.use_chat_format:
+                formatted_prompts = []
+                for prompt in prompts:
+                    formatted_prompts.append(prompt(model.llm_engine.tokenizer))
+                prompts = formatted_prompts
+
+            # these stop sequences are those mentioned in the codex paper.
+            stop_sequences = ["\nclass", "\ndef", "\n#", "\nif", "\nprint"]
             # Because many tokenizers will treat the word after space differently from the original word alone, 
             # to be consistent, we add a space before tokenization and remove it after tokenization.
             stop_sequences = [tokenizer.encode(" " + x, add_special_tokens=False)[1:] for x in stop_sequences]

@@ -47,6 +47,7 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
             batch_outputs = model.generate(
                 input_ids=batch_input_ids,
                 attention_mask=attention_mask,
+                eos_token_id=tokenizer.eos_token_id,
                 stopping_criteria=[KeyWordsCriteria(stop_id_sequences)] if stop_id_sequences else None,
                 **generation_kwargs
             )
@@ -166,6 +167,7 @@ def score_completions(model, tokenizer, scoring_examples, batch_size=1, aggregat
             tokenized_batch = {
                 key: value.cuda() for key, value in tokenized_batch.items()
             }
+        tokenized_batch.pop("token_type_ids", None)
         outputs = model(**tokenized_batch)
 
         for example_idx, (prompt, example) in enumerate(zip(batch_prompts, batch_examples)):
@@ -219,10 +221,10 @@ def load_hf_lm_and_tokenizer(
         gptq_model=False,
         use_fast_tokenizer=True,
         padding_side="left",
+        token=os.getenv("HF_TOKEN", None)
     ):
     
     from transformers import AutoModelForCausalLM, AutoTokenizer, OPTForCausalLM, GPTNeoXForCausalLM
-
     if gptq_model:
         from auto_gptq import AutoGPTQForCausalLM
         model_wrapper = AutoGPTQForCausalLM.from_quantized(
@@ -233,13 +235,14 @@ def load_hf_lm_and_tokenizer(
         model = AutoModelForCausalLM.from_pretrained(
             model_name_or_path, 
             device_map=device_map, 
-            load_in_8bit=True
+            load_in_8bit=True,
+            token=token
         )
     else:
         if device_map:
-            model = AutoModelForCausalLM.from_pretrained(model_name_or_path, device_map=device_map, torch_dtype=torch_dtype)
+            model = AutoModelForCausalLM.from_pretrained(model_name_or_path, device_map=device_map, torch_dtype=torch_dtype, token=token)
         else:
-            model = AutoModelForCausalLM.from_pretrained(model_name_or_path, torch_dtype=torch_dtype)
+            model = AutoModelForCausalLM.from_pretrained(model_name_or_path, torch_dtype=torch_dtype, token=token)
             if torch.cuda.is_available():
                 model = model.cuda()
         if convert_to_half:
@@ -249,10 +252,10 @@ def load_hf_lm_and_tokenizer(
     if not tokenizer_name_or_path:
         tokenizer_name_or_path = model_name_or_path
     try:
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=use_fast_tokenizer)
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=use_fast_tokenizer, token=token)
     except:
         # some tokenizers (e.g., GPTNeoXTokenizer) don't have the slow or fast version, so we just roll back to the default one
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path)
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, token=token)
     # set padding side to left for batch generation
     tokenizer.padding_side = padding_side
     # set pad token to eos token if pad token is not set (as is the case for llama models)
