@@ -223,12 +223,20 @@ def load_hf_lm_and_tokenizer(
         padding_side="left",
         token=os.getenv("HF_TOKEN", None)
     ):
-    
+
+    # Loading OLMo models from HF requires `trust_remote_code=True`.
+    # TODO: Implement this via command-line flag rather than hardcoded list.
+    trusted_models = ["allenai/OLMo-7B", "allenai/OLMo-7B-Twin-2T", "allenai/OLMo-1B"]
+    if model_name_or_path in trusted_models:
+        trust_remote_code = True
+    else:
+        trust_remote_code = False
+
     from transformers import AutoModelForCausalLM, AutoTokenizer, OPTForCausalLM, GPTNeoXForCausalLM
     if gptq_model:
         from auto_gptq import AutoGPTQForCausalLM
         model_wrapper = AutoGPTQForCausalLM.from_quantized(
-            model_name_or_path, device="cuda:0", use_triton=True
+            model_name_or_path, device="cuda:0", use_triton=True, trust_remote_code=trust_remote_code
         )
         model = model_wrapper.model  
     elif load_in_8bit:
@@ -236,13 +244,25 @@ def load_hf_lm_and_tokenizer(
             model_name_or_path, 
             device_map=device_map, 
             load_in_8bit=True,
-            token=token
+            token=token,
+            trust_remote_code=trust_remote_code
         )
     else:
         if device_map:
-            model = AutoModelForCausalLM.from_pretrained(model_name_or_path, device_map=device_map, torch_dtype=torch_dtype, token=token)
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name_or_path,
+                device_map=device_map,
+                torch_dtype=torch_dtype,
+                token=token,
+                trust_remote_code=trust_remote_code,
+            )
         else:
-            model = AutoModelForCausalLM.from_pretrained(model_name_or_path, torch_dtype=torch_dtype, token=token)
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name_or_path,
+                torch_dtype=torch_dtype,
+                token=token,
+                trust_remote_code=trust_remote_code,
+            )
             if torch.cuda.is_available():
                 model = model.cuda()
         if convert_to_half:

@@ -38,7 +38,14 @@ If you just want the dependencies for the weight diff script, use:
 pip install -r weight-diff-requirements.txt
 ```
 
+If you'd like to experiment with AI2's [OLMo](https://huggingface.co/allenai/OLMo-7B) models, you should also install:
+
+```bash
+pip install ai2-olmo
+```
+
 If you'd like to run experiments within a Docker environment, you can create one using:
+
 ```bash
 docker build --build-arg CUDA=11.8.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 . -t <your tag here>
 ```
