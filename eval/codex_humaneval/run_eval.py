@@ -26,20 +26,39 @@ def main(args):
         test_data = random.sample(test_data, args.max_num_examples)
     print("Number of examples:", len(test_data))
 
+    # these stop sequences are those mentioned in the codex paper.
+    stop_sequences = ["\nclass", "\ndef", "\n#", "\nif", "\nprint"]
+
     if args.use_chat_format:
         prompts = []
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
-        def apply_chat_format(example, tokenizer):
-            messages = [{"role": "user", "content": "Complete the following python function.\n\n\n" + example["prompt"]}]
+        # If available use more realistic instructions from HumanEvalPack (https://hf.co/datasets/bigcode/humanevalpack)
+        if os.path.exists(args.data_file_hep):
+            with open(args.data_file_hep, "r") as f:
+                instructions = [json.loads(l) for l in f]
+                instructions_dict = {
+                    x["task_id"].replace("Python", "HumanEval"): x["instruction"] for x in instructions
+                }
+            answer = "Here is the function:\n\n```python\n"
+            stop_sequences.append("\n```")
+        else:
+            print(f"Could not find HumanEvalPack file at {args.data_file_hep}, which will result in significantly worse performance. You can download it at https://hf.co/datasets/bigcode/humanevalpack/blob/main/data/python/data/humanevalpack.jsonl")
+            instructions_dict = None
+            answer = "Here is the completed function:\n\n\n"
+
+        def apply_chat_format(tokenizer, inst, suffix):
+            messages = [{"role": "user", "content": inst}]
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
-            if prompt[-1] in ["\n", " "]:
-                prompt += "Here is the completed function:\n\n\n" + example["prompt"]
-            else:
-                prompt += " Here is the completed function:\n\n\n" + example["prompt"]
-            return prompt
-        # return partials that we will finalise once we have the tokenizer.
+            prefix = "" if prompt[-1] in ["\n", " "] else " "
+            return prompt + prefix + suffix
+            
+        instruction = "Complete the following python function.\n\n\n"
         for example in test_data:
-            prompts.append(lambda tokenizer: apply_chat_format(example, tokenizer))
+            if instructions_dict is not None:
+                instruction = instructions_dict[example["task_id"]]
+                prompts.append((instruction, answer + example["prompt"]))
+            else:
+                prompts.append((instruction + example["prompt"], answer))   
     else:
         prompts = [example["prompt"] for example in test_data]
         
@@ -53,16 +72,13 @@ def main(args):
             )
             sampling_params = vllm.SamplingParams(
                 n=args.unbiased_sampling_size_n,
-                temperature=args.temperature, 
+                temperature=args.temperature,
                 top_p=0.95,
                 max_tokens=512,
-                stop=["\nclass", "\ndef", "\n#", "\nif", "\nprint"]
+                stop=stop_sequences,
             )
             if args.use_chat_format:
-                formatted_prompts = []
-                for prompt in prompts:
-                    formatted_prompts.append(prompt(model.llm_engine.tokenizer))
-                prompts = formatted_prompts
+                prompts = [apply_chat_format(model.llm_engine.tokenizer, inst, suffix) for (inst, suffix) in prompts]
             generations = model.generate(prompts, sampling_params)
             outputs = [output.text for it in generations for output in it.outputs]
             # Note: early vllm might ignore the first space in the generation, because the processing of _token.
@@ -81,10 +97,7 @@ def main(args):
                 use_fast_tokenizer=not args.use_slow_tokenizer,
             )
             if args.use_chat_format:
-                formatted_prompts = []
-                for prompt in prompts:
-                    formatted_prompts.append(prompt(model.llm_engine.tokenizer))
-                prompts = formatted_prompts
+                prompts = [apply_chat_format(tokenizer, inst, suffix) for (inst, suffix) in prompts]
 
             # these stop sequences are those mentioned in the codex paper.
             stop_sequences = ["\nclass", "\ndef", "\n#", "\nif", "\nprint"]
@@ -161,6 +174,12 @@ if __name__ == "__main__":
         default="data/codex_eval/HumanEval.jsonl.gz",
         help="Path to the HumanEval data file."
     )
+    parser.add_argument(
+        "--data_file_hep", 
+        type=str, 
+        default="data/codex_eval/humanevalpack.jsonl",
+        help="Path to the HumanEvalPack data file."
+    )    
     parser.add_argument(
         "--max_num_examples", 
         type=int, 
