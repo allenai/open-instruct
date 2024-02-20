@@ -50,6 +50,8 @@ If you'd like to run experiments within a Docker environment, you can create one
 docker build --build-arg CUDA=11.8.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 . -t <your tag here>
 ```
 
+If you are internally at AI2, you can use this pre-built beaker image [here](https://beaker.org/im/01HQ1PMA9YCVKXYN6BHP5EYV5E/details).
+
 ## Training
 
 ### Dataset preparation
@@ -61,6 +63,8 @@ We include a collection of representative instruction datasets in our exploratio
 ```
 
 Please check these datasets for licenses and restrictions around their use!
+
+You can also find the processed [Tulu v1](https://huggingface.co/datasets/allenai/tulu-v1-sft-mixture) and [Tulu v2](https://huggingface.co/datasets/allenai/tulu-v2-sft-mixture) SFT datasets on HuggingFace.
 
 ### Model preparation
 
