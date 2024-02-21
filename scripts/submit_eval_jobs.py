@@ -59,7 +59,7 @@ models = [
 
     # other causal models
     # ("hf-opt-7B", "facebook/opt-6.7b", None, "vanilla_lm"),
-    ("olmo_7b_final_dpo", "/net/nfs.cirrascale/allennlp/hamishi/checkpoints/olmo_7b_finetune_dpo", None, "tuned_lm"),
+    # ("finetuned_opt", "01H13EBXSADXXJCRERART90ZKJ", None, "tuned_lm"),
     # (args.model_name, args.location, args.beaker_subfolder, model_type),
 ]
 
