@@ -4,12 +4,12 @@ import json
 import random
 import torch
 import vllm
-from transformers import AutoTokenizer
 from eval.utils import (
     generate_completions, 
     load_hf_lm_and_tokenizer, 
     query_openai_chat_model,
     dynamic_import_function,
+    load_hf_tokenizer,
 )
 from eval.codex_humaneval.data import write_jsonl, read_problems
 from eval.codex_humaneval.evaluation import evaluate_functional_correctness
@@ -70,6 +70,11 @@ def main(args):
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
             )
+            tokenizer = load_hf_tokenizer(
+                model_name_or_path=args.model_name_or_path,
+                tokenizer_name_or_path=args.tokenizer_name_or_path if args.tokenizer_name_or_path is not None else args.model_name_or_path,
+                use_fast_tokenizer=not args.use_slow_tokenizer,
+            )
             sampling_params = vllm.SamplingParams(
                 n=args.unbiased_sampling_size_n,
                 temperature=args.temperature,
@@ -78,7 +83,7 @@ def main(args):
                 stop=stop_sequences,
             )
             if args.use_chat_format:
-                prompts = [apply_chat_format(model.llm_engine.tokenizer, inst, suffix) for (inst, suffix) in prompts]
+                prompts = [apply_chat_format(tokenizer, inst, suffix) for (inst, suffix) in prompts]
             generations = model.generate(prompts, sampling_params)
             outputs = [output.text for it in generations for output in it.outputs]
             # Note: early vllm might ignore the first space in the generation, because the processing of _token.

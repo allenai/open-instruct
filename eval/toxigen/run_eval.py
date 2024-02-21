@@ -14,6 +14,7 @@ from eval.utils import (
     generate_completions,
     load_hf_lm_and_tokenizer,
     query_openai_chat_model,
+    load_hf_tokenizer,
 )
 from eval.utils import dynamic_import_function 
 
@@ -61,7 +62,11 @@ def main(args):
     # Generate the outputs
     if args.model_name_or_path:
         prompts = []
-        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name_or_path if args.model_name_or_path else args.model_name_or_path, use_fast=not args.use_slow_tokenizer)
+        tokenizer = load_hf_tokenizer(
+            model_name_or_path=args.model_name_or_path,
+            tokenizer_name_or_path=args.tokenizer_name_or_path if args.tokenizer_name_or_path is not None else args.model_name_or_path,
+            use_fast_tokenizer=not args.use_slow_tokenizer,
+        )
         for example in examples:
             if args.use_chat_format:
                 messages = [{"role": "user", "content": "Complete the following: " + example["text"]}]

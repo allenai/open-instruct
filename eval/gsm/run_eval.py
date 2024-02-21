@@ -12,6 +12,7 @@ from eval.utils import (
     load_hf_lm_and_tokenizer,
     query_openai_chat_model,
     dynamic_import_function,
+    load_hf_tokenizer
 )
 from eval.gsm.examplars import EXAMPLARS as GSM_EXAMPLARS
 
@@ -79,13 +80,18 @@ def main(args):
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
             )
+            tokenizer = load_hf_tokenizer(
+                model_name_or_path=args.model_name_or_path,
+                tokenizer_name_or_path=args.tokenizer_name_or_path if args.tokenizer_name_or_path is not None else args.model_name_or_path,
+                use_fast_tokenizer=not args.use_slow_tokenizer,
+            )
             sampling_params = vllm.SamplingParams(
                 temperature=0,
                 max_tokens=512,
                 stop=["\n"] if not args.use_chat_format else None, # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
             )
             if args.use_chat_format:
-                prompts = [apply_chat_format(example, model.llm_engine.tokenizer) for example in test_data]
+                prompts = [apply_chat_format(example, tokenizer) for example in test_data]
             else:
                 prompts = [prompt_prefix + "Question: " + example["question"].strip() + "\nAnswer:" for example in test_data]
             # We need to remap the outputs to the prompts because vllm might not return outputs for some prompts (e.g., if the prompt is too long)

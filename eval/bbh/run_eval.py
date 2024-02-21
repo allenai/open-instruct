@@ -13,6 +13,7 @@ from eval.utils import (
     generate_completions,
     query_openai_chat_model,
     dynamic_import_function,
+    load_hf_tokenizer
 )
 
 
@@ -67,7 +68,11 @@ def main(args):
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
             )
-            tokenizer = model.llm_engine.tokenizer
+            tokenizer = load_hf_tokenizer(
+                model_name_or_path=args.model_name_or_path,
+                tokenizer_name_or_path=args.tokenizer_name_or_path if args.tokenizer_name_or_path is not None else args.model_name_or_path,
+                use_fast_tokenizer=not args.use_slow_tokenizer,
+            )
         else:
             print("Loading model and tokenizer with huggingface...")
             model, tokenizer = load_hf_lm_and_tokenizer(

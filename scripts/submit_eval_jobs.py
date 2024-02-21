@@ -13,7 +13,7 @@ parser.add_argument("--workspace", type=str, default="hamishivi")
 parser.add_argument("--model_name", type=str, default="hf-opt-7B")
 parser.add_argument("--location", type=str, default=None)
 parser.add_argument("--beaker_subfolder", type=str, default=None)
-parser.add_argument("--cluster", type=str, default="ai2/allennlp-cirrascale")
+parser.add_argument("--cluster", type=str, default="")
 parser.add_argument("--is_tuned", action="store_true")
 parser.add_argument("--use_hf_tokenizer_template", action="store_true")
 args = parser.parse_args()
@@ -27,10 +27,9 @@ with open("beaker_configs/default_eval.yaml", 'r') as f:
 d1 = yaml.load(default_yaml, Loader=yaml.FullLoader)
 
 cluster = args.cluster
-num_gpus = args.num_gpus
-d1['tasks'][0]['context']['cluster'] = cluster
-d1['tasks'][0]['context']['priority'] = "high"
-d1['tasks'][0]['resources']['gpuCount'] = num_gpus
+d1['tasks'][0]['constraints']['cluster'] = ["ai2/allennlp-cirrascale", "ai2/general-cirrascale", "ai2/general-cirrascale-a100-80g-ib", "ai2/mosaic-cirrascale-a100", "ai2/s2-cirrascale-l40"]
+d1['tasks'][0]['context']['priority'] = "preemptible"
+d1['tasks'][0]['resources']['gpuCount'] = 1
 
 # modify here for different set of experiments
 experiment_groups = [
@@ -57,8 +56,8 @@ models = [
 
     # other causal models
     # ("hf-opt-7B", "facebook/opt-6.7b", None, "vanilla_lm"),
-    # ("finetuned_opt", "01H13EBXSADXXJCRERART90ZKJ", None, "tuned_lm"),
-    (args.model_name, args.location, args.beaker_subfolder, model_type),
+    ("olmo_7b_final_dpo", "/net/nfs.cirrascale/allennlp/hamishi/checkpoints/olmo_7b_finetune_dpo", None, "tuned_lm"),
+    # (args.model_name, args.location, args.beaker_subfolder, model_type),
 ]
 
 #--------------- experiments about number of supervision tasks -------------------------
@@ -240,6 +239,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --tokenizer_name_or_path /model \
             --save_dir /output/ \
             --use_chat_format \
+            --max_new_tokens 2048 \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''
     else:
@@ -329,7 +329,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
     elif "olmo" in model_info[0]:
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
             "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
-            "--chat_formatting_function eval.templates.create_prompt_with_olmo_chat_format")
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format_force_bos")
         ]
         # no vllm for olmo yet
         if "--use_vllm" in d['tasks'][0]['arguments'][0]:

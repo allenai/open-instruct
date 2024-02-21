@@ -7,8 +7,7 @@ import torch
 import datasets
 import vllm
 from alpaca_eval import evaluate as alpaca_farm_evaluate
-from eval.utils import query_openai_chat_model, query_openai_model, generate_completions, dynamic_import_function, load_hf_lm_and_tokenizer
-from transformers import AutoTokenizer
+from eval.utils import query_openai_chat_model, query_openai_model, generate_completions, dynamic_import_function, load_hf_lm_and_tokenizer, load_hf_tokenizer
 
 def main(args):
     random.seed(42)
@@ -29,7 +28,11 @@ def main(args):
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path is not None else args.model_name_or_path,
                 tensor_parallel_size=torch.cuda.device_count(),
             )
-            tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name_or_path if args.model_name_or_path else args.model_name_or_path, use_fast=not args.use_slow_tokenizer)
+            tokenizer = load_hf_tokenizer(
+                model_name_or_path=args.model_name_or_path,
+                tokenizer_name_or_path=args.tokenizer_name_or_path if args.tokenizer_name_or_path is not None else args.model_name_or_path,
+                use_fast_tokenizer=not args.use_slow_tokenizer,
+            )
             sampling_params = vllm.SamplingParams(
                 temperature=0,  # greedy decoding
                 max_tokens=args.max_new_tokens,
