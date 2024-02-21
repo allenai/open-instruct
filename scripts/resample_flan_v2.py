@@ -10,12 +10,18 @@ if __name__ == "__main__":
     parser.add_argument("--total_num_samples", type=int, default=50000)
     parser.add_argument("--output_path", type=str, default="data/raw_train/flan_v2/flan_v2_50k.jsonl")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--mixing_portions",
+        choices=["flan_v1", "flan_v2"],
+        default="flan_v2",
+        help="Mixing weights for flan subsets.",
+    )
     args = parser.parse_args()
     random.seed(args.seed)
 
     # The following portions are based on the flan_v2 code: https://github.com/google-research/FLAN/blob/main/flan/v2/run_example.py
     # This is used to build tulu mixture v1.
-    portions = {
+    portions_v1 = {
         "flan_zsopt": 0.1,
         "flan_fsopt": 0.1,
         "flan_zsnoopt": 0.1,
@@ -34,7 +40,7 @@ if __name__ == "__main__":
 
     # For tulu mixture v2, for only keep the few shot ones since those zero-shot outputs might not be optimal in terms of styles.
     # We also remove dialog since it might be too easy for LLMs.
-    portions = {
+    portions_v2 = {
         "flan_zsopt": 0,
         "flan_fsopt": 0.2,
         "flan_zsnoopt": 0,
@@ -50,6 +56,9 @@ if __name__ == "__main__":
         "dialog_zsopt": 0,
         "dialog_fsopt": 0,
     }
+
+    portions_lookup = {"flan_v1": portions_v1, "flan_v2": portions_v2}
+    portions = portions_lookup[args.mixing_portions]
 
     assert sum(portions.values()) == 1.0
 
