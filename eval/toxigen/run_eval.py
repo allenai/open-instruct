@@ -61,9 +61,9 @@ def main(args):
     # Generate the outputs
     if args.model_name_or_path:
         prompts = []
+        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name_or_path if args.model_name_or_path else args.model_name_or_path, use_fast=not args.use_slow_tokenizer)
         for example in examples:
             if args.use_chat_format:
-                tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name_or_path if args.model_name_or_path else args.model_name_or_path, use_fast=not args.use_slow_tokenizer)
                 messages = [{"role": "user", "content": "Complete the following: " + example["text"]}]
                 chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
                 prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
