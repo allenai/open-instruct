@@ -66,6 +66,12 @@ def parse_args():
         required=False,
     )
     parser.add_argument(
+        "--model_revision",
+        help="If given, specifies a model revision. This will be applied to the config and tokenizer as well as the model.",
+        default="main",
+        required=False,
+    )
+    parser.add_argument(
         "--config_name",
         type=str,
         default=None,
@@ -371,7 +377,7 @@ def save_with_accelerate(accelerator, model, tokenizer, output_dir, args):
             output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save, state_dict=state_dict,
             safe_serialization=False
         )
-        
+
 
 def main():
     args = parse_args()
@@ -436,18 +442,18 @@ def main():
 
     # Load pretrained model and tokenizer
     if args.config_name:
-        config = AutoConfig.from_pretrained(args.config_name, trust_remote_code=args.trust_remote_code)
+        config = AutoConfig.from_pretrained(args.config_name, trust_remote_code=args.trust_remote_code, revision=args.model_revision)
     elif args.model_name_or_path:
-        config = AutoConfig.from_pretrained(args.model_name_or_path, trust_remote_code=args.trust_remote_code)
+        config = AutoConfig.from_pretrained(args.model_name_or_path, trust_remote_code=args.trust_remote_code, revision=args.model_revision)
     else:
         raise ValueError(
             "You are instantiating a new config instance from scratch. This is not supported by this script."
         )
 
     if args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, trust_remote_code=args.trust_remote_code, use_fast=not args.use_slow_tokenizer)
+        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, trust_remote_code=args.trust_remote_code, use_fast=not args.use_slow_tokenizer, revision=args.model_revision)
     elif args.model_name_or_path:
-        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=args.trust_remote_code, use_fast=not args.use_slow_tokenizer)
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=args.trust_remote_code, use_fast=not args.use_slow_tokenizer, revision=args.model_revision)
     else:
         raise ValueError(
             "You are instantiating a new tokenizer from scratch. This is not supported by this script."
@@ -474,6 +480,7 @@ def main():
                 trust_remote_code=args.trust_remote_code,
                 torch_dtype=torch.bfloat16,
                 use_flash_attention_2=True if args.use_flash_attn else False,
+                revision=args.model_revision
             )
         else:
             model = AutoModelForCausalLM.from_pretrained(
@@ -483,6 +490,7 @@ def main():
                 trust_remote_code=args.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 use_flash_attention_2=True if args.use_flash_attn else False,
+                revision=args.model_revision
             )
     else:
         logger.info("Training new model from scratch")
