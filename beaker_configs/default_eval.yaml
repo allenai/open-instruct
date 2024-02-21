@@ -1,9 +1,10 @@
 version: v2
 description: open-instruct-eval-default
+budget: ai2/oe-adapt
 tasks:
   - name: open-instruct-eval-default
     image:
-      beaker: Yizhongw03/open-instruct
+      beaker: hamishivi/tokenizer-eval-fix-test
     command: [
       '/bin/sh', '-c'
     ]
@@ -49,6 +50,7 @@ tasks:
       path: /output
     resources:
       gpuCount: 1
+    constraints:
+      cluster: ai2/allennlp-cirrascale
     context:
-      cluster: ai2/general-cirrascale
       priority: high
