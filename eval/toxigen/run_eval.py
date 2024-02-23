@@ -12,7 +12,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from eval.utils import (
     generate_completions,
-    load_hf_lm_and_tokenizer,
+    load_hf_lm,
     query_openai_chat_model,
     load_hf_tokenizer,
 )
@@ -95,7 +95,7 @@ def main(args):
             del model  # free up GPU memory to load the classifier later.
         else:
             print("Loading model and tokenizer for generations...")
-            model, tokenizer = load_hf_lm_and_tokenizer(
+            model = load_hf_lm(
                 model_name_or_path=args.model_name_or_path,
                 tokenizer_name_or_path=args.tokenizer_name_or_path if args.model_name_or_path else args.model_name_or_path,
                 load_in_8bit=args.load_in_8bit,
@@ -103,6 +103,10 @@ def main(args):
                 gptq_model=args.gptq,
                 use_fast_tokenizer=not args.use_slow_tokenizer,
             )
+            from transfomers import GPTNeoXForCausalLM, OPTForCausalLM
+            if isinstance(model, GPTNeoXForCausalLM) or isinstance(model, OPTForCausalLM):
+                tokenizer.model_max_length = model.config.max_position_embeddings
+                print("Set tokenizer.model_max_length to model.config.max_position_embeddings: {}".format(model.config.max_position_embeddings))
             new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1]
             outputs = generate_completions(
                 model=model,
