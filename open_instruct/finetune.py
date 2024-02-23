@@ -443,18 +443,36 @@ def main():
 
     # Load pretrained model and tokenizer
     if args.config_name:
-        config = AutoConfig.from_pretrained(args.config_name, trust_remote_code=args.trust_remote_code, revision=args.model_revision)
+        config = AutoConfig.from_pretrained(
+            args.config_name,
+            trust_remote_code=args.trust_remote_code,
+            revision=args.model_revision,
+        )
     elif args.model_name_or_path:
-        config = AutoConfig.from_pretrained(args.model_name_or_path, trust_remote_code=args.trust_remote_code, revision=args.model_revision)
+        config = AutoConfig.from_pretrained(
+            args.model_name_or_path,
+            trust_remote_code=args.trust_remote_code,
+            revision=args.model_revision,
+        )
     else:
         raise ValueError(
             "You are instantiating a new config instance from scratch. This is not supported by this script."
         )
 
     if args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, trust_remote_code=args.trust_remote_code, use_fast=not args.use_slow_tokenizer, revision=args.model_revision)
+        tokenizer = AutoTokenizer.from_pretrained(
+            args.tokenizer_name,
+            trust_remote_code=args.trust_remote_code,
+            use_fast=not args.use_slow_tokenizer,
+            revision=args.model_revision,
+        )
     elif args.model_name_or_path:
-        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=args.trust_remote_code, use_fast=not args.use_slow_tokenizer, revision=args.model_revision)
+        tokenizer = AutoTokenizer.from_pretrained(
+            args.model_name_or_path,
+            trust_remote_code=args.trust_remote_code,
+            use_fast=not args.use_slow_tokenizer,
+            revision=args.model_revision,
+        )
     else:
         raise ValueError(
             "You are instantiating a new tokenizer from scratch. This is not supported by this script."
