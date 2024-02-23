@@ -67,7 +67,8 @@ def parse_args():
     )
     parser.add_argument(
         "--model_revision",
-        help="If given, specifies a model revision. This will be applied to the config and tokenizer as well as the model.",
+        help="""If given, specifies a model revision (for HuggingFace models). This will 
+        be applied to all model components, including config and tokenizer.""",
         default="main",
         required=False,
     )
@@ -495,7 +496,6 @@ def main():
     else:
         logger.info("Training new model from scratch")
         model = AutoModelForCausalLM.from_config(config)
-
 
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
