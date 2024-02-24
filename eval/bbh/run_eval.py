@@ -62,7 +62,7 @@ def main(args):
     if args.model_name_or_path:
         tokenizer = load_hf_tokenizer(
             model_name_or_path=args.model_name_or_path,
-            tokenizer_name_or_path=args.tokenizer_name_or_path if args.tokenizer_name_or_path is not None else args.model_name_or_path,
+            tokenizer_name_or_path=args.tokenizer_name_or_path,
             use_fast_tokenizer=not args.use_slow_tokenizer,
         )
         if args.use_vllm:
