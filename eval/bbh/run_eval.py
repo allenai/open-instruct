@@ -102,7 +102,7 @@ def main(args):
                 sampling_params = vllm.SamplingParams(
                     temperature=0,
                     max_tokens=512,
-                    stop=["\n\n"] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
+                    stop=["\n\n"],
                 )
                 # We need to remap the outputs to the prompts because vllm might not return outputs for some prompts (e.g., if the prompt is too long)
                 generations = model.generate(prompts, sampling_params)
@@ -120,7 +120,7 @@ def main(args):
                     max_new_tokens=512,
                     temperature=0,
                     batch_size=args.eval_batch_size if args.eval_batch_size else 1,
-                    stop_id_sequences=[[stop_sequence]] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
+                    stop_id_sequences=[[stop_sequence]],
                 )
         else:
             instances = []

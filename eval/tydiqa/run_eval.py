@@ -224,7 +224,17 @@ def main(args):
         lang_references = [{"id": example["id"], "answers": example["answers"]} for example in test_data if example["lang"] == lang]
         eval_scores[lang] = metric.compute(predictions=lang_predictions, references=lang_references)
 
-    eval_scores["average"] = {metric: np.mean([scores[metric] for scores in eval_scores.values()]) for metric in ["f1", "exact_match"]}
+    print("Calculating recall ...")
+    for lang in data_languages:
+        lang_predictions = [output for example, output in zip(test_data, outputs) if example["lang"] == lang]
+        lang_references = [example["answers"] for example in test_data if example["lang"] == lang]
+        recalls = []
+        for pred, refs in zip(lang_predictions, lang_references):
+            recall = 100.0 if any([ref['text'].strip().lower() in pred.strip().lower() for ref in refs]) else 0.0
+            recalls.append(recall)
+        eval_scores[lang]['recall'] = np.mean(recalls)
+
+    eval_scores["average"] = {metric: np.mean([scores[metric] for scores in eval_scores.values()]) for metric in ["f1", "exact_match", "recall"]}
 
     print("Scores:")
     print(json.dumps(eval_scores, indent=4))
