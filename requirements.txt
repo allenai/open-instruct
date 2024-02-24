@@ -35,4 +35,3 @@ alpaca-eval==0.5.3
 flask
 vllm 
 openpyxl
-scikit-learn
