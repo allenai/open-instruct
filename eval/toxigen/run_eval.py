@@ -97,11 +97,9 @@ def main(args):
             print("Loading model and tokenizer for generations...")
             model = load_hf_lm(
                 model_name_or_path=args.model_name_or_path,
-                tokenizer_name_or_path=args.tokenizer_name_or_path if args.model_name_or_path else args.model_name_or_path,
                 load_in_8bit=args.load_in_8bit,
                 device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                 gptq_model=args.gptq,
-                use_fast_tokenizer=not args.use_slow_tokenizer,
             )
             from transformers import GPTNeoXForCausalLM, OPTForCausalLM
             if isinstance(model, GPTNeoXForCausalLM) or isinstance(model, OPTForCausalLM):
