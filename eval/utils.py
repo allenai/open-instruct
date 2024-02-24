@@ -318,7 +318,7 @@ def load_hf_lm_and_tokenizer(
             gptq_model=gptq_model,
             token=token,
         )
-        from transfomers import GPTNeoXForCausalLM, OPTForCausalLM
+        from transformers import GPTNeoXForCausalLM, OPTForCausalLM
         if isinstance(model, GPTNeoXForCausalLM) or isinstance(model, OPTForCausalLM):
             tokenizer.model_max_length = model.config.max_position_embeddings
             print("Set tokenizer.model_max_length to model.config.max_position_embeddings: {}".format(model.config.max_position_embeddings))
