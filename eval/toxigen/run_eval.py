@@ -12,8 +12,9 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from eval.utils import (
     generate_completions,
-    load_hf_lm_and_tokenizer,
+    load_hf_lm,
     query_openai_chat_model,
+    load_hf_tokenizer,
 )
 from eval.utils import dynamic_import_function 
 
@@ -61,9 +62,13 @@ def main(args):
     # Generate the outputs
     if args.model_name_or_path:
         prompts = []
+        tokenizer = load_hf_tokenizer(
+            model_name_or_path=args.model_name_or_path,
+            tokenizer_name_or_path=args.tokenizer_name_or_path,
+            use_fast_tokenizer=not args.use_slow_tokenizer,
+        )
         for example in examples:
             if args.use_chat_format:
-                tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name_or_path if args.model_name_or_path else args.model_name_or_path, use_fast=not args.use_slow_tokenizer)
                 messages = [{"role": "user", "content": "Complete the following: " + example["text"]}]
                 chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
                 prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
@@ -90,14 +95,16 @@ def main(args):
             del model  # free up GPU memory to load the classifier later.
         else:
             print("Loading model and tokenizer for generations...")
-            model, tokenizer = load_hf_lm_and_tokenizer(
+            model = load_hf_lm(
                 model_name_or_path=args.model_name_or_path,
-                tokenizer_name_or_path=args.tokenizer_name_or_path if args.model_name_or_path else args.model_name_or_path,
                 load_in_8bit=args.load_in_8bit,
                 device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                 gptq_model=args.gptq,
-                use_fast_tokenizer=not args.use_slow_tokenizer,
             )
+            from transformers import GPTNeoXForCausalLM, OPTForCausalLM
+            if isinstance(model, GPTNeoXForCausalLM) or isinstance(model, OPTForCausalLM):
+                tokenizer.model_max_length = model.config.max_position_embeddings
+                print("Set tokenizer.model_max_length to model.config.max_position_embeddings: {}".format(model.config.max_position_embeddings))
             new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1]
             outputs = generate_completions(
                 model=model,

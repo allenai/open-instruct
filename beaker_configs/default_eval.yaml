@@ -1,5 +1,6 @@
 version: v2
 description: open-instruct-eval-default
+budget: ai2/oe-adapt
 tasks:
   - name: open-instruct-eval-default
     image:
@@ -49,6 +50,7 @@ tasks:
       path: /output
     resources:
       gpuCount: 1
+    constraints:
+      cluster: ai2/allennlp-cirrascale
     context:
-      cluster: ai2/general-cirrascale
       priority: high

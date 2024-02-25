@@ -13,9 +13,10 @@ parser.add_argument("--workspace", type=str, default="hamishivi")
 parser.add_argument("--model_name", type=str, default="hf-opt-7B")
 parser.add_argument("--location", type=str, default=None)
 parser.add_argument("--beaker_subfolder", type=str, default=None)
-parser.add_argument("--cluster", type=str, default="ai2/allennlp-cirrascale")
+parser.add_argument("--cluster", nargs='+', default=["ai2/allennlp-cirrascale", "ai2/general-cirrascale", "ai2/general-cirrascale-a100-80g-ib", "ai2/mosaic-cirrascale-a100", "ai2/s2-cirrascale-l40"])
 parser.add_argument("--is_tuned", action="store_true")
 parser.add_argument("--use_hf_tokenizer_template", action="store_true")
+parser.add_argument("--priority", type=str, default="preemptible")
 args = parser.parse_args()
 
 
@@ -27,10 +28,11 @@ with open("beaker_configs/default_eval.yaml", 'r') as f:
 d1 = yaml.load(default_yaml, Loader=yaml.FullLoader)
 
 cluster = args.cluster
-num_gpus = args.num_gpus
-d1['tasks'][0]['context']['cluster'] = cluster
-d1['tasks'][0]['context']['priority'] = "high"
-d1['tasks'][0]['resources']['gpuCount'] = num_gpus
+if cluster[0] == "all":
+    cluster = []  # empty list means all clusters
+d1['tasks'][0]['constraints']['cluster'] = cluster
+d1['tasks'][0]['context']['priority'] = args.priority
+d1['tasks'][0]['resources']['gpuCount'] = 1
 
 # modify here for different set of experiments
 experiment_groups = [

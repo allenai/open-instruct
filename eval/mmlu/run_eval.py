@@ -3,12 +3,11 @@ import os
 import torch
 import numpy as np
 import pandas as pd
-import time
 import json
 from tqdm import tqdm
 import time
 from eval.mmlu.categories import subcategories, categories
-from eval.utils import get_next_word_predictions, load_hf_lm_and_tokenizer, query_openai_chat_model, dynamic_import_function
+from eval.utils import get_next_word_predictions, load_hf_tokenizer, load_hf_lm, query_openai_chat_model, dynamic_import_function
 
 
 choices = ["A", "B", "C", "D"]
@@ -148,14 +147,21 @@ def main(args):
 
     if args.model_name_or_path:
         print("Loading model and tokenizer...")
-        model, tokenizer = load_hf_lm_and_tokenizer(
-            model_name_or_path=args.model_name_or_path, 
+        tokenizer = load_hf_tokenizer(
+            model_name_or_path=args.model_name_or_path,
             tokenizer_name_or_path=args.tokenizer_name_or_path,
+            use_fast_tokenizer=not args.use_slow_tokenizer,
+        )
+        model = load_hf_lm(
+            model_name_or_path=args.model_name_or_path, 
             load_in_8bit=args.load_in_8bit, 
             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
             gptq_model=args.gptq,
-            use_fast_tokenizer=not args.use_slow_tokenizer,
         )
+        from transformers import GPTNeoXForCausalLM, OPTForCausalLM
+        if isinstance(model, GPTNeoXForCausalLM) or isinstance(model, OPTForCausalLM):
+            tokenizer.model_max_length = model.config.max_position_embeddings
+            print("Set tokenizer.model_max_length to model.config.max_position_embeddings: {}".format(model.config.max_position_embeddings))
     
     subjects = sorted(
         [

@@ -4,12 +4,12 @@ import json
 import random
 import torch
 import vllm
-from transformers import AutoTokenizer
 from eval.utils import (
     generate_completions, 
-    load_hf_lm_and_tokenizer, 
+    load_hf_lm, 
     query_openai_chat_model,
     dynamic_import_function,
+    load_hf_tokenizer,
 )
 from eval.codex_humaneval.data import write_jsonl, read_problems
 from eval.codex_humaneval.evaluation import evaluate_functional_correctness
@@ -63,6 +63,11 @@ def main(args):
         prompts = [example["prompt"] for example in test_data]
         
     if args.model_name_or_path:
+        tokenizer = load_hf_tokenizer(
+            model_name_or_path=args.model_name_or_path,
+            tokenizer_name_or_path=args.tokenizer_name_or_path,
+            use_fast_tokenizer=not args.use_slow_tokenizer,
+        )
         if args.use_vllm:
             model = vllm.LLM(
                 model=args.model_name_or_path,
@@ -78,7 +83,7 @@ def main(args):
                 stop=stop_sequences,
             )
             if args.use_chat_format:
-                prompts = [apply_chat_format(model.llm_engine.tokenizer, inst, suffix) for (inst, suffix) in prompts]
+                prompts = [apply_chat_format(tokenizer, inst, suffix) for (inst, suffix) in prompts]
             generations = model.generate(prompts, sampling_params)
             outputs = [output.text for it in generations for output in it.outputs]
             # Note: early vllm might ignore the first space in the generation, because the processing of _token.
@@ -87,15 +92,18 @@ def main(args):
             outputs = [output for output in outputs]
         else:
             print("Loading model and tokenizer...")
-            model, tokenizer = load_hf_lm_and_tokenizer(
+            model = load_hf_lm(
                 model_name_or_path=args.model_name_or_path, 
-                tokenizer_name_or_path=args.tokenizer_name_or_path, 
                 load_in_8bit=args.load_in_8bit, 
                 # device map is determined by the number of gpus available.
                 device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                 gptq_model=args.gptq,
-                use_fast_tokenizer=not args.use_slow_tokenizer,
             )
+            from transformers import GPTNeoXForCausalLM, OPTForCausalLM
+            if isinstance(model, GPTNeoXForCausalLM) or isinstance(model, OPTForCausalLM):
+                tokenizer.model_max_length = model.config.max_position_embeddings
+                print("Set tokenizer.model_max_length to model.config.max_position_embeddings: {}".format(model.config.max_position_embeddings))
+            
             if args.use_chat_format:
                 prompts = [apply_chat_format(tokenizer, inst, suffix) for (inst, suffix) in prompts]
 
