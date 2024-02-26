@@ -4,7 +4,7 @@ This script is used to get models' predictions on a set of prompts (put in files
 with the prompt in a `prompt` field or the conversation history in a `messages` field).
 
 For example, to get predictions on a set of prompts, you should put them in a file with the following format:
-    {"id": <uniq_id>, "prompt": "Plan a trip to Paris."}
+    {"id": <uniq_id>, args.prompt_key: "Plan a trip to Paris."}
     ...
 Or you can use the messages format:
     {"id": <uniq_id>, "messages": [{"role": "user", "content": "Plan a trip to Paris."}]}
@@ -23,10 +23,19 @@ Then you can run this script with the following command:
 import argparse
 import json
 import os
+import sys
 import vllm
 import torch
-from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model, dynamic_import_function
 
+from huggingface_hub.commands.user import login; login(token="<your key>")
+print("loggedin!")
+print(os.getcwd())
+
+print("Command-line arguments:")
+for arg in sys.argv[1:]:
+    print(arg)
+print("done###########")
+from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model, dynamic_import_function
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -64,6 +73,10 @@ def parse_args():
         default=1,
         help="batch size for prediction.")
     parser.add_argument(
+        "--load_in_4bit",
+        action="store_true",
+        help="load model in 4bit mode, which will reduce memory and speed up inference.")
+    parser.add_argument(
         "--load_in_8bit",
         action="store_true",
         help="load model in 8bit mode, which will reduce memory and speed up inference.")
@@ -90,6 +103,11 @@ def parse_args():
         type=str, 
         default="eval.templates.create_prompt_with_tulu_chat_format", 
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
+    )
+    parser.add_argument(
+        "--prompt_key", 
+        type=str, 
+        default="prompt", 
     )
     parser.add_argument(
         "--max_new_tokens",
@@ -141,20 +159,21 @@ if __name__ == "__main__":
                 assert all("role" in message and "content" in message for message in instance["messages"]), \
                     "Each message should have a `role` and a `content` field."
                 prompt = eval(args.chat_formatting_function)(instance["messages"], add_bos=False)
-            elif "prompt" in instance:
+            elif args.prompt_key in instance:
                 if args.use_chat_format:
-                    messages = [{"role": "user", "content": instance["prompt"]}]
+                    messages = [{"role": "user", "content": instance[args.prompt_key]}]
                     prompt = chat_formatting_function(messages, add_bos=False)
                 else:
-                    prompt = instance["prompt"]
+                    prompt = instance[args.prompt_key]
             else:
                 raise ValueError("Either `messages` or `prompt` should be in the instance.")
             prompts.append(prompt)
+            # print(prompt)
         if args.use_vllm:
             model = vllm.LLM(
                 model=args.model_name_or_path,
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
-                tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
+                tokenizer_mode="slow" if args.use_slow_tokenizer else "auto"
             )
             sampling_params = vllm.SamplingParams(
                 temperature=args.temperature if args.do_sample else 0, 
@@ -167,7 +186,7 @@ if __name__ == "__main__":
             model, tokenizer = load_hf_lm_and_tokenizer(
                 model_name_or_path=args.model_name_or_path, 
                 tokenizer_name_or_path=args.tokenizer_name_or_path,
-                load_in_8bit=args.load_in_8bit, 
+                load_in_4bit=args.load_in_4bit, 
                 device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                 gptq_model=args.gptq,
                 use_fast_tokenizer=not args.use_slow_tokenizer,
@@ -185,6 +204,8 @@ if __name__ == "__main__":
         with open(args.output_file, "w") as f:
             for instance, output in zip(instances, outputs):
                 instance["output"] = output
+                # print(instance)
+                # input()
                 f.write(json.dumps(instance) + "\n")
                 
     elif args.openai_engine is not None:

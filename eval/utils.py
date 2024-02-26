@@ -45,7 +45,8 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
             batch_input_ids = batch_input_ids.cuda()
             attention_mask = attention_mask.cuda()
 
-        try:
+        if True:
+        #try:
             batch_outputs = model.generate(
                 input_ids=batch_input_ids,
                 attention_mask=attention_mask,
@@ -73,13 +74,13 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
             batch_generations = [
                 output[len(prompt):] for prompt, output in zip(batch_prompts, batch_outputs)
             ]
-        except Exception as e:
-            print("Error when generating completions for batch:")
-            print(batch_prompts)
-            print("Error message:")
-            print(e)
-            print("Use empty string as the completion.")
-            batch_generations = [""] * len(batch_prompts) * num_return_sequences
+        #except Exception as e:
+        #    print("Error when generating completions for batch:")
+        #    print(batch_prompts)
+        #    print("Error message:")
+        #    print(e)
+        #    print("Use empty string as the completion.")
+        #    batch_generations = [""] * len(batch_prompts) * num_return_sequences
 
         generations += batch_generations
 
@@ -191,7 +192,7 @@ def load_hf_lm_and_tokenizer(
         tokenizer_name_or_path=None, 
         device_map="auto", 
         torch_dtype="auto",
-        load_in_8bit=False, 
+        load_in_4bit=False, 
         convert_to_half=False,
         gptq_model=False,
         use_fast_tokenizer=True,
@@ -206,11 +207,11 @@ def load_hf_lm_and_tokenizer(
             model_name_or_path, device="cuda:0", use_triton=True
         )
         model = model_wrapper.model  
-    elif load_in_8bit:
+    elif load_in_4bit:
         model = AutoModelForCausalLM.from_pretrained(
             model_name_or_path, 
             device_map=device_map, 
-            load_in_8bit=True
+            load_in_4bit=True
         )
     else:
         if device_map:
