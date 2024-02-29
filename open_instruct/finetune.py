@@ -169,7 +169,7 @@ def parse_args():
         "--warmup_ratio", type=float, default=0, help="Ratio of total training steps used for warmup."
     )
     parser.add_argument("--output_dir", type=str, default=None, help="Where to store the final model.")
-    parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
+    parser.add_argument("--seed", type=int, default=42, help="A seed for reproducible training.")
     parser.add_argument(
         "--preprocessing_num_workers",
         type=int,
