@@ -66,17 +66,17 @@ def parse_args():
         required=False,
     )
     parser.add_argument(
-        "--model_revision",
-        help="""If given, specifies a model revision (for HuggingFace models). This will 
-        be applied to all model components, including config and tokenizer.""",
-        default="main",
-        required=False,
-    )
-    parser.add_argument(
         "--config_name",
         type=str,
         default=None,
         help="Pretrained config name or path if not the same as model_name",
+    )
+    parser.add_argument(
+        "--model_revision",
+        help="""If given, specifies a model revision (for HuggingFace models). This will 
+        be applied to both the `model_name_or_path` and `config_name` args.""",
+        default="main",
+        required=False,
     )
     parser.add_argument(
         "--use_lora",
@@ -111,6 +111,15 @@ def parse_args():
         type=str,
         default=None,
         help="Pretrained tokenizer name or path if not the same as model_name",
+    )
+    parser.add_argument(
+        "--tokenizer_revision",
+        help="""Specifies a revision for the tokenizer. If not given, defaults
+             to the value of the `model_revision` arg. In most cases, the tokenizer
+             revision should be the same as the model revision and this flag shouldn't
+             be needed.""",
+        default=None,
+        required=False,
     )
     parser.add_argument(
         "--use_slow_tokenizer",
@@ -160,7 +169,7 @@ def parse_args():
         "--warmup_ratio", type=float, default=0, help="Ratio of total training steps used for warmup."
     )
     parser.add_argument("--output_dir", type=str, default=None, help="Where to store the final model.")
-    parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
+    parser.add_argument("--seed", type=int, default=42, help="A seed for reproducible training.")
     parser.add_argument(
         "--preprocessing_num_workers",
         type=int,
@@ -459,19 +468,32 @@ def main():
             "You are instantiating a new config instance from scratch. This is not supported by this script."
         )
 
+    tokenizer_revision = (
+        args.model_revision
+        if args.tokenizer_revision is None
+        else args.tokenizer_revision
+    )
+
+    if tokenizer_revision != args.model_revision:
+        # Warn user if tokenizer and model use different revisions; this is an unusual
+        # use case.
+        warning = f"""Requested tokenizer revision `{tokenizer_revision}` is different
+                   from the model revision `{args.model_revision}`."""
+        logger.warn(warning)
+
     if args.tokenizer_name:
         tokenizer = AutoTokenizer.from_pretrained(
             args.tokenizer_name,
             trust_remote_code=args.trust_remote_code,
             use_fast=not args.use_slow_tokenizer,
-            revision=args.model_revision,
+            revision=tokenizer_revision
         )
     elif args.model_name_or_path:
         tokenizer = AutoTokenizer.from_pretrained(
             args.model_name_or_path,
             trust_remote_code=args.trust_remote_code,
             use_fast=not args.use_slow_tokenizer,
-            revision=args.model_revision,
+            revision=tokenizer_revision
         )
     else:
         raise ValueError(
