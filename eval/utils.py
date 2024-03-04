@@ -7,6 +7,7 @@ import os
 from importlib import import_module
 from transformers import StoppingCriteria
 from eval.dispatch_openai_requests import dispatch_openai_chat_requesets, dispatch_openai_prompt_requesets
+import warnings
 
 
 class KeyWordsCriteria(StoppingCriteria):
@@ -275,6 +276,13 @@ def load_hf_tokenizer(
         token=os.getenv("HF_TOKEN", None),
     ):
         from transformers import AutoTokenizer
+
+        # Need to explicitly import the olmo tokenizer.
+        try:
+            from hf_olmo import OLMoTokenizerFast
+        except ImportError:
+            warnings.warn("OLMo not installed. Ignore if using a different model.")
+
         if not tokenizer_name_or_path:
             tokenizer_name_or_path = model_name_or_path
         try:

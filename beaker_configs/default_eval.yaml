@@ -12,8 +12,8 @@ tasks:
       --ntrain 5
       --data_dir /data/mmlu/
       --save_dir /output/
-      --model /model
-      --tokenizer /model
+      --model_name_or_path /model
+      --tokenizer_name_or_path /model
       --eval_batch_size 4
       --load_in_8bit
       --use_chat_format
