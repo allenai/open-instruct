@@ -12,6 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--workspace", type=str, default="hamishivi")
 parser.add_argument("--model_name", type=str, default="hf-opt-7B")
 parser.add_argument("--location", type=str, default=None)
+parser.add_argument("--beaker_image", type=str, default=None, help="If given, use this Beaker image.")
 parser.add_argument("--beaker_subfolder", type=str, default=None)
 parser.add_argument("--cluster", nargs='+', default=["ai2/allennlp-cirrascale", "ai2/general-cirrascale", "ai2/general-cirrascale-a100-80g-ib", "ai2/mosaic-cirrascale-a100", "ai2/s2-cirrascale-l40"])
 parser.add_argument("--is_tuned", action="store_true")
@@ -33,6 +34,10 @@ if cluster[0] == "all":
 d1['tasks'][0]['constraints']['cluster'] = cluster
 d1['tasks'][0]['context']['priority'] = args.priority
 d1['tasks'][0]['resources']['gpuCount'] = 1
+
+# Use a different image if requested.
+if args.beaker_image is not None:
+    d1['tasks'][0]['image']['beaker'] = args.beaker_image
 
 # modify here for different set of experiments
 experiment_groups = [
@@ -107,7 +112,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --data_dir /data/bbh \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --max_num_examples_per_task 40 \
             --no_cot \
@@ -120,7 +125,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --data_dir /data/bbh \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --max_num_examples_per_task 40 \
             --use_chat_format \
@@ -133,7 +138,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --max_num_examples 200 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --n_shot 8 \
             --no_cot \
@@ -147,7 +152,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --max_num_examples 200 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --n_shot 8 \
             --use_chat_format \
@@ -162,7 +167,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --max_context_length 512 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
@@ -177,7 +182,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --max_context_length 512 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
@@ -191,7 +196,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --temperature 0.1 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model
         '''
     elif experiment_group == "codex_eval_temp_0.8":
@@ -203,7 +208,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --temperature 0.8 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model
         '''
     elif experiment_group == "trutufulqa":
@@ -260,10 +265,11 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
     if model_info[2] is not None:
         # extract existing model path
         model_name_or_path = re.search("--model_name_or_path (\S+)", d['tasks'][0]['arguments'][0]).group(1)
-        # replace the model path with the checkpoint subfolder
-        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(model_name_or_path, model_name_or_path+"/"+model_info[2])]
-        # replace the tokenizer path with the checkpoint subfolder
-        tokenizer_name_or_path = re.search("--tokenizer_name_or_path (\S+)", d['tasks'][0]['arguments'][0]).group(1)
+        # replace the model path with the checkpoint subfolder. 
+        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(model_name_or_path, model_name_or_path+"/"+model_info[2], 1)]
+        # NOTE: We don't change the tokenizer subfolder, because by default the
+        # tokenizer is only saved to the top-level output dir. That's why we call
+        # `str.replace(..., 1)` above; this only replaces the first match.
 
     # for vanilla_lm, remove the chat formatting function
     if model_info[3] == "vanilla_lm":
