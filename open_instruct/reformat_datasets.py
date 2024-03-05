@@ -309,6 +309,31 @@ def convert_gpt4_alpaca_data(data_dir, output_dir, load_en=True, load_zh=False, 
                 ]
             }) + "\n")
 
+def convert_safety_adapt_data(data_dir, output_dir, num_examples=None):
+    os.makedirs(output_dir, exist_ok=True)
+    examples = [json.loads(i) for i in open(os.path.join(data_dir, "safety_train.jsonl"))]
+
+    if num_examples:
+        examples = random.sample(examples, k=num_examples)
+    output_path = os.path.join(output_dir, "safety_tunning_data.jsonl")
+    with open(output_path, "w") as fout:
+        for idx, example in enumerate(examples):
+            encoded_example = encode_instruction_example(
+                instruction=example["prompt"], 
+                input=None, 
+                output=example["response"],
+                random_template=True,
+                eos_token=None
+            )
+            fout.write(json.dumps({
+                "dataset": "safety_adapt",
+                "id": f"safety_adapt_{idx}",
+                "messages": [
+                    {"role": "user", "content": example["prompt"]},
+                    {"role": "assistant", "content": example["response"]},
+                ]
+            }) + "\n")
+
 
 def convert_sharegpt_data(data_dir, output_dir, data_file="sharegpt_html_cleaned_and_split_2048.json", num_examples=None):
     os.makedirs(output_dir, exist_ok=True)
