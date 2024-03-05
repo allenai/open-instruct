@@ -56,6 +56,8 @@ experiment_groups = [
     "alpaca_eval",
 ]
 
+# format: model name, their beaker id, checkpoint subfolder, tuned or base.
+# or: name, path, None, tuned or base
 model_info = (args.model_name, args.location, args.beaker_subfolder, model_type)
 
 #--------------- experiments about number of supervision tasks -------------------------
