@@ -1,3 +1,4 @@
+# python open_instruct/merge_lora.py --base_model_name_or_path allenai/tulu-2-7b --lora_model_name_or_path model_checkpoints/tulu2_lora_safety_adapt --output_dir model_checkpoints/tulu2_lora_safety_adapt_merged --save_tokenizer
 import torch
 import argparse
 from peft import PeftConfig, PeftModel
@@ -77,6 +78,10 @@ if __name__ == "__main__":
         base_model = AutoModelForCausalLM.from_pretrained(
             args.base_model_name_or_path if args.base_model_name_or_path else peft_config.base_model_name_or_path,
         )
+    import pdb; pdb.set_trace()
+    # Faeze: temporary fixing the mismatch embedding weights error
+    base_model.resize_token_embeddings(32001)
+
     print("Loading the lora model...")
     lora_model = PeftModel.from_pretrained(base_model, args.lora_model_name_or_path)
     print("Merging the lora modules...")
