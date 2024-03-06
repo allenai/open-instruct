@@ -13,14 +13,14 @@ mv data/raw_train/super_ni/natural-instructions-master/* data/raw_train/super_ni
 
 
 echo "Downloading the flan_v2 chain-of-thought submix..."
-wget -P data/raw_train/cot/ https://beaker.org/api/v3/datasets/01GXZ52K2Q932H6KZY499A7FE8/files/cot_zsopt.jsonl
-wget -P data/raw_train/cot/ https://beaker.org/api/v3/datasets/01GXZ51ZV283RAZW7J3ECM4S58/files/cot_fsopt.jsonl
+wget -P data/raw_train/cot/ https://huggingface.co/datasets/hamishivi/tulu_mix_store/resolve/main/cot_zsopt.jsonl
+wget -P data/raw_train/cot/ https://huggingface.co/datasets/hamishivi/tulu_mix_store/resolve/main/cot_fsopt.jsonl
 
 
 echo "Downloading the flan_v2 collection, here we use two subsampled versions: for tulu v1 we subsampled 100K, for tulu v2 we subsampled 50K..."
 mkdir -p data/raw_train/flan_v2/
-wget -O data/raw_train/flan_v2/tulu_v1_resampled_flan_100k.jsonl https://beaker.org/api/v3/datasets/01GZTTS2EJFPA83PXS4FQCS1SA/files/flan_v2_resampled_100k.jsonl
-wget -O data/raw_train/flan_v2/tulu_v2_resampled_flan_50k.jsonl https://beaker.org/api/v3/datasets/01HBS0N5ZSDF5AECA9VMB1RKXQ/files/flan_v2_resampled_50k.jsonl
+wget -O data/raw_train/flan_v2/tulu_v1_resampled_flan_100k.jsonl https://huggingface.co/datasets/hamishivi/tulu_mix_store/resolve/main/flan_v2_resampled_100k.jsonl
+wget -O data/raw_train/flan_v2/tulu_v2_resampled_flan_50k.jsonl https://huggingface.co/datasets/hamishivi/tulu_mix_store/resolve/main/flan_v2_resampled_50k.jsonl
 
 
 echo "Downloading self-instruct data..."
@@ -92,11 +92,11 @@ wget -P data/raw_train/open_orca/ https://huggingface.co/datasets/Open-Orca/Open
 
 
 echo "Downloading the Science Instructions dataset..."
-wget -P data/raw_train/science https://beaker.org/api/v3/datasets/01HBS3G7TA8AT15C7RWTJAN66X/files/science_train.jsonl
+wget -P data/raw_train/science https://huggingface.co/datasets/hamishivi/tulu_mix_store/resolve/main/science_train.jsonl
 
 
 echo "Downloading the HardCoded dataset..."
-wget -P data/raw_train/hard_coded/ https://beaker.org/api/v3/datasets/01HBS14BBV16K45MMFSYJR86CA/files/hard_coded_examples.xlsx
+wget -P data/raw_train/hard_coded/ https://huggingface.co/datasets/hamishivi/tulu_mix_store/resolve/main/hard_coded_examples.xlsx
 
 
 echo "Processing datasets..."
