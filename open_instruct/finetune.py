@@ -642,7 +642,7 @@ def main():
             "weight_decay": 0.0,
         },
     ]
-    if args.use_qlora:
+    if args.use_qlora: # or args.use_lora:
         from bitsandbytes.optim import AdamW
         optimizer = AdamW(
             optimizer_grouped_parameters,

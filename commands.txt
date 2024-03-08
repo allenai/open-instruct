@@ -25,7 +25,7 @@ beaker session create \
 
 beaker session create --mount beaker://01HQNXPTDJ0JZ49NP6WCJ3MJGM=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/lora_hf_llama2_model_7B_safety-adapt --mount beaker://01HQNY3BM4EPVMTN824CADP733=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/lora_tulu_2_7b_no_refusals_safety-adapt --mount beaker://01HQPJQ43PJCWH1FCDS89C0XKR=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/full_hf_llama2_model_7B_safety-adapt --mount beaker://01HQPCXGHVT9G1X2XYJH56ZX3D=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/full_tulu_2_7b_no_refusals_safety-adapt --mount beaker://01HQPB0GRKYB6FSF21K81S3FS5=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/full_tulu_2_7b_safety-adapt --gpus 2 --budget ai2/oe-adapt
 
-
+--mount beaker://01HRDKBX09CPGT3D4K6TR4VBMQ=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/safety-adapt/output
 
 # sachin's 5 epochs 
 --mount beaker://01HQV6E6ADBFM1M42ERG0PGTCF=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_epochs_5/trl_lora_tulu_2_7b_no_refusals_safety-adapt --mount beaker://01HQV6E65PNXJ033AYAEBDKWZD=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_epochs_5/trl_lora_tulu_2_7b_safety-adapt --gpus 2 --budget ai2/oe-adapt

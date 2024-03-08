@@ -1,4 +1,3 @@
-torch<=2.0.1
 scipy
 packaging
 sentencepiece
@@ -27,7 +26,6 @@ termcolor
 jsonlines
 unidic-lite
 einops
-flash-attn==2.2.2
 auto-gptq
 fire
 alpaca-eval==0.5.3
