@@ -25,6 +25,7 @@ import json
 import os
 import vllm
 import torch
+import hf_olmo
 from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model, dynamic_import_function
 
 
@@ -131,7 +132,10 @@ if __name__ == "__main__":
 
         with open(input_file, "r") as f:
             try:
-                instances = [json.loads(x) for x in f.readlines()]
+                if input_file.endswith("jsonl"):
+                    instances = [json.loads(x) for x in f.readlines()]
+                elif input_file.endswith("json"):
+                    instances = json.load(f)
             except:
                 instances = json.load(open(input_file))["instructions"]
                 instances = [{"prompt": ex} for ex in instances]
@@ -158,7 +162,10 @@ if __name__ == "__main__":
                 raise ValueError("Either `messages` or `prompt` should be in the instance.")
 
             prompts.append(prompt)
+
+        print(f"*** Prompt: {prompts[0]}")
         if args.use_vllm:
+            # import pdb; pdb.set_trace()
             model = vllm.LLM(
                 model=args.model_name_or_path,
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
@@ -173,6 +180,7 @@ if __name__ == "__main__":
             outputs = model.generate(prompts, sampling_params)
             outputs = [it.outputs[0].text for it in outputs]
         else:
+            # import pdb; pdb.set_trace()
             model, tokenizer = load_hf_lm_and_tokenizer(
                 model_name_or_path=args.model_name_or_path, 
                 tokenizer_name_or_path=args.tokenizer_name_or_path,
@@ -181,6 +189,7 @@ if __name__ == "__main__":
                 gptq_model=args.gptq,
                 use_fast_tokenizer=not args.use_slow_tokenizer,
             )
+            model.to("cuda:0")
             outputs = generate_completions(
                 model=model,
                 tokenizer=tokenizer,
