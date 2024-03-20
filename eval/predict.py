@@ -23,9 +23,10 @@ Then you can run this script with the following command:
 import argparse
 import json
 import os
+import pandas as pd
 import vllm
 import torch
-# import hf_olmo
+import hf_olmo
 from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model, dynamic_import_function
 
 
@@ -136,6 +137,9 @@ if __name__ == "__main__":
                     instances = [json.loads(x) for x in f.readlines()]
                 elif input_file.endswith("json"):
                     instances = json.load(f)
+                elif input_file.endswith("csv"):
+                    df = pd.read_csv(input_file)
+                    instances = df.to_dict('records')
             except:
                 instances = json.load(open(input_file))["instructions"]
                 instances = [{"prompt": ex} for ex in instances]
