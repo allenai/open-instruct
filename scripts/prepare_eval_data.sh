@@ -45,6 +45,10 @@ do
 done
 
 
+# IFEVAL data
+wget -P data/eval/ifeval https://github.com/google-research/google-research/raw/master/instruction_following_eval/data/input_data.jsonl
+
+
 # we use self-instruct test set, and vicuna test set for our human evaluation
 mkdir -p data/eval/creative_tasks 
 wget -O data/eval/creative_tasks/self_instruct_test.jsonl https://github.com/yizhongw/self-instruct/raw/main/human_eval/user_oriented_instructions.jsonl

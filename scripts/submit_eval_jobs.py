@@ -51,6 +51,7 @@ experiment_groups = [
     "tydiqa_no_context_1shot",
     "codex_eval_temp_0.1",
     "codex_eval_temp_0.8",
+    "ifeval",
     "trutufulqa",
     "toxigen",
     "alpaca_eval",
@@ -207,6 +208,17 @@ for experiment_group in experiment_groups:
             --use_vllm \
             --model_name_or_path /model \
             --tokenizer_name_or_path /model
+        '''
+    elif experiment_group == "ifeval":
+        task_spec['arguments'][0] = '''
+            python -m eval.ifeval.run_eval \
+                --data_dir /data/eval/ifeval/ \
+                --save_dir /output/ \
+                --model_name_or_path /model \
+                --tokenizer_name_or_path /model \
+                --use_chat_format \
+                --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
+                --use_vllm
         '''
     elif experiment_group == "trutufulqa":
         task_spec['arguments'][0] = '''
