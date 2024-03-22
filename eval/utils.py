@@ -390,8 +390,8 @@ def query_openai_chat_model(engine, instances, output_path=None, batch_size=10, 
             raise RuntimeError(f"Failed to get response from OpenAI API after {retry_limit} retries.")
         assert len(outputs) == len(batch)
         for instance, output in zip(batch, outputs):
-            instance[f"output"] = output["choices"][0]["message"]["content"]
-            instance["response_metadata"] = output
+            instance[f"output"] = output.choices[0].message.content
+            instance["response_metadata"] = output.json()
             results.append(instance)
             if output_path is not None:
                 fout.write(json.dumps(instance) + "\n")
@@ -457,8 +457,8 @@ def query_openai_model(engine, instances, output_path=None, batch_size=10, retry
             raise RuntimeError(f"Failed to get response from OpenAI API after {retry_limit} retries.")
         assert len(outputs) == len(batch)
         for instance, output in zip(batch, outputs):
-            instance[f"output"] = output["choices"][0]["text"]
-            instance["response_metadata"] = output
+            instance[f"output"] = output.choices[0].text
+            instance["response_metadata"] = output.json()
             results.append(instance)
             if output_path is not None:
                 fout.write(json.dumps(instance) + "\n")
