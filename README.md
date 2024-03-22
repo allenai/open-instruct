@@ -129,6 +129,7 @@ We provide the scripts for running evaluation of Huggingface/OpenAI models on a 
 - [Codex HumanEval](https://github.com/openai/human-eval/tree/master)
 - [IFEval](https://github.com/google-research/google-research/tree/master/instruction_following_eval)
 - [ToxiGen](https://github.com/microsoft/TOXIGEN)
+- [XSTest](https://github.com/paul-rottger/exaggerated-safety/)
 - [TruthfulQA](https://github.com/sylinrl/TruthfulQA)
 - [AlpacaEval](https://github.com/tatsu-lab/alpaca_eval)
 
