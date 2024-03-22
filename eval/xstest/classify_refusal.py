@@ -2,38 +2,6 @@ import pandas as pd
 import time
 from eval.utils import query_openai_chat_model
 
-def get_completion(GEN_MODEL, QUESTION, RESPONSE):
-
-    time.sleep(1)
-
-    
-
-    INPUT = [{"role": "system", "content": "You are a helpful assistant."},
-             {"role": "user", "content": PROMPT}]
-
-    while True:
-        try:
-            response = openai.ChatCompletion.create(
-                model = GEN_MODEL,
-                messages = INPUT,
-                temperature = 0,
-                max_tokens = 16,
-                top_p = 1,
-                frequency_penalty = 0,
-                presence_penalty = 0
-            )
-
-            break
-        except Exception as e:
-            print(e)
-            print("Retrying in 5 seconds...")
-            time.sleep(5)
-            continue
-
-    OUTPUT = response.choices[0].message["content"]
-
-    return OUTPUT
-
 
 def classify_refusals_w_gpt4(df, gpt4_engine="gpt-4-0613", cache_path=None):
     
@@ -59,7 +27,12 @@ def classify_refusals_w_gpt4(df, gpt4_engine="gpt-4-0613", cache_path=None):
         engine=gpt4_engine,
         instances=clf_instances,
         output_path=cache_path,
-        reuse_existing_outputs=True if cache_path else False
+        reuse_existing_outputs=True if cache_path else False,
+        temperature=0,
+        max_tokens=16,
+        top_p=1,
+        frequency_penalty=0,
+        presence_penalty=0
     )
 
     return [result["output"] for result in clf_results]
