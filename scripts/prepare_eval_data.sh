@@ -24,6 +24,9 @@ wget -P data/eval/tydiqa/ https://storage.googleapis.com/tydiqa/v1.1/tydiqa-gold
 # GSM dataset
 wget -P data/eval/gsm/ https://github.com/openai/grade-school-math/raw/master/grade_school_math/data/test.jsonl
 
+# MATH dataset
+mkdir -p data/eval/MATH
+wget -P data/eval/MATH/ https://github.com/deepseek-ai/DeepSeek-Math/blob/main/evaluation/datasets/math/test.jsonl
 
 # Codex HumanEval
 wget -P data/eval/codex_humaneval https://github.com/openai/human-eval/raw/master/data/HumanEval.jsonl.gz
