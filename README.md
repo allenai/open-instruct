@@ -124,6 +124,7 @@ We provide the scripts for running evaluation of Huggingface/OpenAI models on a 
 
 - [MMLU](https://github.com/hendrycks/test)
 - [Grade School Math (GSM)](https://github.com/openai/grade-school-math)
+- [MATH](https://github.com/hendrycks/math)
 - [Big-Bench Hard (BBH)](https://github.com/suzgunmirac/BIG-Bench-Hard/tree/main)
 - [TydiQA](https://github.com/google-research-datasets/tydiqa)
 - [Codex HumanEval](https://github.com/openai/human-eval/tree/master)
