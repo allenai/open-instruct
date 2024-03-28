@@ -213,7 +213,7 @@ for experiment_group in experiment_groups:
     elif experiment_group == "ifeval":
         task_spec['arguments'][0] = '''
             python -m eval.ifeval.run_eval \
-                --data_dir /data/eval/ifeval/ \
+                --data_dir /data/ifeval/ \
                 --save_dir /output/ \
                 --model_name_or_path /model \
                 --tokenizer_name_or_path /model \
