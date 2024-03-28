@@ -17,7 +17,7 @@ protobuf
 # But this PR is not compatible with the latest version of Transformers library (v4.34.0).
 # To incorporate it, we forked the Transformers library and made some changes to make it compatible with the latest version.
 git+https://github.com/yizhongw/transformers.git@left_padding
-openai>=1.5.0
+openai>=1.0.0
 tiktoken
 rouge_score
 tensorboard
@@ -35,3 +35,7 @@ alpaca-eval==0.5.3
 flask
 vllm 
 openpyxl
+# for ifeval
+nltk
+langdetect
+immutabledict

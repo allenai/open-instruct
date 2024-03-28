@@ -124,6 +124,9 @@ RUN pip install flash-attn==2.2.2 --no-build-isolation
 RUN pip install -r requirements.txt
 RUN pip install ai2-olmo
 
+# NLTK download
+RUN python -m nltk.downloader punkt
+
 # Use v1 of alpaca eval.
 ENV IS_ALPACA_EVAL_2=False
 
