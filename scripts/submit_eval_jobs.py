@@ -51,8 +51,10 @@ experiment_groups = [
     "tydiqa_no_context_1shot",
     "codex_eval_temp_0.1",
     "codex_eval_temp_0.8",
+    "ifeval",
     "trutufulqa",
     "toxigen",
+    "xstest",
     "alpaca_eval",
 ]
 
@@ -208,6 +210,17 @@ for experiment_group in experiment_groups:
             --model_name_or_path /model \
             --tokenizer_name_or_path /model
         '''
+    elif experiment_group == "ifeval":
+        task_spec['arguments'][0] = '''
+            python -m eval.ifeval.run_eval \
+                --data_dir /data/ifeval/ \
+                --save_dir /output/ \
+                --model_name_or_path /model \
+                --tokenizer_name_or_path /model \
+                --use_chat_format \
+                --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
+                --use_vllm
+        '''
     elif experiment_group == "trutufulqa":
         task_spec['arguments'][0] = '''
         python -m eval.truthfulqa.run_eval \
@@ -228,6 +241,18 @@ for experiment_group in experiment_groups:
         task_spec['arguments'][0] = '''
         python -m eval.toxigen.run_eval \
             --data_dir /data/toxigen/ \
+            --save_dir /output/ \
+            --model_name_or_path /model \
+            --tokenizer_name_or_path /model \
+            --eval_batch_size 32 \
+            --use_vllm \
+            --use_chat_format \
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+        '''
+    elif experiment_group == "xstest":
+        task_spec['arguments'][0] = '''
+        python -m eval.xstest.run_eval \
+            --data_dir /data/xstest/ \
             --save_dir /output/ \
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
