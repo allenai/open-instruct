@@ -16,6 +16,18 @@ def create_prompt_with_tulu_chat_format(messages, bos="<s>", eos="</s>", add_bos
     formatted_text = bos + formatted_text if add_bos else formatted_text
     return formatted_text
 
+# {% for message in messages %}
+#     {% if message['role'] == 'system' %}
+#         {{ bos_token + "<|system|>\n" + message['content'] + "\n" }}
+#     {% elif message['role'] == 'user' %}
+#         {{ bos_token + "<|user|>\n" + message['content'] + "\n" }}
+#     {% elif message['role'] == 'assistant' %}
+#         {{ "<|assistant|>\n" + message['content'].strip() + eos + "\n" }}
+#     {% endif %}
+# {% endfor %}
+# {% for message in messages %}{% if message['role'] == 'system' %}{{ bos_token + '<|system|>\n' + message['content'] + '\n' }}{% elif message['role'] == 'user' %}{{ bos_token + '<|user|>\n' + message['content'] + '\n' }}{% elif message['role'] == 'assistant' %}{{ '<|assistant|>\n' + message['content'].strip() + eos + '\n' }}{% endif %}{% endfor %}
+
+
 def create_prompt_with_olmo_chat_format(messages, bos="|||IP_ADDRESS|||", eos="|||IP_ADDRESS|||", add_bos=True):
     formatted_text = ""
     for message in messages:

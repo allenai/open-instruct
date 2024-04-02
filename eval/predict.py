@@ -29,6 +29,10 @@ import torch
 import hf_olmo
 from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model, dynamic_import_function
 
+HF_TOKEN = "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"
+from huggingface_hub.commands.user import login; login(token=HF_TOKEN)
+print("logged in!")
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
