@@ -138,3 +138,7 @@ dmypy.json
 
 # model checkpoints
 model_checkpoints/
+
+# data
+safety-adapt/experiments/data/
+commands.txt

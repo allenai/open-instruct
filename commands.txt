@@ -25,7 +25,75 @@ beaker session create \
 
 beaker session create --mount beaker://01HQNXPTDJ0JZ49NP6WCJ3MJGM=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/lora_hf_llama2_model_7B_safety-adapt --mount beaker://01HQNY3BM4EPVMTN824CADP733=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/lora_tulu_2_7b_no_refusals_safety-adapt --mount beaker://01HQPJQ43PJCWH1FCDS89C0XKR=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/full_hf_llama2_model_7B_safety-adapt --mount beaker://01HQPCXGHVT9G1X2XYJH56ZX3D=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/full_tulu_2_7b_no_refusals_safety-adapt --mount beaker://01HQPB0GRKYB6FSF21K81S3FS5=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/full_tulu_2_7b_safety-adapt --gpus 2 --budget ai2/oe-adapt
 
+beaker session create --mount beaker://01HGK8CGNWNPSW145HW7EYK3DM=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/tulu_2_7b_uncensored \
+--gpus 1 --budget ai2/oe-adapt
+
 --mount beaker://01HRDKBX09CPGT3D4K6TR4VBMQ=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/safety-adapt/output
 
 # sachin's 5 epochs 
 --mount beaker://01HQV6E6ADBFM1M42ERG0PGTCF=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_epochs_5/trl_lora_tulu_2_7b_no_refusals_safety-adapt --mount beaker://01HQV6E65PNXJ033AYAEBDKWZD=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_epochs_5/trl_lora_tulu_2_7b_safety-adapt --gpus 2 --budget ai2/oe-adapt
+
+
+# exp new March 10 
+
+beaker session create \
+--mount beaker://01HRMHV81KCJT3FDWTQFGN85CG=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_new_march10/lora_tulu_2_7b_safety-adapt_match_tulu_safety \
+--mount beaker://01HRG9F6JNFTNEMRXNW5CY16BH=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_new_march10/lora_tulu_2_7b_safety-adapt_match_tulu_bottom25_safety \
+--mount beaker://01HRMMKHRP24FRR3CMNRMM3ZX9=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_new_march10/lora_tulu_2_7b_safety-adapt_match_tulu_top25_safety \
+--mount beaker://01HRG4TSBFWGRCJR3VF9XDCWG5=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_new_march10/lora_tulu_2_7b_safety-adapt_bottom25 \
+--mount beaker://01HRG4TS6ACPQ8VR8HZRKV58WW=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_new_march10/lora_tulu_2_7b_safety-adapt_top25 \
+--gpus 2 --budget ai2/oe-adapt
+
+beaker session create \
+--mount beaker://01HRTBDJCE7SBBF41ZCCY07E4Y=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_new_march10/lora_tulu_2_7b_safety-adapt \
+--mount beaker://01HRNE6MSNEZJQ49HMX6GH1KDR=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_new_march10/lora_tulu_2_7b_safetytuned_redteaming \
+--gpus 2 --budget ai2/oe-adapt
+
+beaker session create \
+--mount beaker://01HS2BE0GH4G91H0T3CSXPQ2FY=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_with_contrastive/lora_tulu_2_7b_safety-adapt_contrastive_1epoch \
+--mount beaker://01HS2BE0NWMBYEGQ3EZHSVG1K5=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_with_contrastive/lora_tulu_2_7b_safety-adapt_contrastive_2epoch \
+--mount beaker://01HS2BE0TRQJ81ZFNCFG7KZNXM=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_with_contrastive/lora_tulu_2_7b_safety-adapt_contrastive_3epoch \
+--mount beaker://01HS2C5BWB75WD1NBCEDZHH7BG=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_with_contrastive/lora_tulu_2_7b_uncensored_safety-adapt_contrastive_1epoch \
+--mount beaker://01HS6PEC7M8J8RTRSEVZ9PMAGH=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_with_contrastive/lora_tulu_2_7b_uncensored_safety-adapt_contrastive_2epoch \
+--mount beaker://01HS2C5C0TCD7CFBP5F8QF9YVF=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_with_contrastive/lora_tulu_2_7b_uncensored_safety-adapt_contrastive_3epoch \
+--gpus 2 --budget ai2/oe-adapt
+
+beaker session create \
+--mount beaker://01HS93ZEMKA9MBWNAJ4JPV9H11=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_with_contrastive/lora_tulu_2_7b_only_contrastive_1epoch \
+--mount beaker://01HS93ZEYKGG0TD0XRB184JTMC=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_with_contrastive/lora_tulu_2_7b_uncensored_only_contrastive_1epoch \
+--gpus 2 --budget ai2/oe-adapt
+
+beaker session create \
+--mount beaker://01HRWX16NN9JPQ6Y6HQRW5FASE=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_new_march10/lora_tulu_2_7b_uncensored_safety-adapt \
+--mount beaker://01HRG4TSBFWGRCJR3VF9XDCWG5=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_new_march10/lora_tulu_2_7b_safety-adapt_bottom25 \
+--gpus 2 --budget ai2/oe-adapt
+
+
+beaker session create \
+--mount beaker://01HS2BE0GH4G91H0T3CSXPQ2FY=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_with_contrastive/lora_tulu_2_7b_safety-adapt_contrastive_1epoch \
+--mount beaker://01HS2C5BWB75WD1NBCEDZHH7BG=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_with_contrastive/lora_tulu_2_7b_uncensored_safety-adapt_contrastive_1epoch \
+--mount beaker://01HRTBDJCE7SBBF41ZCCY07E4Y=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_new_march10/lora_tulu_2_7b_safety-adapt \
+--mount beaker://01HRNE6MSNEZJQ49HMX6GH1KDR=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_new_march10/lora_tulu_2_7b_safetytuned_redteaming \
+--mount beaker://01HRMHV81KCJT3FDWTQFGN85CG=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_new_march10/lora_tulu_2_7b_safety-adapt_match_tulu_safety \
+--mount beaker://01HRG9F6JNFTNEMRXNW5CY16BH=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_new_march10/lora_tulu_2_7b_safety-adapt_match_tulu_bottom25_safety \
+--gpus 2 --budget ai2/oe-adapt
+
+beaker session create \
+--mount beaker://01HSEST0QDKN3A20HT661R6HWX=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_new_march10/lora_tulu_2_7b_safety-adapt_match_tulu_safety_1epoch \
+--mount beaker://01HSESQ7NRYNX97ZVMN9DFWF2Y=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_with_contrastive/lora_tulu_2_7b_safety-adapt_tulu_match_combined_contrastive_epoch1 \
+--mount beaker://01HSESQ7FCPTSX6JKFDK2EYMBQ=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_with_contrastive/lora_tulu_2_7b_safety-adapt_tulu_match_combined_contrastive_epoch3 \
+--gpus 2 --budget ai2/oe-adapt
+
+beaker session create \
+--mount beaker://01HSGQYCDEZ27E3TWWNK7V9H64=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_with_contrastive/lora_tulu_2_7b_safety_adapt_v0.1_contrastive_harmless_epoch1 \
+--mount beaker://01HSGR2N3EBVCWTCG6BEX4GZBV=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_with_contrastive/lora_tulu_2_7b-uncensored_safety_adapt_v0.1_contrastive_harmless_epoch1 \
+--gpus 2 --budget ai2/oe-adapt
+
+# v2 rerunnning contrastive_combined and contrastive_harmless_combined with ulu2 uncensored
+beaker session create \
+--mount beaker://01HSHV70H45ADTW5HWG2S5Y114=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_with_contrastive/lora_tulu_2_7b_uncensored_safety-adapt_contrastive_1epoch_v2 \
+--mount beaker://01HSHV70PDMT1617M08DP2C4D7=/net/nfs.cirrascale/mosaic/faezeb/open-instruct/model_checkpoints/exp_with_contrastive/lora_tulu_2_7b-uncensored_safety_adapt_v0.1_contrastive_harmless_epoch1_v2 \
+--gpus 2 --budget ai2/oe-adapt
+
+# jupyter on beaker
+conda run -p /net/nfs.cirrascale/mosaic/faezeb/miniconda3/envs/tulu_mini --no-capture-output jupyter notebook --ip 0.0.0.0 --port 8813 --no-browser
