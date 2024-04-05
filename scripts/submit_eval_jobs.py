@@ -18,6 +18,7 @@ parser.add_argument("--cluster", nargs='+', default=["ai2/allennlp-cirrascale", 
 parser.add_argument("--is_tuned", action="store_true")
 parser.add_argument("--use_hf_tokenizer_template", action="store_true")
 parser.add_argument("--priority", type=str, default="preemptible")
+parser.add_argument("--olmo", action="store_true", help="Pass this flag if evaluating an OLMo model and `olmo` isn't in the model name.")
 args = parser.parse_args()
 
 
@@ -356,7 +357,7 @@ for experiment_group in experiment_groups:
             "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
             "--chat_formatting_function eval.templates.create_prompt_with_xwin_chat_format")
         ]
-    elif "olmo" in model_info[0]:
+    elif "olmo" in model_info[0] or args.olmo:
         task_spec['arguments'] = [task_spec['arguments'][0].replace(
             "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
             "--chat_formatting_function eval.templates.create_prompt_with_olmo_chat_format")
