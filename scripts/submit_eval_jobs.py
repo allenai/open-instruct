@@ -134,6 +134,7 @@ experiment_groups_default = [
     "toxigen",
     "xstest",
     "alpaca_eval",
+    "alpaca_eval_2",
 ]
 experiment_groups = args.experiments or experiment_groups_default
 
@@ -348,7 +349,17 @@ for experiment_group in experiment_groups:
         '''
     elif experiment_group == "alpaca_eval":
         task_spec['arguments'][0] = '''
-        python -m eval.alpaca_farm.run_eval \
+        IS_ALPACA_EVAL_2=False python -m eval.alpaca_farm.run_eval \
+            --use_vllm \
+            --model_name_or_path /model \
+            --tokenizer_name_or_path /model \
+            --save_dir /output/ \
+            --use_chat_format \
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+        '''
+    elif experiment_group == "alpaca_eval_2":
+        task_spec['arguments'][0] = '''
+        IS_ALPACA_EVAL_2=True python -m eval.alpaca_farm.run_eval \
             --use_vllm \
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \

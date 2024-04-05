@@ -30,7 +30,7 @@ einops
 flash-attn==2.2.2
 auto-gptq
 fire
-alpaca-eval==0.5.3
+alpaca-eval==0.6
 # for human eval web app
 flask
 vllm 
