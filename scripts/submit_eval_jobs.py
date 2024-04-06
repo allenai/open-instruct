@@ -272,6 +272,10 @@ for experiment_group in experiment_groups:
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''
+        # OLMo models can only output 2048 new tokens at most; default is 8192.
+        if "olmo" in model_info[0] or args.olmo:
+            task_spec['arguments'][0] += " --max_new_tokens 2048"
+
     else:
         raise ValueError("experiment_group not supported")
 
