@@ -77,13 +77,6 @@ if __name__ == "__main__":
         base_model = AutoModelForCausalLM.from_pretrained(
             args.base_model_name_or_path if args.base_model_name_or_path else peft_config.base_model_name_or_path,
         )
-    print("Loading the lora model...")
-    lora_model = PeftModel.from_pretrained(base_model, args.lora_model_name_or_path)
-    print("Merging the lora modules...")
-    merged_model = lora_model.merge_and_unload()
-    
-    output_dir = args.output_dir if args.output_dir else args.lora_model_name_or_path
-    os.makedirs(output_dir, exist_ok=True)
 
     # If tokenizer is specified, use it. Otherwise, use the tokenizer in the lora model folder or the base model folder.
     if args.tokenizer_name_or_path:
@@ -97,11 +90,19 @@ if __name__ == "__main__":
             print("No tokenizer found in the lora model folder. Using the tokenizer in the base model folder...")
             tokenizer = AutoTokenizer.from_pretrained(args.base_model_name_or_path, use_fast=args.use_fast_tokenizer)
 
-    embedding_size = merged_model.get_input_embeddings().weight.shape[0]
+    embedding_size = base_model.get_input_embeddings().weight.shape[0]
     if len(tokenizer) > embedding_size:
         print(f"The vocabulary the tokenizer contains {len(tokenizer)-embedding_size} more tokens than the base model.")
         print("Resizing the token embeddings of the merged model...")
-        merged_model.resize_token_embeddings(len(tokenizer))
+        base_model.resize_token_embeddings(len(tokenizer))
+    
+    print("Loading the lora model...")
+    lora_model = PeftModel.from_pretrained(base_model, args.lora_model_name_or_path)
+    print("Merging the lora modules...")
+    merged_model = lora_model.merge_and_unload()
+    
+    output_dir = args.output_dir if args.output_dir else args.lora_model_name_or_path
+    os.makedirs(output_dir, exist_ok=True)
     
     print(f"Saving merged model to {output_dir}...")
     merged_model.save_pretrained(output_dir)
