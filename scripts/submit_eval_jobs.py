@@ -19,6 +19,7 @@ parser.add_argument("--is_tuned", action="store_true")
 parser.add_argument("--use_hf_tokenizer_template", action="store_true")
 parser.add_argument("--priority", type=str, default="preemptible")
 parser.add_argument("--olmo", action="store_true", help="Pass this flag if evaluating an OLMo model and `olmo` isn't in the model name.")
+parser.add_argument("--experiments", type=str, nargs="+", default=None, help="Experiments to run, e.g., '--experiments mmlu_5shot gsm_cot'")
 args = parser.parse_args()
 
 
@@ -40,8 +41,8 @@ d1['tasks'][0]['resources']['gpuCount'] = 1
 if args.beaker_image is not None:
     d1['tasks'][0]['image']['beaker'] = args.beaker_image
 
-# modify here for different set of experiments
-experiment_groups = [
+# modify here, or use "--experiments", for different set of experiments
+experiment_groups_default = [
     "mmlu_0shot",
     "mmlu_5shot",
     "gsm_direct",
@@ -58,6 +59,7 @@ experiment_groups = [
     "xstest",
     "alpaca_eval",
 ]
+experiment_groups = args.experiments or experiment_groups_default
 
 # format: model name, their beaker id, checkpoint subfolder, tuned or base.
 # or: name, path, None, tuned or base
