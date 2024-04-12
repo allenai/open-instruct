@@ -88,7 +88,7 @@ def main(args):
             sampling_params = vllm.SamplingParams(
                 temperature=0,
                 max_tokens=512,
-                stop=["\n"] if not args.use_chat_format else None, # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
+                stop=["\n\n"] if not args.use_chat_format else None, # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
             )
             if args.use_chat_format:
                 prompts = [apply_chat_format(example, tokenizer) for example in test_data]
@@ -115,14 +115,20 @@ def main(args):
                 prompts = [apply_chat_format(example, tokenizer) for example in test_data]
             else:
                 prompts = [prompt_prefix + "Question: " + example["question"].strip() + "\nAnswer:" for example in test_data]            
+            # We'll stop generation at double new line (check if that's 1 or 2 tokens)
             new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1] # get the last token because the tokenizer may add space tokens at the start.
+            double_new_line_token = tokenizer.encode("\n\n", add_special_tokens=False)[-1]
+            if new_line_token == double_new_line_token:
+                stop_tokens = [new_line_token, new_line_token]   # double new line is two new line tokens
+            else:
+                stop_tokens = [double_new_line_token]  # double new line has its own token
             outputs = generate_completions(
                 model=model,
                 tokenizer=tokenizer,
                 prompts=prompts,
                 max_new_tokens=512,
                 batch_size=args.eval_batch_size,
-                stop_id_sequences=[[new_line_token]] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
+                stop_id_sequences=[stop_tokens] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
                 do_sample=False,
             )
     else:
