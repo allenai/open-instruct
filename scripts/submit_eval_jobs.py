@@ -1,6 +1,7 @@
 import copy
 import subprocess
 import yaml
+import os
 import re
 import itertools
 from datetime import date
@@ -14,10 +15,17 @@ parser.add_argument("--model_name", type=str, default="hf-opt-7B")
 parser.add_argument("--location", type=str, default=None)
 parser.add_argument("--beaker_image", type=str, default=None, help="If given, use this Beaker image.")
 parser.add_argument("--beaker_subfolder", type=str, default=None)
-parser.add_argument("--cluster", nargs='+', default=["ai2/allennlp-cirrascale", "ai2/general-cirrascale", "ai2/general-cirrascale-a100-80g-ib", "ai2/mosaic-cirrascale-a100", "ai2/s2-cirrascale-l40"])
+parser.add_argument("--cluster", nargs='+', default=[
+    "ai2/allennlp-cirrascale",
+    # "ai2/general-cirrascale",
+    "ai2/general-cirrascale-a100-80g-ib",
+    # "ai2/mosaic-cirrascale-a100",
+    "ai2/s2-cirrascale-l40"
+])
 parser.add_argument("--is_tuned", action="store_true")
 parser.add_argument("--use_hf_tokenizer_template", action="store_true")
 parser.add_argument("--priority", type=str, default="preemptible")
+parser.add_argument("--output_dir", type=str, default="/output/")
 args = parser.parse_args()
 
 
@@ -53,12 +61,14 @@ experiment_groups = [
     "codex_eval_temp_0.8",
     "trutufulqa",
     "toxigen",
-    "alpaca_eval",
+    # "alpaca_eval",
 ]
 
 # format: model name, their beaker id, checkpoint subfolder, tuned or base.
 # or: name, path, None, tuned or base
 model_info = (args.model_name, args.location, args.beaker_subfolder, model_type)
+
+print(model_info)
 
 #--------------- experiments about number of supervision tasks -------------------------
 
@@ -255,8 +265,15 @@ for experiment_group in experiment_groups:
     elif model_info[1].startswith("/"):  # if it's a local model, load it from the local directory
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", "--model_name_or_path "+model_info[1])]
+    elif model_info[1] in ["jacobm"]:
+        # mount by name for ease of access
+        task_spec['datasets'][1]['source']['beaker'] = "jacobm/" + model_info[0]
     else:  # if it's a beaker model, mount the beaker dataset to `/model`
         task_spec['datasets'][1]['source']['beaker'] = model_info[1]
+
+    # if a custom output directory is specified, set that here
+    if args.output_dir != "/output/":
+        task_spec['arguments'] = [task_spec['arguments'][0].replace("/output/", os.path.join(args.output_dir, experiment_group))]
 
     # if a specific checkpoint is specified, load model from that checkpoint
     if model_info[2] is not None:
