@@ -49,18 +49,18 @@ if args.beaker_image is not None:
 
 # modify here for different set of experiments
 experiment_groups = [
-    # "mmlu_0shot",
-    # "mmlu_5shot",
-    # "gsm_direct",
-    # "gsm_cot",
-    # "bbh_direct",
-    # "bbh_cot",
-    # "tydiqa_goldp_1shot",
-    # "tydiqa_no_context_1shot",
-    # "codex_eval_temp_0.1",
-    # "codex_eval_temp_0.8",
-    # "trutufulqa",
-    # "toxigen",
+    "mmlu_0shot",
+    "mmlu_5shot",
+    "gsm_direct",
+    "gsm_cot",
+    "bbh_direct",
+    "bbh_cot",
+    "tydiqa_goldp_1shot",
+    "tydiqa_no_context_1shot",
+    "codex_eval_temp_0.1",
+    "codex_eval_temp_0.8",
+    "trutufulqa",
+    "toxigen",
     "alpaca_eval",
 ]
 
