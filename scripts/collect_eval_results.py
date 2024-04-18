@@ -3,10 +3,10 @@ Usage example:
 python scripts/collect_eval_results.py \
     --experiment_id 01HV0P4E3MW9211HX0JEKM0PXM \
     --job_suffix _tulu2_13b_dpo_ultrainteract_04082024 \
-    --output_file scratch/metrics.json \
+    --output_file metrics.json \
     --task_order gsm_cot gsm_direct toxigen alpaca_eval \
     --print_table \
-    --table_file scratch/metrics.tsv
+    --table_file metrics.tsv
 """
 
 import beaker
