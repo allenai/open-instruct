@@ -60,7 +60,10 @@ def make_parser():
         help="Suffix of job name; remove this from the job name to get the eval task.",
     )
     parser.add_argument(
-        "--output_file", type=Path, help="Output file for collected results."
+        "--output_file",
+        type=Path,
+        default=None,
+        help="If given, dump a .json with all metrics to this file.",
     )
     parser.add_argument(
         "--table_file",
@@ -183,7 +186,8 @@ def main():
                 args.table_file, sep="\t", index=True, float_format="%0.4f"
             )
 
-    json.dump(metrics_all, open(args.output_file, "w"), indent=2)
+    if args.output_file is not None:
+        json.dump(metrics_all, open(args.output_file, "w"), indent=2)
 
 
 if __name__ == "__main__":
