@@ -141,4 +141,7 @@ model_checkpoints/
 
 # data
 safety-adapt/experiments/data/
-commands.txt
+commands_.txt
+
+# Others
+safety-adapt/finetune_lora_with_accelerate_jacob.sh

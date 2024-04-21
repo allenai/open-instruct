@@ -20,6 +20,7 @@ import os
 
 
 def get_tulu(args, n_science_insts):
+    random.seed(76)
     "Get the tulu dataset, but filter out the science data."
     # If no tulu data, return None.
     if args.tulu == "none":
