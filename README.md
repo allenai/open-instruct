@@ -51,7 +51,7 @@ If you'd like to run experiments within a Docker environment, you can create one
 docker build --build-arg CUDA=11.8.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 --build-arg REQUIRE=requirements.txt . -t <your tag here>
 ```
 
-If you are internally at AI2, you can use this pre-built beaker image Yizhongw03/open-instruct (most recent version [here](Yizhongw03/open-instruct)).
+If you are internally at AI2, you can use this pre-built beaker image Yizhongw03/open-instruct (most recent version [here](https://beaker.org/im/01HSPPCBMA11BYKDQ2XQ2V947Q/details)). A version with newer transformers is available [here](https://beaker.org/im/01HW960RVZ0DWWBQKWPSK4T4Y6/details).
 
 ## Training
 
@@ -101,6 +101,7 @@ Our checkpoints can be found:
 
 - [Here](https://huggingface.co/collections/hamishivi/tulu-v1-suite-655138c3743e6349aaa07d7d) for all Tulu v1 models.
 - [Here](https://huggingface.co/collections/allenai/tulu-v2-suite-6551b56e743e6349aab45101) for all Tulu v2 models.
+- [OLMo 7B SFT](https://huggingface.co/allenai/OLMo-7B-SFT) and [Instruct](https://huggingface.co/allenai/OLMo-7B-Instruct), along with a [2048 sequence length version of Tulu 2](https://huggingface.co/datasets/allenai/tulu-v2-sft-mixture-olmo-2048).
 
 
 ### Weight diff script
