@@ -1,6 +1,7 @@
 ARG CUDA
 ARG DIST
 ARG TARGET
+ARG REQUIRE
 FROM --platform=linux/amd64 nvidia/cuda:${CUDA}-${TARGET}-${DIST}
 
 ARG DEBIAN_FRONTEND="noninteractive"
@@ -116,13 +117,12 @@ RUN apt-get -y install git-lfs
 
 WORKDIR /stage/
 
-COPY requirements.txt .
+COPY ${REQUIRE} .
 RUN pip install --upgrade pip setuptools wheel
 RUN pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
 RUN pip install packaging
 RUN pip install flash-attn==2.2.2 --no-build-isolation
-RUN pip install -r requirements.txt
-RUN pip install ai2-olmo
+RUN pip install -r ${REQUIRE}
 
 # NLTK download
 RUN python -m nltk.downloader punkt

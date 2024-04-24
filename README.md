@@ -32,25 +32,26 @@ To run training, evaluation, or inference for our finetuned models, you need to 
 ```bash
 pip install -r requirements.txt
 ```
+*Note:* This includes an old version of Transformers primarily to support reproducing results for Tulu 2. For newer models, the second set of requirements may be better for you.
+
+We have a separate list of requirements for the new OLMo models, supported with the `-hf` suffix on HuggingFace (e.g. [allenai/OLMo-1.7-7B-hf](https://huggingface.co/allenai/OLMo-1.7-7B-hf)). 
+```bash
+pip install -r requirements-olmo.txt
+```
+Future OLMo models will have native support, which will not be necessary.
 
 If you just want the dependencies for the weight diff script, use:
 ```bash
 pip install -r weight-diff-requirements.txt
 ```
 
-If you'd like to experiment with AI2's [OLMo](https://huggingface.co/allenai/OLMo-7B) models, you should also install:
-
-```bash
-pip install ai2-olmo
-```
-
 If you'd like to run experiments within a Docker environment, you can create one using:
 
 ```bash
-docker build --build-arg CUDA=11.8.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 . -t <your tag here>
+docker build --build-arg CUDA=11.8.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 --build-arg REQUIRE=requirements.txt . -t <your tag here>
 ```
 
-If you are internally at AI2, you can use this pre-built beaker image [here](https://beaker.org/im/01HQ1PMA9YCVKXYN6BHP5EYV5E/details).
+If you are internally at AI2, you can use this pre-built beaker image Yizhongw03/open-instruct (most recent version [here](Yizhongw03/open-instruct)).
 
 ## Training
 
