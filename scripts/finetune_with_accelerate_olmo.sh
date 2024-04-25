@@ -14,9 +14,9 @@ accelerate launch \
     --use_deepspeed \
     --deepspeed_config_file ds_configs/stage3_no_offloading_accelerate.conf \
     open_instruct/finetune.py \
-    --model_name_or_path allenai/OLMo-1.7-7B \
+    --model_name_or_path allenai/OLMo-1.7-7B-hf \
     --use_flash_attn \
-    --tokenizer_name allenai/OLMo-1.7-7B \
+    --tokenizer_name allenai/OLMo-1.7-7B-hf \
     --dataset_name allenai/tulu-v2-sft-mixture \
     --max_seq_length 4096 \
     --preprocessing_num_workers 128 \
