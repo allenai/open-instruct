@@ -33,3 +33,4 @@ openpyxl
 nltk
 langdetect
 immutabledict
+ai2-olmo>=0.3.0 # for compatibility with OLMo models in transition to Transformers integration
