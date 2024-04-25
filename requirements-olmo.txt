@@ -21,7 +21,7 @@ termcolor
 jsonlines
 unidic-lite
 einops
-flash-attn==2.2.2
+# flash-attn==2.2.2 # should really only be in dockerfile. Local env often doesn't have GPUs
 auto-gptq
 fire
 alpaca-eval==0.5.3

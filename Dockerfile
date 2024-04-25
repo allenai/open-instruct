@@ -121,7 +121,7 @@ RUN pip install --upgrade pip setuptools wheel
 RUN pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
 RUN pip install packaging
 RUN pip install flash-attn==2.2.2 --no-build-isolation
-RUN pip install -r requirementstxt
+RUN pip install -r requirements.txt
 
 # NLTK download
 RUN python -m nltk.downloader punkt

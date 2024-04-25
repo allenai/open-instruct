@@ -5,6 +5,7 @@ import re
 import itertools
 from datetime import date
 import argparse
+import os
 
 today = date.today().strftime("%m%d%Y")
 
@@ -20,6 +21,7 @@ parser.add_argument("--use_hf_tokenizer_template", action="store_true")
 parser.add_argument("--priority", type=str, default="preemptible")
 parser.add_argument("--olmo", action="store_true", help="Pass this flag if evaluating an OLMo model and `olmo` isn't in the model name.")
 parser.add_argument("--experiments", type=str, nargs="+", default=None, help="Experiments to run, e.g., '--experiments mmlu_5shot gsm_cot'")
+parser.add_argument("--num_gpus", type=int, default=1)
 args = parser.parse_args()
 
 
@@ -35,7 +37,7 @@ if cluster[0] == "all":
     cluster = []  # empty list means all clusters
 d1['tasks'][0]['constraints']['cluster'] = cluster
 d1['tasks'][0]['context']['priority'] = args.priority
-d1['tasks'][0]['resources']['gpuCount'] = 1
+d1['tasks'][0]['resources']['gpuCount'] = args.num_gpus
 
 # Use a different image if requested.
 if args.beaker_image is not None:
@@ -276,7 +278,7 @@ for experiment_group in experiment_groups:
         '''
         # OLMo models can only output 2048 new tokens at most; default is 8192.
         if "olmo" in model_info[0] or args.olmo:
-            task_spec['arguments'][0] += " --max_new_tokens 2048"
+            task_spec['arguments'][0] += " --max_new_tokens 4096" # nol increased hardcode to 4096
 
     else:
         raise ValueError("experiment_group not supported")
@@ -389,6 +391,9 @@ for experiment_group in experiment_groups:
 experiment_name = f"open_instruct_eval_{model_name}_{today}" 
 d["description"] = experiment_name
 d["tasks"] = eval_task_specs
+# if beaker_configs/auto_created doesn't exist, create it with os
+if not os.path.exists("beaker_configs/auto_created"):
+    os.makedirs("beaker_configs/auto_created")
 fn = "beaker_configs/auto_created/{}.yaml".format(experiment_name)
 file = open(fn, "w")
 yaml.dump(d, file, default_flow_style=True)
