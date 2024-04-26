@@ -248,7 +248,7 @@ for experiment_group in experiment_groups:
         '''
     elif experiment_group == "mbpp_evalplus_temp_0.1":
         task_spec['arguments'][0] = '''
-            python -m eval.mbpp.run_eval \
+            HF_ALLOW_CODE_EVAL=1 python -m eval.mbpp.run_eval \
             --eval_pass_at_ks 1 5 10 20 \
             --unbiased_sampling_size_n 20 \
             --temperature 0.1 \
@@ -261,7 +261,7 @@ for experiment_group in experiment_groups:
         '''
     elif experiment_group == "mbpp_evalplus_temp_0.8":
         task_spec['arguments'][0] = '''
-            python -m eval.mbpp.run_eval \
+            HF_ALLOW_CODE_EVAL=1 python -m eval.mbpp.run_eval \
             --eval_pass_at_ks 1 5 10 20 \
             --unbiased_sampling_size_n 20 \
             --temperature 0.8 \
