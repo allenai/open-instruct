@@ -10,7 +10,7 @@ import os
 today = date.today().strftime("%m%d%Y")
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--workspace", type=str, default="hamishivi")
+parser.add_argument("--workspace", type=str, default="oe-adapt-general")
 parser.add_argument("--model_name", type=str, default="hf-opt-7B")
 parser.add_argument("--location", type=str, default=None)
 parser.add_argument("--beaker_image", type=str, default=None, help="If given, use this Beaker image.")
