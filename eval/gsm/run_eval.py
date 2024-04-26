@@ -85,10 +85,11 @@ def main(args):
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
             )
+            stop_string = "\n\n" if args.stop_at_double_newline else "\n"
             sampling_params = vllm.SamplingParams(
                 temperature=0,
                 max_tokens=512,
-                stop=["\n\n"] if not args.use_chat_format else None, # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
+                stop=[stop_string] if not args.use_chat_format else None, # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
             )
             if args.use_chat_format:
                 prompts = [apply_chat_format(example, tokenizer) for example in test_data]
@@ -115,13 +116,15 @@ def main(args):
                 prompts = [apply_chat_format(example, tokenizer) for example in test_data]
             else:
                 prompts = [prompt_prefix + "Question: " + example["question"].strip() + "\nAnswer:" for example in test_data]            
-            # We'll stop generation at double new line (check if that's 1 or 2 tokens)
             new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1] # get the last token because the tokenizer may add space tokens at the start.
-            double_new_line_token = tokenizer.encode("\n\n", add_special_tokens=False)[-1]
-            if new_line_token == double_new_line_token:
-                stop_tokens = [new_line_token, new_line_token]   # double new line is two new line tokens
-            else:
-                stop_tokens = [double_new_line_token]  # double new line has its own token
+            stop_tokens = [new_line_token]
+            if args.stop_at_double_newline:
+                # We'll stop generation at double new line (check if that's 1 or 2 tokens)
+                double_new_line_token = tokenizer.encode("\n\n", add_special_tokens=False)[-1]
+                if new_line_token == double_new_line_token:
+                    stop_tokens = [new_line_token, new_line_token]   # double new line is two new line tokens
+                else:
+                    stop_tokens = [double_new_line_token]  # double new line has its own token
             outputs = generate_completions(
                 model=model,
                 tokenizer=tokenizer,
@@ -256,6 +259,11 @@ if __name__ == "__main__":
         type=str, 
         default="eval.templates.create_prompt_with_tulu_chat_format", 
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
+    )
+    parser.add_argument(
+        "--stop_at_double_newline",
+        action="store_true",
+        help="If given, will stop generation at double newline instead of single."
     )
     args = parser.parse_args()
 
