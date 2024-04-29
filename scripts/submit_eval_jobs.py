@@ -20,6 +20,7 @@ parser.add_argument("--use_hf_tokenizer_template", action="store_true")
 parser.add_argument("--priority", type=str, default="preemptible")
 parser.add_argument("--olmo", action="store_true", help="Pass this flag if evaluating an OLMo model and `olmo` isn't in the model name.")
 parser.add_argument("--experiments", type=str, nargs="+", default=None, help="Experiments to run, e.g., '--experiments mmlu_5shot gsm_cot'")
+parser.add_argument("--gsm_stop_at_double_newline", action="store_true", help="If given, stop generation at double newline for GSM8k.")
 args = parser.parse_args()
 
 
@@ -147,6 +148,8 @@ for experiment_group in experiment_groups:
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''
+        if args.gsm_stop_at_double_newline:
+            task_spec['arguments'][0] += " --stop_at_double_newline"
     elif experiment_group == "gsm_cot":
         task_spec['arguments'][0] = '''
             python -m eval.gsm.run_eval \
@@ -160,6 +163,8 @@ for experiment_group in experiment_groups:
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         ''' 
+        if args.gsm_stop_at_double_newline:
+            task_spec['arguments'][0] += " --stop_at_double_newline"
     elif experiment_group == "tydiqa_goldp_1shot":
         task_spec["arguments"][0] = '''
             python -m eval.tydiqa.run_eval \
