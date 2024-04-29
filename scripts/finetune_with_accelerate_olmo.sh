@@ -31,4 +31,5 @@ accelerate launch \
     --with_tracking \
     --report_to wandb \
     --logging_steps 1 \
-    --checkpointing_steps epoch
+    --checkpointing_steps epoch \
+    --add_bos
