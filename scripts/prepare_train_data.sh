@@ -1,5 +1,7 @@
-# check if there is $HF_TOKEN in the environment variables
-if [ -z "$HF_TOKEN" ]
+# check if there is $HF_TOKEN in the environment variables, or if the huggingface-cli is installed and logged in 
+if huggingface-cli whoami &>/dev/null; then
+    echo "Logged in to HuggingFace."
+elif [ -z "$HF_TOKEN" ]
 then
     echo "Warning: HuggingFace dataset LIMA requires permissive access."
     echo "Warning: Please request the access at https://huggingface.co/datasets/GAIR/lima and set the HF_TOKEN environment variable before running this script."
@@ -77,13 +79,16 @@ python scripts/split_sharegpt_conversations.py \
     --model-name-or-path oobabooga/llama-tokenizer \
     --max-length 4096
 
-
 echo "Downloading LIMA dataset..."
-wget --header="Authorization: Bearer $HF_TOKEN" -P data/raw_train/lima/ https://huggingface.co/datasets/GAIR/lima/raw/main/train.jsonl
-
+if huggingface-cli whoami &>/dev/null; then
+    huggingface-cli download GAIR/lima --repo-type dataset --local-dir data/raw_train/lima/
+else; then
+    wget --header="Authorization: Bearer $HF_TOKEN" -P data/raw_train/lima/ https://huggingface.co/datasets/GAIR/lima/raw/main/train.jsonl
+fi
 
 echo "Downloading WizardLM dataset..."
-wget -P data/raw_train/wizardlm/ https://huggingface.co/datasets/WizardLM/WizardLM_evol_instruct_V2_196k/resolve/main/WizardLM_evol_instruct_V2_143k.json
+# original data removed wget -P data/raw_train/wizardlm/ https://huggingface.co/datasets/WizardLM/WizardLM_evol_instruct_V2_196k/resolve/main/WizardLM_evol_instruct_V2_143k.json
+wget -P data/raw_train/wizardlm/ https://huggingface.co/datasets/Leon-Leee/Wizardlm_Evol_Instruct_v2_196K_backuped/resolve/main/data/train-00000-of-00001-004cd1ba9dc05e6c.parquet
 
 
 echo "Downloading the OpenOrca dataset..."
