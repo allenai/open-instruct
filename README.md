@@ -27,31 +27,39 @@ Please see our first paper [How Far Can Camels Go? Exploring the State of Instru
 
 ## Setup
 
+Installation is lightweight and assumes **one of two installation strategies**. 
+First, installing in a *bare environment* (no Cuda image).
+
+Before installing, if not in a Docker container with NVCC installed, you should run:
+```
+conda install cuda-nvcc=<ver> -c nvidia
+```
+Then, install `torch==2.2.1` from source.
+
 To run training, evaluation, or inference for our finetuned models, you need to install the required packages by running the following command (after installing pytorch):
 
 ```bash
 pip install -r requirements.txt
 ```
-*Note:* This includes an old version of Transformers primarily to support reproducing results for Tulu 2. For newer models, the second set of requirements may be better for you.
-
-We have a separate list of requirements for the new OLMo models, supported with the `-hf` suffix on HuggingFace (e.g. [allenai/OLMo-1.7-7B-hf](https://huggingface.co/allenai/OLMo-1.7-7B-hf)). 
-```bash
-pip install -r requirements-olmo.txt
-```
-Future OLMo models will have native support, which will not be necessary.
+*Note:* Previous versions of Open Instruct used a pinned version of Transformers for replicating Tulu 2 results. If this is your goal, refer to [this commit or older](https://github.com/allenai/open-instruct/commit/f3424591638ed63b31d5869abd867932c359c1ed).
 
 If you just want the dependencies for the weight diff script, use:
 ```bash
 pip install -r weight-diff-requirements.txt
 ```
 
-If you'd like to run experiments within a Docker environment, you can create one using:
+For a second installation strategy, if you'd like to *run experiments within a Docker environment*, you can create one using:
 
 ```bash
 docker build --build-arg CUDA=11.8.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 --build-arg REQUIRE=requirements.txt . -t <your tag here>
 ```
 
 If you are internally at AI2, you can use this pre-built beaker image Yizhongw03/open-instruct (most recent version [here](https://beaker.org/im/01HSPPCBMA11BYKDQ2XQ2V947Q/details)). A version with newer transformers is available [here](https://beaker.org/im/01HW960RVZ0DWWBQKWPSK4T4Y6/details).
+
+If using early OLMo models without `-hf` in the name, you will still need to use the following code. We recommend using early models with `-hf` in name, and models released after April 2024 will be supported natively.
+```
+from hf_olmo import OLMoForCausalLM
+```
 
 ## Training
 

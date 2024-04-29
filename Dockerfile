@@ -116,11 +116,12 @@ RUN apt-get -y install git-lfs
 
 WORKDIR /stage/
 
+# TODO When updating flash-attn or torch in the future, make sure to update the version in the requirements.txt file. 
 COPY requirements.txt .
 RUN pip install --upgrade pip setuptools wheel
-RUN pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
+RUN pip install torch==2.2.1 torchvision==0.17.1 torchaudio==2.2.1 --index-url https://download.pytorch.org/whl/cu118
 RUN pip install packaging
-RUN pip install flash-attn==2.2.2 --no-build-isolation
+RUN pip install flash-attn==2.5.2 --no-build-isolation
 RUN pip install -r requirements.txt
 
 # NLTK download

@@ -1,4 +1,5 @@
-torch<=2.0.1
+# TODO When updating flash-attn or torch in the future, make sure to update the version in the Dockerfile 
+torch<=2.2.1
 scipy
 packaging
 sentencepiece
@@ -10,13 +11,7 @@ bitsandbytes>=0.41.1
 evaluate>=0.4.0
 tokenizers>=0.13.3
 protobuf
-# Transformers library (v4.34.0) still has a bug for left padding, 
-# and significantly affect the inference and thus our evaluation performance (e.g., MMLU and TruthfulQA).
-# Follwing PR is a temporary fix for it but has not been merged yet.
-# See https://github.com/huggingface/transformers/pull/25284
-# But this PR is not compatible with the latest version of Transformers library (v4.34.0).
-# To incorporate it, we forked the Transformers library and made some changes to make it compatible with the latest version.
-git+https://github.com/yizhongw/transformers.git@left_padding
+transformers==4.40
 openai>=1.0.0
 tiktoken
 rouge_score
@@ -27,16 +22,16 @@ termcolor
 jsonlines
 unidic-lite
 einops
-flash-attn==2.2.2
+flash-attn==2.5.2 # should really only be in dockerfile. Local env often doesn't have GPUs
 auto-gptq
 fire
 alpaca-eval==0.5.3
 # for human eval web app
 flask
-vllm 
+vllm @ git+https://github.com/vllm-project/vllm@fbf152d976e655f8734561452a1036e63081ccfd # todo bump to next release for easier install
 openpyxl
 # for ifeval
 nltk
 langdetect
 immutabledict
-ai2-olmo # for early olmo models, not most recent
+ai2-olmo>=0.3.0 # for compatibility with OLMo models in transition to Transformers integration
