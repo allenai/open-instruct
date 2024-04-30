@@ -146,9 +146,11 @@ for experiment_group in experiment_groups:
             --n_shot 8 \
             --no_cot \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
         if args.gsm_stop_at_double_newline:
+            # We need to final backslash in the command above so that there isn't a
+            # newline between this argument and the prior part of the command.
             task_spec['arguments'][0] += " --stop_at_double_newline"
     elif experiment_group == "gsm_cot":
         task_spec['arguments'][0] = '''
@@ -161,7 +163,7 @@ for experiment_group in experiment_groups:
             --tokenizer_name_or_path /model \
             --n_shot 8 \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         ''' 
         if args.gsm_stop_at_double_newline:
             task_spec['arguments'][0] += " --stop_at_double_newline"
