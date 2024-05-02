@@ -12,7 +12,7 @@ accelerate launch \
     --num_machines 1 \
     --num_processes $NUM_GPUS \
     --use_deepspeed \
-    --deepspeed_config_file ds_configs/stage3_no_offloading_accelerate.conf \
+    --deepspeed_config_file ds_configs/stage3_offloading_accelerate.conf \
     open_instruct/finetune.py \
     --model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/13B/ \
     --use_flash_attn \
