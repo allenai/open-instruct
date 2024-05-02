@@ -64,6 +64,15 @@ experiment_groups = [
     "alpaca_eval",
 ]
 
+if args.beaker_image is not None and args.beaker_image == "hamishivi/open-instruct-mbpp-test":
+    experiment_groups = [
+        "codex_eval_plus_temp_0.1",
+        "codex_eval_plus_temp_0.8",
+        "mbpp_temp_0.1",
+        "mbpp_temp_0.8",
+    ]
+
+
 # format: model name, their beaker id, checkpoint subfolder, tuned or base.
 # or: name, path, None, tuned or base
 model_info = (args.model_name, args.location, args.beaker_subfolder, model_type)
@@ -253,6 +262,60 @@ for experiment_group in experiment_groups:
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --save_dir /output/ \
+            --use_chat_format \
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+        '''
+    elif experiment_group == "codex_eval_plus_temp_0.1":
+        task_spec['arguments'][0] = '''
+        python -m eval.codex_humaneval.run_eval \
+            --data_file /net/nfs.cirrascale/allennlp/hamishi/test/open-instruct/data/eval/codex_humaneval/HumanEvalPlus-OriginFmt.jsonl.gz \
+            --eval_pass_at_ks 1 5 10 20 \
+            --unbiased_sampling_size_n 20 \
+            --temperature 0.1 \
+            --save_dir /output/ \
+            --use_vllm \
+            --model_name_or_path /model \
+            --tokenizer_name_or_path /model \
+            --use_chat_format \
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+        '''
+    elif experiment_group == "codex_eval_plus_temp_0.8":
+        task_spec['arguments'][0] = '''
+        python -m eval.codex_humaneval.run_eval \
+            --data_file /net/nfs.cirrascale/allennlp/hamishi/test/open-instruct/data/eval/codex_humaneval/HumanEvalPlus-OriginFmt.jsonl.gz \
+            --eval_pass_at_ks 1 5 10 20 \
+            --unbiased_sampling_size_n 20 \
+            --temperature 0.8 \
+            --save_dir /output/ \
+            --use_vllm \
+            --model_name_or_path /model \
+            --tokenizer_name_or_path /model \
+            --use_chat_format \
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+        '''
+    elif experiment_group == "mbpp_temp_0.1":
+        task_spec['arguments'][0] = '''
+        HF_ALLOW_CODE_EVAL=1 python -m eval.mbpp.run_eval \
+            --eval_pass_at_ks 1 5 10 20 \
+            --unbiased_sampling_size_n 20 \
+            --temperature 0.1 \
+            --save_dir /output/ \
+            --use_vllm \
+            --model_name_or_path /model \
+            --tokenizer_name_or_path /model \
+            --use_chat_format \
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+        '''
+    elif experiment_group == "mbpp_temp_0.8":
+        task_spec['arguments'][0] = '''
+        HF_ALLOW_CODE_EVAL=1 python -m eval.mbpp.run_eval \
+            --eval_pass_at_ks 1 5 10 20 \
+            --unbiased_sampling_size_n 20 \
+            --temperature 0.8 \
+            --save_dir /output/ \
+            --use_vllm \
+            --model_name_or_path /model \
+            --tokenizer_name_or_path /model \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
         '''

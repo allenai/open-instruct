@@ -58,7 +58,7 @@ python scripts/submit_eval_jobs.py \
     --workspace modular-adaptation-science \
     --model_name ${MODEL} \
     --location jacobm \
-    --priority high \
+    --priority normal \
     --is_tuned \
     --output_dir /net/nfs.cirrascale/allennlp/jacobm/modular_adaptation/results/domain_addition/science/tulu_evals/${MODEL}/
 done
