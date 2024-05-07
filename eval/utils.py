@@ -4,8 +4,11 @@ import json
 import time
 import asyncio
 import os
+import gc
 from importlib import import_module
-from transformers import StoppingCriteria
+import vllm
+from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
+from transformers import StoppingCriteria, AutoModelForSequenceClassification
 from eval.dispatch_openai_requests import dispatch_openai_chat_requesets, dispatch_openai_prompt_requesets
 import warnings
 
@@ -476,3 +479,48 @@ def dynamic_import_function(function_path):
     function = getattr(module, function_name)
     return function
  
+def bon_generation_vllm(prompts, model, bon_model, bon_tokenizer, bon=16, vllm_sampling_kwargs=None, destroy_vllm_model=True):
+    vllm_sampling_kwargs['temperature'] =  0.7
+    vllm_sampling_kwargs['n'] = bon
+    sampling_params = vllm.SamplingParams(
+        **vllm_sampling_kwargs
+    )
+    generation_outputs = model.generate(prompts, sampling_params)
+    all_text_outputs = []
+    for it in generation_outputs:
+        all_text_outputs.append([x.text for x in it.outputs])
+    # optionally remove vllm model to free up memory
+    if destroy_vllm_model:
+        # delete vllm instance to free up memory
+        destroy_model_parallel()
+        # this del has to be called to properly free up gpu memory
+        del model.llm_engine.workers
+        del model
+        gc.collect()
+        torch.cuda.empty_cache()
+    # load bon model
+    bon_model = AutoModelForSequenceClassification.from_pretrained(bon_model, load_in_8bit=True, device_map="auto")
+    bon_model.resize_token_embeddings(len(bon_tokenizer))
+    bon_model.eval()
+    # score all prompts
+    chosen_outputs = []
+    score_text_pairs = []
+    # make sure to add eos
+    bon_tokenizer.add_eos_token = True
+    with torch.inference_mode():
+        for prompt, text_output in tqdm.tqdm(zip(prompts, all_text_outputs), total=len(prompts)):
+            inps = [prompt + text for text in text_output]
+            # lazy, for now im doing bsz 1 type stuff
+            all_logits = []
+            for inp in inps:
+                logits = bon_model(**bon_tokenizer([inp], return_tensors="pt", padding=True)).logits
+                all_logits.append(logits.item())
+            logits = torch.tensor(all_logits)
+            chosen_outputs.append(text_output[torch.argmax(logits).item()])
+            score_text_pairs.append(list(zip(logits.tolist(), text_output)))
+    # clean up bon model
+    del bon_model
+    torch.cuda.empty_cache()
+    # score text pairs might be useful for debugging
+    return chosen_outputs, score_text_pairs
+

@@ -10,13 +10,14 @@ import torch
 import random
 import vllm
 import pandas as pd
-
+from transformers import AutoTokenizer
 from eval.utils import (
     load_hf_lm,
     generate_completions,
     query_openai_chat_model,
     dynamic_import_function,
-    load_hf_tokenizer
+    load_hf_tokenizer,
+    bon_generation_vllm,
 )
 from eval.xstest.classify_refusal import classify_refusals_w_gpt4, classify_outputs_w_strmatch
 
@@ -43,6 +44,8 @@ def main(args):
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
+                gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+                swap_space=args.vllm_swap_space,
             )
         else:
             print("Loading model and tokenizer with huggingface...")
@@ -74,15 +77,39 @@ def main(args):
 
         # generate with vllm
         if args.use_vllm:
-            sampling_params = vllm.SamplingParams(
+            sampling_kwargs = dict(
                 temperature=0,
                 max_tokens=2048,
             )
-            # We need to remap the outputs to the prompts because vllm might not return outputs for some prompts (e.g., if the prompt is too long)
-            generations = model.generate(prompts, sampling_params)
-            prompt_to_output = {
-                g.prompt: g.outputs[0].text for g in generations
-            }
+            if args.bon > 1:
+                # setup bon, since the pad token matters
+                bon_tokenizer = AutoTokenizer.from_pretrained(args.bon_tokenizer) if args.bon_tokenizer is not None else tokenizer
+                bon_tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+                generations, scores = bon_generation_vllm(
+                    prompts=prompts,
+                    model=model,
+                    bon_model=args.bon_reward_model,
+                    bon_tokenizer=bon_tokenizer,
+                    bon=args.bon,
+                    vllm_sampling_kwargs=sampling_kwargs,
+                )
+                # save scores for debugging
+                if args.bon_output_file is not None:
+                    with open(args.bon_output_file, "w") as fout:
+                        for score in scores:
+                            fout.write(json.dumps(score) + "\n")
+                prompt_to_output = {
+                    p: g for p, g in zip(prompts, generations)
+                }
+            else:
+                sampling_params = vllm.SamplingParams(
+                    **sampling_kwargs,
+                )
+                # We need to remap the outputs to the prompts because vllm might not return outputs for some prompts (e.g., if the prompt is too long)
+                generations = model.generate(prompts, sampling_params)
+                prompt_to_output = {
+                    g.prompt: g.outputs[0].text for g in generations
+                }
             outputs = [prompt_to_output[prompt] if prompt in prompt_to_output else "" for prompt in prompts]
         # generate with hf model
         else:
@@ -229,6 +256,48 @@ if __name__ == "__main__":
         type=str, 
         default="eval.templates.create_prompt_with_tulu_chat_format", 
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
+    )
+    parser.add_argument(
+        "--bon",
+        type=int,
+        default=1,
+        help="If > 1, generate multiple samples and save. Only the first generation will be evaluated. Combine with scoring script for BoN eval."
+    )
+    parser.add_argument(
+        "--bon_output_file",
+        type=str,
+        default=None,
+        help="Path to save the BoN outputs."
+    )
+    parser.add_argument(
+        "--bon_reward_model",
+        type=str,
+        default=None,
+        help="Reward model to use for BoN evaluation."
+    )
+    parser.add_argument(
+        "--bon_tokenizer",
+        type=str,
+        default=None,
+        help="Tokenizer to use for BoN evaluation. If not specified, will use the same tokenizer as the model."
+    )
+    parser.add_argument(
+        "--existing_generations",
+        type=str,
+        default=None,
+        help="Path to existing generations to use instead of generating new ones."
+    )
+    parser.add_argument(
+        "--vllm_gpu_memory_utilization",
+        type=float,
+        default=0.9,
+        help="GPU memory utilization for vLLM. Set to lower values (e.g. 0.3) if using BoN to give space for the reward model."
+    )
+    parser.add_argument(
+        "--vllm_swap_space",
+        type=int,
+        default=8,
+        help="Swap space for vLLM. Set to higher values (e.g. 16) if you are encoutering vLLM CPU swap issues."
     )
     args = parser.parse_args()
 

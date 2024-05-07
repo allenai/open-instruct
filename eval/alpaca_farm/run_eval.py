@@ -6,8 +6,9 @@ import random
 import torch
 import datasets
 import vllm
+from transformers import AutoTokenizer
 from alpaca_eval import evaluate as alpaca_farm_evaluate
-from eval.utils import query_openai_chat_model, query_openai_model, generate_completions, dynamic_import_function, load_hf_lm, load_hf_tokenizer
+from eval.utils import query_openai_chat_model, query_openai_model, generate_completions, dynamic_import_function, load_hf_lm, load_hf_tokenizer, bon_generation_vllm
 
 def main(args):
     random.seed(42)
@@ -29,16 +30,18 @@ def main(args):
                 use_fast_tokenizer=not args.use_slow_tokenizer,
             )
 
-        if args.use_vllm:
+        if args.existing_generations is not None:
+            outputs = []
+            with open(args.existing_generations, "r") as fin:
+                for line in fin:
+                    outputs.append(json.loads(line)["output"])
+        elif args.use_vllm:
             model = vllm.LLM(
                 model=args.model_name_or_path,
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path is not None else args.model_name_or_path,
                 tensor_parallel_size=torch.cuda.device_count(),
-            )
-            
-            sampling_params = vllm.SamplingParams(
-                temperature=0,  # greedy decoding
-                max_tokens=args.max_new_tokens,
+                gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+                swap_space=args.vllm_swap_space,
             )
             # apply chat formatting
             if args.use_chat_format:
@@ -48,9 +51,34 @@ def main(args):
                     formatted_prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
                     formatted_prompts.append(formatted_prompt)
                 prompts = formatted_prompts
-                    
-            outputs = model.generate(prompts, sampling_params)
-            outputs = [it.outputs[0].text for it in outputs]
+            sampling_kwargs = {
+                "temperature": 0,  # greedy decoding
+                "max_tokens": args.max_new_tokens,
+            }
+            if args.bon > 1:
+                # setup bon, since the pad token matters
+                bon_tokenizer = AutoTokenizer.from_pretrained(args.bon_tokenizer) if args.bon_tokenizer is not None else tokenizer
+                bon_tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+                outputs, scores = bon_generation_vllm(
+                    prompts=prompts,
+                    model=model,
+                    bon_model=args.bon_reward_model,
+                    bon_tokenizer=bon_tokenizer,
+                    bon=args.bon,
+                    vllm_sampling_kwargs=sampling_kwargs,
+                )
+                # save scores for debugging
+                if args.bon_output_file is not None:
+                    with open(args.bon_output_file, "w") as fout:
+                        for score in scores:
+                            fout.write(json.dumps(score) + "\n")
+            else:
+                # just generate directly, greedily.
+                sampling_params = vllm.SamplingParams(
+                    **sampling_kwargs,
+                )
+                generation_outputs = model.generate(prompts, sampling_params)
+                outputs = [it.outputs[0].text for it in generation_outputs]
         else:
             model = load_hf_lm(
                 model_name_or_path=args.model_name_or_path,
@@ -210,6 +238,48 @@ if __name__ == "__main__":
         "--use_vllm",
         action="store_true",
         help="If given, we will use vLLM to generate the predictions - much faster.",
+    )
+    parser.add_argument(
+        "--bon",
+        type=int,
+        default=1,
+        help="If > 1, generate multiple samples and save. Only the first generation will be evaluated. Combine with scoring script for BoN eval."
+    )
+    parser.add_argument(
+        "--bon_output_file",
+        type=str,
+        default=None,
+        help="Path to save the BoN outputs."
+    )
+    parser.add_argument(
+        "--bon_reward_model",
+        type=str,
+        default=None,
+        help="Reward model to use for BoN evaluation."
+    )
+    parser.add_argument(
+        "--bon_tokenizer",
+        type=str,
+        default=None,
+        help="Tokenizer to use for BoN evaluation. If not specified, will use the same tokenizer as the model."
+    )
+    parser.add_argument(
+        "--existing_generations",
+        type=str,
+        default=None,
+        help="Path to existing generations to use instead of generating new ones."
+    )
+    parser.add_argument(
+        "--vllm_gpu_memory_utilization",
+        type=float,
+        default=0.9,
+        help="GPU memory utilization for vLLM. Set to lower values (e.g. 0.3) if using BoN to give space for the reward model."
+    )
+    parser.add_argument(
+        "--vllm_swap_space",
+        type=int,
+        default=8,
+        help="Swap space for vLLM. Set to higher values (e.g. 16) if you are encoutering vLLM CPU swap issues."
     )
     args = parser.parse_args()
 
