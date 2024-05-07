@@ -94,7 +94,7 @@ for experiment_group in experiment_groups:
     task_spec = copy.deepcopy(d1["tasks"][0])
 
     name = f"open_instruct_eval_{experiment_group}_{model_name}_{today}"
-    task_spec['name'] = name
+    task_spec['name'] = name[:128]
 
     if experiment_group == "mmlu_0shot":
         task_spec['arguments'][0] = '''
@@ -371,7 +371,7 @@ for experiment_group in experiment_groups:
             # request 2x more GPUs
             task_spec['resources']['gpuCount'] = 2 * task_spec['resources']['gpuCount']
     
-    elif "70B" in model_info[0] or "65B" in model_info[0] or "40B" in model_info[0]:
+    elif "70B" in model_info[0] or "70b" in model_info[0] or "65B" in model_info[0] or "40B" in model_info[0]:
         # find the batch size argument, and reduce by 4x
         if "--eval_batch_size" in task_spec['arguments'][0]:
             original_batch_size = re.search("--eval_batch_size (\d+)", task_spec['arguments'][0]).group(1)

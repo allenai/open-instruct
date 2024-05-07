@@ -25,16 +25,16 @@ domain_info = [
     # TODO: fix context length/etc below
     # ("science", "tulu_all-science_none.jsonl", False),
     # ("science", "tulu_none-science_2500.jsonl", False),
-    # ("science", "tulu_all-science_2500.jsonl", False),
+    ("science", "tulu_all-science_2500.jsonl", False),
 
     # ("safety", "tulu_all-safety_none.jsonl", False),
     # ("safety", "tulu_none-safety_100.jsonl", False),
-    # ("safety", "tulu_all-safety_100.jsonl", False),
+    ("safety", "tulu_all-safety_100.jsonl", False),
 
     # ("coding", "tulu_all-coding_none.jsonl", False),
     # ("coding", "tulu_none-coding_100.jsonl", False),
-    # ("coding", "tulu_all-coding_100.jsonl", False),
-    # ("coding", "tulu_v2_mix-coding_100.jsonl", False),
+    ("coding", "tulu_all-coding_100.jsonl", False),
+    ("coding", "tulu_v2_mix-coding_100.jsonl", False),
 
     # # TODO: implement continued ft per domain
     # ("science", "tulu_none-science_2500.jsonl", True),
@@ -74,7 +74,6 @@ for domain, dataset, continued_ft in domain_info:
         quit()
 
     if cluster == "ai2/jupiter-cirrascale":
-        pass
         # model location
         d['tasks'][0]['arguments'][0] = d['tasks'][0]['arguments'][0].replace(
             "--model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/13B/", 
@@ -85,11 +84,11 @@ for domain, dataset, continued_ft in domain_info:
             "--tokenizer_name /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/13B/", 
             "--tokenizer_name /net/weka/reviz/jacobm/modular_adaptation/checkpoints/llama_2_13b/", 
         )
-        # save location
-        d['tasks'][0]['arguments'][0] = d['tasks'][0]['arguments'][0].replace(
-            "--output_dir /output/", 
-            f"--output_dir /net/weka/reviz/jacobm/modular_adaptation/checkpoints/{base_model}-{dataset.replace('.jsonl', '').replace('_eval_no', '')}/", 
-        )
+        # # save location
+        # d['tasks'][0]['arguments'][0] = d['tasks'][0]['arguments'][0].replace(
+        #     "--output_dir /output/", 
+        #     f"--output_dir /net/weka/reviz/jacobm/modular_adaptation/checkpoints/{base_model}-{dataset.replace('.jsonl', '').replace('_eval_no', '')}/", 
+        # )
         # train data location
         d['tasks'][0]['arguments'][0] = d['tasks'][0]['arguments'][0].replace(
             f"--train_file /net/nfs.cirrascale/allennlp/jacobm/modular_adaptation/train_data/{domain}/{dataset}", 

@@ -13,7 +13,7 @@ tasks:
       --num_machines 1
       --num_processes 8
       --use_deepspeed
-      --deepspeed_config_file ds_configs/stage3_offloading_accelerate.conf
+      --deepspeed_config_file ds_configs/stage3_no_offloading_accelerate.conf
       open_instruct/finetune.py
       --model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/7B/
       --use_flash_attn
@@ -22,8 +22,8 @@ tasks:
       --train_file /net/nfs.cirrascale/allennlp/jacobm/modular_adaptation/train_data/tulu_v2_mix.jsonl
       --max_seq_length 4096
       --preprocessing_num_workers 16
-      --per_device_train_batch_size 2
-      --gradient_accumulation_steps 8
+      --per_device_train_batch_size 1
+      --gradient_accumulation_steps 16
       --learning_rate 2e-5
       --lr_scheduler_type linear
       --warmup_ratio 0.03
