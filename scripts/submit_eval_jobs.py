@@ -92,9 +92,8 @@ parser.add_argument(
     "--gpu_multiplier",
     default=None,
     type=int,
-    help="""Increase number of GPU's by this factor relative ot the default. If using 
-    80GB A100's or similar, set this to 2 for 30B or larger models. If not given, a 
-    reasonable default will be selected based on the model name.""",
+    help="""Increase number of GPU's by this factor relative to the default. If not 
+    given, a reasonable default will be selected based on the model name.""",
 )
 args = parser.parse_args()
 
