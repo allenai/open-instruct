@@ -34,6 +34,9 @@ d1['tasks'][0]['resources']['gpuCount'] = num_gpus
 # tulu_all_no_science_no_safety-science_2500.jsonl
 
 domain_info = [
+    ("tulu", "tulu_all-science_none.jsonl", False),
+    ("tulu", "tulu_all-coding_none.jsonl", False),
+    ("tulu", "tulu_all-safety_none.jsonl", False),
     # ("tulu", "tulu_all_no_science_no_safety.jsonl", False),
     # ("tulu", "tulu_all_no_science_no_safety_no_coding.jsonl", False),
 
@@ -48,15 +51,15 @@ domain_info = [
     # ("tulu", "tulu_mix_v2.jsonl", False),
 
     # # TODO: implement continued ft per domain
-    ("science", "tulu_none-science_2500.jsonl", True),
-    ("safety", "tulu_none-safety_100.jsonl", True),
-    ("coding", "tulu_none-coding_50.jsonl", True),
-    ("coding", "tulu_none-coding_100.jsonl", True),
+    # ("science", "tulu_none-science_2500.jsonl", True),
+    # ("safety", "tulu_none-safety_100.jsonl", True),
+    # ("coding", "tulu_none-coding_50.jsonl", True),
+    # ("coding", "tulu_none-coding_100.jsonl", True),
     
-    ("science", "tulu_match_no_science_no_safety-science_2500.jsonl", True),
-    ("safety", "tulu_match_no_science_no_safety-safety_100.jsonl", True),
+    # ("science", "tulu_match_no_science_no_safety-science_2500.jsonl", True),
+    # ("safety", "tulu_match_no_science_no_safety-safety_100.jsonl", True),
     # ("coding", "tulu_match_no_science_no_safety-coding_50.jsonl", True), # haven't made this file yet
-    ("coding", "tulu_match_no_science_no_safety-coding_100.jsonl", True),
+    # ("coding", "tulu_match_no_science_no_safety-coding_100.jsonl", True),
 ]
 
 for domain, dataset, continued_ft in domain_info:
