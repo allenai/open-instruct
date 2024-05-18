@@ -5,6 +5,7 @@ import re
 import itertools
 from datetime import date
 import argparse
+import os
 
 
 ########################################
@@ -450,9 +451,9 @@ experiment_name = f"open_instruct_eval_{model_name}_{today}"
 d["description"] = experiment_name
 d["tasks"] = eval_task_specs
 fn = "beaker_configs/auto_created/{}.yaml".format(experiment_name)
-file = open(fn, "w")
-yaml.dump(d, file, default_flow_style=True)
-file.close()
+os.makedirs(os.path.dirname(fn), exist_ok=True)
+with open(fn, "w") as file:
+    yaml.dump(d, file, default_flow_style=True)
 
 cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
 subprocess.Popen(cmd, shell=True)
