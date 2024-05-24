@@ -530,6 +530,7 @@ def main():
                 config=config,
                 trust_remote_code=args.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
+                torch_dtype=torch.bfloat16,
                 use_flash_attention_2=True if args.use_flash_attn else False,
                 revision=args.model_revision
             )
