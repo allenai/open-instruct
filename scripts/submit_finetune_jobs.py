@@ -16,6 +16,7 @@ cluster = "ai2/allennlp-cirrascale"
 num_gpus = 4
 d1['tasks'][0]['context']['cluster'] = cluster
 d1['tasks'][0]['context']['priority'] = "high"
+d1['tasks'][0]['context']['preemptible'] = False # requried for Jupiter/Pluto
 d1['tasks'][0]['resources']['gpuCount'] = num_gpus
 
 # modify here for different set of experiments
