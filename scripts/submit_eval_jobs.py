@@ -77,7 +77,8 @@ parser.add_argument("--beaker_subfolder", type=str, default=None)
 parser.add_argument("--cluster", nargs='+', default=["ai2/allennlp-cirrascale", "ai2/general-cirrascale", "ai2/general-cirrascale-a100-80g-ib", "ai2/mosaic-cirrascale-a100", "ai2/s2-cirrascale-l40"])
 parser.add_argument("--is_tuned", action="store_true")
 parser.add_argument("--use_hf_tokenizer_template", action="store_true")
-parser.add_argument("--priority", type=str, default="preemptible")
+parser.add_argument("--priority", type=str, default="low")
+parser.add_argument("--preemptible", action="store_true", default=False, help="for using preemtipble jobs (required on some instances)")
 parser.add_argument("--olmo", action="store_true", help="Pass this flag if evaluating an OLMo model and `olmo` isn't in the model name.")
 parser.add_argument("--experiments", type=str, nargs="+", default=None, help="Experiments to run, e.g., '--experiments mmlu_5shot gsm_cot'")
 parser.add_argument("--gsm_stop_at_double_newline", action="store_true", help="If given, stop generation at double newline for GSM8k.")
@@ -111,6 +112,7 @@ if cluster[0] == "all":
     cluster = []  # empty list means all clusters
 d1['tasks'][0]['constraints']['cluster'] = cluster
 d1['tasks'][0]['context']['priority'] = args.priority
+d1['tasks'][0]['context']['preemptible'] = args.preemptible
 d1['tasks'][0]['resources']['gpuCount'] = 1
 
 # Use a different image if requested.

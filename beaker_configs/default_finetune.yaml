@@ -63,3 +63,4 @@ tasks:
     context:
       cluster: ai2/allennlp-cirrascale
       priority: high
+      preemptible: false
