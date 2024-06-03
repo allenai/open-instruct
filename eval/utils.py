@@ -281,10 +281,10 @@ def load_hf_tokenizer(
         from transformers import AutoTokenizer
 
         # Need to explicitly import the olmo tokenizer.
-        try:
-            from hf_olmo import OLMoTokenizerFast
-        except ImportError:
-            warnings.warn("OLMo not installed. Ignore if using a different model.")
+        # try:
+        #     from hf_olmo import OLMoTokenizerFast
+        # except ImportError:
+        #     warnings.warn("OLMo not installed. Ignore if using a different model.")
 
         if not tokenizer_name_or_path:
             tokenizer_name_or_path = model_name_or_path
@@ -520,6 +520,7 @@ def bon_generation_vllm(prompts, model, bon_model, bon_tokenizer, bon=16, vllm_s
             score_text_pairs.append(list(zip(logits.tolist(), text_output)))
     # clean up bon model
     del bon_model
+    gc.collect()
     torch.cuda.empty_cache()
     # score text pairs might be useful for debugging
     return chosen_outputs, score_text_pairs
