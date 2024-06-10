@@ -113,12 +113,13 @@ RUN apt update && apt install -y openjdk-8-jre-headless
 
 RUN curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash
 RUN apt-get -y install git-lfs
+RUN apt-get install -y --reinstall python-pkg-resources
 
 WORKDIR /stage/
 
 # TODO When updating flash-attn or torch in the future, make sure to update the version in the requirements.txt file. 
 COPY requirements.txt .
-RUN pip install --upgrade pip setuptools wheel
+RUN pip install --upgrade pip "setuptools<70.0.0" wheel
 RUN pip install torch==2.2.1 torchvision==0.17.1 torchaudio==2.2.1 --index-url https://download.pytorch.org/whl/cu118
 RUN pip install packaging
 RUN pip install flash-attn==2.5.2 --no-build-isolation
