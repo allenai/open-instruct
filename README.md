@@ -56,6 +56,8 @@ docker build --build-arg CUDA=11.8.0 --build-arg TARGET=cudnn8-devel --build-arg
 
 If you are internally at AI2, you can use this pre-built beaker image Yizhongw03/open-instruct (most recent version [here](https://beaker.org/im/01HSPPCBMA11BYKDQ2XQ2V947Q/details)). A version with newer transformers is available [here](https://beaker.org/im/01HW960RVZ0DWWBQKWPSK4T4Y6/details).
 
+To eval OLMo-1.7 on the suite eval set from Open-Instruct (MMLU, BBQ, etc), use this pre-built beaker image `nouhad/open-instruct-olmo-safety`
+
 If using early OLMo models without `-hf` in the name, you will still need to use the following code. We recommend using early models with `-hf` in name, and models released after April 2024 will be supported natively.
 ```
 from hf_olmo import OLMoForCausalLM
