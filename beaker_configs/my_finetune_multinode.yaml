@@ -1,13 +1,13 @@
 version: v2
 budget: ai2/oe-adapt
-description: open-instruct-finetune-multinode-test
+description: open-instruct-finetune-multinode-llama-3-tulu-v2
 tasks:
-  - name: open-instruct-finetune-multinode-test
-    replicas: 1
+  - name: open-instruct-finetune-multinode-llama-3
+    replicas: 8
     leaderSelection: true
     hostNetworking: true
     propagateFailure: true
-    # synchronizedStartTimeout: 48h0m0s
+    synchronizedStartTimeout: 48h0m0s
     propagatePreemption: true
     image:
       beaker: jacobm/open-instruct-llama-3
@@ -17,8 +17,11 @@ tasks:
     arguments: ['
         unset CUDA_LAUNCH_BLOCKING && accelerate launch
               --mixed_precision bf16
-              --num_machines 1
-              --num_processes 8
+              --num_machines 8
+              --num_processes 64
+              --machine_rank $BEAKER_REPLICA_RANK
+              --main_process_ip $BEAKER_LEADER_REPLICA_HOSTNAME
+              --main_process_port 29400
               --use_deepspeed
               --deepspeed_config_file ds_configs/stage3_no_offloading_accelerate.conf
               open_instruct/finetune.py
@@ -26,11 +29,11 @@ tasks:
               --use_flash_attn
               --tokenizer_name /models/llama_3/8b/
               --use_slow_tokenizer
-              --train_file /data/codefeedback-single-turn-20p.jsonl
+              --train_file /data/tulu_v2_mix.jsonl
               --max_seq_length 2048
               --preprocessing_num_workers 16
               --per_device_train_batch_size 2
-              --gradient_accumulation_steps 16
+              --gradient_accumulation_steps 1
               --learning_rate 2e-5
               --lr_scheduler_type linear
               --warmup_ratio 0.03
