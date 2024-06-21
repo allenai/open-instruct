@@ -44,18 +44,18 @@ random.shuffle(all_data)
 random.shuffle(socratic)
 random.shuffle(mathstackexchange)
 random.shuffle(stackexchange)
-with open("./tulu-3-dev/data/mammoth_v2-all.jsonl", "w") as f_out:
+with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-all.jsonl", "w") as f_out:
     for elem in all_data:
         print(json.dumps(elem), file=f_out)
 
-with open("./tulu-3-dev/data/mammoth_v2-socratic.jsonl", "w") as f_out:
+with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-socratic.jsonl", "w") as f_out:
     for elem in socratic:
         print(json.dumps(elem), file=f_out)
 
-with open("./tulu-3-dev/data/mammoth_v2-mathstackexchange.jsonl", "w") as f_out:
+with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-mathstackexchange.jsonl", "w") as f_out:
     for elem in mathstackexchange:
         print(json.dumps(elem), file=f_out)
 
-with open("./tulu-3-dev/data/mammoth_v2-stackexchange.jsonl", "w") as f_out:
+with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-stackexchange.jsonl", "w") as f_out:
     for elem in stackexchange:
         print(json.dumps(elem), file=f_out)
