@@ -14,13 +14,23 @@ ds = load_dataset("TIGER-Lab/WebInstructSub")
 #     "content": "1. Miguel\n2. Yes\n3. Eight\n4. unknown\n5. Swift\n6. \"We Are Never Ever Getting Back Together\"\n7. Female\n8. The rough times he has had of late.\n9. \"Red\"\n10. Yes" 
 # } ]
 
+{
+    "dataset": "sharegpt", 
+    "id": "sharegpt_Laiu9nC_0", 
+    "messages": [{"role": "user", "content": "\u4e0a\u73ed\u901a\u52e4\u56db\u5c0f\u65f6\u662f\u4ec0\u4e48\u4f53\u9a8c\uff1f"}, {"role": "assistant", "content": "\u4e0a\u73ed\u901a\u52e4\u56db\u5c0f\u65f6\u7684\u4f53\u9a8c\u53ef\u80fd\u4f1a\u975e\u5e38\u75b2\u60eb\u548c\u6311\u6218\u6027\u3002\u8fd9\u79cd\u60c5\u51b5\u4e0b\uff0c\u60a8\u9700\u8981\u5728\u65e9\u6668\u8d77\u5e8a\u5f97\u66f4\u65e9\uff0c\u5e76\u5728\u4e0b\u73ed\u540e\u518d\u665a\u56de\u5bb6\u3002\u7531\u4e8e\u957f\u65f6\u95f4\u7684\u901a\u52e4\uff0c\u60a8\u53ef\u80fd\u4f1a\u611f\u5230\u8eab\u4f53\u75b2\u60eb\u548c\u7cbe\u795e\u75b2\u60eb\uff0c\u7279\u522b\u662f\u5982\u679c\u60a8\u9700\u8981\u5728\u62e5\u6324\u7684\u516c\u5171\u4ea4\u901a\u5de5\u5177\u4e0a\u5ea6\u8fc7\u5927\u91cf\u65f6\u95f4\u3002\u6b64\u5916\uff0c\u60a8\u7684\u5de5\u4f5c\u6548\u7387\u53ef\u80fd\u4f1a\u53d7\u5230\u5f71\u54cd\uff0c\u56e0\u4e3a\u60a8\u9700\u8981\u5728\u8def\u4e0a\u82b1\u8d39\u5f88\u591a\u65f6\u95f4\uff0c\u800c\u4e0d\u662f\u5728\u5de5\u4f5c\u4e2d\u3002\u8fd9\u53ef\u80fd\u4f1a\u5bfc\u81f4\u66f4\u591a\u7684\u538b\u529b\u548c\u7126\u8651\uff0c\u56e0\u4e3a\u60a8\u5fc5\u987b\u66f4\u597d\u5730\u7ba1\u7406\u60a8\u7684\u65f6\u95f4\u548c\u5de5\u4f5c\u4efb\u52a1\u3002\u5982\u679c\u60a8\u9762\u4e34\u8fd9\u6837\u7684\u60c5\u51b5\uff0c\u5efa\u8bae\u60a8\u8003\u8651\u8c03\u6574\u5de5\u4f5c\u65f6\u95f4\u6216\u5730\u70b9\uff0c\u6216\u8005\u5bfb\u627e\u66f4\u9760\u8fd1\u5de5\u4f5c\u5730\u70b9\u7684\u4f4f\u6240\uff0c\u4ee5\u51cf\u8f7b\u901a\u52e4\u7684\u538b\u529b\u3002"}]
+}
+
 all_data = []
 socratic = []
 mathstackexchange = []
 stackexchange = []
 
+i = 0
 for elem in ds["train"]:
-    inst = [
+    inst = {
+        "dataset": elem["source"],
+        "id": str(i),
+        "messages": [
         {
             "role": "user",
             "content": elem["question"]
@@ -29,7 +39,7 @@ for elem in ds["train"]:
             "role": "assistant",
             "content": elem["answer"]
         }
-    ]
+    ]}
     all_data.append(inst)
     if elem["source"] == "socratic":
         socratic.append(inst)
@@ -39,6 +49,7 @@ for elem in ds["train"]:
         stackexchange.append(inst)
     else:
         print(f"unknown source: {elem['source']}")
+    i += 1
 
 random.shuffle(all_data)
 random.shuffle(socratic)

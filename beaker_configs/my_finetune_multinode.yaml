@@ -1,6 +1,6 @@
 version: v2
 budget: ai2/oe-adapt
-description: open-instruct-finetune-multinode-llama-3-tulu-v2
+description: open-instruct-finetune-multinode-llama-3-mammoth_v2-mathstackexchange
 tasks:
   - name: open-instruct-finetune-multinode-llama-3
     replicas: 8
@@ -29,7 +29,7 @@ tasks:
               --use_flash_attn
               --tokenizer_name /models/llama_3/8b/
               --use_slow_tokenizer
-              --train_file /data/tulu_v2_mix.jsonl
+              --train_file /data/mammoth_v2-mathstackexchange.jsonl
               --max_seq_length 2048
               --preprocessing_num_workers 16
               --per_device_train_batch_size 2
