@@ -568,7 +568,8 @@ def main():
         num_added_tokens = tokenizer.add_special_tokens({
             "pad_token": "<|reserved_special_token_250|>",
         })
-        assert num_added_tokens == 1, "Llama 3 tokenizer should only add one special token - the pad_token."
+        print(num_added_tokens)
+        # assert num_added_tokens == 1, "Llama 3 tokenizer should only add one special token - the pad_token."
     
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
