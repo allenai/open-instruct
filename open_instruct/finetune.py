@@ -564,6 +564,11 @@ def main():
         # only the eos for olmo, but we use it as bos
         tokenizer.bos_token = tokenizer.eos_token
         assert args.add_bos, "For OLMo, you must add bos token to the beginning of the input sequence."
+    elif tokenizer.pad_token_id is None:
+        num_added_tokens = tokenizer.add_special_tokens({
+            "pad_token": "<|reserved_special_token_250|>",
+        })
+        assert num_added_tokens == 1, "Llama 3 tokenizer should only add one special token - the pad_token."
     
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
