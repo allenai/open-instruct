@@ -71,72 +71,72 @@ for elem in ds["train"]:
 #     for elem in stackexchange:
 #         print(json.dumps(elem), file=f_out)
 
-# all_data_with_tulu = all_data + tulu_data
-# socratic_with_tulu = all_data + socratic
-# mathstackexchange_with_tulu = all_data + mathstackexchange
-# stackexchange_with_tulu = all_data + stackexchange
-
-# random.shuffle(all_data_with_tulu)
-# random.shuffle(socratic_with_tulu)
-# random.shuffle(mathstackexchange_with_tulu)
-# random.shuffle(stackexchange_with_tulu)
-# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-all_with-tulu.jsonl", "w") as f_out:
-#     for elem in all_data_with_tulu:
-#         print(json.dumps(elem), file=f_out)
-
-# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-socratic_with-tulu.jsonl", "w") as f_out:
-#     for elem in socratic_with_tulu:
-#         print(json.dumps(elem), file=f_out)
-
-# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-mathstackexchange_with-tulu.jsonl", "w") as f_out:
-#     for elem in mathstackexchange_with_tulu:
-#         print(json.dumps(elem), file=f_out)
-
-# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-stackexchange_with-tulu.jsonl", "w") as f_out:
-#     for elem in stackexchange_with_tulu:
-#         print(json.dumps(elem), file=f_out)
-    
-random.shuffle(all_data)
-random.shuffle(socratic)
-random.shuffle(mathstackexchange)
-random.shuffle(stackexchange)
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-all-50k.jsonl", "w") as f_out:
-    for elem in all_data[:50000]:
-        print(json.dumps(elem), file=f_out)
-
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-socratic-50k.jsonl", "w") as f_out:
-    for elem in socratic[:50000]:
-        print(json.dumps(elem), file=f_out)
-
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-mathstackexchange-50k.jsonl", "w") as f_out:
-    for elem in mathstackexchange[:50000]:
-        print(json.dumps(elem), file=f_out)
-
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-stackexchange-50k.jsonl", "w") as f_out:
-    for elem in stackexchange[:50000]:
-        print(json.dumps(elem), file=f_out)
-
-all_data_with_tulu = all_data[:50000] + tulu_data
-socratic_with_tulu = socratic[:50000] + tulu_data
-mathstackexchange_with_tulu = mathstackexchange[:50000] + tulu_data
-stackexchange_with_tulu = stackexchange[:50000] + tulu_data
+all_data_with_tulu = tulu_data + all_data
+socratic_with_tulu = tulu_data + socratic
+mathstackexchange_with_tulu = tulu_data + mathstackexchange
+stackexchange_with_tulu = tulu_data + stackexchange
 
 random.shuffle(all_data_with_tulu)
 random.shuffle(socratic_with_tulu)
 random.shuffle(mathstackexchange_with_tulu)
 random.shuffle(stackexchange_with_tulu)
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-50k-with-tulu.jsonl", "w") as f_out:
+with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-all_with-tulu.jsonl", "w") as f_out:
     for elem in all_data_with_tulu:
         print(json.dumps(elem), file=f_out)
 
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-socratic-50k-with-tulu.jsonl", "w") as f_out:
+with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-socratic_with-tulu.jsonl", "w") as f_out:
     for elem in socratic_with_tulu:
         print(json.dumps(elem), file=f_out)
 
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-mathstackexchange-50k-with-tulu.jsonl", "w") as f_out:
+with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-mathstackexchange_with-tulu.jsonl", "w") as f_out:
     for elem in mathstackexchange_with_tulu:
         print(json.dumps(elem), file=f_out)
 
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-stackexchange-50k-with-tulu.jsonl", "w") as f_out:
+with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-stackexchange_with-tulu.jsonl", "w") as f_out:
     for elem in stackexchange_with_tulu:
         print(json.dumps(elem), file=f_out)
+    
+# random.shuffle(all_data)
+# random.shuffle(socratic)
+# random.shuffle(mathstackexchange)
+# random.shuffle(stackexchange)
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-all-50k.jsonl", "w") as f_out:
+#     for elem in all_data[:50000]:
+#         print(json.dumps(elem), file=f_out)
+
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-socratic-50k.jsonl", "w") as f_out:
+#     for elem in socratic[:50000]:
+#         print(json.dumps(elem), file=f_out)
+
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-mathstackexchange-50k.jsonl", "w") as f_out:
+#     for elem in mathstackexchange[:50000]:
+#         print(json.dumps(elem), file=f_out)
+
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-stackexchange-50k.jsonl", "w") as f_out:
+#     for elem in stackexchange[:50000]:
+#         print(json.dumps(elem), file=f_out)
+
+# all_data_with_tulu = all_data[:50000] + tulu_data
+# socratic_with_tulu = socratic[:50000] + tulu_data
+# mathstackexchange_with_tulu = mathstackexchange[:50000] + tulu_data
+# stackexchange_with_tulu = stackexchange[:50000] + tulu_data
+
+# random.shuffle(all_data_with_tulu)
+# random.shuffle(socratic_with_tulu)
+# random.shuffle(mathstackexchange_with_tulu)
+# random.shuffle(stackexchange_with_tulu)
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-50k-with-tulu.jsonl", "w") as f_out:
+#     for elem in all_data_with_tulu:
+#         print(json.dumps(elem), file=f_out)
+
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-socratic-50k-with-tulu.jsonl", "w") as f_out:
+#     for elem in socratic_with_tulu:
+#         print(json.dumps(elem), file=f_out)
+
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-mathstackexchange-50k-with-tulu.jsonl", "w") as f_out:
+#     for elem in mathstackexchange_with_tulu:
+#         print(json.dumps(elem), file=f_out)
+
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-stackexchange-50k-with-tulu.jsonl", "w") as f_out:
+#     for elem in stackexchange_with_tulu:
+#         print(json.dumps(elem), file=f_out)
