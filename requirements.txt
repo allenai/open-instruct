@@ -25,7 +25,7 @@ einops
 flash-attn==2.5.2 # should really only be in dockerfile. Local env often doesn't have GPUs
 auto-gptq
 fire
-alpaca-eval==0.5.3
+alpaca-eval==0.6
 # for human eval web app
 flask
 vllm @ git+https://github.com/vllm-project/vllm@fbf152d976e655f8734561452a1036e63081ccfd # todo bump to next release for easier install

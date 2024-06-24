@@ -260,6 +260,12 @@ def parse_args():
         action='store_true',
         help='Trust remote code when loading pretrained models and tokenizers. Use only when you trust the remote code.',
     )
+    parser.add_argument(
+        '--wandb_entity', 
+        type=str,
+        default=None,
+        help='Entity to use for logging to wandb.'
+    )
     args = parser.parse_args()
 
     # Sanity checks
@@ -679,7 +685,9 @@ def main():
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
         experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"].value
-        accelerator.init_trackers("open_instruct", experiment_config)
+        accelerator.init_trackers("open_instruct_dpo", 
+                                  experiment_config, 
+                                  init_kwargs={"wandb": {"entity": args.wandb_entity}})
 
     # Train!
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps

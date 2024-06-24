@@ -129,9 +129,6 @@ RUN pip install -r requirements.txt
 # NLTK download
 RUN python -m nltk.downloader punkt
 
-# Use v1 of alpaca eval.
-ENV IS_ALPACA_EVAL_2=False
-
 COPY open_instruct open_instruct
 COPY eval eval
 COPY ds_configs ds_configs

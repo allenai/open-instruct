@@ -40,6 +40,7 @@ def main(args):
             sampling_params = vllm.SamplingParams(
                 temperature=0,  # greedy decoding
                 max_tokens=args.max_new_tokens,
+                stop=args.additional_stop_sequence,
             )
             # apply chat formatting
             if args.use_chat_format:
@@ -81,6 +82,7 @@ def main(args):
                 do_sample=False,
                 temperature=0,
                 batch_size=args.eval_batch_size if args.eval_batch_size else 1,
+                stop_id_sequences=[tokenizer.convert_tokens_to_ids(stop) for stop in args.additional_stop_sequence],
             )
     else:
         openai_query_cache_path = os.path.join(args.save_dir, "openai_query_cache.jsonl")
@@ -109,7 +111,6 @@ def main(args):
         df_leaderboard, annotations = alpaca_farm_evaluate(
             model_outputs=model_results,
             reference_outputs=args.reference_path,
-            annotators_config="alpaca_eval_gpt4",
             output_path=args.save_dir,
             is_return_instead_of_print=True,
             caching_path=os.path.join(args.save_dir, "alpaca_eval_annotator_cache.json"),
@@ -119,7 +120,6 @@ def main(args):
     else:
         df_leaderboard, annotations = alpaca_farm_evaluate(
             model_outputs=model_results,
-            annotators_config="alpaca_eval_gpt4",
             output_path=args.save_dir,
             is_return_instead_of_print=True,
             caching_path=os.path.join(args.save_dir, "alpaca_eval_annotator_cache.json"),
@@ -211,6 +211,13 @@ if __name__ == "__main__":
         "--use_vllm",
         action="store_true",
         help="If given, we will use vLLM to generate the predictions - much faster.",
+    )
+    parser.add_argument(
+        '--additional_stop_sequence',
+        type=str,
+        nargs="+",
+        default=[],
+        help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
     )
     args = parser.parse_args()
 
