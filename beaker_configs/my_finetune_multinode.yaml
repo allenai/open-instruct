@@ -1,6 +1,6 @@
 version: v2
 budget: ai2/oe-adapt
-description: open-instruct-finetune-multinode-llama-3-tulu-v2-4k
+description: open-instruct-finetune-multinode-llama-3-metamath-100k-with-tulu
 tasks:
   - name: open-instruct-finetune-multinode-llama-3
     replicas: 16
@@ -29,7 +29,7 @@ tasks:
               --use_flash_attn
               --tokenizer_name /models/llama_3/8b/
               --use_slow_tokenizer
-              --train_file /data/tulu_v2_mix.jsonl
+              --train_file /data/metamath-100k-with-tulu.jsonl
               --max_seq_length 4096
               --preprocessing_num_workers 16
               --per_device_train_batch_size 1
