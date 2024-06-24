@@ -24,7 +24,7 @@ all_data = []
 i = 0
 for elem in ds["train"]:
     inst = {
-        "dataset": elem["source"],
+        "dataset": "metamath",
         "id": str(i),
         "messages": [
         {
