@@ -85,11 +85,15 @@ def main(args):
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
             )
-            stop_string = "\n\n" if args.stop_at_double_newline else "\n"
+            stop_strings = args.additional_stop_sequence
+            # we only use stop token for non-chat format (usually applied to vanilla pretrained language models).
+            # For chat format, we will rely on the model knows when to stop.
+            if not args.use_chat_format:
+                stop_strings += ["\n\n"] if args.stop_at_double_newline else ["\n"]
             sampling_params = vllm.SamplingParams(
                 temperature=0,
                 max_tokens=512,
-                stop=[stop_string] if not args.use_chat_format else None, # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
+                stop=stop_strings
             )
             if args.use_chat_format:
                 prompts = [apply_chat_format(example, tokenizer) for example in test_data]
@@ -117,7 +121,8 @@ def main(args):
             else:
                 prompts = [prompt_prefix + "Question: " + example["question"].strip() + "\nAnswer:" for example in test_data]            
             new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1] # get the last token because the tokenizer may add space tokens at the start.
-            stop_tokens = [new_line_token]
+            stop_tokens = [[new_line_token]]
+            stop_tokens += [[tokenizer.encode(stop_seq, add_special_tokens=False)[-1]] for stop_seq in args.additional_stop_sequence]
             if args.stop_at_double_newline:
                 # We'll stop generation at double new line (check if that's 1 or 2 tokens)
                 double_new_line_token = tokenizer.encode("\n\n", add_special_tokens=False)[-1]
@@ -264,6 +269,13 @@ if __name__ == "__main__":
         "--stop_at_double_newline",
         action="store_true",
         help="If given, will stop generation at double newline instead of single."
+    )
+    parser.add_argument(
+        '--additional_stop_sequence',
+        type=str,
+        nargs="+",
+        default=[],
+        help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
     )
     args = parser.parse_args()
 
