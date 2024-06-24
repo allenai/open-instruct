@@ -33,6 +33,7 @@ def main(args):
             model = vllm.LLM(
                 model=args.model_name_or_path,
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path is not None else args.model_name_or_path,
+                tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
             )
             
@@ -108,7 +109,6 @@ def main(args):
         df_leaderboard, annotations = alpaca_farm_evaluate(
             model_outputs=model_results,
             reference_outputs=args.reference_path,
-            annotators_config="alpaca_eval_gpt4",
             output_path=args.save_dir,
             is_return_instead_of_print=True,
             caching_path=os.path.join(args.save_dir, "alpaca_eval_annotator_cache.json"),
@@ -118,7 +118,6 @@ def main(args):
     else:
         df_leaderboard, annotations = alpaca_farm_evaluate(
             model_outputs=model_results,
-            annotators_config="alpaca_eval_gpt4",
             output_path=args.save_dir,
             is_return_instead_of_print=True,
             caching_path=os.path.join(args.save_dir, "alpaca_eval_annotator_cache.json"),

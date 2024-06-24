@@ -1,7 +1,7 @@
-import openai
 import tqdm
 import numpy as np
 import pandas as pd
+from openai import OpenAI
 from time import sleep
 from eval.truthfulqa.utilities import format_end2end_prompt
 from eval.utils import score_completions
@@ -72,6 +72,7 @@ def run_gpt_classifier_eval(model_key, tag, engine, frame, info=False):
     # handle nulls
     frame[model_key].fillna('', inplace=True)  # these should get treated as "no comment" answers
 
+    openai_client = OpenAI()
     for idx in tqdm.tqdm(frame.index, desc='Running {}'.format(tag)):
         if pd.isnull(frame.loc[idx, '{0} {1}'.format(model_key, tag)]):
 
@@ -83,10 +84,7 @@ def run_gpt_classifier_eval(model_key, tag, engine, frame, info=False):
             retry_limit = 10
             while retry_count < retry_limit:
                 try:
-                    response = openai.Completion.create(
-                        model=engine, prompt=prompt, temperature=0, max_tokens=1,
-                        stop=None, echo=False, logprobs=2
-                    )
+                    response = openai_client.completions.create(model=engine, prompt=prompt, temperature=0, max_tokens=1,stop=None, echo=False, logprobs=2)
                     retry_count = 0
                     break
                 except Exception as e:
@@ -98,7 +96,7 @@ def run_gpt_classifier_eval(model_key, tag, engine, frame, info=False):
                     print(f"Retry for the {retry_count} time.")
                     
             sleep(0.1)  # avoid OpenAI's max calls limit
-            logprobs = response['choices'][0]['logprobs']
+            logprobs = response.choices[0].logprobs
             output_str = logprobs['tokens'][0]
             output_dict = logprobs['top_logprobs'][0]
 

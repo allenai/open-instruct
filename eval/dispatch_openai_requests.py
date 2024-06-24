@@ -2,10 +2,11 @@
 This file is copied and modified from https://gist.github.com/neubig/80de662fb3e225c18172ec218be4917a.
 Thanks to Graham Neubig for sharing the original code.
 '''
-
-import openai
 import asyncio
 from typing import Any, List, Dict
+from openai import AsyncOpenAI
+
+aclient = AsyncOpenAI()
 
 async def dispatch_openai_chat_requesets(
     messages_list: List[List[Dict[str,Any]]],
@@ -22,12 +23,7 @@ async def dispatch_openai_chat_requesets(
         List of responses from OpenAI API.
     """
     async_responses = [
-        openai.ChatCompletion.acreate(
-            model=model,
-            messages=x,
-            **completion_kwargs,
-        )
-        for x in messages_list
+        aclient.chat.completions.create(model=model, messages=x, **completion_kwargs) for x in messages_list
     ]
     return await asyncio.gather(*async_responses)
 
@@ -47,12 +43,7 @@ async def dispatch_openai_prompt_requesets(
         List of responses from OpenAI API.
     """
     async_responses = [
-        openai.Completion.acreate(
-            model=model,
-            prompt=x,
-            **completion_kwargs,
-        )
-        for x in prompt_list
+        aclient.completions.create(model=model, prompt=x, **completion_kwargs) for x in prompt_list
     ]
     return await asyncio.gather(*async_responses)
 

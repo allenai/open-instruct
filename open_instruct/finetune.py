@@ -267,6 +267,13 @@ def parse_args():
         choices=['mean', 'sum'],
         help='How to reduce loss over tokens. Default is mean, but using sum can improve chat model performance.',
     )
+    parser.add_argument(
+        '--wandb_entity', 
+        type=str,
+        default=None,
+        help='Entity to use for logging to wandb.'
+    )
+
     args = parser.parse_args()
 
     # Sanity checks
@@ -700,7 +707,10 @@ def main():
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
         experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"].value
-        accelerator.init_trackers("open_instruct", experiment_config)
+        accelerator.init_trackers("open_instruct_sft", 
+                                  experiment_config, 
+                                  init_kwargs={"wandb": {"entity": args.wandb_entity}})
+
 
     # Train!
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
@@ -836,14 +846,14 @@ def main():
                 output_dir = os.path.join(args.output_dir, output_dir)
             save_with_accelerate(accelerator, model, tokenizer, output_dir, args)
 
-    if args.with_tracking:
-        accelerator.end_training()
-
     if args.output_dir is not None:
-        accelerator.wait_for_everyone()
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)
         save_with_accelerate(accelerator, model, tokenizer, args.output_dir, args)
+
+    accelerator.wait_for_everyone()
+    if args.with_tracking:
+        accelerator.end_training()
 
 
 if __name__ == "__main__":
