@@ -159,7 +159,6 @@ for experiment_group in experiment_groups:
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --eval_batch_size 4 \
-            --load_in_8bit \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
@@ -172,7 +171,6 @@ for experiment_group in experiment_groups:
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --eval_batch_size 4 \
-            --load_in_8bit \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
@@ -310,7 +308,6 @@ for experiment_group in experiment_groups:
             --hf_truth_model_name_or_path allenai/truthfulqa-truth-judge-llama2-7B \
             --hf_info_model_name_or_path allenai/truthfulqa-info-judge-llama2-7B \
             --eval_batch_size 20 \
-            --load_in_8bit \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
