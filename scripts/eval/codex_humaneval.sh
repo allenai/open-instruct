@@ -31,6 +31,33 @@ python -m eval.codex_humaneval.run_eval \
     --data_file data/eval/codex_humaneval/HumanEval.jsonl.gz  \
     --data_file_hep data/eval/codex_humaneval/humanevalpack.jsonl  \
     --use_chat_format \
+    --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
+    --eval_pass_at_ks 1 5 10 20 \
+    --unbiased_sampling_size_n 20 \
+    --temperature 0.1 \
+    --save_dir results/codex_humaneval/tulu_7B_temp_0_1 \
+    --model ../checkpoints/tulu_7B/ \
+    --tokenizer ../checkpoints/tulu_7B/ \
+    --use_vllm
+
+# Evaluating tulu 7B model using temperature 0.1 to get the pass@1 score with chat format via HumanEvalPack
+# And use the HumanEval+ data for more rigorous evaluation.
+python -m eval.codex_humaneval.run_eval \
+    --data_file data/eval/codex_humaneval/HumanEvalPlus-OriginFmt.jsonl.gz  \
+    --data_file_hep data/eval/codex_humaneval/humanevalpack.jsonl  \
+    --use_chat_format \
+    --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
+    --eval_pass_at_ks 1 5 10 20 \
+    --unbiased_sampling_size_n 20 \
+    --temperature 0.1 \
+    --save_dir results/codex_humaneval/tulu_7B_temp_0_1 \
+    --model ../checkpoints/tulu_7B/ \
+    --tokenizer ../checkpoints/tulu_7B/ \
+    --use_vllm
+
+# you can also use humaneval+ without the HumanEvalPack data
+python -m eval.codex_humaneval.run_eval \
+    --data_file data/eval/codex_humaneval/HumanEvalPlus-OriginFmt.jsonl.gz  \
     --eval_pass_at_ks 1 5 10 20 \
     --unbiased_sampling_size_n 20 \
     --temperature 0.1 \
