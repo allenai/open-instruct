@@ -582,7 +582,9 @@ def main():
         # only the eos for olmo, but we use it as bos
         tokenizer.bos_token = tokenizer.eos_token
         assert args.add_bos, "For OLMo, you must add bos token to the beginning of the input sequence."
-    
+    elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast) and tokenizer.pad_token is None:
+        num_added_tokens = tokenizer.add_special_tokens({'pad_token': '<pad>'})
+        assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
