@@ -377,6 +377,11 @@ def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=Fals
 
 
 def save_with_accelerate(accelerator, model, tokenizer, output_dir, args):
+    # set the generation config to an empty setting to be safe.
+    # we usually do greedy decoding for generation, so this should be okay.
+    # otherwise, we get an error thrown at save time.
+    model.generation_config = transformers.GenerationConfig(temperature=None, top_p=None)
+
     unwrapped_model = accelerator.unwrap_model(model)
     # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
     # Otherwise, sometimes the model will be saved with only part of the parameters.
@@ -463,12 +468,14 @@ def main():
             args.config_name,
             trust_remote_code=args.trust_remote_code,
             revision=args.model_revision,
+            token=os.getenv("HF_TOKEN", None)
         )
     elif args.model_name_or_path:
         config = AutoConfig.from_pretrained(
             args.model_name_or_path,
             trust_remote_code=args.trust_remote_code,
             revision=args.model_revision,
+            token=os.getenv("HF_TOKEN", None)
         )
     else:
         raise ValueError(
@@ -493,14 +500,16 @@ def main():
             args.tokenizer_name,
             trust_remote_code=args.trust_remote_code,
             use_fast=not args.use_slow_tokenizer,
-            revision=tokenizer_revision
+            revision=tokenizer_revision,
+            token=os.getenv("HF_TOKEN", None)
         )
     elif args.model_name_or_path:
         tokenizer = AutoTokenizer.from_pretrained(
             args.model_name_or_path,
             trust_remote_code=args.trust_remote_code,
             use_fast=not args.use_slow_tokenizer,
-            revision=tokenizer_revision
+            revision=tokenizer_revision,
+            token=os.getenv("HF_TOKEN", None)
         )
     else:
         raise ValueError(
@@ -528,7 +537,8 @@ def main():
                 trust_remote_code=args.trust_remote_code,
                 torch_dtype=torch.bfloat16,
                 use_flash_attention_2=True if args.use_flash_attn else False,
-                revision=args.model_revision
+                revision=args.model_revision,
+                token=os.getenv("HF_TOKEN", None)
             )
         else:
             model = AutoModelForCausalLM.from_pretrained(
@@ -538,7 +548,8 @@ def main():
                 trust_remote_code=args.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 use_flash_attention_2=True if args.use_flash_attn else False,
-                revision=args.model_revision
+                revision=args.model_revision,
+                token=os.getenv("HF_TOKEN", None)
             )
     else:
         logger.info("Training new model from scratch")
