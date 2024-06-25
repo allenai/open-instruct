@@ -328,6 +328,19 @@ def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=Fals
             else:
                 raise ValueError("Invalid role: {}".format(message["role"]))
         return message_text
+    
+    # def _concat_messages(messages):
+    #     message_text = ""
+    #     for message in messages:
+    #         if message["role"] == "system":
+    #             message_text += "<|start_header_id|>system<|end_header_id|>\n\n" + message["content"].strip() + tokenizer.eos_token
+    #         elif message["role"] == "user":
+    #             message_text += "<|start_header_id|>user<|end_header_id|>\n\n" + message["content"].strip() + tokenizer.eos_token
+    #         elif message["role"] == "assistant":
+    #             message_text += "<|start_header_id|>assistant<|end_header_id|>\n\n" + message["content"].strip() + tokenizer.eos_token
+    #         else:
+    #             raise ValueError("Invalid role: {}".format(message["role"]))
+    #     return message_text
         
     example_text = _concat_messages(messages).strip()
     if add_bos:

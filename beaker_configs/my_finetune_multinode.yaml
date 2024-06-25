@@ -76,7 +76,7 @@ tasks:
     resources:
       gpuCount: 8
     context:
-      priority: normal
+      priority: high
       preemptible: true
     constraints:
       cluster: [ai2/jupiter-cirrascale-2]

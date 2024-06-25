@@ -28,6 +28,12 @@ parser.add_argument("--priority", type=str, default="preemptible")
 parser.add_argument("--olmo", action="store_true", help="Pass this flag if evaluating an OLMo model and `olmo` isn't in the model name.")
 parser.add_argument("--experiments", type=str, nargs="+", default=None, help="Experiments to run, e.g., '--experiments mmlu_5shot gsm_cot'")
 parser.add_argument("--num_gpus", type=int, default=1)
+parser.add_argument(
+    "--tokenizer_name",
+    type=str,
+    default=None,
+    help="Pretrained tokenizer name or path if not the same as model_name",
+)
 args = parser.parse_args()
 
 
@@ -297,6 +303,9 @@ for experiment_group in experiment_groups:
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path "+model_info[1])]
     else:  # if it's a beaker model, mount the beaker dataset to `/model`
         task_spec['datasets'][1]['source']['beaker'] = model_info[1]
+
+    if args.tokenizer_name is not None:
+        task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", f"--tokenizer_name_or_path {args.tokenizer_name}")]
 
     # if a specific checkpoint is specified, load model from that checkpoint
     if model_info[2] is not None:
