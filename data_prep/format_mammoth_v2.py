@@ -95,44 +95,64 @@ for elem in ds["train"]:
 #     for elem in stackexchange_with_tulu:
 #         print(json.dumps(elem), file=f_out)
     
+# random.shuffle(all_data)
+# random.shuffle(socratic)
+# random.shuffle(mathstackexchange)
+# random.shuffle(stackexchange)
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-all-200k.jsonl", "w") as f_out:
+#     for elem in all_data[:200000]:
+#         print(json.dumps(elem), file=f_out)
+
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-socratic-200k.jsonl", "w") as f_out:
+#     for elem in socratic[:200000]:
+#         print(json.dumps(elem), file=f_out)
+
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-mathstackexchange-200k.jsonl", "w") as f_out:
+#     for elem in mathstackexchange[:200000]:
+#         print(json.dumps(elem), file=f_out)
+
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-stackexchange-200k.jsonl", "w") as f_out:
+#     for elem in stackexchange[:200000]:
+#         print(json.dumps(elem), file=f_out)
+
+# random.shuffle(all_data)
+# random.shuffle(socratic)
+# random.shuffle(mathstackexchange)
+# random.shuffle(stackexchange)
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-all-500k.jsonl", "w") as f_out:
+#     for elem in all_data[:500000]:
+#         print(json.dumps(elem), file=f_out)
+
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-socratic-500k.jsonl", "w") as f_out:
+#     for elem in socratic[:500000]:
+#         print(json.dumps(elem), file=f_out)
+
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-mathstackexchange-500k.jsonl", "w") as f_out:
+#     for elem in mathstackexchange[:500000]:
+#         print(json.dumps(elem), file=f_out)
+
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-stackexchange-500k.jsonl", "w") as f_out:
+#     for elem in stackexchange[:500000]:
+#         print(json.dumps(elem), file=f_out)
+
 random.shuffle(all_data)
 random.shuffle(socratic)
 random.shuffle(mathstackexchange)
 random.shuffle(stackexchange)
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-all-200k.jsonl", "w") as f_out:
-    for elem in all_data[:200000]:
+with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-all-900k.jsonl", "w") as f_out:
+    for elem in all_data[:900000]:
         print(json.dumps(elem), file=f_out)
 
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-socratic-200k.jsonl", "w") as f_out:
-    for elem in socratic[:200000]:
+with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-socratic-900k.jsonl", "w") as f_out:
+    for elem in socratic[:900000]:
         print(json.dumps(elem), file=f_out)
 
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-mathstackexchange-200k.jsonl", "w") as f_out:
-    for elem in mathstackexchange[:200000]:
+with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-mathstackexchange-900k.jsonl", "w") as f_out:
+    for elem in mathstackexchange[:900000]:
         print(json.dumps(elem), file=f_out)
 
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-stackexchange-200k.jsonl", "w") as f_out:
-    for elem in stackexchange[:200000]:
-        print(json.dumps(elem), file=f_out)
-
-random.shuffle(all_data)
-random.shuffle(socratic)
-random.shuffle(mathstackexchange)
-random.shuffle(stackexchange)
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-all-500k.jsonl", "w") as f_out:
-    for elem in all_data[:500000]:
-        print(json.dumps(elem), file=f_out)
-
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-socratic-500k.jsonl", "w") as f_out:
-    for elem in socratic[:500000]:
-        print(json.dumps(elem), file=f_out)
-
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-mathstackexchange-500k.jsonl", "w") as f_out:
-    for elem in mathstackexchange[:500000]:
-        print(json.dumps(elem), file=f_out)
-
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-stackexchange-500k.jsonl", "w") as f_out:
-    for elem in stackexchange[:500000]:
+with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mammoth_v2-stackexchange-900k.jsonl", "w") as f_out:
+    for elem in stackexchange[:900000]:
         print(json.dumps(elem), file=f_out)
 
 # all_data_with_tulu = all_data[:50000] + tulu_data
