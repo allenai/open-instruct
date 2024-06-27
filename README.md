@@ -51,7 +51,7 @@ pip install -r weight-diff-requirements.txt
 For a second installation strategy, if you'd like to *run experiments within a Docker environment*, you can create one using:
 
 ```bash
-docker build --build-arg CUDA=11.8.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 --build-arg REQUIRE=requirements.txt . -t <your tag here>
+docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 --build-arg REQUIRE=requirements.txt . -t <your tag here>
 ```
 
 If you are internally at AI2, you can use this pre-built beaker image Yizhongw03/open-instruct (most recent version [here](https://beaker.org/im/01HSPPCBMA11BYKDQ2XQ2V947Q/details)). A version with newer transformers is available [here](https://beaker.org/im/01HW960RVZ0DWWBQKWPSK4T4Y6/details).
