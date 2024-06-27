@@ -105,9 +105,11 @@ d1['tasks'][0]['context']['preemptible'] = args.preemptible
 d1['tasks'][0]['resources']['gpuCount'] = 1
 
 # remove nfs if asked or jupiter in cluster list.
+nfs_available = True
 if args.no_nfs or any(["jupiter" in c for c in cluster]):
     # remove the NFS dataset - last element in the list.
     d1['tasks'][0]['datasets'] = d1['tasks'][0]['datasets'][:-1]
+    nfs_available = False
 
 # Use a different image if requested.
 if args.beaker_image is not None:
@@ -371,6 +373,7 @@ for experiment_group in experiment_groups:
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path "+model_info[1])]
     elif model_info[1].startswith("/"):  # if it's a local model, load it from the local directory
+        assert nfs_available, "NFS is required for path-based models."  # to be safe.
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path "+model_info[1])]
     else:  # if it's a beaker model, mount the beaker dataset to `/model`
