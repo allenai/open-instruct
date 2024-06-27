@@ -24,7 +24,7 @@ all_data = []
 i = 0
 for elem in ds["train"]:
     inst = {
-        "dataset": "metamath",
+        "dataset": "mathplus",
         "id": str(i),
         "messages": [
         {
@@ -39,22 +39,32 @@ for elem in ds["train"]:
     all_data.append(inst)
 random.shuffle(all_data)
 
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/metamath.jsonl", "w") as f_out:
-    for elem in all_data:
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mathplus.jsonl", "w") as f_out:
+#     for elem in all_data:
+#         print(json.dumps(elem), file=f_out)
+
+with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mathplus-50k.jsonl", "w") as f_out:
+    for elem in all_data[:50000]:
         print(json.dumps(elem), file=f_out)
 
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/metamath-100k.jsonl", "w") as f_out:
-    for elem in all_data[:100000]:
+with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mathplus-500k.jsonl", "w") as f_out:
+    for elem in all_data[:500000]:
         print(json.dumps(elem), file=f_out)
 
-mixed_data = all_data + tulu_data
-random.shuffle(mixed_data)
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/metamath-with-tulu.jsonl", "w") as f_out:
-    for elem in mixed_data:
-        print(json.dumps(elem), file=f_out)
+# mixed_data = all_data + tulu_data
+# random.shuffle(mixed_data)
+# with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mathplus-with-tulu.jsonl", "w") as f_out:
+#     for elem in mixed_data:
+#         print(json.dumps(elem), file=f_out)
 
-mixed_data_100k = all_data[:100000] + tulu_data
+mixed_data_100k = all_data[:50000] + tulu_data
 random.shuffle(mixed_data_100k)
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/metamath-100k-with-tulu.jsonl", "w") as f_out:
+with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mathplus-50k-with-tulu.jsonl", "w") as f_out:
     for elem in mixed_data_100k:
+        print(json.dumps(elem), file=f_out)
+
+mixed_data_500k = all_data[:500000] + tulu_data
+random.shuffle(mixed_data_500k)
+with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mathplus-500k-with-tulu.jsonl", "w") as f_out:
+    for elem in mixed_data_500k:
         print(json.dumps(elem), file=f_out)
