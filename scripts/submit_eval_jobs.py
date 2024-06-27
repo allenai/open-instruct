@@ -84,6 +84,7 @@ parser.add_argument("--experiments", type=str, nargs="+", default=None, help="Ex
 parser.add_argument("--batch_size_reduction", type=int, default=None, help="Reduce batch size by this factor.")
 parser.add_argument("--gpu_multiplier", type=int, default=None, help="Multiply the number of GPUs by this factor.")
 parser.add_argument("--gsm_stop_at_double_newline", action="store_true", help="Stop GSM generation at the first double newline.")
+parser.add_argument("--no-nfs", action="store_true", help="Don't mount the NFS.")
 parser.add_argument("--add_stop_sequence", type=str, nargs="+", default=[], help="Additional stop sequences to use when generating completions.") # e.g. \"<|eot_id|>\" for llama 3
 args = parser.parse_args()
 
@@ -103,6 +104,10 @@ d1['tasks'][0]['context']['priority'] = args.priority
 d1['tasks'][0]['context']['preemptible'] = args.preemptible
 d1['tasks'][0]['resources']['gpuCount'] = 1
 
+# remove nfs if asked or jupiter in cluster list.
+if args.no_nfs or any(["jupiter" in c for c in cluster]):
+    # remove the NFS dataset - last element in the list.
+    d1['tasks'][0]['datasets'] = d1['tasks'][0]['datasets'][:-1]
 
 # Use a different image if requested.
 if args.beaker_image is not None:
