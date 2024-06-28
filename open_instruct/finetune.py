@@ -833,7 +833,6 @@ def main():
                 optimizer.step()
                 optimizer.zero_grad()
                 lr_scheduler.step() 
-                import pdb; pdb.set_trace()      
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:

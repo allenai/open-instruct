@@ -4,7 +4,6 @@ scipy
 packaging
 sentencepiece
 datasets
-deepspeed>=0.10.0
 accelerate>=0.21.0
 peft>=0.4.0
 bitsandbytes>=0.41.1
@@ -27,11 +26,7 @@ fire
 alpaca-eval==0.6.2
 # for human eval web app
 flask
-# Newer vLLM requires pydantic >= 2, but deepspeed requires pydantic < 2
-# if we are not using olmo models, this is fine.
-# once https://github.com/microsoft/DeepSpeed/pull/5167 is merged, we can
-# update vLLM and remove the need for a separate olmo inference file
-vllm>=0.4.1
+vllm>=0.4.2 # for compatibility with OLMo models in transition to Transformers integration
 openpyxl
 # for ifeval
 nltk
