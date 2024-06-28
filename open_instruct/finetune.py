@@ -594,6 +594,8 @@ def main():
         embedding_size = embeddings.weight.shape[0]
         if len(tokenizer) > embeddings.weight.shape[0]:
             model.resize_token_embeddings(len(tokenizer))
+        # update embedding size after resizing
+        embedding_size = embeddings.weight.shape[0]
 
     if args.use_lora:
         if args.use_qlora:
@@ -830,7 +832,8 @@ def main():
                     accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad()
-                lr_scheduler.step()       
+                lr_scheduler.step() 
+                import pdb; pdb.set_trace()      
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
