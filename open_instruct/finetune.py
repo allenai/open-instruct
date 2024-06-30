@@ -37,11 +37,6 @@ from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_tr
 
 logger = get_logger(__name__)
 
-try:
-    from hf_olmo import OLMoTokenizerFast
-except ImportError:
-    logger.warning("OLMo not installed. Ignore if using a different model.")
-
 def parse_args():
     parser = argparse.ArgumentParser(description="Finetune a transformers model on a causal language modeling task")
     parser.add_argument(
@@ -578,10 +573,6 @@ def main():
             assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
     elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
         num_added_tokens = tokenizer.add_special_tokens({'unk_token': '<unk>'})
-    elif isinstance(tokenizer, OLMoTokenizerFast):
-        # only the eos for olmo, but we use it as bos
-        tokenizer.bos_token = tokenizer.eos_token
-        assert args.add_bos, "For OLMo, you must add bos token to the beginning of the input sequence."
     elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast) and tokenizer.pad_token is None:
         num_added_tokens = tokenizer.add_special_tokens({'pad_token': '<pad>'})
         assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
@@ -595,7 +586,7 @@ def main():
         if len(tokenizer) > embeddings.weight.shape[0]:
             model.resize_token_embeddings(len(tokenizer))
         # update embedding size after resizing
-        embedding_size = embeddings.weight.shape[0]
+        embedding_size = len(tokenizer)
 
     if args.use_lora:
         if args.use_qlora:
