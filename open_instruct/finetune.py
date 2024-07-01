@@ -31,7 +31,7 @@ from transformers import (
     GPTNeoXTokenizerFast,
     GPT2Tokenizer,
     OPTForCausalLM,
-    BitsAndBytesConfig,
+    BitsAndBytesConfig
 )
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 
@@ -375,7 +375,12 @@ def save_with_accelerate(accelerator, model, tokenizer, output_dir, args):
     # set the generation config to an empty setting to be safe.
     # we usually do greedy decoding for generation, so this should be okay.
     # otherwise, we get an error thrown at save time.
-    model.generation_config = transformers.GenerationConfig(temperature=None, top_p=None)
+    model.generation_config = transformers.GenerationConfig(
+        temperature=None,
+        top_p=None,
+        eos_token_id=tokenizer.eos_token_id,
+        bos_token_id=tokenizer.bos_token_id
+    )
 
     unwrapped_model = accelerator.unwrap_model(model)
     # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
@@ -584,7 +589,7 @@ def main():
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
         embedding_size = embeddings.weight.shape[0]
         if len(tokenizer) > embeddings.weight.shape[0]:
-            model.resize_token_embeddings(len(tokenizer))
+            model.resize_token_embeddings(len(tokenizer))  # TODO: pad to multiple for tensor cores.
         # update embedding size after resizing
         embedding_size = len(tokenizer)
 
