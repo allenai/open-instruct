@@ -21,12 +21,12 @@ termcolor
 jsonlines
 unidic-lite
 einops
-flash-attn==2.5.8 # should really only be in dockerfile. Local env often doesn't have GPUs
+flash-attn>=2.5.9 # should really only be in dockerfile. Local env often doesn't have GPUs
 fire
 alpaca-eval==0.6.2
 # for human eval web app
 flask
-vllm>=0.4.2 # for compatibility with OLMo models in transition to Transformers integration
+vllm>=0.4.2  # for compatibility with olmo
 openpyxl
 # for ifeval
 nltk
