@@ -61,10 +61,12 @@ If you are internally at AI2, you can use this pre-built beaker image Yizhongw03
 
 To eval OLMo-1.7 on the suite eval set from Open-Instruct (MMLU, BBQ, etc), use this pre-built beaker image `nouhad/open-instruct-olmo-safety`
 
-**Important for OLMo users:** Note that due to version conflicts between deepspeed and vLLM, we cannot support OLMo inference and deepspeed within the same image (this will be fixed once deepspeed allows pydantic >= 2). To build a docker image suitable for inference for OLMo, use:
+**Important for OLMo users:** Note that due to version conflicts between deepspeed and vLLM, we cannot support OLMo inference and deepspeed within the same image (this will be fixed once deepspeed allows pydantic >= 2). To build a docker image suitable for inference/evaluation for OLMo, use:
 ```bash
 docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 --build-arg REQUIRE=requirements-olmo.txt -f Dockerfile.olmo . -t <your tag here>
 ```
+
+For training, you can use the previous image.
 
 
 ## Training

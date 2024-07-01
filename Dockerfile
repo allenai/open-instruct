@@ -123,7 +123,7 @@ RUN pip install --upgrade pip "setuptools<70.0.0" wheel
 # TODO, unpin setuptools when this issue in flash attention is resolved
 RUN pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121
 RUN pip install packaging
-RUN pip install flash-attn==2.5.9 --no-build-isolation
+RUN pip install flash-attn==2.5.9.post1 --no-build-isolation
 RUN pip install -r requirements.txt
 
 # NLTK download
