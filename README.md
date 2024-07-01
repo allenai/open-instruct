@@ -6,14 +6,17 @@ This repo serves as an open effort on instruction-tuning popular pretrained lang
 2. Code for running standard evaluation on a range of benchmarks, targeting for differnt capabilities of these language models.
 3. Checkpoints or other useful artifacts that we build in our exploration.
 
-Please see our first paper [How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources](https://arxiv.org/abs/2306.04751) for more thoughts behind this project and our initial findings. Please see our second paper [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702) for newer results using Llama-2 models and direct preference optimization. We are still working on more models, so stay tuned for future work!
+Please see our first paper [How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources](https://arxiv.org/abs/2306.04751) for more thoughts behind this project and our initial findings. Please see our second paper [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702) for results using Llama-2 models and direct preference optimization. We are still working on more models. For more recent results involving PPO and DPO please see our third paper [Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback](https://arxiv.org/abs/2406.09279). We also have 
 
 <p align="center" width="100%">
       <img src="images/tulu_logo.png" alt="Tülu (a hybrid camel) represents a suite of LLaMa models that we built by fully-finetuning them on a strong mix of datasets." style="width: 20%; min-width: 200px; display: block; margin: auto;">
 </p>
 
+*Note:* Previous versions of Open Instruct used a pinned version of Transformers for replicating Tulu 1/2 results. If this is your goal, refer to [this commit or older](https://github.com/allenai/open-instruct/commit/f3424591638ed63b31d5869abd867932c359c1ed).
+
 ## News
 
+- [2024-07-01] We released [Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback](https://arxiv.org/abs/2406.09279) and have majorly updated our codebase to support new models and package versions.
 - [2023-11-27] We released [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702). Check out our models [here](https://huggingface.co/collections/allenai/tulu-v2-suite-6551b56e743e6349aab45101). We have added a DPO finetuning script for replicating our results.
 - [2023-09-26] We switched to use the official [alpaca-eval](https://github.com/tatsu-lab/alpaca_eval) library to run AlpacaFarm evaluation but use regenerated longer reference outputs. This will change our numbers reported in the paper. We will update the paper soon.
 - [2023-09-25] Supported using [vLLM](https://github.com/vllm-project/vllm/) for our evaluations, which speeds up the evaluation by 10x.
@@ -34,7 +37,7 @@ Before installing, if not in a Docker container with NVCC installed, you should 
 ```
 conda install cuda-nvcc=<ver> -c nvidia
 ```
-Then, install `torch==2.2.1` from source.
+Then, install `torch==2.3.0` from source.
 
 To run training, evaluation, or inference for our finetuned models, you need to install the required packages by running the following command (after installing pytorch):
 
@@ -58,10 +61,11 @@ If you are internally at AI2, you can use this pre-built beaker image Yizhongw03
 
 To eval OLMo-1.7 on the suite eval set from Open-Instruct (MMLU, BBQ, etc), use this pre-built beaker image `nouhad/open-instruct-olmo-safety`
 
-If using early OLMo models without `-hf` in the name, you will still need to use the following code. We recommend using early models with `-hf` in name, and models released after April 2024 will be supported natively.
+**Important for OLMo users:** Note that due to version conflicts between deepspeed and vLLM, we cannot support OLMo inference and deepspeed within the same image (this will be fixed once deepspeed allows pydantic >= 2). To build a docker image suitable for inference for OLMo, use:
+```bash
+docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 --build-arg REQUIRE=requirements-olmo.txt -f Dockerfile.olmo . -t <your tag here>
 ```
-from hf_olmo import OLMoForCausalLM
-```
+
 
 ## Training
 
@@ -143,7 +147,7 @@ We provide the scripts for running evaluation of Huggingface/OpenAI models on a 
 - [ToxiGen](https://github.com/microsoft/TOXIGEN)
 - [XSTest](https://github.com/paul-rottger/exaggerated-safety/)
 - [TruthfulQA](https://github.com/sylinrl/TruthfulQA)
-- [AlpacaEval](https://github.com/tatsu-lab/alpaca_eval)
+- [AlpacaEval 1 and 2](https://github.com/tatsu-lab/alpaca_eval)
 
 We are working on including more promising benchmarks into this list. Please stay tuned!
 
@@ -194,5 +198,16 @@ If you used this repository or our models, please cite our work:
       eprint={2311.10702},
       archivePrefix={arXiv},
       primaryClass={cs.CL}
+}
+```
+
+```bibtex
+@misc{ivison2024unpacking,
+      title={Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback}, 
+      author={Hamish Ivison and Yizhong Wang and Jiacheng Liu and Zeqiu Wu and Valentina Pyatkin and Nathan Lambert and Noah A. Smith and Yejin Choi and Hannaneh Hajishirzi},
+      year={2024},
+      eprint={2406.09279},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
 }
 ```
