@@ -4,11 +4,11 @@ scipy
 packaging
 sentencepiece
 datasets
-accelerate>=0.21.0
-peft>=0.4.0
+accelerate==0.31.0
+peft>=0.11.1
 bitsandbytes>=0.41.1
 evaluate>=0.4.0
-tokenizers>=0.13.3
+tokenizers==0.19.1
 protobuf
 transformers>=4.40
 openai>=1.0.0
@@ -21,7 +21,7 @@ termcolor
 jsonlines
 unidic-lite
 einops
-flash-attn>=2.5.9 # should really only be in dockerfile. Local env often doesn't have GPUs
+flash-attn==2.5.9 # should really only be in dockerfile. Local env often doesn't have GPUs
 fire
 alpaca-eval==0.6.2
 # for human eval web app
