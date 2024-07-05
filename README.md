@@ -97,7 +97,7 @@ You can use the following command to run instruction tuning (finetuning a pretra
 
 Make sure to adjust `model_name_or_path`, `tokenizer_name`, `train_file`, and `output_dir` to your models / data / setting. By default, this uses `deepspeed` with `accelerate`.
 
-**Note:** If you are looking to replicate the released Tulu 2 models, it may be useful to swap the loss calculation to `--reduce_loss sum`. This uses a sum reduction instead of a mean reduction for loss calculations, and means we weight all tokens evenly when training, better mimicking the larger batch sizes used to train Tulu 2 models. See https://github.com/huggingface/transformers/issues/24725 for more discussion and details.
+**Note:** If you are looking to replicate the released Tulu 2 models, it may be useful to swap the loss calculation to `--reduce_loss sum`. This uses a sum reduction instead of a mean reduction for loss calculations, and means we weight all tokens evenly when training, better mimicking the larger batch sizes used to train Tulu 2 models. See https://github.com/huggingface/transformers/issues/24725 for more discussion and details. Generally, *you may get better results using the sum reduction if you need to use a lot of gradient accumulation* (including for training Llama 3 models).
 
 ### Parameter-Efficient Finetuning
 
