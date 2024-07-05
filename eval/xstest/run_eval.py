@@ -77,6 +77,7 @@ def main(args):
             sampling_params = vllm.SamplingParams(
                 temperature=0,
                 max_tokens=2048,
+                stop=args.additional_stop_sequence,
             )
             # We need to remap the outputs to the prompts because vllm might not return outputs for some prompts (e.g., if the prompt is too long)
             generations = model.generate(prompts, sampling_params)
@@ -93,6 +94,7 @@ def main(args):
                 max_new_tokens=2048,
                 temperature=0,
                 batch_size=args.eval_batch_size if args.eval_batch_size else 1,
+                stop_id_sequences=[tokenizer.convert_tokens_to_ids(stop) for stop in args.additional_stop_sequence],
             )
     else:
         instances = [{"id": i, "prompt": prompt} for i, prompt in enumerate(data["prompt"])]
@@ -229,6 +231,13 @@ if __name__ == "__main__":
         type=str, 
         default="eval.templates.create_prompt_with_tulu_chat_format", 
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
+    )
+    parser.add_argument(
+        '--additional_stop_sequence',
+        type=str,
+        nargs="+",
+        default=[],
+        help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
     )
     args = parser.parse_args()
 

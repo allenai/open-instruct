@@ -85,10 +85,15 @@ def main(args):
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
             )
+            stop_sequences = args.additional_stop_sequence
+            # we only use stop token for non-chat format (usually applied to vanilla pretrained language models).
+            # For chat format, we will rely on the model knows when to stop.
+            if not args.use_chat_format:
+                stop_sequences.append("\n")
             sampling_params = vllm.SamplingParams(
                 temperature=0,  # greedy decoding
                 max_tokens=512,  # maximum we can pass to roberta
-                stop=["\n"] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
+                stop=stop_sequences,
             )
             outputs = model.generate(prompts, sampling_params)
             outputs = [it.outputs[0].text for it in outputs]
@@ -106,13 +111,18 @@ def main(args):
                 tokenizer.model_max_length = model.config.max_position_embeddings
                 print("Set tokenizer.model_max_length to model.config.max_position_embeddings: {}".format(model.config.max_position_embeddings))
             new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1]
+            stop_sequences = [[tokenizer.encode(seq, add_special_tokens=False)[-1]] for seq in args.additional_stop_sequence]
+            # we only use stop token for non-chat format (usually applied to vanilla pretrained language models).
+            # For chat format, we will rely on the model knows when to stop.
+            if not args.use_chat_format:
+                stop_sequences.append([new_line_token])
             outputs = generate_completions(
                 model=model,
                 tokenizer=tokenizer,
                 prompts=prompts,
                 max_new_tokens=512,
                 batch_size=args.eval_batch_size if args.eval_batch_size else 1,
-                stop_id_sequences=[[new_line_token]] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
+                stop_id_sequences=stop_sequences,  
             )
     else:
         instances = [{
@@ -251,6 +261,13 @@ if __name__ == "__main__":
         type=int,
         default=500,
         help="If given, we will only use this many prompts per group. Default to 500 (half the available prompts).",
+    )
+    parser.add_argument(
+        '--additional_stop_sequence',
+        type=str,
+        nargs="+",
+        default=[],
+        help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
     )
     args = parser.parse_args()
 

@@ -69,7 +69,7 @@ def adjust_gpus(task_spec, experiment_group, model_name, gpu_multiplier):
 today = date.today().strftime("%m%d%Y")
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--workspace", type=str, default="hamishivi")
+parser.add_argument("--workspace", type=str, default="oe-adapt-general")
 parser.add_argument("--model_name", type=str, default="hf-opt-7B")
 parser.add_argument("--location", type=str, default=None)
 parser.add_argument("--beaker_image", type=str, default=None, help="If given, use this Beaker image.")
@@ -81,22 +81,11 @@ parser.add_argument("--priority", type=str, default="low")
 parser.add_argument("--preemptible", action="store_true", default=False, help="for using preemtipble jobs (required on some instances)")
 parser.add_argument("--olmo", action="store_true", help="Pass this flag if evaluating an OLMo model and `olmo` isn't in the model name.")
 parser.add_argument("--experiments", type=str, nargs="+", default=None, help="Experiments to run, e.g., '--experiments mmlu_5shot gsm_cot'")
-parser.add_argument("--gsm_stop_at_double_newline", action="store_true", help="If given, stop generation at double newline for GSM8k.")
-parser.add_argument(
-    "--batch_size_reduction",
-    default=None,
-    type=int,
-    help="""Reduce batch size by this factor relative to the default. Setting 
-    this to 2 for 13B models and 4 for anything bigger is generally good. If not given,
-    a reasonable default will be selected based on the model name.""",
-)
-parser.add_argument(
-    "--gpu_multiplier",
-    default=None,
-    type=int,
-    help="""Increase number of GPU's by this factor relative to the default. If not 
-    given, a reasonable default will be selected based on the model name.""",
-)
+parser.add_argument("--batch_size_reduction", type=int, default=None, help="Reduce batch size by this factor.")
+parser.add_argument("--gpu_multiplier", type=int, default=None, help="Multiply the number of GPUs by this factor.")
+parser.add_argument("--gsm_stop_at_double_newline", action="store_true", help="Stop GSM generation at the first double newline.")
+parser.add_argument("--no-nfs", action="store_true", help="Don't mount the NFS.")
+parser.add_argument("--add_stop_sequence", type=str, nargs="+", default=[], help="Additional stop sequences to use when generating completions.") # e.g. \"<|eot_id|>\" for llama 3
 args = parser.parse_args()
 
 
@@ -114,6 +103,13 @@ d1['tasks'][0]['constraints']['cluster'] = cluster
 d1['tasks'][0]['context']['priority'] = args.priority
 d1['tasks'][0]['context']['preemptible'] = args.preemptible
 d1['tasks'][0]['resources']['gpuCount'] = 1
+
+# remove nfs if asked or jupiter in cluster list.
+nfs_available = True
+if args.no_nfs or any(["jupiter" in c for c in cluster]):
+    # remove the NFS dataset - last element in the list.
+    d1['tasks'][0]['datasets'] = d1['tasks'][0]['datasets'][:-1]
+    nfs_available = False
 
 # Use a different image if requested.
 if args.beaker_image is not None:
@@ -172,9 +168,8 @@ for experiment_group in experiment_groups:
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --eval_batch_size 4 \
-            --load_in_8bit \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "mmlu_5shot":
         task_spec['arguments'][0] = '''
@@ -185,9 +180,8 @@ for experiment_group in experiment_groups:
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --eval_batch_size 4 \
-            --load_in_8bit \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "bbh_direct":
         task_spec['arguments'][0] = '''
@@ -200,7 +194,7 @@ for experiment_group in experiment_groups:
             --max_num_examples_per_task 40 \
             --no_cot \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "bbh_cot":
         task_spec['arguments'][0] = '''
@@ -212,7 +206,7 @@ for experiment_group in experiment_groups:
             --tokenizer_name_or_path /model \
             --max_num_examples_per_task 40 \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "gsm_direct":
         task_spec['arguments'][0] = '''
@@ -286,7 +280,7 @@ for experiment_group in experiment_groups:
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "tydiqa_no_context_1shot":
         task_spec["arguments"][0] = '''
@@ -301,7 +295,7 @@ for experiment_group in experiment_groups:
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "codex_eval_temp_0.1":
         task_spec['arguments'][0] = '''
@@ -313,7 +307,7 @@ for experiment_group in experiment_groups:
             --save_dir /output/ \
             --use_vllm \
             --model_name_or_path /model \
-            --tokenizer_name_or_path /model
+            --tokenizer_name_or_path /model \
         '''
     elif experiment_group == "codex_eval_temp_0.8":
         task_spec['arguments'][0] = '''
@@ -325,7 +319,7 @@ for experiment_group in experiment_groups:
             --save_dir /output/ \
             --use_vllm \
             --model_name_or_path /model \
-            --tokenizer_name_or_path /model
+            --tokenizer_name_or_path /model \
         '''
     elif experiment_group == "ifeval":
         task_spec['arguments'][0] = '''
@@ -336,7 +330,7 @@ for experiment_group in experiment_groups:
                 --tokenizer_name_or_path /model \
                 --use_chat_format \
                 --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
-                --use_vllm
+                --use_vllm \
         '''
     elif experiment_group == "trutufulqa":
         task_spec['arguments'][0] = '''
@@ -350,9 +344,8 @@ for experiment_group in experiment_groups:
             --hf_truth_model_name_or_path allenai/truthfulqa-truth-judge-llama2-7B \
             --hf_info_model_name_or_path allenai/truthfulqa-info-judge-llama2-7B \
             --eval_batch_size 20 \
-            --load_in_8bit \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "toxigen":
         task_spec['arguments'][0] = '''
@@ -364,7 +357,7 @@ for experiment_group in experiment_groups:
             --eval_batch_size 32 \
             --use_vllm \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "xstest":
         task_spec['arguments'][0] = '''
@@ -376,7 +369,7 @@ for experiment_group in experiment_groups:
             --eval_batch_size 32 \
             --use_vllm \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "alpaca_eval":
         task_spec['arguments'][0] = '''
@@ -386,7 +379,7 @@ for experiment_group in experiment_groups:
             --tokenizer_name_or_path /model \
             --save_dir /output/ \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "alpaca_eval_2":
         task_spec['arguments'][0] = '''
@@ -396,11 +389,11 @@ for experiment_group in experiment_groups:
             --tokenizer_name_or_path /model \
             --save_dir /output/ \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
         # OLMo models can only output 2048 new tokens at most; default is 8192.
         if "olmo" in model_info[0] or args.olmo:
-            task_spec['arguments'][0] += " --max_new_tokens 2048"
+            task_spec['arguments'][0] += " --max_new_tokens 4096" # nol increased hardcode to 4096
 
     else:
         raise ValueError("experiment_group not supported")
@@ -409,6 +402,7 @@ for experiment_group in experiment_groups:
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path "+model_info[1])]
     elif model_info[1].startswith("/"):  # if it's a local model, load it from the local directory
+        assert nfs_available, "NFS is required for path-based models."  # to be safe.
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path "+model_info[1])]
     else:  # if it's a beaker model, mount the beaker dataset to `/model`
@@ -442,12 +436,13 @@ for experiment_group in experiment_groups:
     )
 
     # if using huggingface tokenizer template, replace the chat formatting function with hf tokenizer one
+    # otherwise, try to guess what template to use based on model name
     if args.use_hf_tokenizer_template:
         task_spec['arguments'] = [task_spec['arguments'][0].replace(
             "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
             "--chat_formatting_function eval.templates.create_prompt_with_huggingface_tokenizer_template")
         ]
-    if "llama2-chat" in model_info[0]:
+    elif "llama2-chat" in model_info[0]:
         task_spec['arguments'] = [task_spec['arguments'][0].replace(
             "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
             "--chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format")
@@ -472,17 +467,17 @@ for experiment_group in experiment_groups:
             "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
             "--chat_formatting_function eval.templates.create_prompt_with_olmo_chat_format")
         ]
-        # no vllm for olmo yet
-        if "--use_vllm" in task_spec['arguments'][0]:
-            print(f"Removing --use_vllm for {model_info[0]}")
-            task_spec['arguments'] = [task_spec['arguments'][0].replace("--use_vllm", "")] 
 
     if any([x in model_info[0] for x in ["opt", "pythia", "falcon"]]):
         if "--use_vllm" in task_spec['arguments'][0]:
             print(f"Removing --use_vllm for {model_info[0]}")
             task_spec['arguments'] = [task_spec['arguments'][0].replace("--use_vllm", "")] 
 
-    # print(d)
+    # Add additional stop sequences if needed.
+    # mainly for llama-3-instruct eot.
+    tasks_without_addition_stop = ["mmlu_0shot", "mmlu_5shot", "trutufulqa"]
+    if args.add_stop_sequence and experiment_group not in tasks_without_addition_stop:
+        task_spec['arguments'] = [task_spec['arguments'][0] + " --additional_stop_sequence " + " ".join(args.add_stop_sequence)]
 
     eval_task_specs.append(task_spec)
 
@@ -492,6 +487,9 @@ for experiment_group in experiment_groups:
 experiment_name = f"open_instruct_eval_{model_name}_{today}" 
 d["description"] = experiment_name
 d["tasks"] = eval_task_specs
+# if beaker_configs/auto_created doesn't exist, create it with os
+if not os.path.exists("beaker_configs/auto_created"):
+    os.makedirs("beaker_configs/auto_created")
 fn = "beaker_configs/auto_created/{}.yaml".format(experiment_name)
 os.makedirs(os.path.dirname(fn), exist_ok=True)
 with open(fn, "w") as file:
