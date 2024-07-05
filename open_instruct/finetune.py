@@ -583,14 +583,17 @@ def main():
         assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
-    # on a small vocab and want a smaller embedding size, remove this test.
     # gather deepspeed to get "real" embedding size    
     embeddings = model.get_input_embeddings()
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
         embedding_size = embeddings.weight.shape[0]
-        if len(tokenizer) > embeddings.weight.shape[0]:
-            model.resize_token_embeddings(len(tokenizer))  # TODO: pad to multiple for tensor cores.
-        # update embedding size after resizing
+    # resize does its own gather
+    if len(tokenizer) > embedding_size:
+        # pad to multiple for tensor cores.
+        model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
+    # update embedding size after resizing for sum loss
+    embeddings = model.get_input_embeddings()
+    with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
         embedding_size = embeddings.weight.shape[0]
 
     # set the tokenizer chat template to the tulu format
