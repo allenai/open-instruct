@@ -83,7 +83,7 @@ def convert_super_ni_data(data_dir, output_dir, zero_shot_examples_per_task=60, 
 def convert_cot_data(data_dir, output_dir, num_zero_shot_examples=50000, num_few_shot_examples=50000):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
-    if num_few_shot_examples > 0:
+    if num_zero_shot_examples > 0:
         with open(os.path.join(data_dir, "cot_zsopt.jsonl"), "r") as fin:
             zero_shot_examples = [json.loads(line) for line in fin]
             if num_zero_shot_examples < len(zero_shot_examples):
