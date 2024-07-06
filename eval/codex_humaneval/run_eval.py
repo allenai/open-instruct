@@ -27,7 +27,7 @@ def main(args):
     print("Number of examples:", len(test_data))
 
     # these stop sequences are those mentioned in the codex paper.
-    stop_sequences = ["\nclass", "\ndef", "\n#", "\nif", "\nprint"]
+    stop_sequences = ["\nclass", "\ndef", "\n#", "\nif", "\nprint"] + args.additional_stop_sequence
 
     if args.use_chat_format:
         prompts = []
@@ -109,7 +109,7 @@ def main(args):
                 prompts = [apply_chat_format(tokenizer, inst, suffix) for (inst, suffix) in prompts]
 
             # these stop sequences are those mentioned in the codex paper.
-            stop_sequences = ["\nclass", "\ndef", "\n#", "\nif", "\nprint"]
+            stop_sequences = ["\nclass", "\ndef", "\n#", "\nif", "\nprint"] + args.additional_stop_sequence
             # Because many tokenizers will treat the word after space differently from the original word alone, 
             # to be consistent, we add a space before tokenization and remove it after tokenization.
             stop_sequences = [tokenizer.encode(" " + x, add_special_tokens=False)[1:] for x in stop_sequences]
@@ -274,6 +274,13 @@ if __name__ == "__main__":
         type=str, 
         default="eval.templates.create_prompt_with_tulu_chat_format", 
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
+    )
+    parser.add_argument(
+        '--additional_stop_sequence',
+        type=str,
+        nargs="+",
+        default=[],
+        help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
     )
     args = parser.parse_args()
     # model_name_or_path and openai_engine cannot be both None or both not None.

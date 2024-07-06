@@ -83,7 +83,7 @@ def convert_super_ni_data(data_dir, output_dir, zero_shot_examples_per_task=60, 
 def convert_cot_data(data_dir, output_dir, num_zero_shot_examples=50000, num_few_shot_examples=50000):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
-    if num_few_shot_examples > 0:
+    if num_zero_shot_examples > 0:
         with open(os.path.join(data_dir, "cot_zsopt.jsonl"), "r") as fin:
             zero_shot_examples = [json.loads(line) for line in fin]
             if num_zero_shot_examples < len(zero_shot_examples):
@@ -493,8 +493,14 @@ def convert_lima_data(data_dir, output_dir, num_examples=None):
 def convert_wizardlm_data(data_dir, output_dir, num_examples=30000):
     os.makedirs(output_dir, exist_ok=True)
     examples = []
-    with open(os.path.join(data_dir, "WizardLM_evol_instruct_V2_143k.json"), "r") as fin:
-        examples = json.load(fin)
+    # check if the original json file exists
+    if os.path.exists(os.path.join(data_dir, "WizardLM_evol_instruct_V2_143k.json")):
+        # proceed as normally
+        with open(os.path.join(data_dir, "WizardLM_evol_instruct_V2_143k.json"), "r") as fin:
+            examples = json.load(fin)
+    else: # try other data train-00000-of-00001-004cd1ba9dc05e6c.parquet
+        df = pd.read_parquet(os.path.join(data_dir, "train-00000-of-00001-004cd1ba9dc05e6c.parquet"))
+        examples = df.to_dict(orient="records")
     if num_examples:
         examples = random.sample(examples, k=num_examples)
 

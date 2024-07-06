@@ -6,14 +6,17 @@ This repo serves as an open effort on instruction-tuning popular pretrained lang
 2. Code for running standard evaluation on a range of benchmarks, targeting for differnt capabilities of these language models.
 3. Checkpoints or other useful artifacts that we build in our exploration.
 
-Please see our first paper [How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources](https://arxiv.org/abs/2306.04751) for more thoughts behind this project and our initial findings. Please see our second paper [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702) for newer results using Llama-2 models and direct preference optimization. We are still working on more models, so stay tuned for future work!
+Please see our first paper [How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources](https://arxiv.org/abs/2306.04751) for more thoughts behind this project and our initial findings. Please see our second paper [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702) for results using Llama-2 models and direct preference optimization. We are still working on more models. For more recent results involving PPO and DPO please see our third paper [Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback](https://arxiv.org/abs/2406.09279). We also have 
 
 <p align="center" width="100%">
       <img src="images/tulu_logo.png" alt="Tülu (a hybrid camel) represents a suite of LLaMa models that we built by fully-finetuning them on a strong mix of datasets." style="width: 20%; min-width: 200px; display: block; margin: auto;">
 </p>
 
+*Note:* Previous versions of Open Instruct used a pinned version of Transformers for replicating Tulu 1/2 results. If this is your goal, refer to [this commit or older](https://github.com/allenai/open-instruct/commit/f3424591638ed63b31d5869abd867932c359c1ed).
+
 ## News
 
+- [2024-07-01] We released [Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback](https://arxiv.org/abs/2406.09279) and have majorly updated our codebase to support new models and package versions.
 - [2023-11-27] We released [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702). Check out our models [here](https://huggingface.co/collections/allenai/tulu-v2-suite-6551b56e743e6349aab45101). We have added a DPO finetuning script for replicating our results.
 - [2023-09-26] We switched to use the official [alpaca-eval](https://github.com/tatsu-lab/alpaca_eval) library to run AlpacaFarm evaluation but use regenerated longer reference outputs. This will change our numbers reported in the paper. We will update the paper soon.
 - [2023-09-25] Supported using [vLLM](https://github.com/vllm-project/vllm/) for our evaluations, which speeds up the evaluation by 10x.
@@ -27,30 +30,44 @@ Please see our first paper [How Far Can Camels Go? Exploring the State of Instru
 
 ## Setup
 
+Installation is lightweight and assumes **one of two installation strategies**. 
+First, installing in a *bare environment* (no Cuda image).
+
+Before installing, if not in a Docker container with NVCC installed, you should run:
+```
+conda install cuda-nvcc=<ver> -c nvidia
+```
+Then, install `torch==2.3.0` from source.
+
 To run training, evaluation, or inference for our finetuned models, you need to install the required packages by running the following command (after installing pytorch):
 
 ```bash
 pip install -r requirements.txt
 ```
+*Note:* Previous versions of Open Instruct used a pinned version of Transformers for replicating Tulu 2 results. If this is your goal, refer to [this commit or older](https://github.com/allenai/open-instruct/commit/f3424591638ed63b31d5869abd867932c359c1ed).
 
 If you just want the dependencies for the weight diff script, use:
 ```bash
 pip install -r weight-diff-requirements.txt
 ```
 
-If you'd like to experiment with AI2's [OLMo](https://huggingface.co/allenai/OLMo-7B) models, you should also install:
+For a second installation strategy, if you'd like to *run experiments within a Docker environment*, you can create one using:
 
 ```bash
-pip install ai2-olmo
+docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 --build-arg REQUIRE=requirements.txt . -t <your tag here>
 ```
 
-If you'd like to run experiments within a Docker environment, you can create one using:
+If you are internally at AI2, you can use this pre-built beaker image Yizhongw03/open-instruct (most recent version [here](https://beaker.org/im/01HSPPCBMA11BYKDQ2XQ2V947Q/details)). A version with newer transformers is available [here](https://beaker.org/im/01HW960RVZ0DWWBQKWPSK4T4Y6/details).
 
+To eval OLMo-1.7 on the suite eval set from Open-Instruct (MMLU, BBQ, etc), use this pre-built beaker image `nouhad/open-instruct-olmo-safety`
+
+**Important for OLMo users:** Note that due to version conflicts between deepspeed and vLLM, we cannot support OLMo inference and deepspeed within the same image (this will be fixed once deepspeed allows pydantic >= 2). To build a docker image suitable for inference/evaluation for OLMo, use:
 ```bash
-docker build --build-arg CUDA=11.8.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 . -t <your tag here>
+docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 --build-arg REQUIRE=requirements-olmo.txt -f Dockerfile.olmo . -t <your tag here>
 ```
 
-If you are internally at AI2, you can use this pre-built beaker image [here](https://beaker.org/im/01HQ1PMA9YCVKXYN6BHP5EYV5E/details).
+For training, you can use the previous image.
+
 
 ## Training
 
@@ -64,7 +81,7 @@ We include a collection of representative instruction datasets in our exploratio
 
 Please check these datasets for licenses and restrictions around their use!
 
-You can also find the processed [Tulu v1](https://huggingface.co/datasets/allenai/tulu-v1-sft-mixture) and [Tulu v2](https://huggingface.co/datasets/allenai/tulu-v2-sft-mixture) SFT datasets on HuggingFace.
+You can also find the processed [Tulu v1](https://huggingface.co/datasets/allenai/tulu-v1-sft-mixture) and [Tulu v2](https://huggingface.co/datasets/allenai/tulu-v2-sft-mixture) SFT datasets on HuggingFace. Note that the train data preparation script will not precisely recreate the Tulu v2 mixture due to randomness in the generation and shifts in data availability - see [this PR](https://github.com/allenai/open-instruct/pull/156) for some details. If you need exactly yhe training data used, the HuggingFace mixture is exactly this - the exact same data used during model training.
 
 ### Model preparation
 
@@ -79,6 +96,8 @@ You can use the following command to run instruction tuning (finetuning a pretra
 ```
 
 Make sure to adjust `model_name_or_path`, `tokenizer_name`, `train_file`, and `output_dir` to your models / data / setting. By default, this uses `deepspeed` with `accelerate`.
+
+**Note:** If you are looking to replicate the released Tulu 2 models, it may be useful to swap the loss calculation to `--reduce_loss sum`. This uses a sum reduction instead of a mean reduction for loss calculations, and means we weight all tokens evenly when training, better mimicking the larger batch sizes used to train Tulu 2 models. See https://github.com/huggingface/transformers/issues/24725 for more discussion and details. Generally, *you may get better results using the sum reduction if you need to use a lot of gradient accumulation* (including for training Llama 3 models).
 
 ### Parameter-Efficient Finetuning
 
@@ -100,6 +119,7 @@ Our checkpoints can be found:
 
 - [Here](https://huggingface.co/collections/hamishivi/tulu-v1-suite-655138c3743e6349aaa07d7d) for all Tulu v1 models.
 - [Here](https://huggingface.co/collections/allenai/tulu-v2-suite-6551b56e743e6349aab45101) for all Tulu v2 models.
+- [OLMo 7B SFT](https://huggingface.co/allenai/OLMo-7B-SFT) and [Instruct](https://huggingface.co/allenai/OLMo-7B-Instruct), along with a [2048 sequence length version of Tulu 2](https://huggingface.co/datasets/allenai/tulu-v2-sft-mixture-olmo-2048).
 
 
 ### Weight diff script
@@ -131,7 +151,7 @@ We provide the scripts for running evaluation of Huggingface/OpenAI models on a 
 - [ToxiGen](https://github.com/microsoft/TOXIGEN)
 - [XSTest](https://github.com/paul-rottger/exaggerated-safety/)
 - [TruthfulQA](https://github.com/sylinrl/TruthfulQA)
-- [AlpacaEval](https://github.com/tatsu-lab/alpaca_eval)
+- [AlpacaEval 1 and 2](https://github.com/tatsu-lab/alpaca_eval)
 
 We are working on including more promising benchmarks into this list. Please stay tuned!
 
@@ -182,5 +202,16 @@ If you used this repository or our models, please cite our work:
       eprint={2311.10702},
       archivePrefix={arXiv},
       primaryClass={cs.CL}
+}
+```
+
+```bibtex
+@misc{ivison2024unpacking,
+      title={Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback}, 
+      author={Hamish Ivison and Yizhong Wang and Jiacheng Liu and Zeqiu Wu and Valentina Pyatkin and Nathan Lambert and Noah A. Smith and Yejin Choi and Hannaneh Hajishirzi},
+      year={2024},
+      eprint={2406.09279},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
 }
 ```

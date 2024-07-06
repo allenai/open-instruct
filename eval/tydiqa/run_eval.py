@@ -185,10 +185,15 @@ def main(args):
 
     if args.model_name_or_path:
         if args.use_vllm:
+            stop_sequences = args.additional_stop_sequence
+            # we only use stop token for non-chat format (usually applied to vanilla pretrained language models).
+            # For chat format, we will rely on the model knows when to stop.
+            if not args.use_chat_format:
+                stop_sequences.append("\n")
             sampling_params = vllm.SamplingParams(
                 temperature=0,
                 max_tokens=50,
-                stop=["\n"] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
+                stop=stop_sequences, 
             )
             # We need to remap the outputs to the prompts because vllm might not return outputs for some prompts (e.g., if the prompt is too long)
             generations = model.generate(prompts, sampling_params)
@@ -198,13 +203,18 @@ def main(args):
             outputs = [prompt_to_output[prompt].strip() if prompt in prompt_to_output else "" for prompt in prompts]
         else:
             new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1] # get the last token because the tokenizer may add space tokens at the start.
+            stop_sequences = [[tokenizer.encode(stop_sequence, add_special_tokens=False)[-1]] for stop_sequence in args.additional_stop_sequence]
+            # we only use stop token for non-chat format (usually applied to vanilla pretrained language models).
+            # For chat format, we will rely on the model knows when to stop.
+            if not args.use_chat_format:
+                stop_sequences.append([new_line_token])
             outputs = generate_completions(
                 model=model,
                 tokenizer=tokenizer,
                 prompts=prompts,
                 max_new_tokens=50,
                 batch_size=args.eval_batch_size,
-                stop_id_sequences=[[new_line_token]] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
+                stop_id_sequences=stop_sequences,
             )
             # remove unnecessary space
             outputs = [output.strip() for output in outputs]
@@ -341,6 +351,13 @@ if __name__ == "__main__":
         type=str, 
         default="eval.templates.create_prompt_with_tulu_chat_format", 
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
+    )
+    parser.add_argument(
+        '--additional_stop_sequence',
+        type=str,
+        nargs="+",
+        default=[],
+        help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
     )
     args = parser.parse_args()
     # model_name_or_path and openai_engine cannot be both None or both not None.

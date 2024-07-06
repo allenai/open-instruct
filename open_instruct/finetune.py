@@ -31,16 +31,11 @@ from transformers import (
     GPTNeoXTokenizerFast,
     GPT2Tokenizer,
     OPTForCausalLM,
-    BitsAndBytesConfig,
+    BitsAndBytesConfig
 )
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 
 logger = get_logger(__name__)
-
-try:
-    from hf_olmo import OLMoTokenizerFast
-except ImportError:
-    logger.warning("OLMo not installed. Ignore if using a different model.")
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Finetune a transformers model on a causal language modeling task")
@@ -267,6 +262,13 @@ def parse_args():
         choices=['mean', 'sum'],
         help='How to reduce loss over tokens. Default is mean, but using sum can improve chat model performance.',
     )
+    parser.add_argument(
+        '--wandb_entity', 
+        type=str,
+        default=None,
+        help='Entity to use for logging to wandb.'
+    )
+
     args = parser.parse_args()
 
     # Sanity checks
@@ -370,6 +372,16 @@ def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=Fals
 
 
 def save_with_accelerate(accelerator, model, tokenizer, output_dir, args):
+    # set the generation config to an empty setting to be safe.
+    # we usually do greedy decoding for generation, so this should be okay.
+    # otherwise, we get an error thrown at save time.
+    model.generation_config = transformers.GenerationConfig(
+        temperature=None,
+        top_p=None,
+        eos_token_id=tokenizer.eos_token_id,
+        bos_token_id=tokenizer.bos_token_id
+    )
+
     unwrapped_model = accelerator.unwrap_model(model)
     # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
     # Otherwise, sometimes the model will be saved with only part of the parameters.
@@ -456,12 +468,14 @@ def main():
             args.config_name,
             trust_remote_code=args.trust_remote_code,
             revision=args.model_revision,
+            token=os.getenv("HF_TOKEN", None)
         )
     elif args.model_name_or_path:
         config = AutoConfig.from_pretrained(
             args.model_name_or_path,
             trust_remote_code=args.trust_remote_code,
             revision=args.model_revision,
+            token=os.getenv("HF_TOKEN", None)
         )
     else:
         raise ValueError(
@@ -486,14 +500,16 @@ def main():
             args.tokenizer_name,
             trust_remote_code=args.trust_remote_code,
             use_fast=not args.use_slow_tokenizer,
-            revision=tokenizer_revision
+            revision=tokenizer_revision,
+            token=os.getenv("HF_TOKEN", None)
         )
     elif args.model_name_or_path:
         tokenizer = AutoTokenizer.from_pretrained(
             args.model_name_or_path,
             trust_remote_code=args.trust_remote_code,
             use_fast=not args.use_slow_tokenizer,
-            revision=tokenizer_revision
+            revision=tokenizer_revision,
+            token=os.getenv("HF_TOKEN", None)
         )
     else:
         raise ValueError(
@@ -521,7 +537,8 @@ def main():
                 trust_remote_code=args.trust_remote_code,
                 torch_dtype=torch.bfloat16,
                 use_flash_attention_2=True if args.use_flash_attn else False,
-                revision=args.model_revision
+                revision=args.model_revision,
+                token=os.getenv("HF_TOKEN", None)
             )
         else:
             model = AutoModelForCausalLM.from_pretrained(
@@ -531,7 +548,8 @@ def main():
                 trust_remote_code=args.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 use_flash_attention_2=True if args.use_flash_attn else False,
-                revision=args.model_revision
+                revision=args.model_revision,
+                token=os.getenv("HF_TOKEN", None)
             )
     else:
         logger.info("Training new model from scratch")
@@ -548,26 +566,43 @@ def main():
         })
         assert num_added_tokens in [0, 1], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
     elif isinstance(tokenizer, GPTNeoXTokenizerFast):
-        num_added_tokens = tokenizer.add_special_tokens({
-            "pad_token": "<pad>",
-        })
-        assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
+        # OLMo newer models use this tokenizer
+        if tokenizer.bos_token is None:
+            tokenizer.bos_token = tokenizer.eos_token
+            assert args.add_bos, "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
+        # else, pythia / other models
+        else:
+            num_added_tokens = tokenizer.add_special_tokens({
+                "pad_token": "<pad>",
+            })
+            assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
     elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
         num_added_tokens = tokenizer.add_special_tokens({'unk_token': '<unk>'})
-    elif isinstance(tokenizer, OLMoTokenizerFast):
-        # only the eos for olmo, but we use it as bos
-        tokenizer.bos_token = tokenizer.eos_token
-        assert args.add_bos, "For OLMo, you must add bos token to the beginning of the input sequence."
-    
+    elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast) and tokenizer.pad_token is None:
+        num_added_tokens = tokenizer.add_special_tokens({'pad_token': '<pad>'})
+        assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
-    # on a small vocab and want a smaller embedding size, remove this test.
     # gather deepspeed to get "real" embedding size    
     embeddings = model.get_input_embeddings()
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
         embedding_size = embeddings.weight.shape[0]
-        if len(tokenizer) > embeddings.weight.shape[0]:
-            model.resize_token_embeddings(len(tokenizer))
+    # resize does its own gather
+    if len(tokenizer) > embedding_size:
+        # pad to multiple for tensor cores.
+        model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
+    # update embedding size after resizing for sum loss
+    embeddings = model.get_input_embeddings()
+    with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
+        embedding_size = embeddings.weight.shape[0]
+
+    # set the tokenizer chat template to the tulu format
+    # this makes evaluation/etc easier down the line.
+    tokenizer.chat_template = "{% for message in messages %}\n{% if message['role'] == 'user' %}\n{{ '<|user|>\n' + message['content'] }}\n{% elif message['role'] == 'assistant' %}\n{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n{% endif %}\n{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n{% endif %}\n{% endfor %}" # noqa: E501
+    if args.add_bos:
+        # also add bos in the chat template
+        tokenizer.chat_template = "{{ bos_token }}" + tokenizer.chat_template
+
 
     if args.use_lora:
         if args.use_qlora:
@@ -700,7 +735,10 @@ def main():
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
         experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"].value
-        accelerator.init_trackers("open_instruct", experiment_config)
+        accelerator.init_trackers("open_instruct_sft", 
+                                  experiment_config, 
+                                  init_kwargs={"wandb": {"entity": args.wandb_entity}})
+
 
     # Train!
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
@@ -801,7 +839,7 @@ def main():
                     accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
                 optimizer.step()
                 optimizer.zero_grad()
-                lr_scheduler.step()       
+                lr_scheduler.step() 
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
