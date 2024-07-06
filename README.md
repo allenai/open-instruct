@@ -64,7 +64,7 @@ We include a collection of representative instruction datasets in our exploratio
 
 Please check these datasets for licenses and restrictions around their use!
 
-You can also find the processed [Tulu v1](https://huggingface.co/datasets/allenai/tulu-v1-sft-mixture) and [Tulu v2](https://huggingface.co/datasets/allenai/tulu-v2-sft-mixture) SFT datasets on HuggingFace.
+You can also find the processed [Tulu v1](https://huggingface.co/datasets/allenai/tulu-v1-sft-mixture) and [Tulu v2](https://huggingface.co/datasets/allenai/tulu-v2-sft-mixture) SFT datasets on HuggingFace. Note that the train data preparation script will not precisely recreate the Tulu v2 mixture due to randomness in the generation and shifts in data availability - see [this PR](https://github.com/allenai/open-instruct/pull/156) for some details. If you need exactly yhe training data used, the HuggingFace mixture is exactly this - the exact same data used during model training.
 
 ### Model preparation
 
