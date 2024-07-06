@@ -89,7 +89,7 @@ def main(args):
                 stop_strings += ["\n"]
             sampling_params = vllm.SamplingParams(
                 temperature=0,
-                max_tokens=512,
+                max_tokens=args.max_new_tokens,
                 stop=stop_strings, 
             )
             if args.use_chat_format:
@@ -247,6 +247,12 @@ if __name__ == "__main__":
         "--no_cot", 
         action="store_true", 
         help="If given, we're evaluating a model without chain-of-thought."
+    )
+    parser.add_argument(
+        '--max_new_tokens',
+        type=int,
+        default=2048,
+        help="maximum number of tokens to generate for each prompt."
     )
     parser.add_argument(
         "--eval_batch_size", 
