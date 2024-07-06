@@ -50,7 +50,7 @@ def main(args):
     else:
         prompts = [example["prompt"] + example['code'].split(":")[0] for example in test_data]
     
-    stop_sequences = ['```']
+    stop_sequences = ['```'] + args.additional_stop_sequence
         
     if not args.results_file:
         if args.model_name_or_path:
@@ -259,6 +259,13 @@ if __name__ == "__main__":
         type=str, 
         default="minimal_multitask.eval.templates.create_prompt_with_tulu_chat_format", 
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
+    )
+    parser.add_argument(
+        '--additional_stop_sequence',
+        type=str,
+        nargs="+",
+        default=[],
+        help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
     )
     parser.add_argument("--results_file", type=str)
     args = parser.parse_args()
