@@ -82,7 +82,7 @@ python scripts/split_sharegpt_conversations.py \
 echo "Downloading LIMA dataset..."
 if huggingface-cli whoami &>/dev/null; then
     huggingface-cli download GAIR/lima --repo-type dataset --local-dir data/raw_train/lima/
-else; then
+else
     wget --header="Authorization: Bearer $HF_TOKEN" -P data/raw_train/lima/ https://huggingface.co/datasets/GAIR/lima/raw/main/train.jsonl
 fi
 
