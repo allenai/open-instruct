@@ -50,11 +50,11 @@ def main(args):
         for example in MATH_EXAMPLARS:
             if args.no_cot:
                 demonstrations.append(
-                    "Question: " + example["question"] + "\n" + "Answer: " + example["short_answer"]
+                    "Problem:\n" + example["question"] + "\n\n" + "Solution:\n" + example["short_answer"]
                 )
             else:
                 demonstrations.append(
-                    "Problem:" + "\n" + example["question"] + "\n\n" + "Solution: " + "\n" + example["cot_answer"] + "\n" + "Final Answer: " + f"The final answer is ${example['short_answer']}$. I hope it is correct."
+                    "Problem:\n" + example["question"] + "\n\n" + "Solution:\n" + example["cot_answer"]
                 )
         prompt_prefix = args.prompt_prefix + "\n\n" + "\n\n".join(demonstrations) + "\n\n"
     else:
@@ -63,7 +63,7 @@ def main(args):
     if args.use_chat_format:
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
         def apply_chat_format(example, tokenizer):
-            messages = [{"role": "user", "content": prompt_prefix + "Problem: " + example["question"].strip()}]
+            messages = [{"role": "user", "content": prompt_prefix + "Problem:\n" + example["question"].strip()}]
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
             prompt += "Solution:" if prompt[-1] in ["\n", " "] else " Solution:"
             return prompt
@@ -93,12 +93,12 @@ def main(args):
                 stop=stop_strings, 
             )
             if args.use_chat_format:
-                prompts = [apply_chat_format(example, tokenizer) for example in test_data]
+                prompts = [apply_chat_format(demonstrations, example, tokenizer) for example in test_data]
             else:
                 if args.no_cot:
-                    prompts = [prompt_prefix + "Problem: " + example["question"].strip() + "\Solution:" for example in test_data]
+                    prompts = [prompt_prefix + "Problem:\n" + example["question"].strip() + "\n\nSolution:\n" for example in test_data]
                 else:
-                    prompts = [prompt_prefix + "Problem: " + "\n" + example["question"].strip() + "\n\nSolution: " + "\n" for example in test_data]
+                    prompts = [prompt_prefix + "Problem:\n" + example["question"].strip() + "\n\nSolution:\n" for example in test_data]
             generations = model.generate(prompts, sampling_params)
             prompt_to_output = {
                 g.prompt: g.outputs[0].text for g in generations
@@ -119,9 +119,9 @@ def main(args):
                 prompts = [apply_chat_format(example, tokenizer) for example in test_data]
             else:
                 if args.no_cot:
-                    prompts = [prompt_prefix + "Problem: " + example["question"].strip() + "\nSolution:" for example in test_data]
+                    prompts = [prompt_prefix + "Problem:\n" + example["question"].strip() + "\n\nSolution:\n" for example in test_data]
                 else:
-                    prompts = [prompt_prefix + "Problem: " + "\n" + example["question"].strip() + "\nSolution: " + "\n" for example in test_data]
+                    prompts = [prompt_prefix + "Problem:\n" + example["question"].strip() + "\n\nSolution:\n" for example in test_data]
             # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
             stop_tokens = [[tokenizer.encode(stop_seq, add_special_tokens=False)[-1]] for stop_seq in args.additional_stop_sequence]
             if not args.use_chat_format:
@@ -251,7 +251,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--max_new_tokens',
         type=int,
-        default=2048,
+        default=1024,
         help="maximum number of tokens to generate for each prompt."
     )
     parser.add_argument(
