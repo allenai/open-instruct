@@ -31,8 +31,9 @@ def main(args):
         for line in fin:
             example = json.loads(line)
             test_data.append({
-                "question": example["question"],
-                "answer": extract_answer(example["answer"])
+                "question": example["problem"],
+                "answer": extract_answer(example["solution"]),
+                "type": example["type"]
             })
     
     if args.max_num_examples and len(test_data) > args.max_num_examples:
@@ -53,7 +54,7 @@ def main(args):
                 )
             else:
                 demonstrations.append(
-                    "Question:" + "\n" + example["question"] + "\n" + "Solution: " + "\n" + example["cot_answer"] + "\n" + "Final Answer: " + f"The final answer is ${example['short_answer']}$."
+                    "Problem:" + "\n" + example["question"] + "\n\n" + "Solution: " + "\n" + example["cot_answer"] + "\n" + "Final Answer: " + f"The final answer is ${example['short_answer']}$. I hope it is correct."
                 )
         prompt_prefix = args.prompt_prefix + "\n\n" + "\n\n".join(demonstrations) + "\n\n"
     else:
@@ -62,9 +63,9 @@ def main(args):
     if args.use_chat_format:
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
         def apply_chat_format(example, tokenizer):
-            messages = [{"role": "user", "content": prompt_prefix + "Question: " + example["question"].strip()}]
+            messages = [{"role": "user", "content": prompt_prefix + "Problem: " + example["question"].strip()}]
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
-            prompt += "Answer:" if prompt[-1] in ["\n", " "] else " Answer:"
+            prompt += "Solution:" if prompt[-1] in ["\n", " "] else " Solution:"
             return prompt
         
     if args.model_name_or_path:
@@ -81,18 +82,23 @@ def main(args):
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
             )
+            stop_strings = args.additional_stop_sequence
+            # we only use stop token for non-chat format (usually applied to vanilla pretrained language models).
+            # For chat format, we will rely on the model knows when to stop.
+            if not args.use_chat_format:
+                stop_strings += ["\n"]
             sampling_params = vllm.SamplingParams(
                 temperature=0,
                 max_tokens=512,
-                stop=["\n"] if not args.use_chat_format else None, # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
+                stop=stop_strings, 
             )
             if args.use_chat_format:
                 prompts = [apply_chat_format(example, tokenizer) for example in test_data]
             else:
                 if args.no_cot:
-                    prompts = [prompt_prefix + "Question: " + example["question"].strip() + "\nAnswer:" for example in test_data]
+                    prompts = [prompt_prefix + "Problem: " + example["question"].strip() + "\Solution:" for example in test_data]
                 else:
-                    prompts = [prompt_prefix + "Question: " + "\n" + example["question"].strip() + "\nSolution: " + "\n" for example in test_data]
+                    prompts = [prompt_prefix + "Problem: " + "\n" + example["question"].strip() + "\n\nSolution: " + "\n" for example in test_data]
             generations = model.generate(prompts, sampling_params)
             prompt_to_output = {
                 g.prompt: g.outputs[0].text for g in generations
@@ -116,14 +122,18 @@ def main(args):
                     prompts = [prompt_prefix + "Question: " + example["question"].strip() + "\nAnswer:" for example in test_data]
                 else:
                     prompts = [prompt_prefix + "Question: " + "\n" + example["question"].strip() + "\nSolution: " + "\n" for example in test_data]
-            new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1] # get the last token because the tokenizer may add space tokens at the start.
+            # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
+            stop_tokens = [[tokenizer.encode(stop_seq, add_special_tokens=False)[-1]] for stop_seq in args.additional_stop_sequence]
+            if not args.use_chat_format:
+                new_line_token = tokenizer.encode("\n", add_special_tokens=False)[-1] # get the last token because the tokenizer may add space tokens at the start.
+                stop_tokens += [[new_line_token]]
             outputs = generate_completions(
                 model=model,
                 tokenizer=tokenizer,
                 prompts=prompts,
                 max_new_tokens=512,
                 batch_size=args.eval_batch_size,
-                stop_id_sequences=[[new_line_token]] if not args.use_chat_format else None,  # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
+                stop_id_sequences=stop_tokens,
                 do_sample=False,
             )
     else:
@@ -158,15 +168,32 @@ def main(args):
         correct_list.append(correct)
     accuracy = round(sum(correct_list) / len(correct_list), ndigits=4)
     print(f"Accuracy: {accuracy}")
+    metrics = {
+        "accuracy": accuracy
+    }
+
+    # calculate per-type accuracy
+    type_correct = {}
+    type_total = {}
+    for pred, sample in zip(predictions, test_data):
+        type_ = sample["type"]
+        if type_ not in type_correct:
+            type_correct[type_] = 0
+            type_total[type_] = 0
+        type_correct[type_] += eval_math(pred)
+        type_total[type_] += 1
+    type_accuracy = {type_: round(type_correct[type_] / type_total[type_], ndigits=4) for type_ in type_correct}
+    print("Per-type accuracy:")
+    for type_, acc in type_accuracy.items():
+        print(f"{type_}: {acc}")
+    metrics["per_type_accuracy"] = type_accuracy
 
     with open(os.path.join(args.save_dir, f"predictions.jsonl"), "w") as fout:
         for prediction in predictions:
             fout.write(json.dumps(prediction) + "\n")
 
     with open(os.path.join(args.save_dir, "metrics.json"), "w") as fout:
-        json.dump({
-            "accuracy": accuracy
-        }, fout, indent=4)
+        json.dump(metrics, fout, indent=4)
 
 
 if __name__ == "__main__":
@@ -264,6 +291,13 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="the specific template to use for instructing the model."
+    )
+    parser.add_argument(
+        '--additional_stop_sequence',
+        type=str,
+        nargs="+",
+        default=[],
+        help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
     )
     args = parser.parse_args()
 
