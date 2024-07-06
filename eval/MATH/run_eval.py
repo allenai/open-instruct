@@ -119,9 +119,9 @@ def main(args):
                 prompts = [apply_chat_format(example, tokenizer) for example in test_data]
             else:
                 if args.no_cot:
-                    prompts = [prompt_prefix + "Question: " + example["question"].strip() + "\nAnswer:" for example in test_data]
+                    prompts = [prompt_prefix + "Problem: " + example["question"].strip() + "\nSolution:" for example in test_data]
                 else:
-                    prompts = [prompt_prefix + "Question: " + "\n" + example["question"].strip() + "\nSolution: " + "\n" for example in test_data]
+                    prompts = [prompt_prefix + "Problem: " + "\n" + example["question"].strip() + "\nSolution: " + "\n" for example in test_data]
             # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
             stop_tokens = [[tokenizer.encode(stop_seq, add_special_tokens=False)[-1]] for stop_seq in args.additional_stop_sequence]
             if not args.use_chat_format:
@@ -137,7 +137,7 @@ def main(args):
                 do_sample=False,
             )
     else:
-        prompts = [prompt_prefix + "Question: " + example["question"].strip() + "\nAnswer:" for example in test_data]
+        prompts = [prompt_prefix + "Problem: " + example["question"].strip() + "\nSolution:" for example in test_data]
         instances = [{"id": prompt, "prompt": prompt} for _, prompt in enumerate(prompts)]
         results = query_openai_chat_model(
             engine=args.openai_engine,
