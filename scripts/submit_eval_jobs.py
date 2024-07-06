@@ -123,6 +123,8 @@ experiment_groups_default = [
     "gsm_cot",
     "MATH_direct",
     "MATH_cot",
+    "MATH_direct",
+    "MATH_cot",
     "bbh_direct",
     "bbh_cot",
     "tydiqa_goldp_1shot",
@@ -253,7 +255,7 @@ for experiment_group in experiment_groups:
             --n_shot 4 \
             --no_cot \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "MATH_cot":
         task_spec['arguments'][0] = '''
@@ -266,7 +268,7 @@ for experiment_group in experiment_groups:
             --tokenizer_name_or_path /model \
             --n_shot 4 \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "tydiqa_goldp_1shot":
         task_spec["arguments"][0] = '''
