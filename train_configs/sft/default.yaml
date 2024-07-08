@@ -1,0 +1,20 @@
+model_name_or_path: allenai/OLMo-1.7-1B-hf
+model_revision: main
+use_flash_attn: true
+tokenizer_name: allenai/OLMo-1.7-1B-hf
+use_slow_tokenizer: true
+train_file: data/processed/tulu_v2/tulu_v2_data.jsonl
+max_seq_length: 4096
+preprocessing_num_workers: 128
+per_device_train_batch_size: 32
+gradient_accumulation_steps: 4
+learning_rate: 2.0e-05
+lr_scheduler_type: linear
+warmup_ratio: 0.03
+weight_decay: 0.0
+num_train_epochs: 2
+output_dir: output/tulu_v2_${MODEL_SIZE}/
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
