@@ -10,7 +10,7 @@ with open("/oe-adapt-default/jacobm/tulu-3-dev/data/codefeedback-single-turn.jso
     for line in f_in.readlines():
         data.append(json.loads(line))
 
-with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mathplus-200k.jsonl", "w") as f_in:
+with open("/oe-adapt-default/jacobm/tulu-3-dev/data/mathplus-200k.jsonl") as f_in:
     for line in f_in.readlines():
         data.append(json.loads(line))
 
