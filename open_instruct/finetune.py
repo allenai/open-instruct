@@ -470,7 +470,6 @@ def main():
         num_training_steps=num_training_steps_for_scheduler,
         num_warmup_steps=int(num_training_steps_for_scheduler * args.warmup_ratio),
     )
-
     # Prepare everything with `accelerator`.
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
@@ -493,7 +492,7 @@ def main():
     if args.with_tracking:
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
-        experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"].value
+        experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"]
         accelerator.init_trackers("open_instruct_sft", 
                                   experiment_config, 
                                   init_kwargs={"wandb": {"entity": args.wandb_entity}})
