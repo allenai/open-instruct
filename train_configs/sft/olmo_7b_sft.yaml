@@ -2,7 +2,7 @@ model_name_or_path: allenai/OLMo-7B-hf
 model_revision: main
 use_flash_attn: true
 tokenizer_name: allenai/OLMo-7B-hf
-use_slow_tokenizer: true
+use_slow_tokenizer: false # olmo models only use fast tokenizers
 dataset_name: allenai/tulu-v2-sft-mixture-olmo-2048
 max_seq_length: 2048
 preprocessing_num_workers: 128

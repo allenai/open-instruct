@@ -21,3 +21,4 @@ report_to:
   - wandb
 logging_steps: 1
 checkpointing_steps: epoch
+gradient_checkpointing: true
