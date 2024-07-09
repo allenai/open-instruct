@@ -3,6 +3,8 @@
 """
 This file is modified from the huggingface example for finetuning language models
 [run_clm.py](https://github.com/huggingface/transformers/blob/main/examples/pytorch/language-modeling/run_clm.py)
+
+Note: this file is not actively maintained, it is designed to experiment with different training stacks / hardware.
 """
 
 import logging
