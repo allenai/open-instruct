@@ -110,15 +110,15 @@ class FlatArguments:
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
     )
     train_file: Optional[str] = field(default=None, metadata={"help": "The input training data file (a json/jsonl file)."})
-    # max_train_samples: Optional[int] = field(
-    #     default=None,
-    #     metadata={
-    #         "help": (
-    #             "For debugging purposes or quicker training, truncate the number of training examples to this "
-    #             "value if set."
-    #         )
-    #     },
-    # )
+    max_train_samples: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "For debugging purposes or quicker training, truncate the number of training examples to this "
+                "value if set."
+            )
+        },
+    )
     # streaming: bool = field(default=False, metadata={"help": "Enable streaming mode"})
     # overwrite_cache: bool = field(
     #     default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}

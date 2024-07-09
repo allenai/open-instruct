@@ -6,6 +6,7 @@ use_slow_tokenizer: false # olmo models only use fast tokenizers
 # train_file: data/processed/tulu_v2/tulu_v2_data.jsonl
 dataset_name: allenai/tulu-v2-sft-mixture
 max_seq_length: 4096
+max_train_samples: 10000
 preprocessing_num_workers: 128
 per_device_train_batch_size: 2
 gradient_accumulation_steps: 8
