@@ -12,9 +12,9 @@ from eval.utils import (
     dynamic_import_function,
     load_hf_tokenizer
 )
-from eval.MATH.answer_extraction import extract_answer
 from eval.MATH.examplars import EXAMPLARS as MATH_EXAMPLARS
-from eval.MATH.utilities import last_boxed_only_string, remove_boxed, eval_math
+from eval.MATH.utilities import last_boxed_only_string, remove_boxed
+from eval.MATH.minerva_utils import normalize_final_answer, get_unnormalized_answer, is_equiv
 
 DEFAULT_PROMPT_PREFIX_COT = "Solve the question below by reasoning step by step, and put the final answer within \\boxed{}."
 DEFAULT_PROMPT_PREFIX_NO_COT = "Answer the following question."
@@ -32,7 +32,7 @@ def main(args):
             example = json.loads(line)
             test_data.append({
                 "question": example["problem"],
-                "answer": extract_answer(example["solution"]),
+                "answer": normalize_final_answer(remove_boxed(last_boxed_only_string((example["solution"])))),
                 "type": example["type"]
             })
     
@@ -50,22 +50,25 @@ def main(args):
         for example in MATH_EXAMPLARS:
             if args.no_cot:
                 demonstrations.append(
-                    "Problem:\n" + example["question"] + "\n\n" + "Solution:\n" + example["short_answer"]
+                    ("Problem:\n" + example["question"] + "\n\n" + "Solution:",  example["short_answer"])
                 )
             else:
                 demonstrations.append(
-                    "Problem:\n" + example["question"] + "\n\n" + "Solution:\n" + example["cot_answer"]
+                    ("Problem:\n" + example["question"] + "\n\n" + "Solution:", example["cot_answer"] + "\n" + "Final Answer: " + f"The final answer is ${example['short_answer']}$. I hope it is correct.")
                 )
-        prompt_prefix = args.prompt_prefix + "\n\n" + "\n\n".join(demonstrations) + "\n\n"
+            initial_demonstrations = "\n\n".join(["\n".join(d) for d in demonstrations])
     else:
-        prompt_prefix = args.prompt_prefix + "\n\n"
-    
+        demonstrations = []
+
     if args.use_chat_format:
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
-        def apply_chat_format(example, tokenizer):
-            messages = [{"role": "user", "content": prompt_prefix + "Problem:\n" + example["question"].strip()}]
+        def apply_chat_format(example, demonstrations, tokenizer):
+            messages = []
+            for user_turn, assistant_turn in demonstrations:
+                messages.append({"role": "user", "content": user_turn})
+                messages.append({"role": "assistant", "content": assistant_turn})
+            messages += [{"role": "user", "content":  "Problem:\n" + example["question"].strip() + "\n\nSolution:"}]
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
-            prompt += "Solution:" if prompt[-1] in ["\n", " "] else " Solution:"
             return prompt
         
     if args.model_name_or_path:
@@ -82,7 +85,7 @@ def main(args):
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
             )
-            stop_strings = args.additional_stop_sequence
+            stop_strings = args.additional_stop_sequence + ["Problem:"]
             # we only use stop token for non-chat format (usually applied to vanilla pretrained language models).
             # For chat format, we will rely on the model knows when to stop.
             if not args.use_chat_format:
@@ -93,12 +96,12 @@ def main(args):
                 stop=stop_strings, 
             )
             if args.use_chat_format:
-                prompts = [apply_chat_format(demonstrations, example, tokenizer) for example in test_data]
+                prompts = [apply_chat_format(example, demonstrations, tokenizer) for example in test_data]
             else:
                 if args.no_cot:
-                    prompts = [prompt_prefix + "Problem:\n" + example["question"].strip() + "\n\nSolution:\n" for example in test_data]
+                    prompts = [initial_demonstrations + "\n\nProblem:\n" + example["question"].strip() + "\n\nSolution:\n" for example in test_data]
                 else:
-                    prompts = [prompt_prefix + "Problem:\n" + example["question"].strip() + "\n\nSolution:\n" for example in test_data]
+                    prompts = [initial_demonstrations + "\n\nProblem:\n" + example["question"].strip() + "\n\nSolution:\n" for example in test_data]
             generations = model.generate(prompts, sampling_params)
             prompt_to_output = {
                 g.prompt: g.outputs[0].text for g in generations
@@ -116,12 +119,12 @@ def main(args):
                 tokenizer.model_max_length = model.config.max_position_embeddings
                 print("Set tokenizer.model_max_length to model.config.max_position_embeddings: {}".format(model.config.max_position_embeddings))
             if args.use_chat_format:
-                prompts = [apply_chat_format(example, tokenizer) for example in test_data]
+                prompts = [apply_chat_format(example, demonstrations, tokenizer) for example in test_data]
             else:
                 if args.no_cot:
-                    prompts = [prompt_prefix + "Problem:\n" + example["question"].strip() + "\n\nSolution:\n" for example in test_data]
+                    prompts = [initial_demonstrations + "Problem:\n" + example["question"].strip() + "\n\nSolution:\n" for example in test_data]
                 else:
-                    prompts = [prompt_prefix + "Problem:\n" + example["question"].strip() + "\n\nSolution:\n" for example in test_data]
+                    prompts = [initial_demonstrations + "Problem:\n" + example["question"].strip() + "\n\nSolution:\n" for example in test_data]
             # we only use stop token for non-chat format (usually applied to vanilla pretrained language models). For chat format, we will rely on the model knows when to stop.
             stop_tokens = [[tokenizer.encode(stop_seq, add_special_tokens=False)[-1]] for stop_seq in args.additional_stop_sequence]
             if not args.use_chat_format:
@@ -137,7 +140,7 @@ def main(args):
                 do_sample=False,
             )
     else:
-        prompts = [prompt_prefix + "Problem: " + example["question"].strip() + "\nSolution:" for example in test_data]
+        prompts = [initial_demonstrations + "Problem: " + example["question"].strip() + "\nSolution:" for example in test_data]
         instances = [{"id": prompt, "prompt": prompt} for _, prompt in enumerate(prompts)]
         results = query_openai_chat_model(
             engine=args.openai_engine,
@@ -149,10 +152,8 @@ def main(args):
 
     predictions = []
     for output in outputs:
-        last_boxed_output = last_boxed_only_string(output)
-        if last_boxed_output:
-            output = remove_boxed(last_boxed_output)
-        predictions.append(output)
+        output = get_unnormalized_answer(output)
+        predictions.append(normalize_final_answer(output))
 
     predictions = [{
         "question": example["question"],
@@ -164,7 +165,7 @@ def main(args):
     print("Calculating accuracy...")
     correct_list = []
     for pred in predictions:
-        correct = eval_math(pred)
+        correct = 1 if is_equiv(pred['prediction'], pred['answer']) else 0
         correct_list.append(correct)
     accuracy = round(sum(correct_list) / len(correct_list), ndigits=4)
     print(f"Accuracy: {accuracy}")
@@ -180,7 +181,7 @@ def main(args):
         if type_ not in type_correct:
             type_correct[type_] = 0
             type_total[type_] = 0
-        type_correct[type_] += eval_math(pred)
+        type_correct[type_] += 1 if is_equiv(pred["prediction"], pred["answer"]) else 0
         type_total[type_] += 1
     type_accuracy = {type_: round(type_correct[type_] / type_total[type_], ndigits=4) for type_ in type_correct}
     print("Per-type accuracy:")
