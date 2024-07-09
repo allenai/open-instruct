@@ -15,7 +15,7 @@ lr_scheduler_type: linear
 warmup_ratio: 0.03
 weight_decay: 0.0
 num_train_epochs: 3
-output_dir: output/tulu_v2_13b/
+output_dir: output/tulu_v2_70b/
 with_tracking: true
 report_to:
   - wandb
