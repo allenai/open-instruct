@@ -3,7 +3,7 @@ description: open-instruct-finetune
 tasks:
   - name: open-instruct-finetune
     image:
-      beaker: Yizhongw03/open-instruct
+      beaker: hamishivi/open-instruct-public
     command: [
       '/bin/sh', '-c'
     ]

@@ -37,7 +37,7 @@ tasks:
     datasets:
       - mountPath: /data/
         source:
-          beaker: Yizhongw03/open_instruct_eval_data
+          beaker: hamishivi/open-instruct-eval-data
       - mountPath: /model
         source:
           beaker: 01GVYXDGJC6DV0JW9JZ16YM07G

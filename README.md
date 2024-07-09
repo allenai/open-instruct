@@ -57,9 +57,7 @@ For a second installation strategy, if you'd like to *run experiments within a D
 docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 --build-arg REQUIRE=requirements.txt . -t <your tag here>
 ```
 
-If you are internally at AI2, you can use this pre-built beaker image Yizhongw03/open-instruct (most recent version [here](https://beaker.org/im/01HSPPCBMA11BYKDQ2XQ2V947Q/details)). A version with newer transformers is available [here](https://beaker.org/im/01HW960RVZ0DWWBQKWPSK4T4Y6/details).
-
-To eval OLMo-1.7 on the suite eval set from Open-Instruct (MMLU, BBQ, etc), use this pre-built beaker image `nouhad/open-instruct-olmo-safety`
+If you are internally at AI2, you can use this pre-built beaker image `hamishivi/open-instruct-eval` (most recent version [here](https://beaker.org/im/01J2CKY81A6N1WG5QS08Y3WNM5/details)). For finetuning, you can use `hamishivi/open-instruct-public` (most recent version [here](https://beaker.org/im/01J2CQFX7076PDHZJR2GB0C3A9/details)). I will try to update these periodically.
 
 **Important for OLMo users:** Note that due to version conflicts between deepspeed and vLLM, we cannot support OLMo inference and deepspeed within the same image (this will be fixed once deepspeed allows pydantic >= 2). To build a docker image suitable for inference/evaluation for OLMo, use:
 ```bash
@@ -148,6 +146,7 @@ We provide the scripts for running evaluation of Huggingface/OpenAI models on a 
 - [Big-Bench Hard (BBH)](https://github.com/suzgunmirac/BIG-Bench-Hard/tree/main)
 - [TydiQA](https://github.com/google-research-datasets/tydiqa)
 - [Codex HumanEval](https://github.com/openai/human-eval/tree/master)
+- [HumanEval+ and MBPP+](https://github.com/evalplus/evalplus)
 - [IFEval](https://github.com/google-research/google-research/tree/master/instruction_following_eval)
 - [ToxiGen](https://github.com/microsoft/TOXIGEN)
 - [XSTest](https://github.com/paul-rottger/exaggerated-safety/)
