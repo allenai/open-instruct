@@ -121,6 +121,7 @@ experiment_groups_default = [
     "mmlu_5shot",
     "gsm_direct",
     "gsm_cot",
+    "MATH_cot",
     "bbh_direct",
     "bbh_cot",
     "tydiqa_goldp_1shot",
@@ -243,6 +244,19 @@ for experiment_group in experiment_groups:
         ''' 
         if args.gsm_stop_at_double_newline:
             task_spec['arguments'][0] += " --stop_at_double_newline"
+    elif experiment_group == "MATH_cot":
+        task_spec['arguments'][0] = '''
+            python -m eval.MATH.run_eval \
+            --data_dir /data/MATH/ \
+            --max_num_examples 200 \
+            --save_dir /output/ \
+            --use_vllm \
+            --model_name_or_path /model \
+            --tokenizer_name_or_path /model \
+            --n_shot 4 \
+            --use_chat_format \
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
+        '''
     elif experiment_group == "tydiqa_goldp_1shot":
         task_spec["arguments"][0] = '''
             python -m eval.tydiqa.run_eval \

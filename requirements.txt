@@ -37,3 +37,7 @@ openpyxl
 nltk
 langdetect
 immutabledict
+# for math evaluations
+antlr4-python3-runtime==4.11.0
+mpmath==1.3.0
+sympy==1.12.0
