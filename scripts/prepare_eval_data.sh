@@ -32,6 +32,9 @@ wget -P data/eval/MATH/ https://raw.githubusercontent.com/deepseek-ai/DeepSeek-M
 wget -P data/eval/codex_humaneval https://github.com/openai/human-eval/raw/master/data/HumanEval.jsonl.gz
 wget -P data/eval/codex_humaneval https://huggingface.co/datasets/bigcode/humanevalpack/raw/main/data/python/data/humanevalpack.jsonl
 
+# HumanEval+
+wget -P data/eval/codex_humaneval https://github.com/evalplus/humanevalplus_release/releases/download/v0.1.9/HumanEvalPlus-OriginFmt.jsonl.gz
+
 # Alpaca Farm reference
 wget -P data/eval/alpaca_farm https://huggingface.co/datasets/hamishivi/alpaca-farm-davinci-003-2048-token/resolve/main/davinci_003_outputs.json
 

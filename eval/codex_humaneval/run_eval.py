@@ -44,7 +44,8 @@ def main(args):
         else:
             print(f"Could not find HumanEvalPack file at {args.data_file_hep}, which will result in significantly worse performance. You can download it at https://hf.co/datasets/bigcode/humanevalpack/blob/main/data/python/data/humanevalpack.jsonl")
             instructions_dict = None
-            answer = "Here is the completed function:\n\n\n"
+            answer = "Here is the completed function:\n\n\n```python\n"
+            stop_sequences.append("\n```")
 
         def apply_chat_format(tokenizer, inst, suffix):
             messages = [{"role": "user", "content": inst}]
