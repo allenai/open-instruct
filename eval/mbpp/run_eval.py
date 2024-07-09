@@ -43,14 +43,24 @@ def main(args):
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
             prefix = "" if prompt[-1] in ["\n", " "] else " "
             return prompt + prefix + suffix
-            
-        instruction = "Complete the following python function.\n\n\n"
-        for example in test_data:
-            prompts.append((instruction + example["prompt"] + example['code'].split(":")[0], answer))   
+        
+        if args.use_evalplus_prompt:
+            instruction = "Please provide a self-contained Python script that solves the following problem in a markdown code block:"
+            suffix = "Below is a Python script with a self-contained function that solves the problem and passes corresponding tests:"
+            for example in test_data:
+                data_inst = instruction + f"\n```\n{example['prompt'].strip()}\n{random.choice(example['test_list'])}```\n"
+                suffix_inst = f"\n{suffix}\n```python\n" + example['code'].split(":")[0] + ":"
+                prompts.append((data_inst, suffix_inst)) 
+        else:
+            instruction = "Complete the following python function.\n\n\n"
+            for example in test_data:
+                prompts.append((instruction + example["prompt"] + example['code'].split(":")[0], answer))
     else:
         prompts = [example["prompt"] + example['code'].split(":")[0] for example in test_data]
     
     stop_sequences = ['```'] + args.additional_stop_sequence
+    if args.use_evalplus_prompt:
+        stop_sequences += ['\n"""', "\nassert", "\n#"]
         
     if not args.results_file:
         if args.model_name_or_path:
@@ -149,8 +159,12 @@ def main(args):
     duplicate_prompts = [
         prompt for prompt in prompts for _ in range(args.unbiased_sampling_size_n)
     ]
-    # assert len(duplicate_test_data) == len(outputs)
-    predictions = [{"task_id": example["task_id"], "prompt": prompt, "completion": output, "test_cases": example['test']} 
+    # if evalplus setup, we have to re-add the code prefix to the output.
+    if args.use_evalplus_prompt:
+        predictions = [{"task_id": example["task_id"], "prompt": prompt, "completion": example['code'].split(":")[0] + ":" + output, "test_cases": example['test']} 
+                    for example, prompt, output in zip(duplicate_test_data, duplicate_prompts, outputs)]
+    else:
+        predictions = [{"task_id": example["task_id"], "prompt": prompt, "completion": output, "test_cases": example['test']} 
                    for example, prompt, output in zip(duplicate_test_data, duplicate_prompts, outputs)]
     predictions_noresult = [{"task_id":pred["task_id"], "prompt":pred['prompt'], "completion": pred['completion']} for pred in predictions]
     if args.use_chat_format:
@@ -266,6 +280,11 @@ if __name__ == "__main__":
         nargs="+",
         default=[],
         help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
+    )
+    parser.add_argument(
+        '--use_evalplus_prompt',
+        action="store_true",
+        help="If given, we will use the evalplus prompting setup, to better match scores on the evalplus leaderboard."
     )
     parser.add_argument("--results_file", type=str)
     args = parser.parse_args()
