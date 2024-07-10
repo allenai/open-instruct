@@ -66,6 +66,21 @@ docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg
 
 For training, you can use the previous image.
 
+### Repo structure
+```
+├── assets/                     <- Images, licenses, etc.
+├── configs/                    
+|     ├── beaker_configs/       <- AI2 Beaker configs
+|     ├── ds_configs/           <- DeepSpeed configs
+|     └── train_configs/        <- Training configs
+├── eval/                       <- Evaluation suite for fine-tuned models
+├── human_eval/                 <- Human evaluation interface (not maintained)
+├── open_instruct/              <- Source code (flat)
+├── quantize/                   <- Scripts for quantization
+├── scripts/                    <- Core training and evaluation scripts
+├── Dockerfile                  <- Main Dockerfile
+└── Dockerfile.olmo             <- Dockerfile for OLMo users (version conflict currently.)
+```
 
 ## Training
 
