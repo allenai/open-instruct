@@ -2,9 +2,8 @@ import dataclasses
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, NewType, Optional, Tuple
+from typing import Any, List, NewType, Optional, Tuple
 
-import transformers
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
 
@@ -42,6 +41,14 @@ class FlatArguments:
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
+    dpo_use_paged_optimizer: bool = field(
+        default=False,
+        metadata={"help": "Use paged optimizer from bitsandbytes. Not compatible with deepspeed (use deepspeed config instead)."},
+    )
+    dpo_beta: float = field(
+        default=0.1,
+        metadata={"help": "Beta parameter for DPO loss. Default is 0.1."},
+)
     tokenizer_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
     )
