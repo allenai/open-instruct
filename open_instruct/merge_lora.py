@@ -1,12 +1,27 @@
-import torch
+# Copyright 2024 AllenAI. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import argparse
-from peft import PeftConfig, PeftModel
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-import bitsandbytes as bnb
-import os
 import copy
+import os
+
+import bitsandbytes as bnb
+import torch
 from bitsandbytes.functional import dequantize_4bit
+from peft import PeftConfig, PeftModel
 from peft.utils import _get_submodules
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 
 def dequantize_model(model, dtype=torch.bfloat16, device="cuda"):
@@ -38,8 +53,9 @@ def dequantize_model(model, dtype=torch.bfloat16, device="cuda"):
                 setattr(parent, target_name, new_module)
         # to save model, you have to unset this attribute
         model.is_loaded_in_4bit = False
-        
+
         return model
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -58,7 +74,7 @@ if __name__ == "__main__":
     peft_config = PeftConfig.from_pretrained(args.lora_model_name_or_path)
     print("Loading the base model...")
     if args.qlora:
-        quantization_config=BitsAndBytesConfig(
+        quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_compute_dtype=torch.bfloat16,
             bnb_4bit_use_double_quant=True,
@@ -78,7 +94,8 @@ if __name__ == "__main__":
             args.base_model_name_or_path if args.base_model_name_or_path else peft_config.base_model_name_or_path,
         )
 
-    # If tokenizer is specified, use it. Otherwise, use the tokenizer in the lora model folder or the base model folder.
+    # If tokenizer is specified, use it.
+    # Otherwise, use the tokenizer in the lora model folder or the base model folder.
     if args.tokenizer_name_or_path:
         print(f"Loading the tokenizer from {args.tokenizer_name_or_path}...")
         tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name_or_path, use_fast=args.use_fast_tokenizer)
@@ -86,24 +103,28 @@ if __name__ == "__main__":
         try:
             print("Trying to load the tokenizer in the lora model folder...")
             tokenizer = AutoTokenizer.from_pretrained(args.lora_model_name_or_path, use_fast=args.use_fast_tokenizer)
-        except:
-            print("No tokenizer found in the lora model folder. Using the tokenizer in the base model folder...")
+        except Exception as e:
+            print(
+                f"No tokenizer found in the lora model folder. Using the tokenizer in the base model folder... e:{e}"
+            )
             tokenizer = AutoTokenizer.from_pretrained(args.base_model_name_or_path, use_fast=args.use_fast_tokenizer)
 
     embedding_size = base_model.get_input_embeddings().weight.shape[0]
     if len(tokenizer) > embedding_size:
-        print(f"The vocabulary the tokenizer contains {len(tokenizer)-embedding_size} more tokens than the base model.")
+        print(
+            f"The vocabulary the tokenizer contains {len(tokenizer)-embedding_size} more tokens than the base model."
+        )
         print("Resizing the token embeddings of the merged model...")
         base_model.resize_token_embeddings(len(tokenizer))
-    
+
     print("Loading the lora model...")
     lora_model = PeftModel.from_pretrained(base_model, args.lora_model_name_or_path)
     print("Merging the lora modules...")
     merged_model = lora_model.merge_and_unload()
-    
+
     output_dir = args.output_dir if args.output_dir else args.lora_model_name_or_path
     os.makedirs(output_dir, exist_ok=True)
-    
+
     print(f"Saving merged model to {output_dir}...")
     merged_model.save_pretrained(output_dir)
 

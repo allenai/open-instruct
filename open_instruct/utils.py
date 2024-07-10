@@ -1,3 +1,17 @@
+# Copyright 2024 AllenAI. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import dataclasses
 import os
 import sys
@@ -5,7 +19,6 @@ from dataclasses import dataclass, field
 from typing import Any, List, NewType, Optional, Tuple
 
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
-
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -23,6 +36,7 @@ https://github.com/allenai/open-instruct/blob/98ccfb460ae4fb98140783b6cf54241926
 
 Commented out Args not currently used
 """
+
 
 @dataclass
 class FlatArguments:
@@ -43,12 +57,15 @@ class FlatArguments:
     )
     dpo_use_paged_optimizer: bool = field(
         default=False,
-        metadata={"help": "Use paged optimizer from bitsandbytes. Not compatible with deepspeed (use deepspeed config instead)."},
+        metadata={
+            "help": "Use paged optimizer from bitsandbytes."
+            " Not compatible with deepspeed (use deepspeed config instead)."
+        },
     )
     dpo_beta: float = field(
         default=0.1,
         metadata={"help": "Beta parameter for DPO loss. Default is 0.1."},
-)
+    )
     tokenizer_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
     )
@@ -72,9 +89,9 @@ class FlatArguments:
         default=False,
         metadata={
             "help": (
-                "Whether or not to allow for custom models defined on the Hub in their own modeling files. This option"
-                "should only be set to `True` for repositories you trust and in which you have read the code, as it will "
-                "execute code present on the Hub on your local machine."
+                "Whether or not to allow for custom models defined on the Hub in their own modeling files. "
+                "This option should only be set to `True` for repositories you trust and in which you "
+                "have read the code, as it will execute code present on the Hub on your local machine."
             )
         },
     )
@@ -82,7 +99,8 @@ class FlatArguments:
         default=False,
         metadata={
             "help": (
-                "It is an option to create the model as an empty shell, then only materialize its parameters when the pretrained weights are loaded. "
+                "It is an option to create the model as an empty shell, "
+                "then only materialize its parameters when the pretrained weights are loaded. "
                 "set True will benefit LLM loading time and RAM consumption."
             )
         },
@@ -93,7 +111,9 @@ class FlatArguments:
     dataset_config_name: Optional[str] = field(
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
     )
-    train_file: Optional[str] = field(default=None, metadata={"help": "The input training data file (a json/jsonl file)."})
+    train_file: Optional[str] = field(
+        default=None, metadata={"help": "The input training data file (a json/jsonl file)."}
+    )
     max_train_samples: Optional[int] = field(
         default=None,
         metadata={
@@ -110,16 +130,21 @@ class FlatArguments:
     max_seq_length: Optional[int] = field(
         default=None,
         metadata={
-            "help": ("The maximum total input sequence length after tokenization. Sequences longer than this will be truncated,")
+            "help": (
+                "The maximum total input sequence length after tokenization. "
+                "Sequences longer than this will be truncated,"
+            )
         },
     )
     overwrite_cache: bool = field(
-        default=False,
-        metadata={"help": "Overwrite the cached training and evaluation sets"}
+        default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
     )
     add_bos: bool = field(
         default=False,
-        metadata={"help": "Forcibly add bos token to the beginning of the input sequence. Use only when tokenizer does not add bos token by default."},
+        metadata={
+            "help": "Forcibly add bos token to the beginning of the input sequence."
+            " Use only when tokenizer does not add bos token by default."
+        },
     )
     clip_grad_norm: float = field(
         default=-1,
@@ -153,8 +178,8 @@ class FlatArguments:
         default="linear",
         metadata={
             "help": "The scheduler type to use for learning rate adjustment.",
-            "choices": ["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"]
-    },
+            "choices": ["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
+        },
     )
     num_train_epochs: int = field(
         default=2,
@@ -190,11 +215,17 @@ class FlatArguments:
     )
     timeout: int = field(
         default=1800,
-        metadata={"help": "Timeout for the training process in seconds. Useful if tokenization process is long. Default is 1800 seconds (30 minutes)."},
+        metadata={
+            "help": "Timeout for the training process in seconds."
+            "Useful if tokenization process is long. Default is 1800 seconds (30 minutes)."
+        },
     )
     reduce_loss: str = field(
         default="mean",
-        metadata={"help": "How to reduce loss over tokens. Options are 'mean' or 'sum'. Using 'sum' can improve chat model performance."},
+        metadata={
+            "help": "How to reduce loss over tokens. Options are 'mean' or 'sum'."
+            "Using 'sum' can improve chat model performance."
+        },
     )
     wandb_entity: Optional[str] = field(
         default=None,
@@ -210,7 +241,10 @@ class FlatArguments:
     )
     report_to: str = field(
         default="all",
-        metadata={"help": "The integration to report results and logs to. Options are 'tensorboard', 'wandb', 'comet_ml', 'clearml', or 'all'."},
+        metadata={
+            "help": "The integration to report results and logs to."
+            "Options are 'tensorboard', 'wandb', 'comet_ml', 'clearml', or 'all'."
+        },
     )
     gradient_checkpointing: bool = field(
         default=False,
@@ -218,21 +252,16 @@ class FlatArguments:
     )
     max_train_steps: Optional[int] = field(
         default=None,
-        metadata={
-            "help": "If set, overrides the number of training steps. Otherwise, num_train_epochs is used."
-        }
+        metadata={"help": "If set, overrides the number of training steps. Otherwise, num_train_epochs is used."},
     )
-    seed: int = field(
-        default=42,
-        metadata={"help": "Random seed for initialization and dataset shuffling."}
-    )
+    seed: int = field(default=42, metadata={"help": "Random seed for initialization and dataset shuffling."})
     checkpointing_steps: Optional[str] = field(
         default=None,
         metadata={
-            "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."
-        }
+            "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
+        },
     )
-    
+
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
             raise ValueError("reduce_loss must be either 'mean' or 'sum'")
@@ -242,6 +271,7 @@ class FlatArguments:
             if self.train_file is not None:
                 extension = self.train_file.split(".")[-1]
                 assert extension in ["json", "jsonl"], "`train_file` should be a json or a jsonl file."
+
 
 class ArgumentParserPlus(HfArgumentParser):
     def parse_yaml_and_args(self, yaml_arg: str, other_args: Optional[List[str]] = None) -> List[dataclass]:
@@ -265,7 +295,7 @@ class ArgumentParserPlus(HfArgumentParser):
         used_args = {}
 
         # overwrite the default/loaded value with the value provided to the command line
-        # adapted from https://github.com/huggingface/transformers/blob/d0b5002378daabf62769159add3e7d66d3f83c3b/src/transformers/hf_argparser.py#L327
+        # noqa adapted from https://github.com/huggingface/transformers/blob/d0b5002378daabf62769159add3e7d66d3f83c3b/src/transformers/hf_argparser.py#L327
         for data_yaml, data_class in zip(arg_list, self.dataclass_types):
             keys = {f.name for f in dataclasses.fields(data_yaml) if f.init}
             inputs = {k: v for k, v in vars(data_yaml).items() if k in keys}

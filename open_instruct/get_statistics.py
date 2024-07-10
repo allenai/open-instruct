@@ -1,10 +1,23 @@
-import json
-import os
-import sys
-import tqdm
-import pandas as pd
-import numpy as np
+# Copyright 2024 AllenAI. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import argparse
+import json
+
+import numpy as np
+import pandas as pd
+import tqdm
 from datasets import load_dataset
 from transformers import AutoTokenizer
 
@@ -13,7 +26,9 @@ def get_statistics_for_messages_data(data_path):
     # load dataset
     dataset = load_dataset("json", data_files={"train": data_path})
     # tokenize dataset
-    tokenizer = AutoTokenizer.from_pretrained("/net/nfs.cirrascale/allennlp/yizhongw/hf_llama_models/7B", use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(
+        "/net/nfs.cirrascale/allennlp/yizhongw/hf_llama_models/7B", use_fast=False
+    )
     # get statistics
     num_instances = len(dataset["train"])
     num_of_turns = [len(instance["messages"]) for instance in dataset["train"]]
@@ -24,10 +39,14 @@ def get_statistics_for_messages_data(data_path):
         instance_length = 0
         for message in instance["messages"]:
             if message["role"] == "user":
-                user_prompt_lengths.append(len(tokenizer(message["content"], truncation=False, add_special_tokens=False)["input_ids"]))
+                user_prompt_lengths.append(
+                    len(tokenizer(message["content"], truncation=False, add_special_tokens=False)["input_ids"])
+                )
                 instance_length += user_prompt_lengths[-1]
             elif message["role"] == "assistant":
-                assistant_response_lengths.append(len(tokenizer(message["content"], truncation=False, add_special_tokens=False)["input_ids"]))
+                assistant_response_lengths.append(
+                    len(tokenizer(message["content"], truncation=False, add_special_tokens=False)["input_ids"])
+                )
                 instance_length += assistant_response_lengths[-1]
         instance_lengths.append(instance_length)
 
@@ -48,7 +67,7 @@ def get_statistics_for_messages_data(data_path):
         "num_instances_with_total_length_gt_4096": np.sum(np.array(instance_lengths) > 4096),
         "top_100_longest_instances": top_100_longest_instances,
     }
-          
+
     # convert everything to dict or scalar
     for key, value in result.items():
         if isinstance(value, pd.Series):
@@ -59,6 +78,7 @@ def get_statistics_for_messages_data(data_path):
             result[key] = int(value)
 
     return result
+
 
 def get_statistics_for_prompt_completion_data(data_path):
     # load dataset
@@ -95,7 +115,7 @@ def get_statistics_for_prompt_completion_data(data_path):
             result[key] = value.tolist()
         elif isinstance(value, np.int64):
             result[key] = int(value)
-    
+
     return result
 
 
@@ -104,7 +124,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_path", type=str, required=True)
     parser.add_argument("--save_path", type=str, help="Path to save the statistics.")
     args = parser.parse_args()
-    
+
     with open(args.data_path, "r") as f:
         sample = json.loads(f.readline())
     if "prompt" in sample:

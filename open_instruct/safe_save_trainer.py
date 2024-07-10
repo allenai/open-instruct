@@ -1,24 +1,40 @@
+# Copyright 2024 AllenAI. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import os
 from pathlib import Path
-from packaging import version
-from transformers import Trainer, is_torch_tpu_available
-from transformers.deepspeed import is_deepspeed_zero3_enabled
-from transformers.utils import is_sagemaker_mp_enabled, WEIGHTS_NAME, logging
-from transformers.trainer_utils import ShardedDDPOption
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType, FullStateDictConfig
 from typing import Optional
 
+from packaging import version
+from torch.distributed.fsdp import FullStateDictConfig
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import StateDictType
+from transformers import Trainer, is_torch_tpu_available
+from transformers.deepspeed import is_deepspeed_zero3_enabled
+from transformers.trainer_utils import ShardedDDPOption
+from transformers.utils import WEIGHTS_NAME, is_sagemaker_mp_enabled, logging
+
 if is_sagemaker_mp_enabled():
-    import smdistributed.modelparallel.torch as smp
     from smdistributed.modelparallel import __version__ as SMP_VERSION
 
     IS_SAGEMAKER_MP_POST_1_10 = version.parse(SMP_VERSION) >= version.parse("1.10")
 
-    from transformers.trainer_pt_utils import smp_forward_backward, smp_forward_only, smp_gather, smp_nested_concat
 else:
     IS_SAGEMAKER_MP_POST_1_10 = False
 
 logger = logging.get_logger(__name__)
+
 
 class SafeSaveTrainer(Trainer):
     def save_model(self, output_dir: Optional[str] = None, _internal_call: bool = False):
