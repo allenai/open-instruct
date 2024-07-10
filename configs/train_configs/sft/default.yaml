@@ -8,6 +8,7 @@ use_slow_tokenizer: false # olmo models only use fast tokenizers
 dataset_mixer:
  allenai/tulu-v2-sft-mixture: 0.5
  HuggingFaceH4/no_robots: 0.8
+#  data/processed/tulu_v2/tulu_v2_filtered_data.jsonl: 0.1
 # dataset_mixer:
 #  allenai/tulu-v2-sft-mixture: 100000
 #  HuggingFaceH4/no_robots: 5000
