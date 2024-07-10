@@ -4,6 +4,7 @@ gradient_checkpointing: true
 tokenizer_name: allenai/OLMo-1.7-7B-SFT-hf
 dataset_name: allenai/ultrafeedback_binarized_cleaned
 max_seq_length: 4096
+gradient_checkpointing: true
 preprocessing_num_workers: 16
 per_device_train_batch_size: 1
 gradient_accumulation_steps: 4 # designed for 8 GPUs, so batch size 32
@@ -18,3 +19,4 @@ with_tracking: true
 report_to:
   - wandb
 logging_steps: 1
+add_bos: true
