@@ -1,8 +1,7 @@
 #!/bin/bash
 
 # example usage
-# sh scripts/finetune_with_accelerate_config.sh 1 configs/train_configs/sft/default.yaml
-# sh scripts/finetune_with_accelerate_config.sh 8 configs/train_configs/sft/olmo_17_sft.yaml
+# sh scripts/dpo_train_with_accelerate_config.sh 8 configs/train_configs/dpo/default.yaml
 
 # Check if exactly two arguments are provided
 if [ "$#" -ne 2 ]; then
@@ -30,5 +29,5 @@ accelerate launch \
     --num_processes $NUM_GPUS \
     --use_deepspeed \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
-    open_instruct/finetune.py \
+    open_instruct/dpo_tune.py \
     "$2"

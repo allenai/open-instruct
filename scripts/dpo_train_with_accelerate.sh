@@ -12,7 +12,7 @@ accelerate launch \
     --num_machines 1 \
     --num_processes $NUM_GPUS \
     --use_deepspeed \
-    --deepspeed_config_file ds_configs/stage3_no_offloading_accelerate.conf \
+    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     open_instruct/dpo_tune.py \
     --model_name_or_path allenai/tulu-2-7b \
     --use_flash_attn \

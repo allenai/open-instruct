@@ -4,7 +4,6 @@
 DPO tuning script. Adapted from our finetuning script.
 '''
 
-import argparse
 import logging
 import math
 import os
@@ -28,7 +27,6 @@ from transformers import (
     AutoTokenizer,
     LlamaTokenizer,
     LlamaTokenizerFast,
-    SchedulerType,
     get_scheduler,
     GPTNeoXTokenizerFast,
     GPT2Tokenizer,
@@ -37,245 +35,9 @@ from transformers import (
 )
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from dpo_utils import dpo_loss, concatenated_forward, DataCollatorForSeq2SeqDPO
+from open_instruct.utils import ArgumentParserPlus, FlatArguments
 
 logger = get_logger(__name__)
-
-try:
-    from hf_olmo import OLMoTokenizerFast
-except ImportError:
-    logger.warning("OLMo not installed. Ignore if using a different model.")
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Finetune a transformers model on a causal language modeling task")
-    parser.add_argument(
-        "--dataset_name",
-        type=str,
-        default=None,
-        help="The name of the dataset to use (via the datasets library).",
-    )
-    parser.add_argument(
-        "--dataset_config_name",
-        type=str,
-        default=None,
-        help="The configuration name of the dataset to use (via the datasets library).",
-    )
-    parser.add_argument(
-        "--train_file", type=str, default=None, help="A csv or a json file containing the training data."
-    )
-    parser.add_argument(
-        "--model_name_or_path",
-        type=str,
-        help="Path to pretrained model or model identifier from huggingface.co/models.",
-        required=False,
-    )
-    parser.add_argument(
-        "--config_name",
-        type=str,
-        default=None,
-        help="Pretrained config name or path if not the same as model_name",
-    )
-    parser.add_argument(
-        "--use_lora",
-        action="store_true",
-        help="If passed, will use LORA (low-rank parameter-efficient training) to train the model.",
-    )
-    parser.add_argument(
-        "--lora_rank",
-        type=int,
-        default=64,
-        help="The rank of lora.",
-    )
-    parser.add_argument(
-        "--lora_alpha",
-        type=float,
-        default=16,
-        help="The alpha parameter of lora.",
-    )
-    parser.add_argument(
-        "--lora_dropout",
-        type=float,
-        default=0.1,
-        help="The dropout rate of lora modules.",
-    )
-    parser.add_argument(
-        "--use_flash_attn",
-        action="store_true",
-        help="If passed, will use flash attention to train the model.",
-    )
-    parser.add_argument(
-        "--tokenizer_name",
-        type=str,
-        default=None,
-        help="Pretrained tokenizer name or path if not the same as model_name",
-    )
-    parser.add_argument(
-        "--use_slow_tokenizer",
-        action="store_true",
-        help="If passed, will use a slow tokenizer (not backed by the 🤗 Tokenizers library).",
-    )
-    parser.add_argument(
-        "--max_seq_length",
-        type=int,
-        default=512,
-        help="The maximum total sequence length (prompt+completion) of each training example.",
-    )
-    parser.add_argument(
-        "--per_device_train_batch_size",
-        type=int,
-        default=8,
-        help="Batch size (per device) for the training dataloader.",
-    )
-    parser.add_argument(
-        "--learning_rate",
-        type=float,
-        default=5e-5,
-        help="Initial learning rate (after the potential warmup period) to use.",
-    )
-    parser.add_argument("--weight_decay", type=float, default=0.0, help="Weight decay to use.")
-    parser.add_argument("--num_train_epochs", type=int, default=3, help="Total number of training epochs to perform.")
-    parser.add_argument(
-        "--max_train_steps",
-        type=int,
-        default=None,
-        help="Total number of training steps to perform. If provided, overrides num_train_epochs.",
-    )
-    parser.add_argument(
-        "--gradient_accumulation_steps",
-        type=int,
-        default=1,
-        help="Number of updates steps to accumulate before performing a backward/update pass.",
-    )
-    parser.add_argument(
-        "--lr_scheduler_type",
-        type=SchedulerType,
-        default="linear",
-        help="The scheduler type to use.",
-        choices=["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
-    )
-    parser.add_argument(
-        "--warmup_ratio", type=float, default=0, help="Ratio of total training steps used for warmup."
-    )
-    parser.add_argument("--output_dir", type=str, default=None, help="Where to store the final model.")
-    parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
-    parser.add_argument(
-        "--preprocessing_num_workers",
-        type=int,
-        default=None,
-        help="The number of processes to use for the preprocessing.",
-    )
-    parser.add_argument(
-        "--overwrite_cache", action="store_true", help="Overwrite the cached training and evaluation sets"
-    )
-    parser.add_argument(
-        "--checkpointing_steps",
-        type=str,
-        default=None,
-        help="Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch.",
-    )
-    parser.add_argument(
-        "--logging_steps",
-        type=int,
-        default=None,
-        help="Log the training loss and learning rate every logging_steps steps.",
-    )
-    parser.add_argument(
-        "--resume_from_checkpoint",
-        type=str,
-        default=None,
-        help="If the training should continue from a checkpoint folder.",
-    )
-    parser.add_argument(
-        "--with_tracking",
-        action="store_true",
-        help="Whether to enable experiment trackers for logging.",
-    )
-    parser.add_argument(
-        "--report_to",
-        type=str,
-        default="all",
-        help=(
-            'The integration to report the results and logs to. Supported platforms are `"tensorboard"`,'
-            ' `"wandb"`, `"comet_ml"` and `"clearml"`. Use `"all"` (default) to report to all integrations.'
-            "Only applicable when `--with_tracking` is passed."
-        ),
-    )
-    parser.add_argument(
-        "--low_cpu_mem_usage",
-        action="store_true",
-        help=(
-            "It is an option to create the model as an empty shell, then only materialize its parameters when the pretrained weights are loaded."
-            "If passed, LLM loading time and RAM consumption will be benefited."
-        ),
-    )
-    parser.add_argument(
-        "--gradient_checkpointing",
-        action="store_true",
-        help=(
-            "Turn on gradient checkpointing. Saves memory but slows training."
-        ),
-    )
-    parser.add_argument(
-        "--use_qlora",
-        action="store_true",
-        help=(
-            "Use qLoRA training - main thing is initialising model in quantised form. Not compatible with deepspeed."
-        ),
-    )
-    parser.add_argument(
-        '--clip_grad_norm',
-        type=float,
-        default=-1,
-        help='Clip gradient norm. Not compatible with deepspeed (use deepspeed config instead).',
-    )
-    parser.add_argument(
-        '--use_8bit_optimizer',
-        action='store_true',
-        help='Use 8bit optimizer from bitsandbytes. Not compatible with deepspeed (use deepspeed config instead).',
-    )
-    parser.add_argument(
-        '--beta',
-        type=float,
-        default=0.1,
-        help='Beta parameter for DPO loss. Default is 0.1.',
-    )
-    parser.add_argument(
-        '--use_paged_optimizer',
-        action='store_true',
-        help='Use paged optimizer from bitsandbytes. Not compatible with deepspeed (use deepspeed config instead).',
-    )
-    parser.add_argument(
-        '--add_bos',
-        action='store_true',
-        help='Forcibly add bos token to the beginning of the input sequence. Use only when tokenizer does not add bos token by default (e.g., olmo).',
-    )
-    parser.add_argument(
-        '--timeout',
-        type=int,
-        default=1800,
-        help='Timeout for the training process. Useful if tokenization process is long. Default is 1800 seconds (30 minutes).',
-    )
-    parser.add_argument(
-        '--trust_remote_code',
-        action='store_true',
-        help='Trust remote code when loading pretrained models and tokenizers. Use only when you trust the remote code.',
-    )
-    parser.add_argument(
-        '--wandb_entity', 
-        type=str,
-        default=None,
-        help='Entity to use for logging to wandb.'
-    )
-    args = parser.parse_args()
-
-    # Sanity checks
-    if args.dataset_name is None and args.train_file is None:
-        raise ValueError("Need either a dataset name or a training file.")
-    else:
-        if args.train_file is not None:
-            extension = args.train_file.split(".")[-1]
-            assert extension in ["json", "jsonl"], "`train_file` should be a json/jsonl file."
-    return args
 
 def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=False):
     '''
@@ -406,7 +168,8 @@ def prepare_deepspeed(accelerator, model):
         
 
 def main():
-    args = parse_args()
+    parser = ArgumentParserPlus((FlatArguments))
+    args = parser.parse()
 
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
@@ -539,16 +302,21 @@ def main():
         })
         assert num_added_tokens in [0, 1], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
     elif isinstance(tokenizer, GPTNeoXTokenizerFast):
-        num_added_tokens = tokenizer.add_special_tokens({
-            "pad_token": "<pad>",
-        })
-        assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
+        # OLMo newer models use this tokenizer
+        if tokenizer.bos_token is None:
+            tokenizer.bos_token = tokenizer.eos_token
+            assert args.add_bos, "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
+        # else, pythia / other models
+        else:
+            num_added_tokens = tokenizer.add_special_tokens({
+                "pad_token": "<pad>",
+            })
+            assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
     elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
         num_added_tokens = tokenizer.add_special_tokens({'unk_token': '<unk>'})
-    elif isinstance(tokenizer, OLMoTokenizerFast):
-        # only the eos for olmo, but we use it as bos
-        tokenizer.bos_token = tokenizer.eos_token
-        assert args.add_bos, "For OLMo, you must add bos token to the beginning of the input sequence."
+    elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast) and tokenizer.pad_token is None:
+        num_added_tokens = tokenizer.add_special_tokens({'pad_token': '<pad>'})
+        assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
@@ -602,6 +370,13 @@ def main():
 
     train_dataset = lm_datasets
 
+    # debugging tool for fewer samples
+    if args.max_train_samples is not None:
+        max_train_samples = min(len(train_dataset), args.max_train_samples)
+        logger.info(f"Limiting training samples to {max_train_samples} from {len(train_dataset)}.")
+        train_dataset = train_dataset.select(range(max_train_samples))
+
+
     # Log a few random samples from the training set:
     for index in random.sample(range(len(train_dataset)), 3):
         logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
@@ -627,7 +402,7 @@ def main():
             "weight_decay": 0.0,
         },
     ]
-    if args.use_qlora or args.use_paged_optimizer:
+    if args.use_qlora or args.dpo_use_paged_optimizer:
         from bitsandbytes.optim import AdamW
         optimizer = AdamW(
             optimizer_grouped_parameters,
@@ -684,7 +459,7 @@ def main():
     if args.with_tracking:
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
-        experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"].value
+        experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"]
         accelerator.init_trackers("open_instruct_dpo", 
                                   experiment_config, 
                                   init_kwargs={"wandb": {"entity": args.wandb_entity}})
@@ -766,7 +541,7 @@ def main():
                     else:
                         reference_chosen_logps, reference_rejected_logps = concatenated_forward(reference_model, batch)
                 losses, _, _ = dpo_loss(
-                    policy_chosen_logps, policy_rejected_logps, reference_chosen_logps, reference_rejected_logps, beta=args.beta)
+                    policy_chosen_logps, policy_rejected_logps, reference_chosen_logps, reference_rejected_logps, beta=args.dpo_beta)
                 # TODO: metric logging          
                 loss = losses.mean()
                 # We keep track of the loss at each logged step

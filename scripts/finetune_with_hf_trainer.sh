@@ -8,7 +8,7 @@ GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
 echo "Training llama model ${MODEL_SIZE} using $NUM_GPUS GPUs, $BATCH_SIZE_PER_GPU batch size per GPU, $GRADIENT_ACC_STEPS gradient accumulation steps"
 
 deepspeed --include localhost:0,1,2,3 open_instruct/finetune_trainer.py \
-    --deepspeed ds_configs/stage3_no_offloading.conf \
+    --deepspeed configs/ds_configs/stage3_no_offloading.conf \
     --model_name_or_path ../hf_llama2_models/${MODEL_SIZE} \
     --tokenizer_name ../hf_llama2_models/${MODEL_SIZE} \
     --use_flash_attn True \
