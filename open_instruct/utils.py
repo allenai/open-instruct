@@ -65,15 +65,6 @@ class FlatArguments:
         default="main",
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
-    # token: str = field(
-    #     default=None,
-    #     metadata={
-    #         "help": (
-    #             "The token to use as HTTP bearer authorization for remote files. If not specified, will use the token "
-    #             "generated when running `huggingface-cli login` (stored in `~/.huggingface`)."
-    #         )
-    #     },
-    # )
     trust_remote_code: bool = field(
         default=False,
         metadata={
