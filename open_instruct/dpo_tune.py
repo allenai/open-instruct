@@ -40,12 +40,6 @@ from open_instruct.utils import ArgumentParserPlus, FlatArguments
 
 logger = get_logger(__name__)
 
-try:
-    from hf_olmo import OLMoTokenizerFast
-except ImportError:
-    logger.warning("OLMo not installed. Ignore if using a different model.")
-
-
 def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=False):
     '''
     Here we assume each example has a rejected and chosen field, both of which are a list of messages.
@@ -315,10 +309,6 @@ def main():
         assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
     elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
         num_added_tokens = tokenizer.add_special_tokens({'unk_token': '<unk>'})
-    elif isinstance(tokenizer, OLMoTokenizerFast):
-        # only the eos for olmo, but we use it as bos
-        tokenizer.bos_token = tokenizer.eos_token
-        assert args.add_bos, "For OLMo, you must add bos token to the beginning of the input sequence."
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.

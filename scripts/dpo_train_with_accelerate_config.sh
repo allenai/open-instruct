@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # example usage
-# sh scripts/dpo_train_with_accelerate_new.sh 8 configs/train_configs/dpo/default.yaml
+# sh scripts/dpo_train_with_accelerate_config.sh 8 configs/train_configs/dpo/default.yaml
 
 # Check if exactly two arguments are provided
 if [ "$#" -ne 2 ]; then
