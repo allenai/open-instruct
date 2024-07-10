@@ -17,15 +17,15 @@ DPO utils
 Adapted from https://github.com/eric-mitchell/direct-preference-optimization/blob/main/trainers.py
 """
 
-import torch
-
-torch.backends.cuda.matmul.allow_tf32 = True
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Union
 
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import DataCollatorForSeq2Seq
+
+torch.backends.cuda.matmul.allow_tf32 = True
 
 
 def dpo_loss(
@@ -39,17 +39,24 @@ def dpo_loss(
     """Compute the DPO loss for a batch of policy and reference model log probabilities.
 
     Args:
-        policy_chosen_logps: Log probabilities of the policy model for the chosen responses. Shape: (batch_size,)
-        policy_rejected_logps: Log probabilities of the policy model for the rejected responses. Shape: (batch_size,)
-        reference_chosen_logps: Log probabilities of the reference model for the chosen responses. Shape: (batch_size,)
-        reference_rejected_logps: Log probabilities of the reference model for the rejected responses. Shape: (batch_size,)
-        beta: Temperature parameter for the DPO loss, typically something in the range of 0.1 to 0.5. We ignore the reference model as beta -> 0.
-        reference_free: If True, we ignore the _provided_ reference model and implicitly use a reference model that assigns equal probability to all responses.
+        policy_chosen_logps: Log probabilities of the policy model
+            for the chosen responses. Shape: (batch_size,)
+        policy_rejected_logps: Log probabilities of the policy model
+            for the rejected responses. Shape: (batch_size,)
+        reference_chosen_logps: Log probabilities of the reference model
+            for the chosen responses. Shape: (batch_size,)
+        reference_rejected_logps: Log probabilities of the reference model
+            for the rejected responses. Shape: (batch_size,)
+        beta: Temperature parameter for the DPO loss, typically something
+            in the range of 0.1 to 0.5. We ignore the reference model as beta -> 0.
+        reference_free: If True, we ignore the _provided_ reference model
+            and implicitly use a reference model that assigns equal probability to all responses.
 
     Returns:
         A tuple of three tensors: (losses, chosen_rewards, rejected_rewards).
         The losses tensor contains the DPO loss for each example in the batch.
-        The chosen_rewards and rejected_rewards tensors contain the rewards for the chosen and rejected responses, respectively.
+        The chosen_rewards and rejected_rewards tensors contain the rewards
+            for the chosen and rejected responses, respectively.
     """
     pi_logratios = policy_chosen_logps - policy_rejected_logps
     ref_logratios = reference_chosen_logps - reference_rejected_logps
@@ -72,12 +79,16 @@ def _get_batch_logps(
     """Compute the log probabilities of the given labels under the given logits.
 
     Args:
-        logits: Logits of the model (unnormalized). Shape: (batch_size, sequence_length, vocab_size)
-        labels: Labels for which to compute the log probabilities. Label tokens with a value of -100 are ignored. Shape: (batch_size, sequence_length)
-        average_log_prob: If True, return the average log probability per (non-masked) token. Otherwise, return the sum of the log probabilities of the (non-masked) tokens.
+        logits: Logits of the model (unnormalized).
+            Shape: (batch_size, sequence_length, vocab_size)
+        labels: Labels for which to compute the log probabilities.
+            Label tokens with a value of -100 are ignored. Shape: (batch_size, sequence_length)
+        average_log_prob: If True, return the average log probability per (non-masked) token.
+            Otherwise, return the sum of the log probabilities of the (non-masked) tokens.
 
     Returns:
-        A tensor of shape (batch_size,) containing the average/sum log probabilities of the given labels under the given logits.
+        A tensor of shape (batch_size,) containing the average/sum
+            log probabilities of the given labels under the given logits.
     """
     assert logits.shape[:-1] == labels.shape
 
@@ -100,7 +111,8 @@ def concatenated_inputs(batch: Dict[str, Union[List, torch.LongTensor]]) -> Dict
     """Concatenate the chosen and rejected inputs into a single tensor.
 
     Args:
-        batch: A batch of data. Must contain the keys 'chosen_input_ids' and 'rejected_input_ids', which are tensors of shape (batch_size, sequence_length).
+        batch: A batch of data. Must contain the keys 'chosen_input_ids'
+            and 'rejected_input_ids', which are tensors of shape (batch_size, sequence_length).
 
     Returns:
         A dictionary containing the concatenated inputs under the key 'concatenated_input_ids'.

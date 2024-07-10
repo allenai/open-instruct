@@ -1,3 +1,3 @@
-from .utils import FlatArguments, ArgumentParserPlus
+from .utils import ArgumentParserPlus, FlatArguments
 
 All = [FlatArguments, ArgumentParserPlus]

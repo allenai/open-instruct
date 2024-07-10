@@ -1,3 +1,5 @@
+# !/usr/bin/env python
+# coding=utf-8
 # Copyright 2024 AllenAI. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,10 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-#!/usr/bin/env python
-# coding=utf-8
-
-import argparse
 import logging
 import math
 import os
@@ -45,7 +43,6 @@ from transformers import (
     LlamaTokenizer,
     LlamaTokenizerFast,
     OPTForCausalLM,
-    SchedulerType,
     get_scheduler,
 )
 
@@ -486,12 +483,17 @@ def main():
         overrode_max_train_steps = True
 
     # Create the learning rate scheduler.
-    # Note: the current accelerator.step() calls the .step() of the real scheduler for the `num_processes` times. This is because they assume
-    # the user initialize the scheduler with the entire training set. In the case of data parallel training, each process only
-    # sees a subset (1/num_processes) of the training set. So each time the process needs to update the lr multiple times so that the total
+    # Note: the current accelerator.step() calls the .step() of the real scheduler
+    # for the `num_processes` times. This is because they assume
+    # the user initialize the scheduler with the entire training set.
+    # In the case of data parallel training, each process only
+    # sees a subset (1/num_processes) of the training set.
+    # So each time the process needs to update the lr multiple times so that the total
     # number of updates in the end matches the num_training_steps here.
-    # Here we need to set the num_training_steps to either using the entire training set (when epochs is specified) or we need to multiply the
-    # num_training_steps by num_processes so that the total number of updates matches the num_training_steps.
+    # Here we need to set the num_training_steps to either using
+    # the entire training set (when epochs is specified) or we need to multiply the
+    # num_training_steps by num_processes so that the total number
+    # of updates matches the num_training_steps.
     num_training_steps_for_scheduler = (
         args.max_train_steps if overrode_max_train_steps else args.max_train_steps * accelerator.num_processes
     )

@@ -30,7 +30,8 @@ encoding_templates_w_input = [
     ("{instruction}\n\nNow complete the following instance -\nInput: {input}\nOutput:", "{output}", 0.05),
     ("Instruction:{instruction}\n\nInput: {input}\n\n", "{output}", 0.05),
     (
-        "Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.\n\n"
+        "Below is an instruction that describes a task, paired with an input that provides further context."
+        " Write a response that appropriately completes the request.\n\n"
         "### Instruction:\n{instruction}\n\n### Input:\n{input}\n\n### Response:",
         "{output}",
         0.1,
@@ -52,7 +53,8 @@ encoding_templates_wo_input = [
     ("Plase answer the following request: {instruction}\nAnswer:", "{output}", 0.05),
     ("Tell me how would you respond to the following request.\n{instruction}\n", "{output}", 0.05),
     (
-        "Write a response that appropriately completes the request.\n\n### Instruction:\n{instruction}\n\n### Response:",
+        "Write a response that appropriately completes the request."
+        "\n\n### Instruction:\n{instruction}\n\n### Response:",
         "{output}",
         0.1,
     ),  # alpaca template

@@ -58,7 +58,8 @@ class FlatArguments:
     dpo_use_paged_optimizer: bool = field(
         default=False,
         metadata={
-            "help": "Use paged optimizer from bitsandbytes. Not compatible with deepspeed (use deepspeed config instead)."
+            "help": "Use paged optimizer from bitsandbytes."
+            " Not compatible with deepspeed (use deepspeed config instead)."
         },
     )
     dpo_beta: float = field(
@@ -88,9 +89,9 @@ class FlatArguments:
         default=False,
         metadata={
             "help": (
-                "Whether or not to allow for custom models defined on the Hub in their own modeling files. This option"
-                "should only be set to `True` for repositories you trust and in which you have read the code, as it will "
-                "execute code present on the Hub on your local machine."
+                "Whether or not to allow for custom models defined on the Hub in their own modeling files. "
+                "This option should only be set to `True` for repositories you trust and in which you "
+                "have read the code, as it will execute code present on the Hub on your local machine."
             )
         },
     )
@@ -98,7 +99,8 @@ class FlatArguments:
         default=False,
         metadata={
             "help": (
-                "It is an option to create the model as an empty shell, then only materialize its parameters when the pretrained weights are loaded. "
+                "It is an option to create the model as an empty shell, "
+                "then only materialize its parameters when the pretrained weights are loaded. "
                 "set True will benefit LLM loading time and RAM consumption."
             )
         },
@@ -129,7 +131,8 @@ class FlatArguments:
         default=None,
         metadata={
             "help": (
-                "The maximum total input sequence length after tokenization. Sequences longer than this will be truncated,"
+                "The maximum total input sequence length after tokenization. "
+                "Sequences longer than this will be truncated,"
             )
         },
     )
@@ -139,7 +142,8 @@ class FlatArguments:
     add_bos: bool = field(
         default=False,
         metadata={
-            "help": "Forcibly add bos token to the beginning of the input sequence. Use only when tokenizer does not add bos token by default."
+            "help": "Forcibly add bos token to the beginning of the input sequence."
+            " Use only when tokenizer does not add bos token by default."
         },
     )
     clip_grad_norm: float = field(
@@ -212,13 +216,15 @@ class FlatArguments:
     timeout: int = field(
         default=1800,
         metadata={
-            "help": "Timeout for the training process in seconds. Useful if tokenization process is long. Default is 1800 seconds (30 minutes)."
+            "help": "Timeout for the training process in seconds."
+            "Useful if tokenization process is long. Default is 1800 seconds (30 minutes)."
         },
     )
     reduce_loss: str = field(
         default="mean",
         metadata={
-            "help": "How to reduce loss over tokens. Options are 'mean' or 'sum'. Using 'sum' can improve chat model performance."
+            "help": "How to reduce loss over tokens. Options are 'mean' or 'sum'."
+            "Using 'sum' can improve chat model performance."
         },
     )
     wandb_entity: Optional[str] = field(
@@ -236,7 +242,8 @@ class FlatArguments:
     report_to: str = field(
         default="all",
         metadata={
-            "help": "The integration to report results and logs to. Options are 'tensorboard', 'wandb', 'comet_ml', 'clearml', or 'all'."
+            "help": "The integration to report results and logs to."
+            "Options are 'tensorboard', 'wandb', 'comet_ml', 'clearml', or 'all'."
         },
     )
     gradient_checkpointing: bool = field(
@@ -251,7 +258,7 @@ class FlatArguments:
     checkpointing_steps: Optional[str] = field(
         default=None,
         metadata={
-            "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."
+            "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
         },
     )
 
@@ -288,7 +295,7 @@ class ArgumentParserPlus(HfArgumentParser):
         used_args = {}
 
         # overwrite the default/loaded value with the value provided to the command line
-        # adapted from https://github.com/huggingface/transformers/blob/d0b5002378daabf62769159add3e7d66d3f83c3b/src/transformers/hf_argparser.py#L327
+        # noqa adapted from https://github.com/huggingface/transformers/blob/d0b5002378daabf62769159add3e7d66d3f83c3b/src/transformers/hf_argparser.py#L327
         for data_yaml, data_class in zip(arg_list, self.dataclass_types):
             keys = {f.name for f in dataclasses.fields(data_yaml) if f.init}
             inputs = {k: v for k, v in vars(data_yaml).items() if k in keys}

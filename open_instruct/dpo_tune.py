@@ -1,3 +1,5 @@
+# !/usr/bin/env python
+# coding=utf-8
 # Copyright 2024 AllenAI. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,9 +13,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-#!/usr/bin/env python
-# coding=utf-8
 """
 DPO tuning script. Adapted from our finetuning script.
 """
@@ -171,7 +170,8 @@ def prepare_deepspeed(accelerator, model):
                 else getattr(model.config, "hidden_size", None)
             )
             if hidden_size is not None and config_kwargs["zero_optimization"]["stage"] == 3:
-                # Note that `stage3_prefetch_bucket_size` can produce DeepSpeed messages like: `Invalidate trace cache @ step 0: expected module 1, but got module 0`
+                # Note that `stage3_prefetch_bucket_size` can produce DeepSpeed messages like:
+                # `Invalidate trace cache @ step 0: expected module 1, but got module 0`
                 # This is expected and is not an error, see: https://github.com/microsoft/DeepSpeed/discussions/4081
                 config_kwargs.update(
                     {
@@ -182,7 +182,8 @@ def prepare_deepspeed(accelerator, model):
                 )
 
     # If ZeRO-3 is used, we shard both the active and reference model.
-    # Otherwise, we assume the reference model fits in memory and is initialized on each device with ZeRO disabled (stage 0)
+    # Otherwise, we assume the reference model fits in memory and
+    # is initialized on each device with ZeRO disabled (stage 0)
     if config_kwargs["zero_optimization"]["stage"] != 3:
         config_kwargs["zero_optimization"]["stage"] = 0
     model, *_ = deepspeed.initialize(model=model, config=config_kwargs)
@@ -472,12 +473,17 @@ def main():
         overrode_max_train_steps = True
 
     # Create the learning rate scheduler.
-    # Note: the current accelerator.step() calls the .step() of the real scheduler for the `num_processes` times. This is because they assume
-    # the user initialize the scheduler with the entire training set. In the case of data parallel training, each process only
-    # sees a subset (1/num_processes) of the training set. So each time the process needs to update the lr multiple times so that the total
+    # Note: the current accelerator.step() calls the .step() of the
+    # real scheduler for the `num_processes` times. This is because they assume
+    # the user initialize the scheduler with the entire training set.
+    # In the case of data parallel training, each process only
+    # sees a subset (1/num_processes) of the training set.
+    # So each time the process needs to update the lr multiple times so that the total
     # number of updates in the end matches the num_training_steps here.
-    # Here we need to set the num_training_steps to either using the entire training set (when epochs is specified) or we need to multiply the
-    # num_training_steps by num_processes so that the total number of updates matches the num_training_steps.
+    # Here we need to set the num_training_steps to either using the
+    # entire training set (when epochs is specified) or we need to multiply the
+    # num_training_steps by num_processes so that the total number of
+    # updates matches the num_training_steps.
     num_training_steps_for_scheduler = (
         args.max_train_steps if overrode_max_train_steps else args.max_train_steps * accelerator.num_processes
     )

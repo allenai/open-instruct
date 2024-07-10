@@ -37,7 +37,7 @@ def convert_super_ni_data(
     train_tasks = []
     with open(os.path.join(data_dir, "splits", "xlingual", "train_tasks.txt"), "r") as fin:
         for line in fin:
-            if not "_mmmlu_" in line:  # skip mmlu to avoid test leakage
+            if "_mmmlu_" not in line:  # skip mmlu to avoid test leakage
                 train_tasks.append(line.strip())
     with open(os.path.join(output_dir, "super_ni_data.jsonl"), "w") as fout:
         for task in train_tasks:
@@ -433,9 +433,11 @@ def convert_baize_data(data_dir, output_dir, num_examples=None):
 def convert_oasst1_data(data_dir, output_dir, top_k_reply=None):
     """
     For OASST1, because it's in a tree structure, where every user input might get multiple replies,
-    we have to save every path from the root node to the assistant reply (including both leaf node and intemediate node).
+    we have to save every path from the root node to the assistant reply
+    (including both leaf node and intemediate node).
     This results in some of the messages being duplicated among different paths (instances).
-    You can set top_k_reply to control how many replies to consider when traversing the tree, which will consider the replies with
+    You can set top_k_reply to control how many replies to consider
+    when traversing the tree, which will consider the replies with
     the highest human-reviewed quality scores.
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -457,7 +459,7 @@ def convert_oasst1_data(data_dir, output_dir, top_k_reply=None):
             else:
                 child_replies = [child for child in reply["replies"] if not child["deleted"]]
                 for child in child_replies:
-                    if not "quality" in child["labels"]:
+                    if "quality" not in child["labels"]:
                         child["labels"]["quality"] = {
                             "value": 0.0,
                             "count": 0,
@@ -476,7 +478,7 @@ def convert_oasst1_data(data_dir, output_dir, top_k_reply=None):
             messages.append({"role": "user", "content": reply["text"]})
             child_replies = [child for child in reply["replies"] if not child["deleted"]]
             for child in child_replies:
-                if not "quality" in child["labels"]:
+                if "quality" not in child["labels"]:
                     child["labels"]["quality"] = {
                         "value": 0.0,
                         "count": 0,
@@ -712,7 +714,7 @@ if __name__ == "__main__":
 
     for dataset in args.dataset:
         if dataset == "tulu_v1":
-            print(f"Processing tulu_v1 subsets...")
+            print("Processing tulu_v1 subsets...")
             convert_flan_v2_data(
                 data_dir=os.path.join(args.raw_data_dir, "flan_v2"),
                 output_dir=os.path.join(args.output_dir, "tulu_v1", "flan_v2_subset"),
@@ -763,7 +765,7 @@ if __name__ == "__main__":
                         for line in fin:
                             fout.write(line)
         elif dataset == "tulu_v2":
-            print(f"Processing tulu_v2 subsets...")
+            print("Processing tulu_v2 subsets...")
             convert_flan_v2_data(
                 data_dir=os.path.join(args.raw_data_dir, "flan_v2"),
                 output_dir=os.path.join(args.output_dir, "tulu_v2", "flan_v2_subset"),
@@ -827,8 +829,9 @@ if __name__ == "__main__":
             # merge all the subsets
             print("Merging all the subsets to create tulu v2...")
             all_subsets = [f for f in os.listdir(os.path.join(args.output_dir, "tulu_v2")) if f.endswith("_subset")]
-            with open(os.path.join(args.output_dir, "tulu_v2", "tulu_v2_data.jsonl"), "w") as fout, \
-                open(os.path.join(args.output_dir, "tulu_v2", "tulu_v2_filtered_data.jsonl"), "w") as fout_filtered:
+            tulu_v2_path = os.path.join(args.output_dir, "tulu_v2", "tulu_v2_data.jsonl")
+            tulu_v2_filtered_path = os.path.join(args.output_dir, "tulu_v2", "tulu_v2_filtered_data.jsonl")
+            with open(tulu_v2_path, "w") as fout, open(tulu_v2_filtered_path, "w") as fout_filtered:
                 for subset in all_subsets:
                     dataset_name = subset[: -len("_subset")]
                     with open(

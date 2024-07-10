@@ -1,3 +1,5 @@
+# !/usr/bin/env python
+# coding=utf-8
 # Copyright 2024 AllenAI. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,8 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-#!/usr/bin/env python
-# coding=utf-8
 """
 This file is modified from the huggingface example for finetuning language models
 [run_clm.py](https://github.com/huggingface/transformers/blob/main/examples/pytorch/language-modeling/run_clm.py)
@@ -102,16 +102,17 @@ class ModelArguments:
     use_auth_token: bool = field(
         default=None,
         metadata={
-            "help": "The `use_auth_token` argument is deprecated and will be removed in Transformers v4.34. Please use `token`."
+            "help": "The `use_auth_token` argument is deprecated"
+            " and will be removed in Transformers v4.34. Please use `token`."
         },
     )
     trust_remote_code: bool = field(
         default=False,
         metadata={
             "help": (
-                "Whether or not to allow for custom models defined on the Hub in their own modeling files. This option"
-                "should only be set to `True` for repositories you trust and in which you have read the code, as it will "
-                "execute code present on the Hub on your local machine."
+                "Whether or not to allow for custom models defined on the Hub in their own modeling files. "
+                "This option should only be set to `True` for repositories you trust and in which you "
+                "have read the code, as it will  execute code present on the Hub on your local machine."
             )
         },
     )
@@ -129,7 +130,8 @@ class ModelArguments:
         default=False,
         metadata={
             "help": (
-                "It is an option to create the model as an empty shell, then only materialize its parameters when the pretrained weights are loaded. "
+                "It is an option to create the model as an empty shell, then only materialize its parameters "
+                "when the pretrained weights are loaded. "
                 "set True will benefit LLM loading time and RAM consumption."
             )
         },
@@ -172,7 +174,8 @@ class DataTrainingArguments:
         default=None,
         metadata={
             "help": (
-                "The maximum total input sequence length after tokenization. Sequences longer than this will be truncated,"
+                "The maximum total input sequence length after tokenization."
+                " Sequences longer than this will be truncated,"
             )
         },
     )
@@ -222,7 +225,8 @@ def main():
     # Log on each process the small summary:
     logger.warning(
         f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
-        + f"distributed training: {training_args.parallel_mode.value == 'distributed'}, 16-bits training: {training_args.fp16}"
+        + f"distributed training: {training_args.parallel_mode.value == 'distributed'},"
+        + f"16-bits training: {training_args.fp16}"
     )
     logger.info(f"Training parameters {training_args}")
 
@@ -276,9 +280,7 @@ def main():
     elif model_args.model_name_or_path:
         config = AutoConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
     else:
-        raise ValueError(
-            "You are instantiating a new config instance from scratch. This is not supported by this finetuning script."
-        )
+        raise ValueError("You are instantiating a new config instance from scratch. This is not supported.")
 
     tokenizer_kwargs = {
         "cache_dir": model_args.cache_dir,

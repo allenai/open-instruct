@@ -94,7 +94,8 @@ if __name__ == "__main__":
             args.base_model_name_or_path if args.base_model_name_or_path else peft_config.base_model_name_or_path,
         )
 
-    # If tokenizer is specified, use it. Otherwise, use the tokenizer in the lora model folder or the base model folder.
+    # If tokenizer is specified, use it.
+    # Otherwise, use the tokenizer in the lora model folder or the base model folder.
     if args.tokenizer_name_or_path:
         print(f"Loading the tokenizer from {args.tokenizer_name_or_path}...")
         tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name_or_path, use_fast=args.use_fast_tokenizer)
@@ -102,8 +103,10 @@ if __name__ == "__main__":
         try:
             print("Trying to load the tokenizer in the lora model folder...")
             tokenizer = AutoTokenizer.from_pretrained(args.lora_model_name_or_path, use_fast=args.use_fast_tokenizer)
-        except:
-            print("No tokenizer found in the lora model folder. Using the tokenizer in the base model folder...")
+        except Exception as e:
+            print(
+                f"No tokenizer found in the lora model folder. Using the tokenizer in the base model folder... e:{e}"
+            )
             tokenizer = AutoTokenizer.from_pretrained(args.base_model_name_or_path, use_fast=args.use_fast_tokenizer)
 
     embedding_size = base_model.get_input_embeddings().weight.shape[0]

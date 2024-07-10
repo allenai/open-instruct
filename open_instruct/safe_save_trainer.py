@@ -26,17 +26,10 @@ from transformers.trainer_utils import ShardedDDPOption
 from transformers.utils import WEIGHTS_NAME, is_sagemaker_mp_enabled, logging
 
 if is_sagemaker_mp_enabled():
-    import smdistributed.modelparallel.torch as smp
     from smdistributed.modelparallel import __version__ as SMP_VERSION
 
     IS_SAGEMAKER_MP_POST_1_10 = version.parse(SMP_VERSION) >= version.parse("1.10")
 
-    from transformers.trainer_pt_utils import (
-        smp_forward_backward,
-        smp_forward_only,
-        smp_gather,
-        smp_nested_concat,
-    )
 else:
     IS_SAGEMAKER_MP_POST_1_10 = False
 
