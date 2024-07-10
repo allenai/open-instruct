@@ -4,7 +4,6 @@
 DPO tuning script. Adapted from our finetuning script.
 '''
 
-import argparse
 import logging
 import math
 import os
@@ -303,12 +302,21 @@ def main():
         })
         assert num_added_tokens in [0, 1], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
     elif isinstance(tokenizer, GPTNeoXTokenizerFast):
-        num_added_tokens = tokenizer.add_special_tokens({
-            "pad_token": "<pad>",
-        })
-        assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
+        # OLMo newer models use this tokenizer
+        if tokenizer.bos_token is None:
+            tokenizer.bos_token = tokenizer.eos_token
+            assert args.add_bos, "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
+        # else, pythia / other models
+        else:
+            num_added_tokens = tokenizer.add_special_tokens({
+                "pad_token": "<pad>",
+            })
+            assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
     elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
         num_added_tokens = tokenizer.add_special_tokens({'unk_token': '<unk>'})
+    elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast) and tokenizer.pad_token is None:
+        num_added_tokens = tokenizer.add_special_tokens({'pad_token': '<pad>'})
+        assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
@@ -451,7 +459,7 @@ def main():
     if args.with_tracking:
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
-        experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"].value
+        experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"]
         accelerator.init_trackers("open_instruct_dpo", 
                                   experiment_config, 
                                   init_kwargs={"wandb": {"entity": args.wandb_entity}})
