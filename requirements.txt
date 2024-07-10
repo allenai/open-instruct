@@ -44,4 +44,4 @@ sympy==1.12.0
 # for linting
 black
 flake8
-istort
+isort

@@ -35,4 +35,4 @@ immutabledict
 # for linting
 black
 flake8
-istort
+isort
