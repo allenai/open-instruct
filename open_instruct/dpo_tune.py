@@ -372,6 +372,13 @@ def main():
 
     train_dataset = lm_datasets
 
+    # debugging tool for fewer samples
+    if args.max_train_samples is not None:
+        max_train_samples = min(len(train_dataset), args.max_train_samples)
+        logger.info(f"Limiting training samples to {max_train_samples} from {len(train_dataset)}.")
+        train_dataset = train_dataset.select(range(max_train_samples))
+
+
     # Log a few random samples from the training set:
     for index in random.sample(range(len(train_dataset)), 3):
         logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
