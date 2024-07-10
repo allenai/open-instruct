@@ -9,7 +9,7 @@ This repo serves as an open effort on instruction-tuning popular pretrained lang
 Please see our first paper [How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources](https://arxiv.org/abs/2306.04751) for more thoughts behind this project and our initial findings. Please see our second paper [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702) for results using Llama-2 models and direct preference optimization. We are still working on more models. For more recent results involving PPO and DPO please see our third paper [Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback](https://arxiv.org/abs/2406.09279). We also have 
 
 <p align="center" width="100%">
-      <img src="images/tulu_logo.png" alt="Tülu (a hybrid camel) represents a suite of LLaMa models that we built by fully-finetuning them on a strong mix of datasets." style="width: 20%; min-width: 200px; display: block; margin: auto;">
+      <img src="assets/images/tulu_logo.png" alt="Tülu (a hybrid camel) represents a suite of LLaMa models that we built by fully-finetuning them on a strong mix of datasets." style="width: 20%; min-width: 200px; display: block; margin: auto;">
 </p>
 
 *Note:* Previous versions of Open Instruct used a pinned version of Transformers for replicating Tulu 1/2 results. If this is your goal, refer to [this commit or older](https://github.com/allenai/open-instruct/commit/f3424591638ed63b31d5869abd867932c359c1ed).
@@ -66,6 +66,21 @@ docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg
 
 For training, you can use the previous image.
 
+### Repo structure
+```
+├── assets/                     <- Images, licenses, etc.
+├── configs/                    
+|     ├── beaker_configs/       <- AI2 Beaker configs
+|     ├── ds_configs/           <- DeepSpeed configs
+|     └── train_configs/        <- Training configs
+├── eval/                       <- Evaluation suite for fine-tuned models
+├── human_eval/                 <- Human evaluation interface (not maintained)
+├── open_instruct/              <- Source code (flat)
+├── quantize/                   <- Scripts for quantization
+├── scripts/                    <- Core training and evaluation scripts
+├── Dockerfile                  <- Main Dockerfile
+└── Dockerfile.olmo             <- Dockerfile for OLMo users (version conflict currently.)
+```
 
 ## Training
 
@@ -175,7 +190,7 @@ We release our human evaluation interface and collected annotations in the `./hu
 
 This codebase is licensed under Apache 2.0 as given in [LICENSE](./LICENSE).
 
-The license we use for V1 models released (along with the base model licenses) can be found in [model_licenses/tulu_license.txt](./model_licenses/tulu_license.txt) - just replace `<MODELNAME>` with the actual model name (i.e., the name on HuggingFace).
+The license we use for V1 models released (along with the base model licenses) can be found in [assets/model_licenses/tulu_license.txt](./assets/model_licenses/tulu_license.txt) - just replace `<MODELNAME>` with the actual model name (i.e., the name on HuggingFace).
 
 V2 models are licensed under the [low-risk AI2 ImpACT license](https://allenai.org/licenses/impact-lr). See [here](https://allenai.org/impact-license) for more details.
 
