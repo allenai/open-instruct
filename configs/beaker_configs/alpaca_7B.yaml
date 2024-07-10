@@ -9,7 +9,7 @@ tasks:
     ]
     arguments: ['deepspeed
       open_instruct/finetune_trainer.py
-      --deepspeed ds_configs/stage3_no_offloading.conf
+      --deepspeed configs/ds_configs/stage3_no_offloading.conf
       --model_name_or_path /hf_llama_models/
       --tokenizer_name /hf_llama_models/
       --use_fast_tokenizer False

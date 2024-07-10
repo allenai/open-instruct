@@ -92,7 +92,7 @@ args = parser.parse_args()
 workspace = args.workspace
 model_type = "vanilla_lm" if not args.is_tuned else "tuned_lm"
 
-with open("beaker_configs/default_eval.yaml", 'r') as f:
+with open("configs/beaker_configs/default_eval.yaml", 'r') as f:
     default_yaml = f.read()
 d1 = yaml.load(default_yaml, Loader=yaml.FullLoader)
 
@@ -531,10 +531,10 @@ for experiment_group in experiment_groups:
 experiment_name = f"open_instruct_eval_{model_name}_{today}" 
 d["description"] = experiment_name
 d["tasks"] = eval_task_specs
-# if beaker_configs/auto_created doesn't exist, create it with os
-if not os.path.exists("beaker_configs/auto_created"):
-    os.makedirs("beaker_configs/auto_created")
-fn = "beaker_configs/auto_created/{}.yaml".format(experiment_name)
+# if configs/beaker_configs/auto_created doesn't exist, create it with os
+if not os.path.exists("configs/beaker_configs/auto_created"):
+    os.makedirs("configs/beaker_configs/auto_created")
+fn = "configs/beaker_configs/auto_created/{}.yaml".format(experiment_name)
 os.makedirs(os.path.dirname(fn), exist_ok=True)
 with open(fn, "w") as file:
     yaml.dump(d, file, default_flow_style=True)

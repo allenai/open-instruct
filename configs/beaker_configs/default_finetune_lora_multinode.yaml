@@ -19,7 +19,7 @@ tasks:
         --main_process_ip $BEAKER_LEADER_REPLICA_HOSTNAME
         --main_process_port 29400
         --use_deepspeed
-        --deepspeed_config_file ds_configs/stage3_no_offloading_accelerate.conf
+        --deepspeed_config_file /net/nfs.cirrascale/allennlp/yizhongw/open-instruct-public/configs/ds_configs/stage3_no_offloading_accelerate.conf
         --deepspeed_multinode_launcher standard
         open_instruct/finetune.py
         --model_name_or_path /net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/70B
@@ -27,6 +27,10 @@ tasks:
         --use_slow_tokenizer
         --train_file /net/nfs.cirrascale/allennlp/yizhongw/open-instruct-public/data/processed/sharegpt/sharegpt_data.jsonl
         --use_flash_attn
+        --use_lora
+        --lora_rank 64
+        --lora_alpha 64
+        --lora_dropout 0.1
         --max_seq_length 1024
         --preprocessing_num_workers 64
         --per_device_train_batch_size 1

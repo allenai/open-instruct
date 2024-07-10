@@ -4,7 +4,7 @@ wandb
 data/*
 # !data/processed
 output/
-beaker_configs/auto_created
+configs/beaker_configs/auto_created
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
