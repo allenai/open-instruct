@@ -18,10 +18,9 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, List, NewType, Optional, Tuple
 
-from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
-from datasets import DatasetDict, load_dataset, load_from_disk, concatenate_datasets
+from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
-
+from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -40,6 +39,7 @@ https://github.com/allenai/open-instruct/blob/98ccfb460ae4fb98140783b6cf54241926
 
 Commented out Args not currently used
 """
+
 
 def is_openai_format(messages: Any) -> bool:
     """
@@ -61,6 +61,7 @@ def get_datasets(
     configs: Optional[List[str]] = None,
     columns_to_keep: Optional[List[str]] = None,
     shuffle: bool = True,
+    save_data_dir: Optional[str] = None,
 ) -> DatasetDict:
     """
     Loads one or more datasets with varying training set proportions.
@@ -69,7 +70,8 @@ def get_datasets(
         data_config (`dict`):
             Dataset configuration and split proportions.
         splits (`List[str]`, *optional*, defaults to `['train', 'test']`):
-            Dataset splits to load and mix. Assumes the splits exist in all datasets and have a `train_` or `test_` prefix.
+            Dataset splits to load and mix. Assumes the splits exist
+            in all datasets and have a `train_` or `test_` prefix.
         configs (Optional[List[str]], *optional*, defaults to `None`):
             List of dataset config names. If given must be the same length as 'data_config' keys.
         columns_to_keep (Optional[List[str]], *optional*, defaults to `None`):
@@ -77,6 +79,8 @@ def get_datasets(
             and for cpt this should be (at least) the text column.
         shuffle (`bool`, *optional*, defaults to `True`):
             Whether to shuffle the training and testing/validation data.
+        save_data_dir (Optional[str], *optional*, defaults to `None`):
+            Optional directory to save training/test mixes on.
 
     Returns
         [`DatasetDict`]: The dataset dictionary containing the loaded datasets.
@@ -104,6 +108,7 @@ def get_datasets(
         configs=configs,
         columns_to_keep=columns_to_keep,
         shuffle=shuffle,
+        save_data_dir=save_data_dir,
     )
     return raw_datasets
 
@@ -114,15 +119,18 @@ def mix_datasets(
     configs: Optional[List[str]] = None,
     columns_to_keep: Optional[List[str]] = None,
     shuffle=True,
+    save_data_dir: Optional[str] = None,
 ) -> DatasetDict:
     """
     Loads and mixes datasets according to proportions specified in `dataset_mixer`.
 
     Args:
         dataset_mixer (`dict`):
-            Dictionary containing the dataset names and their training proportions. By default, all test proportions are 1.
+            Dictionary containing the dataset names and their training proportions.
+            By default, all test proportions are 1.
         splits (Optional[List[str]], *optional*, defaults to `None`):
-            Dataset splits to load and mix. Assumes the splits exist in all datasets and have a `train_` or `test_` prefix.
+            Dataset splits to load and mix. Assumes the splits exist in
+            all datasets and have a `train_` or `test_` prefix.
         configs (Optional[List[str]], *optional*, defaults to `None`):
             List of dataset config names. If given must be the same length as 'dataset_mixer' keys.
         columns_to_keep (Optional[List[str]], *optional*, defaults to `None`):
@@ -130,6 +138,8 @@ def mix_datasets(
             and for cpt this should be (at least) the text column.
         shuffle (`bool`, *optional*, defaults to `True`):
             Whether to shuffle the training and testing/validation data.
+        save_data_dir (Optional[str], *optional*, defaults to `None`):
+            Optional directory to save training/test mixes on.
     """
     splits = ["train", "test"] if splits is None else splits
     configs = [None] * len(dataset_mixer) if not configs else configs
@@ -167,11 +177,13 @@ def mix_datasets(
 
     if any(frac_or_samples < 0 for frac_or_samples in frac_or_sample_list):
         raise ValueError("Dataset fractions / lengths cannot be negative.")
-    
+
     # if any > 1, use count
     if any(frac_or_samples > 1 for frac_or_samples in frac_or_sample_list):
         is_count = True
-        raise NotImplementedError("Dataset Mixing from count not yet implemented.")
+        # assert that all are integers
+        if not all(isinstance(frac_or_samples, int) for frac_or_samples in frac_or_sample_list):
+            raise NotImplementedError("Cannot mix fractions and counts, yet.")
     else:
         is_count = False
 
@@ -179,8 +191,9 @@ def mix_datasets(
         train_subsets = []
         # Manage proportions
         for dataset, frac_or_samples in zip(raw_train_datasets, frac_or_sample_list):
+            # TODO selection can be randomized.
             if is_count:
-                train_subset = dataset.select(range(frac_or_samples)) # todo, this can be randomized too
+                train_subset = dataset.select(range(frac_or_samples))
             else:
                 train_subset = dataset.select(range(int(frac_or_samples * len(dataset))))
             train_subsets.append(train_subset)
@@ -200,10 +213,16 @@ def mix_datasets(
 
     if len(raw_datasets) == 0:
         raise ValueError(
-            f"Dataset {dataset_mixer} not recognized with splits {splits}. Check the dataset has been correctly formatted."
+            f"Dataset {dataset_mixer} not recognized with splits {splits}."
+            "Check the dataset has been correctly formatted."
         )
 
+    # optional save
+    if save_data_dir:
+        raw_datasets.save_to_disk(save_data_dir)
+
     return raw_datasets
+
 
 @dataclass
 class FlatArguments:
@@ -274,6 +293,12 @@ class FlatArguments:
     )
     dataset_name: Optional[str] = field(
         default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
+    )
+    dataset_mixer: Optional[dict] = field(
+        default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
+    )
+    dataset_mix_dir: Optional[str] = field(
+        default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
     )
     dataset_config_name: Optional[str] = field(
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
@@ -438,6 +463,8 @@ class FlatArguments:
             if self.train_file is not None:
                 extension = self.train_file.split(".")[-1]
                 assert extension in ["json", "jsonl"], "`train_file` should be a json or a jsonl file."
+        if self.dataset_name is not None and self.dataset_mixer is not None:
+            raise ValueError("Cannot provide both a dataset name and a dataset mixer.")
 
 
 class ArgumentParserPlus(HfArgumentParser):

@@ -1,3 +1,3 @@
-from .utils import ArgumentParserPlus, FlatArguments
+from .utils import ArgumentParserPlus, FlatArguments, get_datasets
 
-All = [FlatArguments, ArgumentParserPlus]
+All = [FlatArguments, ArgumentParserPlus, get_datasets]
