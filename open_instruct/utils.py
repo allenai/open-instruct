@@ -53,10 +53,6 @@ class FlatArguments:
         default=True,
         metadata={"help": "Whether to use flash attention in the model training"},
     )
-    # cache_dir: Optional[str] = field(
-    #     default=None,
-    #     metadata={"help": "Where do you want to store the pretrained models downloaded from huggingface.co"},
-    # )
     use_slow_tokenizer: bool = field(
         default=True,
         metadata={"help": "Whether to use one of the slow tokenizer or not (which is then fast tokenizer)."},
