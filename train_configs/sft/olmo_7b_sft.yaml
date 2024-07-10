@@ -1,0 +1,22 @@
+model_name_or_path: allenai/OLMo-7B-hf
+model_revision: main
+use_flash_attn: true
+tokenizer_name: allenai/OLMo-7B-hf
+use_slow_tokenizer: false # olmo models only use fast tokenizers
+dataset_name: allenai/tulu-v2-sft-mixture-olmo-2048
+max_seq_length: 2048
+preprocessing_num_workers: 128
+per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
+gradient_accumulation_steps: 16
+learning_rate: 2.0e-06
+lr_scheduler_type: linear
+warmup_ratio: 0.03
+weight_decay: 0.0
+num_train_epochs: 3
+output_dir: output/olmo_instruct/
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+checkpointing_steps: epoch
+add_bos: true

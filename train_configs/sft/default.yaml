@@ -1,0 +1,23 @@
+model_name_or_path: allenai/OLMo-1.7-1B-hf
+model_revision: main
+use_flash_attn: true
+tokenizer_name: allenai/OLMo-1.7-1B-hf
+use_slow_tokenizer: false # olmo models only use fast tokenizers
+# train_file: data/processed/tulu_v2/tulu_v2_data.jsonl
+dataset_name: allenai/tulu-v2-sft-mixture
+max_seq_length: 4096
+max_train_samples: 10000
+preprocessing_num_workers: 128
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 8
+learning_rate: 2.0e-05
+lr_scheduler_type: linear
+warmup_ratio: 0.03
+weight_decay: 0.0
+num_train_epochs: 2
+output_dir: output/tulu_olmo_1B/
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+add_bos: true # needed for GPTNeoX olmo models
