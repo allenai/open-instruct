@@ -230,6 +230,7 @@ def main():
             splits=["train"],
             save_data_dir=args.dataset_mix_dir,
             columns_to_keep=["messages"],
+            need_columns=["messages"],
         )
     else:
         data_files = {}

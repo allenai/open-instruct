@@ -56,70 +56,13 @@ def is_openai_format(messages: Any) -> bool:
 
 
 def get_datasets(
-    data_config: dict,
+    dataset_mixer: dict,
     splits: Optional[List[str]] = None,
     configs: Optional[List[str]] = None,
     columns_to_keep: Optional[List[str]] = None,
     shuffle: bool = True,
     save_data_dir: Optional[str] = None,
-) -> DatasetDict:
-    """
-    Loads one or more datasets with varying training set proportions.
-
-    Args:
-        data_config (`dict`):
-            Dataset configuration and split proportions.
-        splits (`List[str]`, *optional*, defaults to `['train', 'test']`):
-            Dataset splits to load and mix. Assumes the splits exist
-            in all datasets and have a `train_` or `test_` prefix.
-        configs (Optional[List[str]], *optional*, defaults to `None`):
-            List of dataset config names. If given must be the same length as 'data_config' keys.
-        columns_to_keep (Optional[List[str]], *optional*, defaults to `None`):
-            Column names to keep in the dataset. Useful in the datamixer to avoid schema conflicts,
-            and for cpt this should be (at least) the text column.
-        shuffle (`bool`, *optional*, defaults to `True`):
-            Whether to shuffle the training and testing/validation data.
-        save_data_dir (Optional[str], *optional*, defaults to `None`):
-            Optional directory to save training/test mixes on.
-
-    Returns
-        [`DatasetDict`]: The dataset dictionary containing the loaded datasets.
-    """
-    if isinstance(data_config, dict):
-        # Structure of the input is:
-        #     dataset_mixer = {
-        #             "dataset1": 0.5,
-        #             "dataset2": 0.3,
-        #             "dataset3": 0.2,
-        #         }
-        # or number of samples
-        #     dataset_mixer = {
-        #             "dataset1": 1000,
-        #             "dataset2": 2000,
-        #             "dataset3": 500,
-        #         }
-        dataset_mixer = data_config
-    else:
-        raise ValueError(f"Data config {data_config} not recognized.")
-
-    raw_datasets = mix_datasets(
-        dataset_mixer,
-        splits=splits,
-        configs=configs,
-        columns_to_keep=columns_to_keep,
-        shuffle=shuffle,
-        save_data_dir=save_data_dir,
-    )
-    return raw_datasets
-
-
-def mix_datasets(
-    dataset_mixer: dict,
-    splits: Optional[List[str]] = None,
-    configs: Optional[List[str]] = None,
-    columns_to_keep: Optional[List[str]] = None,
-    shuffle=True,
-    save_data_dir: Optional[str] = None,
+    need_columns: Optional[List[str]] = None,
 ) -> DatasetDict:
     """
     Loads and mixes datasets according to proportions specified in `dataset_mixer`.
@@ -140,6 +83,9 @@ def mix_datasets(
             Whether to shuffle the training and testing/validation data.
         save_data_dir (Optional[str], *optional*, defaults to `None`):
             Optional directory to save training/test mixes on.
+        need_columns (Optional[List[str]], *optional*, defaults to `None`):
+            Column names that are required to be in the dataset.
+            Quick debugging when mixing heterogeneous datasets.
     """
     splits = ["train", "test"] if splits is None else splits
     configs = [None] * len(dataset_mixer) if not configs else configs
@@ -166,6 +112,11 @@ def mix_datasets(
                     # If not, check local dataset
                     dataset = load_from_disk(os.path.join(ds, split))
 
+            # assert that needed columns are present
+            if need_columns:
+                if not all(col in dataset.column_names for col in need_columns):
+                    raise ValueError(f"Needed column {need_columns} not found in dataset {ds.coulmn_names}.")
+
             # Remove redundant columns to avoid schema conflicts on load
             dataset = dataset.remove_columns([col for col in dataset.column_names if col not in columns_to_keep])
             if "train" in split:
@@ -174,6 +125,9 @@ def mix_datasets(
                 raw_val_datasets.append(dataset)
             else:
                 raise ValueError(f"Split type {split} not recognized as one of test or train.")
+
+    # target features are the features of the first dataset post load
+    target_features = raw_train_datasets[0].features
 
     if any(frac_or_samples < 0 for frac_or_samples in frac_or_sample_list):
         raise ValueError("Dataset fractions / lengths cannot be negative.")
@@ -191,6 +145,8 @@ def mix_datasets(
         train_subsets = []
         # Manage proportions
         for dataset, frac_or_samples in zip(raw_train_datasets, frac_or_sample_list):
+            # cast features (TODO, add more feature regularization)
+            dataset = dataset.cast(target_features)
             # TODO selection can be randomized.
             if is_count:
                 train_subset = dataset.select(range(frac_or_samples))
@@ -206,6 +162,9 @@ def mix_datasets(
 
     # No subsampling for test datasets to enable fair comparison across models
     if len(raw_val_datasets) > 0:
+        for dataset in raw_val_datasets:
+            # cast features (TODO, add more feature regularization)
+            dataset = dataset.cast(target_features)
         if shuffle:
             raw_datasets["test"] = concatenate_datasets(raw_val_datasets).shuffle(seed=42)
         else:
