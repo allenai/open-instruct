@@ -27,3 +27,4 @@ report_to:
   - wandb
 logging_steps: 1
 add_bos: true # needed for GPTNeoX olmo models
+dataset_mix_dir: null
