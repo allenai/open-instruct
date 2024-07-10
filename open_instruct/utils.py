@@ -75,16 +75,6 @@ class FlatArguments:
             )
         },
     )
-    # torch_dtype: Optional[str] = field(
-    #     default="auto",
-    #     metadata={
-    #         "help": (
-    #             "Override the default `torch.dtype` and load the model under this dtype. If `auto` is passed, the "
-    #             "dtype will be automatically derived from the model's weights."
-    #         ),
-    #         "choices": ["auto", "bfloat16", "float16", "float32"],
-    #     },
-    # )
     low_cpu_mem_usage: bool = field(
         default=False,
         metadata={
@@ -110,10 +100,6 @@ class FlatArguments:
             )
         },
     )
-    # streaming: bool = field(default=False, metadata={"help": "Enable streaming mode"})
-    # overwrite_cache: bool = field(
-    #     default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
-    # )
     preprocessing_num_workers: Optional[int] = field(
         default=None,
         metadata={"help": "The number of processes to use for the preprocessing."},
