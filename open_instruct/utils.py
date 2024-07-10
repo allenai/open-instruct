@@ -19,6 +19,9 @@ from dataclasses import dataclass, field
 from typing import Any, List, NewType, Optional, Tuple
 
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
+from datasets import DatasetDict, load_dataset, load_from_disk, concatenate_datasets
+from datasets.builder import DatasetGenerationError
+
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -28,8 +31,9 @@ DataClassType = NewType("DataClassType", Any)
 
 """
 Notes:
-Inspired by Alignment Handbook Parser
+Inspired by Alignment Handbook Parser and Dataset Mixer
 https://github.com/huggingface/alignment-handbook/blob/main/src/alignment/configs.py
+https://github.com/huggingface/alignment-handbook/blob/main/src/alignment/data.py
 
 Migrated Args from
 https://github.com/allenai/open-instruct/blob/98ccfb460ae4fb98140783b6cf54241926160a06/open_instruct/finetune_trainer.py
@@ -37,6 +41,169 @@ https://github.com/allenai/open-instruct/blob/98ccfb460ae4fb98140783b6cf54241926
 Commented out Args not currently used
 """
 
+def is_openai_format(messages: Any) -> bool:
+    """
+    Check if the input messages are in OpenAI format.
+    Args:
+        messages (`Any`):
+            Messages to check.
+    Returns:
+        `bool`: Whether the messages are in OpenAI format.
+    """
+    if isinstance(messages, list) and all(isinstance(message, dict) for message in messages):
+        return all("role" in message and "content" in message for message in messages)
+    return False
+
+
+def get_datasets(
+    data_config: dict,
+    splits: Optional[List[str]] = None,
+    configs: Optional[List[str]] = None,
+    columns_to_keep: Optional[List[str]] = None,
+    shuffle: bool = True,
+) -> DatasetDict:
+    """
+    Loads one or more datasets with varying training set proportions.
+
+    Args:
+        data_config (`dict`):
+            Dataset configuration and split proportions.
+        splits (`List[str]`, *optional*, defaults to `['train', 'test']`):
+            Dataset splits to load and mix. Assumes the splits exist in all datasets and have a `train_` or `test_` prefix.
+        configs (Optional[List[str]], *optional*, defaults to `None`):
+            List of dataset config names. If given must be the same length as 'data_config' keys.
+        columns_to_keep (Optional[List[str]], *optional*, defaults to `None`):
+            Column names to keep in the dataset. Useful in the datamixer to avoid schema conflicts,
+            and for cpt this should be (at least) the text column.
+        shuffle (`bool`, *optional*, defaults to `True`):
+            Whether to shuffle the training and testing/validation data.
+
+    Returns
+        [`DatasetDict`]: The dataset dictionary containing the loaded datasets.
+    """
+    if isinstance(data_config, dict):
+        # Structure of the input is:
+        #     dataset_mixer = {
+        #             "dataset1": 0.5,
+        #             "dataset2": 0.3,
+        #             "dataset3": 0.2,
+        #         }
+        # or number of samples
+        #     dataset_mixer = {
+        #             "dataset1": 1000,
+        #             "dataset2": 2000,
+        #             "dataset3": 500,
+        #         }
+        dataset_mixer = data_config
+    else:
+        raise ValueError(f"Data config {data_config} not recognized.")
+
+    raw_datasets = mix_datasets(
+        dataset_mixer,
+        splits=splits,
+        configs=configs,
+        columns_to_keep=columns_to_keep,
+        shuffle=shuffle,
+    )
+    return raw_datasets
+
+
+def mix_datasets(
+    dataset_mixer: dict,
+    splits: Optional[List[str]] = None,
+    configs: Optional[List[str]] = None,
+    columns_to_keep: Optional[List[str]] = None,
+    shuffle=True,
+) -> DatasetDict:
+    """
+    Loads and mixes datasets according to proportions specified in `dataset_mixer`.
+
+    Args:
+        dataset_mixer (`dict`):
+            Dictionary containing the dataset names and their training proportions. By default, all test proportions are 1.
+        splits (Optional[List[str]], *optional*, defaults to `None`):
+            Dataset splits to load and mix. Assumes the splits exist in all datasets and have a `train_` or `test_` prefix.
+        configs (Optional[List[str]], *optional*, defaults to `None`):
+            List of dataset config names. If given must be the same length as 'dataset_mixer' keys.
+        columns_to_keep (Optional[List[str]], *optional*, defaults to `None`):
+            Column names to keep in the dataset. Useful in the datamixer to avoid schema conflicts,
+            and for cpt this should be (at least) the text column.
+        shuffle (`bool`, *optional*, defaults to `True`):
+            Whether to shuffle the training and testing/validation data.
+    """
+    splits = ["train", "test"] if splits is None else splits
+    configs = [None] * len(dataset_mixer) if not configs else configs
+    columns_to_keep = [] if columns_to_keep is None else columns_to_keep
+
+    if configs is not None and len(configs) != len(dataset_mixer):
+        raise ValueError("The number of given dataset config names must be the same as the given number of datasets.")
+
+    raw_datasets = DatasetDict()
+    raw_train_datasets = []
+    raw_val_datasets = []
+    frac_or_sample_list = []
+    for (ds, frac_or_samples), ds_config in zip(dataset_mixer.items(), configs):
+        frac_or_sample_list.append(frac_or_samples)
+        for split in splits:
+            # if dataset ends with .json or .jsonl, load from file
+            if ds.endswith(".json") or ds.endswith(".jsonl"):
+                dataset = load_dataset("json", data_files=ds, split=split)
+            else:
+                try:
+                    # Try first if dataset on a Hub repo
+                    dataset = load_dataset(ds, ds_config, split=split)
+                except DatasetGenerationError:
+                    # If not, check local dataset
+                    dataset = load_from_disk(os.path.join(ds, split))
+
+            # Remove redundant columns to avoid schema conflicts on load
+            dataset = dataset.remove_columns([col for col in dataset.column_names if col not in columns_to_keep])
+            if "train" in split:
+                raw_train_datasets.append(dataset)
+            elif "test" in split:
+                raw_val_datasets.append(dataset)
+            else:
+                raise ValueError(f"Split type {split} not recognized as one of test or train.")
+
+    if any(frac_or_samples < 0 for frac_or_samples in frac_or_sample_list):
+        raise ValueError("Dataset fractions / lengths cannot be negative.")
+    
+    # if any > 1, use count
+    if any(frac_or_samples > 1 for frac_or_samples in frac_or_sample_list):
+        is_count = True
+        raise NotImplementedError("Dataset Mixing from count not yet implemented.")
+    else:
+        is_count = False
+
+    if len(raw_train_datasets) > 0:
+        train_subsets = []
+        # Manage proportions
+        for dataset, frac_or_samples in zip(raw_train_datasets, frac_or_sample_list):
+            if is_count:
+                train_subset = dataset.select(range(frac_or_samples)) # todo, this can be randomized too
+            else:
+                train_subset = dataset.select(range(int(frac_or_samples * len(dataset))))
+            train_subsets.append(train_subset)
+
+        # Shuggle final datasets
+        if shuffle:
+            raw_datasets["train"] = concatenate_datasets(train_subsets).shuffle(seed=42)
+        else:
+            raw_datasets["train"] = concatenate_datasets(train_subsets)
+
+    # No subsampling for test datasets to enable fair comparison across models
+    if len(raw_val_datasets) > 0:
+        if shuffle:
+            raw_datasets["test"] = concatenate_datasets(raw_val_datasets).shuffle(seed=42)
+        else:
+            raw_datasets["test"] = concatenate_datasets(raw_val_datasets)
+
+    if len(raw_datasets) == 0:
+        raise ValueError(
+            f"Dataset {dataset_mixer} not recognized with splits {splits}. Check the dataset has been correctly formatted."
+        )
+
+    return raw_datasets
 
 @dataclass
 class FlatArguments:
