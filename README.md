@@ -66,6 +66,13 @@ docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg
 
 For training, you can use the previous image.
 
+### Developing
+When submitting a PR to this repo, we check the core code in `open_instruct/` for style with the following:
+```
+make style
+make quality
+```
+
 ### Repo structure
 ```
 ├── assets/                     <- Images, licenses, etc.
