@@ -1,9 +1,24 @@
+# Copyright 2024 AllenAI. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import html
+import sys
+from threading import Thread
+
 import gradio as gr
 import torch
-import sys
-import html
-from transformers import AutoTokenizer, AutoModelForCausalLM, TextIteratorStreamer
-from threading import Thread
+from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 
 if len(sys.argv) > 1:
     model_name_or_path = sys.argv[1]
@@ -14,6 +29,7 @@ tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=False)
 model = AutoModelForCausalLM.from_pretrained(model_name_or_path)
 
 model.half().cuda()
+
 
 def convert_message(message):
     message_text = ""
@@ -34,6 +50,7 @@ def convert_message(message):
     message_text = message_text.replace("<br>", "\n")
     return message_text
 
+
 def convert_history(chat_history, max_input_length=1024):
     history_text = ""
     idx = len(chat_history) - 1
@@ -49,11 +66,12 @@ def convert_history(chat_history, max_input_length=1024):
         history_text = "<|assistant|>\n"
     return history_text
 
+
 @torch.inference_mode()
 def instruct(instruction, max_token_output=1024):
     input_text = instruction
     streamer = TextIteratorStreamer(tokenizer, skip_prompt=True)
-    input_ids = tokenizer(input_text, return_tensors='pt', truncation=False)
+    input_ids = tokenizer(input_text, return_tensors="pt", truncation=False)
     input_ids["input_ids"] = input_ids["input_ids"].cuda()
     input_ids["attention_mask"] = input_ids["attention_mask"].cuda()
     generation_kwargs = dict(input_ids, streamer=streamer, max_new_tokens=max_token_output)
@@ -69,6 +87,7 @@ with gr.Blocks() as demo:
             instruction = gr.Textbox(label="Input")
             output = gr.Textbox(label="Output")
         greet_btn = gr.Button("Submit")
+
         def yield_instruct(instruction):
             # quick prompt hack:
             instruction = "<|user|>\n" + instruction + "\n<|assistant|>\n"
@@ -76,12 +95,14 @@ with gr.Blocks() as demo:
             for token in instruct(instruction):
                 output += token
                 yield output
+
         greet_btn.click(fn=yield_instruct, inputs=[instruction], outputs=output, api_name="greet")
     # chatbot-style model
     with gr.Tab("Chatbot"):
         chatbot = gr.Chatbot([], elem_id="chatbot")
         msg = gr.Textbox()
         clear = gr.Button("Clear")
+
         # fn to add user message to history
         def user(user_message, history):
             return "", history + [[user_message, None]]
@@ -94,9 +115,7 @@ with gr.Blocks() as demo:
             history[-1][1] += new_token
             yield history
 
-    msg.submit(user, [msg, chatbot], [msg, chatbot], queue=False).then(
-        bot, chatbot, chatbot
-    )
+    msg.submit(user, [msg, chatbot], [msg, chatbot], queue=False).then(bot, chatbot, chatbot)
 
     clear.click(lambda: None, None, chatbot, queue=False)
 

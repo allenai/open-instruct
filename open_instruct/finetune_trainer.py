@@ -1,3 +1,17 @@
+# Copyright 2024 AllenAI. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 #!/usr/bin/env python
 # coding=utf-8
 """
@@ -12,31 +26,30 @@ import os
 import sys
 import warnings
 from dataclasses import dataclass, field
-from typing import Optional
 from functools import partial
+from typing import Optional
+
 import datasets
 import torch
-from datasets import load_dataset
-
 import transformers
+from datasets import load_dataset
+from finetune import encode_with_messages_format, encode_with_prompt_completion_format
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
     AutoTokenizer,
+    DataCollatorForSeq2Seq,
+    GPT2Tokenizer,
+    GPTNeoXTokenizerFast,
+    HfArgumentParser,
     LlamaTokenizer,
     LlamaTokenizerFast,
-    HfArgumentParser,
-    TrainingArguments,
-    DataCollatorForSeq2Seq,
-    set_seed,
-    GPTNeoXTokenizerFast,
-    GPT2Tokenizer,
     OPTForCausalLM,
     Trainer,
+    TrainingArguments,
+    set_seed,
 )
 from transformers.trainer_utils import get_last_checkpoint
-from finetune import encode_with_prompt_completion_format, encode_with_messages_format
-
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +148,9 @@ class DataTrainingArguments:
     dataset_config_name: Optional[str] = field(
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
     )
-    train_file: Optional[str] = field(default=None, metadata={"help": "The input training data file (a json/jsonl file)."})
+    train_file: Optional[str] = field(
+        default=None, metadata={"help": "The input training data file (a json/jsonl file)."}
+    )
     max_train_samples: Optional[int] = field(
         default=None,
         metadata={
@@ -156,7 +171,9 @@ class DataTrainingArguments:
     max_seq_length: Optional[int] = field(
         default=None,
         metadata={
-            "help": ("The maximum total input sequence length after tokenization. Sequences longer than this will be truncated,")
+            "help": (
+                "The maximum total input sequence length after tokenization. Sequences longer than this will be truncated,"
+            )
         },
     )
 
@@ -177,7 +194,9 @@ def main():
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
     if model_args.use_auth_token is not None:
-        warnings.warn("The `use_auth_token` argument is deprecated and will be removed in Transformers v4.34.", FutureWarning)
+        warnings.warn(
+            "The `use_auth_token` argument is deprecated and will be removed in Transformers v4.34.", FutureWarning
+        )
         if model_args.token is not None:
             raise ValueError("`token` and `use_auth_token` are both specified. Please set only the argument `token`.")
         model_args.token = model_args.use_auth_token
@@ -304,20 +323,27 @@ def main():
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
     if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
-        num_added_tokens = tokenizer.add_special_tokens({
-            "bos_token": "<s>",
-            "eos_token": "</s>",
-            "unk_token": "<unk>",
-            "pad_token": "<pad>",
-        })
-        assert num_added_tokens in [0, 1], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
+        num_added_tokens = tokenizer.add_special_tokens(
+            {
+                "bos_token": "<s>",
+                "eos_token": "</s>",
+                "unk_token": "<unk>",
+                "pad_token": "<pad>",
+            }
+        )
+        assert num_added_tokens in [
+            0,
+            1,
+        ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
     elif isinstance(tokenizer, GPTNeoXTokenizerFast):
-        num_added_tokens = tokenizer.add_special_tokens({
-            "pad_token": "<pad>",
-        })
+        num_added_tokens = tokenizer.add_special_tokens(
+            {
+                "pad_token": "<pad>",
+            }
+        )
         assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
     elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
-        num_added_tokens = tokenizer.add_special_tokens({'unk_token': '<unk>'})
+        num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
 
     # resize embeddings if needed (e.g. for LlamaTokenizer)
     embedding_size = model.get_input_embeddings().weight.shape[0]
@@ -339,7 +365,6 @@ def main():
         )
     else:
         raise ValueError("You need to have either 'prompt'&'completion' or 'messages' in your column names.")
-    
 
     # To speed up this part, we use multiprocessing.
     with training_args.main_process_first(desc="Processing instruction data"):
@@ -357,7 +382,7 @@ def main():
                 batched=False,
             )
         lm_datasets.set_format(type="pt")
-        lm_datasets = lm_datasets.filter(lambda example: (example['labels'] != -100).any())
+        lm_datasets = lm_datasets.filter(lambda example: (example["labels"] != -100).any())
 
     if training_args.do_train:
         if "train" not in raw_datasets:
