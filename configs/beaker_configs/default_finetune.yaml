@@ -17,7 +17,6 @@ tasks:
       --model_name_or_path /hf_llama_models
       --use_flash_attn
       --tokenizer_name /hf_llama_models
-      --use_slow_tokenizer
       --train_file /data/alpaca_data_original_template.jsonl
       --max_seq_length 2048
       --preprocessing_num_workers 16
@@ -46,16 +45,18 @@ tasks:
         value: false
       - name: WANDB_DISABLED
         value: true
-    datasets:
-      - mountPath: /data
-        source:
-          beaker: Yizhongw03/processed_open_instruct_data
-      - mountPath: /mmlu
-        source:
-          beaker: Yizhongw03/mmlu
-      - mountPath: /hf_llama_models
-        source:
-          beaker: Yizhongw03/hf_llama_model_7B
+      - name: HF_TOKEN
+        secret: HF_TOKEN
+    # datasets: # example for how to include datasets in mounting
+    #   - mountPath: /data
+    #     source:
+    #       beaker: Yizhongw03/processed_open_instruct_data
+    #   - mountPath: /mmlu
+    #     source:
+    #       beaker: Yizhongw03/mmlu
+    #   - mountPath: /hf_llama_models
+    #     source:
+    #       beaker: Yizhongw03/hf_llama_model_7B
     result:
       path: /output
     resources:
