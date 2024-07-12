@@ -5,7 +5,7 @@ slices:
       - model: /llama_3_8b-tulu_and_codefeedback_st_100p
         layer_range: [0, 32]
 merge_method: slerp
-base_model: /tulu_all
+base_model: /llama_3_8b-tulu_and_mathplus_200k
 parameters:
   t:
     - value: 0.5
