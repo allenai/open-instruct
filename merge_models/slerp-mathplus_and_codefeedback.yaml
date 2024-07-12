@@ -1,0 +1,14 @@
+slices:
+  - sources:
+      - model: /llama_3_8b-tulu_and_mathplus_200k
+      - model: /llama_3_8b-tulu_and_codefeedback_st_100p
+merge_method: slerp
+base_model: /tulu_all
+parameters:
+  t:
+    - value: 0.5
+dtype: bfloat16
+
+# beaker session create --gpus 1 --budget ai2/oe-adapt \
+#     --mount beaker://jacobm/llama_3_8b-tulu_and_mathplus_200k=/llama_3_8b-tulu_and_mathplus_200k \
+#     --mount beaker://jacobm/llama_3_8b-tulu_and_codefeedback_st_100p=/llama_3_8b-tulu_and_codefeedback_st_100p
