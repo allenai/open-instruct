@@ -1,7 +1,9 @@
 slices:
   - sources:
       - model: /llama_3_8b-tulu_and_mathplus_200k
+        layer_range: [0, 32]
       - model: /llama_3_8b-tulu_and_codefeedback_st_100p
+        layer_range: [0, 32]
 merge_method: slerp
 base_model: /tulu_all
 parameters:
