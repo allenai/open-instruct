@@ -82,7 +82,6 @@ if __name__ == "__main__":
         )
         base_model = AutoModelForCausalLM.from_pretrained(
             args.base_model_name_or_path if args.base_model_name_or_path else peft_config.base_model_name_or_path,
-            load_in_4bit=True,
             torch_dtype=torch.bfloat16,
             quantization_config=quantization_config,
             device_map={"": 0} if torch.cuda.is_available() else None,
