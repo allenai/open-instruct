@@ -18,7 +18,7 @@ def main():
                         help="Path to an additional config file to override default settings")
     parser.add_argument("--wandb_api_key", required=False, help="Weights & Biases API key")
     parser.add_argument("--cluster", type=str, default="ai2/allennlp-cirrascale", help="Beaker cluster to use")
-    parser.add_argument("--priority", type=str, default="normal", help="Priority of the job")
+    parser.add_argument("--priority", type=str, default="high", help="Priority of the job")
     parser.add_argument("--preemptible", type=bool, default=True, help="Whether to use preemptible instances")
     parser.add_argument("--num_gpus", type=int, default=4, help="Number of GPUs to use")
     parser.add_argument("--image", type=str, default="hamishivi/open-instruct-public", help="Beaker image to use.")
@@ -121,21 +121,17 @@ def main():
 
         return ' '.join(new_cmd_parts)
 
-
-    
-    import ipdb; ipdb.set_trace()
     new_arguments = override_and_reconstruct_command(d1['tasks'][0]['arguments'][0], train_config, unknown_args)
     
     model_name = get_model_name(new_arguments)
+    # if model name has /, replace with _
+    model_name = model_name.replace("/", "_")
     # try given config only has one
-    try:
-        dataset_name, dataset_mixer, train_file = check_dataset_selection(new_arguments)
-        print(f"Dataset selection is valid.")
-        print(f"Dataset name: {dataset_name}")
-        print(f"Dataset mixer: {dataset_mixer}")
-        print(f"Train file: {train_file}")
-    except ValueError as e:
-        print(f"Error in dataset selection: {str(e)}")
+    dataset_name, dataset_mixer, train_file = check_dataset_selection(new_arguments)
+    print(f"Dataset selection is valid.")
+    print(f"Dataset name: {dataset_name}")
+    print(f"Dataset mixer: {dataset_mixer}")
+    print(f"Train file: {train_file}")
 
     d = copy.deepcopy(d1)
     d['tasks'][0]['arguments'][0] = new_arguments
@@ -160,11 +156,11 @@ def main():
     d['tasks'][0]['envVars'].append({
         'name': 'WANDB_RUN_GROUP', 'value': experiment_group
     })
-    
+
     # optionally, print to debug config
     # print(d)
 
-    fn = "configs/default_beaker_configs/auto_created/{}.yaml".format(exp_name)
+    fn = "configs/beaker_configs/auto_created/{}.yaml".format(exp_name)
     file = open(fn, "w")
     yaml.dump(d, file, default_flow_style=True)
     file.close()

@@ -1,5 +1,6 @@
 version: v2
 description: open-instruct-finetune
+budget: ai2/oe-adapt
 tasks:
   - name: open-instruct-finetune
     image:
@@ -17,7 +18,6 @@ tasks:
       --model_name_or_path /hf_llama_models
       --use_flash_attn
       --tokenizer_name /hf_llama_models
-      --train_file /data/alpaca_data_original_template.jsonl
       --max_seq_length 2048
       --preprocessing_num_workers 16
       --per_device_train_batch_size 2
