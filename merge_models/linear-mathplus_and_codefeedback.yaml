@@ -1,13 +1,13 @@
 models:
-  - model: /llama_3_8b-tulu_and_mathplus_200k
+  - model: /llama_3_8b-tulu_and_mathplus_200k-1e-5
     parameters:
       weight: 0.5
-  - model: /llama_3_8b-tulu_and_codefeedback_st_100p
+  - model: /llama_3_8b-tulu_and_codefeedback_st_all-1e-5
     parameters:
       weight: 0.5
 merge_method: linear
 dtype: bfloat16
 
 # beaker session create --gpus 1 --budget ai2/oe-adapt \
-#     --mount beaker://jacobm/llama_3_8b-tulu_and_mathplus_200k=/llama_3_8b-tulu_and_mathplus_200k \
-#     --mount beaker://jacobm/llama_3_8b-tulu_and_codefeedback_st_100p=/llama_3_8b-tulu_and_codefeedback_st_100p
+#     --mount beaker://jacobm/llama_3_8b-tulu_and_mathplus_200k-1e-5=/llama_3_8b-tulu_and_mathplus_200k-1e-5 \
+#     --mount beaker://jacobm/llama_3_8b-tulu_and_codefeedback_st_all-1e-5=/llama_3_8b-tulu_and_codefeedback_st_all-1e-5
