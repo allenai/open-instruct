@@ -298,7 +298,6 @@ def main():
                 args.model_name_or_path,
                 from_tf=bool(".ckpt" in args.model_name_or_path),
                 config=config,
-                load_in_4bit=True,
                 quantization_config=bnb_config,
                 device_map=device_map,
                 trust_remote_code=args.trust_remote_code,
