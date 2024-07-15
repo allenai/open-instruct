@@ -55,6 +55,59 @@ def is_openai_format(messages: Any) -> bool:
     return False
 
 
+# functions for handling different formats of messages
+def instruction_output_to_messages(example):
+    """
+    Convert an instruction in inst-output to a list of messages.
+    e.g. vicgalle/alpaca-gpt4"""
+    messages = [
+        {"role": "user", "content": example["instruction"]},
+        {"role": "assistant", "content": example["output"]},
+    ]
+    example["messages"] = messages
+    return example
+
+
+def prompt_completion_to_messages(example):
+    """
+    Convert a prompt-completion pair to a list of messages.
+    e.g. HuggingFaceH4/CodeAlpaca_20K"""
+    messages = [
+        {"role": "user", "content": example["prompt"]},
+        {"role": "assistant", "content": example["completion"]},
+    ]
+    example["messages"] = messages
+    return example
+
+
+def question_response_to_messages(example):
+    """
+    Convert a question-response pair to a list of messages.
+    e.g. Open-Orca/OpenOrca"""
+    messages = [
+        {"role": "user", "content": example["question"]},
+        {"role": "assistant", "content": example["response"]},
+    ]
+    example["messages"] = messages
+    return example
+
+
+def conversations_to_messages(example):
+    """
+    Convert from conversations format to messages.
+
+    E.g. change "from": "user" to "role": "user"
+        and "value" to "content"
+        and "gpt" to "assistant"
+
+    WizardLMTeam/WizardLM_evol_instruct_V2_196k
+    """
+    name_mapping = {"gpt": "assistant", "user": "user", "human": "user"}
+    messages = [{"role": name_mapping[conv["from"]], "content": conv["value"]} for conv in example["conversations"]]
+    example["messages"] = messages
+    return example
+
+
 def get_datasets(
     dataset_mixer: dict,
     splits: Optional[List[str]] = None,
@@ -116,6 +169,29 @@ def get_datasets(
             if need_columns:
                 if not all(col in dataset.column_names for col in need_columns):
                     raise ValueError(f"Needed column {need_columns} not found in dataset {ds.coulmn_names}.")
+
+            # handle per-case conversions
+            # if "instruction" and "output" columns are present and "messages" is not, convert to messages
+            if (
+                "instruction" in dataset.column_names
+                and "output" in dataset.column_names
+                and "messages" not in dataset.column_names
+            ):
+                dataset = dataset.map(instruction_output_to_messages, num_proc=10)
+            elif (
+                "prompt" in dataset.column_names
+                and "completion" in dataset.column_names
+                and "messages" not in dataset.column_names
+            ):
+                dataset = dataset.map(prompt_completion_to_messages, num_proc=10)
+            elif "conversations" in dataset.column_names and "messages" not in dataset.column_names:
+                dataset = dataset.map(conversations_to_messages, num_proc=10)
+            elif (
+                "question" in dataset.column_names
+                and "response" in dataset.column_names
+                and "messages" not in dataset.column_names
+            ):
+                dataset = dataset.map(question_response_to_messages, num_proc=10)
 
             # Remove redundant columns to avoid schema conflicts on load
             dataset = dataset.remove_columns([col for col in dataset.column_names if col not in columns_to_keep])

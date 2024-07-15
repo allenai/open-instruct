@@ -75,3 +75,26 @@ class GetDatasetsTest(unittest.TestCase):
         datasets = get_datasets(dataset_mixer, splits=["test"], columns_to_keep=["prompt", "completion"])
         self.assertEqual(len(datasets["test"]), 100)
         self.assertRaises(KeyError, lambda: datasets["train"])
+
+
+# useful for checking if public datasets are still available
+# class CheckTuluDatasetsTest(unittest.TestCase):
+#     """
+#     Try to rebuild Tulu from public sources
+#     """
+
+#     def test_loading_tulu(self):
+#         dataset_mixer = {
+#             "natolambert/tulu-v2-sft-mixture-flan": 50000,
+#             "natolambert/tulu-v2-sft-mixture-cot": 49747,
+#             "allenai/openassistant-guanaco-reformatted": 7708,  # not exact subset
+#             "Vtuber-plan/sharegpt-cleaned": 114046,
+#             # original https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered
+#             "vicgalle/alpaca-gpt4": 20000,
+#             "HuggingFaceH4/CodeAlpaca_20K": 18000,  # original uses https://github.com/sahil280114/codealpaca
+#             "natolambert/tulu-v2-sft-mixture-lima": 1018,  # original has 1030
+#             "WizardLMTeam/WizardLM_evol_instruct_V2_196k": 30000,
+#             "Open-Orca/OpenOrca": 30000,
+#             "natolambert/tulu-v2-sft-mixture-science": 7468,  # original data slightly different
+#         }
+#         _ = get_datasets(dataset_mixer, splits=["train"], columns_to_keep=["messages"])
