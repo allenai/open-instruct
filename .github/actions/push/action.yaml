@@ -1,0 +1,55 @@
+# copied from internal repo https://github.com/allenai/docker-images
+name: Push image to Beaker
+description: Push image to Beaker images.
+inputs:
+  image:
+    description: The tag of the built image
+    required: true
+  beaker:
+    description: Upload release images to Beaker under this name
+    required: false
+    default: ""
+  latest:
+    description: If the image should also be pushed as latest
+    required: false
+    default: false
+runs:
+  using: composite
+  steps:
+    # - shell: bash
+    #   run: |
+    #     # Tag image with registry.
+    #     docker tag ${{ inputs.image }} ghcr.io/allenai/${{ inputs.image }}
+    # - shell: bash
+    #   if: "!startsWith(github.ref, 'refs/tags/') && github.event_name != 'pull_request'"
+    #   run: |
+    #     # Push image.
+    #     docker push ghcr.io/allenai/${{ inputs.image }}
+    # - shell: bash
+    #   if: github.event_name != 'pull_request' && inputs.latest == 'true'
+    #   run: |
+    #     # Push latest image.
+    #     image_tag=${{ inputs.image }}
+    #     latest_tag=ghcr.io/allenai/${image_tag%:*}:latest
+    #     docker tag "${image_tag}" "${latest_tag}"
+    #     docker push "${latest_tag}"
+    # - shell: bash
+    #   if: startsWith(github.ref, 'refs/tags/')
+    #   run: |
+    #     # Push release image.
+    #     GITHUB_TAG=${GITHUB_REF#refs/tags/}
+    #     RELEASE=${GITHUB_TAG%-*}
+    #     RELEASE_IMAGE="ghcr.io/allenai/${{ inputs.image }}-${RELEASE}"
+    #     docker tag ${{ inputs.image }} "${RELEASE_IMAGE}"
+    #     docker push "${RELEASE_IMAGE}"
+    - shell: bash
+      if: startsWith(github.ref, 'refs/tags/') && inputs.beaker != ''
+      run: |
+        # Push release to Beaker.
+        SHORT_SHA=$(git rev-parse --short HEAD)
+        beaker image create --name "${{ inputs.beaker }}-${SHORT_SHA}-${{ github.run_id }}" ${{ inputs.image }}
+        # We delete the previous version. This doesn't actually delete the backing Docker image, so
+        # we'll still benefit from layer caching when we push new version. The image might not exist
+        # yet, so it's ok if this fails.
+        beaker image delete ai2/${{ inputs.beaker }} || true
+        beaker image create --name ${{ inputs.beaker }} ${{ inputs.image }}
