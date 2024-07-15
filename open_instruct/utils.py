@@ -126,8 +126,14 @@ def get_datasets(
             else:
                 raise ValueError(f"Split type {split} not recognized as one of test or train.")
 
-    # target features are the features of the first dataset post load
-    target_features = raw_train_datasets[0].features
+    if len(raw_val_datasets) == 0 and len(raw_train_datasets) == 0:
+        raise ValueError("No datasets loaded.")
+    elif len(raw_train_datasets) == 0:
+        # target features are the features of the first dataset post load
+        target_features = raw_val_datasets[0].features
+    else:
+        # target features are the features of the first dataset post load
+        target_features = raw_train_datasets[0].features
 
     if any(frac_or_samples < 0 for frac_or_samples in frac_or_sample_list):
         raise ValueError("Dataset fractions / lengths cannot be negative.")
