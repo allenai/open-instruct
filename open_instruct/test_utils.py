@@ -14,8 +14,11 @@
 # limitations under the License.
 # Copied from https://github.com/huggingface/alignment-handbook/blob/main/tests/test_data.py
 import unittest
-from open_instruct.utils import get_datasets, FlatArguments
+
 import pytest
+
+from open_instruct.utils import FlatArguments, get_datasets
+
 
 class GetDatasetsTest(unittest.TestCase):
     """Each of these test datasets has 100 examples"""
@@ -72,4 +75,3 @@ class GetDatasetsTest(unittest.TestCase):
         datasets = get_datasets(dataset_mixer, splits=["test"], columns_to_keep=["prompt", "completion"])
         self.assertEqual(len(datasets["test"]), 100)
         self.assertRaises(KeyError, lambda: datasets["train"])
-
