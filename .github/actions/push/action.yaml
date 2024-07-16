@@ -15,6 +15,7 @@ inputs:
     default: false
 runs:
   using: composite
+  # note, name used for this is associated with the beaker key in repo secrets
   steps:
     - shell: bash
       if: inputs.beaker != '' # previously startsWith(github.ref, 'refs/tags/') && ...
@@ -25,5 +26,5 @@ runs:
         # We delete the previous version. This doesn't actually delete the backing Docker image, so
         # we'll still benefit from layer caching when we push new version. The image might not exist
         # yet, so it's ok if this fails.
-        beaker image delete oe-adapt/${{ inputs.beaker }} || true
+        beaker image delete nathanl/${{ inputs.beaker }} || true
         beaker image create --name ${{ inputs.beaker }} ${{ inputs.image }}
