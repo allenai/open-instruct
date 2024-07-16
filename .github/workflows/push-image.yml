@@ -19,8 +19,6 @@ on:
       - 'open_instruct/**'
       - '!open_instruct/README.md'
     branches: [main]
-    tags:
-      - 'v*.*.*-open_instruct'
   pull_request:
     # Also run on PRs that update the files in the image's directory (other than README).
     branches: [main]

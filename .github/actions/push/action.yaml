@@ -16,34 +16,8 @@ inputs:
 runs:
   using: composite
   steps:
-    # - shell: bash
-    #   run: |
-    #     # Tag image with registry.
-    #     docker tag ${{ inputs.image }} ghcr.io/allenai/${{ inputs.image }}
-    # - shell: bash
-    #   if: "!startsWith(github.ref, 'refs/tags/') && github.event_name != 'pull_request'"
-    #   run: |
-    #     # Push image.
-    #     docker push ghcr.io/allenai/${{ inputs.image }}
-    # - shell: bash
-    #   if: github.event_name != 'pull_request' && inputs.latest == 'true'
-    #   run: |
-    #     # Push latest image.
-    #     image_tag=${{ inputs.image }}
-    #     latest_tag=ghcr.io/allenai/${image_tag%:*}:latest
-    #     docker tag "${image_tag}" "${latest_tag}"
-    #     docker push "${latest_tag}"
-    # - shell: bash
-    #   if: startsWith(github.ref, 'refs/tags/')
-    #   run: |
-    #     # Push release image.
-    #     GITHUB_TAG=${GITHUB_REF#refs/tags/}
-    #     RELEASE=${GITHUB_TAG%-*}
-    #     RELEASE_IMAGE="ghcr.io/allenai/${{ inputs.image }}-${RELEASE}"
-    #     docker tag ${{ inputs.image }} "${RELEASE_IMAGE}"
-    #     docker push "${RELEASE_IMAGE}"
     - shell: bash
-      if: startsWith(github.ref, 'refs/tags/') && inputs.beaker != ''
+      if: inputs.beaker != '' # previously startsWith(github.ref, 'refs/tags/') && ...
       run: |
         # Push release to Beaker.
         SHORT_SHA=$(git rev-parse --short HEAD)
