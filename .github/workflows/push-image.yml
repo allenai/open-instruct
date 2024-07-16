@@ -55,7 +55,7 @@ jobs:
               --build-arg CUDA=12.1.0 --build-arg \
               TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 \
               --build-arg REQUIRE=requirements.txt . \
-              -t open_instruct_auto
+              -t open_instruct
               
 
       - name: Check image
@@ -67,5 +67,5 @@ jobs:
         uses: ./.github/actions/push
         with:
           image: open_instruct  # this is the tag of the image we just built in the previous step
-          beaker: open_instruct  # this is the name of the image on Beaker
+          beaker: open_instruct_auto  # this is the name of the image on Beaker
           latest: true  # this flag says we should also push this as the 'latest' version to GHCR
