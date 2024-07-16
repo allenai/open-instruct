@@ -10,27 +10,27 @@ ENV TZ="America/Los_Angeles"
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
-    git \
-    jq \
-    language-pack-en \
-    make \
-    man-db \
-    manpages \
-    manpages-dev \
-    manpages-posix \
-    manpages-posix-dev \
-    sudo \
-    unzip \
-    vim \
-    wget \
-    fish \
-    parallel \
-    iputils-ping \
-    htop \
-    emacs \
-    zsh \
-    rsync \
-    tmux
+    # git \
+    # jq \
+    # language-pack-en \
+    # make \
+    # man-db \
+    # manpages \
+    # manpages-dev \
+    # manpages-posix \
+    # manpages-posix-dev \
+    # sudo \
+    # unzip \
+    # vim \
+    # wget \
+    # fish \
+    # parallel \
+    # iputils-ping \
+    # htop \
+    # emacs \
+    # zsh \
+    # rsync \
+    # tmux
 
 # This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
 # puts the right NVIDIA things in the right place (that THOR requires).

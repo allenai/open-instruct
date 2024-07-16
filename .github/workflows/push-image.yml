@@ -63,7 +63,7 @@ jobs:
           docker run --rm open_instruct
 
       - name: Push image
-        if: github.event_name != 'pull_request'
+        # if: github.event_name != 'pull_request'
         uses: ./.github/actions/push
         with:
           image: open_instruct  # this is the tag of the image we just built in the previous step
