@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y \
 
 # This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
 # puts the right NVIDIA things in the right place (that THOR requires).
-# ENV NVIDIA_DRIVER_CAPABILITIES=graphics,utility,compute
+ENV NVIDIA_DRIVER_CAPABILITIES=graphics,utility,compute
 
 # Install conda. We give anyone in the users group the ability to run
 # conda commands and install packages in the base (default) environment.
