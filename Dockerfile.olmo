@@ -134,7 +134,7 @@ RUN python -m nltk.downloader punkt
 
 COPY open_instruct open_instruct
 COPY eval eval
-COPY ds_configs ds_configs
+COPY configs configs
 COPY scripts scripts
 RUN chmod +x scripts/*
 
