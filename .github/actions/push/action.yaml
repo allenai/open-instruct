@@ -1,0 +1,30 @@
+# copied from internal repo https://github.com/allenai/docker-images
+name: Push image to Beaker
+description: Push image to Beaker images.
+inputs:
+  image:
+    description: The tag of the built image
+    required: true
+  beaker:
+    description: Upload release images to Beaker under this name
+    required: false
+    default: ""
+  latest:
+    description: If the image should also be pushed as latest
+    required: false
+    default: false
+runs:
+  using: composite
+  # note, name used for this is associated with the beaker key in repo secrets
+  steps:
+    - shell: bash
+      if: inputs.beaker != '' # previously startsWith(github.ref, 'refs/tags/') && ...
+      run: |
+        # Push release to Beaker.
+        SHORT_SHA=$(git rev-parse --short HEAD)
+        beaker image create --name "${{ inputs.beaker }}-${SHORT_SHA}-${{ github.run_id }}" ${{ inputs.image }}
+        # We delete the previous version. This doesn't actually delete the backing Docker image, so
+        # we'll still benefit from layer caching when we push new version. The image might not exist
+        # yet, so it's ok if this fails.
+        beaker image delete nathanl/${{ inputs.beaker }} || true
+        beaker image create --name ${{ inputs.beaker }} ${{ inputs.image }}

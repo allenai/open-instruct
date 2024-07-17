@@ -1,0 +1,25 @@
+# copied from internal repo https://github.com/allenai/docker-images
+name: Build setup
+description: Setup the environment for a build
+inputs:
+  beaker_token:
+    description: The Beaker user token
+    required: true
+  # ghcr_token:
+  #   description: GHCR token
+  #   required: true
+  # ghcr_user:
+  #   description: GHCR user name
+  #   required: true
+runs:
+  using: composite
+  steps:
+    - uses: allenai/setup-beaker@v2
+      with:
+        token: ${{ inputs.beaker_token }}
+        workspace: ai2/oe-adapt
+
+    # - shell: bash
+    #   run: |
+    #     # Login to GitHub container registry.
+    #     echo ${{ inputs.ghcr_token }} | docker login ghcr.io -u ${{ inputs.ghcr_user }} --password-stdin
