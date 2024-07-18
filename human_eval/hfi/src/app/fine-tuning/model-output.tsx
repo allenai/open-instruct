@@ -1,6 +1,12 @@
 import ChatMessage from "../components/chat-message";
+import { ModelOutput as ModelOutputType } from "../services/flask.service";
 
-export default function ModelOutput() {
+export type ModelOutputParams = {
+    modelOutput: ModelOutputType|null
+    size?: 'sm'|'xs'|'base'
+}
+
+export default function ModelOutput({ modelOutput, size = 'xs' }: ModelOutputParams) {
   return (
     <div id="model-outputs-region" className="flex flex-col m-4 p-4 rounded w-full">
        <ChatMessage icon="🤖" message="Here are some responses from two AI models." />
@@ -11,7 +17,11 @@ export default function ModelOutput() {
               </div>
           
               <div className="col completion-col rounded" id="completion-A-col">
-                  {/* <xmp className="message-text">Loading model outputs ... </xmp> */}
+                <pre className="whitespace-pre-wrap text-xs">
+                    <code>
+                    { modelOutput?.completions[0].completion }
+                    </code>
+                </pre>
               </div>
           </div>
           <div className="flex flex-col lg:w-1/2">
@@ -19,7 +29,11 @@ export default function ModelOutput() {
                   <button className="completion-icon">B</button>
               </div>
               <div className="col completion-col rounded" id="completion-B-col">
-                  {/* <xmp className="message-text">Loading model outputs ... </xmp> */}
+              <pre className="whitespace-pre-wrap text-xs">
+                    <code>
+                    { modelOutput?.completions[1].completion }
+                    </code>
+                </pre>
               </div>
           </div>
       </div>

@@ -1,7 +1,10 @@
-import ChatMessage from "../components/chat-message";
+import { KeyboardEventHandler, useEffect, useState } from "react";
 import { SingleSelectQuestion, SingleSelectQuestionParams } from "../components/question";
+import { HandleKeyboardShortcut, KeyboardShortcutParams } from "./evaluation.shortcuts";
 
 export default function Evaluation() {
+
+  const [currentQuestion, setCurrentQuestion] = useState(1)
 
 const q3Params: SingleSelectQuestionParams = {
   question: "Please select your preference:",
@@ -13,6 +16,28 @@ const q3Params: SingleSelectQuestionParams = {
     { label: "B is clearly better", value: "b-is-better" }
   ]
 };
+
+
+  useEffect(() => {
+    const onKeyDown = HandleKeyboardShortcut({
+      nextQuestion: () => { setCurrentQuestion(currentQuestion + 1); console.log('q', currentQuestion) },
+      previousQuestion: () => { setCurrentQuestion(currentQuestion - 1); console.log('q', currentQuestion) },
+      nextInstance: () => { console.log('nextInstance') },
+      previousInstance: () => { console.log('previousInstance') },
+      save: () => { console.log('save') },
+      approve: () => { console.log('approve') },
+      reject: () => { console.log('reject') },
+      rank: (r) => { console.log('rank', r) }
+    } as KeyboardShortcutParams);
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+      
+  }, [currentQuestion]);
+
+
 
   return (
     <div id="evaluation-region" className="flex flex-col m-4 p-4 rounded w-full">

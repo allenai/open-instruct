@@ -35,24 +35,7 @@ export default function Login({backendUrl}: {backendUrl: string}) {
         };
     
     fetchSessionData();
-    }, []);
-
-    
-    useEffect(() => {
-        const fetchUserData = async () => {
-            try {
-                const response = await fetch('/flask/api/user', {
-                credentials: 'include',
-            });
-            const data = await response.json();
-            console.log('user', data);
-            } catch (error) {
-            console.error('Failed to fetch user', error);
-            }
-        };
-    
-    fetchUserData();
-    }, []);
+    }, [router]);
     
     const logout = async () => {
         try {
