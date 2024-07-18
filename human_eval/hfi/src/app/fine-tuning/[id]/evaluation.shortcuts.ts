@@ -6,8 +6,8 @@ export type KeyboardShortcutParams = {
   nextQuestion: () => void;
   previousQuestion: () => void;
   rank: (rank: number) => void;
-  approve: () => void;
-  reject: () => void;
+  approve: (q: number) => void;
+  reject: (q: number) => void;
 }
 
 type KeyboardListener = (e: KeyboardEvent)  => any;
@@ -33,28 +33,20 @@ export function HandleKeyboardShortcut(params: KeyboardShortcutParams): Keyboard
       handler: (e) => { e.preventDefault(); params.previousInstance() }
     },
     {
-      condition: (key, isModified) => key === 'j' && !isModified,
-      handler: () => params.nextQuestion()
-    },
-    {
-      condition: (key, isModified) => key === 'k' && !isModified,
-      handler: () => params.previousQuestion()
+      condition: (key, isModified) => key === 'u' && !isModified,
+      handler: () => { params.previousQuestion(); params.approve(1) }
     },
     {
       condition: (key, isModified) => key === 'i' && !isModified,
-      handler: () => { params.previousQuestion(); params.approve() }
-    },
-    {
-      condition: (key, isModified) => key === 'u' && !isModified,
-      handler: () => { params.previousQuestion(); params.reject() }
-    },
-    {
-      condition: (key, isModified) => key === 'k' && !isModified,
-      handler: () => { params.nextQuestion(); params.approve() }
+      handler: () => { params.previousQuestion(); params.reject(1) }
     },
     {
       condition: (key, isModified) => key === 'j' && !isModified,
-      handler: () => { params.nextQuestion(); params.reject() }
+      handler: () => { params.nextQuestion(); params.approve(2) }
+    },
+    {
+      condition: (key, isModified) => key === 'k' && !isModified,
+      handler: () => { params.nextQuestion(); params.reject(2) }
     },
     {
       condition: (key, _) => ['1', '2', '3', '4', '5'].includes(key),

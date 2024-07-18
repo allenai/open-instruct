@@ -46,7 +46,7 @@ export default function Evaluation({ instanceId, nextInstance, previousInstance,
       console.log(formState)
     }
 
-    const setEvalForQuestion = (v: string) => {
+    const setEvalForQuestion = (currentQuestion: number, v: string) => {
       if (currentQuestion === 1) {
         set('a_acceptable', v)
       } else if (currentQuestion === 2) {
@@ -75,14 +75,14 @@ export default function Evaluation({ instanceId, nextInstance, previousInstance,
     }
 
     const onKeyDown = HandleKeyboardShortcut({
-      nextQuestion: () => { setCurrentQuestion(2); },
       previousQuestion: () => { setCurrentQuestion(1); },
+      nextQuestion: () => { setCurrentQuestion(2); },
       nextInstance: () => { nextInstance() },
       previousInstance: () => { previousInstance() },
       nextInstanceIfSaved: () => { if (isSaved) { nextInstance(); } else { shakeSubmit(); } },
       save: save,
-      approve: () => { setEvalForQuestion('yes') },
-      reject: () => { setEvalForQuestion('no') },
+      approve: (q) => { setEvalForQuestion(q, 'yes') },
+      reject: (q) => { setEvalForQuestion(q, 'no') },
       rank: (r) => { set('rank', String(r)) }
     } as KeyboardShortcutParams);
     window.addEventListener('keydown', onKeyDown);
