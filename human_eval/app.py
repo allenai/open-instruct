@@ -54,6 +54,13 @@ class EvaluationRecord(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
+@app.route('/api/user', methods=['GET'])
+@login_required
+def user():
+    if current_user.is_authenticated:
+        return jsonify({"username": current_user.username}), 200
+    else:
+        return jsonify({"error": "User not authenticated"}), 401
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -392,6 +399,10 @@ def main():
         action="store_true",
         help="Whether to run the server in debug mode."
     )
+    parser.add_argument(
+        "--next",
+        help="Changes the application root of the Flask app to point to http://localhost:3000, where the Next.js frontend is running."
+    )
     args = parser.parse_args()
 
     if not os.path.exists(os.path.join(os.getcwd(), 'data', 'evaluation.db')):
@@ -401,6 +412,9 @@ def main():
             db.session.add(new_user)
             db.session.commit()
 
+    if (args.next):
+        app.config['APPLICATION_ROOT'] = 'http://localhost:3000'
+    
     # load the predictions
     global COMPARISON_INSTANCES
     with open(args.comparison_data_path, "r") as f:
