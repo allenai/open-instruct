@@ -68,80 +68,112 @@ export default function Navbar() {
         <div className="my-4 flex flex-col">
         <ul>
           <li className="flex justify-between items-center gap-x-2 py-2.5 border-t border-gray-200 first:border-t-0 dark:border-neutral-700">
-            <span className="font-bold text-gray-800">
-              Bold
+            <span className="text-gray-800">
+            <span className='font-bold'>R</span>eject 👎 - No, currently selected answer is not acceptable.
             </span>
             <span className="flex flex-wrap items-center gap-x-1 text-sm text-gray-600 dark:text-neutral-400">
               <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
-                Ctrl
-              </span>
-              +
-              <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
-                b
+                r
               </span>
             </span>
           </li>
 
           <li className="flex justify-between items-center gap-x-2 py-2.5 border-t border-gray-200 first:border-t-0 dark:border-neutral-700">
-            <span className="italic text-gray-800">
-              Italic
+            <span className="text-gray-800">
+            <span className='font-bold'>T</span>humbs up 👍 - Yes, currently selected answer is acceptable.
             </span>
             <span className="flex flex-wrap items-center gap-x-1 text-sm text-gray-600 dark:text-neutral-400">
               <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
-                Ctrl
-              </span>
-              +
-              <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
-                i
+                t
               </span>
             </span>
           </li>
 
           <li className="flex justify-between items-center gap-x-2 py-2.5 border-t border-gray-200 first:border-t-0 dark:border-neutral-700">
-            <span className="underline underline-offset-4 text-gray-800">
-              Underline
+            <span className="text-gray-800">
+            A is clearly better
             </span>
             <span className="flex flex-wrap items-center gap-x-1 text-sm text-gray-600 dark:text-neutral-400">
               <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
-                Ctrl
-              </span>
-              +
-              <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
-                u
+                1
               </span>
             </span>
           </li>
 
           <li className="flex justify-between items-center gap-x-2 py-2.5 border-t border-gray-200 first:border-t-0 dark:border-neutral-700">
-            <span className="line-through text-gray-800">
-              Strikethrough
+            <span className="text-gray-800">
+            B is clearly better
             </span>
             <span className="flex flex-wrap items-center gap-x-1 text-sm text-gray-600 dark:text-neutral-400">
               <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
-                Ctrl
-              </span>
-              +
-              <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
-                Alt
-              </span>
-              +
-              <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
-                u
+                5
               </span>
             </span>
           </li>
 
           <li className="flex justify-between items-center gap-x-2 py-2.5 border-t border-gray-200 first:border-t-0 dark:border-neutral-700">
-            <span className="text-sm text-gray-800">
-              Small text
+            <span className="text-gray-800">
+              Go to previous question
             </span>
             <span className="flex flex-wrap items-center gap-x-1 text-sm text-gray-600 dark:text-neutral-400">
               <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
-                Ctrl
+                j
+              </span>
+            </span>
+          </li>
+
+          <li className="flex justify-between items-center gap-x-2 py-2.5 border-t border-gray-200 first:border-t-0 dark:border-neutral-700">
+            <span className="text-gray-800">
+              Go to next question
+            </span>
+            <span className="flex flex-wrap items-center gap-x-1 text-sm text-gray-600 dark:text-neutral-400">
+              <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
+                k
+              </span>
+            </span>
+          </li>
+
+          <li className="flex justify-between items-center gap-x-2 py-2.5 border-t border-gray-200 first:border-t-0 dark:border-neutral-700">
+            <span className="text-gray-800">
+              Save
+            </span>
+            <span className="flex flex-wrap items-center gap-x-1 text-sm text-gray-600 dark:text-neutral-400">
+              <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
+                Ctrl or Cmd
               </span>
               +
               <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
                 s
+              </span>
+            </span>
+          </li>
+
+          <li className="flex justify-between items-center gap-x-2 py-2.5 border-t border-gray-200 first:border-t-0 dark:border-neutral-700">
+            <span className="text-gray-800">
+              Go to previous instance
+            </span>
+            <span className="flex flex-wrap items-center gap-x-1 text-sm text-gray-600 dark:text-neutral-400">
+              <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
+                Ctrl or Cmd
+              </span>
+              +
+              <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
+                j
+              </span>
+            </span>
+          </li>
+
+          <li className="flex justify-between items-center gap-x-2 py-2.5 border-t border-gray-200 first:border-t-0 dark:border-neutral-700">
+            <span className="text-gray-800">
+              Go to next instance
+            </span>
+            <span className="flex flex-wrap items-center gap-x-1 text-sm text-gray-600 dark:text-neutral-400">
+              <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
+                Ctrl or Cmd
+              </span>
+              +
+              <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
+                k
               </span>
             </span>
           </li>

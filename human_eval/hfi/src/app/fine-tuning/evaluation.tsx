@@ -15,8 +15,9 @@ const q3Params: SingleSelectQuestionParams = {
 };
 
   return (
-    <div id="evaluation-region" className="flex flex-col m-4 p-4 rounded">
-      <ChatMessage icon="📝" message="Now please evaluate the two outputs based on your knowledge, preference, and any external tools (e.g., Google Search or Translate)" />
+    <div id="evaluation-region" className="flex flex-col m-4 p-4 rounded w-full">
+      <h2>Evaluation</h2>
+      <p className="text-sm text-gray">Now please evaluate the two outputs based on your knowledge, preference, and any external tools (e.g., Google Search or Translate)</p>
       <div className="row mt-3">
           <div className="col icon-col">
           </div>

@@ -22,7 +22,7 @@ export function SingleSelectQuestion({ question, description, options } : Single
 
   return (
     <div className="form-group eval-form-item">
-        <p className="text-base mb-2">{question}</p>
+        <p className="text-base font-semibold mb-2">{question}</p>
         <Description />
         {options.map((option, index) => (
         <div key={index} className="form-check form-check-inline my-2">

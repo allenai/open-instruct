@@ -8,11 +8,15 @@ export default function Home() {
   return (
     <>
     <Navbar />
-    <div className="flex flex-row">
-        <div className="mx-auto container">
-            <InstructionAndInput />
-            <ModelOutput />
+    <div className="flex flex-row w-full">
+        <div className="container flex flex-col lg:flex-row  mx-auto">
+            <div className="flex flex-col lg:w-4/6 p-4">
+              <InstructionAndInput />
+              <ModelOutput />
+            </div>
+            <div className="flex flex-col lg:w-2/6 p-4">
             <Evaluation />
+            </div>
         </div>
     </div>
 
