@@ -67,49 +67,50 @@ export default function Navbar() {
         <p className="mb-4">To make your annotation experience smoother, use the following keyboard shortcuts.</p>
         <div className="my-4 flex flex-col">
         <ul>
-        <li className="flex justify-between items-center gap-x-2 py-2.5 border-t border-gray-200 first:border-t-0 dark:border-neutral-700">
+       
+
+          <li className="flex justify-between items-center gap-x-2 py-2.5 border-t border-gray-200 first:border-t-0 dark:border-neutral-700">
             <span className="text-gray-800">
-            👎 - Output A is not acceptable. This shortcut <kbd>r</kbd>, along with shortcut <kbd>t</kbd> is at the top level keyboard.
+             👍 - Output A is acceptable. This shortcut <kbd>i</kbd>, along with shortcut <kbd>r</kbd> is at the top level keyboard.
             </span>
             <span className="flex flex-wrap items-center gap-x-1 text-sm text-gray-600 dark:text-neutral-400">
               <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
-                r
+                u
+              </span>
+            </span>
+          </li>
+          <li className="flex justify-between items-center gap-x-2 py-2.5 border-t border-gray-200 first:border-t-0 dark:border-neutral-700">
+            <span className="text-gray-800">
+            👎 - Output A is not acceptable. This shortcut <kbd>u</kbd>, along with shortcut <kbd>t</kbd> is at the top level keyboard.
+            </span>
+            <span className="flex flex-wrap items-center gap-x-1 text-sm text-gray-600 dark:text-neutral-400">
+              <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
+                i
               </span>
             </span>
           </li>
 
           <li className="flex justify-between items-center gap-x-2 py-2.5 border-t border-gray-200 first:border-t-0 dark:border-neutral-700">
             <span className="text-gray-800">
-             👍 - Output A is acceptable. This shortcut <kbd>t</kbd>, along with shortcut <kbd>r</kbd> is at the top level keyboard.
+             👍 - Output B is acceptable. This shortcut <kbd>k</kbd>, along with shortcut <kbd>f</kbd> is at the bottom level keyboard.
             </span>
             <span className="flex flex-wrap items-center gap-x-1 text-sm text-gray-600 dark:text-neutral-400">
               <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
-                t
-              </span>
-            </span>
-          </li>
-          <li className="flex justify-between items-center gap-x-2 py-2.5 border-t border-gray-200 first:border-t-0 dark:border-neutral-700">
-            <span className="text-gray-800">
-            👎 - Output B is not acceptable. This shortcut <kbd>f</kbd>, along with shortcut <kbd>g</kbd> is at the bottom level keyboard.
-            </span>
-            <span className="flex flex-wrap items-center gap-x-1 text-sm text-gray-600 dark:text-neutral-400">
-              <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
-                f
+                j
               </span>
             </span>
           </li>
 
           <li className="flex justify-between items-center gap-x-2 py-2.5 border-t border-gray-200 first:border-t-0 dark:border-neutral-700">
             <span className="text-gray-800">
-             👍 - Output B is acceptable. This shortcut <kbd>g</kbd>, along with shortcut <kbd>f</kbd> is at the bottom level keyboard.
+            👎 - Output B is not acceptable. This shortcut <kbd>j</kbd>, along with shortcut <kbd>g</kbd> is at the bottom level keyboard.
             </span>
             <span className="flex flex-wrap items-center gap-x-1 text-sm text-gray-600 dark:text-neutral-400">
               <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
-                g
+                k
               </span>
             </span>
           </li>
-
           <li className="flex justify-between items-center gap-x-2 py-2.5 border-t border-gray-200 first:border-t-0 dark:border-neutral-700">
             <span className="text-gray-800">
             A is clearly better. This shortcut maps from 1 to 5, ranging from A to B.
@@ -173,6 +174,16 @@ export default function Navbar() {
               +
               <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
                 k
+              </span>
+            </span>
+          </li>
+          <li className="flex justify-between items-center gap-x-2 py-2.5 border-t border-gray-200 first:border-t-0 dark:border-neutral-700">
+            <span className="text-gray-800">
+              Go to next instance (if saved)
+            </span>
+            <span className="flex flex-wrap items-center gap-x-1 text-sm text-gray-600 dark:text-neutral-400">
+              <span className="min-h-[30px] inline-flex justify-center items-center py-1 px-1.5 bg-gray-200 border border-transparent font-mono text-sm text-gray-800 rounded-md dark:bg-neutral-700 dark:text-neutral-200">
+                space
               </span>
             </span>
           </li>
