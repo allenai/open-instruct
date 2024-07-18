@@ -1,14 +1,17 @@
 
 export type SingleSelectQuestionParams = { 
+  id: string,
   question: string, 
   description?: string,
   options: {
     label: string,
     value: string
   }[]
+  selectedValue?: string
+  onValueChanged?: (value: string) => void
 }
 
-export function SingleSelectQuestion({ question, description, options } : SingleSelectQuestionParams) {
+export function SingleSelectQuestion({ id, question, description, options, selectedValue, onValueChanged } : SingleSelectQuestionParams) {
 
   const Description = () => {
     if (!description) {
@@ -29,9 +32,14 @@ export function SingleSelectQuestion({ question, description, options } : Single
           <input
             className="form-check-input m-2"
             type="radio"
-            name="single-select"
-            id={`option-${index}`}
+            name={id}
             value={option.value}
+            defaultChecked={option.value === selectedValue}
+            onChange={() => {
+              if (typeof onValueChanged === 'function') {
+                onValueChanged(option.value)
+              }
+            }}
           />
           <label className="form-check-label" htmlFor={`option-${index}`}>
             {option.label}

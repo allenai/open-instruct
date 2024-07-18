@@ -41,11 +41,19 @@ export function HandleKeyboardShortcut(params: KeyboardShortcutParams): Keyboard
     },
     {
       condition: (key, isModified) => key === 't' && !isModified,
-      handler: () => params.approve()
+      handler: () => { params.previousQuestion(); params.approve() }
     },
     {
       condition: (key, isModified) => key === 'r' && !isModified,
-      handler: () => params.reject()
+      handler: () => { params.previousQuestion(); params.reject() }
+    },
+    {
+      condition: (key, isModified) => key === 'g' && !isModified,
+      handler: () => { params.nextQuestion(); params.approve() }
+    },
+    {
+      condition: (key, isModified) => key === 'f' && !isModified,
+      handler: () => { params.nextQuestion(); params.reject() }
     },
     {
       condition: (key, _) => ['1', '2', '3', '4', '5'].includes(key),
@@ -55,7 +63,7 @@ export function HandleKeyboardShortcut(params: KeyboardShortcutParams): Keyboard
 
   return (e: KeyboardEvent) => {
 
-    const allowedKeys = ['j', 'k', 'r', 't', '1', '2', '3', '4', '5', 's']
+    const allowedKeys = ['j', 'k', 'r', 't', '1', '2', '3', '4', '5', 's', 'f', 'g']
     
     if (!allowedKeys.includes(e.key)) {
       return
