@@ -40,31 +40,35 @@ export function HandleKeyboardShortcut(params: KeyboardShortcutParams): Keyboard
       handler: () => params.previousQuestion()
     },
     {
-      condition: (key, isModified) => key === 't' && !isModified,
+      condition: (key, isModified) => key === 'i' && !isModified,
       handler: () => { params.previousQuestion(); params.approve() }
     },
     {
-      condition: (key, isModified) => key === 'r' && !isModified,
+      condition: (key, isModified) => key === 'u' && !isModified,
       handler: () => { params.previousQuestion(); params.reject() }
     },
     {
-      condition: (key, isModified) => key === 'g' && !isModified,
+      condition: (key, isModified) => key === 'k' && !isModified,
       handler: () => { params.nextQuestion(); params.approve() }
     },
     {
-      condition: (key, isModified) => key === 'f' && !isModified,
+      condition: (key, isModified) => key === 'j' && !isModified,
       handler: () => { params.nextQuestion(); params.reject() }
     },
     {
       condition: (key, _) => ['1', '2', '3', '4', '5'].includes(key),
       handler: (e) => params.rank(Number(e.key))
+    },
+    {
+      condition: (key, _) => key === ' ',
+      handler: (e) => { e.preventDefault(); params.nextInstance() }
     }
   ]
 
   return (e: KeyboardEvent) => {
 
-    const allowedKeys = ['j', 'k', 'r', 't', '1', '2', '3', '4', '5', 's', 'f', 'g']
-    
+    const allowedKeys = ['j', 'k', '1', '2', '3', '4', '5', 's', 'i', 'u', 'k', 'j', ' ']
+
     if (!allowedKeys.includes(e.key)) {
       return
     }

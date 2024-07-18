@@ -1,5 +1,5 @@
-import ChatMessage from "../components/chat-message";
-import { ModelOutput as ModelOutputType } from "../services/flask.service";
+import ChatMessage from "../../components/chat-message";
+import { ModelOutput as ModelOutputType } from "../../services/flask.service";
 
 export type ModelOutputParams = {
     modelOutput: ModelOutputType|null

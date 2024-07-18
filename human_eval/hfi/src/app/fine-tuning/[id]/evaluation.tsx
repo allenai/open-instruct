@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { SingleSelectQuestion, SingleSelectQuestionParams } from "../components/question";
+import { SingleSelectQuestion, SingleSelectQuestionParams } from "../../components/question";
 import { HandleKeyboardShortcut, KeyboardShortcutParams } from "./evaluation.shortcuts";
 
 type FormState = {
@@ -8,9 +8,18 @@ type FormState = {
   rank: string
 }
 
-export default function Evaluation() {
+type EvaluationParams = {
+  instanceId: number
+  nextInstance: () => void
+  previousInstance: () => void
+  goToInstance: (i: number) => void
+}
+
+export default function Evaluation({ instanceId, nextInstance, previousInstance, goToInstance } : EvaluationParams) {
 
   const [currentQuestion, setCurrentQuestion] = useState(1)
+
+  const [isSaved, setIsSaved] = useState(false)
 
   const [formState, setFormState] = useState<FormState>({} as FormState)
 
@@ -26,7 +35,6 @@ export default function Evaluation() {
       { label: "B is clearly better", value: "5" }
     ]
   };
-
 
   useEffect(() => {
 
@@ -46,12 +54,17 @@ export default function Evaluation() {
       }
     }
 
+    const save = () => {
+      console.log('is saved')
+      setIsSaved(true)
+    }
+
     const onKeyDown = HandleKeyboardShortcut({
-      nextQuestion: () => { setCurrentQuestion(2); console.log('q', currentQuestion) },
-      previousQuestion: () => { setCurrentQuestion(1); console.log('q', currentQuestion) },
-      nextInstance: () => { console.log('nextInstance') },
-      previousInstance: () => { console.log('previousInstance') },
-      save: () => { console.log('save') },
+      nextQuestion: () => { setCurrentQuestion(2); },
+      previousQuestion: () => { setCurrentQuestion(1); },
+      nextInstance: () => { nextInstance() },
+      previousInstance: () => { previousInstance() },
+      save: () => { save },
       approve: () => { setEvalForQuestion('yes') },
       reject: () => { setEvalForQuestion('no') },
       rank: (r) => { set('rank', String(r)) }
@@ -62,7 +75,7 @@ export default function Evaluation() {
       window.removeEventListener('keydown', onKeyDown);
     };
       
-  }, [currentQuestion, formState]);
+  }, [currentQuestion, formState, nextInstance, previousInstance, setIsSaved]);
 
   const Form = () => {
     

@@ -1,4 +1,4 @@
-import ChatMessage from "../components/chat-message"
+import ChatMessage from "../../components/chat-message"
 
 export type InstructionAndInputParams = {
   prompt: string|undefined
