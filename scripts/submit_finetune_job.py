@@ -16,7 +16,7 @@ def main():
                         help="Path to the default Beaker config file")
     parser.add_argument("--config", default=None, 
                         help="Path to an additional config file to override default settings")
-    parser.add_argument("--wandb_api_key", required=False, help="Weights & Biases API key")
+    # parser.add_argument("--wandb_api_key", required=False, help="Weights & Biases API key")
     parser.add_argument("--cluster", type=str, default="ai2/allennlp-cirrascale", help="Beaker cluster to use")
     parser.add_argument("--priority", type=str, default="high", help="Priority of the job")
     parser.add_argument("--preemptible", type=bool, default=True, help="Whether to use preemptible instances")
@@ -70,10 +70,10 @@ def main():
     # modify here for different set of experiments
     experiment_group = "dataset_comparison"
     wandb_project = "open_instruct"
-    if args.wandb_api_key:
-        wandb_api_key = args.wandb_api_key
-    else:
-        wandb_api_key = os.environ.get("WANDB_API_KEY")
+    # if args.wandb_api_key:
+    #     wandb_api_key = args.wandb_api_key
+    # else:
+    #     wandb_api_key = os.environ.get("WANDB_API_KEY")
 
     # if config is passed, load and merge that
     def override_and_reconstruct_command(original_command, train_config, unknown_args):
@@ -147,9 +147,9 @@ def main():
             env['value'] = False
         if env['name'] == "WANDB_PROJECT":
             env['value'] = wandb_project
-    d['tasks'][0]['envVars'].append({
-        'name': 'WANDB_API_KEY', 'value': wandb_api_key
-    })
+    # d['tasks'][0]['envVars'].append({
+    #     'name': 'WANDB_API_KEY', 'value': wandb_api_key
+    # })
     d['tasks'][0]['envVars'].append({
         'name': 'WANDB_NAME', 'value': exp_name
     })
