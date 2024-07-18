@@ -43,7 +43,7 @@ export default function Workspace({ instanceId }: WorkspaceParams) {
   return (
     <div className="container flex flex-col lg:flex-row  mx-auto">
       <div className="flex flex-col lg:w-4/6 p-4">
-        <InstructionAndInput prompt={modelOutput?.prompt} />
+        <InstructionAndInput description="" prompt={modelOutput?.prompt} />
         <ModelOutput modelOutput={modelOutput} />
       </div>
       <div className="flex flex-col lg:w-2/6 p-4">

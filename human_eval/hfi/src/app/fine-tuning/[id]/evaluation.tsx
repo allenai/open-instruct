@@ -59,12 +59,28 @@ export default function Evaluation({ instanceId, nextInstance, previousInstance,
       setIsSaved(true)
     }
 
+    const shakeSubmit = () => {
+      
+      const s = document.getElementById("save");
+      if (s?.classList.contains("border-red-500") || s?.classList.contains("border-blue-500")) {
+        return
+      }
+      s?.classList.remove("border-black");
+      s?.classList.add("border-red-500", "text-red-500");
+
+      setTimeout(() => {
+        s?.classList.add("border-black");
+        s?.classList.remove("border-red-500", "text-red-500");
+      }, 800);
+    }
+
     const onKeyDown = HandleKeyboardShortcut({
       nextQuestion: () => { setCurrentQuestion(2); },
       previousQuestion: () => { setCurrentQuestion(1); },
       nextInstance: () => { nextInstance() },
       previousInstance: () => { previousInstance() },
-      save: () => { save },
+      nextInstanceIfSaved: () => { if (isSaved) { nextInstance(); } else { shakeSubmit(); } },
+      save: save,
       approve: () => { setEvalForQuestion('yes') },
       reject: () => { setEvalForQuestion('no') },
       rank: (r) => { set('rank', String(r)) }
@@ -75,7 +91,7 @@ export default function Evaluation({ instanceId, nextInstance, previousInstance,
       window.removeEventListener('keydown', onKeyDown);
     };
       
-  }, [currentQuestion, formState, nextInstance, previousInstance, setIsSaved]);
+  }, [currentQuestion, formState, nextInstance, previousInstance, setIsSaved, isSaved]);
 
   const Form = () => {
     
@@ -114,8 +130,10 @@ export default function Evaluation({ instanceId, nextInstance, previousInstance,
         selectedValue={formState.rank}
         onValueChanged={(v) => setFormState({...formState, rank: v})}
       />
-      <div className="my-4 text-center">
-          <input type="submit" onClick={submit} value='Submit' className="btn btn-primary w-fit border-black border rounded px-4 py-2" id="evaluation-submit" />
+      <div className="my-4 mx-auto text-center flex flex-row">
+        <button onClick={previousInstance} className="btn btn-primary w-fit border-gray-400 border text-gray-400 border-2 rounded px-4 py-2 ml-auto mr-2" id="evaluation-submit">Previous</button>
+        <button onClick={nextInstance} hidden={isSaved} className="btn btn-primary w-fit border-gray-400 border text-gray-400 border-2 rounded px-4 py-2 mx-2" id="evaluation-submit" >Next</button>
+        <input id="save" type="submit" onClick={isSaved ? submit : nextInstance} value={!isSaved ? 'Submit' : 'Next'} className="btn btn-primary w-fit border-black border border-2 cursor-pointer rounded px-4 py-2 mr-1 ml-2" />
       </div>
       </>
     )

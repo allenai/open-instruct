@@ -1,6 +1,7 @@
 export type KeyboardShortcutParams = {
   save: () => void;
   nextInstance: () => void;
+  nextInstanceIfSaved: () => void;
   previousInstance: () => void;
   nextQuestion: () => void;
   previousQuestion: () => void;
@@ -61,7 +62,7 @@ export function HandleKeyboardShortcut(params: KeyboardShortcutParams): Keyboard
     },
     {
       condition: (key, _) => key === ' ',
-      handler: (e) => { e.preventDefault(); params.nextInstance() }
+      handler: (e) => { e.preventDefault(); params.nextInstanceIfSaved() }
     }
   ]
 
