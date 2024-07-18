@@ -35,10 +35,12 @@ Each line of this file should be in the following format:
 Now you can run the app with:
 
 ```bash
-python app.py
+python app.py --comparison_data_path data/eval_instances_tulu_1.jsonl
 ```
 
-You can open the app in your browser at http://localhost:5001. When doing the annotation, you can track the progress at the following url: http://localhost:5001/summary.
+This will automatically create the necessary sqlite database in `data/evaluation.db`.
+
+You can then open the app in your browser at http://localhost:5001. When doing the annotation, you can track the progress at the following url: http://localhost:5001/summary.
 
 Here is a screenshot of the annotation interface:
 
