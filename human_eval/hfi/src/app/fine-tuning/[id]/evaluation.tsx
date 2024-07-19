@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SingleSelectQuestion, SingleSelectQuestionParams } from "../../components/question";
 import { HandleKeyboardShortcut, KeyboardShortcutParams } from "./evaluation.shortcuts";
 import { EvaluationInput, FlaskService, ModelOutput } from "@/app/services/flask.service";
@@ -20,10 +20,9 @@ type EvaluationParams = {
 export default function Evaluation({ instanceId, save, nextInstance, previousInstance, flask } : EvaluationParams) {
 
   const [currentQuestion, setCurrentQuestion] = useState(1)
-
   const [isSaved, setIsSaved] = useState(false)
-
   const [formState, setFormState] = useState<FormState>({} as FormState)
+  const submitRef = useRef<(any)>(null);
 
   const q3Params: SingleSelectQuestionParams = {
     id: 'rank',
@@ -39,13 +38,11 @@ export default function Evaluation({ instanceId, save, nextInstance, previousIns
   };
 
   useEffect(() => {
-
     const set = (q: string, v: string) => {
       setFormState({
         ...formState,
         [q]: v
       })
-      
     }
 
     const setEvalForQuestion = (currentQuestion: number, v: string) => {
@@ -57,6 +54,7 @@ export default function Evaluation({ instanceId, save, nextInstance, previousIns
     }
 
     const beginSave = async () => {
+      console.log('beginning save')
       const result = await save({
         a_is_acceptable: formState.a_acceptable,
         b_is_acceptable: formState.b_acceptable,
@@ -66,6 +64,8 @@ export default function Evaluation({ instanceId, save, nextInstance, previousIns
       if (result)
         setIsSaved(true)
     }
+
+    submitRef.current = beginSave
 
     const shakeSubmit = () => {
       
@@ -87,7 +87,7 @@ export default function Evaluation({ instanceId, save, nextInstance, previousIns
       nextQuestion: () => { setCurrentQuestion(2); },
       nextInstance: () => { nextInstance() },
       previousInstance: () => { previousInstance() },
-      nextInstanceIfSaved: () => { if (isSaved) { nextInstance(); } else { shakeSubmit(); } },
+      nextInstanceIfSaved: () => { if (isSaved) { beginSave(); } else { shakeSubmit(); } },
       save: beginSave,
       approve: (q) => { setEvalForQuestion(q, 'yes') },
       reject: (q) => { setEvalForQuestion(q, 'no') },
@@ -102,14 +102,14 @@ export default function Evaluation({ instanceId, save, nextInstance, previousIns
   }, [currentQuestion, formState, nextInstance, previousInstance, setIsSaved, isSaved, save]);
 
   const Form = () => {
-    
-    const submit = (e: any) => {
-      e.preventDefault()
-      setCurrentQuestion(currentQuestion + 1)
-      console.log(formState)
-    }
 
-    return (
+    const submit = () => {
+      if (submitRef && submitRef.current) {
+        submitRef.current()
+      } 
+    }
+    
+     return (
       <>
       <div className={currentQuestion === 1 ? 'border border-red-300 border-2 p-2 rounded my-2' : 'border border-gray-300 border-2 p-2 rounded my-2'}>
         <SingleSelectQuestion 
@@ -141,7 +141,7 @@ export default function Evaluation({ instanceId, save, nextInstance, previousIns
       <div className="my-4 mx-auto text-center flex flex-row">
         <button onClick={previousInstance} className="btn btn-primary w-fit border-gray-400 border text-gray-400 border-2 rounded px-4 py-2 ml-auto mr-2" id="evaluation-submit">Previous</button>
         <button onClick={nextInstance} hidden={isSaved} className="btn btn-primary w-fit border-gray-400 border text-gray-400 border-2 rounded px-4 py-2 mx-2" id="evaluation-submit" >Next</button>
-        <input id="save" type="submit" onClick={isSaved ? submit : nextInstance} value={!isSaved ? 'Submit' : 'Next'} className="btn btn-primary w-fit border-black border border-2 cursor-pointer rounded px-4 py-2 mr-1 ml-2" />
+        <input id="save" type="submit" onClick={submit} value={!isSaved ? 'Submit' : 'Next'} className="btn btn-primary w-fit border-black border border-2 cursor-pointer rounded px-4 py-2 mr-1 ml-2" />
       </div>
       </>
     )
