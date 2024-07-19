@@ -14,8 +14,10 @@ export type WorkspaceParams = {
 export default function Workspace({ instanceId }: WorkspaceParams) {
 
   const [currentInstanceId, setCurrentInstanceId ] = useState(instanceId)
-  const flask = useFlaskService()
   const [modelOutput, setModelOutput] = useState<ModelOutputType|null>(null)
+  const [username, setUsername] = useState<string>('')
+  const flask = useFlaskService()
+  
   const router = useRouter()
 
   const next = () => {
@@ -33,6 +35,8 @@ export default function Workspace({ instanceId }: WorkspaceParams) {
     const init = async () => {
       let modelOutput = await lastValueFrom(flask.getModelOutputs(instanceId));
       setModelOutput(modelOutput);
+      let authdUser = await lastValueFrom(flask.getAuthenticatedUser())
+      setUsername(authdUser)
     }
 
     init();
@@ -40,6 +44,9 @@ export default function Workspace({ instanceId }: WorkspaceParams) {
 
   const save = async (input: Partial<EvaluationInput>) => {
     if (!modelOutput) return false;
+    if (!input.a_is_acceptable) throw Error('Question 1 is required');
+    if (!input.b_is_acceptable) throw Error('Question 2 is required');
+    if (!input.rank) throw Error('Question 3 is required');
 
     // append username
     input = {...input, evaluator: username}

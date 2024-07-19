@@ -1,8 +1,8 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+This Human Feedback Interface web application is built using [Next.js](https://nextjs.org/).
 
 ## Getting Started
 
-First, run the development server:
+To run the development server locally, you can:
 
 ```bash
 npm run dev
@@ -14,23 +14,60 @@ pnpm dev
 bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Note: Remember that you must also be running the backend server ([See instructions](https://github.com/allenai/open-instruct/tree/main/human_eval)) to have the functionalities for authentication, evaluation submission, and reporting.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Usage
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+Visit [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-## Learn More
+After logging in with the default user `admin:admin`, you'll encounter the annotation workspace:
 
-To learn more about Next.js, take a look at the following resources:
+![workspace.png](docs/workspace.png)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+This workspace has four sections: 
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
+1. the nav bar - allows you to report an instance with meta feedback, view the keyboard shortcuts, or log out.
+2. human prompt - the yellow section highlights the instruction/input from the user.
+3. model output - the blue/purple section showcases the model's output, which the annotator is designated to evaluate.
+4. evaluation section - the annotator has three questions to answer, which they can use with their mouse or their keyboard shortcuts. Users can move to the previous/next instances, or choose to submit their evaluation.
 
-## Deploy on Vercel
+The evaluation process comes with keyboard shortcuts to make your annotation experience smoother.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+## Keyboard shortcuts
+
+![keyboard shortcuts](docs/keyboard-shortcuts.png)
+
+
+The current annotation process has three questions: 
+
+1. Whether Output A is acceptable (u) or not acceptable (i)
+2. Whether Output B is acceptable (j) or not acceptable (k)
+3. Whether you prefer Output A (1) or Output B (5), or if it is a tie (3)
+
+The keyboard shortcuts are designed so that annotators can quickly label just by moving their right index and middle finger up and down (ui, jk) when labeling the questions, and their left hand resting on (1-5) for the preference ranking.
+
+Afterwards, the user can press Cmd + S or Ctrl + S to submit the evaluation, and press Spacebar to move to the next instance (only if it has been saved successfully).
+
+## Analytics
+
+Another section that I plan to include here is integration with Google Analytics, to measure the time-to-evaluation. Measuring these information carefully will help optimize the interface evaluation experience, and be the foundation for A/B testing.
+
+## Future work
+
+Not all of the APIs have been ported into the Next.js frontend app. I focused mostly on the primary application requirements, which is authentication, labeling/evaluation experience, and evaluation submission.
+
+### Better validation experience
+
+Currently, the submit/save button works as intended and throws an error when the required fields are missing.
+
+This can be further improved by presenting an error alert or highlighting the form fields with a red asterisk, signifying that the fields are required.
+
+![validation errors](docs/validation-errors.png)
+
+### Feedback reporting
+
+Currently the Meta-feedback Report tab is visually set up but not yet functional. This is essential when cleaning datasets, when certain instance data needs to be flagged.
+
+![meta-feedback.png](docs/meta-feedback.png)
+
