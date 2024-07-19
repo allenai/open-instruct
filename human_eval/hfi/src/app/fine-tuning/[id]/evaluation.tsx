@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { SingleSelectQuestion, SingleSelectQuestionParams } from "../../components/question";
 import { HandleKeyboardShortcut, KeyboardShortcutParams } from "./evaluation.shortcuts";
+import { EvaluationInput, FlaskService, ModelOutput } from "@/app/services/flask.service";
 
 type FormState = {
   a_acceptable: string,
@@ -12,10 +13,11 @@ type EvaluationParams = {
   instanceId: number
   nextInstance: () => void
   previousInstance: () => void
-  goToInstance: (i: number) => void
+  save: (input: Partial<EvaluationInput>) => Promise<boolean>
+  flask: FlaskService
 }
 
-export default function Evaluation({ instanceId, nextInstance, previousInstance, goToInstance } : EvaluationParams) {
+export default function Evaluation({ instanceId, save, nextInstance, previousInstance, flask } : EvaluationParams) {
 
   const [currentQuestion, setCurrentQuestion] = useState(1)
 
@@ -28,11 +30,11 @@ export default function Evaluation({ instanceId, nextInstance, previousInstance,
     selectedValue: formState.rank,
     question: "Please select your preference:",
     options: [
-      { label: "A is clearly better", value: "1" },
-      { label: "A is slightly better", value: "2" },
-      { label: "Tie", value: "3" },
-      { label: "B is slightly better", value: "4" },
-      { label: "B is clearly better", value: "5" }
+      { label: "A is clearly better", value: "a-is-better" },
+      { label: "A is slightly better", value: "a-is-slightly-better" },
+      { label: "Tie", value: "tie" },
+      { label: "B is slightly better", value: "b-is-slightly-better" },
+      { label: "B is clearly better", value: "b-is-better" }
     ]
   };
 
@@ -43,7 +45,7 @@ export default function Evaluation({ instanceId, nextInstance, previousInstance,
         ...formState,
         [q]: v
       })
-      console.log(formState)
+      
     }
 
     const setEvalForQuestion = (currentQuestion: number, v: string) => {
@@ -54,9 +56,15 @@ export default function Evaluation({ instanceId, nextInstance, previousInstance,
       }
     }
 
-    const save = () => {
-      console.log('is saved')
-      setIsSaved(true)
+    const beginSave = async () => {
+      const result = await save({
+        a_is_acceptable: formState.a_acceptable,
+        b_is_acceptable: formState.b_acceptable,
+        rank: formState.rank,
+      } as Partial<EvaluationInput>)
+      
+      if (result)
+        setIsSaved(true)
     }
 
     const shakeSubmit = () => {
@@ -80,10 +88,10 @@ export default function Evaluation({ instanceId, nextInstance, previousInstance,
       nextInstance: () => { nextInstance() },
       previousInstance: () => { previousInstance() },
       nextInstanceIfSaved: () => { if (isSaved) { nextInstance(); } else { shakeSubmit(); } },
-      save: save,
+      save: beginSave,
       approve: (q) => { setEvalForQuestion(q, 'yes') },
       reject: (q) => { setEvalForQuestion(q, 'no') },
-      rank: (r) => { set('rank', String(r)) }
+      rank: (r) => { set('rank', r) }
     } as KeyboardShortcutParams);
     window.addEventListener('keydown', onKeyDown);
 
@@ -91,7 +99,7 @@ export default function Evaluation({ instanceId, nextInstance, previousInstance,
       window.removeEventListener('keydown', onKeyDown);
     };
       
-  }, [currentQuestion, formState, nextInstance, previousInstance, setIsSaved, isSaved]);
+  }, [currentQuestion, formState, nextInstance, previousInstance, setIsSaved, isSaved, save]);
 
   const Form = () => {
     

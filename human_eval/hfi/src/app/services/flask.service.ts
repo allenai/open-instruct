@@ -8,6 +8,13 @@ export type ModelOutput = {
   prompt: string
 }
 
+export type EvaluationInput = {
+  a_is_acceptable: string
+  b_is_acceptable: string
+  evaluator: string
+  rank: string
+}
+
 export class FlaskService {
   constructor() {
 
@@ -20,6 +27,28 @@ export class FlaskService {
     })));
 
     return get$.pipe(concatMap(r => r.json() as Promise<ModelOutput>));
+  }
+  saveModelOutput(id: number, modelOutput: ModelOutput, evaluationInput: EvaluationInput) {
+    return from(fetch(`/flask/api/submit-evaluation`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        index: id,
+        prompt: modelOutput.prompt,
+        model_a: modelOutput.completions[0].model,
+        model_b: modelOutput.completions[1].model,
+        completion_a: modelOutput.completions[0].completion,
+        completion_b: modelOutput.completions[1].completion,
+        completion_a_is_acceptable: evaluationInput.a_is_acceptable,
+        completion_b_is_acceptable: evaluationInput.b_is_acceptable,
+        preference: evaluationInput.rank,
+        evaluator: evaluationInput.evaluator,
+
+      }),
+      credentials: 'include',
+    }))
   }
 }
 

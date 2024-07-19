@@ -5,7 +5,7 @@ export type KeyboardShortcutParams = {
   previousInstance: () => void;
   nextQuestion: () => void;
   previousQuestion: () => void;
-  rank: (rank: number) => void;
+  rank: (rank: string) => void;
   approve: (q: number) => void;
   reject: (q: number) => void;
 }
@@ -50,7 +50,24 @@ export function HandleKeyboardShortcut(params: KeyboardShortcutParams): Keyboard
     },
     {
       condition: (key, _) => ['1', '2', '3', '4', '5'].includes(key),
-      handler: (e) => params.rank(Number(e.key))
+      handler: (e) => {
+        [
+          { label: "A is clearly better", value: "a-is-better" },
+          { label: "A is slightly better", value: "a-is-slightly-better" },
+          { label: "Tie", value: "tie" },
+          { label: "B is slightly better", value: "b-is-slightly-better" },
+          { label: "B is clearly better", value: "b-is-better" }
+        ]
+
+        switch (e.key) {
+          case '1': params.rank('a-is-better'); break;
+          case '2': params.rank('a-is-slightly-better'); break;
+          case '3': params.rank('tie'); break;
+          case '4': params.rank('b-is-slightly-better');  break;
+          case '5': params.rank('b-is-better'); break;
+          
+        }
+      }
     },
     {
       condition: (key, _) => key === ' ',

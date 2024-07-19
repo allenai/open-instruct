@@ -24,11 +24,11 @@ export default function Login({backendUrl}: {backendUrl: string}) {
             });
             const data = await response.json();
             if (response.ok && data.username) {
-                router.push('/fine-tuning')
+                router.push('/fine-tuning/1')
                 return;
             }
             setSessionData(data.user);
-            console.log('session data', data);
+            
             } catch (error) {
             console.error('Failed to fetch session data', error);
             }
@@ -37,20 +37,6 @@ export default function Login({backendUrl}: {backendUrl: string}) {
     fetchSessionData();
     }, [router]);
     
-    const logout = async () => {
-        try {
-            const response = await fetch('/api/logout', {
-                credentials: 'include',
-                method: 'POST',
-            });
-            await response.text();
-            console.log('logged out', response.ok);
-        } catch (error) {
-            console.error('Failed to log out', error);
-        }
-    };
-
-
     
   return (
     <>
@@ -62,9 +48,6 @@ export default function Login({backendUrl}: {backendUrl: string}) {
                 <Form state={formState} backendUrl={backendUrl} />
                 <button onClick={toggleState} className="btn btn-primary m-1">Switch to Signup</button>
                 
-            </div>
-            <div className="row col-12 mt-4 text-center" id="login-region">
-                <button onClick={logout} className="btn btn-primary m-1">Log out</button>
             </div>
         </div>
 

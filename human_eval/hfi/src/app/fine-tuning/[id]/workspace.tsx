@@ -2,16 +2,17 @@
 import { useEffect, useState } from "react";
 import Evaluation from "./evaluation";
 import InstructionAndInput from "./instruction-and-input";
-import useFlaskService, { ModelOutput as ModelOutputType } from "../../services/flask.service";
+import useFlaskService, { EvaluationInput, ModelOutput as ModelOutputType } from "../../services/flask.service";
 import { lastValueFrom } from "rxjs";
 import ModelOutput from "./model-output";
 import { useRouter } from "next/navigation";
 
 export type WorkspaceParams = {
   instanceId: number
+  username: string
 }
 
-export default function Workspace({ instanceId }: WorkspaceParams) {
+export default function Workspace({ instanceId, username }: WorkspaceParams) {
 
   const [currentInstanceId, setCurrentInstanceId ] = useState(instanceId)
   const flask = useFlaskService()
@@ -30,15 +31,32 @@ export default function Workspace({ instanceId }: WorkspaceParams) {
   }
 
   useEffect(() => {
-    console.log('reloading flask')
     const init = async () => {
       let modelOutput = await lastValueFrom(flask.getModelOutputs(instanceId));
       setModelOutput(modelOutput);
-      console.log(modelOutput);
     }
 
     init();
   }, [flask, instanceId]);
+
+  const save = async (input: Partial<EvaluationInput>) => {
+    if (!modelOutput) return false;
+
+    // append username
+    input = {...input, evaluator: username}
+
+      const save$ = flask.saveModelOutput(instanceId, modelOutput!, {
+        a_is_acceptable: input.a_is_acceptable,
+        b_is_acceptable: input.b_is_acceptable,
+        evaluator: username,
+        rank: input.rank
+      } as EvaluationInput)
+
+      const response = await lastValueFrom(save$)
+      const json = await response.json()
+      console.log(json)
+      return true;
+  }
 
   return (
     <div className="container flex flex-col lg:flex-row  mx-auto">
@@ -47,7 +65,7 @@ export default function Workspace({ instanceId }: WorkspaceParams) {
         <ModelOutput modelOutput={modelOutput} />
       </div>
       <div className="flex flex-col lg:w-2/6 p-4">
-      <Evaluation instanceId={currentInstanceId} nextInstance={next} previousInstance={prev} goToInstance={setCurrentInstanceId} />
+      <Evaluation flask={flask} instanceId={currentInstanceId} save={save} nextInstance={next} previousInstance={prev}  />
       </div>
   </div>
   )

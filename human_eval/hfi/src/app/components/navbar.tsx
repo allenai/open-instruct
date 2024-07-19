@@ -1,6 +1,7 @@
 "use client";
 import React, { useState } from 'react';
 import Modal from './modal';
+import { useRouter } from 'next/navigation';
 
 export default function Navbar() {
 
@@ -14,6 +15,38 @@ export default function Navbar() {
   const openShortcutsModal = () => setShortcutsModalOpen(true);
   const closeShortcutsModal = () => setShortcutsModalOpen(false);
 
+  const router = useRouter()
+
+  const logout = async () => {
+    try {
+        const response = await fetch('/api/logout', {
+            credentials: 'include',
+            method: 'POST',
+        });
+        await response.text();
+        console.log('logged out', response.ok);
+        
+        const cookiesToClear = [
+          'auth_verification',
+          'twk_idm_key',
+          'TawkConnectionTime',
+          'JSESSIONID',
+          'next-auth.csrf-token',
+          'next-auth.callback-url',
+          'next-auth.session-token',
+          'session',
+        ];
+      
+        cookiesToClear.forEach(cookieName => {
+          document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=None; Secure`;
+        });
+      
+        
+        router.push('/')
+    } catch (error) {
+        console.error('Failed to log out', error);
+    }
+};
 
   return (
     <nav className="bg-gray-800 p-4">
@@ -26,7 +59,7 @@ export default function Navbar() {
           <a href="#" onClick={openShortcutsModal} className="text-gray-300 hover:text-white">
             Shortcuts
           </a>
-          <a href="#" className="text-gray-300 hover:text-white">
+          <a href="#" onClick={logout} className="text-gray-300 hover:text-white">
             Log out
           </a>
         </div>
