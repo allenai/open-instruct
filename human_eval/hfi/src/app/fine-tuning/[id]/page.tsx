@@ -10,7 +10,6 @@ type HomeParams = {
 }
 
 const Home : FC<HomeParams> = ({ params }) => {
-  
   return (
     <>
     <Navbar />

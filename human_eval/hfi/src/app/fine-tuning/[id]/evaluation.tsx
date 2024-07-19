@@ -87,7 +87,7 @@ export default function Evaluation({ instanceId, save, nextInstance, previousIns
       nextQuestion: () => { setCurrentQuestion(2); },
       nextInstance: () => { nextInstance() },
       previousInstance: () => { previousInstance() },
-      nextInstanceIfSaved: () => { if (isSaved) { beginSave(); } else { shakeSubmit(); } },
+      nextInstanceIfSaved: () => { if (isSaved) { nextInstance(); } else { shakeSubmit(); } },
       save: beginSave,
       approve: (q) => { setEvalForQuestion(q, 'yes') },
       reject: (q) => { setEvalForQuestion(q, 'no') },

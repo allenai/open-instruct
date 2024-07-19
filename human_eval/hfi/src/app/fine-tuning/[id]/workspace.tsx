@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Evaluation from "./evaluation";
 import InstructionAndInput from "./instruction-and-input";
 import useFlaskService, { EvaluationInput, ModelOutput as ModelOutputType } from "../../services/flask.service";
-import { lastValueFrom } from "rxjs";
+import { firstValueFrom, lastValueFrom } from "rxjs";
 import ModelOutput from "./model-output";
 import { useRouter } from "next/navigation";
 
@@ -33,9 +33,12 @@ export default function Workspace({ instanceId }: WorkspaceParams) {
 
   useEffect(() => {
     const init = async () => {
-      let modelOutput = await lastValueFrom(flask.getModelOutputs(instanceId));
+      if (!instanceId) return;
+      if (!flask) return;
+  
+      let modelOutput = await firstValueFrom(flask.getModelOutputs(instanceId));
       setModelOutput(modelOutput);
-      let authdUser = await lastValueFrom(flask.getAuthenticatedUser())
+      let authdUser = await firstValueFrom(flask.getAuthenticatedUser())
       setUsername(authdUser)
     }
 
