@@ -51,7 +51,7 @@ export default function Navbar() {
   return (
     <nav className="bg-gray-800 p-4">
       <div className="container mx-auto flex justify-between items-center">
-          <a className="text-white text-lg font-bold" href='/fine-tuning'>🕵 &nbsp; Human Evaluation</a>
+          <a className="text-white text-lg font-bold cursor-pointer" >🕵 &nbsp; Human Evaluation</a>
         <div className="space-x-8 text-sm">
           <a href="#" onClick={openFeedbackModal} className="text-gray-300 hover:text-white">
             Report
