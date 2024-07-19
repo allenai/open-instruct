@@ -1,4 +1,4 @@
-import { Observable, defer, from , concatMap} from 'rxjs';
+import { Observable, defer, from , concatMap, map} from 'rxjs';
 
 export type ModelOutput = {
   completions: {
@@ -18,6 +18,17 @@ export type EvaluationInput = {
 export class FlaskService {
   constructor() {
 
+  }
+
+  getAuthenticatedUser(): Observable<string> {
+    const get$ = defer(() => from(fetch('/flask/api/user', {
+      credentials: 'include',
+    })));
+
+    return get$.pipe(
+      concatMap(r => r.json() as Promise<{username: string}>),
+      map(r => r.username),
+    )
   }
 
   getModelOutputs(id: number): Observable<ModelOutput>{

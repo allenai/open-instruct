@@ -3,11 +3,16 @@ import { useEffect, useState } from "react";
 
 import Form from './login-form';
 import { useRouter } from "next/navigation";
+import useFlaskService from "../services/flask.service";
+import { firstValueFrom } from "rxjs";
+
+export type LoginState = 'loading'|'login'|'signup'|'redirecting'
 
 export default function Login({backendUrl}: {backendUrl: string}) {
 
-    const [formState, setFormState] = useState<'login'|'signup'>('login')
+    const [formState, setFormState] = useState<LoginState>('loading')
     const router = useRouter()
+    const flask = useFlaskService()
 
     const toggleState = () => {
         const newState = (formState === 'login') ? 'signup' : 'login';
@@ -17,25 +22,40 @@ export default function Login({backendUrl}: {backendUrl: string}) {
     const [sessionData, setSessionData] = useState<string | null>(null);
 
     useEffect(() => {
-        const fetchSessionData = async () => {
+        const getUser = async () => {
             try {
-                const response = await fetch('/flask/api/user', {
-                credentials: 'include',
-            });
-            const data = await response.json();
-            if (response.ok && data.username) {
-                router.push('/fine-tuning/1')
-                return;
+                const user$ = flask.getAuthenticatedUser()
+                const user = await firstValueFrom(user$)
+
+                if (user) {
+                    setFormState('redirecting')
+                    setSessionData(user);
+                    router.push('/fine-tuning/1')
+                    return;
+                } 
+            } catch (e) {
+                // Python returns a template, not aJSON response
+                const knownError = e instanceof Error && e.message.includes('Unexpected token');
+                if (!knownError) { console.error(e); }
             }
-            setSessionData(data.user);
-            
-            } catch (error) {
-            console.error('Failed to fetch session data', error);
-            }
+            setFormState('login')
+            console.error('Failed to get authenticated user; please log in');
         };
     
-    fetchSessionData();
-    }, [router]);
+    getUser();
+    }, [router, flask]);
+
+    if (formState == 'redirecting') {
+        return <>
+        <div className="row">
+            <div id="nav">
+                {/* style="text-decoration: none" */}
+                <h2 className="text-center" id="title"><a href="/">🕵 Human Evaluation</a></h2>
+                <p className="text-center my-2">Redirecting...</p>
+            </div>
+        </div>
+        </>;
+    }
     
     
   return (

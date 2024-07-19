@@ -1,8 +1,17 @@
 "use client"
-export default function Form({ state, backendUrl }: {state: 'login'|'signup', backendUrl: string}) {
+
+import { LoginState } from "./login-page";
+
+export default function Form({ state, backendUrl }: {state: LoginState, backendUrl: string}) {
 
   let buttonLabel = (state === "login") ? 'Login' : 'Sign up';
   let formAction = (state === "login") ? '/flask/login' : '/flask/signup';
+
+  if (state === 'loading') {
+    return <>
+        <p>Loading...</p>
+    </>
+  }
 
   return (
   <form className="m-5" id="authForm" action={formAction} method="post">

@@ -15,7 +15,7 @@ const Home : FC<HomeParams> = ({ params }) => {
     <>
     <Navbar />
     <div className="flex flex-row w-full">
-        <Workspace username="darrensapalo" instanceId={Number(params.id)} />
+        <Workspace instanceId={Number(params.id)} />
     </div>
     </>
   );

@@ -9,10 +9,9 @@ import { useRouter } from "next/navigation";
 
 export type WorkspaceParams = {
   instanceId: number
-  username: string
 }
 
-export default function Workspace({ instanceId, username }: WorkspaceParams) {
+export default function Workspace({ instanceId }: WorkspaceParams) {
 
   const [currentInstanceId, setCurrentInstanceId ] = useState(instanceId)
   const flask = useFlaskService()
