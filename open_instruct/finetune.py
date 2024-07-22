@@ -373,7 +373,20 @@ def main():
 
     # set the tokenizer chat template to the tulu format
     # this makes evaluation/etc easier down the line.
-    tokenizer.chat_template = "{% for message in messages %}\n{% if message['role'] == 'user' %}\n{{ '<|user|>\n' + message['content'] }}\n{% elif message['role'] == 'assistant' %}\n{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n{% endif %}\n{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n{% endif %}\n{% endfor %}"  # noqa: E501
+    chat_template = (
+        "{% for message in messages %}\n"
+        "{% if message['role'] == 'system' %}\n"
+        "{{ '<|system|>\n' + message['content'] }}\n"
+        "{% elif message['role'] == 'user' %}\n"
+        "{{ '<|user|>\n' + message['content'] }}\n"
+        "{% elif message['role'] == 'assistant' %}\n"
+        "{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n"
+        "{% endif %}\n"
+        "{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n"
+        "{% endif %}\n"
+        "{% endfor %}"
+    )
+    tokenizer.chat_template = chat_template
     if args.add_bos:
         # also add bos in the chat template
         tokenizer.chat_template = "{{ bos_token }}" + tokenizer.chat_template
