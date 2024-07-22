@@ -20,6 +20,7 @@ from .utils import ArgumentParserPlus, FlatArguments, get_datasets
 # Run as module for local imports, e.g.:
 # python -m open_instruct.mix_data configs/train_configs/sft/default.yaml --save_data_dir=output/tmp/
 
+
 def main():
     parser = ArgumentParserPlus((FlatArguments))
     args = parser.parse()
@@ -28,17 +29,18 @@ def main():
     assert args.dataset_mixer is not None, "data_mixer is required in config"
 
     raw_datasets = get_datasets(
-            args.dataset_mixer,
-            configs=args.dataset_config_name,
-            splits=["train"],
-            save_data_dir=args.dataset_mix_dir, # location where dataset is saved as json
-            columns_to_keep=["messages"],
-            need_columns=["messages"],
-        )
-    
+        args.dataset_mixer,
+        configs=args.dataset_config_name,
+        splits=["train"],
+        save_data_dir=args.dataset_mix_dir,  # location where dataset is saved as json
+        columns_to_keep=["messages"],
+        need_columns=["messages"],
+    )
+
     # print first 5 samples of dataset
     for i in range(5):
-        print(raw_datasets['train'][i])
+        print(raw_datasets["train"][i])
+
 
 if __name__ == "__main__":
     main()
