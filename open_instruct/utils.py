@@ -147,6 +147,10 @@ def get_datasets(
     if configs is not None and len(configs) != len(dataset_mixer):
         raise ValueError("The number of given dataset config names must be the same as the given number of datasets.")
 
+    # print save location
+    if save_data_dir:
+        print(f"Saving mixed dataset to {save_data_dir}")
+
     raw_datasets = DatasetDict()
     raw_train_datasets = []
     raw_val_datasets = []
@@ -164,6 +168,10 @@ def get_datasets(
                 except DatasetGenerationError:
                     # If not, check local dataset
                     dataset = load_from_disk(os.path.join(ds, split))
+
+            # shuffle dataset if set
+            if shuffle:
+                dataset = dataset.shuffle(seed=42)
 
             # assert that needed columns are present
             if need_columns:
@@ -236,21 +244,15 @@ def get_datasets(
                 train_subset = dataset.select(range(int(frac_or_samples * len(dataset))))
             train_subsets.append(train_subset)
 
-        # Shuggle final datasets
-        if shuffle:
-            raw_datasets["train"] = concatenate_datasets(train_subsets).shuffle(seed=42)
-        else:
-            raw_datasets["train"] = concatenate_datasets(train_subsets)
+        raw_datasets["train"] = concatenate_datasets(train_subsets)
 
     # No subsampling for test datasets to enable fair comparison across models
     if len(raw_val_datasets) > 0:
         for dataset in raw_val_datasets:
             # cast features (TODO, add more feature regularization)
             dataset = dataset.cast(target_features)
-        if shuffle:
-            raw_datasets["test"] = concatenate_datasets(raw_val_datasets).shuffle(seed=42)
-        else:
-            raw_datasets["test"] = concatenate_datasets(raw_val_datasets)
+
+        raw_datasets["test"] = concatenate_datasets(raw_val_datasets)
 
     if len(raw_datasets) == 0:
         raise ValueError(
