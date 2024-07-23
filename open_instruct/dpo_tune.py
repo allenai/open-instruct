@@ -33,7 +33,6 @@ from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import InitProcessGroupKwargs, set_seed
 from datasets import load_dataset
-from dpo_utils import DataCollatorForSeq2SeqDPO, concatenated_forward, dpo_loss
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
@@ -50,6 +49,7 @@ from transformers import (
     get_scheduler,
 )
 
+from open_instruct.dpo_utils import DataCollatorForSeq2SeqDPO, concatenated_forward, dpo_loss
 from open_instruct.utils import ArgumentParserPlus, FlatArguments
 
 logger = get_logger(__name__)
@@ -246,7 +246,7 @@ def main():
         data_files = {}
         dataset_args = {}
         if args.train_file is not None:
-            data_files["train_prefs"] = args.train_file
+            data_files["train"] = args.train_file
         raw_datasets = load_dataset(
             "json",
             data_files=data_files,
@@ -290,7 +290,6 @@ def main():
                     args.model_name_or_path,
                     from_tf=bool(".ckpt" in args.model_name_or_path),
                     config=config,
-                    load_in_4bit=True,
                     trust_remote_code=args.trust_remote_code,
                     quantization_config=bnb_config,
                     device_map=device_map,
@@ -379,12 +378,12 @@ def main():
 
     # Preprocessing the datasets.
     if (
-        "prompt" in raw_datasets["train_prefs"].column_names
-        and "completion" in raw_datasets["train_prefs"].column_names
+        "prompt" in raw_datasets["train"].column_names
+        and "completion" in raw_datasets["train"].column_names
     ):
         raise ValueError("Sorry, prompt-completion format is not supported for DPO training.")
     elif (
-        "chosen" in raw_datasets["train_prefs"].column_names and "rejected" in raw_datasets["train_prefs"].column_names
+        "chosen" in raw_datasets["train"].column_names and "rejected" in raw_datasets["train"].column_names
     ):
         encode_function = partial(
             encode_with_messages_format,
@@ -396,13 +395,13 @@ def main():
         raise ValueError("You need to have 'chosen' and 'rejected in your column names.")
 
     with accelerator.main_process_first():
-        lm_datasets = raw_datasets["train_prefs"].map(
+        lm_datasets = raw_datasets["train"].map(
             encode_function,
             batched=False,
             num_proc=args.preprocessing_num_workers,
             remove_columns=[
                 name
-                for name in raw_datasets["train_prefs"].column_names
+                for name in raw_datasets["train"].column_names
                 if name
                 not in [
                     "chosen_input_ids",
@@ -648,10 +647,13 @@ def main():
         accelerator.end_training()
 
     if args.output_dir is not None:
-        accelerator.wait_for_everyone()
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)
         save_with_accelerate(accelerator, model, tokenizer, args.output_dir, args)
+
+    accelerator.wait_for_everyone()
+    if args.with_tracking:
+        accelerator.end_training()
 
 
 if __name__ == "__main__":
