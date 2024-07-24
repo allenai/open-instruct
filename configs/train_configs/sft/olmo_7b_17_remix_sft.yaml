@@ -9,6 +9,7 @@ dataset_mixer:
   allenai/wildjailbreak: 262000
   /net/nfs.cirrascale/mosaic/oe-safety-datasets/vanilla_harmful_v.03/sampled_data/gpt-3.5-turbo_synthetic_harm_v03.jsonl: 21876
   /net/nfs.cirrascale/mosaic/oe-safety-datasets/wildchat_lmsys_sexual/gpt4_lmsys_wildchat_dedup_50ksampled.jsonl: 16888
+  allenai/tulu-v2-sft-mixture: 326154
 max_seq_length: 4096 # Note, reduced from 8192 to fit on one GPU with DeepSpeed Stage3
 preprocessing_num_workers: 128
 per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
