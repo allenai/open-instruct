@@ -1,10 +1,10 @@
 # taken and modified from https://github.com/huggingface/trl/blob/main/trl/
-from dataclasses import dataclass
 import gc
 import math
 import os
 import time
 from collections import OrderedDict, defaultdict
+from dataclasses import dataclass
 from typing import Dict, Literal, Optional, Tuple, Union
 
 import numpy as np
@@ -17,27 +17,28 @@ from accelerate.utils import broadcast, gather_object
 from datasets import Dataset
 from torch.utils.data import DataLoader
 from transformers import (
-    TrainingArguments,
     DataCollatorWithPadding,
     GenerationConfig,
     PreTrainedTokenizer,
     Trainer,
     TrainerControl,
     TrainerState,
+    TrainingArguments,
 )
 from transformers.integrations import get_reporting_integration_callbacks
 from transformers.trainer_callback import CallbackHandler, DefaultFlowCallback
 
 from .model_utils import (
-    unwrap_model_for_generation, disable_dropout_in_model,
+    batch_generation,
+    disable_dropout_in_model,
+    exact_div,
     first_true_indices,
     forward,
     get_reward,
     prepare_deepspeed,
     print_rich_table,
     truncate_response,
-    batch_generation,
-    exact_div,
+    unwrap_model_for_generation,
 )
 
 
@@ -106,6 +107,7 @@ class OnlineDPOConfig(TrainingArguments):
     """the mini batch size per GPU"""
     mini_batch_size: Optional[int] = None
     """the mini batch size across GPUs"""
+
 
 INVALID_LOGPROB = 1.0
 
@@ -489,18 +491,18 @@ class OnlineDPOTrainer(Trainer):
                                 chosen_rewards = self.beta * (chosen_logprobs_sum - chosen_ref_logprobs_sum)
                                 rejected_rewards = self.beta * (rejected_logprobs_sum - rejected_ref_logprobs_sum)
                                 loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = loss
-                                chosen_rewards_stats[
-                                    epoch_idx, minibatch_idx, gradient_accumulation_idx
-                                ] = chosen_rewards.mean()
-                                rejected_rewards_stats[
-                                    epoch_idx, minibatch_idx, gradient_accumulation_idx
-                                ] = rejected_rewards.mean()
-                                chosen_logprobs_stats[
-                                    epoch_idx, minibatch_idx, gradient_accumulation_idx
-                                ] = chosen_logprobs_sum.mean()
-                                rejected_logprobs_stats[
-                                    epoch_idx, minibatch_idx, gradient_accumulation_idx
-                                ] = rejected_logprobs_sum.mean()
+                                chosen_rewards_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = (
+                                    chosen_rewards.mean()
+                                )
+                                rejected_rewards_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = (
+                                    rejected_rewards.mean()
+                                )
+                                chosen_logprobs_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = (
+                                    chosen_logprobs_sum.mean()
+                                )
+                                rejected_logprobs_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = (
+                                    rejected_logprobs_sum.mean()
+                                )
                         gradient_accumulation_idx += 1
                     minibatch_idx += 1
                     self.state.global_step += 1
@@ -545,7 +547,6 @@ class OnlineDPOTrainer(Trainer):
                 self.log(metrics)
 
             del (kl, mean_kl, mean_entropy, scores, scores_margin)
-
 
     def generate_completions(self, sampling: bool = False):
         args = self.args

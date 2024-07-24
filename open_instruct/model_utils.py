@@ -14,26 +14,30 @@
 # limitations under the License.
 
 
-from dataclasses import dataclass, field
 import itertools
-from typing import List, Optional, Tuple, Union
 from contextlib import contextmanager
-from accelerate import Accelerator
-from deepspeed.runtime.engine import DeepSpeedEngine
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple, Union
+
+import deepspeed
 import pandas as pd
 import torch
-from torch.nn.parallel.distributed import DistributedDataParallel
 import transformers
-import deepspeed
+from accelerate import Accelerator
 from accelerate.state import AcceleratorState
+from deepspeed.runtime.engine import DeepSpeedEngine
 from rich.console import Console
 from rich.table import Table
+from torch.nn.parallel.distributed import DistributedDataParallel
+
 
 def get_all_parameters(sub_module, recurse=False):
     return itertools.chain(sub_module.named_parameters(recurse=recurse), sub_module.ds_external_parameters())
 
+
 def iter_params(module, recurse=False):
     return [param for _, param in get_all_parameters(module, recurse)]
+
 
 def remove_hooks(model: "DeepSpeedEngine") -> None:
     """Removes the optimizer hooks from a DeepSpeed ZeRO-3 model."""
@@ -93,7 +97,6 @@ def exact_div(a, b, custom_error_message=""):
     if a != q * b:
         raise ValueError(f"{custom_error_message}, inexact division: {a} / {b} = {a / b}")
     return q
-
 
 
 def first_true_indices(bools: torch.Tensor, dtype=torch.long):
@@ -339,6 +342,7 @@ def batch_generation(
         logitss.append(logits)
     return torch.cat(query_responses, 0), torch.cat(logitss, 0)
 
+
 def print_rich_table(df: pd.DataFrame) -> Table:
     console = Console()
     table = Table(show_lines=True)
@@ -348,6 +352,7 @@ def print_rich_table(df: pd.DataFrame) -> Table:
         table.add_row(*row.astype(str).tolist())
     console.print(table)
 
+
 CHAT_TEMPLATES = {
     "simple_concat": "{% for message in messages %}{{message['content']}}{% endfor %}{{eos_token}}",
     "simple_concat_with_space": "{% for message in messages %}{{' ' if not loop.first else ''}}{{message['content']}}{% endfor %}{{eos_token}}",
@@ -355,7 +360,6 @@ CHAT_TEMPLATES = {
     "simple_chat": "{% for message in messages %}{{'\n\n' if not loop.first else ''}}{{message['role']|capitalize + ': ' +message['content']}}{% endfor %}{{eos_token}}",
     "zephyr": """{% for message in messages %}\n{% if message['role'] == 'user' %}\n{{ '<|user|>\n' + message['content'] + eos_token }}\n{% elif message['role'] == 'system' %}\n{{ '<|system|>\n' + message['content'] + eos_token }}\n{% elif message['role'] == 'assistant' %}\n{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n{% endif %}\n{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n{% endif %}\n{% endfor %}""",
 }
-
 
 
 @dataclass

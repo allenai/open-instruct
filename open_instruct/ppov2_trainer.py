@@ -1,10 +1,10 @@
 # taken and modified from https://github.com/huggingface/trl/blob/main/trl/
-from dataclasses import dataclass
 import gc
 import math
 import os
 import time
 from collections import OrderedDict, defaultdict
+from dataclasses import dataclass
 from typing import Dict, Literal, Optional, Tuple, Union
 
 import numpy as np
@@ -17,27 +17,28 @@ from accelerate.utils import broadcast, gather_object
 from datasets import Dataset
 from torch.utils.data import DataLoader
 from transformers import (
-    TrainingArguments,
     DataCollatorWithPadding,
     GenerationConfig,
     PreTrainedTokenizer,
     Trainer,
     TrainerControl,
     TrainerState,
+    TrainingArguments,
 )
 from transformers.integrations import get_reporting_integration_callbacks
 from transformers.trainer_callback import CallbackHandler, DefaultFlowCallback
 
 from .model_utils import (
-    unwrap_model_for_generation, disable_dropout_in_model,
+    batch_generation,
+    disable_dropout_in_model,
+    exact_div,
     first_true_indices,
     forward,
     get_reward,
     prepare_deepspeed,
     print_rich_table,
     truncate_response,
-    batch_generation,
-    exact_div,
+    unwrap_model_for_generation,
 )
 
 
@@ -115,8 +116,8 @@ class PPOv2Config(TrainingArguments):
     mini_batch_size: Optional[int] = None
     """the mini batch size across GPUs"""
 
-INVALID_LOGPROB = 1.0
 
+INVALID_LOGPROB = 1.0
 
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[bool] = None) -> torch.Tensor:
@@ -567,14 +568,14 @@ class PPOv2Trainer(Trainer):
                                 entropy = torch.logsumexp(logits, dim=-1) - torch.sum(prob_dist * logits, dim=-1)
                                 approxkl = 0.5 * (logprobs_diff**2).mean()
                                 approxkl_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = approxkl
-                                pg_clipfrac_stats[
-                                    ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx
-                                ] = pg_clipfrac
+                                pg_clipfrac_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = (
+                                    pg_clipfrac
+                                )
                                 pg_loss_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = pg_loss
                                 vf_loss_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = vf_loss
-                                vf_clipfrac_stats[
-                                    ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx
-                                ] = vf_clipfrac
+                                vf_clipfrac_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = (
+                                    vf_clipfrac
+                                )
                                 entropy_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = entropy.mean()
                                 ratio_stats[ppo_epoch_idx, minibatch_idx, gradient_accumulation_idx] = ratio.mean()
                         gradient_accumulation_idx += 1
@@ -644,7 +645,6 @@ class PPOv2Trainer(Trainer):
                 returns,
             )
             torch.cuda.empty_cache()
-
 
     def generate_completions(self, sampling: bool = False):
         args = self.args
