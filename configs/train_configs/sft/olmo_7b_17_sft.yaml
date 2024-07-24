@@ -3,7 +3,7 @@ model_revision: main
 use_flash_attn: true
 tokenizer_name: allenai/OLMo-1.7-7B-hf
 use_slow_tokenizer: false # olmo models only use fast tokenizers
-dataset_name: allenai/tulu-v2-sft-mixture
+dataset_name: allenai/tulu-v2-sft-mixture-olmo-4096
 max_seq_length: 4096
 preprocessing_num_workers: 128
 per_device_train_batch_size: 1 # note, this is set up for 8 GPUs

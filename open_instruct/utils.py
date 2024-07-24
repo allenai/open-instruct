@@ -55,6 +55,83 @@ def is_openai_format(messages: Any) -> bool:
     return False
 
 
+# functions for handling different formats of messages
+def instruction_output_to_messages(example):
+    """
+    Convert an instruction in inst-output to a list of messages.
+    e.g. vicgalle/alpaca-gpt4"""
+    messages = [
+        {"role": "user", "content": example["instruction"]},
+        {"role": "assistant", "content": example["output"]},
+    ]
+    example["messages"] = messages
+    return example
+
+
+def query_answer_to_messages(example):
+    """
+    Convert a query-answer pair to a list of messages.
+    e.g. m-a-p/CodeFeedback-Filtered-Instruction"""
+    messages = [
+        {"role": "user", "content": example["query"]},
+        {"role": "assistant", "content": example["answer"]},
+    ]
+    example["messages"] = messages
+    return example
+
+
+def query_response_to_messages(example):
+    """
+    Convert a query-response pair to a list of messages.
+    e.g. meta-math/MetaMathQA"""
+    messages = [
+        {"role": "user", "content": example["query"]},
+        {"role": "assistant", "content": example["response"]},
+    ]
+    example["messages"] = messages
+    return example
+
+
+def prompt_completion_to_messages(example):
+    """
+    Convert a prompt-completion pair to a list of messages.
+    e.g. HuggingFaceH4/CodeAlpaca_20K"""
+    messages = [
+        {"role": "user", "content": example["prompt"]},
+        {"role": "assistant", "content": example["completion"]},
+    ]
+    example["messages"] = messages
+    return example
+
+
+def question_response_to_messages(example):
+    """
+    Convert a question-response pair to a list of messages.
+    e.g. Open-Orca/OpenOrca"""
+    messages = [
+        {"role": "user", "content": example["question"]},
+        {"role": "assistant", "content": example["response"]},
+    ]
+    example["messages"] = messages
+    return example
+
+
+def conversations_to_messages(example):
+    """
+    Convert from conversations format to messages.
+
+    E.g. change "from": "user" to "role": "user"
+        and "value" to "content"
+        and "gpt" to "assistant"
+
+    WizardLMTeam/WizardLM_evol_instruct_V2_196k
+    """
+    name_mapping = {"gpt": "assistant", "user": "user", "human": "user"}
+    messages = [{"role": name_mapping[conv["from"]], "content": conv["value"]} for conv in example["conversations"]]
+    example["messages"] = messages
+    return example
+
+
 def get_datasets(
     dataset_mixer: dict,
     splits: Optional[List[str]] = None,
@@ -94,6 +171,10 @@ def get_datasets(
     if configs is not None and len(configs) != len(dataset_mixer):
         raise ValueError("The number of given dataset config names must be the same as the given number of datasets.")
 
+    # print save location
+    if save_data_dir:
+        print(f"Saving mixed dataset to {save_data_dir}")
+
     raw_datasets = DatasetDict()
     raw_train_datasets = []
     raw_val_datasets = []
@@ -112,13 +193,61 @@ def get_datasets(
                     # If not, check local dataset
                     dataset = load_from_disk(os.path.join(ds, split))
 
+            # shuffle dataset if set
+            if shuffle:
+                dataset = dataset.shuffle(seed=42)
+
             # assert that needed columns are present
             if need_columns:
                 if not all(col in dataset.column_names for col in need_columns):
-                    raise ValueError(f"Needed column {need_columns} not found in dataset {ds.coulmn_names}.")
+                    raise ValueError(f"Needed column {need_columns} not found in dataset {dataset.coulmn_names}.")
+
+            # handle per-case conversions
+            # if "instruction" and "output" columns are present and "messages" is not, convert to messages
+            if (
+                "instruction" in dataset.column_names
+                and "output" in dataset.column_names
+                and "messages" not in dataset.column_names
+            ):
+                dataset = dataset.map(instruction_output_to_messages, num_proc=10)
+            elif (
+                "prompt" in dataset.column_names
+                and "completion" in dataset.column_names
+                and "messages" not in dataset.column_names
+            ):
+                dataset = dataset.map(prompt_completion_to_messages, num_proc=10)
+            elif "conversations" in dataset.column_names and "messages" not in dataset.column_names:
+                dataset = dataset.map(conversations_to_messages, num_proc=10)
+            elif (
+                "question" in dataset.column_names
+                and "response" in dataset.column_names
+                and "messages" not in dataset.column_names
+            ):
+                dataset = dataset.map(question_response_to_messages, num_proc=10)
+            elif (
+                "query" in dataset.column_names
+                and "answer" in dataset.column_names
+                and "messages" not in dataset.column_names
+            ):
+                dataset = dataset.map(query_answer_to_messages, num_proc=10)
+            elif (
+                "query" in dataset.column_names
+                and "response" in dataset.column_names
+                and "messages" not in dataset.column_names
+            ):
+                dataset = dataset.map(query_response_to_messages, num_proc=10)
+
+            # if id not in dataset, create it as ds-{index}
+            if "id" not in dataset.column_names:
+                id_col = [f"{ds}_{i}" for i in range(len(dataset))]
+                dataset = dataset.add_column("id", id_col)
 
             # Remove redundant columns to avoid schema conflicts on load
-            dataset = dataset.remove_columns([col for col in dataset.column_names if col not in columns_to_keep])
+            dataset = dataset.remove_columns(
+                [col for col in dataset.column_names if col not in (columns_to_keep + ["id"])]
+            )
+
+            # add tag to the dataset corresponding to where it was sourced from, for
             if "train" in split:
                 raw_train_datasets.append(dataset)
             elif "test" in split:
@@ -126,8 +255,14 @@ def get_datasets(
             else:
                 raise ValueError(f"Split type {split} not recognized as one of test or train.")
 
-    # target features are the features of the first dataset post load
-    target_features = raw_train_datasets[0].features
+    if len(raw_val_datasets) == 0 and len(raw_train_datasets) == 0:
+        raise ValueError("No datasets loaded.")
+    elif len(raw_train_datasets) == 0:
+        # target features are the features of the first dataset post load
+        target_features = raw_val_datasets[0].features
+    else:
+        # target features are the features of the first dataset post load
+        target_features = raw_train_datasets[0].features
 
     if any(frac_or_samples < 0 for frac_or_samples in frac_or_sample_list):
         raise ValueError("Dataset fractions / lengths cannot be negative.")
@@ -154,21 +289,15 @@ def get_datasets(
                 train_subset = dataset.select(range(int(frac_or_samples * len(dataset))))
             train_subsets.append(train_subset)
 
-        # Shuggle final datasets
-        if shuffle:
-            raw_datasets["train"] = concatenate_datasets(train_subsets).shuffle(seed=42)
-        else:
-            raw_datasets["train"] = concatenate_datasets(train_subsets)
+        raw_datasets["train"] = concatenate_datasets(train_subsets)
 
     # No subsampling for test datasets to enable fair comparison across models
     if len(raw_val_datasets) > 0:
         for dataset in raw_val_datasets:
             # cast features (TODO, add more feature regularization)
             dataset = dataset.cast(target_features)
-        if shuffle:
-            raw_datasets["test"] = concatenate_datasets(raw_val_datasets).shuffle(seed=42)
-        else:
-            raw_datasets["test"] = concatenate_datasets(raw_val_datasets)
+
+        raw_datasets["test"] = concatenate_datasets(raw_val_datasets)
 
     if len(raw_datasets) == 0:
         raise ValueError(
@@ -178,7 +307,16 @@ def get_datasets(
 
     # optional save
     if save_data_dir:
-        raw_datasets.save_to_disk(save_data_dir)
+        for split in raw_datasets:
+            raw_datasets[split].to_json(save_data_dir + f"mixed_ds_{split}.json")
+
+    # remove id column
+    if len(raw_train_datasets) > 0:
+        if "id" in raw_datasets["train"].column_names:
+            raw_datasets["train"] = raw_datasets["train"].remove_columns("id")
+    if len(raw_val_datasets) > 0:
+        if "id" in raw_datasets["test"].column_names:
+            raw_datasets["test"] = raw_datasets["test"].remove_columns("id")
 
     return raw_datasets
 
