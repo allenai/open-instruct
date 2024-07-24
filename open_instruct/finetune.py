@@ -46,7 +46,7 @@ from transformers import (
     get_scheduler,
 )
 
-from open_instruct.utils import ArgumentParserPlus, FlatArguments
+from open_instruct.utils import ArgumentParserPlus, FlatArguments, get_datasets
 
 logger = get_logger(__name__)
 
@@ -221,6 +221,16 @@ def main():
         raw_datasets = load_dataset(
             args.dataset_name,
             args.dataset_config_name,
+        )
+    elif args.dataset_mixer is not None:
+        # mixing datasets via config
+        raw_datasets = get_datasets(
+            args.dataset_mixer,
+            configs=args.dataset_config_name,
+            splits=["train"],
+            save_data_dir=args.dataset_mix_dir,
+            columns_to_keep=["messages"],
+            need_columns=["messages"],
         )
     else:
         data_files = {}
