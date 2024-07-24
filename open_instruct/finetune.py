@@ -249,6 +249,7 @@ def main():
             args.config_name,
             trust_remote_code=args.trust_remote_code,
             revision=args.model_revision,
+            output_router_logits=True,
             token=os.getenv("HF_TOKEN", None),
         )
     elif args.model_name_or_path:
@@ -256,6 +257,7 @@ def main():
             args.model_name_or_path,
             trust_remote_code=args.trust_remote_code,
             revision=args.model_revision,
+            output_router_logits=True,
             token=os.getenv("HF_TOKEN", None),
         )
     else:
