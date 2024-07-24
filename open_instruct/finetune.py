@@ -609,7 +609,7 @@ def main():
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
             with accelerator.accumulate(model):
-                outputs = model(**batch, use_cache=False)
+                outputs = model(**batch, use_cache=False, output_router_logits=True)
                 if args.reduce_loss == "mean":
                     loss = outputs.loss
                 else:

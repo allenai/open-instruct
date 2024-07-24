@@ -128,6 +128,7 @@ RUN pip install flash-attn==2.5.8 --no-build-isolation
 # note that image is just for eval.
 COPY requirements-olmo.txt .
 RUN pip install -r requirements-olmo.txt
+RUN https://github.com/Muennighoff/transformers.git@olmoe
 
 # NLTK download
 RUN python -m nltk.downloader punkt
