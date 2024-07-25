@@ -3,7 +3,7 @@ import subprocess
 import yaml
 from datetime import datetime
 import argparse
-import os 
+import re 
 import shlex
 
 def load_yaml(file_path):
@@ -53,8 +53,6 @@ def main():
     # Print unknown arguments
     print("Unknown arguments:", unknown_args)
 
-    # handle gpus as an unknown_arg
-    unknown_args["num_processes"] = args.num_gpus
         
     now = datetime.now().strftime("%m%d%Y%H%M%S")
     with open(args.default_beaker_config, 'r') as f:
@@ -123,13 +121,21 @@ def main():
         new_cmd_parts.append('open_instruct/finetune.py')
         for key, value in cmd_dict.items():
             new_cmd_parts.append(f'--{key}')
-            if value is not True:
+            # if string in [], expand args
+            if isinstance(value, list):
+                for v in value:
+                    new_cmd_parts.append(str(v))
+            elif value is not True:
                 new_cmd_parts.append(str(value))
 
         return ' '.join(new_cmd_parts)
 
     new_arguments = override_and_reconstruct_command(d1['tasks'][0]['arguments'][0], train_config, unknown_args)
     
+    # place --num_processes with args.num_gpus
+    # will be --num_processes {N} before
+    new_arguments = re.sub(r'--num_processes \d+', f'--num_processes {args.num_gpus}', new_arguments)
+
     model_name = get_model_name(new_arguments)
     # if model name has /, replace with _
     model_name = model_name.replace("/", "_")
