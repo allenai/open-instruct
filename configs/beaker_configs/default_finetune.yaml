@@ -8,7 +8,7 @@ tasks:
     command: [
       '/bin/sh', '-c'
     ]
-    arguments: ['accelerate launch
+    arguments: ['PYTHONPATH="/stage:$PYTHONPATH" accelerate launch
       --mixed_precision bf16
       --num_machines 1
       --num_processes 4

@@ -99,8 +99,8 @@ def main():
         script_index = cmd_parts.index('open_instruct/finetune.py')
 
         # Separate the command into pre-script and post-script parts
-        pre_script = cmd_parts[:2]  # 'accelerate launch'
-        pre_script_args = cmd_parts[2:script_index]
+        pre_script = cmd_parts[:3]  # 'accelerate launch'
+        pre_script_args = cmd_parts[3:script_index]
         post_script_args = cmd_parts[script_index+1:]
 
         # Parse arguments
@@ -108,12 +108,19 @@ def main():
         post_dict = parse_args(post_script_args)
 
         # Combine dictionaries and apply overrides
-        cmd_dict = {**pre_dict, **post_dict}
+        cmd_dict = {**post_dict}
         cmd_dict.update(train_config)
         cmd_dict.update(unknown_args)
-
+        
         # Reconstruct the command string
-        new_cmd_parts = pre_script + ['open_instruct/finetune.py']
+        new_cmd_parts = pre_script
+        # add pre python args
+        for key, value in pre_dict.items():
+            new_cmd_parts.append(f'--{key}')
+            if value is not True:
+                new_cmd_parts.append(str(value))
+        # add python job + post args
+        new_cmd_parts.append('open_instruct/finetune.py')
         for key, value in cmd_dict.items():
             new_cmd_parts.append(f'--{key}')
             if value is not True:
