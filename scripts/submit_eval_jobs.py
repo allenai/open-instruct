@@ -57,25 +57,25 @@ if args.beaker_image is not None:
 
 # modify here, or use "--experiments", for different set of experiments
 experiment_groups_default = [
-    # "mmlu_0shot",
-    # "mmlu_5shot",
-    # "gsm_direct",
-    # "gsm_cot",
-    # "bbh_direct",
-    # "bbh_cot",
-    # "tydiqa_goldp_1shot",
-    # "tydiqa_no_context_1shot",
-    # "codex_eval_temp_0.1",
-    # "codex_eval_temp_0.8",
-    # "codex_evalplus_temp_0.1",
-    # "codex_evalplus_temp_0.8",
-    # # "mbpp_evalplus_temp_0.1",
-    # # "mbpp_evalplus_temp_0.8",
-    # "ifeval",
-    # "trutufulqa",
-    # "toxigen",
-    # "xstest",
-    # "alpaca_eval",
+    "mmlu_0shot",
+    "mmlu_5shot",
+    "gsm_direct",
+    "gsm_cot",
+    "bbh_direct",
+    "bbh_cot",
+    "tydiqa_goldp_1shot",
+    "tydiqa_no_context_1shot",
+    "codex_eval_temp_0.1",
+    "codex_eval_temp_0.8",
+    "codex_evalplus_temp_0.1",
+    "codex_evalplus_temp_0.8",
+    # "mbpp_evalplus_temp_0.1",
+    # "mbpp_evalplus_temp_0.8",
+    "ifeval",
+    "trutufulqa",
+    "toxigen",
+    "xstest",
+    "alpaca_eval",
     "alpaca_eval_2",
 ]
 experiment_groups = args.experiments or experiment_groups_default
@@ -110,9 +110,8 @@ for experiment_group in experiment_groups:
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --eval_batch_size 4 \
-            --load_in_8bit \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "mmlu_5shot":
         task_spec['arguments'][0] = '''
@@ -123,9 +122,8 @@ for experiment_group in experiment_groups:
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --eval_batch_size 4 \
-            --load_in_8bit \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "bbh_direct":
         task_spec['arguments'][0] = '''
@@ -138,7 +136,7 @@ for experiment_group in experiment_groups:
             --max_num_examples_per_task 40 \
             --no_cot \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "bbh_cot":
         task_spec['arguments'][0] = '''
@@ -150,7 +148,7 @@ for experiment_group in experiment_groups:
             --tokenizer_name_or_path /model \
             --max_num_examples_per_task 40 \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "gsm_direct":
         task_spec['arguments'][0] = '''
@@ -164,8 +162,12 @@ for experiment_group in experiment_groups:
             --n_shot 8 \
             --no_cot \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
+        if args.gsm_stop_at_double_newline:
+            # We need to final backslash in the command above so that there isn't a
+            # newline between this argument and the prior part of the command.
+            task_spec['arguments'][0] += " --stop_at_double_newline"
     elif experiment_group == "gsm_cot":
         task_spec['arguments'][0] = '''
             python -m eval.gsm.run_eval \
@@ -177,8 +179,23 @@ for experiment_group in experiment_groups:
             --tokenizer_name_or_path /model \
             --n_shot 8 \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         ''' 
+        if args.gsm_stop_at_double_newline:
+            task_spec['arguments'][0] += " --stop_at_double_newline"
+    elif experiment_group == "MATH_cot":
+        task_spec['arguments'][0] = '''
+            python -m eval.MATH.run_eval \
+            --data_dir /data/MATH/ \
+            --max_num_examples 200 \
+            --save_dir /output/ \
+            --use_vllm \
+            --model_name_or_path /model \
+            --tokenizer_name_or_path /model \
+            --n_shot 4 \
+            --use_chat_format \
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
+        '''
     elif experiment_group == "tydiqa_goldp_1shot":
         task_spec["arguments"][0] = '''
             python -m eval.tydiqa.run_eval \
@@ -191,7 +208,7 @@ for experiment_group in experiment_groups:
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "tydiqa_no_context_1shot":
         task_spec["arguments"][0] = '''
@@ -206,7 +223,7 @@ for experiment_group in experiment_groups:
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "codex_eval_temp_0.1":
         task_spec['arguments'][0] = '''
@@ -218,7 +235,7 @@ for experiment_group in experiment_groups:
             --save_dir /output/ \
             --use_vllm \
             --model_name_or_path /model \
-            --tokenizer_name_or_path /model
+            --tokenizer_name_or_path /model \
         '''
     elif experiment_group == "codex_eval_temp_0.8":
         task_spec['arguments'][0] = '''
@@ -230,12 +247,12 @@ for experiment_group in experiment_groups:
             --save_dir /output/ \
             --use_vllm \
             --model_name_or_path /model \
-            --tokenizer_name_or_path /model
+            --tokenizer_name_or_path /model \
         '''
     elif experiment_group == "codex_evalplus_temp_0.1":
         task_spec['arguments'][0] = '''
             python -m eval.codex_humaneval.run_eval \
-            --data_file /net/nfs.cirrascale/allennlp/hamishi/test/open-instruct/data/eval/codex_humaneval/HumanEvalPlus-OriginFmt.jsonl.gz \
+            --data_file /data/codex_humaneval/HumanEvalPlus-OriginFmt.jsonl.gz \
             --eval_pass_at_ks 1 5 10 20 \
             --unbiased_sampling_size_n 20 \
             --temperature 0.1 \
@@ -249,7 +266,7 @@ for experiment_group in experiment_groups:
     elif experiment_group == "codex_evalplus_temp_0.8":
         task_spec['arguments'][0] = '''
             python -m eval.codex_humaneval.run_eval \
-            --data_file /net/nfs.cirrascale/allennlp/hamishi/test/open-instruct/data/eval/codex_humaneval/HumanEvalPlus-OriginFmt.jsonl.gz \
+            --data_file /data/codex_humaneval/HumanEvalPlus-OriginFmt.jsonl.gz \
             --data_file_hep data/eval/codex_humaneval/humanevalpack.jsonl  \
             --eval_pass_at_ks 1 5 10 20 \
             --unbiased_sampling_size_n 20 \
@@ -296,7 +313,7 @@ for experiment_group in experiment_groups:
                 --tokenizer_name_or_path /model \
                 --use_chat_format \
                 --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
-                --use_vllm
+                --use_vllm \
         '''
     elif experiment_group == "trutufulqa":
         task_spec['arguments'][0] = '''
@@ -310,9 +327,8 @@ for experiment_group in experiment_groups:
             --hf_truth_model_name_or_path allenai/truthfulqa-truth-judge-llama2-7B \
             --hf_info_model_name_or_path allenai/truthfulqa-info-judge-llama2-7B \
             --eval_batch_size 20 \
-            --load_in_8bit \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "toxigen":
         task_spec['arguments'][0] = '''
@@ -324,7 +340,7 @@ for experiment_group in experiment_groups:
             --eval_batch_size 32 \
             --use_vllm \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "xstest":
         task_spec['arguments'][0] = '''
@@ -336,21 +352,18 @@ for experiment_group in experiment_groups:
             --eval_batch_size 32 \
             --use_vllm \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
     elif experiment_group == "alpaca_eval":
         task_spec['arguments'][0] = '''
-        python -m eval.alpaca_farm.run_eval \
+        IS_ALPACA_EVAL_2=False python -m eval.alpaca_farm.run_eval \
             --use_vllm \
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --save_dir /output/ \
             --use_chat_format \
-            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
-        # OLMo models can only output 2048 new tokens at most; default is 8192.
-        if "olmo" in model_info[0] or args.olmo:
-            task_spec['arguments'][0] += " --max_new_tokens 4096" # nol increased hardcode to 4096
     elif experiment_group == "alpaca_eval_2":
         task_spec['arguments'][0] = '''
         IS_ALPACA_EVAL_2=True python -m eval.alpaca_farm.run_eval \
