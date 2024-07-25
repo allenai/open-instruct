@@ -36,7 +36,6 @@ from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
     AutoTokenizer,
-    AutoTokenizerFast,
     BitsAndBytesConfig,
     DataCollatorForSeq2Seq,
     GPT2Tokenizer,
