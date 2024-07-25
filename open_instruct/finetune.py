@@ -36,6 +36,7 @@ from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
     AutoTokenizer,
+    AutoTokenizerFase,
     BitsAndBytesConfig,
     DataCollatorForSeq2Seq,
     GPT2Tokenizer,
@@ -276,17 +277,17 @@ def main():
 
     if args.tokenizer_name:
         tokenizer = AutoTokenizer.from_pretrained(
-            args.tokenizer_name,
+            "GPTNeoXTokenizerFast",
             trust_remote_code=args.trust_remote_code,
-            use_fast=not args.use_slow_tokenizer,
+            use_fast=True,
             revision=tokenizer_revision,
             token=os.getenv("HF_TOKEN", None),
         )
     elif args.model_name_or_path:
         tokenizer = AutoTokenizer.from_pretrained(
-            args.model_name_or_path,
+            "GPTNeoXTokenizerFast",
             trust_remote_code=args.trust_remote_code,
-            use_fast=not args.use_slow_tokenizer,
+            use_fast=True,
             revision=tokenizer_revision,
             token=os.getenv("HF_TOKEN", None),
         )
