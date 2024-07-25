@@ -63,8 +63,6 @@ class OnlineDPOConfig(TrainingArguments):
     """the number of debugging samples generations (i.e., `generate_completions` calls) throughout training"""
 
     # other config
-    base_model: str = "EleutherAI/pythia-160m"
-    """the name of the pretrained model to use"""
     response_length: int = 53
     """the length of the response"""
     stop_token: Optional[Literal["eos"]] = None
@@ -547,6 +545,9 @@ class OnlineDPOTrainer(Trainer):
                 self.log(metrics)
 
             del (kl, mean_kl, mean_entropy, scores, scores_margin)
+            if args.num_sample_generations > 0 and (update - 1) % self.sample_generations_freq == 0:
+                self.generate_completions(sampling=True)
+                torch.cuda.empty_cache()
 
     def generate_completions(self, sampling: bool = False):
         args = self.args
