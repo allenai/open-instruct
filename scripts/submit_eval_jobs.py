@@ -127,7 +127,7 @@ experiment_groups_default = [
     "mmlu_5shot",
     "gsm_direct",
     "gsm_cot",
-    "MATH_cot",
+    # "MATH_cot",
     "bbh_direct",
     "bbh_cot",
     "tydiqa_goldp_1shot",
