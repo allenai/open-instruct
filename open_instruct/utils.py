@@ -243,9 +243,9 @@ class FlatArguments:
         default="all",
         metadata={
             "help": "The integration(s) to report results and logs to. "
-                    "Can be a single string or a list of strings. "
-                    "Options are 'tensorboard', 'wandb', 'comet_ml', 'clearml', or 'all'. "
-                    "Specify multiple by listing them: e.g., ['tensorboard', 'wandb']"
+            "Can be a single string or a list of strings. "
+            "Options are 'tensorboard', 'wandb', 'comet_ml', 'clearml', or 'all'. "
+            "Specify multiple by listing them: e.g., ['tensorboard', 'wandb']"
         },
     )
     gradient_checkpointing: bool = field(
