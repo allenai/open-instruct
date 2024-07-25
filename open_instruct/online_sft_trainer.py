@@ -170,7 +170,6 @@ class OnlineSFTTrainer(Trainer):
             self.sample_generations_freq = max(1, args.num_total_batches // args.num_sample_generations)
         self.local_dataloader_batch_size = args.local_batch_size
 
-
         #########
         # setup model, optimizer, and others
         #########
@@ -385,8 +384,12 @@ class OnlineSFTTrainer(Trainer):
                 scores_per_query = scores.reshape(args.num_generation_per_prompt, args.local_batch_size)
                 best_idxes = scores_per_query.argmax(0)
                 worst_idxes = scores_per_query.argmin(0)
-                best_idxes_offset = best_idxes + torch.arange(args.local_batch_size, device=device) * args.num_generation_per_prompt
-                worst_idxes_offset = worst_idxes + torch.arange(args.local_batch_size, device=device) * args.num_generation_per_prompt
+                best_idxes_offset = (
+                    best_idxes + torch.arange(args.local_batch_size, device=device) * args.num_generation_per_prompt
+                )
+                worst_idxes_offset = (
+                    worst_idxes + torch.arange(args.local_batch_size, device=device) * args.num_generation_per_prompt
+                )
                 best_query_responses = query_responses[best_idxes_offset]
                 # worst_query_responses = query_responses[worst_idxes_offset] TODO: maybe interesting to see the worse responses.
                 best_scores = scores[best_idxes_offset]
@@ -422,7 +425,9 @@ class OnlineSFTTrainer(Trainer):
                             # but unlike `transformers` we mask the padding tokens via `ignore_index=-1`
                             shift_logits = lm_logits[..., :-1, :].contiguous()
                             shift_labels = labels[..., 1:].contiguous()
-                            loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1), ignore_index=-1)
+                            loss = F.cross_entropy(
+                                shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1), ignore_index=-1
+                            )
                             accelerator.backward(loss)
                             optimizer.step()
                             optimizer.zero_grad()
