@@ -351,6 +351,19 @@ for experiment_group in experiment_groups:
         # OLMo models can only output 2048 new tokens at most; default is 8192.
         if "olmo" in model_info[0] or args.olmo:
             task_spec['arguments'][0] += " --max_new_tokens 4096" # nol increased hardcode to 4096
+    elif experiment_group == "alpaca_eval_2":
+        task_spec['arguments'][0] = '''
+        IS_ALPACA_EVAL_2=True python -m eval.alpaca_farm.run_eval \
+            --use_vllm \
+            --model_name_or_path /model \
+            --tokenizer_name_or_path /model \
+            --save_dir /output/ \
+            --use_chat_format \
+            --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
+        '''
+        # OLMo models can only output 2048 new tokens at most; default is 8192.
+        if "olmo" in model_info[0] or args.olmo:
+            task_spec['arguments'][0] += " --max_new_tokens 4096" # nol increased hardcode to 4096
 
     else:
         raise ValueError("experiment_group not supported")
