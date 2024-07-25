@@ -4,7 +4,7 @@ budget: ai2/oe-adapt
 tasks:
   - name: open-instruct-finetune
     image:
-      beaker: hamishivi/open-instruct-public
+      beaker: nathanl/open_instruct_auto
     command: [
       '/bin/sh', '-c'
     ]
