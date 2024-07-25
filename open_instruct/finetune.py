@@ -276,7 +276,7 @@ def main():
 
     if args.tokenizer_name:
         tokenizer = AutoTokenizer.from_pretrained(
-            "GPTNeoXTokenizer",
+            args.tokenizer_name,
             trust_remote_code=args.trust_remote_code,
             use_fast=True,
             revision=tokenizer_revision,
@@ -284,7 +284,7 @@ def main():
         )
     elif args.model_name_or_path:
         tokenizer = AutoTokenizer.from_pretrained(
-            "GPTNeoXTokenizer",
+            args.model_name_or_path,
             trust_remote_code=args.trust_remote_code,
             use_fast=True,
             revision=tokenizer_revision,
