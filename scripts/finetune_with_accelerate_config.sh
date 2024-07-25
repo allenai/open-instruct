@@ -31,4 +31,5 @@ accelerate launch \
     --use_deepspeed \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     open_instruct/finetune.py \
-    "$2"
+    "$2" #\
+    #--report_to=tensorboard,wandb

@@ -16,7 +16,7 @@ import dataclasses
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Any, List, NewType, Optional, Tuple
+from typing import Any, List, NewType, Optional, Tuple, Union
 
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
@@ -528,11 +528,13 @@ class FlatArguments:
         default=False,
         metadata={"help": "Whether to enable experiment trackers for logging."},
     )
-    report_to: str = field(
+    report_to: Union[str, List[str]] = field(
         default="all",
         metadata={
-            "help": "The integration to report results and logs to."
-            "Options are 'tensorboard', 'wandb', 'comet_ml', 'clearml', or 'all'."
+            "help": "The integration(s) to report results and logs to. "
+            "Can be a single string or a list of strings. "
+            "Options are 'tensorboard', 'wandb', 'comet_ml', 'clearml', or 'all'. "
+            "Specify multiple by listing them: e.g., ['tensorboard', 'wandb']"
         },
     )
     gradient_checkpointing: bool = field(
