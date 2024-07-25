@@ -39,6 +39,7 @@ from transformers import (
     BitsAndBytesConfig,
     DataCollatorForSeq2Seq,
     GPT2Tokenizer,
+    GPTNeoXTokenizer,
     GPTNeoXTokenizerFast,
     LlamaTokenizer,
     LlamaTokenizerFast,
