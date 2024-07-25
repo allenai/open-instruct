@@ -71,11 +71,11 @@ experiment_groups_default = [
     "codex_evalplus_temp_0.8",
     # "mbpp_evalplus_temp_0.1",
     # "mbpp_evalplus_temp_0.8",
-    # "ifeval",
+    "ifeval",
     "trutufulqa",
     "toxigen",
-    # "xstest",
-    # "alpaca_eval",
+    "xstest",
+    "alpaca_eval",
 ]
 experiment_groups = args.experiments or experiment_groups_default
 
