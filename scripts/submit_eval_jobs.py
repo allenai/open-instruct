@@ -136,8 +136,8 @@ experiment_groups_default = [
     "codex_eval_temp_0.8",
     "codex_evalplus_temp_0.1",
     "codex_evalplus_temp_0.8",
-    "mbpp_evalplus_temp_0.1",
-    "mbpp_evalplus_temp_0.8",
+    # "mbpp_evalplus_temp_0.1",
+    # "mbpp_evalplus_temp_0.8",
     "ifeval",
     "trutufulqa",
     "toxigen",
@@ -319,7 +319,7 @@ for experiment_group in experiment_groups:
     elif experiment_group == "codex_evalplus_temp_0.1":
         task_spec['arguments'][0] = '''
             python -m eval.codex_humaneval.run_eval \
-            --data_file /data/codex_humaneval/HumanEvalPlus-OriginFmt.jsonl.gz \
+            --data_file /net/nfs.cirrascale/allennlp/hamishi/test/open-instruct/data/eval/codex_humaneval/HumanEvalPlus-OriginFmt.jsonl.gz  \
             --eval_pass_at_ks 1 5 10 20 \
             --unbiased_sampling_size_n 20 \
             --temperature 0.1 \
@@ -333,7 +333,7 @@ for experiment_group in experiment_groups:
     elif experiment_group == "codex_evalplus_temp_0.8":
         task_spec['arguments'][0] = '''
             python -m eval.codex_humaneval.run_eval \
-            --data_file /data/codex_humaneval/HumanEvalPlus-OriginFmt.jsonl.gz \
+            --data_file /net/nfs.cirrascale/allennlp/hamishi/test/open-instruct/data/eval/codex_humaneval/HumanEvalPlus-OriginFmt.jsonl.gz  \
             --data_file_hep data/eval/codex_humaneval/humanevalpack.jsonl  \
             --eval_pass_at_ks 1 5 10 20 \
             --unbiased_sampling_size_n 20 \
