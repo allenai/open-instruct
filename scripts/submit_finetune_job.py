@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--priority", type=str, default="high", help="Priority of the job")
     parser.add_argument("--preemptible", type=bool, default=True, help="Whether to use preemptible instances")
     parser.add_argument("--num_gpus", type=int, default=4, help="Number of GPUs to use")
-    parser.add_argument("--image", type=str, default="hamishivi/open-instruct-public", help="Beaker image to use.")
+    parser.add_argument("--image", type=str, default="nathanl/open_instruct_auto", help="Beaker image to use.")
     parser.add_argument("--workspace", type=str, default="ai2/tulu-2-improvements", help="Beaker workspace to use.")
     # allow unknown args from CLI, use this to modify loaded config in bash scripts for sweeping
     # Note, can only override args in --config passed (not default FlatArguments class in open_instruct/utils.py)
