@@ -45,6 +45,7 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
             attention_mask = attention_mask.cuda()
 
         try:
+            print("Trying to generate batch outputs")
             batch_outputs = model.generate(
                 input_ids=batch_input_ids,
                 attention_mask=attention_mask,
@@ -52,6 +53,7 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
                 stopping_criteria=[KeyWordsCriteria(stop_id_sequences)] if stop_id_sequences else None,
                 **generation_kwargs
             )
+            print("Generated batch outputs")
         
             # the stopping criteria is applied at batch level, so if other examples are not stopped, the entire batch will continue to generate.
             # so some outputs still have the stop sequence, which we need to remove.
@@ -62,17 +64,22 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
                             batch_outputs[output_idx, token_idx:] = tokenizer.pad_token_id
                             break
 
+            print("Batch output padding thing done")
+
             # remove the prompt from the output
             # we need to re-encode the prompt because we need to make sure the special tokens are treated the same way as in the outputs.
             # we changed our previous way of truncating the output token ids dicrectly because some tokenizer (e.g., llama) won't add space token before the first token.
             # space is important for some tasks (e.g., code completion).
             batch_outputs = tokenizer.batch_decode(batch_outputs, skip_special_tokens=True)
+            print("batch decode 1 done")
             batch_prompts = tokenizer.batch_decode(batch_input_ids, skip_special_tokens=True)
+            print("batch decode 2 done")
             # duplicate the prompts to match the number of return sequences
             batch_prompts = [prompt for prompt in batch_prompts for _ in range(num_return_sequences)]
             batch_generations = [
                 output[len(prompt):] for prompt, output in zip(batch_prompts, batch_outputs)
             ]
+            print("done")
         except Exception as e:
             print("Error when generating completions for batch:")
             print(batch_prompts)
