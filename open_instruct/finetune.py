@@ -684,6 +684,8 @@ def main():
     if args.output_dir is not None:
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)
+        # if "olmoe": # TODO: need to make this clean for the real PR
+        model.config.output_router_logits = False
         save_with_accelerate(accelerator, model, tokenizer, args.output_dir, args)
 
     accelerator.wait_for_everyone()
