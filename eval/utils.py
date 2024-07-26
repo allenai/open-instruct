@@ -260,6 +260,7 @@ def load_hf_lm(
                 torch_dtype=torch_dtype,
                 token=token,
                 trust_remote_code=trust_remote_code,
+                output_router_logits=False,
             )
         else:
             model = AutoModelForCausalLM.from_pretrained(
@@ -267,6 +268,7 @@ def load_hf_lm(
                 torch_dtype=torch_dtype,
                 token=token,
                 trust_remote_code=trust_remote_code,
+                output_router_logits=False,
             )
             if torch.cuda.is_available():
                 model = model.cuda()
