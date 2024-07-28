@@ -149,6 +149,7 @@ def concatenated_forward(
     all_logits = model(
         input_ids=concatenated_batch["concatenated_input_ids"],
         attention_mask=concatenated_batch["concatenated_attention_mask"],
+        output_router_logits=True,
     ).logits.to(torch.float32)
     all_logps = _get_batch_logps(all_logits, concatenated_batch["concatenated_labels"], average_log_prob=False)
     chosen_logps = all_logps[: batch["chosen_input_ids"].shape[0]]

@@ -148,6 +148,7 @@ def save_with_accelerate(accelerator, model, tokenizer, output_dir, args):
         if accelerator.is_main_process:
             unwrapped_model.save_pretrained(output_dir, state_dict=state_dict)
     else:
+        unwrapped_model.config.output_router_logits = False
         unwrapped_model.save_pretrained(
             output_dir,
             is_main_process=accelerator.is_main_process,
@@ -264,10 +265,10 @@ def main():
         )
 
     if args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, trust_remote_code=args.trust_remote_code)
+        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, use_fast=True, trust_remote_code=args.trust_remote_code)
     elif args.model_name_or_path:
         tokenizer = AutoTokenizer.from_pretrained(
-            args.model_name_or_path, use_fast=not args.use_slow_tokenizer, trust_remote_code=args.trust_remote_code
+            args.model_name_or_path, use_fast=True, trust_remote_code=args.trust_remote_code
         )
     else:
         raise ValueError(
@@ -295,6 +296,7 @@ def main():
                     device_map=device_map,
                     torch_dtype=torch.bfloat16,
                     use_flash_attention_2=True if args.use_flash_attn else False,
+                    output_router_logits=True,
                 )
             else:
                 model = AutoModelForCausalLM.from_pretrained(
@@ -304,6 +306,7 @@ def main():
                     trust_remote_code=args.trust_remote_code,
                     low_cpu_mem_usage=args.low_cpu_mem_usage,
                     use_flash_attention_2=True if args.use_flash_attn else False,
+                    output_router_logits=True,
                 )
         else:
             logger.info("Training new model from scratch")
