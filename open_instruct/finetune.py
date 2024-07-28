@@ -162,6 +162,7 @@ def save_with_accelerate(accelerator, model, tokenizer, output_dir, args):
             unwrapped_model.save_pretrained(output_dir, state_dict=state_dict)
     else:
         # don't use safetensors for saving for now
+        unwrapped_model.config.output_router_logits = False
         unwrapped_model.save_pretrained(
             output_dir,
             is_main_process=accelerator.is_main_process,
@@ -685,7 +686,6 @@ def main():
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)
         # if "olmoe": # TODO: need to make this clean for the real PR
-        model.config.output_router_logits = False
         save_with_accelerate(accelerator, model, tokenizer, args.output_dir, args)
 
     accelerator.wait_for_everyone()
