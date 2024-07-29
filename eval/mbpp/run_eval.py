@@ -42,7 +42,7 @@ def main(args):
             messages = [{"role": "user", "content": inst}]
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
             prefix = "" if prompt[-1] in ["\n", " "] else " "
-            return prompt + prefix + suffix
+            return prompt + prefix + suffix +"\n<|reserved_special_token_248|>\n"
         
         if args.use_evalplus_prompt:
             instruction = "Please provide a self-contained Python script that solves the following problem in a markdown code block:"

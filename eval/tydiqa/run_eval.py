@@ -179,6 +179,7 @@ def main(args):
             messages = [{"role": "user", "content": prompt}]
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
             prompt += a_template if prompt[-1] in ["\n", " "] else " " + a_template
+            prompt += "\n<|reserved_special_token_248|>\n"
         else:
             prompt += a_template
         prompts.append(prompt)

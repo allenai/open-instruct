@@ -48,6 +48,7 @@ def main(args):
                 for prompt in prompts:
                     messages = [{"role": "user", "content": prompt}]
                     formatted_prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
+                    formatted_prompt += "\n<|reserved_special_token_248|>\n"
                     formatted_prompts.append(formatted_prompt)
                 prompts = formatted_prompts
                     

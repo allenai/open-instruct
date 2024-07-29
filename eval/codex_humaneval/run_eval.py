@@ -51,7 +51,7 @@ def main(args):
             messages = [{"role": "user", "content": inst}]
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
             prefix = "" if prompt[-1] in ["\n", " "] else " "
-            return prompt + prefix + suffix
+            return prompt + prefix + suffix +"\n<|reserved_special_token_248|>\n"
             
         instruction = "Complete the following python function.\n\n\n"
         for example in test_data:

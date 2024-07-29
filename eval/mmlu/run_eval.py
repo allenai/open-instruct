@@ -75,6 +75,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
                     prompt += "The answer is:"
                 else:
                     prompt += " The answer is:"
+                prompt += "\n<|reserved_special_token_248|>\n"
                     
             tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
         prompts.append(prompt)

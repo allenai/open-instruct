@@ -69,6 +69,7 @@ def main(args):
                 messages.append({"role": "assistant", "content": assistant_turn})
             messages += [{"role": "user", "content":  "Problem:\n" + example["question"].strip() + "\n\nSolution:"}]
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
+            prompt += "\n<|reserved_special_token_248|>\n"
             return prompt
         
     if args.model_name_or_path:

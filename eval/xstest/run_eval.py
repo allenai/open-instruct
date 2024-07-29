@@ -67,7 +67,7 @@ def main(args):
                 prompts.append(
                     chat_formatting_function(
                         [{"role": "user", "content": prompt}], tokenizer, add_bos=False
-                    )
+                    ) + "\n<|reserved_special_token_248|>\n"
                 )
         else:
             prompts = list(data["prompt"])
