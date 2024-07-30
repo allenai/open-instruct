@@ -126,7 +126,14 @@ def conversations_to_messages(example):
 
     WizardLMTeam/WizardLM_evol_instruct_V2_196k
     """
-    name_mapping = {"gpt": "assistant", "user": "user", "human": "user"}
+    name_mapping = {
+        "gpt": "assistant",
+        "Assistant": "assistant",
+        "assistant": "assistant",
+        "user": "user",
+        "User": "user",
+        "human": "user",
+    }
     messages = [{"role": name_mapping[conv["from"]], "content": conv["value"]} for conv in example["conversations"]]
     example["messages"] = messages
     return example
