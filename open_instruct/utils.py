@@ -544,6 +544,10 @@ class FlatArguments:
             "Specify multiple by listing them: e.g., ['tensorboard', 'wandb']"
         },
     )
+    save_to_hub: Optional[str] = field(
+        default=None,
+        metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"},
+    )
     gradient_checkpointing: bool = field(
         default=False,
         metadata={"help": "Turn on gradient checkpointing. Saves memory but slows training."},
