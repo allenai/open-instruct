@@ -135,7 +135,7 @@ def main(args):
                 model=model,
                 tokenizer=tokenizer,
                 prompts=prompts,
-                max_new_tokens=512,
+                max_new_tokens=1536,
                 batch_size=args.eval_batch_size,
                 stop_id_sequences=stop_tokens,
                 do_sample=False,
