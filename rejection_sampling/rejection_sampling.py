@@ -17,18 +17,6 @@ from huggingface_hub import HfApi
 api = HfApi()
 
 
-"""
-python rejection_sampling.py \
-    --input_filename completions.jsonl \
-    --save_filename rejection_sampled_completions.jsonl \
-    --n 3 \
-    --num_gpus 2 \
-    --push_to_hub \
-"""
-
-# 1. split up data manually
-# 2. do map reduce style 
-
 @dataclass
 class Args:
     model_name_or_path: str = "cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr"
@@ -81,7 +69,7 @@ def process_shard(rank: int, args: Args, shard: List[str]):
     
     ds = Dataset.from_list(shard)
     ds = ds.map(
-        lambda x: {"input_ids": tokenizer.encode(x["prompt"] + x["completion"])},
+        lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])},
         remove_columns=ds.column_names
     )
     model = AutoModelForSequenceClassification.from_pretrained(args.model_name_or_path)
@@ -107,7 +95,7 @@ def main(args: Args):
     # Split the data into shards
     shard_size = len(completions) // args.num_gpus
     shards = [completions[i:i+shard_size] for i in range(0, len(completions), shard_size)]
-    
+
     # Process shards in parallel
     with mp.Pool(args.num_gpus) as pool:
         results = []
@@ -134,25 +122,12 @@ def main(args: Args):
     worst_completions = [completions[i] for i in worst_indices_offset]
     
     # Save results
-    with open(f"{args.save_filename_prefix}_best.jsonl", 'w') as outfile:
-        for i in range(len(best_completions)):
-            json.dump(best_completions[i], outfile)
-            outfile.write('\n')
-    with open(f"{args.save_filename_prefix}_worst.jsonl", 'w') as outfile:
-        for i in range(len(worst_completions)):
-            json.dump(worst_completions[i], outfile)
-            outfile.write('\n')
     table = defaultdict(list)
     for i in range(len(best_completions)):
-        table["chosen"].append([
-            {"content": best_completions[i]["prompt"], "role": "user"},
-            {"content": best_completions[i]["prompt"], "role": "assistant"},
-        ])
-        table["rejected"].append([
-            {"content": worst_completions[i]["prompt"], "role": "user"},
-            {"content": worst_completions[i]["prompt"], "role": "assistant"},
-        ])
-        assert worst_completions[i]["prompt"] == best_completions[i]["prompt"]
+        table["chosen"].append(best_completions[i]["messages"])
+        table["rejected"].append(worst_completions[i]["messages"])
+        table["reference_completion"].append(worst_completions[i]["reference_completion"])
+        assert worst_completions[i]["messages"][:-1] == best_completions[i]["messages"][:-1]
         table["chosen_score"].append(best_completions[i]["score"])
         table["rejected_score"].append(worst_completions[i]["score"])
     ds = Dataset.from_dict(table)
@@ -161,12 +136,13 @@ def main(args: Args):
             args.hf_entity = api.whoami()["name"]
         full_repo_id = f"{args.hf_entity}/{args.hf_repo_id}_{int(time.time())}"
         ds.push_to_hub(full_repo_id)
-        api.upload_file(
-            path_or_fileobj=__file__,
-            path_in_repo=__file__.split("/")[-1],
-            repo_id=full_repo_id,
-            repo_type="dataset",
-        )
+        for f in [__file__, args.input_filename]:
+            api.upload_file(
+                path_or_fileobj=f,
+                path_in_repo=f.split("/")[-1],
+                repo_id=full_repo_id,
+                repo_type="dataset",
+            )
 
 if __name__ == "__main__":
     parser = HfArgumentParser((Args,))
