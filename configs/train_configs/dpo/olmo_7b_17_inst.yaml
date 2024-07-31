@@ -1,0 +1,22 @@
+model_name_or_path: allenai/OLMo-1.7-7B-SFT-hf
+use_flash_attn: true
+gradient_checkpointing: true
+tokenizer_name: allenai/OLMo-1.7-7B-SFT-hf
+dataset_name: allenai/ultrafeedback_binarized_cleaned
+max_seq_length: 4096
+gradient_checkpointing: true
+preprocessing_num_workers: 16
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 4 # designed for 8 GPUs, so batch size 32
+learning_rate: 5.0e-7
+dpo_beta: 0.1
+lr_scheduler_type: linear
+warmup_ratio: 0.1
+weight_decay: 0.0
+num_train_epochs: 3
+output_dir: output/olmo_instruct_dpo/
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+add_bos: true

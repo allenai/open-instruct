@@ -116,10 +116,18 @@ def main(args):
 
             # generate with vllm
             if args.use_vllm:
-                sampling_kwargs = {
-                    "temperature": 0,
-                    "max_tokens": 512,
-                    "stop": ["\n\n"],
+                stop = args.additional_stop_sequence
+                if not args.use_chat_format or args.stop_at_double_newline:
+                    stop += ["\n\n"]
+                sampling_params = vllm.SamplingParams(
+                    temperature=0,
+                    max_tokens=512,
+                    stop=stop,
+                )
+                # We need to remap the outputs to the prompts because vllm might not return outputs for some prompts (e.g., if the prompt is too long)
+                generations = model.generate(prompts, sampling_params)
+                prompt_to_output = {
+                    g.prompt: g.outputs[0].text for g in generations
                 }
                 if args.bon > 1:
                     # setup bon, since the pad token matters
@@ -162,7 +170,7 @@ def main(args):
                     max_new_tokens=512,
                     temperature=0,
                     batch_size=args.eval_batch_size if args.eval_batch_size else 1,
-                    stop_id_sequences=[[stop_sequence]],
+                    stop_id_sequences=[[stop_sequence] + [tokenizer.encode(stop, add_special_tokens=False) for stop in args.additional_stop_sequence]],
                 )
         else:
             instances = []
@@ -329,6 +337,16 @@ if __name__ == "__main__":
         type=int,
         default=8,
         help="Swap space for vLLM. Set to higher values (e.g. 16) if you are encoutering vLLM CPU swap issues."
+        '--additional_stop_sequence',
+        type=str,
+        nargs="+",
+        default=[],
+        help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
+    )
+    parser.add_argument(
+        '--stop_at_double_newline',
+        action="store_true",
+        help="If given, we will stop generation at the first double newline. Turn on to match older eval settings."
     )
     args = parser.parse_args()
 

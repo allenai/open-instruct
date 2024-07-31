@@ -29,7 +29,7 @@ def main(args):
     print("Number of examples:", len(test_data))
 
     # these stop sequences are those mentioned in the codex paper.
-    stop_sequences = ["\nclass", "\ndef", "\n#", "\nif", "\nprint"]
+    stop_sequences = ["\nclass", "\ndef", "\n#", "\nif", "\nprint"] + args.additional_stop_sequence
 
     if args.use_chat_format:
         prompts = []
@@ -46,7 +46,8 @@ def main(args):
         else:
             print(f"Could not find HumanEvalPack file at {args.data_file_hep}, which will result in significantly worse performance. You can download it at https://hf.co/datasets/bigcode/humanevalpack/blob/main/data/python/data/humanevalpack.jsonl")
             instructions_dict = None
-            answer = "Here is the completed function:\n\n\n"
+            answer = "Here is the completed function:\n\n\n```python\n"
+            stop_sequences.append("\n```")
 
         def apply_chat_format(tokenizer, inst, suffix):
             messages = [{"role": "user", "content": inst}]
@@ -133,7 +134,7 @@ def main(args):
                 prompts = [apply_chat_format(tokenizer, inst, suffix) for (inst, suffix) in prompts]
 
             # these stop sequences are those mentioned in the codex paper.
-            stop_sequences = ["\nclass", "\ndef", "\n#", "\nif", "\nprint"]
+            stop_sequences = ["\nclass", "\ndef", "\n#", "\nif", "\nprint"] + args.additional_stop_sequence
             # Because many tokenizers will treat the word after space differently from the original word alone, 
             # to be consistent, we add a space before tokenization and remove it after tokenization.
             stop_sequences = [tokenizer.encode(" " + x, add_special_tokens=False)[1:] for x in stop_sequences]
@@ -340,6 +341,11 @@ if __name__ == "__main__":
         type=int,
         default=8,
         help="Swap space for vLLM. Set to higher values (e.g. 16) if you are encoutering vLLM CPU swap issues."
+        '--additional_stop_sequence',
+        type=str,
+        nargs="+",
+        default=[],
+        help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
     )
     args = parser.parse_args()
     # model_name_or_path and openai_engine cannot be both None or both not None.

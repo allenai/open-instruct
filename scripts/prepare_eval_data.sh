@@ -24,10 +24,16 @@ wget -P data/eval/tydiqa/ https://storage.googleapis.com/tydiqa/v1.1/tydiqa-gold
 # GSM dataset
 wget -P data/eval/gsm/ https://github.com/openai/grade-school-math/raw/master/grade_school_math/data/test.jsonl
 
+# MATH dataset
+mkdir -p data/eval/MATH
+wget -P data/eval/MATH/ https://raw.githubusercontent.com/deepseek-ai/DeepSeek-Math/main/evaluation/datasets/math/test.jsonl
 
 # Codex HumanEval
 wget -P data/eval/codex_humaneval https://github.com/openai/human-eval/raw/master/data/HumanEval.jsonl.gz
 wget -P data/eval/codex_humaneval https://huggingface.co/datasets/bigcode/humanevalpack/raw/main/data/python/data/humanevalpack.jsonl
+
+# HumanEval+
+wget -P data/eval/codex_humaneval https://github.com/evalplus/humanevalplus_release/releases/download/v0.1.9/HumanEvalPlus-OriginFmt.jsonl.gz
 
 # Alpaca Farm reference
 wget -P data/eval/alpaca_farm https://huggingface.co/datasets/hamishivi/alpaca-farm-davinci-003-2048-token/resolve/main/davinci_003_outputs.json
@@ -56,4 +62,4 @@ wget -P data/eval/xstest https://github.com/paul-rottger/exaggerated-safety/raw/
 # we use self-instruct test set, and vicuna test set for our human evaluation
 mkdir -p data/eval/creative_tasks 
 wget -O data/eval/creative_tasks/self_instruct_test.jsonl https://github.com/yizhongw/self-instruct/raw/main/human_eval/user_oriented_instructions.jsonl
-wget -O data/eval/creative_tasks/vicuna_test.jsonl https://github.com/lm-sys/FastChat/raw/main/fastchat/eval/table/question.jsonl
+wget -O data/eval/creative_tasks/vicuna_test.jsonl https://raw.githubusercontent.com/lm-sys/FastChat/main/fastchat/llm_judge/data/vicuna_bench/question.jsonl

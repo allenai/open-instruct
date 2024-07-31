@@ -1,0 +1,22 @@
+# Note, the exact model was trained on TPUs in a different repo
+model_name_or_path: meta-llama/Llama-2-13b
+model_revision: main
+use_flash_attn: true
+tokenizer_name: meta-llama/Llama-2-13b
+use_slow_tokenizer: true
+dataset_name: allenai/tulu-v2-sft-mixture
+max_seq_length: 2048 # Note, reduced from 8192 to fit on one GPU with DeepSpeed Stage3
+preprocessing_num_workers: 128
+per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
+gradient_accumulation_steps: 16 # effective batch size 128 for tulu 2
+learning_rate: 2.0e-05
+lr_scheduler_type: linear
+warmup_ratio: 0.03
+weight_decay: 0.0
+num_train_epochs: 3
+output_dir: output/tulu_v2_13b/
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+checkpointing_steps: epoch

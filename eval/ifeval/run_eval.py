@@ -269,6 +269,7 @@ def main(args):
             sampling_kwargs = dict(
                 temperature=0,
                 max_tokens=2048,
+                stop=args.additional_stop_sequence,
             )
             if args.bon > 1:
                 # setup bon, since the pad token matters
@@ -309,6 +310,7 @@ def main(args):
                 max_new_tokens=2048,
                 temperature=0,
                 batch_size=args.eval_batch_size if args.eval_batch_size else 1,
+                stop_id_sequences=[tokenizer.convert_tokens_to_ids(stop) for stop in args.additional_stop_sequence],
             )
     else:
         instances = []
@@ -474,6 +476,11 @@ if __name__ == "__main__":
         type=int,
         default=8,
         help="Swap space for vLLM. Set to higher values (e.g. 16) if you are encoutering vLLM CPU swap issues."
+        '--additional_stop_sequence',
+        type=str,
+        nargs="+",
+        default=[],
+        help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
     )
     args = parser.parse_args()
 

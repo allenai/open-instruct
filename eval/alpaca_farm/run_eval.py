@@ -15,7 +15,7 @@ def main(args):
     os.makedirs(args.save_dir, exist_ok=True)
 
     logging.info("loading data and model...")
-    alpaca_eval_data = datasets.load_dataset("tatsu-lab/alpaca_eval", "alpaca_eval")["eval"]
+    alpaca_eval_data = datasets.load_dataset("tatsu-lab/alpaca_eval", "alpaca_eval", trust_remote_code=True)["eval"]
     prompts = []
     chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
     for example in alpaca_eval_data:
@@ -39,9 +39,16 @@ def main(args):
             model = vllm.LLM(
                 model=args.model_name_or_path,
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path is not None else args.model_name_or_path,
+                tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
                 gpu_memory_utilization=args.vllm_gpu_memory_utilization,
                 swap_space=args.vllm_swap_space,
+            )
+            
+            sampling_params = vllm.SamplingParams(
+                temperature=0,  # greedy decoding
+                max_tokens=args.max_new_tokens,
+                stop=args.additional_stop_sequence,
             )
             # apply chat formatting
             if args.use_chat_format:
@@ -108,6 +115,7 @@ def main(args):
                 do_sample=False,
                 temperature=0,
                 batch_size=args.eval_batch_size if args.eval_batch_size else 1,
+                stop_id_sequences=[tokenizer.convert_tokens_to_ids(stop) for stop in args.additional_stop_sequence],
             )
     else:
         openai_query_cache_path = os.path.join(args.save_dir, "openai_query_cache.jsonl")
@@ -136,7 +144,6 @@ def main(args):
         df_leaderboard, annotations = alpaca_farm_evaluate(
             model_outputs=model_results,
             reference_outputs=args.reference_path,
-            annotators_config="alpaca_eval_gpt4",
             output_path=args.save_dir,
             is_return_instead_of_print=True,
             caching_path=os.path.join(args.save_dir, "alpaca_eval_annotator_cache.json"),
@@ -146,7 +153,6 @@ def main(args):
     else:
         df_leaderboard, annotations = alpaca_farm_evaluate(
             model_outputs=model_results,
-            annotators_config="alpaca_eval_gpt4",
             output_path=args.save_dir,
             is_return_instead_of_print=True,
             caching_path=os.path.join(args.save_dir, "alpaca_eval_annotator_cache.json"),
@@ -280,6 +286,11 @@ if __name__ == "__main__":
         type=int,
         default=8,
         help="Swap space for vLLM. Set to higher values (e.g. 16) if you are encoutering vLLM CPU swap issues."
+        '--additional_stop_sequence',
+        type=str,
+        nargs="+",
+        default=[],
+        help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
     )
     args = parser.parse_args()
 
