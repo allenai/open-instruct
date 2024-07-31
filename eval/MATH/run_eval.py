@@ -4,13 +4,15 @@ import os
 import random
 import torch
 import vllm
+from transformers import AutoTokenizer
 
 from eval.utils import (
     generate_completions,
     load_hf_lm,
     query_openai_chat_model,
     dynamic_import_function,
-    load_hf_tokenizer
+    load_hf_tokenizer,
+    bon_generation_vllm
 )
 from eval.MATH.examplars import EXAMPLARS as MATH_EXAMPLARS
 from eval.MATH.utilities import last_boxed_only_string, remove_boxed
@@ -90,11 +92,22 @@ def main(args):
             # For chat format, we will rely on the model knows when to stop.
             if not args.use_chat_format:
                 stop_strings += ["\n"]
-            sampling_params = vllm.SamplingParams(
-                temperature=0,
-                max_tokens=args.max_new_tokens,
-                stop=stop_strings, 
+
+            sampling_kwargs = dict(
+                temperature=args.temperature,
+                max_tokens=512,
+                stop=stop_strings
             )
+            if args.beam_search > 1:
+                sampling_kwargs['use_beam_search'] = True
+                sampling_kwargs['best_of'] = args.beam_search
+            if args.top_k >= 0:
+                sampling_kwargs['top_k'] = args.top_k
+            if args.top_p >= 0:
+                sampling_kwargs['top_p'] = args.top_p
+            if args.top_p >= 0 or args.top_k >= 0 and args.temperature == 0:
+                sampling_kwargs['temperature'] = 1.0 # normal temp. set since 0 = greedy
+
             if args.use_chat_format:
                 prompts = [apply_chat_format(example, demonstrations, tokenizer) for example in test_data]
             else:
@@ -102,10 +115,36 @@ def main(args):
                     prompts = [initial_demonstrations + "\n\nProblem:\n" + example["question"].strip() + "\n\nSolution:\n" for example in test_data]
                 else:
                     prompts = [initial_demonstrations + "\n\nProblem:\n" + example["question"].strip() + "\n\nSolution:\n" for example in test_data]
-            generations = model.generate(prompts, sampling_params)
-            prompt_to_output = {
-                g.prompt: g.outputs[0].text for g in generations
-            }
+
+            if args.bon > 1:
+                # setup bon, since the pad token matters
+                bon_tokenizer = AutoTokenizer.from_pretrained(args.bon_tokenizer) if args.bon_tokenizer is not None else tokenizer
+                bon_tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+                generation_outputs, scores = bon_generation_vllm(
+                    prompts=prompts,
+                    model=model,
+                    bon_model=args.bon_reward_model,
+                    bon_tokenizer=bon_tokenizer,
+                    bon=args.bon,
+                    vllm_sampling_kwargs=sampling_kwargs,
+                )
+                # save scores for debugging
+                if args.bon_output_file is not None:
+                    with open(args.bon_output_file, "w") as fout:
+                        for score in scores:
+                            fout.write(json.dumps(score) + "\n")
+                prompt_to_output = {
+                    p: g for p, g in zip(prompts, generation_outputs)
+                }
+            else:
+                # just generate directly, greedily.
+                sampling_params = vllm.SamplingParams(
+                    **sampling_kwargs,
+                )
+                generations = model.generate(prompts, sampling_params)
+                prompt_to_output = {
+                    g.prompt: g.outputs[0].text for g in generations
+                }
             outputs = [prompt_to_output[prompt] if prompt in prompt_to_output else "" for prompt in prompts]
         else:
             model = load_hf_lm(

@@ -95,10 +95,19 @@ def main(args):
             
             stop_strings = args.additional_stop_sequence
             sampling_kwargs = dict(
-                temperature=0,
+                temperature=args.temperature,
                 max_tokens=512,
                 stop=stop_strings
             )
+            if args.beam_search > 1:
+                sampling_kwargs['use_beam_search'] = True
+                sampling_kwargs['best_of'] = args.beam_search
+            if args.top_k >= 0:
+                sampling_kwargs['top_k'] = args.top_k
+            if args.top_p >= 0:
+                sampling_kwargs['top_p'] = args.top_p
+            if args.top_p >= 0 or args.top_k >= 0 and args.temperature == 0:
+                sampling_kwargs['temperature'] = 1.0 # normal temp. set since 0 = greedy
             if args.use_chat_format:
                 prompts = [apply_chat_format(example, tokenizer) for example in test_data]
             else:
@@ -338,6 +347,8 @@ if __name__ == "__main__":
         type=int,
         default=8,
         help="Swap space for vLLM. Set to higher values (e.g. 16) if you are encoutering vLLM CPU swap issues."
+    )
+    parser.add_argument(
         "--stop_at_double_newline",
         action="store_true",
         help="If given, will stop generation at double newline instead of single."
@@ -348,6 +359,30 @@ if __name__ == "__main__":
         nargs="+",
         default=[],
         help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
+    )
+    parser.add_argument(
+        '--temperature',
+        type=float,
+        default=0.0,  # in vllm, 0.0 means greedy decoding.
+        help="Temperature for generation."
+    )
+    parser.add_argument(
+        '--top_k',
+        type=float,
+        default=-1,
+        help="Top k for generation."
+    )
+    parser.add_argument(
+        '--top_p',
+        type=float,
+        default=-1,
+        help="Top p for generation."
+    )
+    parser.add_argument(
+        '--beam_search',
+        type=int,
+        default=1,  # if > 1, we will use beam search.
+        help="Beam search for generation."
     )
     args = parser.parse_args()
 

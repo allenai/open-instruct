@@ -7,7 +7,7 @@ import os
 import gc
 from importlib import import_module
 import vllm
-from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
+from vllm.distributed import destroy_model_parallel
 from transformers import StoppingCriteria, AutoModelForSequenceClassification
 from eval.dispatch_openai_requests import dispatch_openai_chat_requesets, dispatch_openai_prompt_requesets
 import warnings
@@ -487,7 +487,7 @@ def bon_generation_vllm(prompts, model, bon_model, bon_tokenizer, bon=16, vllm_s
         # delete vllm instance to free up memory
         destroy_model_parallel()
         # this del has to be called to properly free up gpu memory
-        del model.llm_engine.workers
+        del model.llm_engine
         del model
         gc.collect()
         torch.cuda.empty_cache()
