@@ -20,14 +20,14 @@ do
     python mason.py \
         --cluster ai2/allennlp-cirrascale  ai2/general-cirrascale-a5000  ai2/general-cirrascale-a5000  ai2/general-cirrascale-a100-80g-ib  \
         --budget ai2/allennlp \
+        --priority low \
         --gpus 1 -- python rejection_sampling/generation.py \
         --dataset_name allenai/tulu-v2-sft-mixture \
         --model_name_or_path allenai/llama-3-tulu-2-8b \
         --dataset_start_idx $start_idx \
         --dataset_end_idx $end_idx \
         --save_filename rejection_sampling/shards/rejection_sampled_completions_$i.jsonl \
-        --n 5 \
-        --priority low
+        --n 5
 
     echo "Finished shard $((i+1)) of $num_shards"
     echo

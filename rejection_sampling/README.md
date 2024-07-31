@@ -48,54 +48,57 @@ python mason.py \
 # prod generations
 bash rejection_sampling/batch_generation.bash
 # Running shard 1 of 10 (indices 0 to 32615)
-# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '0', '--dataset_end_idx', '32615', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_0.jsonl', '--n', '5', '--priority', 'low']
-# Kicked off Beaker job. https://beaker.org/ex/01J45E6E9N8PQBAHHRGP3YWY2A
+
+# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '0', '--dataset_end_idx', '32615', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_0.jsonl', '--n', '5']
+# Kicked off Beaker job. https://beaker.org/ex/01J45EDCVMJ3JZP4QPBDGENCBJ
 # Finished shard 1 of 10
 
 # Running shard 2 of 10 (indices 32615 to 65230)
-# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '32615', '--dataset_end_idx', '65230', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_1.jsonl', '--n', '5', '--priority', 'low']
-# Kicked off Beaker job. https://beaker.org/ex/01J45E6F26QK71XEB5SX65JZWF
+# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '32615', '--dataset_end_idx', '65230', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_1.jsonl', '--n', '5']
+# Kicked off Beaker job. https://beaker.org/ex/01J45EDDME4ZP5MCZ16RQNPTGC
 # Finished shard 2 of 10
 
 # Running shard 3 of 10 (indices 65230 to 97845)
-# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '65230', '--dataset_end_idx', '97845', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_2.jsonl', '--n', '5', '--priority', 'low']
-# Kicked off Beaker job. https://beaker.org/ex/01J45E6FTYQYACTQETVKQ30Q26
+# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '65230', '--dataset_end_idx', '97845', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_2.jsonl', '--n', '5']
+# Kicked off Beaker job. https://beaker.org/ex/01J45EDED3YQ0XEE6QNY7C8GXD
 # Finished shard 3 of 10
 
 # Running shard 4 of 10 (indices 97845 to 130460)
-# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '97845', '--dataset_end_idx', '130460', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_3.jsonl', '--n', '5', '--priority', 'low']
-# Kicked off Beaker job. https://beaker.org/ex/01J45E6GKH6H5JMBH71T9DHHRB
+# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '97845', '--dataset_end_idx', '130460', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_3.jsonl', '--n', '5']
+# Kicked off Beaker job. https://beaker.org/ex/01J45EDF5P9SV1ARKY1EF9MBRP
 # Finished shard 4 of 10
 
 # Running shard 5 of 10 (indices 130460 to 163075)
-# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '130460', '--dataset_end_idx', '163075', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_4.jsonl', '--n', '5', '--priority', 'low']
-# Kicked off Beaker job. https://beaker.org/ex/01J45E6HC6TZ545TBK9HFEWB8Z
+# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '130460', '--dataset_end_idx', '163075', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_4.jsonl', '--n', '5']
+# Kicked off Beaker job. https://beaker.org/ex/01J45EDFZ6MED7PVGVPX6MVS2M
 # Finished shard 5 of 10
 
 # Running shard 6 of 10 (indices 163075 to 195690)
-# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '163075', '--dataset_end_idx', '195690', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_5.jsonl', '--n', '5', '--priority', 'low']
-# Kicked off Beaker job. https://beaker.org/ex/01J45E6J47T8769T3ES13JYK3Q
+# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '163075', '--dataset_end_idx', '195690', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_5.jsonl', '--n', '5']
+# Kicked off Beaker job. https://beaker.org/ex/01J45EDGQDNVHMMJ8NR57T7NDB
 # Finished shard 6 of 10
 
 # Running shard 7 of 10 (indices 195690 to 228305)
-# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '195690', '--dataset_end_idx', '228305', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_6.jsonl', '--n', '5', '--priority', 'low']
-# Kicked off Beaker job. https://beaker.org/ex/01J45E6JWME19A0Z3BZ1N65HB5
+# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '195690', '--dataset_end_idx', '228305', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_6.jsonl', '--n', '5']
+# Kicked off Beaker job. https://beaker.org/ex/01J45EDHFC4QRSAVD3FH15ZSAE
 # Finished shard 7 of 10
 
 # Running shard 8 of 10 (indices 228305 to 260920)
-# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '228305', '--dataset_end_idx', '260920', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_7.jsonl', '--n', '5', '--priority', 'low']
-# Kicked off Beaker job. https://beaker.org/ex/01J45E6KMW3Z10E5546CHXJZC3
+# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '228305', '--dataset_end_idx', '260920', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_7.jsonl', '--n', '5']
+# Kicked off Beaker job. https://beaker.org/ex/01J45EDJ89EAV0V4DMGWTG0TK8
 # Finished shard 8 of 10
 
 # Running shard 9 of 10 (indices 260920 to 293535)
-# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '260920', '--dataset_end_idx', '293535', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_8.jsonl', '--n', '5', '--priority', 'low']
-# Kicked off Beaker job. https://beaker.org/ex/01J45E6MDJD0DW97ZTM6R1PE03
+# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '260920', '--dataset_end_idx', '293535', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_8.jsonl', '--n', '5']
+# Kicked off Beaker job. https://beaker.org/ex/01J45EDK0XE1HSF953EMT3TSQ3
 # Finished shard 9 of 10
 
 # Running shard 10 of 10 (indices 293535 to 326154)
-# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '293535', '--dataset_end_idx', '326154', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_9.jsonl', '--n', '5', '--priority', 'low']
-# Kicked off Beaker job. https://beaker.org/ex/01J45E6N5P6C9TSAX1PGS1635K
+# full_command=['python', 'rejection_sampling/generation.py', '--dataset_name', 'allenai/tulu-v2-sft-mixture', '--model_name_or_path', 'allenai/llama-3-tulu-2-8b', '--dataset_start_idx', '293535', '--dataset_end_idx', '326154', '--save_filename', 'rejection_sampling/shards/rejection_sampled_completions_9.jsonl', '--n', '5']
+# Kicked off Beaker job. https://beaker.org/ex/01J45EDKTM1YBK3YRV9V0BQT9R
 # Finished shard 10 of 10
+
+# All shards submitted
 ```
 
 
