@@ -63,7 +63,8 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
             ds[key] = ds[key].select(range(min(dataset_args.sanity_check_size, len(ds[key]))))
     if dataset_args.dataset_end_idx is None:
         dataset_args.dataset_end_idx = len(ds[dataset_args.dataset_train_split])
-    ds[key] = ds[key].select(range(dataset_args.dataset_start_idx, dataset_args.dataset_end_idx))
+    for key in ds:
+        ds[key] = ds[key].select(range(dataset_args.dataset_start_idx, dataset_args.dataset_end_idx))
     pprint([dataset_args, args, gen_args])
 
     ## DATASET specific logic: in this dataset the prompt is simply just a list of strings

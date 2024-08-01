@@ -1,3 +1,6 @@
+import os
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+
 import time
 import torch
 import torch.multiprocessing as mp
@@ -10,6 +13,7 @@ from transformers import (
     DataCollatorWithPadding,
     AutoTokenizer,
 )
+from tqdm import tqdm
 from datasets import Dataset
 import json
 from torch.utils.data import DataLoader
@@ -21,13 +25,14 @@ api = HfApi()
 class Args:
     model_name_or_path: str = "cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr"
     input_filename: str = "completions.jsonl"
-    save_filename_prefix: str = "rejected_sampling_completions"
+    save_filename: str = "rejected_sampling_completions.jsonl"
     n: int = 1
-    forward_batch_size: int = 10
+    forward_batch_size: int = 8
     num_gpus: int = 1  # New argument for specifying the number of GPUs
     push_to_hub: bool = False
     hf_entity: Optional[str] = None
     hf_repo_id: str = "rejection_sampling"
+    add_timestamp: bool = True
 
 
 def first_true_indices(bools: torch.Tensor, dtype=torch.long):
@@ -78,7 +83,7 @@ def process_shard(rank: int, args: Args, shard: List[str]):
     dataloader = DataLoader(ds, batch_size=args.forward_batch_size, collate_fn=data_collator, pin_memory=True)
     scores = []
     with torch.no_grad():
-        for data in dataloader:
+        for data in tqdm(dataloader):
             input_ids = data["input_ids"].to(device)
             _, score, _ = get_reward(model, input_ids, tokenizer.pad_token_id, 0)
             scores.append(score.cpu())
@@ -130,13 +135,21 @@ def main(args: Args):
         assert worst_completions[i]["messages"][:-1] == best_completions[i]["messages"][:-1]
         table["chosen_score"].append(best_completions[i]["score"])
         table["rejected_score"].append(worst_completions[i]["score"])
-    ds = Dataset.from_dict(table)
+    first_key = list(table.keys())[0]
+    print(f"{len(table[first_key])=}")
+    with open(args.save_filename, 'w') as outfile:
+        for i in range(len(table[first_key])):
+            json.dump({key: table[key][i] for key in table}, outfile)
+            outfile.write('\n')
+
     if args.push_to_hub:
         if args.hf_entity is None:
             args.hf_entity = api.whoami()["name"]
-        full_repo_id = f"{args.hf_entity}/{args.hf_repo_id}_{int(time.time())}"
-        ds.push_to_hub(full_repo_id)
-        for f in [__file__, args.input_filename]:
+        full_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
+        if args.add_timestamp:
+            full_repo_id += f"_{int(time.time())}"
+        api.create_repo(full_repo_id, repo_type="dataset")
+        for f in [__file__, args.save_filename]:
             api.upload_file(
                 path_or_fileobj=f,
                 path_in_repo=f.split("/")[-1],

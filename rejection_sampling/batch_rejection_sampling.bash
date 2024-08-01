@@ -2,7 +2,7 @@ mkdir -p rejection_sampling/shards
 total_items=326154
 num_shards=10
 items_per_shard=$((total_items / num_shards))
-shared_hf_repo_id=rejection_sampling_$RANDOM
+shared_hf_repo_id=rejection_sampling_$RANDOM 
 
 # Loop through shards
 for ((i=0; i<num_shards; i++))
@@ -22,13 +22,15 @@ do
         --cluster ai2/allennlp-cirrascale  ai2/general-cirrascale-a5000  ai2/general-cirrascale-a5000  ai2/general-cirrascale-a100-80g-ib  \
         --budget ai2/allennlp \
         --priority low \
-        --gpus 1 -- python rejection_sampling/generation.py \
-        --dataset_name allenai/tulu-v2-sft-mixture \
-        --model_name_or_path allenai/llama-3-tulu-2-8b \
-        --dataset_start_idx $start_idx \
-        --dataset_end_idx $end_idx \
-        --save_filename rejection_sampling/shards/rejection_sampled_completions_$i.jsonl \
-        --n 5
+        --gpus 1 -- python rejection_sampling/rejection_sampling.py \
+        --input_filename rejection_sampling/shards/rejection_sampled_completions_$i.jsonl \
+        --model_name_or_path allenai/llama-3-tulu-2-8b-uf-mean-rm \
+        --save_filename rejection_sampling/shards/rejection_sampled_completions_scores_$i.jsonl \
+        --hf_repo_id $shared_hf_repo_id \
+        --no_add_timestamp \
+        --n 5 \
+        --push_to_hub \
+        --num_gpus 1
 
     echo "Finished shard $((i+1)) of $num_shards"
     echo
