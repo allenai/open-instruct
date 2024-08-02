@@ -71,12 +71,15 @@ TASKS=("gsm8k::olmo1" "drop::llama3" "minerva_math::llama3" "codex_humaneval" "c
 MODEL_TYPE="vllm"
 BATCH_SIZE_VLLM=10000
 BATCH_SIZE_OTHER=1
+GPU_COUNT=1
+GPU_COUNT_OTHER=2
 
 for TASK in "${TASKS[@]}"; do
     if [[ "$TASK" == "mmlu:mc::olmes" ]]; then
         BATCH_SIZE=$BATCH_SIZE_OTHER
+        GPU_COUNT=$GPU_COUNT_OTHER
     else
         BATCH_SIZE=$BATCH_SIZE_VLLM
     fi
-    oe-eval --model "$MODEL_NAME" --beaker-workspace "ai2/tulu-3-results" --beaker-budget ai2/oe-adapt --task "$TASK" --model-type "$MODEL_TYPE" --batch-size "$BATCH_SIZE" --model-args {\"model_path\":\"${MODEL_LOCATION}\"} ${HF_UPLOAD_ARG}
+    oe-eval --model "$MODEL_NAME" --beaker-workspace "ai2/tulu-3-results" --beaker-budget ai2/oe-adapt --task "$TASK" --model-type "$MODEL_TYPE" --batch-size "$BATCH_SIZE" --model-args {\"model_path\":\"${MODEL_LOCATION}\"} ${HF_UPLOAD_ARG} --gpus "$GPU_COUNT"
 done
