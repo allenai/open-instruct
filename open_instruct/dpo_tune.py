@@ -256,9 +256,9 @@ def main():
 
     # Load pretrained model and tokenizer
     if args.config_name:
-        config = AutoConfig.from_pretrained(args.config_name, trust_remote_code=args.trust_remote_code, output_router_logits=True,)
+        config = AutoConfig.from_pretrained(args.config_name, trust_remote_code=args.trust_remote_code, output_router_logits=False,)
     elif args.model_name_or_path:
-        config = AutoConfig.from_pretrained(args.model_name_or_path, trust_remote_code=args.trust_remote_code, output_router_logits=True,)
+        config = AutoConfig.from_pretrained(args.model_name_or_path, trust_remote_code=args.trust_remote_code, output_router_logits=False,)
     else:
         raise ValueError(
             "You are instantiating a new config instance from scratch. This is not supported by this script."

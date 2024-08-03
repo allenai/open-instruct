@@ -250,7 +250,7 @@ def main():
             args.config_name,
             trust_remote_code=args.trust_remote_code,
             revision=args.model_revision,
-            output_router_logits=True,
+            output_router_logits=False,
             token=os.getenv("HF_TOKEN", None),
         )
     elif args.model_name_or_path:
@@ -258,7 +258,7 @@ def main():
             args.model_name_or_path,
             trust_remote_code=args.trust_remote_code,
             revision=args.model_revision,
-            output_router_logits=True,
+            output_router_logits=False,
             token=os.getenv("HF_TOKEN", None),
         )
     else:
@@ -612,7 +612,7 @@ def main():
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
             with accelerator.accumulate(model):
-                outputs = model(**batch, use_cache=False, output_router_logits=True)
+                outputs = model(**batch, use_cache=False, output_router_logits=False)
                 if args.reduce_loss == "mean":
                     loss = outputs.loss
                 else:
