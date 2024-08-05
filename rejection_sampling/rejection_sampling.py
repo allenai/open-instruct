@@ -1,4 +1,6 @@
 import os
+
+import numpy as np
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 
 import time
@@ -27,7 +29,7 @@ class Args:
     input_filename: str = "completions.jsonl"
     save_filename: str = "rejected_sampling_completions.jsonl"
     n: int = 1
-    forward_batch_size: int = 8
+    max_forward_batch_size: int = 8
     num_gpus: int = 1  # New argument for specifying the number of GPUs
     push_to_hub: bool = False
     hf_entity: Optional[str] = None
@@ -80,15 +82,33 @@ def process_shard(rank: int, args: Args, shard: List[str]):
     model = AutoModelForSequenceClassification.from_pretrained(args.model_name_or_path)
     model = model.to(device)
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
-    dataloader = DataLoader(ds, batch_size=args.forward_batch_size, collate_fn=data_collator, pin_memory=True)
+    current_batch_size = args.max_forward_batch_size
+    # NOTE: two optimizations here:
+    # 1. we sort by input_ids length to reduce padding at first
+    # 2. we shrink the batch size if we run out of memory (so initially we can use a large batch size)
+    input_ids_lengths = [len(x) for x in ds["input_ids"]]
+    sorted_indices = np.argsort(input_ids_lengths)
     scores = []
-    with torch.no_grad():
-        for data in tqdm(dataloader):
-            input_ids = data["input_ids"].to(device)
-            _, score, _ = get_reward(model, input_ids, tokenizer.pad_token_id, 0)
-            scores.append(score.cpu())
-    
-    return torch.cat(scores)
+    i = 0
+    while i < len(ds):
+        with torch.no_grad():
+            data = ds[sorted_indices[i:i+current_batch_size]]
+            try:
+                input_ids = data_collator(data)["input_ids"].to(device)
+                _, score, _ = get_reward(model, input_ids, tokenizer.pad_token_id, 0)
+                scores.extend(score.cpu().tolist())
+                i += current_batch_size
+                print(f"processing: {i}:{i+current_batch_size}/{len(ds)}")
+            except torch.cuda.OutOfMemoryError:
+                if current_batch_size == 1:
+                    raise ValueError("Out of memory even with batch size 1")
+                current_batch_size //= 2
+                print(f"Reducing batch size to {current_batch_size}")
+                continue
+    # restore the original order
+    scores = np.array(scores)
+    scores = scores[np.argsort(sorted_indices)]
+    return torch.tensor(scores)
 
 def main(args: Args):
     mp.set_start_method('spawn', force=True)

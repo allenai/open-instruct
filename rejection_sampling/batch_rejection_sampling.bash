@@ -5,7 +5,10 @@ items_per_shard=$((total_items / num_shards))
 shared_hf_repo_id=rejection_sampling_$RANDOM 
 
 # Loop through shards
-for ((i=0; i<num_shards; i++))
+# for ((i=0; i<num_shards; i++))
+
+# only process 1, 2, 3 , 7, shards
+for i in 0 1 2 4 5 6 7 9
 do
     # Calculate start and end indices for this shard
     start_idx=$((i * items_per_shard))
@@ -19,7 +22,7 @@ do
     # Run the command for this shard
     echo "Running shard $((i+1)) of $num_shards (indices $start_idx to $end_idx)"
     python mason.py \
-        --cluster ai2/allennlp-cirrascale  ai2/general-cirrascale-a5000  ai2/general-cirrascale-a5000  ai2/general-cirrascale-a100-80g-ib  \
+        --cluster ai2/allennlp-cirrascale  ai2/general-cirrascale-a100-80g-ib  \
         --budget ai2/allennlp \
         --priority low \
         --gpus 1 -- python rejection_sampling/rejection_sampling.py \

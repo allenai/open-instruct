@@ -42,7 +42,7 @@ python mason.py \
     
 chmod -R 777 /net/nfs.cirrascale/allennlp/.cache/hub/
 python mason.py \
-    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/general-cirrascale-a100-80g-ib \
+    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a100-80g-ib \
     --priority low \
     --budget ai2/allennlp \
     --gpus 1 -- python rejection_sampling/generation.py \
@@ -113,4 +113,6 @@ bash rejection_sampling/batch_rejection_sampling.bash
 
 
 
-# build docker 
+```
+huggingface-cli upload vwxyzjn/rejection_sampling_23251 . .
+```
