@@ -585,16 +585,30 @@ class FlatArguments:
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
             raise ValueError("reduce_loss must be either 'mean' or 'sum'")
-        if self.dataset_name is None and self.train_file is None and self.dataset_mixer is None:
+        if (
+            self.dataset_name is None and
+            self.train_file is None and 
+            self.dataset_mixer is None and 
+            self.dataset_mixer_list is  None
+        ):
             raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
         else:
             if self.train_file is not None:
                 extension = self.train_file.split(".")[-1]
                 assert extension in ["json", "jsonl"], "`train_file` should be a json or a jsonl file."
         if (
-            (self.dataset_name is not None and self.dataset_mixer is not None)
+            (
+                self.dataset_name is not None and
+                (
+                    self.dataset_mixer is not None or
+                    self.dataset_mixer_list is not None
+                )
+            )
             or (self.dataset_name is not None and self.train_file is not None)
-            or (self.dataset_mixer is not None and self.train_file is not None)
+            or (
+                (self.dataset_mixer is not None or self.dataset_mixer_list is not None) and
+                self.train_file is not None
+            )
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
 
