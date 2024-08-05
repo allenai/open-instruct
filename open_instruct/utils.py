@@ -176,13 +176,8 @@ def get_datasets(
         mixer_dict = {}
         i = 0
         while i < len(dataset_mixer) - 1:
-            assert (
-                isinstance(dataset_mixer[i], str) and (
-                    isinstance(dataset_mixer[i+1], int) or 
-                    isinstance(dataset_mixer[i+1], float)
-                )
-            ),f"Invalid type in data mixer: {dataset_mixer}"
-            mixer_dict[dataset_mixer[i]] = dataset_mixer[i+1]
+            assert isinstance(dataset_mixer[i], str),f"Invalid type in data mixer: {dataset_mixer}"
+            mixer_dict[dataset_mixer[i]] = float(dataset_mixer[i+1])
             i += 2
         dataset_mixer = mixer_dict
 
