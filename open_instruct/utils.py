@@ -605,6 +605,7 @@ class FlatArguments:
                 (self.dataset_mixer is not None or self.dataset_mixer_list is not None) and
                 self.train_file is not None
             )
+            or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
 
