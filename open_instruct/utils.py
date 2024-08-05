@@ -138,7 +138,6 @@ def conversations_to_messages(example):
     example["messages"] = messages
     return example
 
-
 def get_datasets(
     dataset_mixer: Union[dict, list],
     splits: Optional[List[str]] = None,
@@ -414,8 +413,11 @@ class FlatArguments:
     dataset_name: Optional[str] = field(
         default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
     )
-    dataset_mixer: Optional[Union[dict,list]] = field(
-        default=None, metadata={"help": "A list or dictionary of datasets (local or HF) to sample from."}
+    dataset_mixer: Optional[dict] = field(
+        default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
+    )
+    dataset_mixer_list: Optional[list] = field(
+        default=None, metadata={"help": "A list of datasets (local or HF) to sample from."}
     )
     dataset_mix_dir: Optional[str] = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
