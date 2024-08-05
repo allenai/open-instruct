@@ -140,7 +140,7 @@ def conversations_to_messages(example):
 
 
 def get_datasets(
-    dataset_mixer: dict,
+    dataset_mixer: Union[dict, list],
     splits: Optional[List[str]] = None,
     configs: Optional[List[str]] = None,
     columns_to_keep: Optional[List[str]] = None,
@@ -152,9 +152,10 @@ def get_datasets(
     Loads and mixes datasets according to proportions specified in `dataset_mixer`.
 
     Args:
-        dataset_mixer (`dict`):
+        dataset_mixer (`list` or `dict`):
             Dictionary containing the dataset names and their training proportions.
             By default, all test proportions are 1.
+            If a list is passed in, it will be converted to a dictionary.
         splits (Optional[List[str]], *optional*, defaults to `None`):
             Dataset splits to load and mix. Assumes the splits exist in
             all datasets and have a `train_` or `test_` prefix.
@@ -171,6 +172,21 @@ def get_datasets(
             Column names that are required to be in the dataset.
             Quick debugging when mixing heterogeneous datasets.
     """
+    if isinstance(dataset_mixer, list):
+        assert len(dataset_mixer) % 2 == 0,f"Data mixer list length is not even: {dataset_mixer}"
+        mixer_dict = {}
+        i = 0
+        while i < len(dataset_mixer) - 1:
+            assert (
+                isinstance(dataset_mixer[i], str) and (
+                    isinstance(dataset_mixer[i+1], int) or 
+                    isinstance(dataset_mixer[i+1], float)
+                )
+            ),f"Invalid type in data mixer: {dataset_mixer}"
+            mixer_dict[dataset_mixer[i]] = dataset_mixer[i+1]
+            i += 2
+        dataset_mixer = mixer_dict
+
     splits = ["train", "test"] if splits is None else splits
     configs = [None] * len(dataset_mixer) if not configs else configs
     columns_to_keep = [] if columns_to_keep is None else columns_to_keep
@@ -398,8 +414,8 @@ class FlatArguments:
     dataset_name: Optional[str] = field(
         default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
     )
-    dataset_mixer: Optional[dict] = field(
-        default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
+    dataset_mixer: Optional[Union[dict,list]] = field(
+        default=None, nargs='*', metadata={"help": "A list or dictionary of datasets (local or HF) to sample from."}
     )
     dataset_mix_dir: Optional[str] = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
