@@ -153,8 +153,7 @@ def layer_init(layer: nn.Module, std: float):
 
 def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     accelerator = calculate_runtime_args_and_accelerator(args, model_config)
-    # adjust the local seed for each process using a prime number so they don't overlap
-    local_seed = args.seed + accelerator.process_index * 100003
+    local_seed = args.seed + accelerator.process_index
 
     # set up experiment tracking and seeds
     if accelerator.is_main_process:
@@ -266,9 +265,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     print_rich_single_line_metrics(eval_metrics)
                     for key, value in eval_metrics.items():
                         writer.add_scalar(f"eval/rm/{key}", value, episode)
-                    print_rich_table(df)
                     if args.with_tracking:
                         wandb.log({"preference_sample_texts": wandb.Table(dataframe=df)})
+                    else:
+                        print_rich_table(df)
 
             episode += args.micro_batch_size
             query_responses = torch.cat((data[INPUT_IDS_CHOSEN_KEY], data[INPUT_IDS_REJECTED_KEY]), dim=0)
@@ -295,8 +295,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     "epoch": episode / len(train_dataset),
                     "train/rm/accuracy":  accelerator.gather(accuracies).mean().item(),
                     "train/rm/loss": accelerator.gather(losses).mean().item(),
-                    "train/rm/chosen_rewards": accelerator.gather(chosen_rewards).mean().item(),
-                    "train/rm/rejected_rewards": accelerator.gather(rejected_rewards).mean().item(),
+                    "train/rm/chosen_reward": accelerator.gather(chosen_rewards).mean().item(),
+                    "train/rm/rejected_reward": accelerator.gather(rejected_rewards).mean().item(),
                     "train/rm/reward_margin": accelerator.gather(reward_margin).mean().item(),
                     "train/rm/lr": scheduler.get_last_lr()[0],
                 }

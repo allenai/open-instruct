@@ -51,12 +51,18 @@ INPUT_IDS_PROMPT_KEY = "input_ids_prompt"
 ATTENTION_MASK_PROMPT_KEY = "attention_mask_prompt"
 TOKENIZED_PREFERENCE_DATASET_KEYS = [
     INPUT_IDS_CHOSEN_KEY,
-    ATTENTION_MASK_CHOSEN_KEY,
+    # ATTENTION_MASK_CHOSEN_KEY,
     INPUT_IDS_REJECTED_KEY,
-    ATTENTION_MASK_REJECTED_KEY,
-    INPUT_IDS_PROMPT_KEY,
-    ATTENTION_MASK_PROMPT_KEY,
+    # ATTENTION_MASK_REJECTED_KEY,
+    # INPUT_IDS_PROMPT_KEY,
+    # ATTENTION_MASK_PROMPT_KEY,
 ]
+
+# NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
+# also we don't really need `ATTENTION_MASK_CHOSEN_KEY` and `ATTENTION_MASK_REJECTED_KEY`
+# since we are always padding from the right with a collator; however they might become
+# more useful if we want to do some sort of packing in the future. The nice thing is
+# that the tokenization logic would work for both DPO and RM training.
 
 # SFT dataset
 MESSAGES_KEY = "messages"
@@ -363,19 +369,13 @@ class SimplePreferenceCollator:
             pad_length_chosen = max_length - len(batch[i][INPUT_IDS_CHOSEN_KEY])
             pad_length_rejected = max_length - len(batch[i][INPUT_IDS_REJECTED_KEY])
 
-            # Create padding and attention mask
-            padding_chosen = [self.pad_token_id] * pad_length_chosen
-            mask_chosen = [1] * len(batch[i][INPUT_IDS_CHOSEN_KEY]) + [0] * pad_length_chosen
-            padding_rejected = [self.pad_token_id] * pad_length_rejected
-            mask_rejected = [1] * len(batch[i][INPUT_IDS_REJECTED_KEY]) + [0] * pad_length_rejected
-
             # Pad from the right
+            padding_chosen = [self.pad_token_id] * pad_length_chosen
+            padding_rejected = [self.pad_token_id] * pad_length_rejected
             padded_sequence_chosen = batch[i][INPUT_IDS_CHOSEN_KEY] + padding_chosen
             padded_sequence_rejected = batch[i][INPUT_IDS_REJECTED_KEY] + padding_rejected
             padded_sequences_chosen.append(padded_sequence_chosen)
-            attention_masks_chosen.append(mask_chosen)
             padded_sequences_rejected.append(padded_sequence_rejected)
-            attention_masks_rejected.append(mask_rejected)
         
         # Convert to tensors
         padded_sequences_chosen = torch.tensor(padded_sequences_chosen)
@@ -385,51 +385,5 @@ class SimplePreferenceCollator:
         
         return {
             INPUT_IDS_CHOSEN_KEY: padded_sequences_chosen,
-            ATTENTION_MASK_CHOSEN_KEY: attention_masks_chosen,
             INPUT_IDS_REJECTED_KEY: padded_sequences_rejected,
-            ATTENTION_MASK_REJECTED_KEY: attention_masks_rejected,
         }
-
-# class SimplePaddingCollator:
-#     def __init__(self, pad_token_id, padding_side):
-#         self.pad_token_id = pad_token_id
-#         self.padding_side = padding_side
-
-#     def __call__(self, batch):
-#         # Find max length in the batch
-#         max_length = max(len(x) for x in batch)
-
-#         # Initialize lists to store padded sequences and attention masks
-#         padded_sequences = []
-#         attention_masks = []
-
-#         for sequence in batch:
-#             # Calculate padding length
-#             pad_length = max_length - len(sequence)
-
-#             # Create padding and attention mask
-#             padding = [self.pad_token_id] * pad_length
-#             mask = [1] * len(sequence) + [0] * pad_length
-
-#             # Apply padding based on padding_side
-#             if self.padding_side == 'right':
-#                 padded_sequence = sequence + padding
-#             else:  # left padding
-#                 padded_sequence = padding + sequence
-#                 mask = mask[::-1]  # reverse mask for left padding
-
-#             padded_sequences.append(padded_sequence)
-#             attention_masks.append(mask)
-
-#         # Convert to tensors
-#         padded_sequences = torch.tensor(padded_sequences)
-#         attention_masks = torch.tensor(attention_masks)
-
-#         return {
-#             'input_ids': padded_sequences,
-#             'attention_mask': attention_masks,
-#         }
-
-# # Example usage:
-# # collator = SimplePaddingCollator(pad_token_id=0, padding_side='right')
-# # dataloader = DataLoader(dataset, batch_size=32, collate_fn=collator)
