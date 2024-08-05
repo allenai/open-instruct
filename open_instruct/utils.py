@@ -415,7 +415,7 @@ class FlatArguments:
         default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
     )
     dataset_mixer: Optional[Union[dict,list]] = field(
-        default=None, nargs='*', metadata={"help": "A list or dictionary of datasets (local or HF) to sample from."}
+        default=None, metadata={"help": "A list or dictionary of datasets (local or HF) to sample from."}
     )
     dataset_mix_dir: Optional[str] = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
