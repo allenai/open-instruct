@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "open_instruct"
+authors = [
+    {name = "Example Author", email = "author@example.com"}
+]
+description = "package description"
+version = "0.0.1"
+readme = "README.md"
+requires-python = ">=3.7"
+dependencies = []
+
+[tool.setuptools]
+py-modules = ["open_instruct"]
