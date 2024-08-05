@@ -416,7 +416,7 @@ class FlatArguments:
     dataset_mixer: Optional[dict] = field(
         default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
     )
-    dataset_mixer_list: Optional[list] = field(
+    dataset_mixer_list: Optional[list[str]] = field(
         default=None, metadata={"help": "A list of datasets (local or HF) to sample from."}
     )
     dataset_mix_dir: Optional[str] = field(
