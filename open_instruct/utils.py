@@ -138,6 +138,7 @@ def conversations_to_messages(example):
     example["messages"] = messages
     return example
 
+
 def get_datasets(
     dataset_mixer: Union[dict, list],
     splits: Optional[List[str]] = None,
@@ -172,11 +173,11 @@ def get_datasets(
             Quick debugging when mixing heterogeneous datasets.
     """
     if isinstance(dataset_mixer, list):
-        assert len(dataset_mixer) % 2 == 0,f"Data mixer list length is not even: {dataset_mixer}"
+        assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
         mixer_dict = {}
         i = 0
         while i < len(dataset_mixer) - 1:
-            assert isinstance(dataset_mixer[i], str),f"Invalid type in data mixer: {dataset_mixer}"
+            assert isinstance(dataset_mixer[i], str), f"Invalid type in data mixer: {dataset_mixer}"
             mixer_dict[dataset_mixer[i]] = float(dataset_mixer[i+1])
             i += 2
         dataset_mixer = mixer_dict
@@ -582,9 +583,9 @@ class FlatArguments:
             raise ValueError("reduce_loss must be either 'mean' or 'sum'")
         if (
             self.dataset_name is None and
-            self.train_file is None and 
-            self.dataset_mixer is None and 
-            self.dataset_mixer_list is  None
+            self.train_file is None and
+            self.dataset_mixer is None and
+            self.dataset_mixer_list is None
         ):
             raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
         else:
