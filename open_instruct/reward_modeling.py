@@ -195,7 +195,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     if args.total_episodes is None:
         args.total_episodes = args.num_train_epochs * len(train_dataset)
     args.num_training_steps = args.total_episodes // args.batch_size
-    args.eval_freq = max(1, args.total_episodes // args.num_evals)
+    args.eval_freq = max(1, args.num_training_steps // args.num_evals)
     if accelerator.is_main_process:
         visualize_token(train_dataset[0][INPUT_IDS_CHOSEN_KEY], tokenizer)
         if args.with_tracking:
