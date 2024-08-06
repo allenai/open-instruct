@@ -20,7 +20,7 @@ def main():
     parser.add_argument("--cluster", type=str, default="ai2/allennlp-cirrascale", help="Beaker cluster to use")
     parser.add_argument("--priority", type=str, default="high", help="Priority of the job")
     parser.add_argument("--preemptible", type=bool, default=True, help="Whether to use preemptible instances")
-    parser.add_argument("--num_gpus", type=int, default=4, help="Number of GPUs to use")
+    parser.add_argument("--num_gpus", type=int, default=8, help="Number of GPUs to use")
     parser.add_argument("--num_nodes", type=int, default=1, help="Number of nodes to use")
     parser.add_argument("--image", type=str, default="nathanl/open_instruct_auto", help="Beaker image to use.")
     parser.add_argument("--workspace", type=str, default="ai2/tulu-2-improvements", help="Beaker workspace to use.")
@@ -61,7 +61,7 @@ def main():
     d1 = yaml.load(default_yaml, Loader=yaml.FullLoader)
 
     if args.num_nodes > 1:
-        args.num_gpus = 8 # assume we use entire nodes if doing multinode training
+        assert args.num_gpus == 8, "`num_gpus` must be set to 8 when training with multiple nodes" 
         d1['tasks'][0]['replicas'] = args.num_nodes
 
     d1['tasks'][0]['image']['beaker'] = args.image
