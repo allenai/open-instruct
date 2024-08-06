@@ -189,7 +189,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         dataset = dataset_processor.filter(dataset)
     train_dataset = dataset[dataset_config.dataset_train_split]
     eval_dataset = dataset[dataset_config.dataset_eval_split]
-    visualize_token(train_dataset[0][INPUT_IDS_CHOSEN_KEY], tokenizer)
     train_dataset = train_dataset.select_columns(TOKENIZED_PREFERENCE_DATASET_KEYS)
 
     # some more runtime logging
@@ -197,10 +196,12 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         args.total_episodes = args.num_train_epochs * len(train_dataset)
     args.num_training_steps = args.total_episodes // args.batch_size
     args.eval_freq = max(1, args.total_episodes // args.num_evals)
-    if args.with_tracking and accelerator.is_main_process:
-        # upload the visualized token length
-        dataset_processor.get_token_length_visualization(dataset, save_path=f"runs/{args.run_name}/token_length.png")
-        wandb.log({"token_length": wandb.Image(f"runs/{args.run_name}/token_length.png")})
+    if accelerator.is_main_process:
+        visualize_token(train_dataset[0][INPUT_IDS_CHOSEN_KEY], tokenizer)
+        if args.with_tracking:
+            # upload the visualized token length
+            dataset_processor.get_token_length_visualization(dataset, save_path=f"runs/{args.run_name}/token_length.png")
+            wandb.log({"token_length": wandb.Image(f"runs/{args.run_name}/token_length.png")})
 
     # create the model and optimizer
     model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
