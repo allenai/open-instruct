@@ -27,6 +27,54 @@ python open_instruct/reward_modeling.py \
     --push_to_hub \
 ```
 
+You would typically get a track run like https://wandb.ai/ai2-llm/open-instruct/runs/ztgnw64l
+
+
+
+### Quality of life tools
+
+
+Note that when running with `--push_to_hub` and `--with_tracking`, the HF repo is automatically tracked to wandb, so we link the tracked run and the trained model.
+
+![reward modeling tracked hf repo](reward_modeling_hf_repo.png)
+
+
+Furthermore, we also track the dataset length visualization in wandb (see detail in [here](#dataset-processing))
+
+
+![token length visualization in wandb](reward_modeling_token_wandb.png)
+
+
+Finally, we also include samples 
+
+![reward modeling preference sample texts](reward_modeling_preference_sample_texts.png)
+
+
+
+## To debug
+
+To debug you can run the command with `--sanity_check`, this way it will only deal with 100 samples from the dataset and cut down dataset processing time.
+
+```bash
+python -i open_instruct/reward_modeling.py \
+    --dataset_name trl-internal-testing/sentiment-trl-style \
+    --dataset_train_split train \
+    --dataset_eval_split test \
+    --model_name_or_path EleutherAI/pythia-14m \
+    --chat_template simple_concat_with_space \
+    --learning_rate 3e-6 \
+    --per_device_train_batch_size 1 \
+    --per_device_eval_batch_size 1 \
+    --gradient_accumulation_steps 32 \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 1024 \
+    --num_train_epochs 1 \
+    --output_dir models/rm/rm \
+    --sanity_check \
+    --push_to_hub
+```
+
+
 ## How does it work?
 
 
@@ -229,25 +277,8 @@ These are relevant implementation details on reward modeling:
 ## Experiment results
 
 
-```bash
-# LEVEL 0: interactive debugging
-python -i open_instruct/reward_modeling.py \
-    --dataset_name trl-internal-testing/sentiment-trl-style \
-    --dataset_train_split train \
-    --dataset_eval_split test \
-    --model_name_or_path EleutherAI/pythia-14m \
-    --chat_template simple_concat_with_space \
-    --learning_rate 3e-6 \
-    --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 32 \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 1024 \
-    --num_train_epochs 1 \
-    --output_dir models/rm/rm \
-    --sanity_check \
-    --push_to_hub
 
+```bash
 # LEVEL 1: single GPU model training; adjust your `per_device_train_batch_size` and
 # `gradient_accumulation_steps` accordingly
 # you can also use the `trl-internal-testing/descriptiveness-trl-style` dataset
@@ -267,43 +298,65 @@ python open_instruct/reward_modeling.py \
     --output_dir models/rm/rm_sentiment_1b \
     --with_tracking \
     --push_to_hub \
+```
 
+Tracked experiment: https://wandb.ai/ai2-llm/open-instruct/runs/ztgnw64l
+Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1722961506
+
+
+
+```bash
 # LEVEL 2: multi-gpu training using DS2 with the TL;DR summarization dataset
-accelerate launch --config_file examples/accelerate_configs/deepspeed_zero2.yaml \
+accelerate launch  --config_file configs/ds_configs/deepspeed_zero2.yaml \
     open_instruct/reward_modeling.py \
     --dataset_name trl-internal-testing/tldr-preference-trl-style \
     --dataset_train_split train \
     --dataset_eval_split validation \
-    --model_name_or_path EleutherAI/pythia-2.8b-deduped \
+    --model_name_or_path EleutherAI/pythia-1b-deduped \
     --chat_template simple_concat_with_space \
     --learning_rate 3e-6 \
-    --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 32 \
+    --per_device_train_batch_size 32 \
+    --per_device_eval_batch_size 32 \
+    --gradient_accumulation_steps 1 \
     --max_token_length 1024 \
     --max_prompt_token_lenth 512 \
     --num_train_epochs 1 \
-    --output_dir models/rm/rm_tldr_2.8b \
-    --bf16 \
+    --output_dir models/rm/rm_tldr_1b \
+    --with_tracking \
+    --push_to_hub
+```
 
+Tracked experiment: https://wandb.ai/ai2-llm/open-instruct/runs/etfpvan2
+Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1722961863
+
+```bash
 # LEVEL 2: multi-gpu training using DS2 with the anthropic HH dataset
-accelerate launch --config_file examples/accelerate_configs/deepspeed_zero2.yaml \
+accelerate launch --config_file configs/ds_configs/deepspeed_zero2.yaml \
     open_instruct/reward_modeling.py \
     --dataset_name trl-internal-testing/hh-rlhf-trl-style \
     --dataset_train_split train \
-    --dataset_eval_split validation \
-    --model_name_or_path EleutherAI/pythia-2.8b-deduped \
+    --dataset_eval_split test \
+    --model_name_or_path EleutherAI/pythia-1b-deduped \
     --chat_template simple_chat \
     --learning_rate 3e-6 \
-    --per_device_train_batch_size 4 \
-    --per_device_eval_batch_size 4 \
-    --gradient_accumulation_steps 8 \
+    --per_device_train_batch_size 8 \
+    --per_device_eval_batch_size 8 \
+    --gradient_accumulation_steps 4 \
     --max_token_length 2048 \
     --max_prompt_token_lenth 1024 \
     --num_train_epochs 1 \
-    --bf16 \
-    --output_dir models/rm/rm_hh_2.8b \
+    --output_dir models/rm/rm_hh_1b \
+    --with_tracking \
+    --push_to_hub 
+```
 
+Tracked experiment: https://wandb.ai/ai2-llm/open-instruct/runs/0uwj4pmt
+Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1722962876
+
+
+
+```bash
+# TODO (Costa): to be tested
 # LEVEL 3: multi-gpu training using DS2 with the ultrafeedback dataset
 accelerate launch --config_file examples/accelerate_configs/deepspeed_zero2.yaml \
     open_instruct/rm_zephyr.py \
