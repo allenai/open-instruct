@@ -6,7 +6,7 @@ use_flash_attn: true
 tokenizer_name: meta-llama/Meta-Llama-3-8B
 use_slow_tokenizer: true
 dataset_mixer:
-  allenai/tulu-v2-sft-mixture-olmo-4096: 1.0
+  allenai/tulu-v2-sft-mixture: 1.0
   HuggingFaceH4/no_robots: 1.0
   meta-math/MetaMathQA: 0.25
   m-a-p/CodeFeedback-Filtered-Instruction: 1.0
