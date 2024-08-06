@@ -153,9 +153,9 @@ def get_datasets(
 
     Args:
         dataset_mixer (`list` or `dict`):
-            Dictionary containing the dataset names and their training proportions.
-            By default, all test proportions are 1.
-            If a list is passed in, it will be converted to a dictionary.
+            Dictionary or list containing the dataset names and their training proportions.
+            By default, all test proportions are 1. Lists are formatted as
+            `key1 value1 key2 value2 ...` If a list is passed in, it will be converted to a dictionary.
         splits (Optional[List[str]], *optional*, defaults to `None`):
             Dataset splits to load and mix. Assumes the splits exist in
             all datasets and have a `train_` or `test_` prefix.
