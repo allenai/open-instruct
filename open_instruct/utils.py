@@ -218,7 +218,7 @@ def get_datasets(
             # assert that needed columns are present
             if need_columns:
                 if not all(col in dataset.column_names for col in need_columns):
-                    raise ValueError(f"Needed column {need_columns} not found in dataset {dataset.column_names}.")
+                    raise ValueError(f"Needed column {need_columns} not found in dataset {dataset.coulmn_names}.")
 
             # handle per-case conversions
             # if "instruction" and "output" columns are present and "messages" is not, convert to messages
