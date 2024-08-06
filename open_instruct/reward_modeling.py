@@ -1,9 +1,7 @@
 import os
 import random
 import time
-from collections import ChainMap
-from dataclasses import asdict, dataclass, field
-from types import SimpleNamespace
+from dataclasses import asdict, dataclass
 from typing import Literal, Optional
 
 import numpy as np
@@ -13,25 +11,19 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from accelerate import Accelerator
-from accelerate.utils import gather_object, broadcast
-from datasets import load_dataset, Dataset
-from rich.console import Console
+from accelerate.utils import broadcast, gather_object
+from datasets import load_dataset
+from huggingface_hub import HfApi
 from rich.pretty import pprint
-from rich.table import Table
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from tqdm import tqdm
 from transformers import (
+    AutoModelForSequenceClassification,
     AutoTokenizer,
     PreTrainedModel,
-    AutoModelForSequenceClassification,
     get_scheduler,
 )
-from huggingface_hub import HfApi
 
-from open_instruct.reward_modeling_eval import evaluate
-from open_instruct.utils import ArgumentParserPlus
-from open_instruct.model_utils import get_reward, disable_dropout_in_model, ModelConfig, print_rich_single_line_metrics, print_rich_table, save_with_accelerate
 from open_instruct.dataset_processor import (
     CHAT_TEMPLATES,
     INPUT_IDS_CHOSEN_KEY,
@@ -39,9 +31,20 @@ from open_instruct.dataset_processor import (
     TOKENIZED_PREFERENCE_DATASET_KEYS,
     DatasetConfig,
     PreferenceDatasetProcessor,
-    visualize_token,
     SimplePreferenceCollator,
+    visualize_token,
 )
+from open_instruct.model_utils import (
+    ModelConfig,
+    disable_dropout_in_model,
+    get_reward,
+    print_rich_single_line_metrics,
+    print_rich_table,
+    save_with_accelerate,
+)
+from open_instruct.reward_modeling_eval import evaluate
+from open_instruct.utils import ArgumentParserPlus
+
 api = HfApi()
 
 
@@ -60,7 +63,9 @@ class Args:
     """The epsilon value for the optimizer"""
     learning_rate: float = 2e-5
     """The initial learning rate for AdamW optimizer."""
-    lr_scheduler_type: Literal["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"] = "linear"
+    lr_scheduler_type: Literal[
+        "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
+    ] = "linear"
     """Which scheduler to use"""
     warm_up_steps: int = 0
     """Number of warm up steps for the scheduler"""
@@ -116,13 +121,9 @@ class Args:
 
 def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig) -> Accelerator:
     """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
-    accelerator = Accelerator(
-        gradient_accumulation_steps=args.gradient_accumulation_steps
-    )
+    accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
     args.world_size = accelerator.num_processes
-    args.local_batch_size = (
-        args.per_device_train_batch_size * args.gradient_accumulation_steps
-    )
+    args.local_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps
     args.micro_batch_size = int(args.per_device_train_batch_size * args.world_size)
     args.batch_size = int(args.local_batch_size * args.world_size)
     time_tensor = torch.tensor(int(time.time()), device=accelerator.device)
@@ -131,18 +132,14 @@ def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig
     args.run_name = f"{args.exp_name}__{args.seed}__{time_int}"
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
-            args.hf_repo_id = (
-                f"{args.exp_name}__{model_config.model_name_or_path.replace('/', '_')}"
-            )
+            args.hf_repo_id = f"{args.exp_name}__{model_config.model_name_or_path.replace('/', '_')}"
         if args.hf_entity is None:
             args.hf_entity = api.whoami()["name"]
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
         if args.hf_repo_revision is None:  # auto-generate one
             args.hf_repo_revision = args.run_name
-        args.hf_repo_url = (
-            f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-        )
-        
+        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+
     return accelerator
 
 
@@ -164,17 +161,14 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 project=args.wandb_project_name,
                 entity=args.wandb_entity,
                 sync_tensorboard=True,
-                config={
-                    **asdict(args), **asdict(dataset_config), **asdict(model_config)
-                },
+                config={**asdict(args), **asdict(dataset_config), **asdict(model_config)},
                 name=args.run_name,
                 save_code=True,
             )
         writer = SummaryWriter(f"runs/{args.run_name}")
         writer.add_text(
             "hyperparameters",
-            "|param|value|\n|-|-|\n%s"
-            % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+            "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
         )
         pprint([args, dataset_config, model_config])
     device = accelerator.device
@@ -185,7 +179,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # create a tokenizer (pad from right)
     tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path, padding_side="right")
-    tokenizer.add_special_tokens({"pad_token": "[PAD]"}) # NOTE: we do not resize the embedding
+    tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
     tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
 
     # create the dataset
@@ -205,14 +199,18 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         args.total_episodes = args.num_train_epochs * len(train_dataset)
     args.num_training_steps = args.total_episodes // args.batch_size
     args.eval_freq = max(1, args.num_training_steps // args.num_evals)
-    if args.with_tracking:
+    if args.with_tracking and accelerator.is_main_process:
         # upload the visualized token length
         wandb.log({"token_length": wandb.Image(f"runs/{args.run_name}/token_length.png")})
 
     # create the model and optimizer
-    model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(model_config.model_name_or_path, num_labels=1)
-    disable_dropout_in_model(model) # see p.3. in https://arxiv.org/pdf/1909.08593
-    layer_init(model.score, std=1 / np.sqrt(model.config.hidden_size + 1)) # see p. 11 in https://arxiv.org/abs/2009.01325
+    model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
+        model_config.model_name_or_path, num_labels=1
+    )
+    disable_dropout_in_model(model)  # see p.3. in https://arxiv.org/pdf/1909.08593
+    layer_init(
+        model.score, std=1 / np.sqrt(model.config.hidden_size + 1)
+    )  # see p. 11 in https://arxiv.org/abs/2009.01325
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, eps=args.eps)
     scheduler = get_scheduler(
         args.lr_scheduler_type,
@@ -274,8 +272,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             query_responses = torch.cat((data[INPUT_IDS_CHOSEN_KEY], data[INPUT_IDS_REJECTED_KEY]), dim=0)
             with accelerator.accumulate(model):
                 _, predicted_reward, _ = get_reward(model, query_responses, tokenizer.pad_token_id, 0)
-                chosen_rewards = predicted_reward[:data[INPUT_IDS_CHOSEN_KEY].shape[0]]
-                rejected_rewards = predicted_reward[data[INPUT_IDS_CHOSEN_KEY].shape[0]:]
+                chosen_rewards = predicted_reward[: data[INPUT_IDS_CHOSEN_KEY].shape[0]]
+                rejected_rewards = predicted_reward[data[INPUT_IDS_CHOSEN_KEY].shape[0] :]
                 accuracy = (chosen_rewards > rejected_rewards).float().mean()
                 loss = -F.logsigmoid(chosen_rewards - rejected_rewards).mean()
                 accelerator.backward(loss)
@@ -287,13 +285,13 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             rejected_rewards[gradient_accumulation_idx] = rejected_rewards.mean()
             reward_margin[gradient_accumulation_idx] = (chosen_rewards - rejected_rewards).mean()
             gradient_accumulation_idx = (gradient_accumulation_idx + 1) % args.gradient_accumulation_steps
-            
+
             if training_step % args.gradient_accumulation_steps == 0:
                 scheduler.step()
                 metrics = {
                     "episode": episode,
                     "epoch": episode / len(train_dataset),
-                    "train/rm/accuracy":  accelerator.gather(accuracies).mean().item(),
+                    "train/rm/accuracy": accelerator.gather(accuracies).mean().item(),
                     "train/rm/loss": accelerator.gather(losses).mean().item(),
                     "train/rm/chosen_reward": accelerator.gather(chosen_rewards).mean().item(),
                     "train/rm/rejected_reward": accelerator.gather(rejected_rewards).mean().item(),
@@ -304,15 +302,23 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     print_rich_single_line_metrics(metrics)
                     for key, value in metrics.items():
                         writer.add_scalar(key, value, episode)
-            
+
             # don't forget to increment the training step
             training_step += 1
-
 
     # save model
     os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
     original_tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path)
-    save_with_accelerate(accelerator, model, original_tokenizer, args.output_dir, False, args.push_to_hub, args.hf_repo_id, args.hf_repo_revision)
+    save_with_accelerate(
+        accelerator,
+        model,
+        original_tokenizer,
+        args.output_dir,
+        False,
+        args.push_to_hub,
+        args.hf_repo_id,
+        args.hf_repo_revision,
+    )
 
 
 if __name__ == "__main__":

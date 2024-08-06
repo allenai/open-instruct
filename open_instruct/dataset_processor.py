@@ -17,7 +17,7 @@
 # 14. `add_bos_token` and `add_eos_token`? E.g., LLAMA models
 # 15. generate properties: has eos_token, bos_token?
 
-## too many names related to "maximum length":
+# too many names related to "maximum length":
 # * `max_seq_length` in SFT
 # * `max_length`, `max_target_length` in RM / DPO,
 # * `max_prompt_length` in DPO
@@ -29,12 +29,11 @@ from dataclasses import dataclass
 from typing import Optional, Union
 
 import matplotlib.pyplot as plt
+import torch
 from datasets import Dataset, DatasetDict
 from rich.console import Console
 from rich.text import Text
-import torch
 from transformers import PreTrainedTokenizer
-
 
 logging.basicConfig(level=logging.INFO)
 
@@ -70,6 +69,7 @@ INPUT_IDS_KEY = "input_ids"
 
 
 # Chat templates
+# flake8: noqa
 CHAT_TEMPLATES = {
     "simple_concat": "{% for message in messages %}{{message['content']}}{% endfor %}{{eos_token}}",
     "simple_concat_with_space": "{% for message in messages %}{{' ' if not loop.first else ''}}{{message['content']}}{% endfor %}{{eos_token}}",
@@ -77,6 +77,7 @@ CHAT_TEMPLATES = {
     "simple_chat": "{% for message in messages %}{{'\n\n' if not loop.first else ''}}{{message['role']|capitalize + ': ' +message['content']}}{% endfor %}{{eos_token}}",
     "zephyr": """{% for message in messages %}\n{% if message['role'] == 'user' %}\n{{ '<|user|>\n' + message['content'] + eos_token }}\n{% elif message['role'] == 'system' %}\n{{ '<|system|>\n' + message['content'] + eos_token }}\n{% elif message['role'] == 'assistant' %}\n{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n{% endif %}\n{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n{% endif %}\n{% endfor %}""",
 }
+# flake8: noqa
 
 
 @dataclass
@@ -109,9 +110,7 @@ class DatasetConfig:
             self.load_from_cache_file = True
 
         if self.chat_template not in CHAT_TEMPLATES:
-            raise ValueError(
-                f"chat_template must be one of {list(CHAT_TEMPLATES.keys())}"
-            )
+            raise ValueError(f"chat_template must be one of {list(CHAT_TEMPLATES.keys())}")
 
 
 class DatasetProcessor:
@@ -136,13 +135,9 @@ class DatasetProcessor:
         """Sanity check the dataset by selecting a subset of samples to speed up tokenization: only useful for debugging"""
         if self.config.sanity_check:
             for key in dataset:
-                dataset[key] = dataset[key].select(
-                    range(min(self.config.sanity_check_max_samples, len(dataset[key])))
-                )
+                dataset[key] = dataset[key].select(range(min(self.config.sanity_check_max_samples, len(dataset[key]))))
 
-    def get_token_length_stats(
-        self, features: list[str], dataset: Union[Dataset, DatasetDict]
-    ):
+    def get_token_length_stats(self, features: list[str], dataset: Union[Dataset, DatasetDict]):
         """Get token length statistics for the dataset"""
         if isinstance(dataset, Dataset):
             return self._get_token_length_stats(features, dataset)
@@ -158,8 +153,7 @@ class DatasetProcessor:
             stats[key] = {
                 "max_token_length": max(len(x) for x in dataset[key]),
                 "min_token_length": min(len(x) for x in dataset[key]),
-                "mean_token_length": sum(len(x) for x in dataset[key])
-                / len(dataset[key]),
+                "mean_token_length": sum(len(x) for x in dataset[key]) / len(dataset[key]),
             }
         return stats
 
@@ -207,17 +201,11 @@ class DatasetProcessor:
 class PreferenceDatasetProcessor(DatasetProcessor):
     def tokenize(self, dataset: Union[Dataset, DatasetDict]):
         def tokenize_fn(row):
-            row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(
-                row[CHOSEN_KEY][:-1]
-            )
+            row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(row[CHOSEN_KEY][:-1])
             row[ATTENTION_MASK_PROMPT_KEY] = [1] * len(row[INPUT_IDS_PROMPT_KEY])
-            row[INPUT_IDS_CHOSEN_KEY] = self.tokenizer.apply_chat_template(
-                row[CHOSEN_KEY]
-            )
+            row[INPUT_IDS_CHOSEN_KEY] = self.tokenizer.apply_chat_template(row[CHOSEN_KEY])
             row[ATTENTION_MASK_CHOSEN_KEY] = [1] * len(row[INPUT_IDS_CHOSEN_KEY])
-            row[INPUT_IDS_REJECTED_KEY] = self.tokenizer.apply_chat_template(
-                row[REJECTED_KEY]
-            )
+            row[INPUT_IDS_REJECTED_KEY] = self.tokenizer.apply_chat_template(row[REJECTED_KEY])
             row[ATTENTION_MASK_REJECTED_KEY] = [1] * len(row[INPUT_IDS_REJECTED_KEY])
             return row
 
@@ -232,13 +220,15 @@ class PreferenceDatasetProcessor(DatasetProcessor):
             return (
                 len(row[INPUT_IDS_PROMPT_KEY]) <= self.config.max_prompt_token_lenth
                 if self.config.max_prompt_token_lenth is not None
-                else True
-                and len(row[INPUT_IDS_CHOSEN_KEY]) <= self.config.max_token_length
-                if self.config.max_token_length is not None
-                else True
-                and len(row[INPUT_IDS_REJECTED_KEY]) <= self.config.max_token_length
-                if self.config.max_token_length is not None
-                else True
+                else (
+                    True and len(row[INPUT_IDS_CHOSEN_KEY]) <= self.config.max_token_length
+                    if self.config.max_token_length is not None
+                    else (
+                        True and len(row[INPUT_IDS_REJECTED_KEY]) <= self.config.max_token_length
+                        if self.config.max_token_length is not None
+                        else True
+                    )
+                )
             )
 
         filtered_dataset = dataset.filter(
@@ -250,12 +240,8 @@ class PreferenceDatasetProcessor(DatasetProcessor):
             for key in dataset:
                 filtered_count = len(dataset[key]) - len(filtered_dataset[key])
                 total_count = len(dataset[key])
-                percentage = (
-                    (filtered_count / total_count) * 100 if total_count > 0 else 0
-                )
-                logging.info(
-                    f"Filtered out {filtered_count} samples or {percentage:.2f}% samples from {key}"
-                )
+                percentage = (filtered_count / total_count) * 100 if total_count > 0 else 0
+                logging.info(f"Filtered out {filtered_count} samples or {percentage:.2f}% samples from {key}")
         return filtered_dataset
 
     def get_token_length_stats(self, dataset: Union[Dataset, DatasetDict]):
@@ -268,9 +254,7 @@ class PreferenceDatasetProcessor(DatasetProcessor):
             dataset=dataset,
         )
 
-    def get_token_length_visualization(
-        self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30
-    ):
+    def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):
         return super().get_token_length_visualization(
             features=[
                 INPUT_IDS_PROMPT_KEY,
@@ -286,9 +270,7 @@ class PreferenceDatasetProcessor(DatasetProcessor):
 class SFTDatasetProcessor(DatasetProcessor):
     def tokenize(self, dataset: Union[Dataset, DatasetDict]):
         def tokenize_fn(row):
-            row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(
-                row[MESSAGES_KEY][:-1]
-            )
+            row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(row[MESSAGES_KEY][:-1])
             row[INPUT_IDS_KEY] = self.tokenizer.apply_chat_template(row[MESSAGES_KEY])
             return row
 
@@ -303,9 +285,11 @@ class SFTDatasetProcessor(DatasetProcessor):
             return (
                 len(row[INPUT_IDS_PROMPT_KEY]) <= self.config.max_prompt_token_lenth
                 if self.config.max_prompt_token_lenth is not None
-                else True and len(row[INPUT_IDS_KEY]) <= self.config.max_token_length
-                if self.config.max_token_length is not None
-                else True
+                else (
+                    True and len(row[INPUT_IDS_KEY]) <= self.config.max_token_length
+                    if self.config.max_token_length is not None
+                    else True
+                )
             )
 
         return dataset.filter(
@@ -315,13 +299,9 @@ class SFTDatasetProcessor(DatasetProcessor):
         )
 
     def get_token_length_stats(self, dataset: Union[Dataset, DatasetDict]):
-        return super().get_token_length_stats(
-            features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY], dataset=dataset
-        )
+        return super().get_token_length_stats(features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY], dataset=dataset)
 
-    def get_token_length_visualization(
-        self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30
-    ):
+    def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):
         return super().get_token_length_visualization(
             features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY],
             dataset=dataset,
@@ -341,7 +321,6 @@ def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
     console.print(rich_text)
 
 
-
 class SimplePreferenceCollator:
     def __init__(self, pad_token_id):
         """Simple collator for preference dataset (always pad from the right)"""
@@ -353,8 +332,8 @@ class SimplePreferenceCollator:
         max_length_chosen = -1
         max_length_rejected = -1
         for i in range(len(batch)):
-            max_length_chosen = max(max_length_chosen, len(batch[i]['input_ids_chosen']))
-            max_length_rejected = max(max_length_rejected, len(batch[i]['input_ids_rejected']))
+            max_length_chosen = max(max_length_chosen, len(batch[i]["input_ids_chosen"]))
+            max_length_rejected = max(max_length_rejected, len(batch[i]["input_ids_rejected"]))
         max_length = max(max_length_chosen, max_length_rejected)
         assert max_length > 0, "the dataset is empty"
 
@@ -363,7 +342,7 @@ class SimplePreferenceCollator:
         attention_masks_chosen = []
         padded_sequences_rejected = []
         attention_masks_rejected = []
-        
+
         for i in range(len(batch)):
             # Calculate padding length
             pad_length_chosen = max_length - len(batch[i][INPUT_IDS_CHOSEN_KEY])
@@ -376,13 +355,13 @@ class SimplePreferenceCollator:
             padded_sequence_rejected = batch[i][INPUT_IDS_REJECTED_KEY] + padding_rejected
             padded_sequences_chosen.append(padded_sequence_chosen)
             padded_sequences_rejected.append(padded_sequence_rejected)
-        
+
         # Convert to tensors
         padded_sequences_chosen = torch.tensor(padded_sequences_chosen)
         attention_masks_chosen = torch.tensor(attention_masks_chosen)
         padded_sequences_rejected = torch.tensor(padded_sequences_rejected)
         attention_masks_rejected = torch.tensor(attention_masks_rejected)
-        
+
         return {
             INPUT_IDS_CHOSEN_KEY: padded_sequences_chosen,
             INPUT_IDS_REJECTED_KEY: padded_sequences_rejected,

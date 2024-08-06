@@ -1,47 +1,30 @@
-import os
-import random
-import time
-from collections import ChainMap, defaultdict
-from dataclasses import asdict, dataclass, field
-from types import SimpleNamespace
-from typing import List, Literal, Optional, Tuple
+from collections import defaultdict
+from typing import Tuple
 
-import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
-from accelerate import Accelerator
-from accelerate.utils import gather_object, broadcast
-from datasets import load_dataset, Dataset
-from rich.console import Console
-from rich.pretty import pprint
-from rich.table import Table
+from datasets import load_dataset
+from huggingface_hub import HfApi
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from transformers import (
+    AutoModelForSequenceClassification,
     AutoTokenizer,
     PreTrainedModel,
-    AutoModelForSequenceClassification,
     PreTrainedTokenizer,
-    get_scheduler,
 )
-from huggingface_hub import HfApi
 
-from open_instruct.utils import ArgumentParserPlus
-from open_instruct.model_utils import get_reward, disable_dropout_in_model, ModelConfig, print_rich_single_line_metrics, print_rich_table, save_with_accelerate
 from open_instruct.dataset_processor import (
     CHAT_TEMPLATES,
     INPUT_IDS_CHOSEN_KEY,
     INPUT_IDS_REJECTED_KEY,
-    TOKENIZED_PREFERENCE_DATASET_KEYS,
     DatasetConfig,
     PreferenceDatasetProcessor,
-    visualize_token,
     SimplePreferenceCollator,
 )
+from open_instruct.model_utils import get_reward, print_rich_table
+
 api = HfApi()
 
 
@@ -54,7 +37,9 @@ def find_shared_text(chosen_text: str, rejected_text: str):
     return chosen_text[:i]
 
 
-def evaluate(model: PreTrainedModel, dataloader: DataLoader, tokenizer: PreTrainedTokenizer, max_sampled_texts: int = 0) -> Tuple[dict, dict]:
+def evaluate(
+    model: PreTrainedModel, dataloader: DataLoader, tokenizer: PreTrainedTokenizer, max_sampled_texts: int = 0
+) -> Tuple[dict, dict]:
     model.eval()
     total_loss = 0
     total_accuracy = 0
@@ -69,8 +54,8 @@ def evaluate(model: PreTrainedModel, dataloader: DataLoader, tokenizer: PreTrain
         for data in tqdm(dataloader):
             query_responses = torch.cat((data[INPUT_IDS_CHOSEN_KEY], data[INPUT_IDS_REJECTED_KEY]), dim=0)
             _, predicted_reward, _ = get_reward(model, query_responses, tokenizer.pad_token_id, 0)
-            chosen_rewards = predicted_reward[:data[INPUT_IDS_CHOSEN_KEY].shape[0]]
-            rejected_rewards = predicted_reward[data[INPUT_IDS_CHOSEN_KEY].shape[0]:]
+            chosen_rewards = predicted_reward[: data[INPUT_IDS_CHOSEN_KEY].shape[0]]
+            rejected_rewards = predicted_reward[data[INPUT_IDS_CHOSEN_KEY].shape[0] :]
             accuracy = (chosen_rewards > rejected_rewards).float().mean()
             loss = -F.logsigmoid(chosen_rewards - rejected_rewards).mean()
             total_loss += loss.item()
@@ -83,18 +68,22 @@ def evaluate(model: PreTrainedModel, dataloader: DataLoader, tokenizer: PreTrain
             if table is not None and len(table["shared prompt text"]) < max_sampled_texts:
                 chosen_texts = tokenizer.batch_decode(data[INPUT_IDS_CHOSEN_KEY])
                 rejected_texts = tokenizer.batch_decode(data[INPUT_IDS_REJECTED_KEY])
-                rewards_rounded = [[round(chosen.item(), 4), round(rejected.item(), 4)] for chosen, rejected in zip(chosen_rewards, rejected_rewards)]
-                correct_prediction = [bool((chosen > rejected)) for chosen, rejected in zip(chosen_rewards, rejected_rewards)]
+                rewards_rounded = [
+                    [round(chosen.item(), 4), round(rejected.item(), 4)]
+                    for chosen, rejected in zip(chosen_rewards, rejected_rewards)
+                ]
+                correct_prediction = [
+                    bool((chosen > rejected)) for chosen, rejected in zip(chosen_rewards, rejected_rewards)
+                ]
                 shared_texts = [
                     find_shared_text(chosen_text, rejected_text)
                     for chosen_text, rejected_text in zip(chosen_texts, rejected_texts)
                 ]
                 chosen_response_texts = [
-                    chosen_text[len(shared_text):]
-                    for chosen_text, shared_text in zip(chosen_texts, shared_texts)
+                    chosen_text[len(shared_text) :] for chosen_text, shared_text in zip(chosen_texts, shared_texts)
                 ]
                 rejected_response_texts = [
-                    rejected_text[len(shared_text):]
+                    rejected_text[len(shared_text) :]
                     for rejected_text, shared_text in zip(rejected_texts, shared_texts)
                 ]
                 table["shared prompt text"].extend(shared_texts)
@@ -112,11 +101,14 @@ def evaluate(model: PreTrainedModel, dataloader: DataLoader, tokenizer: PreTrain
         "reward_margin": total_reward_margin / total_samples,
     }, table
 
+
 if __name__ == "__main__":
     model = AutoModelForSequenceClassification.from_pretrained("EleutherAI/pythia-14m", num_labels=1)
-    dataset_config = DatasetConfig(dataset_name="trl-internal-testing/sentiment-trl-style", chat_template="simple_chat")
+    dataset_config = DatasetConfig(
+        dataset_name="trl-internal-testing/sentiment-trl-style", chat_template="simple_chat"
+    )
     tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m", padding_side="right")
-    tokenizer.add_special_tokens({"pad_token": "[PAD]"}) # NOTE: we do not resize the embedding
+    tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
     tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
     eval_dataset = load_dataset(dataset_config.dataset_name)["test"]
     dataset_processor = PreferenceDatasetProcessor(

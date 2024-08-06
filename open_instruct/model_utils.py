@@ -1,4 +1,4 @@
-### Taken and modified from https://github.com/huggingface/trl
+# Taken and modified from https://github.com/huggingface/trl
 # Copyright 2022 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -27,16 +27,14 @@ except ImportError:
 import pandas as pd
 import torch
 import transformers
-from transformers import PreTrainedModel, PreTrainedTokenizer
-from huggingface_hub import ModelCard
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
+from rich import print as rprint
 from rich.console import Console
 from rich.table import Table
-from rich import print as rprint
 from rich.text import Text
 from torch.nn.parallel.distributed import DistributedDataParallel
-
+from transformers import PreTrainedModel, PreTrainedTokenizer
 
 
 @dataclass
@@ -112,8 +110,6 @@ class ModelConfig:
     use_bnb_nested_quant: bool = field(default=False, metadata={"help": "use nested quantization"})
 
 
-
-
 # ----------------------------------------------------------------------------
 # Model utilities; reward model stuff
 def disable_dropout_in_model(model: torch.nn.Module) -> None:
@@ -179,7 +175,9 @@ def get_reward(
     )
     reward_logits = model.score(output.hidden_states[-1])
     sequence_lengths = first_true_indices(query_responses[:, context_length:] == pad_token_id) - 1 + context_length
-    assert reward_logits.shape[-1] == 1, "Reward model should output a single scalar per token. Check if you added `num_labels=1` when doing `AutoModelForSequenceClassification.from_pretrained(...)`."
+    assert (
+        reward_logits.shape[-1] == 1
+    ), "Reward model should output a single scalar per token. Check if you added `num_labels=1` when doing `AutoModelForSequenceClassification.from_pretrained(...)`."
     # https://github.com/huggingface/transformers/blob/dc68a39c8111217683bf49a4912d0c9018bab33d/src/transformers/models/gpt2/modeling_gpt2.py#L1454
     return (
         reward_logits,
@@ -219,7 +217,6 @@ def forward(
         return_dict=True,
         output_hidden_states=True,
     )
-
 
 
 def truncate_response(stop_token_id: int, pad_token_id: int, responses: torch.Tensor):
@@ -303,9 +300,16 @@ def batch_generation(
     return torch.cat(query_responses, 0), torch.cat(logitss, 0)
 
 
-
-
-def save_with_accelerate(accelerator: Accelerator, model: torch.nn.Module, tokenizer: PreTrainedTokenizer, output_dir: str, use_lora: bool = False, push_to_hub: bool = False, hf_repo_id: Optional[str] = None, hf_repo_revision: Optional[str] = None) -> None:
+def save_with_accelerate(
+    accelerator: Accelerator,
+    model: torch.nn.Module,
+    tokenizer: PreTrainedTokenizer,
+    output_dir: str,
+    use_lora: bool = False,
+    push_to_hub: bool = False,
+    hf_repo_id: Optional[str] = None,
+    hf_repo_revision: Optional[str] = None,
+) -> None:
     unwrapped_model: PreTrainedModel = accelerator.unwrap_model(model)
     # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
     # Otherwise, sometimes the model will be saved with only part of the parameters.
@@ -332,9 +336,7 @@ def save_with_accelerate(accelerator: Accelerator, model: torch.nn.Module, token
             revision=hf_repo_revision,
             safe_serialization=False,
         )
-        hf_repo_url = (
-            f"https://huggingface.co/{hf_repo_id}/tree/{hf_repo_revision}"
-        )
+        hf_repo_url = f"https://huggingface.co/{hf_repo_id}/tree/{hf_repo_revision}"
         print(f"🔥 pushed to {hf_repo_url}")
 
     if accelerator.is_main_process:
@@ -345,6 +347,7 @@ def save_with_accelerate(accelerator: Accelerator, model: torch.nn.Module, token
                 revision=hf_repo_revision,
             )
     # customize model card (TODO (Costa): this can be prettier)
+
 
 # ----------------------------------------------------------------------------
 # DeepSpeed utilities
@@ -455,7 +458,6 @@ def prepare_deepspeed(
     return model
 
 
-
 # ----------------------------------------------------------------------------
 # Quality of life utilities
 def print_rich_table(df: pd.DataFrame) -> Table:
@@ -475,19 +477,20 @@ def format_value(value):
         return f"{value:.2f}"
     return str(value)
 
+
 def print_rich_single_line_metrics(metrics):
     formatted_metrics = []
     for key, value in metrics.items():
         # Shortening the key names
-        short_key = key.split('/')[-1] if '/' in key else key
-        
+        short_key = key.split("/")[-1] if "/" in key else key
+
         # Create a colored text object
         metric_text = Text()
         metric_text.append(short_key + ": ", style="bold cyan")  # Keys in cyan
         metric_text.append(format_value(value), style="yellow")  # Values in yellow
-        
+
         formatted_metrics.append(metric_text)
-    
+
     rprint(" | ".join(str(metric) for metric in formatted_metrics))
 
 
