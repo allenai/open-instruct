@@ -39,6 +39,9 @@ bash rejection_sampling/e2e_hello_world.bash
 bash rejection_sampling/batch_rejection_sampling.bash
 ```
 
+You can see a demo [here](https://drive.google.com/file/d/1dq3KG15ajpOv8tFYEZGS4tlW7G55oOYP/view?usp=sharing)
+
+<img width="1327" alt="image" src="https://github.com/user-attachments/assets/71a15671-e054-4eab-a571-715881958e74">
 
 
 ```bash
