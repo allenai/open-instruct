@@ -81,8 +81,6 @@ class Args:
     """The forward batch size per device for evaluation (local_micro_batch_size)"""
     total_episodes: Optional[int] = None
     """The total number of episodes in the dataset"""
-    local_eval_batch_size: int = 1
-    """per rank eval batch size"""
     world_size: Optional[int] = None
     """The number of processes (GPUs) to use"""
     micro_batch_size: Optional[int] = None
@@ -93,7 +91,7 @@ class Args:
     """The batch size across devices (HF's `per_device_train_batch_size` * `world_size` * `gradient_accumulation_steps`)"""
     num_training_steps: Optional[int] = None
     """The number of training_steps to train"""
-    num_evals: int = 5
+    num_evals: int = 1
     """The number of evaluations to run throughout training"""
     eval_freq: Optional[int] = None
     """The frequency of evaluation steps"""
@@ -186,9 +184,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     dataset = load_dataset(dataset_config.dataset_name)
     dataset_processor = PreferenceDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
     dataset_processor.sanity_check_(dataset)
-    dataset = dataset_processor.tokenize(dataset)
-    dataset = dataset_processor.filter(dataset)
-    dataset_processor.get_token_length_visualization(dataset, save_path=f"runs/{args.run_name}/token_length.png")
+    with accelerator.main_process_first():
+        dataset = dataset_processor.tokenize(dataset)
+        dataset = dataset_processor.filter(dataset)
     train_dataset = dataset[dataset_config.dataset_train_split]
     eval_dataset = dataset[dataset_config.dataset_eval_split]
     visualize_token(train_dataset[0][INPUT_IDS_CHOSEN_KEY], tokenizer)
@@ -198,9 +196,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     if args.total_episodes is None:
         args.total_episodes = args.num_train_epochs * len(train_dataset)
     args.num_training_steps = args.total_episodes // args.batch_size
-    args.eval_freq = max(1, args.num_training_steps // args.num_evals)
+    args.eval_freq = max(1, args.total_episodes // args.num_evals)
     if args.with_tracking and accelerator.is_main_process:
         # upload the visualized token length
+        dataset_processor.get_token_length_visualization(dataset, save_path=f"runs/{args.run_name}/token_length.png")
         wandb.log({"token_length": wandb.Image(f"runs/{args.run_name}/token_length.png")})
 
     # create the model and optimizer
@@ -221,13 +220,13 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     data_collator = SimplePreferenceCollator(pad_token_id=tokenizer.pad_token_id)
     dataloader = DataLoader(
         train_dataset,
-        batch_size=args.local_batch_size,
+        batch_size=args.per_device_train_batch_size,
         shuffle=True,
         collate_fn=data_collator,
     )
     eval_dataloader = DataLoader(
         eval_dataset,
-        batch_size=args.local_eval_batch_size,
+        batch_size=args.per_device_eval_batch_size,
         shuffle=False,
         collate_fn=data_collator,
     )
@@ -253,8 +252,11 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     # training loop
     for _ in range(args.num_train_epochs):
         for data in dataloader:
+            episode += args.micro_batch_size
+            training_step += 1
+
             # (optionally) evaluate the model
-            if args.num_evals > 0 and training_step % args.eval_freq == 0:
+            if args.num_evals > 0 and training_step > 1 and training_step % args.eval_freq == 0:
                 eval_metrics, table = evaluate(model, eval_dataloader, tokenizer, max_sampled_texts=10)
                 for key in table:
                     table[key] = gather_object(table[key])
@@ -268,22 +270,21 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     else:
                         print_rich_table(df)
 
-            episode += args.micro_batch_size
             query_responses = torch.cat((data[INPUT_IDS_CHOSEN_KEY], data[INPUT_IDS_REJECTED_KEY]), dim=0)
             with accelerator.accumulate(model):
                 _, predicted_reward, _ = get_reward(model, query_responses, tokenizer.pad_token_id, 0)
-                chosen_rewards = predicted_reward[: data[INPUT_IDS_CHOSEN_KEY].shape[0]]
-                rejected_rewards = predicted_reward[data[INPUT_IDS_CHOSEN_KEY].shape[0] :]
-                accuracy = (chosen_rewards > rejected_rewards).float().mean()
-                loss = -F.logsigmoid(chosen_rewards - rejected_rewards).mean()
+                chosen_reward = predicted_reward[: data[INPUT_IDS_CHOSEN_KEY].shape[0]]
+                rejected_reward = predicted_reward[data[INPUT_IDS_CHOSEN_KEY].shape[0] :]
+                accuracy = (chosen_reward > rejected_reward).float().mean()
+                loss = -F.logsigmoid(chosen_reward - rejected_reward).mean()
                 accelerator.backward(loss)
                 optimizer.step()
                 optimizer.zero_grad()
             losses[gradient_accumulation_idx] = loss
             accuracies[gradient_accumulation_idx] = accuracy
-            chosen_rewards[gradient_accumulation_idx] = chosen_rewards.mean()
-            rejected_rewards[gradient_accumulation_idx] = rejected_rewards.mean()
-            reward_margin[gradient_accumulation_idx] = (chosen_rewards - rejected_rewards).mean()
+            chosen_rewards[gradient_accumulation_idx] = chosen_reward.mean()
+            rejected_rewards[gradient_accumulation_idx] = rejected_reward.mean()
+            reward_margin[gradient_accumulation_idx] = (chosen_reward - rejected_reward).mean()
             gradient_accumulation_idx = (gradient_accumulation_idx + 1) % args.gradient_accumulation_steps
 
             if training_step % args.gradient_accumulation_steps == 0:
@@ -304,7 +305,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         writer.add_scalar(key, value, episode)
 
             # don't forget to increment the training step
-            training_step += 1
 
     # save model
     os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
