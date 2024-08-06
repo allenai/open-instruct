@@ -126,7 +126,14 @@ def conversations_to_messages(example):
 
     WizardLMTeam/WizardLM_evol_instruct_V2_196k
     """
-    name_mapping = {"gpt": "assistant", "user": "user", "human": "user"}
+    name_mapping = {
+        "gpt": "assistant",
+        "Assistant": "assistant",
+        "assistant": "assistant",
+        "user": "user",
+        "User": "user",
+        "human": "user",
+    }
     messages = [{"role": name_mapping[conv["from"]], "content": conv["value"]} for conv in example["conversations"]]
     example["messages"] = messages
     return example
@@ -536,6 +543,10 @@ class FlatArguments:
             "Options are 'tensorboard', 'wandb', 'comet_ml', 'clearml', or 'all'. "
             "Specify multiple by listing them: e.g., ['tensorboard', 'wandb']"
         },
+    )
+    save_to_hub: Optional[str] = field(
+        default=None,
+        metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"},
     )
     gradient_checkpointing: bool = field(
         default=False,

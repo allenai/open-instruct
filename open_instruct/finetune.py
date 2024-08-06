@@ -171,10 +171,7 @@ def save_with_accelerate(accelerator, model, tokenizer, output_dir, args):
         )
 
 
-def main():
-    parser = ArgumentParserPlus((FlatArguments))
-    args = parser.parse()
-
+def main(args: FlatArguments):
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
@@ -690,4 +687,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = ArgumentParserPlus((FlatArguments))
+    args = parser.parse()
+    main(args)

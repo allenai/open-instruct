@@ -49,7 +49,11 @@ from transformers import (
     get_scheduler,
 )
 
-from open_instruct.dpo_utils import DataCollatorForSeq2SeqDPO, concatenated_forward, dpo_loss
+from open_instruct.dpo_utils import (
+    DataCollatorForSeq2SeqDPO,
+    concatenated_forward,
+    dpo_loss,
+)
 from open_instruct.utils import ArgumentParserPlus, FlatArguments
 
 logger = get_logger(__name__)
@@ -191,10 +195,7 @@ def prepare_deepspeed(accelerator, model):
     return model
 
 
-def main():
-    parser = ArgumentParserPlus((FlatArguments))
-    args = parser.parse()
-
+def main(args: FlatArguments):
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
@@ -377,14 +378,9 @@ def main():
         model.print_trainable_parameters()
 
     # Preprocessing the datasets.
-    if (
-        "prompt" in raw_datasets["train"].column_names
-        and "completion" in raw_datasets["train"].column_names
-    ):
+    if "prompt" in raw_datasets["train"].column_names and "completion" in raw_datasets["train"].column_names:
         raise ValueError("Sorry, prompt-completion format is not supported for DPO training.")
-    elif (
-        "chosen" in raw_datasets["train"].column_names and "rejected" in raw_datasets["train"].column_names
-    ):
+    elif "chosen" in raw_datasets["train"].column_names and "rejected" in raw_datasets["train"].column_names:
         encode_function = partial(
             encode_with_messages_format,
             tokenizer=tokenizer,
@@ -657,4 +653,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = ArgumentParserPlus((FlatArguments))
+    args = parser.parse()
+    main(args)
