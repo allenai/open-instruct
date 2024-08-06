@@ -200,7 +200,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         visualize_token(train_dataset[0][INPUT_IDS_CHOSEN_KEY], tokenizer)
         if args.with_tracking:
             # upload the visualized token length
-            dataset_processor.get_token_length_visualization(dataset, save_path=f"runs/{args.run_name}/token_length.png")
+            dataset_processor.get_token_length_visualization(
+                dataset, save_path=f"runs/{args.run_name}/token_length.png"
+            )
             wandb.log({"token_length": wandb.Image(f"runs/{args.run_name}/token_length.png")})
 
     # create the model and optimizer
