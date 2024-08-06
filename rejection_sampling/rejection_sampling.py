@@ -79,7 +79,11 @@ def process_shard(rank: int, args: Args, shard: List[str]):
         lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])},
         remove_columns=ds.column_names
     )
-    model = AutoModelForSequenceClassification.from_pretrained(args.model_name_or_path)
+    model = AutoModelForSequenceClassification.from_pretrained(
+        args.model_name_or_path,
+        torch_dtype=torch.bfloat16, 
+        attn_implementation="flash_attention_2",
+    )
     model = model.to(device)
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
     current_batch_size = args.max_forward_batch_size
@@ -168,7 +172,7 @@ def main(args: Args):
         full_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
         if args.add_timestamp:
             full_repo_id += f"_{int(time.time())}"
-        api.create_repo(full_repo_id, repo_type="dataset")
+        api.create_repo(full_repo_id, repo_type="dataset", exist_ok=True)
         for f in [__file__, args.save_filename]:
             api.upload_file(
                 path_or_fileobj=f,
