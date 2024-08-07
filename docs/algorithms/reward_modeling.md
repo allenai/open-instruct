@@ -300,8 +300,8 @@ python open_instruct/reward_modeling.py \
     --push_to_hub \
 ```
 
-Tracked experiment: https://wandb.ai/ai2-llm/open-instruct/runs/ztgnw64l
-Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1722961506
+* Tracked experiment: https://wandb.ai/ai2-llm/open-instruct/runs/ztgnw64l
+* Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1722961506
 
 
 
@@ -326,8 +326,8 @@ accelerate launch  --config_file configs/ds_configs/deepspeed_zero2.yaml \
     --push_to_hub
 ```
 
-Tracked experiment: https://wandb.ai/ai2-llm/open-instruct/runs/etfpvan2
-Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1722961863
+* Tracked experiment: https://wandb.ai/ai2-llm/open-instruct/runs/etfpvan2
+* Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1722961863
 
 ```bash
 # LEVEL 2: multi-gpu training using DS2 with the anthropic HH dataset
@@ -350,8 +350,8 @@ accelerate launch --config_file configs/ds_configs/deepspeed_zero2.yaml \
     --push_to_hub 
 ```
 
-Tracked experiment: https://wandb.ai/ai2-llm/open-instruct/runs/0uwj4pmt
-Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1722962876
+* Tracked experiment: https://wandb.ai/ai2-llm/open-instruct/runs/0uwj4pmt
+* Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1722962876
 
 
 
