@@ -296,11 +296,11 @@ def get_datasets(
         # target features are the features of the first dataset post load
         target_features = raw_train_datasets[0].features
 
-    if any((frac_or_samples != "all" and frac_or_samples < 0) for frac_or_samples in frac_or_sample_list):
+    if any(frac_or_samples < 0 for frac_or_samples in frac_or_sample_list):
         raise ValueError("Dataset fractions / lengths cannot be negative.")
 
     # if any > 1, use count
-    if any((frac_or_samples != "all" and frac_or_samples > 1) for frac_or_samples in frac_or_sample_list):
+    if any(frac_or_samples > 1 for frac_or_samples in frac_or_sample_list):
         is_count = True
         # assert that all are integers
         if not all(
@@ -317,9 +317,7 @@ def get_datasets(
             # cast features (TODO, add more feature regularization)
             dataset = dataset.cast(target_features)
             # TODO selection can be randomized.
-            if frac_or_samples == "all":
-                train_subset = dataset
-            elif is_count:
+            if is_count:
                 train_subset = dataset.select(range(frac_or_samples))
             else:
                 train_subset = dataset.select(range(int(frac_or_samples * len(dataset))))
