@@ -87,7 +87,7 @@ parser.add_argument("--gsm_stop_at_double_newline", action="store_true", help="S
 parser.add_argument("--no-nfs", action="store_true", help="Don't mount the NFS.")
 parser.add_argument("--add_stop_sequence", type=str, nargs="+", default=[], help="Additional stop sequences to use when generating completions.") # e.g. \"<|eot_id|>\" for llama 3
 parser.add_argument("--upload_to_hf", type=str, default=None, help="If given, upload the eval results to the Hugging Face model hub. Provide the HF dataset and path in form <hf dataset>//<hf path>.")
-parser.add_argument("hf_upload_experiments", type=str, nargs="*", default=None, help="Upload given experiment to the Hugging Face model hub.")
+parser.add_argument("--hf_upload_experiments", type=str, nargs="*", default=None, help="Upload given experiment to the Hugging Face model hub.")
 args = parser.parse_args()
 
 
