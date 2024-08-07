@@ -22,13 +22,14 @@ import json
 from torch.utils.data import DataLoader
 from huggingface_hub import HfApi
 from collections import Counter
+from typing import Union
 
 api = HfApi()
 
 
 @dataclass
 class Args:
-    model_names_or_paths: tuple[str] | list[str] = ("allenai/llama-3-tulu-2-8b-uf-mean-rm", "cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr")
+    model_names_or_paths: Union[tuple[str], list[str]] = ("allenai/llama-3-tulu-2-8b-uf-mean-rm", "cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr")
     input_filename: str = "completions.jsonl"
     save_filename: str = "rejected_sampling_completions.jsonl"
     n: int = 1
