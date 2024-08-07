@@ -20,7 +20,30 @@ For Ai2 users, these scripts all work best in interactive sessions (not in batch
 sh scripts/finetune_with_accelerate_config.sh 1 configs/train_configs/sft/default.yaml
 sh scripts/finetune_with_accelerate_config.sh 8 configs/train_configs/sft/olmo_17_sft.yaml
 ```
-4. `finetune_with_acceralate.sh`: Script that the `_config` option above is based on. Uses options provided at CLI.
+4. `finetune_with_acceralate.sh`: Script that the `_config` option above is based on. Uses options provided at CLI. **Change hyperparameters by manually editing or copying the script**.
+
+## Direct Preference Optimization (DPO) scripts
+1. `dpo_train_with_accelerate_config.sh`: Script for running `open_instruct/dpo_tune.py` with configs found in `configs/train_configs/dpo/`. Good for reproducing results. E.g.
+```bash
+sh scripts/dpo_train_with_accelerate_config.sh 8 configs/train_configs/dpo/default.yaml
+```
+2. `dpo_train_with_accelerate.sh`: Script for running `open_instruct/dpo_tune.py` directly. **Change hyperparameters by manually editing or copying the script**.
+E.g.
+```bash
+sh scripts/dpo_train_with_accelerate.sh
+```
+3. `dpo_train_with_qlora.sh`: Same as (2) with QLoRA quantization.
+
+## Beaker / job submission scripts
+1. `submit_eval_jobs.py`: Submit eval jobs for tasks in `scripts/evals/`. TODO add example.
+2. `submit_finetune_jobs.py`: **Core script** for submitting multiple and configurable instruction tuning jobs. This script works for both single- and multi-node configurations. It by default reads configs in `configs/train_configs`, but also can take in CLI arguments matching those in `open_instruct/utils.py` `FlatArguments` class. 
+Example of running this is in `scripts/submit_finetune_jobs.sh`. 
+```
+python scripts/submit_finetune_job.py --config=configs/train_configs/sft/default.yaml  --learning_rate 1e-6
+python scripts/submit_finetune_job.py --config=configs/train_configs/sft/default.yaml  --learning_rate 4e-6
+python scripts/submit_finetune_job.py --config=configs/train_configs/sft/default.yaml  --learning_rate 1e-5
+python scripts/submit_finetune_job.py --config=configs/train_configs/sft/default.yaml  --learning_rate 4e-5
+```
 
 ## Other
 1. `collect_eval_results.py`: For collating metrics from `open-instruct` evaluation job. E.g.
