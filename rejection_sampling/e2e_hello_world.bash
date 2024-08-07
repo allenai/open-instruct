@@ -1,7 +1,7 @@
 mkdir -p rejection_sampling/shards
-total_items=400
+num_prompts=400
 num_shards=5
-items_per_shard=$((total_items / num_shards))
+prompts_per_shard=$((num_prompts / num_shards))
 shared_hf_repo_id=rejection_sampling_$RANDOM 
 num_generations=5
 generation_model=cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr # allenai/llama-3-tulu-2-8b
@@ -15,12 +15,12 @@ mkdir -p rejection_sampling/shards/$shared_hf_repo_id
 for ((i=0; i<num_shards; i++))
 do
     # Calculate start and end indices for this shard
-    start_idx=$((i * items_per_shard))
-    end_idx=$(((i + 1) * items_per_shard))
+    start_idx=$((i * prompts_per_shard))
+    end_idx=$(((i + 1) * prompts_per_shard))
     
-    # Adjust the end index for the last shard to include any remaining items
+    # Adjust the end index for the last shard to include any remaining prompts
     if [ $i -eq $((num_shards - 1)) ]; then
-        end_idx=$((total_items))
+        end_idx=$((num_prompts))
     fi
     
     # Run the command for this shard

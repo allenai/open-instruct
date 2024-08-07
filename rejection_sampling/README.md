@@ -35,6 +35,7 @@ To run through the entire dataset you would need a lot more GPUs to finish the g
 
 ```
 # prod generations
+# NOTE: the scripts below only generate 400 prompts, so it's for demonstration purposes only. The scripts are highly scalable, and you could modify its `num_prompts=400` to something else like 300000 for the tulu dataset.
 bash rejection_sampling/e2e_hello_world.bash
 bash rejection_sampling/batch_rejection_sampling.bash
 ```
