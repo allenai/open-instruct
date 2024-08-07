@@ -57,6 +57,7 @@ from open_instruct.dpo_utils import (
 from open_instruct.utils import (
     ArgumentParserPlus,
     FlatArguments,
+    get_wandb_tags,
     maybe_use_ai2_wandb_entity,
 )
 
