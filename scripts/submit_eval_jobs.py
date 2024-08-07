@@ -541,9 +541,9 @@ for experiment_group in experiment_groups:
         if experiment_group not in args.hf_upload_experiments:
             print(f"Skipping HF upload for {experiment_group}")
         else:
-            hf_dataset = args.upload_to_hf.split("//")[0]
-            hf_path = args.upload_to_hf.split("//")[1]
-            task_spec['arguments'] = [task_spec['arguments'][0] + f" --upload_to_hf {hf_dataset} --hf_upload_name {hf_path}"]
+            hf_dataset = args.upload_to_hf
+            # to match the way oe-eval script works.
+            task_spec['arguments'] = [task_spec['arguments'][0] + f" --upload_to_hf {hf_dataset} --hf_upload_name results/{model_name}"]
 
     eval_task_specs.append(task_spec)
 

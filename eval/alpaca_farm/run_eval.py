@@ -1,5 +1,6 @@
 import os
 import json
+import ast
 import argparse
 import logging
 import random
@@ -137,7 +138,9 @@ def main(args):
         # upload metrics to HF. Main metric is the LC winrate
         # we divide by 100 to match other metrics.
         results = df_leaderboard.to_dict()
-        if os.getenv("IS_ALPACA_EVAL_2", False) != "False":
+        # copied below from alpacaeval codebase
+        is_alpaca_eval_2 = ast.literal_eval(os.environ.get("IS_ALPACA_EVAL_2", "True"))
+        if is_alpaca_eval_2:
             task_name = "oi_alpaca_eval_2"
             # we only have one model in here, so we can just take the first value
             primary_score = [x for x in results["length_controlled_winrate"].values()][0] / 100
