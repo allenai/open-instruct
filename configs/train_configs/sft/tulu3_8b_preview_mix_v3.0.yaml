@@ -1,5 +1,3 @@
-# Note, the exact model was trained on TPUs in a different repo
-# Example file for mixing, use exact tulu 2 mixture for replication allenai/tulu-v2-sft-mixture
 model_name_or_path: meta-llama/Meta-Llama-3-8B
 model_revision: main
 use_flash_attn: true
