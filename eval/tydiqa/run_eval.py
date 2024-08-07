@@ -265,7 +265,7 @@ def main(args):
         # upload metrics to HF. Main metric is the accuracy
         results = eval_scores
         task_name = f"oi_tydiqa_{args.n_shot}shot"
-        primary_score = results["average"]["f1"]
+        primary_score = results["average"]["f1"] / 100
         upload_results_to_hf(
             results,
             args.upload_to_hf,
