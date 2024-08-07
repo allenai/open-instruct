@@ -88,7 +88,7 @@ fi
 
 echo "Downloading WizardLM dataset..."
 # original data removed wget -P data/raw_train/wizardlm/ https://huggingface.co/datasets/WizardLM/WizardLM_evol_instruct_V2_196k/resolve/main/WizardLM_evol_instruct_V2_143k.json
-wget -P data/raw_train/wizardlm/ https://huggingface.co/datasets/ai2-adapt-dev/wizardlm-backup/resolve/main/data/train-00000-of-00001.parquet?download=true
+wget -P data/raw_train/wizardlm/ https://huggingface.co/datasets/ai2-adapt-dev/wizardlm-backup/resolve/main/data/train-00000-of-00001.parquet
 
 
 echo "Downloading the OpenOrca dataset..."
