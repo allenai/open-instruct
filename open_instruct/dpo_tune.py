@@ -517,7 +517,7 @@ def main(args: FlatArguments):
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
         accelerator.init_trackers(
-            "open_instruct_dpo", experiment_config, init_kwargs={"wandb": {"entity": args.wandb_entity}}
+            "open_instruct_internal", experiment_config, init_kwargs={"wandb": {"entity": args.wandb_entity}}
         )
 
     # Train!
