@@ -303,9 +303,7 @@ def get_datasets(
     if any(frac_or_samples > 1 for frac_or_samples in frac_or_sample_list):
         is_count = True
         # assert that all are integers
-        if not all(
-            (isinstance(frac_or_samples, int) or frac_or_samples == 1.0) for frac_or_samples in frac_or_sample_list
-        ):
+        if not all(isinstance(frac_or_samples, int) for frac_or_samples in frac_or_sample_list):
             raise NotImplementedError("Cannot mix fractions and counts, yet.")
     else:
         is_count = False
