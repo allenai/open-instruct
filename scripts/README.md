@@ -65,3 +65,28 @@ python scripts/weights/weight_diff.py recover --path_raw ${hf_llama_path} --path
 ```
 3. `weights/convert_llama_weights_to_hf.sh`: Use `transformers` to convert weights.
 4. `data/*`: scripts for inpecting statistics of and rebuilding Tulu 1/2/N datasets from scratch (where possible).
+
+## Notes on data mixing
+Most of the scripts with `_config` take in configs that look like the following (just the data part):
+```
+dataset_mixer:
+ allenai/tulu-v2-sft-mixture: 0.5
+ HuggingFaceH4/no_robots: 0.8
+```
+There are many ways to configure data mixing. This is done with fractions, but also they can be done with number of samples directly. E.g.
+```
+dataset_mixer:
+ allenai/tulu-v2-sft-mixture: 50000
+ HuggingFaceH4/no_robots: 2500
+```
+The mixer is the advanced alternate to existing data arguments (which are still compatible, for reproducibility), such as local files:
+```
+train_file: data/processed/tulu_v2/tulu_v2_data.jsonl
+```
+or single HuggingFace datasets,
+```
+dataset_name: allenai/tulu-v2-sft-mixture
+```
+**Currently the dataset mixer is only supported for SFT models, but this will be expanded.**
+With these options, the script will fail if multiple data args are passed, in the list of `dataset_mixer`, `train_file`, or `dataset_name`. 
+An internal arg, `dataset_mixer_list` was created to handle conversion from dict to string for Beaker jobs.
