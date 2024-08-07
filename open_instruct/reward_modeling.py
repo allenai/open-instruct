@@ -168,7 +168,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             "hyperparameters",
             "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
         )
-        pprint([args, dataset_config, model_config])
     device = accelerator.device
     random.seed(local_seed)
     np.random.seed(local_seed)
@@ -195,8 +194,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     if args.total_episodes is None:
         args.total_episodes = args.num_train_epochs * len(train_dataset)
     args.num_training_steps = args.total_episodes // args.batch_size
-    args.eval_freq = max(1, args.num_training_steps // args.num_evals)
+    args.eval_freq = max(1, args.total_episodes // args.micro_batch_size // args.num_evals)
     if accelerator.is_main_process:
+        pprint([args, dataset_config, model_config])
         visualize_token(train_dataset[0][INPUT_IDS_CHOSEN_KEY], tokenizer)
         if args.with_tracking:
             # upload the visualized token length
@@ -259,6 +259,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             training_step += 1
 
             # (optionally) evaluate the model
+            accelerator.print(f"Training step: {training_step}, {len(dataloader)=}")
             if args.num_evals > 0 and training_step > 1 and training_step % args.eval_freq == 0:
                 eval_metrics, table = evaluate(model, eval_dataloader, tokenizer, max_sampled_texts=10)
                 for key in table:
@@ -306,8 +307,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     print_rich_single_line_metrics(metrics)
                     for key, value in metrics.items():
                         writer.add_scalar(key, value, episode)
-
-            # don't forget to increment the training step
 
     # save model
     os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)

@@ -46,7 +46,7 @@ def evaluate(
     total_chosen_rewards = 0
     total_rejected_rewards = 0
     total_reward_margin = 0
-    total_samples = 0
+    total_batches = 0
     table = None
     if max_sampled_texts > 0:
         table = defaultdict(list)
@@ -63,7 +63,7 @@ def evaluate(
             total_chosen_rewards += chosen_rewards.mean().item()
             total_rejected_rewards += rejected_rewards.mean().item()
             total_reward_margin += (chosen_rewards - rejected_rewards).mean().item()
-            total_samples += len(data[INPUT_IDS_CHOSEN_KEY])
+            total_batches += 1
 
             if table is not None and len(table["shared prompt text"]) < max_sampled_texts:
                 chosen_texts = tokenizer.batch_decode(data[INPUT_IDS_CHOSEN_KEY])
@@ -94,11 +94,11 @@ def evaluate(
 
     model.train()
     return {
-        "accuracy": total_accuracy / total_samples,
-        "loss": total_loss / total_samples,
-        "chosen_rewards": total_chosen_rewards / total_samples,
-        "rejected_rewards": total_rejected_rewards / total_samples,
-        "reward_margin": total_reward_margin / total_samples,
+        "accuracy": total_accuracy / total_batches,
+        "loss": total_loss / total_batches,
+        "chosen_rewards": total_chosen_rewards / total_batches,
+        "rejected_rewards": total_rejected_rewards / total_batches,
+        "reward_margin": total_reward_margin / total_batches,
     }, table
 
 
