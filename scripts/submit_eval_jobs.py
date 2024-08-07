@@ -88,6 +88,7 @@ parser.add_argument("--no-nfs", action="store_true", help="Don't mount the NFS."
 parser.add_argument("--add_stop_sequence", type=str, nargs="+", default=[], help="Additional stop sequences to use when generating completions.") # e.g. \"<|eot_id|>\" for llama 3
 parser.add_argument("--upload_to_hf", type=str, default=None, help="If given, upload the eval results to the Hugging Face model hub. Provide the HF dataset and path in form <hf dataset>//<hf path>.")
 parser.add_argument("--hf_upload_experiments", type=str, nargs="*", default=None, help="Upload given experiment to the Hugging Face model hub.")
+parser.add_argument("--run_oe_eval_experiments", action="store_true", help="Run the OE eval tool and experiments too.")
 args = parser.parse_args()
 
 
@@ -562,3 +563,15 @@ with open(fn, "w") as file:
 
 cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
 subprocess.Popen(cmd, shell=True)
+
+if args.run_oe_eval_experiments:
+    # if so, run oe-eval. We assume it is cloned in the top-level repo directory.
+    oe_eval_cmd = f"scripts/eval/oe-eval.sh --model-name {model_name}"
+    if args.upload_to_hf:
+        oe_eval_cmd += "--hf-upload"
+    ## model location munging: if beaker, use beaker://. If hf, just name
+    if model_info[0].startswith("hf-"):
+        oe_eval_cmd += f" --model-location {model_info[1]}"
+    else:
+        oe_eval_cmd += f" --model-location beaker://{model_info[1]}"
+    subprocess.Popen(oe_eval_cmd, shell=True)
