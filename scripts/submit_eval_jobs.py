@@ -568,7 +568,7 @@ if args.run_oe_eval_experiments:
     # if so, run oe-eval. We assume it is cloned in the top-level repo directory.
     oe_eval_cmd = f"scripts/eval/oe-eval.sh --model-name {model_name}"
     if args.upload_to_hf:
-        oe_eval_cmd += "--hf-upload"
+        oe_eval_cmd += " --hf-upload"
     ## model location munging: if beaker, use beaker://. If hf, just name
     if model_info[0].startswith("hf-"):
         oe_eval_cmd += f" --model-location {model_info[1]}"
