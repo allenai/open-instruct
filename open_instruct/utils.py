@@ -581,10 +581,10 @@ class FlatArguments:
             raise ValueError("Cannot provide two dataset selection mechanisms.")
 
 
-
 def maybe_use_ai2_wandb_entity() -> Optional[str]:
     """Ai2 internal logic: try use the ai2-llm team if possible. Should not affect external users."""
     import wandb
+
     wandb.login()
     api = wandb.Api()
     current_user = api.viewer

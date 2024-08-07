@@ -54,7 +54,11 @@ from open_instruct.dpo_utils import (
     concatenated_forward,
     dpo_loss,
 )
-from open_instruct.utils import ArgumentParserPlus, FlatArguments, maybe_use_ai2_wandb_entity
+from open_instruct.utils import (
+    ArgumentParserPlus,
+    FlatArguments,
+    maybe_use_ai2_wandb_entity,
+)
 
 logger = get_logger(__name__)
 
@@ -517,7 +521,9 @@ def main(args: FlatArguments):
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
         accelerator.init_trackers(
-            "open_instruct_internal", experiment_config, init_kwargs={"wandb": {"entity": args.wandb_entity, "tags": ["dpo"]}}
+            "open_instruct_internal",
+            experiment_config,
+            init_kwargs={"wandb": {"entity": args.wandb_entity, "tags": [os.path.basename(__file__)[: -len(".py")]]}},
         )
 
     # Train!
