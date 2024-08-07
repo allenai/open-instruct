@@ -46,7 +46,13 @@ from transformers import (
     get_scheduler,
 )
 
-from open_instruct.utils import ArgumentParserPlus, FlatArguments, get_datasets
+from open_instruct.utils import (
+    ArgumentParserPlus,
+    FlatArguments,
+    get_datasets,
+    get_wandb_tags,
+    maybe_use_ai2_wandb_entity,
+)
 
 logger = get_logger(__name__)
 
@@ -545,8 +551,13 @@ def main(args: FlatArguments):
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
         experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"]
+        if args.wandb_entity is None:
+            args.wandb_entity = maybe_use_ai2_wandb_entity()
+        exp_name = os.path.basename(__file__)[: -len(".py")]
         accelerator.init_trackers(
-            "open_instruct_sft", experiment_config, init_kwargs={"wandb": {"entity": args.wandb_entity}}
+            "open_instruct_internal",
+            experiment_config,
+            init_kwargs={"wandb": {"entity": args.wandb_entity, "tags": [exp_name] + get_wandb_tags()}},
         )
 
     # Train!
