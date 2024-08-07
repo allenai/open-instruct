@@ -95,6 +95,14 @@ def get_env_vars():
             name="HF_ASSETS_CACHE",
             value=os.getenv("HF_ASSETS_CACHE"),
         ),
+        beaker.EnvVar(
+            name="HF_TOKEN",
+            secret="HF_TOKEN",
+        ),
+        beaker.EnvVar(
+            name="WANDB_API_KEY",
+            secret="WANDB_API_KEY",
+        ),
     ]
 
     return env_vars
@@ -120,7 +128,9 @@ def get_datasets(beaker_datasets):
 def make_task_spec(args, command):
     full_command = command
     command = ['/bin/bash', '-c']
-    fully_command = f"source /net/nfs.cirrascale/allennlp/costa/.bashrc && cd {os.getcwd()} &&" + " ".join(full_command)
+    # make the following commmand more generalizable to different users
+    # source /net/nfs.cirrascale/allennlp/costa/.bashrc && 
+    fully_command = f"git config --global safe.directory '*' && cd {os.getcwd()} &&" + " ".join(full_command)
     print(f"{full_command=}")
 
 
