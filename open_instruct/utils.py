@@ -61,13 +61,16 @@ def convert_alpaca_gpt4_to_messages(example):
     Convert an instruction in inst-output to a list of messages.
     e.g. vicgalle/alpaca-gpt4"""
     messages = [
-        {"role": "user", "content": (
-            "Below is an instruction that describes a task, paired with an input that provides "
-            "further context. Write a response that appropriately completes the request.\n\n"
-            f"### Instruction:\n{example['instruction']}\n\n"
-            f"### Input:\n{example['input']}\n\n"
-            "### Response:"
-        )},
+        {
+            "role": "user",
+            "content": (
+                "Below is an instruction that describes a task, paired with an input that provides "
+                "further context. Write a response that appropriately completes the request.\n\n"
+                f"### Instruction:\n{example['instruction']}\n\n"
+                f"### Input:\n{example['input']}\n\n"
+                "### Response:"
+            ),
+        },
         {"role": "assistant", "content": example["output"]},
     ]
     example["messages"] = messages
@@ -185,10 +188,10 @@ def get_datasets(
         i = 0
         while i < len(dataset_mixer) - 1:
             assert isinstance(dataset_mixer[i], str), f"Invalid type in data mixer: {dataset_mixer}"
-            if "." in dataset_mixer[i+1]:
-                value = float(dataset_mixer[i+1])
+            if "." in dataset_mixer[i + 1]:
+                value = float(dataset_mixer[i + 1])
             else:
-                value = int(dataset_mixer[i+1])
+                value = int(dataset_mixer[i + 1])
             mixer_dict[dataset_mixer[i]] = value
             i += 2
         dataset_mixer = mixer_dict
@@ -209,7 +212,10 @@ def get_datasets(
     raw_val_datasets = []
     frac_or_sample_list = []
     for (ds, frac_or_samples), ds_config in zip(dataset_mixer.items(), configs):
-        frac_or_sample_list.append(frac_or_samples)
+        if frac_or_samples == "all":
+            frac_or_sample_list.append(1.0)
+        else:
+            frac_or_sample_list.append(frac_or_samples)
         for split in splits:
             # if dataset ends with .json or .jsonl, load from file
             if ds.endswith(".json") or ds.endswith(".jsonl"):
@@ -301,10 +307,8 @@ def get_datasets(
         is_count = True
         # assert that all are integers
         if not all(
-            (
-                isinstance(frac_or_samples, int) or 
-                frac_or_samples == 1.0
-            ) for frac_or_samples in frac_or_sample_list):
+            (isinstance(frac_or_samples, int) or frac_or_samples == 1.0) for frac_or_samples in frac_or_sample_list
+        ):
             raise NotImplementedError("Cannot mix fractions and counts, yet.")
     else:
         is_count = False
@@ -599,10 +603,10 @@ class FlatArguments:
         if self.reduce_loss not in ["mean", "sum"]:
             raise ValueError("reduce_loss must be either 'mean' or 'sum'")
         if (
-            self.dataset_name is None and
-            self.train_file is None and
-            self.dataset_mixer is None and
-            self.dataset_mixer_list is None
+            self.dataset_name is None
+            and self.train_file is None
+            and self.dataset_mixer is None
+            and self.dataset_mixer_list is None
         ):
             raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
         else:
@@ -610,17 +614,10 @@ class FlatArguments:
                 extension = self.train_file.split(".")[-1]
                 assert extension in ["json", "jsonl"], "`train_file` should be a json or a jsonl file."
         if (
-            (
-                self.dataset_name is not None and
-                (
-                    self.dataset_mixer is not None or
-                    self.dataset_mixer_list is not None
-                )
-            )
+            (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
             or (self.dataset_name is not None and self.train_file is not None)
             or (
-                (self.dataset_mixer is not None or self.dataset_mixer_list is not None) and
-                self.train_file is not None
+                (self.dataset_mixer is not None or self.dataset_mixer_list is not None) and self.train_file is not None
             )
             or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
