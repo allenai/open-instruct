@@ -56,19 +56,25 @@ def is_openai_format(messages: Any) -> bool:
 
 
 # functions for handling different formats of messages
-def instruction_output_to_messages(example):
+def convert_alpaca_gpt4_to_messages(example):
     """
     Convert an instruction in inst-output to a list of messages.
     e.g. vicgalle/alpaca-gpt4"""
     messages = [
-        {"role": "user", "content": example["instruction"]},
+        {"role": "user", "content": (
+            "Below is an instruction that describes a task, paired with an input that provides "
+            "further context. Write a response that appropriately completes the request.\n\n"
+            f"### Instruction:\n{example['instruction']}\n\n"
+            f"### Input:\n{example['input']}\n\n"
+            "### Response:"
+        )},
         {"role": "assistant", "content": example["output"]},
     ]
     example["messages"] = messages
     return example
 
 
-def query_answer_to_messages(example):
+def convert_codefeedback_single_turn_to_messages(example):
     """
     Convert a query-answer pair to a list of messages.
     e.g. m-a-p/CodeFeedback-Filtered-Instruction"""
@@ -80,7 +86,7 @@ def query_answer_to_messages(example):
     return example
 
 
-def query_response_to_messages(example):
+def convert_metamath_qa_to_messages(example):
     """
     Convert a query-response pair to a list of messages.
     e.g. meta-math/MetaMathQA"""
@@ -92,11 +98,16 @@ def query_response_to_messages(example):
     return example
 
 
-def prompt_completion_to_messages(example):
+def convert_code_alpaca_to_messages(example):
     """
     Convert a prompt-completion pair to a list of messages.
     e.g. HuggingFaceH4/CodeAlpaca_20K"""
     messages = [
+        {"role": "user", "content": (
+            "Write a response that appropriately completes the request.\n\n"
+            f"### Instruction:\n{example['instruction']}\n\n"
+            "### Response:"
+        )},
         {"role": "user", "content": example["prompt"]},
         {"role": "assistant", "content": example["completion"]},
     ]
@@ -104,11 +115,12 @@ def prompt_completion_to_messages(example):
     return example
 
 
-def question_response_to_messages(example):
+def convert_open_orca_to_messages(example):
     """
     Convert a question-response pair to a list of messages.
     e.g. Open-Orca/OpenOrca"""
     messages = [
+        {"role": "system", "content": example["system_prompt"]},
         {"role": "user", "content": example["question"]},
         {"role": "assistant", "content": example["response"]},
     ]
@@ -231,13 +243,13 @@ def get_datasets(
                 and "output" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(instruction_output_to_messages, num_proc=10)
+                dataset = dataset.map(convert_alpaca_gpt4_to_messages, num_proc=10)
             elif (
                 "prompt" in dataset.column_names
                 and "completion" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(prompt_completion_to_messages, num_proc=10)
+                dataset = dataset.map(convert_code_alpaca_to_messages, num_proc=10)
             elif "conversations" in dataset.column_names and "messages" not in dataset.column_names:
                 dataset = dataset.map(conversations_to_messages, num_proc=10)
             elif (
@@ -245,19 +257,19 @@ def get_datasets(
                 and "response" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(question_response_to_messages, num_proc=10)
+                dataset = dataset.map(convert_open_orca_to_messages, num_proc=10)
             elif (
                 "query" in dataset.column_names
                 and "answer" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(query_answer_to_messages, num_proc=10)
+                dataset = dataset.map(convert_codefeedback_single_turn_to_messages, num_proc=10)
             elif (
                 "query" in dataset.column_names
                 and "response" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(query_response_to_messages, num_proc=10)
+                dataset = dataset.map(convert_metamath_qa_to_messages, num_proc=10)
 
             # if id not in dataset, create it as ds-{index}
             if "id" not in dataset.column_names:
@@ -293,7 +305,11 @@ def get_datasets(
     if any(frac_or_samples > 1 for frac_or_samples in frac_or_sample_list):
         is_count = True
         # assert that all are integers
-        if not all(isinstance(frac_or_samples, int) for frac_or_samples in frac_or_sample_list):
+        if not all(
+            (
+                isinstance(frac_or_samples, int) or 
+                frac_or_samples == 1.0
+            ) for frac_or_samples in frac_or_sample_list):
             raise NotImplementedError("Cannot mix fractions and counts, yet.")
     else:
         is_count = False
@@ -305,7 +321,9 @@ def get_datasets(
             # cast features (TODO, add more feature regularization)
             dataset = dataset.cast(target_features)
             # TODO selection can be randomized.
-            if is_count:
+            if frac_or_samples == 1.0:
+                train_subset = dataset
+            elif is_count:
                 train_subset = dataset.select(range(frac_or_samples))
             else:
                 train_subset = dataset.select(range(int(frac_or_samples * len(dataset))))

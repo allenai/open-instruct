@@ -227,7 +227,7 @@ def main(args: FlatArguments):
             splits=["train"],
             save_data_dir=args.dataset_mix_dir,
             columns_to_keep=["messages"],
-            need_columns=["messages"],
+            # need_columns=["messages"],
         )
     elif args.dataset_mixer_list is not None:
         # mixing datasets via config
@@ -237,7 +237,7 @@ def main(args: FlatArguments):
             splits=["train"],
             save_data_dir=args.dataset_mix_dir,
             columns_to_keep=["messages"],
-            need_columns=["messages"],
+            # need_columns=["messages"],
         )
     else:
         data_files = {}
