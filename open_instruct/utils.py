@@ -212,10 +212,7 @@ def get_datasets(
     raw_val_datasets = []
     frac_or_sample_list = []
     for (ds, frac_or_samples), ds_config in zip(dataset_mixer.items(), configs):
-        if frac_or_samples == "all":
-            frac_or_sample_list.append(1.0)
-        else:
-            frac_or_sample_list.append(frac_or_samples)
+        frac_or_sample_list.append(frac_or_samples)
         for split in splits:
             # if dataset ends with .json or .jsonl, load from file
             if ds.endswith(".json") or ds.endswith(".jsonl"):
@@ -299,11 +296,11 @@ def get_datasets(
         # target features are the features of the first dataset post load
         target_features = raw_train_datasets[0].features
 
-    if any(frac_or_samples < 0 for frac_or_samples in frac_or_sample_list):
+    if any((frac_or_samples != "all" and frac_or_samples < 0) for frac_or_samples in frac_or_sample_list):
         raise ValueError("Dataset fractions / lengths cannot be negative.")
 
     # if any > 1, use count
-    if any(frac_or_samples > 1 for frac_or_samples in frac_or_sample_list):
+    if any((frac_or_samples != "all" and frac_or_samples > 1) for frac_or_samples in frac_or_sample_list):
         is_count = True
         # assert that all are integers
         if not all(
@@ -320,7 +317,7 @@ def get_datasets(
             # cast features (TODO, add more feature regularization)
             dataset = dataset.cast(target_features)
             # TODO selection can be randomized.
-            if frac_or_samples == 1.0:
+            if frac_or_samples == "all":
                 train_subset = dataset
             elif is_count:
                 train_subset = dataset.select(range(frac_or_samples))
