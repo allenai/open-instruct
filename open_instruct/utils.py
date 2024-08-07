@@ -59,19 +59,28 @@ def is_openai_format(messages: Any) -> bool:
 
 
 # functions for handling different formats of messages
-def instruction_output_to_messages(example):
+def convert_alpaca_gpt4_to_messages(example):
     """
     Convert an instruction in inst-output to a list of messages.
     e.g. vicgalle/alpaca-gpt4"""
     messages = [
-        {"role": "user", "content": example["instruction"]},
+        {
+            "role": "user",
+            "content": (
+                "Below is an instruction that describes a task, paired with an input that provides "
+                "further context. Write a response that appropriately completes the request.\n\n"
+                f"### Instruction:\n{example['instruction']}\n\n"
+                f"### Input:\n{example['input']}\n\n"
+                "### Response:"
+            ),
+        },
         {"role": "assistant", "content": example["output"]},
     ]
     example["messages"] = messages
     return example
 
 
-def query_answer_to_messages(example):
+def convert_codefeedback_single_turn_to_messages(example):
     """
     Convert a query-answer pair to a list of messages.
     e.g. m-a-p/CodeFeedback-Filtered-Instruction"""
@@ -83,7 +92,7 @@ def query_answer_to_messages(example):
     return example
 
 
-def query_response_to_messages(example):
+def convert_metamath_qa_to_messages(example):
     """
     Convert a query-response pair to a list of messages.
     e.g. meta-math/MetaMathQA"""
@@ -95,7 +104,7 @@ def query_response_to_messages(example):
     return example
 
 
-def prompt_completion_to_messages(example):
+def convert_code_alpaca_to_messages(example):
     """
     Convert a prompt-completion pair to a list of messages.
     e.g. HuggingFaceH4/CodeAlpaca_20K"""
@@ -107,11 +116,12 @@ def prompt_completion_to_messages(example):
     return example
 
 
-def question_response_to_messages(example):
+def convert_open_orca_to_messages(example):
     """
     Convert a question-response pair to a list of messages.
     e.g. Open-Orca/OpenOrca"""
     messages = [
+        {"role": "system", "content": example["system_prompt"]},
         {"role": "user", "content": example["question"]},
         {"role": "assistant", "content": example["response"]},
     ]
@@ -143,7 +153,7 @@ def conversations_to_messages(example):
 
 
 def get_datasets(
-    dataset_mixer: dict,
+    dataset_mixer: Union[dict, list],
     splits: Optional[List[str]] = None,
     configs: Optional[List[str]] = None,
     columns_to_keep: Optional[List[str]] = None,
@@ -155,9 +165,10 @@ def get_datasets(
     Loads and mixes datasets according to proportions specified in `dataset_mixer`.
 
     Args:
-        dataset_mixer (`dict`):
-            Dictionary containing the dataset names and their training proportions.
-            By default, all test proportions are 1.
+        dataset_mixer (`list` or `dict`):
+            Dictionary or list containing the dataset names and their training proportions.
+            By default, all test proportions are 1. Lists are formatted as
+            `key1 value1 key2 value2 ...` If a list is passed in, it will be converted to a dictionary.
         splits (Optional[List[str]], *optional*, defaults to `None`):
             Dataset splits to load and mix. Assumes the splits exist in
             all datasets and have a `train_` or `test_` prefix.
@@ -174,6 +185,20 @@ def get_datasets(
             Column names that are required to be in the dataset.
             Quick debugging when mixing heterogeneous datasets.
     """
+    if isinstance(dataset_mixer, list):
+        assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
+        mixer_dict = {}
+        i = 0
+        while i < len(dataset_mixer) - 1:
+            assert isinstance(dataset_mixer[i], str), f"Invalid type in data mixer: {dataset_mixer}"
+            if "." in dataset_mixer[i + 1]:
+                value = float(dataset_mixer[i + 1])
+            else:
+                value = int(dataset_mixer[i + 1])
+            mixer_dict[dataset_mixer[i]] = value
+            i += 2
+        dataset_mixer = mixer_dict
+
     splits = ["train", "test"] if splits is None else splits
     configs = [None] * len(dataset_mixer) if not configs else configs
     columns_to_keep = [] if columns_to_keep is None else columns_to_keep
@@ -210,7 +235,7 @@ def get_datasets(
             # assert that needed columns are present
             if need_columns:
                 if not all(col in dataset.column_names for col in need_columns):
-                    raise ValueError(f"Needed column {need_columns} not found in dataset {dataset.coulmn_names}.")
+                    raise ValueError(f"Needed column {need_columns} not found in dataset {dataset.column_names}.")
 
             # handle per-case conversions
             # if "instruction" and "output" columns are present and "messages" is not, convert to messages
@@ -219,13 +244,13 @@ def get_datasets(
                 and "output" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(instruction_output_to_messages, num_proc=10)
+                dataset = dataset.map(convert_alpaca_gpt4_to_messages, num_proc=10)
             elif (
                 "prompt" in dataset.column_names
                 and "completion" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(prompt_completion_to_messages, num_proc=10)
+                dataset = dataset.map(convert_code_alpaca_to_messages, num_proc=10)
             elif "conversations" in dataset.column_names and "messages" not in dataset.column_names:
                 dataset = dataset.map(conversations_to_messages, num_proc=10)
             elif (
@@ -233,19 +258,19 @@ def get_datasets(
                 and "response" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(question_response_to_messages, num_proc=10)
+                dataset = dataset.map(convert_open_orca_to_messages, num_proc=10)
             elif (
                 "query" in dataset.column_names
                 and "answer" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(query_answer_to_messages, num_proc=10)
+                dataset = dataset.map(convert_codefeedback_single_turn_to_messages, num_proc=10)
             elif (
                 "query" in dataset.column_names
                 and "response" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(query_response_to_messages, num_proc=10)
+                dataset = dataset.map(convert_metamath_qa_to_messages, num_proc=10)
 
             # if id not in dataset, create it as ds-{index}
             if "id" not in dataset.column_names:
@@ -403,6 +428,9 @@ class FlatArguments:
     )
     dataset_mixer: Optional[dict] = field(
         default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
+    )
+    dataset_mixer_list: Optional[list[str]] = field(
+        default=None, metadata={"help": "A list of datasets (local or HF) to sample from."}
     )
     dataset_mix_dir: Optional[str] = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
@@ -570,16 +598,24 @@ class FlatArguments:
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
             raise ValueError("reduce_loss must be either 'mean' or 'sum'")
-        if self.dataset_name is None and self.train_file is None and self.dataset_mixer is None:
+        if (
+            self.dataset_name is None
+            and self.train_file is None
+            and self.dataset_mixer is None
+            and self.dataset_mixer_list is None
+        ):
             raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
         else:
             if self.train_file is not None:
                 extension = self.train_file.split(".")[-1]
                 assert extension in ["json", "jsonl"], "`train_file` should be a json or a jsonl file."
         if (
-            (self.dataset_name is not None and self.dataset_mixer is not None)
+            (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
             or (self.dataset_name is not None and self.train_file is not None)
-            or (self.dataset_mixer is not None and self.train_file is not None)
+            or (
+                (self.dataset_mixer is not None or self.dataset_mixer_list is not None) and self.train_file is not None
+            )
+            or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
 
