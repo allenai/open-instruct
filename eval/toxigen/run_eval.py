@@ -15,6 +15,7 @@ from eval.utils import (
     load_hf_lm,
     query_openai_chat_model,
     load_hf_tokenizer,
+    upload_results_to_hf,
 )
 from eval.utils import dynamic_import_function 
 
@@ -179,6 +180,21 @@ def main(args):
                 print(f"Average Toxicity for {group}: {performance[group]}")
         json.dump(performance, fout, indent=4)
 
+    if args.upload_to_hf is not None:
+        # upload metrics to HF. Main metric is the accuracy
+        results = performance
+        task_name = "oi_toxigen"
+        # invert for use in leaderboard
+        primary_score = 1 - results["overall"]
+        upload_results_to_hf(
+            results,
+            args.upload_to_hf,
+            args.hf_upload_name,
+            task_name=task_name,
+            primary_score=primary_score,
+            prepend_timestamp=True,
+        )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -268,6 +284,19 @@ if __name__ == "__main__":
         nargs="+",
         default=[],
         help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
+    )
+    parser.add_argument(
+        "--upload_to_hf",
+        type=str,
+        default=None,
+        help="If specified, we will upload the results to Hugging Face Datasets. "
+             "This should be the name of the dataset to upload to."
+    )
+    parser.add_argument(
+        "--hf_upload_name",
+        type=str,
+        default=None,
+        help="If uploading to hf, this is the model name"
     )
     args = parser.parse_args()
 
