@@ -103,11 +103,6 @@ def convert_code_alpaca_to_messages(example):
     Convert a prompt-completion pair to a list of messages.
     e.g. HuggingFaceH4/CodeAlpaca_20K"""
     messages = [
-        {"role": "user", "content": (
-            "Write a response that appropriately completes the request.\n\n"
-            f"### Instruction:\n{example['instruction']}\n\n"
-            "### Response:"
-        )},
         {"role": "user", "content": example["prompt"]},
         {"role": "assistant", "content": example["completion"]},
     ]
