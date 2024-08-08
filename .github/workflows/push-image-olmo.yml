@@ -21,7 +21,7 @@ on:
       - 'requirements-olmo.txt'
       - 'Dockerfile.olmo'
       # Note, add .olmo dockerfile + requirements if adding auto build to those
-    branches: [main]
+    branches: [main,dockerfile-size-fixes]
   # pull_request: # note, comment this out for running on every push
   #   # Also run on PRs that update the files in the image's directory (other than README).
   #   branches: [main]
