@@ -1,7 +1,8 @@
 # Rejection sampling
 
 This is a technique used in the Llama 3 paper. The basic idea is to sample `n` (typically between 10 and 30) outputs from the latest chat model policy (usually
-the best performing checkpoint of some kind) and use å reward model to select the best candidate.
+the best performing checkpoint of some kind) and use a reward model to select the best candidate. In the following script, we can vary the `--n` to generate
+different number of completions per prompt.
 
 
 # Debug run (use an interactive session)
@@ -26,6 +27,14 @@ python open_instruct/rejection_sampling.py \
     --num_gpus 1 \
 ```
 
+# Implementation details
+
+Note that it is possible to generate identical completions per prompt, which is not going to be that useful, so we filter them out via
+
+```py
+if len(set([item.text for item in output.outputs])) == 1:
+    continue
+```
 
 
 # Run through the entire dataset run
