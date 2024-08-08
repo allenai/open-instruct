@@ -40,8 +40,6 @@ logging.basicConfig(level=logging.INFO)
 
 COLORS = ["on red", "on green", "on blue", "on yellow", "on magenta"]
 # Preference dataset
-CHOSEN_KEY = "chosen"
-REJECTED_KEY = "rejected"
 INPUT_IDS_CHOSEN_KEY = "input_ids_chosen"
 ATTENTION_MASK_CHOSEN_KEY = "attention_mask_chosen"
 INPUT_IDS_REJECTED_KEY = "input_ids_rejected"
@@ -64,18 +62,59 @@ TOKENIZED_PREFERENCE_DATASET_KEYS = [
 # that the tokenization logic would work for both DPO and RM training.
 
 # SFT dataset
-MESSAGES_KEY = "messages"
 INPUT_IDS_KEY = "input_ids"
 
 
 # Chat templates
 # flake8: noqa
 CHAT_TEMPLATES = {
-    "simple_concat": "{% for message in messages %}{{message['content']}}{% endfor %}{{eos_token}}",
-    "simple_concat_with_space": "{% for message in messages %}{{' ' if not loop.first else ''}}{{message['content']}}{% endfor %}{{eos_token}}",
-    "simple_concat_with_new_line": "{% for message in messages %}{{'\n' if not loop.first else ''}}{{message['content']}}{% endfor %}{{eos_token}}",
-    "simple_chat": "{% for message in messages %}{{'\n\n' if not loop.first else ''}}{{message['role']|capitalize + ': ' +message['content']}}{% endfor %}{{eos_token}}",
-    "zephyr": """{% for message in messages %}\n{% if message['role'] == 'user' %}\n{{ '<|user|>\n' + message['content'] + eos_token }}\n{% elif message['role'] == 'system' %}\n{{ '<|system|>\n' + message['content'] + eos_token }}\n{% elif message['role'] == 'assistant' %}\n{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n{% endif %}\n{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n{% endif %}\n{% endfor %}""",
+    "simple_concat_with_space": (
+        "{% for message in messages %}"
+        "{{' ' if not loop.first else ''}}"
+        "{{message['content']}}"
+        "{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}"
+        "{% endfor %}"
+    ),
+    "simple_concat_with_new_line": (
+        "{% for message in messages %}"
+        "{{'\n' if not loop.first else ''}}"
+        "{{message['content']}}"
+        "{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}"
+        "{% endfor %}"
+    ),
+    "simple_chat": (
+        "{% for message in messages %}"
+        "{{'\n\n' if not loop.first else ''}}"
+        "{{message['role']|capitalize + ': ' +message['content']}}"
+        "{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}"
+        "{% endfor %}"
+    ),
+    "zephyr": (
+        "{% for message in messages %}\n"
+        "{% if message['role'] == 'user' %}\n"
+        "{{ '<|user|>\n' + message['content'] + eos_token }}\n"
+        "{% elif message['role'] == 'system' %}\n"
+        "{{ '<|system|>\n' + message['content'] + eos_token }}\n"
+        "{% elif message['role'] == 'assistant' %}\n"
+        "{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n"
+        "{% endif %}\n"
+        "{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n"
+        "{% endif %}\n"
+        "{% endfor %}"
+    ),
+    "tulu": (
+        "{% for message in messages %}\n"
+        "{% if message['role'] == 'system' %}\n"
+        "{{ '<|system|>\n' + message['content'] }}\n"
+        "{% elif message['role'] == 'user' %}\n"
+        "{{ '<|user|>\n' + message['content'] }}\n"
+        "{% elif message['role'] == 'assistant' %}\n"
+        "{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n"
+        "{% endif %}\n"
+        "{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n"
+        "{% endif %}\n"
+        "{% endfor %}"
+    )
 }
 # flake8: noqa
 
@@ -88,6 +127,12 @@ class DatasetConfig:
     dataset_eval_split: str = "test"
     chat_template: str = "simple_chat"
 
+    # columns names
+    preference_chosen_key: str = "chosen"
+    preference_rejected_key: str = "rejected"
+    sft_messages_key: str = "messages"
+
+    # filter config
     max_token_length: Optional[int] = None
     max_prompt_token_lenth: Optional[int] = None
 
@@ -201,11 +246,14 @@ class DatasetProcessor:
 class PreferenceDatasetProcessor(DatasetProcessor):
     def tokenize(self, dataset: Union[Dataset, DatasetDict]):
         def tokenize_fn(row):
-            row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(row[CHOSEN_KEY][:-1])
+            row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(
+                row[self.config.preference_chosen_key][:-1],
+                add_generation_prompt=True,
+            )
             row[ATTENTION_MASK_PROMPT_KEY] = [1] * len(row[INPUT_IDS_PROMPT_KEY])
-            row[INPUT_IDS_CHOSEN_KEY] = self.tokenizer.apply_chat_template(row[CHOSEN_KEY])
+            row[INPUT_IDS_CHOSEN_KEY] = self.tokenizer.apply_chat_template(row[self.config.preference_chosen_key])
             row[ATTENTION_MASK_CHOSEN_KEY] = [1] * len(row[INPUT_IDS_CHOSEN_KEY])
-            row[INPUT_IDS_REJECTED_KEY] = self.tokenizer.apply_chat_template(row[REJECTED_KEY])
+            row[INPUT_IDS_REJECTED_KEY] = self.tokenizer.apply_chat_template(row[self.config.preference_rejected_key])
             row[ATTENTION_MASK_REJECTED_KEY] = [1] * len(row[INPUT_IDS_REJECTED_KEY])
             return row
 
@@ -270,8 +318,11 @@ class PreferenceDatasetProcessor(DatasetProcessor):
 class SFTDatasetProcessor(DatasetProcessor):
     def tokenize(self, dataset: Union[Dataset, DatasetDict]):
         def tokenize_fn(row):
-            row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(row[MESSAGES_KEY][:-1])
-            row[INPUT_IDS_KEY] = self.tokenizer.apply_chat_template(row[MESSAGES_KEY])
+            row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(
+                row[self.config.sft_messages_key][:-1],
+                add_generation_prompt=True,
+            )
+            row[INPUT_IDS_KEY] = self.tokenizer.apply_chat_template(row[self.config.sft_messages_key])
             return row
 
         return dataset.map(
