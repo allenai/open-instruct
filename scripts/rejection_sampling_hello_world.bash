@@ -1,15 +1,15 @@
-mkdir -p rejection_sampling/shards
+mkdir -p output/shards
 num_prompts=400
 num_shards=5
 prompts_per_shard=$((num_prompts / num_shards))
 shared_hf_repo_id=rejection_sampling_$RANDOM 
 num_generations=5
-generation_model=allenai/llama-3-tulu-2-8b
-reward_model=allenai/llama-3-tulu-2-8b-uf-mean-rm
-sft_dataset=allenai/tulu-v2-sft-mixture
+generation_model=cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr
+reward_model=cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr
+sft_dataset=trl-internal-testing/tldr-preference-sft-trl-style
 num_gpus=1
 clusters=ai2/general-cirrascale-a5000 # ai2/allennlp-cirrascale ai2/general-cirrascale-a100-80g-ib
-mkdir -p rejection_sampling/shards/$shared_hf_repo_id
+mkdir -p output/shards/$shared_hf_repo_id
 
 # Loop through shards
 for ((i=0; i<num_shards; i++))
@@ -29,16 +29,16 @@ do
         --cluster $clusters  \
         --budget ai2/allennlp \
         --priority low \
-        --gpus $num_gpus -- "python rejection_sampling/generation.py \
+        --gpus $num_gpus -- "python open_instruct/generation.py \
         --dataset_name $sft_dataset \
         --model_name_or_path $generation_model \
         --dataset_start_idx $start_idx \
         --dataset_end_idx $end_idx \
-        --save_filename rejection_sampling/shards/$shared_hf_repo_id/$i.jsonl \
-        --n $num_generations --tensor_parallel_size $num_gpus && python rejection_sampling/rejection_sampling.py \
-        --input_filename rejection_sampling/shards/$shared_hf_repo_id/$i.jsonl \
+        --save_filename output/shards/$shared_hf_repo_id/$i.jsonl \
+        --n $num_generations --tensor_parallel_size $num_gpus && python open_instruct/rejection_sampling.py \
+        --input_filename output/shards/$shared_hf_repo_id/$i.jsonl \
         --model_name_or_path $reward_model \
-        --save_filename rejection_sampling/shards/$shared_hf_repo_id/scores_$i.jsonl \
+        --save_filename output/shards/$shared_hf_repo_id/scores_$i.jsonl \
         --hf_repo_id $shared_hf_repo_id \
         --no_add_timestamp \
         --n $num_generations \

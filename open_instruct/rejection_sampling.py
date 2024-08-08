@@ -1,8 +1,19 @@
+# Copyright 2024 AllenAI. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import os
-
 import numpy as np
-os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
-
 import time
 import torch
 import torch.multiprocessing as mp
@@ -160,7 +171,7 @@ def main(args: Args):
         table["chosen_score"].append(best_completions[i]["score"])
         table["rejected_score"].append(worst_completions[i]["score"])
     first_key = list(table.keys())[0]
-    print(f"{len(table[first_key])=}")
+    os.makedirs(os.path.dirname(args.save_filename), exist_ok=True)
     with open(args.save_filename, 'w') as outfile:
         for i in range(len(table[first_key])):
             json.dump({key: table[key][i] for key in table}, outfile)
@@ -180,6 +191,7 @@ def main(args: Args):
                 repo_id=full_repo_id,
                 repo_type="dataset",
             )
+        print(f"Pushed to https://huggingface.co/datasets/{full_repo_id}/")
 
 if __name__ == "__main__":
     parser = HfArgumentParser((Args,))
