@@ -64,22 +64,6 @@ RUN echo '%users ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 # work.
 RUN yes | unminimize
 
-# Install MLNX OFED user-space drivers
-# See https://docs.nvidia.com/networking/pages/releaseview.action?pageId=15049785#Howto:DeployRDMAacceleratedDockercontaineroverInfiniBandfabric.-Dockerfile
-ENV MOFED_VER 5.8-1.1.2.1
-ENV OS_VER ubuntu20.04
-ENV PLATFORM x86_64
-RUN wget --quiet https://content.mellanox.com/ofed/MLNX_OFED-${MOFED_VER}/MLNX_OFED_LINUX-${MOFED_VER}-${OS_VER}-${PLATFORM}.tgz && \
-    tar -xvf MLNX_OFED_LINUX-${MOFED_VER}-${OS_VER}-${PLATFORM}.tgz && \
-    MLNX_OFED_LINUX-${MOFED_VER}-${OS_VER}-${PLATFORM}/mlnxofedinstall --basic --user-space-only --without-fw-update -q && \
-    rm -rf MLNX_OFED_LINUX-${MOFED_VER}-${OS_VER}-${PLATFORM} && \
-    rm MLNX_OFED_LINUX-${MOFED_VER}-${OS_VER}-${PLATFORM}.tgz
-
-# Install Docker CLI. Version matches Beaker on-premise servers.
-RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-20.10.21.tgz -o docker.tgz \
-    && sudo tar xzvf docker.tgz --strip 1 -C /usr/local/bin docker/docker \
-    && rm docker.tgz
-
 # Install Beaker
 ARG BEAKER_VERSION
 RUN curl --silent \
