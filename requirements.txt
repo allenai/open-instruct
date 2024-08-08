@@ -45,4 +45,5 @@ sympy==1.12.0
 black
 flake8
 isort
+autoflake
 pytest
