@@ -367,7 +367,7 @@ def main(args):
             warnings.warn("Metric {0} not known, skipping!".format(metric), stacklevel=2)
 
     if "truth" in args.metrics and "info" in args.metrics:
-        print(questions)
+        print(questions.columns.tolist())
         questions["{} truth-info acc".format(model_key)] = questions["{} truth acc".format(model_key)] * questions["{} info acc".format(model_key)]
 
     # save all
