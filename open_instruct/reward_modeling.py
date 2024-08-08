@@ -267,7 +267,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             training_step += 1
 
             # (optionally) evaluate the model
-            accelerator.print(f"Training step: {training_step}, {len(dataloader)=}")
             if args.num_evals > 0 and training_step > 1 and training_step % args.eval_freq == 0:
                 eval_metrics, table = evaluate(model, eval_dataloader, tokenizer, max_sampled_texts=10)
                 for key in table:
