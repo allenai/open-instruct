@@ -254,14 +254,25 @@ def load_hf_lm(
         )
     else:
         if device_map:
-            model = AutoModelForCausalLM.from_pretrained(
-                model_name_or_path,
-                device_map=device_map,
-                torch_dtype=torch_dtype,
-                token=token,
-                trust_remote_code=trust_remote_code,
-                revision="step1223842-tokens5100B",
-            )
+            if "OLMoE" in model_name_or_path:
+                print("loading olmoe annealed")
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name_or_path,
+                    device_map=device_map,
+                    torch_dtype=torch_dtype,
+                    token=token,
+                    trust_remote_code=trust_remote_code,
+                    revision="step1223842-tokens5100B",
+                )
+            else:
+                print(f"loading other model {model_name_or_path}")
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name_or_path,
+                    device_map=device_map,
+                    torch_dtype=torch_dtype,
+                    token=token,
+                    trust_remote_code=trust_remote_code,
+                )
         else:
             model = AutoModelForCausalLM.from_pretrained(
                 model_name_or_path,
