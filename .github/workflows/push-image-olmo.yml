@@ -42,6 +42,9 @@ jobs:
     timeout-minutes: 60
     if: (github.event_name != 'workflow_run') || (github.event.workflow_run.conclusion == 'success')
     steps:
+      - name: Maximize build disk space
+        uses: easimon/maximize-build-space@v10
+            
       - uses: actions/checkout@v3
 
       - name: Setup environment
