@@ -29,7 +29,7 @@ api = HfApi()
 
 @dataclass
 class Args:
-    model_names_or_paths: Union[tuple[str], list[str]] = ("allenai/llama-3-tulu-2-8b-uf-mean-rm", "cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr")
+    model_names_or_paths: Union[tuple[str], list[str]] = ("allenai/llama-3-tulu-2-8b-uf-mean-rm", "cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr", "berkeley-nest/Starling-RM-7B-alpha")
     input_filename: str = "completions.jsonl"
     save_filename: str = "rejected_sampling_completions.jsonl"
     n: int = 1
@@ -102,6 +102,7 @@ def process_shard(rank: int, model_name_or_path: str, args: Args, shard: List[st
     # 2. we shrink the batch size if we run out of memory (so initially we can use a large batch size)
     input_ids_lengths = [len(x) for x in ds["input_ids"]]
     sorted_indices = np.argsort(input_ids_lengths)
+    # scores will store the scores for all the items in the shard, we're processing the shard by batch size
     scores = []
     i = 0
     while i < len(ds):
@@ -110,7 +111,8 @@ def process_shard(rank: int, model_name_or_path: str, args: Args, shard: List[st
             try:
                 input_ids = data_collator(data)["input_ids"].to(device)
                 _, score, _ = get_reward(model, input_ids, tokenizer.pad_token_id, 0)
-                scores.extend(score.cpu().tolist())
+                # score = (batch_size, )
+                scores.extend(score.cpu().tolist()) # convert the tensor score to a list
                 i += current_batch_size
                 print(f"processing: {i}:{i + current_batch_size}/{len(ds)}")
             except torch.cuda.OutOfMemoryError:
@@ -120,7 +122,7 @@ def process_shard(rank: int, model_name_or_path: str, args: Args, shard: List[st
                 print(f"Reducing batch size to {current_batch_size}")
                 continue
     # restore the original order
-    scores = np.array(scores)
+    scores = np.array(scores) # scores is a list of list of scores, each inner list corresponds to the score of a batch
     scores = scores[np.argsort(sorted_indices)]
     return torch.tensor(scores)
 
@@ -129,7 +131,6 @@ def majority_vote(offsets_per_model: dict[str, torch.tensor]) -> torch.tensor:
     """
     offsets_per_model: offsets returned by each model. each tensor is of shape (n_prompts,) indicating best/worst completion offset per prompt
     """
-
     # Determine the number of samples
     num_samples = offsets_per_model[next(iter(offsets_per_model))].size(0)
     # Initialize tensor to store the majority votes
@@ -227,6 +228,7 @@ def main(args: Args):
                 repo_id=full_repo_id,
                 repo_type="dataset",
             )
+        print(f"Pushed to https://huggingface.co/datasets/{full_repo_id}/")
 
 
 if __name__ == "__main__":
