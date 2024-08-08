@@ -38,13 +38,6 @@ ENV NVIDIA_DRIVER_CAPABILITIES=graphics,utility,compute
 
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 
-# Install a few additional utilities via pip
-RUN /opt/miniconda3/bin/pip install --no-cache-dir \
-    gpustat \
-    jupyter \
-    beaker-gantry \
-    oocmap
-
 # Ensure users can modify their container environment.
 RUN echo '%users ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
