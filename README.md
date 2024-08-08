@@ -189,6 +189,22 @@ Evaluation scripts for different datasets are put under `./scripts`. For example
 ./scripts/eval/mmlu.sh
 ```
 
+### Ai2 Internal Evaluation
+
+We provide a script integrated with beaker for use internally at Ai2. For example, to run all the tulu 3 evals with easy uploading:
+```bash
+python scripts/submit_eval_jobs.py \
+      --model_name <model name> \
+      --location <beaker id> \
+      --is_tuned --workspace tulu-3-results \
+      --preemptible \
+      --use_hf_tokenizer_template \
+      --beaker_image nathanl/open_instruct_olmo_auto \
+      --upload_to_hf allenai/tulu-3-evals \
+      --run_oe_eval_experiments
+```
+Replace location with your beaker ID, and model name with your model name (note this will affect experiment naming, so make it unique and memorable!). For HF models, use a name with `hf-<model-name>` for the model_name argument, and for location give the HF path (e.g. `meta-llama/Meta-Llama-3-8B-Instruct`). Note this assumes your model has a valid HF tokenizer chat template.
+
 ### Human evaluation
 
 We release our human evaluation interface and collected annotations in the `./human_eval` folder. Please see the corresponding [README](./human_eval/README.md) for more details.

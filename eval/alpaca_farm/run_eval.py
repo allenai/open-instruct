@@ -1,5 +1,6 @@
 import os
 import json
+import ast
 import argparse
 import logging
 import random
@@ -7,7 +8,7 @@ import torch
 import datasets
 import vllm
 from alpaca_eval import evaluate as alpaca_farm_evaluate
-from eval.utils import query_openai_chat_model, query_openai_model, generate_completions, dynamic_import_function, load_hf_lm, load_hf_tokenizer
+from eval.utils import query_openai_chat_model, query_openai_model, generate_completions, dynamic_import_function, load_hf_lm, load_hf_tokenizer, upload_results_to_hf
 
 def main(args):
     random.seed(42)
@@ -132,6 +133,28 @@ def main(args):
     # save to json
     with open(os.path.join(args.save_dir, f"metrics.json"), "w") as fout:
         json.dump(df_leaderboard.to_dict(), fout)
+
+    if args.upload_to_hf is not None:
+        # upload metrics to HF. Main metric is the LC winrate
+        # we divide by 100 to match other metrics.
+        results = df_leaderboard.to_dict()
+        # copied below from alpacaeval codebase
+        is_alpaca_eval_2 = ast.literal_eval(os.environ.get("IS_ALPACA_EVAL_2", "True"))
+        if is_alpaca_eval_2:
+            task_name = "oi_alpaca_eval_2"
+            # we only have one model in here, so we can just take the first value
+            primary_score = [x for x in results["length_controlled_winrate"].values()][0] / 100
+        else:
+            task_name = "oi_alpaca_eval"
+            primary_score = [x for x in results["discrete_win_rate"].values()][0] / 100
+        upload_results_to_hf(
+            results,
+            args.upload_to_hf,
+            args.hf_upload_name,
+            task_name=task_name,
+            primary_score=primary_score,
+            prepend_timestamp=True,
+        )
         
 
 if __name__ == "__main__":
@@ -218,6 +241,19 @@ if __name__ == "__main__":
         nargs="+",
         default=[],
         help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
+    )
+    parser.add_argument(
+        "--upload_to_hf",
+        type=str,
+        default=None,
+        help="If specified, we will upload the results to Hugging Face Datasets. "
+             "This should be the name of the dataset to upload to."
+    )
+    parser.add_argument(
+        "--hf_upload_name",
+        type=str,
+        default=None,
+        help="If uploading to hf, this is the model name"
     )
     args = parser.parse_args()
 

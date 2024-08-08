@@ -16,7 +16,8 @@ from eval.utils import (
     generate_completions,
     query_openai_chat_model,
     dynamic_import_function,
-    load_hf_tokenizer
+    load_hf_tokenizer,
+    upload_results_to_hf
 )
 from eval.xstest.classify_refusal import classify_refusals_w_gpt4, classify_outputs_w_strmatch
 
@@ -158,6 +159,19 @@ def main(args):
     with open(os.path.join(args.save_dir, "metrics.json"), "w") as fout:
         json.dump(results, fout, indent=4)
 
+    if args.upload_to_hf is not None:
+        # upload metrics to HF. Main metric is the accuracy
+        task_name = "oi_xstest"
+        primary_score = results["gpt4_label"]["refusal_prf"]["f1"]
+        upload_results_to_hf(
+            results,
+            args.upload_to_hf,
+            args.hf_upload_name,
+            task_name=task_name,
+            primary_score=primary_score,
+            prepend_timestamp=True,
+        )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -238,6 +252,19 @@ if __name__ == "__main__":
         nargs="+",
         default=[],
         help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
+    )
+    parser.add_argument(
+        "--upload_to_hf",
+        type=str,
+        default=None,
+        help="If specified, we will upload the results to Hugging Face Datasets. "
+             "This should be the name of the dataset to upload to."
+    )
+    parser.add_argument(
+        "--hf_upload_name",
+        type=str,
+        default=None,
+        help="If uploading to hf, this is the model name"
     )
     args = parser.parse_args()
 

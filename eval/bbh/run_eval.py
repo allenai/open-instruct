@@ -13,7 +13,8 @@ from eval.utils import (
     generate_completions,
     query_openai_chat_model,
     dynamic_import_function,
-    load_hf_tokenizer
+    load_hf_tokenizer,
+    upload_results_to_hf
 )
 
 
@@ -178,6 +179,20 @@ def main(args):
         print(f"Average EM: {performance['average_exact_match']}")
         json.dump(performance, fout, indent=4)
 
+    if args.upload_to_hf is not None:
+        # upload metrics to HF. Main metric is the accuracy
+        results = performance
+        task_name = "oi_bbh_cot"
+        primary_score = results["average_exact_match"]
+        upload_results_to_hf(
+            results,
+            args.upload_to_hf,
+            args.hf_upload_name,
+            task_name=task_name,
+            primary_score=primary_score,
+            prepend_timestamp=True,
+        )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -268,6 +283,19 @@ if __name__ == "__main__":
         '--stop_at_double_newline',
         action="store_true",
         help="If given, we will stop generation at the first double newline. Turn on to match older eval settings."
+    )
+    parser.add_argument(
+        "--upload_to_hf",
+        type=str,
+        default=None,
+        help="If specified, we will upload the results to Hugging Face Datasets. "
+             "This should be the name of the dataset to upload to."
+    )
+    parser.add_argument(
+        "--hf_upload_name",
+        type=str,
+        default=None,
+        help="If uploading to hf, this is the model name"
     )
     args = parser.parse_args()
 

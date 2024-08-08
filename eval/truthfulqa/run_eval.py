@@ -14,6 +14,7 @@ from eval.utils import (
     generate_completions,
     score_completions,
     dynamic_import_function,
+    upload_results_to_hf,
 )
 from eval.truthfulqa.utilities import (
     format_prompt,
@@ -393,6 +394,19 @@ def main(args):
     with open(os.path.join(args.save_dir, 'metrics.json'), 'w') as f:
         json.dump(results, f, indent=2)
 
+    if args.upload_to_hf is not None:
+        # upload metrics to HF. Main metric is the accuracy
+        task_name = "oi_truthfulqa"
+        primary_score = results["truth-info acc"]
+        upload_results_to_hf(
+            results,
+            args.upload_to_hf,
+            args.hf_upload_name,
+            task_name=task_name,
+            primary_score=primary_score,
+            prepend_timestamp=True,
+        )
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -499,6 +513,19 @@ if __name__ == '__main__':
         type=str,
         help='A trained HuggingFace judge model name to be used for computing the metrics for `info` if it is specified.' \
             'Either `gpt_info_model_name` or `hf_info_model_name_or_path` should be specified for computing the metric.'
+    )
+    parser.add_argument(
+        "--upload_to_hf",
+        type=str,
+        default=None,
+        help="If specified, we will upload the results to Hugging Face Datasets. "
+             "This should be the name of the dataset to upload to."
+    )
+    parser.add_argument(
+        "--hf_upload_name",
+        type=str,
+        default=None,
+        help="If uploading to hf, this is the model name"
     )
     args = parser.parse_args()
     main(args)

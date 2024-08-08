@@ -11,6 +11,7 @@ from eval.utils import (
     query_openai_chat_model,
     dynamic_import_function,
     load_hf_tokenizer,
+    upload_results_to_hf,
 )
 from eval.codex_humaneval.data import write_jsonl
 from eval.mbpp.evaluation import compute_code_eval
@@ -179,13 +180,29 @@ def main(args):
         timeout=10.0
     )
 
-    print(pass_at_k_results)
     if args.use_chat_format:
         with open(os.path.join(args.save_dir, "metrics.json"), "w") as fout:
             json.dump(pass_at_k_results, fout)
     else:
         with open(os.path.join(args.save_dir, "metrics.json"), "w") as fout:
             json.dump(pass_at_k_results, fout)
+
+    if args.upload_to_hf is not None:
+        # upload metrics to HF.
+        # main metric is p@10 for temp=.8,
+        # p@1 for temp=.1, maybe default to p@10 otherwise.
+        results = pass_at_k_results
+        pass_at = 1 if args.temperature == 0.1 else 10
+        task_name = f"oi_mbpp_p@{str(pass_at)}"
+        primary_score = results[f"pass@{str(pass_at)}"]
+        upload_results_to_hf(
+            results,
+            args.upload_to_hf,
+            args.hf_upload_name,
+            task_name=task_name,
+            primary_score=primary_score,
+            prepend_timestamp=True,
+        )
 
 
 if __name__ == "__main__":
@@ -285,6 +302,19 @@ if __name__ == "__main__":
         '--use_evalplus_prompt',
         action="store_true",
         help="If given, we will use the evalplus prompting setup, to better match scores on the evalplus leaderboard."
+    )
+    parser.add_argument(
+        "--upload_to_hf",
+        type=str,
+        default=None,
+        help="If specified, we will upload the results to Hugging Face Datasets. "
+             "This should be the name of the dataset to upload to."
+    )
+    parser.add_argument(
+        "--hf_upload_name",
+        type=str,
+        default=None,
+        help="If uploading to hf, this is the model name"
     )
     parser.add_argument("--results_file", type=str)
     args = parser.parse_args()
