@@ -169,7 +169,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 config={**asdict(args), **asdict(dataset_config), **asdict(model_config)},
                 name=args.run_name,
                 save_code=True,
-                tags=[args.exp_name] + get_wandb_tags(args),
+                tags=[args.exp_name] + get_wandb_tags(),
             )
         writer = SummaryWriter(f"runs/{args.run_name}")
         writer.add_text(
