@@ -667,12 +667,12 @@ def get_git_tag() -> str:
 def get_pr_tag() -> str:
     """Try to find associated pull request on GitHub (e.g., `pr-123`)"""
     pr_tag = ""
-    git_commit = (
-        subprocess.check_output(["git", "rev-parse", "--verify", "HEAD"], stderr=subprocess.DEVNULL)
-        .decode("ascii")
-        .strip()
-    )
     try:
+        git_commit = (
+            subprocess.check_output(["git", "rev-parse", "--verify", "HEAD"], stderr=subprocess.DEVNULL)
+            .decode("ascii")
+            .strip()
+        )
         # try finding the pull request number on github
         prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
         if prs.status_code == 200:
