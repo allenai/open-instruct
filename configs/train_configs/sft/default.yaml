@@ -4,7 +4,14 @@ use_flash_attn: true
 tokenizer_name: allenai/OLMo-1.7-1B-hf
 use_slow_tokenizer: false # olmo models only use fast tokenizers
 # train_file: data/processed/tulu_v2/tulu_v2_data.jsonl
-dataset_name: allenai/tulu-v2-sft-mixture
+# dataset_name: allenai/tulu-v2-sft-mixture
+dataset_mixer:
+ allenai/tulu-v2-sft-mixture: 0.5
+ HuggingFaceH4/no_robots: 0.8
+#  data/processed/tulu_v2/tulu_v2_filtered_data.jsonl: 0.1
+# dataset_mixer:
+#  allenai/tulu-v2-sft-mixture: 100000
+#  HuggingFaceH4/no_robots: 5000
 max_seq_length: 4096
 max_train_samples: 10000
 preprocessing_num_workers: 128
@@ -21,3 +28,4 @@ report_to:
   - wandb
 logging_steps: 1
 add_bos: true # needed for GPTNeoX olmo models
+dataset_mix_dir: null

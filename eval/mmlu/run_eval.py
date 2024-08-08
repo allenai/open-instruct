@@ -5,9 +5,8 @@ import numpy as np
 import pandas as pd
 import json
 from tqdm import tqdm
-import time
 from eval.mmlu.categories import subcategories, categories
-from eval.utils import get_next_word_predictions, load_hf_tokenizer, load_hf_lm, query_openai_chat_model, dynamic_import_function
+from eval.utils import get_next_word_predictions, load_hf_tokenizer, load_hf_lm, query_openai_chat_model, dynamic_import_function, upload_results_to_hf
 
 
 choices = ["A", "B", "C", "D"]
@@ -246,6 +245,30 @@ def main(args):
             f,
         )
 
+    if args.upload_to_hf is not None:
+        # upload metrics to HF. Main metric is the accuracy
+        results = {
+            "average_acc": weighted_acc,
+            "subcat_acc": {
+                subcat: np.mean(np.concatenate(subcat_cors[subcat]))
+                for subcat in subcat_cors
+            },
+            "cat_acc": {
+                cat: np.mean(np.concatenate(cat_cors[cat]))
+                for cat in cat_cors
+            },
+        }
+        task_name = f"oi_mmlu_{args.ntrain}shots"
+        primary_score = results["average_acc"]
+        upload_results_to_hf(
+            results,
+            args.upload_to_hf,
+            args.hf_upload_name,
+            task_name=task_name,
+            primary_score=primary_score,
+            prepend_timestamp=True,
+        )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -323,6 +346,19 @@ if __name__ == "__main__":
         type=str, 
         default="eval.templates.create_prompt_with_tulu_chat_format", 
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
+    )
+    parser.add_argument(
+        "--upload_to_hf",
+        type=str,
+        default=None,
+        help="If specified, we will upload the results to Hugging Face Datasets. "
+             "This should be the name of the dataset to upload to."
+    )
+    parser.add_argument(
+        "--hf_upload_name",
+        type=str,
+        default=None,
+        help="If uploading to hf, this is the model name"
     )
     args = parser.parse_args()
 

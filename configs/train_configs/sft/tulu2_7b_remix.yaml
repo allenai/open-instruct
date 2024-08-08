@@ -1,0 +1,34 @@
+# Note, the exact model was trained on TPUs in a different repo
+# Example file for mixing, use exact tulu 2 mixture for replication allenai/tulu-v2-sft-mixture
+model_name_or_path: meta-llama/Llama-2-7b-hf
+model_revision: main
+use_flash_attn: true
+tokenizer_name: meta-llama/Llama-2-7b-hf
+use_slow_tokenizer: true
+dataset_mixer:
+    natolambert/tulu-v2-sft-mixture-flan: 50000
+    natolambert/tulu-v2-sft-mixture-cot: 49747
+    allenai/openassistant-guanaco-reformatted: 7708  # not exact subset
+    Vtuber-plan/sharegpt-cleaned: 114046  # original https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered
+    vicgalle/alpaca-gpt4: 20000
+    HuggingFaceH4/CodeAlpaca_20K: 18000  # original uses https://github.com/sahil280114/codealpaca
+    natolambert/tulu-v2-sft-mixture-lima: 1018  # original has 1030
+    WizardLMTeam/WizardLM_evol_instruct_V2_196k: 30000
+    Open-Orca/OpenOrca: 30000
+    natolambert/tulu-v2-sft-mixture-science: 7468  # original data slightly different
+max_seq_length: 4096 # Note, reduced from 8192 to fit on one GPU with DeepSpeed Stage3
+preprocessing_num_workers: 128
+per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
+gradient_accumulation_steps: 16 # effective batch size 128 for tulu 2
+learning_rate: 2.0e-05
+lr_scheduler_type: linear
+warmup_ratio: 0.03
+weight_decay: 0.0
+num_train_epochs: 3
+output_dir: output/tulu_v2_7b/
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+checkpointing_steps: epoch
+dataset_mix_dir: /output/
