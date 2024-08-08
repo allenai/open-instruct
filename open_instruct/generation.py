@@ -13,23 +13,20 @@
 # limitations under the License.
 
 import copy
+import json
 import multiprocessing
 import os
+from collections import defaultdict
+from dataclasses import dataclass
 from typing import Optional
 
 import pandas as pd
-from collections import defaultdict
-from dataclasses import dataclass
-from vllm import LLM, SamplingParams
-from transformers import (
-    HfArgumentParser,
-    AutoTokenizer,
-)
 from datasets import load_dataset
-import json
 from rich.console import Console
-from rich.table import Table
 from rich.pretty import pprint
+from rich.table import Table
+from transformers import AutoTokenizer, HfArgumentParser
+from vllm import LLM, SamplingParams
 
 
 @dataclass
@@ -68,6 +65,7 @@ def print_rich_table(df: pd.DataFrame) -> Table:
         table.add_row(*row.astype(str).tolist())
     console.print(table)
 
+
 def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     ds = load_dataset(dataset_args.dataset_name)
@@ -90,7 +88,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     # Generate using vLLM
     llm = LLM(model=args.model_name_or_path, tensor_parallel_size=gen_args.tensor_parallel_size)
     outputs = llm.generate(
-        prompt_token_ids=prompt_token_ids, 
+        prompt_token_ids=prompt_token_ids,
         sampling_params=SamplingParams(
             n=gen_args.n,
             temperature=gen_args.temperature,
@@ -124,14 +122,17 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
 
     # Save results
     os.makedirs(os.path.dirname(args.save_filename), exist_ok=True)
-    with open(args.save_filename, 'w') as outfile:
+    with open(args.save_filename, "w") as outfile:
         for i in range(len(table["messages"])):
-            json.dump({
-                "messages": table["messages"][i],
-                "model_completion": table["model_completion"][i],
-                "reference_completion": table["reference_completion"][i],
-            }, outfile)
-            outfile.write('\n')
+            json.dump(
+                {
+                    "messages": table["messages"][i],
+                    "model_completion": table["model_completion"][i],
+                    "reference_completion": table["reference_completion"][i],
+                },
+                outfile,
+            )
+            outfile.write("\n")
 
 
 if __name__ == "__main__":

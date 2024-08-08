@@ -12,25 +12,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import os
-import numpy as np
 import time
-import torch
-import torch.multiprocessing as mp
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Optional, Tuple, List
-from transformers import (
-    HfArgumentParser,
-    AutoModelForSequenceClassification,
-    DataCollatorWithPadding,
-    AutoTokenizer,
-)
-from tqdm import tqdm
+from typing import List, Optional, Tuple
+
+import numpy as np
+import torch
+import torch.multiprocessing as mp
 from datasets import Dataset
-import json
-from torch.utils.data import DataLoader
 from huggingface_hub import HfApi
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+from transformers import (
+    AutoModelForSequenceClassification,
+    AutoTokenizer,
+    DataCollatorWithPadding,
+    HfArgumentParser,
+)
+
 api = HfApi()
 
 
@@ -52,6 +54,7 @@ def first_true_indices(bools: torch.Tensor, dtype=torch.long):
     row_len = bools.size(-1)
     zero_or_index = row_len * (~bools).type(dtype) + torch.arange(row_len, dtype=dtype, device=bools.device)
     return torch.min(zero_or_index, dim=-1).values
+
 
 def get_reward(
     model: torch.nn.Module, query_responses: torch.Tensor, pad_token_id: int, context_length: int
@@ -80,19 +83,17 @@ def get_reward(
         sequence_lengths,
     )
 
+
 def process_shard(rank: int, args: Args, shard: List[str]):
     device = torch.device(f"cuda:{rank}")
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, padding_side="right")
     tokenizer.add_special_tokens({"pad_token": "[PAD]"})
-    
+
     ds = Dataset.from_list(shard)
-    ds = ds.map(
-        lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])},
-        remove_columns=ds.column_names
-    )
+    ds = ds.map(lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])}, remove_columns=ds.column_names)
     model = AutoModelForSequenceClassification.from_pretrained(
         args.model_name_or_path,
-        torch_dtype=torch.bfloat16, 
+        torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
     )
     model = model.to(device)
@@ -107,7 +108,7 @@ def process_shard(rank: int, args: Args, shard: List[str]):
     i = 0
     while i < len(ds):
         with torch.no_grad():
-            data = ds[sorted_indices[i:i+current_batch_size]]
+            data = ds[sorted_indices[i : i + current_batch_size]]
             try:
                 input_ids = data_collator(data)["input_ids"].to(device)
                 _, score, _ = get_reward(model, input_ids, tokenizer.pad_token_id, 0)
@@ -125,31 +126,32 @@ def process_shard(rank: int, args: Args, shard: List[str]):
     scores = scores[np.argsort(sorted_indices)]
     return torch.tensor(scores)
 
+
 def main(args: Args):
-    mp.set_start_method('spawn', force=True)
-    
+    mp.set_start_method("spawn", force=True)
+
     # Load the completions from a file
-    with open(args.input_filename, 'r') as infile:
+    with open(args.input_filename, "r") as infile:
         completions = [json.loads(line) for line in infile]
-    
+
     # Split the data into shards
     shard_size = len(completions) // args.num_gpus
-    shards = [completions[i:i+shard_size] for i in range(0, len(completions), shard_size)]
+    shards = [completions[i : i + shard_size] for i in range(0, len(completions), shard_size)]
 
     # Process shards in parallel
     with mp.Pool(args.num_gpus) as pool:
         results = []
         for i in range(args.num_gpus):
             results.append(pool.apply_async(process_shard, (i, args, shards[i])))
-        
+
         # Collect results
         scores = []
         for result in results:
             scores.append(result.get())
-    
+
     # Combine scores from all GPUs
     scores = torch.cat(scores)
-    
+
     # Rejection sampling
     scores_per_prompt = scores.reshape(-1, args.n)
     for i in range(len(completions)):
@@ -160,7 +162,7 @@ def main(args: Args):
     worst_indices_offset = torch.arange(0, len(worst_indices) * args.n, args.n) + worst_indices
     best_completions = [completions[i] for i in best_indices_offset]
     worst_completions = [completions[i] for i in worst_indices_offset]
-    
+
     # Save results
     table = defaultdict(list)
     for i in range(len(best_completions)):
@@ -172,10 +174,10 @@ def main(args: Args):
         table["rejected_score"].append(worst_completions[i]["score"])
     first_key = list(table.keys())[0]
     os.makedirs(os.path.dirname(args.save_filename), exist_ok=True)
-    with open(args.save_filename, 'w') as outfile:
+    with open(args.save_filename, "w") as outfile:
         for i in range(len(table[first_key])):
             json.dump({key: table[key][i] for key in table}, outfile)
-            outfile.write('\n')
+            outfile.write("\n")
 
     if args.push_to_hub:
         if args.hf_entity is None:
@@ -192,6 +194,7 @@ def main(args: Args):
                 repo_type="dataset",
             )
         print(f"Pushed to https://huggingface.co/datasets/{full_repo_id}/")
+
 
 if __name__ == "__main__":
     parser = HfArgumentParser((Args,))
