@@ -48,6 +48,11 @@ python scripts/submit_finetune_job.py --config=configs/train_configs/sft/default
 python scripts/submit_finetune_job.py --config=configs/train_configs/sft/default.yaml  --learning_rate 4e-5
 ```
 
+To use this for multi-node jobs, here is an example that runs IFT on 4 nodes:
+```
+python scripts/submit_finetune_job.py --default_beaker_config configs/beaker_configs/default_finetune_multinode.yaml --config configs/train_configs/sft/tulu3_8b_preview_mix_v3.1.yaml --cluster ai2/jupiter-cirrascale-2 --workspace ai2/tulu-3-dev --num_nodes 4
+```
+
 
 ### Docker-less job submssions
 
@@ -76,6 +81,7 @@ python mason.py \
     --budget ai2/allennlp \
     --gpus 1 -- sh scripts/dpo_train_with_accelerate_config.sh 8 configs/train_configs/dpo/default.yaml
 ```
+
 
 
 ## Other
