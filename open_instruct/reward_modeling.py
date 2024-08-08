@@ -43,7 +43,11 @@ from open_instruct.model_utils import (
     save_with_accelerate,
 )
 from open_instruct.reward_modeling_eval import evaluate
-from open_instruct.utils import ArgumentParserPlus
+from open_instruct.utils import (
+    ArgumentParserPlus,
+    get_wandb_tags,
+    maybe_use_ai2_wandb_entity,
+)
 
 api = HfApi()
 
@@ -99,7 +103,7 @@ class Args:
     # wandb and HF tracking configs
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "open-instruct"
+    wandb_project_name: str = "open_instruct_internal"
     """The wandb's project name"""
     wandb_entity: Optional[str] = None
     """The entity (team) of wandb's project"""
@@ -138,6 +142,9 @@ def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig
             args.hf_repo_revision = args.run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
 
+    if args.with_tracking:
+        if args.wandb_entity is None:
+            args.wandb_entity = maybe_use_ai2_wandb_entity()
     return accelerator
 
 
@@ -162,6 +169,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 config={**asdict(args), **asdict(dataset_config), **asdict(model_config)},
                 name=args.run_name,
                 save_code=True,
+                tags=[args.exp_name] + get_wandb_tags(args),
             )
         writer = SummaryWriter(f"runs/{args.run_name}")
         writer.add_text(
