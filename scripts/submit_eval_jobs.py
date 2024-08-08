@@ -74,7 +74,7 @@ parser.add_argument("--model_name", type=str, default="hf-opt-7B")
 parser.add_argument("--location", type=str, default=None)
 parser.add_argument("--beaker_image", type=str, default="hamishivi/open-instruct-eval", help="If given, use this Beaker image.")
 parser.add_argument("--beaker_subfolder", type=str, default=None)
-parser.add_argument("--cluster", nargs='+', default=["ai2/allennlp-cirrascale", "ai2/general-cirrascale", "ai2/general-cirrascale-a100-80g-ib"])
+parser.add_argument("--cluster", nargs='+', default=["ai2/allennlp-cirrascale", "ai2/general-cirrascale", "ai2/general-cirrascale-a100-80g-ib", "ai2/s2-cirrascale-l40"])
 parser.add_argument("--is_tuned", action="store_true")
 parser.add_argument("--use_hf_tokenizer_template", action="store_true")
 parser.add_argument("--priority", type=str, default="low")
@@ -121,7 +121,7 @@ experiment_groups_default = [
     # "mmlu_5shot",
     # "gsm_direct",
     "gsm_cot",
-    "MATH_cot",
+    # "MATH_cot",
     # "bbh_direct",
     "bbh_cot",
     # "tydiqa_goldp_1shot",
@@ -137,7 +137,7 @@ experiment_groups_default = [
     "toxigen",
     "xstest",
     "alpaca_eval",
-    "alpaca_eval_2",
+    # "alpaca_eval_2",
 ]
 experiment_groups = args.experiments or experiment_groups_default
 
