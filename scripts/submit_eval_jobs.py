@@ -512,10 +512,10 @@ for experiment_group in experiment_groups:
             "--chat_formatting_function eval.templates.create_prompt_with_olmo_chat_format")
         ]
 
-    if any([x in model_info[0] for x in ["opt", "pythia", "falcon"]]) or "olmoe" in model_info[0]:
-        if "--use_vllm" in task_spec['arguments'][0]:
-            print(f"Removing --use_vllm for {model_info[0]}")
-            task_spec['arguments'] = [task_spec['arguments'][0].replace("--use_vllm", "")] 
+    # if any([x in model_info[0] for x in ["opt", "pythia", "falcon"]]) or "olmoe" in model_info[0]:
+    if "--use_vllm" in task_spec['arguments'][0]:
+        print(f"Removing --use_vllm for {model_info[0]}")
+        task_spec['arguments'] = [task_spec['arguments'][0].replace("--use_vllm", "")] 
 
     # Add additional stop sequences if needed.
     # mainly for llama-3-instruct eot.
