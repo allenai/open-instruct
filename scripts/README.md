@@ -48,6 +48,36 @@ python scripts/submit_finetune_job.py --config=configs/train_configs/sft/default
 python scripts/submit_finetune_job.py --config=configs/train_configs/sft/default.yaml  --learning_rate 4e-5
 ```
 
+
+### Docker-less job submssions
+
+It is possible to re-use the existing environment you have and run things without having to build a docker container. The idea is to install python on NFS. You can refer to https://gist.github.com/vwxyzjn/58a2714cf3fbab5bf672ff750e86a537 for more detail.
+
+Then you can submit jobs via `mason.py`, which we modified from https://github.com/allenai/mason. You can run the following to do a quick check
+```bash
+python mason.py \
+    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/general-cirrascale-a100-80g-ib \
+    --priority low \
+    --budget ai2/allennlp \
+    --gpus 1 -- which python
+```
+
+If you are successful in setting up python on NFS, your `which python` should match the `which python` output in the beaker job.
+
+![alt text](image.png)
+
+
+After setting it up successfully, say you are running `sh scripts/dpo_train_with_accelerate_config.sh 8 configs/train_configs/dpo/default.yaml` locally, now you can submit batch jobs via
+
+```bash
+python mason.py \
+    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/general-cirrascale-a100-80g-ib \
+    --priority low \
+    --budget ai2/allennlp \
+    --gpus 1 -- sh scripts/dpo_train_with_accelerate_config.sh 8 configs/train_configs/dpo/default.yaml
+```
+
+
 ## Other
 1. `collect_eval_results.py`: For collating metrics from `open-instruct` evaluation job. E.g.
 ```bash
