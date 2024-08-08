@@ -78,7 +78,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
         ds[key] = ds[key].select(range(dataset_args.dataset_start_idx, dataset_args.dataset_end_idx))
     pprint([dataset_args, args, gen_args])
 
-    ## DATASET specific logic: in this dataset the prompt is simply just a list of strings
+    # DATASET specific logic: in this dataset the prompt is simply just a list of strings
     ds = ds.map(
         lambda x: {"prompt_token_ids": tokenizer.apply_chat_template(x["messages"][:-1])},
         num_proc=multiprocessing.cpu_count(),

@@ -24,8 +24,6 @@ import torch
 import torch.multiprocessing as mp
 from datasets import Dataset
 from huggingface_hub import HfApi
-from torch.utils.data import DataLoader
-from tqdm import tqdm
 from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
@@ -114,7 +112,7 @@ def process_shard(rank: int, args: Args, shard: List[str]):
                 _, score, _ = get_reward(model, input_ids, tokenizer.pad_token_id, 0)
                 scores.extend(score.cpu().tolist())
                 i += current_batch_size
-                print(f"processing: {i}:{i+current_batch_size}/{len(ds)}")
+                print(f"processing: [{i}:{i+current_batch_size}] out of {len(ds)} samples")
             except torch.cuda.OutOfMemoryError:
                 if current_batch_size == 1:
                     raise ValueError("Out of memory even with batch size 1")
