@@ -1,0 +1,25 @@
+repos:
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args:
+          - --profile=black
+        files: ^open_instruct/
+  - repo: https://github.com/myint/autoflake
+    rev: v2.3.1
+    hooks:
+      - id: autoflake
+        args:
+          - -r
+          - --in-place
+          - --remove-unused-variables
+          - --remove-all-unused-imports
+  - repo: https://github.com/python/black
+    rev: 24.8.0
+    hooks:
+      - id: black
+        args:
+          - --line-length=119
+          - --target-version=py310
+        files: ^open_instruct/
