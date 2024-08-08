@@ -11,4 +11,4 @@ style:
 
 quality:
 	python -m autoflake -r --exclude=wandb --in-place --remove-unused-variables --remove-all-unused-imports $(check_dirs)
-	python -m flake8 --ignore E501 $(check_dirs)
+	python -m flake8 --ignore E501,W503 $(check_dirs)
