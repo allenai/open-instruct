@@ -12,6 +12,7 @@ from eval.utils import (
     query_openai_chat_model,
     dynamic_import_function,
     load_hf_tokenizer,
+    upload_results_to_hf,
 )
 
 
@@ -259,7 +260,20 @@ def main(args):
     
     with open(os.path.join(args.save_dir, "metrics.json"), "w") as fout:
         json.dump(eval_scores, fout, indent=4)
-    print("Done!")
+
+    if args.upload_to_hf is not None:
+        # upload metrics to HF. Main metric is the accuracy
+        results = eval_scores
+        task_name = f"oi_tydiqa_{args.n_shot}shot"
+        primary_score = results["average"]["f1"] / 100
+        upload_results_to_hf(
+            results,
+            args.upload_to_hf,
+            args.hf_upload_name,
+            task_name=task_name,
+            primary_score=primary_score,
+            prepend_timestamp=True,
+        )
 
 
 if __name__ == "__main__":
@@ -358,6 +372,19 @@ if __name__ == "__main__":
         nargs="+",
         default=[],
         help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
+    )
+    parser.add_argument(
+        "--upload_to_hf",
+        type=str,
+        default=None,
+        help="If specified, we will upload the results to Hugging Face Datasets. "
+             "This should be the name of the dataset to upload to."
+    )
+    parser.add_argument(
+        "--hf_upload_name",
+        type=str,
+        default=None,
+        help="If uploading to hf, this is the model name"
     )
     args = parser.parse_args()
     # model_name_or_path and openai_engine cannot be both None or both not None.

@@ -3,7 +3,7 @@
 set -ex
 
 # A script for using oe-eval for our development!
-# to install oe-eval, check out https://github.com/allenai/oe-eval-internal
+# to use, clone oe-eval (https://github.com/allenai/oe-eval-internal) into the top level dir of this repo.
 # you'll need the current main for this to work.
 # sadly, this is internal at Ai2 for now, but we are working on making it public!
 
@@ -83,5 +83,5 @@ for TASK in "${TASKS[@]}"; do
     else
         BATCH_SIZE=$BATCH_SIZE_VLLM
     fi
-    oe-eval --model "$MODEL_NAME" --beaker-workspace "ai2/tulu-3-results" --beaker-budget ai2/oe-adapt --task "$TASK" $MODEL_TYPE --batch-size "$BATCH_SIZE" --model-args {\"model_path\":\"${MODEL_LOCATION}\"} ${HF_UPLOAD_ARG} --gpus "$GPU_COUNT"
+    python oe-eval-internal/oe_eval/launch.py --model "$MODEL_NAME" --beaker-workspace "ai2/tulu-3-results" --beaker-budget ai2/oe-adapt --task "$TASK" $MODEL_TYPE --batch-size "$BATCH_SIZE" --model-args {\"model_path\":\"${MODEL_LOCATION}\"} ${HF_UPLOAD_ARG} --gpus "$GPU_COUNT"
 done
