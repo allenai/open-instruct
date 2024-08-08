@@ -22,7 +22,7 @@ Please see our first paper [How Far Can Camels Go? Exploring the State of Instru
 - [2023-09-25] Supported using [vLLM](https://github.com/vllm-project/vllm/) for our evaluations, which speeds up the evaluation by 10x.
 - [2023-09-17] Supported [LoRA](https://arxiv.org/abs/2106.09685) and [QLoRA](https://arxiv.org/abs/2305.14314) finetuning. See [here](#parameter-efficient-finetuning) for more details.
 - [2023-08-18] Added support for [ToxiGen](https://github.com/microsoft/TOXIGEN)/[TrutufulQA](https://github.com/sylinrl/TruthfulQA) evaluation. Check our `scripts/eval/` for examples of running them.
-- [2023-08-08] Supported several new instruction dataset, including [LIMA](https://huggingface.co/datasets/GAIR/lima) / [WizardLM](https://github.com/nlpxucan/WizardLM) / [Open-Orca](https://huggingface.co/datasets/Open-Orca/OpenOrca). See the [preparation script](./scripts/prepare_train_data.sh) for details. Performance hasn't been evaluated yet.
+- [2023-08-08] Supported several new instruction dataset, including [LIMA](https://huggingface.co/datasets/GAIR/lima) / [WizardLM](https://github.com/nlpxucan/WizardLM) / [Open-Orca](https://huggingface.co/datasets/Open-Orca/OpenOrca). See the [preparation script](./scripts/data/prepare_train_data.sh) for details. Performance hasn't been evaluated yet.
 - [2023-08-06] Supported LLaMa 2 finetuning and FlashAttention-2 by bumping the version of transformers and many other dependencies.
 - [2023-06-29] Added [licensing info](#licensing) for our released models.
 - [2023-06-09] Released Tülu (a suite of LLaMa models fully-finetuned on a strong mix of datasets) and many other checkpoints on HuggingFace [[Links]](#released-checkpoints).
@@ -96,7 +96,7 @@ make quality
 We include a collection of representative instruction datasets in our exploration and are adding new ones to our list. We unify them into the same chatting format. To download and prepare these datasets, simply run the following command:
 
 ```bash
-./scripts/prepare_train_data.sh
+./scripts/data/prepare_train_data.sh
 ```
 
 Please check these datasets for licenses and restrictions around their use!
@@ -153,7 +153,7 @@ To merge a model:
 4. Run the command below:
 
 ```bash
-python scripts/weight_diff.py recover --path_raw ${hf_llama_path} --path_tuned ${output_path} --path_diff ${diff_location}
+python scripts/weights/weight_diff.py recover --path_raw ${hf_llama_path} --path_tuned ${output_path} --path_diff ${diff_location}
 ```
 
 ## Evaluation
@@ -180,7 +180,7 @@ We are working on including more promising benchmarks into this list. Please sta
 You can use the following script to download all the evaluation data:
 
 ```bash
-./scripts/prepare_eval_data.sh
+./scripts/data/prepare_eval_data.sh
 ```
 
 Evaluation scripts for different datasets are put under `./scripts`. For example, you can use the following command to run the MMLU evaluation script:
@@ -188,6 +188,22 @@ Evaluation scripts for different datasets are put under `./scripts`. For example
 ```bash
 ./scripts/eval/mmlu.sh
 ```
+
+### Ai2 Internal Evaluation
+
+We provide a script integrated with beaker for use internally at Ai2. For example, to run all the tulu 3 evals with easy uploading:
+```bash
+python scripts/submit_eval_jobs.py \
+      --model_name <model name> \
+      --location <beaker id> \
+      --is_tuned --workspace tulu-3-results \
+      --preemptible \
+      --use_hf_tokenizer_template \
+      --beaker_image nathanl/open_instruct_olmo_auto \
+      --upload_to_hf allenai/tulu-3-evals \
+      --run_oe_eval_experiments
+```
+Replace location with your beaker ID, and model name with your model name (note this will affect experiment naming, so make it unique and memorable!). For HF models, use a name with `hf-<model-name>` for the model_name argument, and for location give the HF path (e.g. `meta-llama/Meta-Llama-3-8B-Instruct`). Note this assumes your model has a valid HF tokenizer chat template.
 
 ### Human evaluation
 

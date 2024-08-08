@@ -86,6 +86,9 @@ parser.add_argument("--gpu_multiplier", type=int, default=None, help="Multiply t
 parser.add_argument("--gsm_stop_at_double_newline", action="store_true", help="Stop GSM generation at the first double newline.")
 parser.add_argument("--no-nfs", action="store_true", help="Don't mount the NFS.")
 parser.add_argument("--add_stop_sequence", type=str, nargs="+", default=[], help="Additional stop sequences to use when generating completions.") # e.g. \"<|eot_id|>\" for llama 3
+parser.add_argument("--upload_to_hf", type=str, default=None, help="If given, upload the eval results to the Hugging Face model hub. Provide the HF dataset and path in form <hf dataset>//<hf path>.")
+parser.add_argument("--hf_upload_experiments", type=str, nargs="*", default=None, help="Upload given experiment to the Hugging Face model hub.")
+parser.add_argument("--run_oe_eval_experiments", action="store_true", help="Run the OE eval tool and experiments too.")
 args = parser.parse_args()
 
 
@@ -523,6 +526,25 @@ for experiment_group in experiment_groups:
     if args.add_stop_sequence and experiment_group not in tasks_without_addition_stop:
         task_spec['arguments'] = [task_spec['arguments'][0] + " --additional_stop_sequence " + " ".join(args.add_stop_sequence)]
 
+    # add HF hub upload if specified
+    if args.upload_to_hf:
+        if args.hf_upload_experiments is None or len(args.hf_upload_experiments) == 0:
+            # use defaults for tulu dev evals.
+            args.hf_upload_experiments = [
+                "MATH_cot",
+                "bbh_cot",
+                "trutufulqa",
+                "xstest",
+                "alpaca_eval",
+                "alpaca_eval_2",
+            ]
+        if experiment_group not in args.hf_upload_experiments:
+            print(f"Skipping HF upload for {experiment_group}")
+        else:
+            hf_dataset = args.upload_to_hf
+            # to match the way oe-eval script works.
+            task_spec['arguments'] = [task_spec['arguments'][0] + f" --upload_to_hf {hf_dataset} --hf_upload_name results/{model_name}"]
+
     eval_task_specs.append(task_spec)
 
 
@@ -541,3 +563,15 @@ with open(fn, "w") as file:
 
 cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
 subprocess.Popen(cmd, shell=True)
+
+if args.run_oe_eval_experiments:
+    # if so, run oe-eval. We assume it is cloned in the top-level repo directory.
+    oe_eval_cmd = f"scripts/eval/oe-eval.sh --model-name {model_name}"
+    if args.upload_to_hf:
+        oe_eval_cmd += " --hf-upload"
+    ## model location munging: if beaker, use beaker://. If hf, just name
+    if model_info[0].startswith("hf-"):
+        oe_eval_cmd += f" --model-location {model_info[1]}"
+    else:
+        oe_eval_cmd += f" --model-location beaker://{model_info[1]}"
+    subprocess.Popen(oe_eval_cmd, shell=True)

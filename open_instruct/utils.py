@@ -13,11 +13,14 @@
 # limitations under the License.
 
 import dataclasses
+import logging
 import os
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from typing import Any, List, NewType, Optional, Tuple, Union
 
+import requests
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
@@ -56,19 +59,28 @@ def is_openai_format(messages: Any) -> bool:
 
 
 # functions for handling different formats of messages
-def instruction_output_to_messages(example):
+def convert_alpaca_gpt4_to_messages(example):
     """
     Convert an instruction in inst-output to a list of messages.
     e.g. vicgalle/alpaca-gpt4"""
     messages = [
-        {"role": "user", "content": example["instruction"]},
+        {
+            "role": "user",
+            "content": (
+                "Below is an instruction that describes a task, paired with an input that provides "
+                "further context. Write a response that appropriately completes the request.\n\n"
+                f"### Instruction:\n{example['instruction']}\n\n"
+                f"### Input:\n{example['input']}\n\n"
+                "### Response:"
+            ),
+        },
         {"role": "assistant", "content": example["output"]},
     ]
     example["messages"] = messages
     return example
 
 
-def query_answer_to_messages(example):
+def convert_codefeedback_single_turn_to_messages(example):
     """
     Convert a query-answer pair to a list of messages.
     e.g. m-a-p/CodeFeedback-Filtered-Instruction"""
@@ -80,7 +92,7 @@ def query_answer_to_messages(example):
     return example
 
 
-def query_response_to_messages(example):
+def convert_metamath_qa_to_messages(example):
     """
     Convert a query-response pair to a list of messages.
     e.g. meta-math/MetaMathQA"""
@@ -92,7 +104,7 @@ def query_response_to_messages(example):
     return example
 
 
-def prompt_completion_to_messages(example):
+def convert_code_alpaca_to_messages(example):
     """
     Convert a prompt-completion pair to a list of messages.
     e.g. HuggingFaceH4/CodeAlpaca_20K"""
@@ -104,11 +116,12 @@ def prompt_completion_to_messages(example):
     return example
 
 
-def question_response_to_messages(example):
+def convert_open_orca_to_messages(example):
     """
     Convert a question-response pair to a list of messages.
     e.g. Open-Orca/OpenOrca"""
     messages = [
+        {"role": "system", "content": example["system_prompt"]},
         {"role": "user", "content": example["question"]},
         {"role": "assistant", "content": example["response"]},
     ]
@@ -140,7 +153,7 @@ def conversations_to_messages(example):
 
 
 def get_datasets(
-    dataset_mixer: dict,
+    dataset_mixer: Union[dict, list],
     splits: Optional[List[str]] = None,
     configs: Optional[List[str]] = None,
     columns_to_keep: Optional[List[str]] = None,
@@ -152,9 +165,10 @@ def get_datasets(
     Loads and mixes datasets according to proportions specified in `dataset_mixer`.
 
     Args:
-        dataset_mixer (`dict`):
-            Dictionary containing the dataset names and their training proportions.
-            By default, all test proportions are 1.
+        dataset_mixer (`list` or `dict`):
+            Dictionary or list containing the dataset names and their training proportions.
+            By default, all test proportions are 1. Lists are formatted as
+            `key1 value1 key2 value2 ...` If a list is passed in, it will be converted to a dictionary.
         splits (Optional[List[str]], *optional*, defaults to `None`):
             Dataset splits to load and mix. Assumes the splits exist in
             all datasets and have a `train_` or `test_` prefix.
@@ -171,6 +185,20 @@ def get_datasets(
             Column names that are required to be in the dataset.
             Quick debugging when mixing heterogeneous datasets.
     """
+    if isinstance(dataset_mixer, list):
+        assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
+        mixer_dict = {}
+        i = 0
+        while i < len(dataset_mixer) - 1:
+            assert isinstance(dataset_mixer[i], str), f"Invalid type in data mixer: {dataset_mixer}"
+            if "." in dataset_mixer[i + 1]:
+                value = float(dataset_mixer[i + 1])
+            else:
+                value = int(dataset_mixer[i + 1])
+            mixer_dict[dataset_mixer[i]] = value
+            i += 2
+        dataset_mixer = mixer_dict
+
     splits = ["train", "test"] if splits is None else splits
     configs = [None] * len(dataset_mixer) if not configs else configs
     columns_to_keep = [] if columns_to_keep is None else columns_to_keep
@@ -207,7 +235,7 @@ def get_datasets(
             # assert that needed columns are present
             if need_columns:
                 if not all(col in dataset.column_names for col in need_columns):
-                    raise ValueError(f"Needed column {need_columns} not found in dataset {dataset.coulmn_names}.")
+                    raise ValueError(f"Needed column {need_columns} not found in dataset {dataset.column_names}.")
 
             # handle per-case conversions
             # if "instruction" and "output" columns are present and "messages" is not, convert to messages
@@ -216,13 +244,13 @@ def get_datasets(
                 and "output" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(instruction_output_to_messages, num_proc=10)
+                dataset = dataset.map(convert_alpaca_gpt4_to_messages, num_proc=10)
             elif (
                 "prompt" in dataset.column_names
                 and "completion" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(prompt_completion_to_messages, num_proc=10)
+                dataset = dataset.map(convert_code_alpaca_to_messages, num_proc=10)
             elif "conversations" in dataset.column_names and "messages" not in dataset.column_names:
                 dataset = dataset.map(conversations_to_messages, num_proc=10)
             elif (
@@ -230,19 +258,19 @@ def get_datasets(
                 and "response" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(question_response_to_messages, num_proc=10)
+                dataset = dataset.map(convert_open_orca_to_messages, num_proc=10)
             elif (
                 "query" in dataset.column_names
                 and "answer" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(query_answer_to_messages, num_proc=10)
+                dataset = dataset.map(convert_codefeedback_single_turn_to_messages, num_proc=10)
             elif (
                 "query" in dataset.column_names
                 and "response" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(query_response_to_messages, num_proc=10)
+                dataset = dataset.map(convert_metamath_qa_to_messages, num_proc=10)
 
             # if id not in dataset, create it as ds-{index}
             if "id" not in dataset.column_names:
@@ -400,6 +428,9 @@ class FlatArguments:
     )
     dataset_mixer: Optional[dict] = field(
         default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
+    )
+    dataset_mixer_list: Optional[list[str]] = field(
+        default=None, metadata={"help": "A list of datasets (local or HF) to sample from."}
     )
     dataset_mix_dir: Optional[str] = field(
         default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
@@ -567,18 +598,102 @@ class FlatArguments:
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
             raise ValueError("reduce_loss must be either 'mean' or 'sum'")
-        if self.dataset_name is None and self.train_file is None and self.dataset_mixer is None:
+        if (
+            self.dataset_name is None
+            and self.train_file is None
+            and self.dataset_mixer is None
+            and self.dataset_mixer_list is None
+        ):
             raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
         else:
             if self.train_file is not None:
                 extension = self.train_file.split(".")[-1]
                 assert extension in ["json", "jsonl"], "`train_file` should be a json or a jsonl file."
         if (
-            (self.dataset_name is not None and self.dataset_mixer is not None)
+            (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
             or (self.dataset_name is not None and self.train_file is not None)
-            or (self.dataset_mixer is not None and self.train_file is not None)
+            or (
+                (self.dataset_mixer is not None or self.dataset_mixer_list is not None) and self.train_file is not None
+            )
+            or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
+
+
+def maybe_use_ai2_wandb_entity() -> Optional[str]:
+    """Ai2 internal logic: try use the ai2-llm team if possible. Should not affect external users."""
+    import wandb
+
+    wandb.login()
+    api = wandb.Api()
+    current_user = api.viewer
+    teams = current_user.teams
+    if "ai2-llm" in teams:
+        return "ai2-llm"
+    else:
+        return None
+
+
+def get_git_tag() -> str:
+    """Try to get the latest Git tag (e.g., `no-tag-404-g98dc659` or `v1.0.0-4-g98dc659`)"""
+    git_tag = ""
+    try:
+        git_tag = (
+            subprocess.check_output(["git", "describe", "--tags"], stderr=subprocess.DEVNULL).decode("ascii").strip()
+        )
+    except subprocess.CalledProcessError as e:
+        logging.debug(f"Failed to get Git tag: {e}")
+
+    # If no Git tag found, create a custom tag based on commit count and hash
+    if len(git_tag) == 0:
+        try:
+            count = int(
+                subprocess.check_output(["git", "rev-list", "--count", "HEAD"], stderr=subprocess.DEVNULL)
+                .decode("ascii")
+                .strip()
+            )
+            hash = (
+                subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL)
+                .decode("ascii")
+                .strip()
+            )
+            git_tag = f"no-tag-{count}-g{hash}"
+        except subprocess.CalledProcessError as e:
+            logging.debug(f"Failed to get commit count and hash: {e}")
+
+    return git_tag
+
+
+def get_pr_tag() -> str:
+    """Try to find associated pull request on GitHub (e.g., `pr-123`)"""
+    pr_tag = ""
+    git_commit = (
+        subprocess.check_output(["git", "rev-parse", "--verify", "HEAD"], stderr=subprocess.DEVNULL)
+        .decode("ascii")
+        .strip()
+    )
+    try:
+        # try finding the pull request number on github
+        prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
+        if prs.status_code == 200:
+            prs = prs.json()
+            if len(prs["items"]) > 0:
+                pr = prs["items"][0]
+                pr_number = pr["number"]
+                pr_tag = f"pr-{pr_number}"
+    except Exception as e:
+        logging.debug(f"Failed to get PR number: {e}")
+
+    return pr_tag
+
+
+def get_wandb_tags() -> List[str]:
+    """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123`)"""
+    existing_wandb_tags = os.environ.get("WANDB_TAGS", "")
+    git_tag = get_git_tag()
+    pr_tag = get_pr_tag()
+    non_empty_tags = [tag for tag in [existing_wandb_tags, git_tag, pr_tag] if len(tag) > 0]
+    return non_empty_tags
 
 
 class ArgumentParserPlus(HfArgumentParser):
@@ -639,7 +754,7 @@ class ArgumentParserPlus(HfArgumentParser):
 
         return outputs
 
-    def parse(self) -> DataClassType | Tuple[DataClassType]:
+    def parse(self) -> Union[DataClassType, Tuple[DataClassType]]:
         if len(sys.argv) == 2 and sys.argv[1].endswith(".yaml"):
             # If we pass only one argument to the script and it's the path to a YAML file,
             # let's parse it to get our arguments.
