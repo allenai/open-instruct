@@ -69,7 +69,8 @@ python mason.py \
 
 If you are successful in setting up python on NFS, your `which python` should match the `which python` output in the beaker job.
 
-![alt text](image.png)
+![image](https://github.com/user-attachments/assets/4f37d5bd-64bd-476b-9dad-1e35795b2618)
+
 
 
 After setting it up successfully, say you are running `sh scripts/dpo_train_with_accelerate_config.sh 8 configs/train_configs/dpo/default.yaml` locally, now you can submit batch jobs via
