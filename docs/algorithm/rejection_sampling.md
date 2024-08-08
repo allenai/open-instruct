@@ -71,5 +71,5 @@ python mason.py \
     --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/general-cirrascale-a100-80g-ib \
     --priority low \
     --budget ai2/allennlp \
-    --gpus 1 -- chmod -R 777 /net/nfs.cirrascale/allennlp/.cache/hub/
+    --gpus 1 -- chmod -R 777 /net/nfs.cirrascale/allennlp/.cache/
 ```
