@@ -53,6 +53,12 @@ To use this for multi-node jobs, here is an example that runs IFT on 4 nodes:
 python scripts/submit_finetune_job.py --default_beaker_config configs/beaker_configs/default_finetune_multinode.yaml --config configs/train_configs/sft/tulu3_8b_preview_mix_v3.1.yaml --cluster ai2/jupiter-cirrascale-2 --workspace ai2/tulu-3-dev --num_nodes 4
 ```
 
+3. `submit_dpo_job.py`: **Core script** for submitting DPO tuning jobs. It should behave like the finetune script, but additionally can take in beaker datasets to mount via `--datasets`, e.g.:
+```
+python scripts/submit_dpo_job.py --config configs/train_configs/dpo/my_dpo_config.yaml --datasets my_beaker_id:/model --experiment_name my_experiment_name
+```
+In this case, we also ask you provide an experiment name, as we don't know the name of the model being finetuned if it is mounted to `/model`.
+
 
 ### Docker-less job submssions
 
