@@ -543,6 +543,9 @@ for experiment_group in experiment_groups:
         else:
             hf_dataset = args.upload_to_hf
             # to match the way oe-eval script works.
+            # if we prepended hf- to the model name, remove it.
+            if model_name.startswith("hf-"):
+                model_name = model_name[3:]
             task_spec['arguments'] = [task_spec['arguments'][0] + f" --upload_to_hf {hf_dataset} --hf_upload_name results/{model_name}"]
 
     eval_task_specs.append(task_spec)
