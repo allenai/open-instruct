@@ -36,3 +36,4 @@ immutabledict
 black
 flake8
 isort
+autoflake
