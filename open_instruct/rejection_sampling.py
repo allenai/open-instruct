@@ -31,6 +31,8 @@ from transformers import (
     HfArgumentParser,
 )
 
+from open_instruct.model_utils import get_reward
+
 api = HfApi()
 
 
@@ -47,104 +49,6 @@ class Args:
     hf_repo_id: str = "rejection_sampling"
     add_timestamp: bool = True
 
-def first_true_indices(bools: torch.Tensor, dtype=torch.long):
-    """
-    Finds the index of the first `True` value in each row of a boolean tensor. If no `True` value exists in a row,
-    it returns the length of the row.
-
-    Args:
-        bools (torch.Tensor): A boolean tensor of shape (batch_size, sequence_length), where `True` values indicate
-                              the positions of interest.
-        dtype (torch.dtype): The data type to use for the output indices (default is torch.long).
-
-    Returns:
-        torch.Tensor: A tensor of shape (batch_size,) containing the index of the first `True` value in each row.
-                      If a row has no `True` value, the index will be the length of the row.
-    """
-
-    # Get the length of each row (i.e., the number of columns in the last dimension)
-    # row_len is a scalar representing the length of each sequence (sequence_length)
-    row_len = bools.size(-1)
-
-    # Calculate the index positions for the first `True` in each row
-    # ~bools: Invert the boolean values (True becomes False and vice versa)
-    # ~bools.type(dtype): Convert the inverted boolean tensor to the specified dtype (0 for True, 1 for False)
-    # row_len * (~bools).type(dtype): For `False` values, this will give `row_len`, for `True` values it gives 0.
-    # torch.arange(row_len, dtype=dtype, device=bools.device): Generates a tensor with values [0, 1, 2, ..., row_len-1]
-    # for each row. Shape: (sequence_length,)
-    # zero_or_index: Shape (batch_size, sequence_length). This tensor contains the indices for `True` values and `row_len`
-    # for `False` values.
-    zero_or_index = row_len * (~bools).type(dtype) + torch.arange(row_len, dtype=dtype, device=bools.device)
-
-    # Return the minimum value in each row (i.e., the first `True` index or `row_len` if none exist)
-    # torch.min(zero_or_index, dim=-1).values: This returns the minimum value in each row, which corresponds to the first
-    # `True` value's index or `row_len` if there is no `True` in that row.
-    # The returned tensor has shape (batch_size,)
-    return torch.min(zero_or_index, dim=-1).values
-
-def get_reward(
-        model: torch.nn.Module, query_responses: torch.Tensor, pad_token_id: int, context_length: int
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    This function computes reward scores for a batch of query responses based on a pre-trained reward model.
-
-    Args:
-        model (torch.nn.Module): The pre-trained reward model.
-        query_responses (torch.Tensor): Tensor containing the tokenized responses for which to compute rewards.
-            Shape: (batch_size, sequence_length)
-        pad_token_id (int): The ID used for padding tokens in the tokenized sequences.
-        context_length (int): The length of the prompt or context preceding the completions.
-
-    Returns:
-        Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing:
-            - reward_logits: The logits output from the model for all tokens in the sequences.
-              Shape: (batch_size, sequence_length)
-            - final_scores: The final reward scores, one for each sequence, after adjusting for sequence lengths.
-              Shape: (batch_size,)
-            - sequence_lengths: The lengths of each sequence (excluding padding).
-              Shape: (batch_size,)
-    """
-
-    # Create an attention mask where tokens that are not padding have a value of 1, and padding tokens have a value of 0
-    # Shape: (batch_size, sequence_length)
-    attention_mask = query_responses != pad_token_id
-
-    # Calculate position IDs for each token, considering the cumulative sum of the attention mask (to exclude padding)
-    # Shape: (batch_size, sequence_length)
-    position_ids = attention_mask.cumsum(1) - attention_mask.long()  # exclusive cumsum
-
-    # Access the LM backbone from the reward model using its base model prefix
-    lm_backbone = getattr(model, model.base_model_prefix)
-
-    # Replace padding tokens with zeros in the input IDs (so padding tokens won't affect the model's processing)
-    # Shape: (batch_size, sequence_length)
-    input_ids = torch.masked_fill(query_responses, ~attention_mask, 0)
-    output = lm_backbone(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        position_ids=position_ids,
-        return_dict=True,
-        output_hidden_states=True,
-        use_cache=False,  # otherwise mistral-based RM would error out
-    )
-    reward_logits = model.score(output.hidden_states[-1])  # (batch_size, sequence_length)
-
-    # Calculate the length of each sequence by finding the first occurrence of a padding token after the context
-    # sequence_lengths shape: (batch_size,)
-    sequence_lengths = first_true_indices(query_responses[:, context_length:] == pad_token_id) - 1 + context_length
-    # https://github.com/huggingface/transformers/blob/dc68a39c8111217683bf49a4912d0c9018bab33d/src/transformers/models/gpt2/modeling_gpt2.py#L1454
-
-    # Return the reward logits for all tokens, the final reward scores for each sequence, and the sequence lengths
-    return (
-        # reward_logits shape: (batch_size, sequence_length)
-        reward_logits,
-        # final_scores shape: (batch_size,)
-        reward_logits[
-            torch.arange(reward_logits.size(0), device=reward_logits.device),
-            sequence_lengths,
-        ].squeeze(-1), # Shape: (batch_size,)
-        sequence_lengths,
-    )
 
 def process_shard(rank: int, model_name_or_path: str, args: Args, shard: List[str]):
     """
