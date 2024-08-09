@@ -297,11 +297,18 @@ def load_hf_tokenizer(
         from transformers import AutoTokenizer
         if not tokenizer_name_or_path:
             tokenizer_name_or_path = model_name_or_path
-        try:
-            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=use_fast_tokenizer, token=token, revision="step1223842-tokens5100B")
-        except:
-            # some tokenizers (e.g., GPTNeoXTokenizer) don't have the slow or fast version, so we just roll back to the default one
-            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, token=token, revision="step1223842-tokens5100B")
+        if "OLMoE" in tokenizer_name_or_path:
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=use_fast_tokenizer, token=token, revision="step1223842-tokens5100B")
+            except:
+                # some tokenizers (e.g., GPTNeoXTokenizer) don't have the slow or fast version, so we just roll back to the default one
+                tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, token=token, revision="step1223842-tokens5100B")
+        else:
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=use_fast_tokenizer, token=token)
+            except:
+                # some tokenizers (e.g., GPTNeoXTokenizer) don't have the slow or fast version, so we just roll back to the default one
+                tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, token=token)
         # set padding side to left for batch generation
         tokenizer.padding_side = padding_side
         # set pad token to eos token if pad token is not set (as is the case for llama models)
