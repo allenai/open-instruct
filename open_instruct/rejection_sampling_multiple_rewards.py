@@ -226,7 +226,12 @@ def majority_vote(offsets_per_model: dict[str, torch.tensor]) -> torch.tensor:
         # Collect votes from all models for the current sample
         votes = [offsets_per_model[model][i].item() for model in offsets_per_model]
         # Determine the most common vote
-        majority_vote = Counter(votes).most_common(1)[0][0]
+        counter = Counter(votes)
+        # Try to get ther majority vote, but if all models disagree, we randomly choose one
+        if len(offsets_per_model) != len(counter):
+            majority_vote = counter.most_common(1)[0][0]
+        else:
+            majority_vote = votes[np.random.randint(len(votes))]
         # Store the majority vote in the tensor
         majority_votes[i] = majority_vote
 
