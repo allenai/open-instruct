@@ -100,7 +100,7 @@ def main():
         # Split the original command into a list
         cmd_parts = shlex.split(original_command)
 
-        # Find the index of open_instruct/finetune.py
+        # Find the index of open_instruct/dpo_tune.py
         script_index = cmd_parts.index('open_instruct/dpo_tune.py')
 
         # Find the index of 'accelerate launch'
@@ -128,7 +128,7 @@ def main():
             if value is not True:
                 new_cmd_parts.append(str(value))
         # add python job + post args
-        new_cmd_parts.append('open_instruct/finetune.py')
+        new_cmd_parts.append('open_instruct/dpo_tune.py')
         for key, value in cmd_dict.items():
             if key == "dataset_mixer":
                 key = "dataset_mixer_list"
