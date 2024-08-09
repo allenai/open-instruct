@@ -112,7 +112,7 @@ def evaluate(
                 _, score, _ = get_reward(
                     reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                 )
-                table["score"].extend(accelerator.gather(score).float().cpu().numpy())
+                table["score"].extend(score.float().cpu().numpy())
 
             if len(table["query"]) >= max_sampled_texts:
                 break

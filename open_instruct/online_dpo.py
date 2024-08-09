@@ -315,8 +315,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     is_deepspeed_enabled = getattr(accelerator.state, "deepspeed_plugin", None) is not None
     mixed_precision = accelerator.state.mixed_precision
     if is_deepspeed_enabled:
-        reward_model = prepare_deepspeed(args.per_device_train_batch_size, mixed_precision)
-        ref_model = prepare_deepspeed(args.per_device_train_batch_size, mixed_precision)
+        reward_model = prepare_deepspeed(reward_model, args.per_device_train_batch_size, mixed_precision)
+        ref_model = prepare_deepspeed(ref_model, args.per_device_train_batch_size, mixed_precision)
     else:
         reward_model = reward_model.to(device)
         ref_model = ref_model.to(device)
@@ -357,7 +357,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
         # (optionally) evaluate the model
         if args.num_evals > 0 and (training_step - 1) % args.eval_freq == 0:
-            print(f"eval called {training_step=}, {episode=}, {args.eval_freq=}")
             table = evaluate(
                 model,
                 reward_model,
