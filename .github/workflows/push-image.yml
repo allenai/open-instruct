@@ -53,7 +53,7 @@ jobs:
 
       # big images fail, trying this
       - name: Delete huge unnecessary tools folder
-        run: rm -rf /opt/hostedtoolcache
+        run: rm -rf /opt/hostedtoolcache /usr/share/dotnet "$AGENT_TOOLSDIRECTORY"
   
       - name: Build image
         run: |

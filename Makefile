@@ -10,4 +10,5 @@ style:
 	python -m isort $(check_dirs) --profile black
 
 quality:
-	python -m flake8 --max-line-length 119 $(check_dirs)
+	python -m autoflake -r --exclude=wandb --in-place --remove-unused-variables --remove-all-unused-imports $(check_dirs)
+	python -m flake8 --ignore E501,W503 $(check_dirs)
