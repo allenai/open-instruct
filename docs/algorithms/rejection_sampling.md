@@ -20,7 +20,7 @@ python open_instruct/generation.py \
 # 2. tokenize them and run a reward model to filter them
 python open_instruct/rejection_sampling.py \
     --input_filename output/completions.jsonl \
-    --model_name_or_paths allenai/llama-3-tulu-2-8b-uf-mean-rm \
+    --model_names_or_paths allenai/llama-3-tulu-2-8b-uf-mean-rm \
     --save_filename output/rejection_sampled_completions.jsonl \
     --n 3 \
     --push_to_hub \
