@@ -155,7 +155,7 @@ def first_true_indices(bools: torch.Tensor, dtype=torch.long) -> torch.Tensor:
 
 
 def get_reward(
-        model: torch.nn.Module, query_responses: torch.Tensor, pad_token_id: int, context_length: int
+    model: torch.nn.Module, query_responses: torch.Tensor, pad_token_id: int, context_length: int
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     This function computes reward scores for a batch of query responses based on a pre-trained reward model.
@@ -217,7 +217,9 @@ def get_reward(
         reward_logits[
             torch.arange(reward_logits.size(0), device=reward_logits.device),
             sequence_lengths,
-        ].squeeze(-1), # Shape: (batch_size,)
+        ].squeeze(
+            -1
+        ),  # Shape: (batch_size,)
         sequence_lengths,
     )
 

@@ -13,11 +13,10 @@
 # limitations under the License.
 
 import json
-import os
 import time
-from collections import defaultdict, Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import numpy as np
 import torch
@@ -38,7 +37,9 @@ api = HfApi()
 
 @dataclass
 class Args:
-    model_names_or_paths: List[str] = field(default_factory=lambda: ["cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr"])
+    model_names_or_paths: List[str] = field(
+        default_factory=lambda: ["cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr"]
+    )
     input_filename: str = "completions.jsonl"
     save_filename: str = "rejected_sampling_completions.jsonl"
     n: int = 1
@@ -52,19 +53,19 @@ class Args:
 
 def process_shard(rank: int, model_name_or_path: str, args: Args, shard: List[str]):
     """
-       This function processes a shard (subset) of data using a specified model. It tokenizes the data,
-       runs it through the model to get reward scores, and handles out-of-memory errors by adjusting the batch size.
+    This function processes a shard (subset) of data using a specified model. It tokenizes the data,
+    runs it through the model to get reward scores, and handles out-of-memory errors by adjusting the batch size.
 
-       Args:
-           rank (int): The GPU rank (index) to use for processing.
-           model_name_or_path (str): The path or name of the model to load.
-           args (Args): The arguments passed to the script, containing various settings.
-           shard (List[str]): A list of strings representing the shard of data to be processed.
+    Args:
+        rank (int): The GPU rank (index) to use for processing.
+        model_name_or_path (str): The path or name of the model to load.
+        args (Args): The arguments passed to the script, containing various settings.
+        shard (List[str]): A list of strings representing the shard of data to be processed.
 
-       Returns:
-           torch.Tensor: A tensor containing the reward scores for each item in the shard.
-                         Shape: (num_items_in_shard,)
-       """
+    Returns:
+        torch.Tensor: A tensor containing the reward scores for each item in the shard.
+                      Shape: (num_items_in_shard,)
+    """
     device = torch.device(f"cuda:{rank}")
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, padding_side="right")
     tokenizer.add_special_tokens({"pad_token": "[PAD]"})
@@ -72,12 +73,9 @@ def process_shard(rank: int, model_name_or_path: str, args: Args, shard: List[st
     # Convert the list of data items (shard) into a Hugging Face Dataset object
     ds = Dataset.from_list(shard)
     # Apply a tokenization function to each item in the dataset
-    ds = ds.map(
-        lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])},
-        remove_columns=ds.column_names
-    )
+    ds = ds.map(lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])}, remove_columns=ds.column_names)
 
-    ### So this code handles only classification, I should also handle other models judges like Llama3
+    # So this code handles only classification, I should also handle other models judges like Llama3
     model = AutoModelForSequenceClassification.from_pretrained(
         model_name_or_path,
         torch_dtype=torch.bfloat16,
@@ -91,21 +89,21 @@ def process_shard(rank: int, model_name_or_path: str, args: Args, shard: List[st
     # NOTE: two optimizations here:
     # 1. we sort by input_ids length to reduce padding at first
     # 2. we shrink the batch size if we run out of memory (so initially we can use a large batch size)
-    input_ids_lengths = [len(x) for x in ds["input_ids"]] #  input_ids_lengths: (num_items_in_shard,)
+    input_ids_lengths = [len(x) for x in ds["input_ids"]]  # input_ids_lengths: (num_items_in_shard,)
 
-    sorted_indices = np.argsort(input_ids_lengths) # Get indices that would sort the input lengths
+    sorted_indices = np.argsort(input_ids_lengths)  # Get indices that would sort the input lengths
 
     # Initialize a list to store the scores for each item in the shard
     scores = []
     i = 0
     while i < len(ds):
         with torch.no_grad():
-            data = ds[sorted_indices[i:i + current_batch_size]]
+            data = ds[sorted_indices[i : i + current_batch_size]]
             try:
                 input_ids = data_collator(data)["input_ids"].to(device)
                 _, score, _ = get_reward(model, input_ids, tokenizer.pad_token_id, 0)
                 # score = (batch_size, )
-                scores.extend(score.cpu().tolist()) # convert the tensor score to a list
+                scores.extend(score.cpu().tolist())  # convert the tensor score to a list
                 i += current_batch_size
                 print(f"processing: {i}:{i + current_batch_size}/{len(ds)}")
             except torch.cuda.OutOfMemoryError:
@@ -145,16 +143,17 @@ def majority_vote(offsets_per_model: dict[str, torch.tensor]) -> torch.tensor:
 
     return majority_votes
 
+
 def main(args: Args):
-    mp.set_start_method('spawn', force=True)
+    mp.set_start_method("spawn", force=True)
 
     # Load the completions from a file
-    with open(args.input_filename, 'r') as infile:
+    with open(args.input_filename, "r") as infile:
         completions = [json.loads(line) for line in infile]
 
     # Split the data into shards
     shard_size = len(completions) // args.num_gpus
-    shards = [completions[i:i + shard_size] for i in range(0, len(completions), shard_size)]
+    shards = [completions[i : i + shard_size] for i in range(0, len(completions), shard_size)]
 
     # Process shards in parallel
     best_offsets_per_model = {}
@@ -174,14 +173,14 @@ def main(args: Args):
         scores = torch.cat(scores)
 
         # Rejection sampling
-        scores_per_prompt = scores.reshape(-1, args.n) # (n_prompts, n_completions)
+        scores_per_prompt = scores.reshape(-1, args.n)  # (n_prompts, n_completions)
         for i in range(len(completions)):
             if "score" not in completions[i]:
                 completions[i]["score"] = {}
             completions[i]["score"][model_name_or_path] = scores[i].item()
 
-        best_indices = torch.argmax(scores_per_prompt, dim=1) # (n_prompts, 1) --> (n_prompts, )
-        worst_indices = torch.argmin(scores_per_prompt, dim=1) # (n_prompts, 1) --> (n_prompts, )
+        best_indices = torch.argmax(scores_per_prompt, dim=1)  # (n_prompts, 1) --> (n_prompts, )
+        worst_indices = torch.argmin(scores_per_prompt, dim=1)  # (n_prompts, 1) --> (n_prompts, )
         best_indices_offset = torch.arange(0, len(best_indices) * args.n, args.n) + best_indices
         best_offsets_per_model[model_name_or_path] = best_indices_offset
 
@@ -206,10 +205,10 @@ def main(args: Args):
         table["rejected_score"].append(worst_completions[i]["score"])
     first_key = list(table.keys())[0]
     print(f"{len(table[first_key])=}")
-    with open(args.save_filename, 'w') as outfile:
+    with open(args.save_filename, "w") as outfile:
         for i in range(len(table[first_key])):
             json.dump({key: table[key][i] for key in table}, outfile)
-            outfile.write('\n')
+            outfile.write("\n")
 
     if args.push_to_hub:
         if args.hf_entity is None:
