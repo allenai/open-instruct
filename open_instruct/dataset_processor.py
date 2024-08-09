@@ -67,6 +67,8 @@ INPUT_IDS_KEY = "input_ids"
 
 # Chat templates
 # flake8: noqa
+# note we added `{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}`
+# because we want the template to not output eos_token if `add_generation_prompt=True` 
 CHAT_TEMPLATES = {
     "simple_concat_with_space": (
         "{% for message in messages %}"
@@ -114,7 +116,7 @@ CHAT_TEMPLATES = {
         "{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n"
         "{% endif %}\n"
         "{% endfor %}"
-    )
+    ),
 }
 # flake8: noqa
 
@@ -374,11 +376,11 @@ def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
 
 class SimplePreferenceCollator:
     def __init__(self, pad_token_id):
-        """Simple collator for preference dataset (always pad from the right)"""
+        """Simple collator for preference dataset (always pad from the RIGHT)"""
         self.pad_token_id = pad_token_id
 
     def __call__(self, batch):
-        """the input will have input_ids_chosen, attention_mask_chosen, input_ids_rejected, attention_mask_rejected"""
+        """the input will have input_ids_chosen, input_ids_rejected"""
         # Find max length in the batch
         max_length_chosen = -1
         max_length_rejected = -1
@@ -390,9 +392,7 @@ class SimplePreferenceCollator:
 
         # Initialize lists to store padded sequences and attention masks
         padded_sequences_chosen = []
-        attention_masks_chosen = []
         padded_sequences_rejected = []
-        attention_masks_rejected = []
 
         for i in range(len(batch)):
             # Calculate padding length
@@ -409,11 +409,43 @@ class SimplePreferenceCollator:
 
         # Convert to tensors
         padded_sequences_chosen = torch.tensor(padded_sequences_chosen)
-        attention_masks_chosen = torch.tensor(attention_masks_chosen)
         padded_sequences_rejected = torch.tensor(padded_sequences_rejected)
-        attention_masks_rejected = torch.tensor(attention_masks_rejected)
 
         return {
             INPUT_IDS_CHOSEN_KEY: padded_sequences_chosen,
             INPUT_IDS_REJECTED_KEY: padded_sequences_rejected,
+        }
+
+
+class SimpleGenerateCollator:
+    """Simple collator for generation task (always pad from the LEFT)"""
+
+    def __init__(self, pad_token_id):
+        self.pad_token_id = pad_token_id
+
+    def __call__(self, batch):
+        """the input will have input_ids_prompt"""
+        # Find max length in the batch
+        max_length = -1
+        for i in range(len(batch)):
+            max_length = max(max_length, len(batch[i][INPUT_IDS_PROMPT_KEY]))
+        assert max_length > 0, "the dataset is empty"
+
+        # Initialize lists to store padded sequences and attention masks
+        padded_sequences = []
+
+        for i in range(len(batch)):
+            # Calculate padding length
+            pad_length = max_length - len(batch[i][INPUT_IDS_PROMPT_KEY])
+
+            # Pad from the left
+            padding = [self.pad_token_id] * pad_length
+            padded_sequence = padding + batch[i][INPUT_IDS_PROMPT_KEY]
+            padded_sequences.append(padded_sequence)
+
+        # Convert to tensors
+        padded_sequences = torch.tensor(padded_sequences)
+
+        return {
+            INPUT_IDS_PROMPT_KEY: padded_sequences,
         }
