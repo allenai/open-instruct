@@ -1,64 +1,36 @@
 from collections import defaultdict
-import math
-import os
-import random
-import time
-from dataclasses import asdict, dataclass
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List
 
-import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
+import torch.utils
+import torch.utils.data
 from accelerate import Accelerator
-from accelerate.utils import broadcast, gather_object
 from datasets import load_dataset
 from huggingface_hub import HfApi
-from rich.pretty import pprint
-import torch.utils
 from torch.utils.data import DataLoader
-import torch.utils.data
-from torch.utils.tensorboard import SummaryWriter
 from transformers import (
+    AutoModelForCausalLM,
     AutoModelForSequenceClassification,
     AutoTokenizer,
-    PreTrainedModel,
-    get_scheduler,
-    AutoModelForCausalLM,
     GenerationConfig,
     PreTrainedTokenizer,
 )
 
 from open_instruct.dataset_processor import (
     CHAT_TEMPLATES,
-    INPUT_IDS_KEY,
     INPUT_IDS_PROMPT_KEY,
     DatasetConfig,
     SFTDatasetProcessor,
     SimpleGenerateCollator,
-    visualize_token,
 )
 from open_instruct.model_utils import (
-    ModelConfig,
     batch_generation,
-    disable_dropout_in_model,
-    first_true_indices,
-    forward,
     get_reward,
-    prepare_deepspeed,
-    print_rich_single_line_metrics,
     print_rich_table,
-    save_with_accelerate,
-    exact_div,
     truncate_response,
     unwrap_model_for_generation,
-)
-from open_instruct.utils import (
-    ArgumentParserPlus,
-    get_wandb_tags,
-    maybe_use_ai2_wandb_entity,
 )
 
 api = HfApi()
@@ -83,7 +55,7 @@ def evaluate(
         top_p=1.0,
         do_sample=True,
         eos_token_id=stop_token_id,
-        pad_token_id=tokenizer.pad_token_id
+        pad_token_id=tokenizer.pad_token_id,
     )
 
     table = defaultdict(list)
@@ -102,9 +74,7 @@ def evaluate(
                 response = query_response[:, context_length:]
                 postprocessed_response = response
                 if stop_token_id is not None:  # handle the edge case when stop_token_id exists but is 0
-                    postprocessed_response = truncate_response(
-                        stop_token_id, tokenizer.pad_token_id, response
-                    )
+                    postprocessed_response = truncate_response(stop_token_id, tokenizer.pad_token_id, response)
                 table["query"].extend(tokenizer.batch_decode(query, skip_special_tokens=True))
                 table["model response"].extend(tokenizer.batch_decode(postprocessed_response))
 
@@ -117,6 +87,7 @@ def evaluate(
             if len(table["query"]) >= max_sampled_texts:
                 break
     return table
+
 
 if __name__ == "__main__":
     model = AutoModelForCausalLM.from_pretrained("EleutherAI/pythia-14m", num_labels=1)

@@ -406,9 +406,7 @@ def unwrap_model_for_generation(
         yield unwrapped_model
 
 
-def prepare_deepspeed(
-    model: torch.nn.Module, per_device_train_batch_size: int, mixed_precision: str
-):
+def prepare_deepspeed(model: torch.nn.Module, per_device_train_batch_size: int, mixed_precision: str):
     """
     Prepares the model for training with DeepSpeed (both for stage 2 and 3), configuring the appropriate settings based on the model and
     batch size.

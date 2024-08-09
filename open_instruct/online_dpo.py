@@ -1,40 +1,35 @@
-from collections import defaultdict
 import gc
-import math
 import os
 import random
 import time
 from dataclasses import asdict, dataclass
-from typing import Dict, List, Literal, Optional
+from typing import Literal, Optional
 
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import torch.utils
+import torch.utils.data
 from accelerate import Accelerator
 from accelerate.utils import broadcast, gather_object
 from datasets import load_dataset
 from huggingface_hub import HfApi
 from rich.pretty import pprint
-import torch.utils
 from torch.utils.data import DataLoader
-import torch.utils.data
 from torch.utils.tensorboard import SummaryWriter
 from transformers import (
+    AutoModelForCausalLM,
     AutoModelForSequenceClassification,
     AutoTokenizer,
+    GenerationConfig,
     PreTrainedModel,
     get_scheduler,
-    AutoModelForCausalLM,
-    GenerationConfig,
-    PreTrainedTokenizer,
 )
 
 from open_instruct.dataset_processor import (
     CHAT_TEMPLATES,
-    INPUT_IDS_KEY,
     INPUT_IDS_PROMPT_KEY,
     DatasetConfig,
     SFTDatasetProcessor,
@@ -45,6 +40,7 @@ from open_instruct.model_utils import (
     ModelConfig,
     batch_generation,
     disable_dropout_in_model,
+    exact_div,
     first_true_indices,
     forward,
     get_reward,
@@ -52,16 +48,16 @@ from open_instruct.model_utils import (
     print_rich_single_line_metrics,
     print_rich_table,
     save_with_accelerate,
-    exact_div,
     truncate_response,
     unwrap_model_for_generation,
 )
+from open_instruct.online_eval import evaluate
 from open_instruct.utils import (
     ArgumentParserPlus,
     get_wandb_tags,
     maybe_use_ai2_wandb_entity,
 )
-from open_instruct.online_eval import evaluate
+
 api = HfApi()
 INVALID_LOGPROB = 1.0
 
@@ -269,10 +265,21 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             wandb.log({"token_length": wandb.Image(f"runs/{args.run_name}/token_length.png")})
 
     # create the model and optimizer
-    model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(model_config.model_name_or_path, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2",)
-    ref_model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(model_config.model_name_or_path, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2",)
+    model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+        model_config.model_name_or_path,
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
+    )
+    ref_model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+        model_config.model_name_or_path,
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
+    )
     reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
-        args.reward_model_path, num_labels=1, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2",
+        args.reward_model_path,
+        num_labels=1,
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
     )
     for module in [model, ref_model, reward_model]:
         disable_dropout_in_model(module)
@@ -337,7 +344,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         # eos_token_id=args.stop_token_id,
         pad_token_id=tokenizer.pad_token_id,
     )
-
 
     # set up the metrics and initial states
     stats_shape = (args.num_epochs, args.num_mini_batches, args.gradient_accumulation_steps)
@@ -417,9 +423,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 # Response Processing 1. truncate response after the first occurrence of `stop_token_id`
                 postprocessed_response = response
                 if args.stop_token_id is not None:  # handle the edge case when stop_token_id exists but is 0
-                    postprocessed_response = truncate_response(
-                        args.stop_token_id, tokenizer.pad_token_id, response
-                    )
+                    postprocessed_response = truncate_response(args.stop_token_id, tokenizer.pad_token_id, response)
 
                 # Response Processing 2. run reward model on the truncated responses
                 postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
@@ -452,9 +456,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             # otherwise the model could learn to generate the first token as the stop token
             contain_stop_token = contain_stop_token & (sequence_lengths >= args.min_response_length)
             if args.non_stop_penalty:
-                scores = torch.where(
-                    contain_stop_token, scores, torch.full_like(scores, args.penalty_reward_value)
-                )
+                scores = torch.where(contain_stop_token, scores, torch.full_like(scores, args.penalty_reward_value))
 
             # be very careful with `padding_mask_p1`; see https://excalidraw.com/#json=LWnzG4w2k5DjF_EOL_xPt,e2w3a-hFJ_gX5vOfeyXGTw
             response_idxs = torch.arange(responses.shape[1], device=responses.device).repeat(responses.shape[0], 1)
@@ -502,11 +504,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     with accelerator.accumulate(model):
                         micro_batch_end = micro_batch_start + args.per_device_train_batch_size
                         micro_batch_inds = mini_batch_inds[micro_batch_start:micro_batch_end]
-                        ## chosen
                         chosen_mb_inds = chosen_indices[micro_batch_inds]
                         chosen_responses = responses[chosen_mb_inds]
-
-                        ## rejected
                         rejected_mb_inds = rejected_indices[micro_batch_inds]
                         rejected_responses = responses[rejected_mb_inds]
 
@@ -521,9 +520,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         chosen_logits = chosen_logits[:, context_length - 1 : -1]
                         chosen_logits /= args.temperature + 1e-7
                         chosen_all_logprobs = F.log_softmax(chosen_logits, dim=-1)
-                        chosen_logprobs = torch.gather(
-                            chosen_all_logprobs, 2, chosen_responses.unsqueeze(-1)
-                        ).squeeze(-1)
+                        chosen_logprobs = torch.gather(chosen_all_logprobs, 2, chosen_responses.unsqueeze(-1)).squeeze(
+                            -1
+                        )
                         chosen_logprobs = torch.masked_fill(
                             chosen_logprobs, padding_mask[chosen_mb_inds], INVALID_LOGPROB
                         )
@@ -543,9 +542,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         )
                         rejected_ref_logprobs = ref_logprobs[rejected_mb_inds]
                         rejected_logprobs_sum = (rejected_logprobs * ~padding_mask[rejected_mb_inds]).sum(1)
-                        rejected_ref_logprobs_sum = (rejected_ref_logprobs * ~padding_mask[rejected_mb_inds]).sum(
-                            1
-                        )
+                        rejected_ref_logprobs_sum = (rejected_ref_logprobs * ~padding_mask[rejected_mb_inds]).sum(1)
 
                         pi_logratios = chosen_logprobs_sum - rejected_logprobs_sum
                         ref_logratios = chosen_ref_logprobs_sum - rejected_ref_logprobs_sum
