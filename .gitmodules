@@ -1,0 +1,3 @@
+[submodule "safety-eval"]
+	path = safety-eval
+	url = https://github.com/allenai/safety-eval.git
