@@ -43,7 +43,7 @@ def main():
 
     # if args.save_to_hub is not none, push dataset to hub
     if args.save_to_hub:
-        raw_datasets["train"].push_to_hub(args.save_to_hub)
+        raw_datasets["train"].push_to_hub(args.save_to_hub, private=True)
 
 
 if __name__ == "__main__":
