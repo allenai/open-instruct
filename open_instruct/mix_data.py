@@ -18,7 +18,7 @@
 from .utils import ArgumentParserPlus, FlatArguments, get_datasets
 
 # Run as module for local imports, e.g.:
-# python -m open_instruct.mix_data configs/train_configs/sft/default.yaml --save_data_dir=output/tmp/
+# python -m open_instruct.mix_data configs/train_configs/sft/default.yaml --dataset_mix_dir=output/tmp/
 # can pass --save_to_hub=allenai/tulu-v3.1-mix-preview-4096-OLMoE
 
 
