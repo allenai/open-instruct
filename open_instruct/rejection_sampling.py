@@ -27,8 +27,8 @@ from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
     DataCollatorWithPadding,
-    PreTrainedTokenizer,
     HfArgumentParser,
+    PreTrainedTokenizer,
 )
 
 from open_instruct.model_utils import get_reward
@@ -52,7 +52,9 @@ class Args:
     add_timestamp: bool = True
 
 
-def process_shard(rank: int, model_name_or_path: str, args: Args, shard: List[str]) -> Tuple[torch.Tensor, torch.Tensor]:
+def process_shard(
+    rank: int, model_name_or_path: str, args: Args, shard: List[str]
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     This function processes a shard (subset) of data using a specified model. It tokenizes the data,
     runs it through the model to get reward scores, and handles out-of-memory errors by adjusting the batch size.
@@ -75,10 +77,20 @@ def process_shard(rank: int, model_name_or_path: str, args: Args, shard: List[st
     # Convert the list of data items (shard) into a Hugging Face Dataset object
     raw_ds = Dataset.from_list(shard)
     # Apply a tokenization function to each item in the dataset
-    ds = raw_ds.map(lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])}, remove_columns=raw_ds.column_names)
-    reference_completion_ds = raw_ds.map(lambda x: {"input_ids": tokenizer.apply_chat_template(
-        x["messages"][:-1] + [{'content': x["reference_completion"], 'role': "assistant"}])}, remove_columns=raw_ds.column_names)
-    reference_completion_ds = reference_completion_ds.select(range(0, len(ds), args.n)) # remove duplicate reference completions
+    ds = raw_ds.map(
+        lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])}, remove_columns=raw_ds.column_names
+    )
+    reference_completion_ds = raw_ds.map(
+        lambda x: {
+            "input_ids": tokenizer.apply_chat_template(
+                x["messages"][:-1] + [{"content": x["reference_completion"], "role": "assistant"}]
+            )
+        },
+        remove_columns=raw_ds.column_names,
+    )
+    reference_completion_ds = reference_completion_ds.select(
+        range(0, len(ds), args.n)
+    )  # remove duplicate reference completions
     # So this code handles only classification, I should also handle other models judges like Llama3
     model = AutoModelForSequenceClassification.from_pretrained(
         model_name_or_path,
@@ -91,14 +103,23 @@ def process_shard(rank: int, model_name_or_path: str, args: Args, shard: List[st
     # Initialize a data collator to handle dynamic padding of input sequences
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
     scores = batch_processing_scores(args.max_forward_batch_size, device, tokenizer, ds, model, data_collator)
-    reference_completion_scores = batch_processing_scores(args.max_forward_batch_size, device, tokenizer, reference_completion_ds, model, data_collator)
+    reference_completion_scores = batch_processing_scores(
+        args.max_forward_batch_size, device, tokenizer, reference_completion_ds, model, data_collator
+    )
     return scores, reference_completion_scores
 
 
-def batch_processing_scores(max_forward_batch_size: int, device: torch.device, tokenizer: PreTrainedTokenizer, ds: Dataset, model: torch.nn.Module, data_collator: DataCollatorWithPadding) -> torch.Tensor:
+def batch_processing_scores(
+    max_forward_batch_size: int,
+    device: torch.device,
+    tokenizer: PreTrainedTokenizer,
+    ds: Dataset,
+    model: torch.nn.Module,
+    data_collator: DataCollatorWithPadding,
+) -> torch.Tensor:
     # NOTE: two optimizations here:
     # 1. we sort by input_ids length to reduce padding at first
-    # 1.1 note that this may cause slightly different results due to numerical issues. 
+    # 1.1 note that this may cause slightly different results due to numerical issues.
     #   e.g., with sort: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_1723242217
     #   e.g., without sort: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_1723242476
     # 2. we shrink the batch size if we run out of memory (so initially we can use a large batch size)
@@ -220,7 +241,9 @@ def main(args: Args):
         table["chosen"].append(best_completions[i]["messages"])
         table["rejected"].append(worst_completions[i]["messages"])
         table["reference_completion"].append(worst_completions[i]["reference_completion"])
-        table["reference_completion_score"].append({key: reference_completion_scores_per_model[key][i] for key in reference_completion_scores_per_model})
+        table["reference_completion_score"].append(
+            {key: reference_completion_scores_per_model[key][i] for key in reference_completion_scores_per_model}
+        )
         assert worst_completions[i]["messages"][:-1] == best_completions[i]["messages"][:-1]
         table["chosen_score"].append(best_completions[i]["score"])
         table["rejected_score"].append(worst_completions[i]["score"])
