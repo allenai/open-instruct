@@ -55,23 +55,10 @@ As a convenience, you can use the `evaluation/gantry_run.sh` script which includ
     --report_output_path /results/metrics.json
 ```
 
-
+### Extra Beaker Commands
 Here is an example using the full `gantry run` command. Use the beaker image `seungjuh/oe-safety-support-olmo17`
 
 **Important**: Please include all the beaker arguments exactly as in the examples unless intentionally modifying some configuration. Many of them are necessary to avoid job failures, such as `--beaker-image`, `--venv`, and `--env-secret`. Note that `openai_api_key` and `hf_token` are Beaker workspace secret names, so should *not* be replaced with actual values (see One-Time Setup).
-
-```bash
-gantry run --workspace {your_workspace} --cluster {cluster} --gpus {n_gpus} \
-    --name {beaker_experiment_name} --task-name {beaker_task_name} --beaker-image seungjuh/oe-safety-support-olmo17 --venv base \
-    --env-secret OPENAI_API_KEY=openai_api_key \
-    --env-secret HF_TOKEN=hf_token \
-    --budget {budget} -- python evaluation/eval.py generators \
-    --use_vllm \
-    --model_name_or_path allenai/tulu-2-dpo-7b \
-    --model_input_template_path_or_name tulu2 \
-    --tasks harmbench,harmbench:vanilla_ai2_refusal_classifier,toxigen:tiny,trustllm:xstest \
-    --report_output_path /results/metrics.json --save_individual_results_path /results/all.json
-```
 
 Note that the `--` divides the gantry command from the evaluation command - you can edit the second part to run whatever eval suite you want from the `eval.py` script, or any other script in the OE-Safety repo. Any additional Beaker arguments such as a dataset mount to use a model from a Beaker dataset or adding a priority tag can be added before the `--`.
 
