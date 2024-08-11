@@ -588,17 +588,19 @@ def main(args: FlatArguments):
             active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_step)
         else:
             active_dataloader = train_dataloader
+        # we need to average the log probs for simpo loss
+        average_log_prob = True if args.dpo_loss_type == "simpo" else False
         for step, batch in enumerate(active_dataloader):
             # dpo forward pass & loss
             with accelerator.accumulate(model):
-                policy_chosen_logps, policy_rejected_logps = concatenated_forward(model, batch)
+                policy_chosen_logps, policy_rejected_logps = concatenated_forward(model, batch, average_log_prob=average_log_prob)
                 if args.dpo_loss_type == "dpo":
                     with torch.no_grad():
                         if args.use_lora:
                             with accelerator.unwrap_model(model).disable_adapter():
-                                reference_chosen_logps, reference_rejected_logps = concatenated_forward(model, batch)
+                                reference_chosen_logps, reference_rejected_logps = concatenated_forward(model, batch, average_log_prob=average_log_prob)
                         else:
-                            reference_chosen_logps, reference_rejected_logps = concatenated_forward(reference_model, batch)
+                            reference_chosen_logps, reference_rejected_logps = concatenated_forward(reference_model, batch, average_log_prob=average_log_prob)
                     losses, _, _ = dpo_loss(
                         policy_chosen_logps,
                         policy_rejected_logps,
