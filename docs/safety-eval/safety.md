@@ -4,7 +4,7 @@
 Run the following command from the main project dir `open-instruct`.
 ### Safety benchmarks
 
-For all benchmarks requiring safety classification unless noted otherwise, as a default, we use the [WildGuard](https://github.com/allenai/wildguard) classifier to evaluate the safety of model outputs.
+For all benchmarks requiring safety evaluation unless noted otherwise, as a default, we use the [WildGuard](https://github.com/allenai/wildguard) classifier to evaluate the safety of model outputs.
 
 - [WildGuardTest](https://arxiv.org/abs/2406.18495)
 - [Harmbench](https://arxiv.org/abs/2402.04249)
