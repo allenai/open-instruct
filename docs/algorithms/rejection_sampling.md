@@ -20,7 +20,7 @@ python open_instruct/generation.py \
 # 2. tokenize them and run a reward model to filter them
 python open_instruct/rejection_sampling.py \
     --input_filename output/completions.jsonl \
-    --model_name_or_path allenai/llama-3-tulu-2-8b-uf-mean-rm \
+    --model_names_or_paths allenai/llama-3-tulu-2-8b-uf-mean-rm \
     --save_filename output/rejection_sampled_completions.jsonl \
     --n 3 \
     --push_to_hub \
@@ -42,7 +42,7 @@ if len(set([item.text for item in output.outputs])) == 1:
 To run through the entire dataset you would need a lot more GPUs to finish the generation more quickly. 
 
 
-```
+```bash
 # prod generations
 # NOTE: the scripts below only generate 400 prompts, so it's for demonstration purposes only. The scripts are highly scalable, and you could modify its `num_prompts=400` to something else like 300000 for the tulu dataset.
 bash scripts/rejection_sampling_hello_world.bash

@@ -37,7 +37,7 @@ do
         --save_filename output/shards/$shared_hf_repo_id/$i.jsonl \
         --n $num_generations --tensor_parallel_size $num_gpus && python open_instruct/rejection_sampling.py \
         --input_filename output/shards/$shared_hf_repo_id/$i.jsonl \
-        --model_name_or_path $reward_model \
+        --model_names_or_paths $reward_model \
         --save_filename output/shards/$shared_hf_repo_id/scores_$i.jsonl \
         --hf_repo_id $shared_hf_repo_id \
         --no_add_timestamp \
