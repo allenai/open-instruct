@@ -73,38 +73,39 @@ def dpo_loss(
 
     return losses, chosen_rewards, rejected_rewards
 
+
 # From https://github.com/princeton-nlp/SimPO/blob/main/scripts/simpo_trainer.py#L560C1-L595C56
 def simpo_loss(
         policy_chosen_logps: torch.FloatTensor,
         policy_rejected_logps: torch.FloatTensor,
         beta: float,
         gamma_beta_ratio: float,
-        label_smoothing: float,
-    ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
-        """Compute the SimPO loss for a batch of policy model log probabilities.
+        label_smoothing: float = 0.0,
+) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+    """Compute the SimPO loss for a batch of policy model log probabilities.
 
-        Args:
-            policy_chosen_logps: Log probabilities of the policy model for the chosen responses. Shape: (batch_size,)
-            policy_rejected_logps: Log probabilities of the policy model for the rejected responses. Shape: (batch_size,)
+    Args:
+        policy_chosen_logps: Log probabilities of the policy model for the chosen responses. Shape: (batch_size,)
+        policy_rejected_logps: Log probabilities of the policy model for the rejected responses. Shape: (batch_size,)
 
-        Returns:
-            A tuple of three tensors: (losses, chosen_rewards, rejected_rewards).
-            The losses tensor contains the SimPO loss for each example in the batch.
-            The chosen_rewards and rejected_rewards tensors contain the rewards for the chosen and rejected responses, respectively.
-        """
-        pi_logratios = policy_chosen_logps - policy_rejected_logps
-        logits = pi_logratios - gamma_beta_ratio
+    Returns:
+        A tuple of three tensors: (losses, chosen_rewards, rejected_rewards).
+        The losses tensor contains the SimPO loss for each example in the batch.
+        The chosen_rewards and rejected_rewards tensors contain the rewards for the chosen and rejected responses, respectively.
+    """
+    pi_logratios = policy_chosen_logps - policy_rejected_logps
+    logits = pi_logratios - gamma_beta_ratio
 
-        # sigmoid loss type from SimPO.
-        losses = (
-            -F.logsigmoid(beta * logits) * (1 - label_smoothing)
-            - F.logsigmoid(-beta * logits) * label_smoothing
-        )
+    # sigmoid loss type from SimPO.
+    losses = (
+        -F.logsigmoid(beta * logits) * (1 - label_smoothing)
+        - F.logsigmoid(-beta * logits) * label_smoothing
+    )
 
-        chosen_rewards = beta * policy_chosen_logps.detach()
-        rejected_rewards = beta * policy_rejected_logps.detach()
+    chosen_rewards = beta * policy_chosen_logps.detach()
+    rejected_rewards = beta * policy_rejected_logps.detach()
 
-        return losses, chosen_rewards, rejected_rewards
+    return losses, chosen_rewards, rejected_rewards
 
 
 def _get_batch_logps(
