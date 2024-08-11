@@ -48,7 +48,7 @@ In the examples below, text within {} tags should be replaced with your own valu
 As a convenience, you can use the `evaluation/gantry_run.sh` script which includes some necessary arguments. You can use it the same way as `gantry run`, but excluding these boilerplate arguments (take a look at the script to see what it includes). Example usage:
 
 ```bash
-./evaluation/gantry_run.sh --workspace {workspace} --cluster {cluster} --gpus {n_gpus} \
+PYTHONPATH=safety-eval ./safety-eval/evaluation/gantry_run.sh --workspace {workspace} --cluster {cluster} --gpus {n_gpus} \
     --priority {priority} -- python evaluation/run_all_generation_benchmarks.py \
     --model_name_or_path allenai/tulu-2-dpo-7b \
     --model_input_template_path_or_name tulu2 \
