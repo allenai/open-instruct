@@ -32,7 +32,7 @@ python open_instruct/online_dpo.py \
     --push_to_hub \
 
 
-python mason1.py \
+python mason.py \
     --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a100-80g-ib ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/mosaic-cirrascale \
     --priority preemptible \
     --budget ai2/allennlp \
@@ -57,6 +57,69 @@ python mason1.py \
     --beta 0.1 \
     --num_evals 10 \
     --response_length 53 \
+    --with_tracking \
+    --push_to_hub \
+
+
+
+python mason.py \
+    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a100-80g-ib ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/mosaic-cirrascale \
+    --priority preemptible \
+    --budget ai2/allennlp \
+    --workspace ai2/costah \
+    --gpus 8 -- accelerate launch  --config_file configs/ds_configs/deepspeed_zero3.yaml \
+     open_instruct/online_dpo.py \
+    --dataset_name trl-internal-testing/tldr-preference-sft-trl-style \
+    --dataset_train_split train \
+    --dataset_eval_split validation \
+    --learning_rate 3e-6 \
+    --output_dir models/minimal/online_dpo_tldr \
+    --per_device_train_batch_size 4 \
+    --gradient_accumulation_steps 16 \
+    --local_rollout_forward_batch_size 8 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 1000000 \
+    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr  \
+    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
+    --non_stop_penalty \
+    --stop_token eos \
+    --beta 0.1 \
+    --num_evals 10 \
+    --response_length 512 \
+    --with_tracking \
+    --push_to_hub \
+
+
+python mason.py \
+    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a100-80g-ib ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/mosaic-cirrascale \
+    --priority preemptible \
+    --budget ai2/allennlp \
+    --workspace ai2/costah \
+    --gpus 8 -- accelerate launch  --config_file configs/ds_configs/deepspeed_zero3.yaml \
+     open_instruct/online_dpo.py \
+    --dataset_name allenai/ultrafeedback_binarized_cleaned \
+    --dataset_train_split train_prefs \
+    --dataset_eval_split test_prefs \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --sft_messages_key chosen \
+    --learning_rate 3e-6 \
+    --output_dir models/minimal/online_dpo_test \
+    --chat_template tulu \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 32 \
+    --local_rollout_forward_batch_size 2 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 100000 \
+    --model_name_or_path allenai/llama-3-tulu-2-8b  \
+    --reward_model_path allenai/reward_modeling__allenai_llama-3-tulu-2-8b_ultrafeedback \
+    --non_stop_penalty \
+    --stop_token eos \
+    --beta 0.1 \
+    --num_evals 10 \
+    --response_length 512 \
     --with_tracking \
     --push_to_hub \
 ```
