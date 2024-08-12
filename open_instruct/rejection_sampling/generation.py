@@ -29,7 +29,7 @@ from transformers import AutoTokenizer, HfArgumentParser
 from vllm import LLM, SamplingParams
 from openai import AsyncOpenAI  # For API-based models
 from api_generate import LLMGenerationConfig, LLMProcessor  # Import your classes
-
+import asyncio
 
 @dataclass
 class Args:
@@ -112,13 +112,12 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
         outputs = generate_with_vllm(args.model_name_or_path, prompt_token_ids, gen_args)
 
     else:
+        # For OpenAI API-based models, you might need to gather prompts differently
         ds = ds.map(
-            lambda x: {"prompt_token_ids": tokenizer.apply_chat_template(x["messages"][:-1], tokenize=False)},
+            lambda x: {"prompt_token_ids": x["messages"][:-1]},
             num_proc=multiprocessing.cpu_count(),
         )
         breakpoint()
-        # For OpenAI API-based models, you might need to gather prompts differently
-        prompts = ["Example prompt"]  # Adjust this to fetch real prompts from your dataset
         responses = asyncio.run(generate_with_openai(args.model_name_or_path, prompts, gen_args))
         outputs = [{'outputs': [{'text': response}]} for response in responses]
 
