@@ -95,7 +95,6 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
         ds[key] = ds[key].select(range(dataset_args.dataset_start_idx, dataset_args.dataset_end_idx))
     pprint([dataset_args, args, gen_args])
 
-    breakpoint()
     if "gpt-3.5" in args.model_name_or_path or "gpt-4" in args.model_name_or_path:
         use_openai = True
     else:
@@ -108,7 +107,6 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
             lambda x: {"prompt_token_ids": tokenizer.apply_chat_template(x["messages"][:-1])},
             num_proc=multiprocessing.cpu_count(),
         )
-        breakpoint()
         prompt_token_ids = ds[dataset_args.dataset_train_split]["prompt_token_ids"]
         # Generate using vLLM
         outputs = generate_with_vllm(args.model_name_or_path, prompt_token_ids, gen_args)
@@ -118,6 +116,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
             lambda x: {"prompt_token_ids": tokenizer.apply_chat_template(x["messages"][:-1], tokenize=False)},
             num_proc=multiprocessing.cpu_count(),
         )
+        breakpoint()
         # For OpenAI API-based models, you might need to gather prompts differently
         prompts = ["Example prompt"]  # Adjust this to fetch real prompts from your dataset
         responses = asyncio.run(generate_with_openai(args.model_name_or_path, prompts, gen_args))
