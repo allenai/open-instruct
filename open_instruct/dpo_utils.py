@@ -73,35 +73,36 @@ def dpo_loss(
 
     return losses, chosen_rewards, rejected_rewards
 
+
 def wpo_loss(
-        policy_chosen_logps: torch.FloatTensor,
-        policy_rejected_logps: torch.FloatTensor,
-        reference_chosen_logps: torch.FloatTensor,
-        reference_rejected_logps: torch.FloatTensor,
-        beta: float,
-        label_smoothing: float = 0.0,
-        chosen_loss_mask: torch.BoolTensor = None,
-        rejected_loss_mask: torch.BoolTensor = None,
-    ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
-        pi_logratios = policy_chosen_logps - policy_rejected_logps
-        ref_logratios = reference_chosen_logps - reference_rejected_logps
+    policy_chosen_logps: torch.FloatTensor,
+    policy_rejected_logps: torch.FloatTensor,
+    reference_chosen_logps: torch.FloatTensor,
+    reference_rejected_logps: torch.FloatTensor,
+    beta: float,
+    label_smoothing: float = 0.0,
+    chosen_loss_mask: torch.BoolTensor = None,
+    rejected_loss_mask: torch.BoolTensor = None,
+) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+    pi_logratios = policy_chosen_logps - policy_rejected_logps
+    ref_logratios = reference_chosen_logps - reference_rejected_logps
 
-        # compute average logps and use them to compute the weights
-        policy_chosen_logps_average = (policy_chosen_logps * chosen_loss_mask).sum(-1) / chosen_loss_mask.sum(-1)
-        policy_rejected_logps_average = (policy_rejected_logps * rejected_loss_mask).sum(-1) / rejected_loss_mask.sum(-1)
-        policy_weights = torch.clamp(torch.exp(policy_chosen_logps_average + policy_rejected_logps_average), max=1)
+    # compute average logps and use them to compute the weights
+    policy_chosen_logps_average = (policy_chosen_logps * chosen_loss_mask).sum(-1) / chosen_loss_mask.sum(-1)
+    policy_rejected_logps_average = (policy_rejected_logps * rejected_loss_mask).sum(-1) / rejected_loss_mask.sum(-1)
+    policy_weights = torch.clamp(torch.exp(policy_chosen_logps_average + policy_rejected_logps_average), max=1)
 
-        logits = pi_logratios - ref_logratios
+    logits = pi_logratios - ref_logratios
 
-        losses = (
-            -F.logsigmoid(beta * logits) * (1 - label_smoothing) * policy_weights
-            - F.logsigmoid(-beta * logits) * label_smoothing * policy_weights
-        )
+    losses = (
+        -F.logsigmoid(beta * logits) * (1 - label_smoothing) * policy_weights
+        - F.logsigmoid(-beta * logits) * label_smoothing * policy_weights
+    )
 
-        chosen_rewards = beta * (policy_chosen_logps - reference_chosen_logps).detach()
-        rejected_rewards = beta * (policy_rejected_logps - reference_rejected_logps).detach()
+    chosen_rewards = beta * (policy_chosen_logps - reference_chosen_logps).detach()
+    rejected_rewards = beta * (policy_rejected_logps - reference_rejected_logps).detach()
 
-        return losses, chosen_rewards, rejected_rewards
+    return losses, chosen_rewards, rejected_rewards
 
 
 # From https://github.com/princeton-nlp/SimPO/blob/main/scripts/simpo_trainer.py#L560C1-L595C56
