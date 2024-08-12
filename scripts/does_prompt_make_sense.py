@@ -10,6 +10,8 @@ from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm_asyncio
 from transformers import AutoTokenizer, HfArgumentParser
 
+from open_instruct.generation import print_rich_table
+
 
 @dataclass
 class LLMJudgeConfig:
@@ -120,8 +122,4 @@ if __name__ == "__main__":
     df = ds.to_pandas()
     judge_df = llm_judge(ljc, df)
     print(judge_df["decision"].value_counts())
-    # judge_df = df
-    # df["preferred"] = "response1"
-    # win_rate = (judge_df["preferred"] == "response0").sum() / len(judge_df)
-    # print(f"win rate {win_rate}")
-    # judge_df.to_csv(args.output_path)
+    print_rich_table(judge_df[["prompt", "decision", "explanation"]].iloc[2:5])
