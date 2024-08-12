@@ -130,14 +130,6 @@ def llm_judge(ljc: LLMJudgeConfig, df: pd.DataFrame):
 
 if __name__ == "__main__":
     args, ljc = HfArgumentParser((Args, LLMJudgeConfig)).parse_args_into_dataclasses()
-    # df = pd.read_csv(args.csv)
-    # df["reference_responses"] = df["reference_responses"].map(lambda x: x.split("<|endoftext|>")[0].strip())
-    # df["prompt"] = df["query"].map(lambda x: x.strip())
-    # df["response0"] = df["postprocessed_response"].map(lambda x: x.strip())
-    # df["response1"] = df["reference_responses"].map(lambda x: x.strip())
-    # judge_df = llm_judge(ljc, df)
-    # print(judge_df["preferred"].value_counts())
-    # judge_df.to_csv(args.output_path)
 
     args, ljc = HfArgumentParser((Args, LLMJudgeConfig)).parse_args_into_dataclasses()
     raw_dataset = load_dataset(
