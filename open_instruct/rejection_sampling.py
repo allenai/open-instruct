@@ -16,7 +16,7 @@ import json
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -28,6 +28,7 @@ from transformers import (
     AutoTokenizer,
     DataCollatorWithPadding,
     HfArgumentParser,
+    PreTrainedTokenizer,
 )
 
 from open_instruct.model_utils import get_reward
@@ -43,7 +44,7 @@ class Args:
     input_filename: str = "completions.jsonl"
     save_filename: str = "rejected_sampling_completions.jsonl"
     n: int = 1
-    max_forward_batch_size: int = 8
+    max_forward_batch_size: int = 64
     num_gpus: int = 1  # New argument for specifying the number of GPUs
     push_to_hub: bool = False
     hf_entity: Optional[str] = None
@@ -51,7 +52,9 @@ class Args:
     add_timestamp: bool = True
 
 
-def process_shard(rank: int, model_name_or_path: str, args: Args, shard: List[str]):
+def process_shard(
+    rank: int, model_name_or_path: str, args: Args, shard: List[str]
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     This function processes a shard (subset) of data using a specified model. It tokenizes the data,
     runs it through the model to get reward scores, and handles out-of-memory errors by adjusting the batch size.
@@ -65,16 +68,29 @@ def process_shard(rank: int, model_name_or_path: str, args: Args, shard: List[st
     Returns:
         torch.Tensor: A tensor containing the reward scores for each item in the shard.
                       Shape: (num_items_in_shard,)
+        torch.Tensor: A tensor containing the reward scores for each reference completion in the shard.
     """
     device = torch.device(f"cuda:{rank}")
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, padding_side="right")
     tokenizer.add_special_tokens({"pad_token": "[PAD]"})
 
     # Convert the list of data items (shard) into a Hugging Face Dataset object
-    ds = Dataset.from_list(shard)
+    raw_ds = Dataset.from_list(shard)
     # Apply a tokenization function to each item in the dataset
-    ds = ds.map(lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])}, remove_columns=ds.column_names)
-
+    ds = raw_ds.map(
+        lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])}, remove_columns=raw_ds.column_names
+    )
+    reference_completion_ds = raw_ds.map(
+        lambda x: {
+            "input_ids": tokenizer.apply_chat_template(
+                x["messages"][:-1] + [{"content": x["reference_completion"], "role": "assistant"}]
+            )
+        },
+        remove_columns=raw_ds.column_names,
+    )
+    reference_completion_ds = reference_completion_ds.select(
+        range(0, len(ds), args.n)
+    )  # remove duplicate reference completions
     # So this code handles only classification, I should also handle other models judges like Llama3
     model = AutoModelForSequenceClassification.from_pretrained(
         model_name_or_path,
@@ -82,17 +98,36 @@ def process_shard(rank: int, model_name_or_path: str, args: Args, shard: List[st
         attn_implementation="flash_attention_2",
     )
     model = model.to(device)
+    model.eval()
 
     # Initialize a data collator to handle dynamic padding of input sequences
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
-    current_batch_size = args.max_forward_batch_size
+    scores = batch_processing_scores(args.max_forward_batch_size, device, tokenizer, ds, model, data_collator)
+    reference_completion_scores = batch_processing_scores(
+        args.max_forward_batch_size, device, tokenizer, reference_completion_ds, model, data_collator
+    )
+    return scores, reference_completion_scores
+
+
+def batch_processing_scores(
+    max_forward_batch_size: int,
+    device: torch.device,
+    tokenizer: PreTrainedTokenizer,
+    ds: Dataset,
+    model: torch.nn.Module,
+    data_collator: DataCollatorWithPadding,
+) -> torch.Tensor:
     # NOTE: two optimizations here:
     # 1. we sort by input_ids length to reduce padding at first
+    # 1.1 note that this may cause slightly different results due to numerical issues.
+    #   e.g., with sort: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_1723242217
+    #   e.g., without sort: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_1723242476
     # 2. we shrink the batch size if we run out of memory (so initially we can use a large batch size)
+    current_batch_size = max_forward_batch_size
     input_ids_lengths = [len(x) for x in ds["input_ids"]]  # input_ids_lengths: (num_items_in_shard,)
 
-    sorted_indices = np.argsort(input_ids_lengths)  # Get indices that would sort the input lengths
-
+    # Get indices that would sort the input lengths
+    sorted_indices = np.argsort(input_ids_lengths)
     # Initialize a list to store the scores for each item in the shard
     scores = []
     i = 0
@@ -100,12 +135,12 @@ def process_shard(rank: int, model_name_or_path: str, args: Args, shard: List[st
         with torch.no_grad():
             data = ds[sorted_indices[i : i + current_batch_size]]
             try:
+                print(f"processing: {i}:{i + current_batch_size}/{len(ds)}")
                 input_ids = data_collator(data)["input_ids"].to(device)
                 _, score, _ = get_reward(model, input_ids, tokenizer.pad_token_id, 0)
                 # score = (batch_size, )
                 scores.extend(score.cpu().tolist())  # convert the tensor score to a list
                 i += current_batch_size
-                print(f"processing: {i}:{i + current_batch_size}/{len(ds)}")
             except torch.cuda.OutOfMemoryError:
                 if current_batch_size == 1:
                     raise ValueError("Out of memory even with batch size 1")
@@ -158,6 +193,7 @@ def main(args: Args):
     # Process shards in parallel
     best_offsets_per_model = {}
     worst_offsets_per_model = {}
+    reference_completion_scores_per_model = {}
     for model_name_or_path in args.model_names_or_paths:
         with mp.Pool(args.num_gpus) as pool:
             results = []
@@ -166,11 +202,16 @@ def main(args: Args):
 
             # Collect results
             scores = []
+            reference_completion_scores = []
             for result in results:
-                scores.append(result.get())
+                item = result.get()
+                scores.append(item[0])
+                reference_completion_scores.append(item[1])
 
         # Combine scores from all GPUs
         scores = torch.cat(scores)
+        reference_completion_scores = torch.cat(reference_completion_scores)
+        reference_completion_scores_per_model[model_name_or_path] = reference_completion_scores.tolist()
 
         # Rejection sampling
         scores_per_prompt = scores.reshape(-1, args.n)  # (n_prompts, n_completions)
@@ -200,11 +241,13 @@ def main(args: Args):
         table["chosen"].append(best_completions[i]["messages"])
         table["rejected"].append(worst_completions[i]["messages"])
         table["reference_completion"].append(worst_completions[i]["reference_completion"])
+        table["reference_completion_score"].append(
+            {key: reference_completion_scores_per_model[key][i] for key in reference_completion_scores_per_model}
+        )
         assert worst_completions[i]["messages"][:-1] == best_completions[i]["messages"][:-1]
         table["chosen_score"].append(best_completions[i]["score"])
         table["rejected_score"].append(worst_completions[i]["score"])
     first_key = list(table.keys())[0]
-    print(f"{len(table[first_key])=}")
     with open(args.save_filename, "w") as outfile:
         for i in range(len(table[first_key])):
             json.dump({key: table[key][i] for key in table}, outfile)
