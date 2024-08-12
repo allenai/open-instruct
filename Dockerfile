@@ -55,7 +55,6 @@ RUN pip install -r requirements.txt
 
 # NLTK download
 RUN python -m nltk.downloader punkt
-RUN python -m nltk.downloader punkt_tab
 
 COPY open_instruct open_instruct
 COPY eval eval
