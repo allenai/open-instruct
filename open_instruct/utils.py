@@ -386,7 +386,7 @@ class FlatArguments:
     )
     dpo_loss_type: str = field(
         default="dpo",
-        metadata={"help": "Type of DPO loss to use. Options are 'dpo' or 'simpo'."},
+        metadata={"help": "Type of DPO loss to use. Options are 'dpo', 'simpo', or 'wpo'."},
     )
     dpo_gamma_beta_ratio: float = field(
         default=0.3,

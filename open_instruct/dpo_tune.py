@@ -54,6 +54,7 @@ from open_instruct.dpo_utils import (
     concatenated_forward,
     dpo_loss,
     simpo_loss,
+    wpo_loss,
 )
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -616,6 +617,17 @@ def main(args: FlatArguments):
                         beta=args.dpo_beta,
                         gamma_beta_ratio=args.dpo_gamma_beta_ratio,
                         label_smoothing=args.dpo_label_smoothing,
+                    )
+                elif args.dpo_loss_type == "wpo":
+                    losses, _, _ = wpo_loss(
+                        policy_chosen_logps,
+                        policy_rejected_logps,
+                        reference_chosen_logps,
+                        reference_rejected_logps,
+                        beta=args.dpo_beta,
+                        label_smoothing=args.dpo_label_smoothing,
+                        chosen_loss_mask=batch["chosen_labels"] != -100,
+                        rejected_loss_mask=batch["rejected_labels"] != -100,
                     )
                 else:
                     raise ValueError(f"Invalid dpo loss type {args.dpo_loss_type}.")
