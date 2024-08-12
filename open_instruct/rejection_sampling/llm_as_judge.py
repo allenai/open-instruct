@@ -11,6 +11,7 @@ from tqdm.asyncio import tqdm_asyncio
 from transformers import HfArgumentParser
 
 
+
 @dataclass
 class LLMJudgeConfig:
     n: int = 64
