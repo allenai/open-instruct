@@ -100,6 +100,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     else:
         use_openai = False
 
+    breakpoint()
     if not use_openai:
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
         # DATASET specific logic: in this dataset the prompt is simply just a list of strings
