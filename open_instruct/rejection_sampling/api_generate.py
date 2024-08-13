@@ -54,14 +54,14 @@ class LLMProcessor:
                             {"role": "user", "content": text},
                         ],
                     )
-                    r = response.choices[0].message.content
+                    response = response.choices[0].message.content
                     breakpoint()
                     break
                 except Exception as e:
                     print(f"Error in {i}: {e}")
                     await asyncio.sleep(30)
 
-        return r
+        return response
 
     async def process_batch(self, data_list: List[dict], args: Args):
         limiter = asyncio.Semaphore(self.config.max_parallel_requests)

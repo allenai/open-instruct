@@ -41,7 +41,7 @@ JUDGMENT_TEMPLATES = {
     "chat": """
     You are an evaluator tasked with assessing the response to the prompt based on three criteria: accuracy, instruction following, and tone/presentation. 
     For each response provided to the prompt, assign a score from 1 to 3 for each criterion, where 1 is poor, 2 is average, and 3 is excellent.
-    
+    Don't give full scores unless you're mind blown by the response. 
     ### Prompt:
     {prompt}
     
