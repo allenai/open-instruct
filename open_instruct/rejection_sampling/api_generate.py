@@ -62,7 +62,6 @@ class LLMProcessor:
                     else:
                         total_score = -1
                     response = total_score
-                    breakpoint()
                     break
                 except Exception as e:
                     print(f"Error in {i}: {e}")

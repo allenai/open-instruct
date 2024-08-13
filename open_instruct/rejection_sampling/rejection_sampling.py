@@ -144,6 +144,8 @@ def process_shard_api(
     )
     prompts = ds["prompt"]
     model_responses = ds["model_completion"]
+    reference_responses = ds["reference_completion"]
+    breakpoint()
     data_list = [{"prompt": prompt, "response": response} for prompt, response in zip(prompts, model_responses)]
     responses = asyncio.run(generate_with_openai(model_name_or_path, data_list, args, args.n))
     scores = [response["score"] for response in responses]
