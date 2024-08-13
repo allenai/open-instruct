@@ -137,11 +137,11 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
         if len(set([item["text"] for item in output["outputs"]])) == 1:
             continue
 
-        for item in output.outputs:
+        for item in output["outputs"]:
             new_messages = copy.deepcopy(messages[:-1])
             new_messages.append({"role": "assistant", "content": item.text})
             table["messages"].append(new_messages)
-            table["model_completion"].append(item.text)
+            table["model_completion"].append(item["text"])
             table["reference_completion"].append(messages[-1]["content"])
 
     # Save results
