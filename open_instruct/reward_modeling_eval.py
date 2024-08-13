@@ -68,6 +68,9 @@ def evaluate(
             if table is not None and len(table["shared prompt text"]) < max_sampled_texts:
                 chosen_texts = tokenizer.batch_decode(data[INPUT_IDS_CHOSEN_KEY])
                 rejected_texts = tokenizer.batch_decode(data[INPUT_IDS_REJECTED_KEY])
+                # remove padding
+                chosen_texts = [item.replace(tokenizer.pad_token, "") for item in chosen_texts]
+                rejected_texts = [item.replace(tokenizer.pad_token, "") for item in rejected_texts]
                 rewards_rounded = [
                     [round(chosen.item(), 4), round(rejected.item(), 4)]
                     for chosen, rejected in zip(chosen_rewards, rejected_rewards)
