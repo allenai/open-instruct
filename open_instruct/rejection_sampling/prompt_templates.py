@@ -3,6 +3,14 @@
 DEFAULT_SKILL = "summarization"
 
 GENERATION_TEMPLATES = {
+"chat": """
+You are an expert assistant and your goal is to provide the most helpful and accurate response to the following prompt. Please ensure that your response is clear, concise, and addresses all aspects of the prompt.
+
+### Prompt:
+{prompt}
+
+### Response:
+""",
     "summarization": """
     Please provide a concise summary of the following text, highlighting the most important points without including unimportant or irrelevant details.
 
