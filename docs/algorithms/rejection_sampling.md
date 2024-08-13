@@ -7,6 +7,7 @@ different number of completions per prompt.
 
 # Debug run (use an interactive session)
 
+This code supports HF models, local models and also API-based models (e.g., `gpt-4`). For generating completions, the code now accepts one model at a time, but we're working on adding an ensemble of models. Stay tuned. 
 ```bash
 ## tulu v3 recipe
 # 1. first sample a bunch of completions given prompts
@@ -16,7 +17,10 @@ python open_instruct/generation.py \
     --n 3 \
     --save_filename output/completions.jsonl \
     --sanity_check \
-    
+   ```
+### Scoring completions
+You can use either a single RM to score responses or a list of RMs. In the latter case, we will take the majority vote to compute the final score. The RMs can be models explicitly trained as RMs, HF LMs, or API-based models.
+```
 # 2. tokenize them and run a reward model to filter them
 python open_instruct/rejection_sampling.py \
     --input_filename output/completions.jsonl \
