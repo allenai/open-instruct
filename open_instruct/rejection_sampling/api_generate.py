@@ -39,6 +39,7 @@ class LLMProcessor:
     async def process_text(self, data: dict, i: int, limiter: asyncio.Semaphore, args: Args):
         if args.mode == "generation":
             template = get_generation_template(args.skill)
+            prompt = data[""]
             text = template.format(**data)
         else:  # judgment mode
             template = get_judgment_template(args.skill)

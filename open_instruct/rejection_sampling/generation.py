@@ -102,7 +102,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
 
     if not use_openai:
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
-        # DATASET specific logic: in this dataset the prompt is simply just a list of strings
+
         ds = ds.map(
             lambda x: {"prompt_token_ids": tokenizer.apply_chat_template(x["messages"][:-1])},
             num_proc=multiprocessing.cpu_count(),
@@ -112,13 +112,16 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
         outputs = generate_with_vllm(args.model_name_or_path, prompt_token_ids, gen_args)
 
     else:
-        # For OpenAI API-based models, you might need to gather prompts differently
+        # The map function iterates over each example in the dataset and applies a given transformation.
+         # list of dictionaries of [{'role':'user','content': xxx}, {'role': 'assistant','content':xx}]
+        tokenizer = AutoTokenizer.from_pretrained("allenai/llama-3-tulu-2-8b")
         ds = ds.map(
-            lambda x: {"prompt_token_ids": x["messages"][:-1]},
+            lambda x: {"prompt": tokenizer.apply_chat_template(x["messages"][:-1])},
             num_proc=multiprocessing.cpu_count(),
         )
+        messages = ds[dataset_args.dataset_train_split]["prompt"]
         breakpoint()
-        responses = asyncio.run(generate_with_openai(args.model_name_or_path, prompts, gen_args))
+        responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, gen_args))
         outputs = [{'outputs': [{'text': response}]} for response in responses]
 
     # Assuming we generate n=3 completions per prompt, the outputs will look like:
