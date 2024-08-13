@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import json
+import multiprocessing
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -32,6 +34,7 @@ from transformers import (
 )
 
 from open_instruct.model_utils import get_reward
+from generation import generate_with_openai
 
 api = HfApi()
 
@@ -70,12 +73,13 @@ def process_shard(
                       Shape: (num_items_in_shard,)
         torch.Tensor: A tensor containing the reward scores for each reference completion in the shard.
     """
+    # Convert the list of data items (shard) into a Hugging Face Dataset object
+    raw_ds = Dataset.from_list(shard)
+
     device = torch.device(f"cuda:{rank}")
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, padding_side="right")
     tokenizer.add_special_tokens({"pad_token": "[PAD]"})
 
-    # Convert the list of data items (shard) into a Hugging Face Dataset object
-    raw_ds = Dataset.from_list(shard)
     # Apply a tokenization function to each item in the dataset
     ds = raw_ds.map(
         lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])}, remove_columns=raw_ds.column_names
@@ -106,7 +110,41 @@ def process_shard(
     reference_completion_scores = batch_processing_scores(
         args.max_forward_batch_size, device, tokenizer, reference_completion_ds, model, data_collator
     )
+
     return scores, reference_completion_scores
+
+
+def process_shard_api(
+    rank: int, model_name_or_path: str, args: Args, shard: List[str]
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    This function processes a shard (subset) of data using a specified model. It tokenizes the data,
+    runs it through the model to get reward scores, and handles out-of-memory errors by adjusting the batch size.
+
+    Args:
+        rank (int): The GPU rank (index) to use for processing.
+        model_name_or_path (str): The path or name of the model to load.
+        args (Args): The arguments passed to the script, containing various settings.
+        shard (List[str]): A list of strings representing the shard of data to be processed.
+
+    Returns:
+        torch.Tensor: A tensor containing the reward scores for each item in the shard.
+                      Shape: (num_items_in_shard,)
+        torch.Tensor: A tensor containing the reward scores for each reference completion in the shard.
+    """
+
+    # Convert the list of data items (shard) into a Hugging Face Dataset object
+    raw_ds = Dataset.from_list(shard)
+
+    tokenizer = AutoTokenizer.from_pretrained("allenai/llama-3-tulu-2-8b")
+    ds = raw_ds.map(
+        lambda x: {"prompt": tokenizer.apply_chat_template(x["messages"][:-1], tokenize=False)},
+        num_proc=multiprocessing.cpu_count(),
+    )
+    messages = ds["train"]["prompt"]
+    responses = asyncio.run(generate_with_openai(model_name_or_path, messages, args, args.n))
+    scores = [response["score"] for response in responses]
+    return torch.Tensor(scores), torch.Tensor(scores)
 
 
 def batch_processing_scores(
@@ -195,18 +233,26 @@ def main(args: Args):
     worst_offsets_per_model = {}
     reference_completion_scores_per_model = {}
     for model_name_or_path in args.model_names_or_paths:
-        with mp.Pool(args.num_gpus) as pool:
-            results = []
-            for i in range(args.num_gpus):
-                results.append(pool.apply_async(process_shard, (i, model_name_or_path, args, shards[i])))
+        if "gpt-3.5" in model_name_or_path or "gpt-4" in model_name_or_path:
+            use_openai = True
+        else:
+            use_openai = False
 
-            # Collect results
-            scores = []
-            reference_completion_scores = []
-            for result in results:
-                item = result.get()
-                scores.append(item[0])
-                reference_completion_scores.append(item[1])
+        results = []
+        if not use_openai:
+            with mp.Pool(args.num_gpus) as pool:
+                for i in range(args.num_gpus):
+                    results.append(pool.apply_async(process_shard, (i, model_name_or_path, args, shards[i])))
+        else:
+            results.append(process_shard_api(i, model_name_or_path, args, shards[i]))
+
+        # Collect results
+        scores = []
+        reference_completion_scores = []
+        for result in results:
+            item = result.get()
+            scores.append(item[0])
+            reference_completion_scores.append(item[1])
 
         # Combine scores from all GPUs
         scores = torch.cat(scores)
