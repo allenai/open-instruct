@@ -147,15 +147,12 @@ def process_shard_api(
     reference_responses = ds["reference_completion"]
 
     data_list_model_responses = [{"prompt": prompt, "response": response} for prompt, response in zip(prompts, model_responses)]
-    model_responses = asyncio.run(generate_with_openai(model_name_or_path, data_list_model_responses, args, args.n))
-    breakpoint()
-    model_responses_scores = [response["score"] for response in model_responses]
+    model_responses_scores = asyncio.run(generate_with_openai(model_name_or_path, data_list_model_responses, args, args.n))
 
     data_list_reference_responses = [{"prompt": prompt, "response": response} for prompt, response in zip(prompts, reference_responses)]
-    reference_responses = asyncio.run(generate_with_openai(model_name_or_path, data_list_reference_responses, args, args.n))
-    resference_responses_scores = [response["score"] for response in reference_responses]
+    reference_responses_scores = asyncio.run(generate_with_openai(model_name_or_path, data_list_reference_responses, args, args.n))
 
-    return torch.Tensor(model_responses_scores), torch.Tensor(resference_responses_scores)
+    return torch.Tensor(model_responses_scores), torch.Tensor(reference_responses_scores)
 
 
 def batch_processing_scores(
