@@ -117,14 +117,13 @@ def process_shard(
 
 
 def process_shard_api(
-    rank: int, model_name_or_path: str, args: Args, shard: List[str]
+    model_name_or_path: str, args: Args, shard: List[str]
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     This function processes a shard (subset) of data using a specified model. It tokenizes the data,
     runs it through the model to get reward scores, and handles out-of-memory errors by adjusting the batch size.
 
     Args:
-        rank (int): The GPU rank (index) to use for processing.
         model_name_or_path (str): The path or name of the model to load.
         args (Args): The arguments passed to the script, containing various settings.
         shard (List[str]): A list of strings representing the shard of data to be processed.
@@ -248,7 +247,8 @@ def main(args: Args):
                 for i in range(args.num_gpus):
                     results.append(pool.apply_async(process_shard, (i, model_name_or_path, args, shards[i])))
         else:
-            results.append(process_shard_api(i, model_name_or_path, args, shards[i]))
+            for i in range(args.num_gpus):
+                results.append(process_shard_api(model_name_or_path, args, shards[i]))
 
         # Collect results
         scores = []
