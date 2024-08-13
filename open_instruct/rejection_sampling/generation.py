@@ -135,7 +135,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     for output, messages in zip(outputs, ds[dataset_args.dataset_train_split]["messages"]):
         for item in output["outputs"]:
             new_messages = copy.deepcopy(messages[:-1])
-            new_messages.append({"role": "assistant", "content": item.text})
+            new_messages.append({"role": "assistant", "content": item["text"]})
             table["messages"].append(new_messages)
             table["model_completion"].append(item["text"])
             table["reference_completion"].append(messages[-1]["content"])
