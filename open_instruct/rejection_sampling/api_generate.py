@@ -9,6 +9,7 @@ import random
 from openai import AsyncOpenAI
 from prompt_templates import get_generation_template, get_judgment_template
 import re
+from tqdm.asyncio import tqdm
 
 
 @dataclass
@@ -72,4 +73,5 @@ class LLMProcessor:
     async def process_batch(self, data_list: List[dict], args: Args):
         limiter = asyncio.Semaphore(self.config.max_parallel_requests)
         tasks = [self.process_text(data, i, limiter, args) for i, data in enumerate(data_list)]
-        return await asyncio.gather(*tasks)
+        # Use tqdm to track progress
+        return await tqdm.gather(*tasks, total=len(tasks), desc="Processing Batch")
