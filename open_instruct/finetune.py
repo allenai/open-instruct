@@ -695,7 +695,7 @@ def main(args: FlatArguments):
                 f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
             clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
 
-    # dont save state, just model. TODO: should we also save the state?
+    # dont save state, just model to the top-level dir.
     if args.output_dir is not None:
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)

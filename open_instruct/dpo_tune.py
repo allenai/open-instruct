@@ -53,14 +53,14 @@ from open_instruct.dpo_utils import (
     DataCollatorForSeq2SeqDPO,
     concatenated_forward,
     dpo_loss,
-    get_last_checkpoint_path,
-    clean_last_n_checkpoints,
 )
 from open_instruct.utils import (
     ArgumentParserPlus,
     FlatArguments,
     get_wandb_tags,
     maybe_use_ai2_wandb_entity,
+    get_last_checkpoint_path,
+    clean_last_n_checkpoints,
 )
 
 logger = get_logger(__name__)
