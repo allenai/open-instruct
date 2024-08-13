@@ -116,7 +116,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
          # list of dictionaries of [{'role':'user','content': xxx}, {'role': 'assistant','content':xx}]
         tokenizer = AutoTokenizer.from_pretrained("allenai/llama-3-tulu-2-8b")
         ds = ds.map(
-            lambda x: {"prompt": tokenizer.apply_chat_template(x["messages"][:-1])},
+            lambda x: {"prompt": tokenizer.apply_chat_template(x["messages"][:-1], tokenize=False)},
             num_proc=multiprocessing.cpu_count(),
         )
         messages = ds[dataset_args.dataset_train_split]["prompt"]
