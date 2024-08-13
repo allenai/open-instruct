@@ -134,7 +134,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     table = defaultdict(list)
     for output, messages in zip(outputs, ds[dataset_args.dataset_train_split]["messages"]):
         # if the model completions are exactly the same across all completions, we can skip this
-        if len(set([item.text for item in output.outputs])) == 1:
+        if len(set([item["text"] for item in output["outputs"]])) == 1:
             continue
 
         for item in output.outputs:
@@ -143,8 +143,6 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
             table["messages"].append(new_messages)
             table["model_completion"].append(item.text)
             table["reference_completion"].append(messages[-1]["content"])
-
-    # print_rich_table(pd.DataFrame(table)) # uncomment this line to print the table
 
     # Save results
     os.makedirs(os.path.dirname(args.save_filename), exist_ok=True)
