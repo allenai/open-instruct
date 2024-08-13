@@ -20,7 +20,6 @@ import os
 import random
 from datetime import timedelta
 from functools import partial
-from pathlib import Path
 
 import datasets
 import deepspeed
@@ -679,7 +678,8 @@ def main(args: FlatArguments):
                             output_dir = os.path.join(args.output_dir, output_dir)
                         accelerator.save_state(output_dir)
                         # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
-                        Path(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED")).touch()
+                        with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
+                            f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
                         clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
 
                 if completed_steps >= args.max_train_steps:
@@ -691,7 +691,8 @@ def main(args: FlatArguments):
                 output_dir = os.path.join(args.output_dir, output_dir)
             accelerator.save_state(output_dir)
             # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
-            Path(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED")).touch()
+            with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
+                f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
             clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
 
     # dont save state, just model. TODO: should we also save the state?

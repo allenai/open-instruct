@@ -53,6 +53,8 @@ from open_instruct.dpo_utils import (
     DataCollatorForSeq2SeqDPO,
     concatenated_forward,
     dpo_loss,
+    get_last_checkpoint_path,
+    clean_last_n_checkpoints,
 )
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -638,7 +640,11 @@ def main(args: FlatArguments):
                         output_dir = f"step_{completed_steps}"
                         if args.output_dir is not None:
                             output_dir = os.path.join(args.output_dir, output_dir)
-                        save_with_accelerate(accelerator, model, tokenizer, output_dir, args)
+                        accelerator.save_state(output_dir)
+                        # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
+                        with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
+                            f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
+                        clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
 
                 if completed_steps >= args.max_train_steps:
                     break
@@ -647,7 +653,11 @@ def main(args: FlatArguments):
             output_dir = f"epoch_{epoch}"
             if args.output_dir is not None:
                 output_dir = os.path.join(args.output_dir, output_dir)
-            save_with_accelerate(accelerator, model, tokenizer, output_dir, args)
+            accelerator.save_state(output_dir)
+            # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
+            with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
+                f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
+            clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
 
     if args.with_tracking:
         accelerator.end_training()
