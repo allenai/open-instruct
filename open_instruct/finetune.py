@@ -289,6 +289,7 @@ def main(args: FlatArguments):
         tokenizer = AutoTokenizer.from_pretrained(
             args.tokenizer_name,
             trust_remote_code=args.trust_remote_code,
+            use_fast=not args.use_slow_tokenizer,
             revision=tokenizer_revision,
             token=os.getenv("HF_TOKEN", None),
         )
@@ -296,6 +297,7 @@ def main(args: FlatArguments):
         tokenizer = AutoTokenizer.from_pretrained(
             args.model_name_or_path,
             trust_remote_code=args.trust_remote_code,
+            use_fast=not args.use_slow_tokenizer,
             revision=tokenizer_revision,
             token=os.getenv("HF_TOKEN", None),
         )
