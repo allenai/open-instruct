@@ -18,7 +18,7 @@ import json
 import multiprocessing
 import os
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Optional
 import pandas as pd
 from datasets import load_dataset
@@ -83,7 +83,16 @@ def generate_with_vllm(model_name_or_path: str, prompt_token_ids, gen_args: Gene
             include_stop_str_in_output=True,
         ),
     )
-    return outputs
+
+    return [
+        {
+            "outputs": [asdict(out) for out in output.outputs],
+            "prompt": output.prompt,
+            "prompt_logprobs": output.prompt_logprobs,
+            "metrics": output.metrics,
+        }
+        for output in outputs
+    ]
 
 def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
 
@@ -149,6 +158,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
                     "messages": table["messages"][i],
                     "model_completion": table["model_completion"][i],
                     "reference_completion": table["reference_completion"][i],
+                    "model": args.model_name_or_path,
                 },
                 outfile,
             )
