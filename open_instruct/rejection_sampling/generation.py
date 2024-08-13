@@ -123,6 +123,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
         )
         messages = ds[dataset_args.dataset_train_split]["prompt"]
         responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args))
+        breakpoint()
         outputs = [{'outputs': [{'text': response}]} for response in responses]
 
     # Assuming we generate n=3 completions per prompt, the outputs will look like:
