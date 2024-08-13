@@ -8,6 +8,7 @@ import time
 import random
 from openai import AsyncOpenAI
 from prompt_templates import get_generation_template, get_judgment_template
+import re
 
 
 @dataclass
@@ -55,6 +56,12 @@ class LLMProcessor:
                         ],
                     )
                     response = response.choices[0].message.content
+                    match = re.search(r"Total score:\s*(\d+)", response)
+                    if match:
+                        total_score = int(match.group(1))
+                    else:
+                        total_score = -1
+                    response = total_score
                     breakpoint()
                     break
                 except Exception as e:
