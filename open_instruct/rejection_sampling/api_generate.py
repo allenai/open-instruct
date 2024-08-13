@@ -60,7 +60,7 @@ class LLMProcessor:
                     print(f"Error in {i}: {e}")
                     await asyncio.sleep(30)
 
-        return text
+        return r
 
     async def process_batch(self, data_list: List[dict], args: Args):
         limiter = asyncio.Semaphore(self.config.max_parallel_requests)
