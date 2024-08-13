@@ -42,7 +42,6 @@ class LLMProcessor:
             text = template.format(prompt=data)
         else:  # judgment mode
             template = get_judgment_template(args.skill)
-            breakpoint()
             text = template.format(prompt=data["prompt"], response=data["response"])
 
         async with limiter:
@@ -56,6 +55,7 @@ class LLMProcessor:
                         ],
                     )
                     r = response.choices[0].message.content
+                    breakpoint()
                     break
                 except Exception as e:
                     print(f"Error in {i}: {e}")
