@@ -114,7 +114,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     else:
         # The map function iterates over each example in the dataset and applies a given transformation.
          # list of dictionaries of [{'role':'user','content': xxx}, {'role': 'assistant','content':xx}]
-        tokenizer = AutoTokenizer.from_pretrained("allenai/llama-3-tulu-2-8b")
+        tokenizer = AutoTokenizer.from_pretrained("facebook/blenderbot-400M-distill")
         ds = ds.map(
             lambda x: {"prompt": tokenizer.apply_chat_template(x["messages"][:-1], tokenize=False)},
             num_proc=multiprocessing.cpu_count(),
