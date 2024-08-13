@@ -120,8 +120,8 @@ def process_shard_api(
     model_name_or_path: str, args: Args, shard: List[str]
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    This function processes a shard (subset) of data using a specified model. It tokenizes the data,
-    runs it through the model to get reward scores, and handles out-of-memory errors by adjusting the batch size.
+    This function processes a shard (subset) of data using api-based models.
+    It feeds data through the model to get reward scores, and handles out-of-memory errors by adjusting the batch size.
 
     Args:
         model_name_or_path (str): The path or name of the model to load.
