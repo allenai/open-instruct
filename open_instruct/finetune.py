@@ -20,6 +20,7 @@ import os
 import random
 from datetime import timedelta
 from functools import partial
+from pathlib import Path
 
 import datasets
 import deepspeed
@@ -52,6 +53,8 @@ from open_instruct.utils import (
     get_datasets,
     get_wandb_tags,
     maybe_use_ai2_wandb_entity,
+    get_last_checkpoint_path,
+    clean_last_n_checkpoints,
 )
 
 logger = get_logger(__name__)
@@ -287,7 +290,6 @@ def main(args: FlatArguments):
         tokenizer = AutoTokenizer.from_pretrained(
             args.tokenizer_name,
             trust_remote_code=args.trust_remote_code,
-            use_fast=not args.use_slow_tokenizer,
             revision=tokenizer_revision,
             token=os.getenv("HF_TOKEN", None),
         )
@@ -295,7 +297,6 @@ def main(args: FlatArguments):
         tokenizer = AutoTokenizer.from_pretrained(
             args.model_name_or_path,
             trust_remote_code=args.trust_remote_code,
-            use_fast=not args.use_slow_tokenizer,
             revision=tokenizer_revision,
             token=os.getenv("HF_TOKEN", None),
         )
@@ -550,7 +551,7 @@ def main(args: FlatArguments):
 
     # Figure out how many steps we should save the Accelerator states
     checkpointing_steps = args.checkpointing_steps
-    if checkpointing_steps is not None and checkpointing_steps.isdigit():
+    if checkpointing_steps is not None:
         checkpointing_steps = int(checkpointing_steps)
 
     # We need to initialize the trackers we use, and also store our configuration.
@@ -584,22 +585,13 @@ def main(args: FlatArguments):
     starting_epoch = 0
 
     # Potentially load in the weights and states from a previous save
-    if args.resume_from_checkpoint:
-        if args.resume_from_checkpoint is not None or args.resume_from_checkpoint != "":
-            checkpoint_path = args.resume_from_checkpoint
-            path = os.path.basename(args.resume_from_checkpoint)
-        else:
-            # Get the most recent checkpoint
-            dirs = [f.name for f in os.scandir(os.getcwd()) if f.is_dir()]
-            dirs.sort(key=os.path.getctime)
-            path = dirs[-1]  # Sorts folders by date modified, most recent checkpoint is the last
-            checkpoint_path = path
-            path = os.path.basename(checkpoint_path)
-
-        accelerator.print(f"Resumed from checkpoint: {checkpoint_path}")
-        accelerator.load_state(path)
+    last_checkpoint_path = get_last_checkpoint_path(args)
+    if last_checkpoint_path:
+        accelerator.print(f"Resumed from checkpoint: {last_checkpoint_path}")
+        accelerator.load_state(last_checkpoint_path)
         # Extract `epoch_{i}` or `step_{i}`
-        training_difference = os.path.splitext(path)[0]
+        last_checkpoint_path = os.path.basename(last_checkpoint_path)
+        training_difference = os.path.splitext(last_checkpoint_path)[0]
 
         if "epoch" in training_difference:
             starting_epoch = int(training_difference.replace("epoch_", "")) + 1
@@ -612,6 +604,7 @@ def main(args: FlatArguments):
             completed_steps = resume_step // args.gradient_accumulation_steps
             resume_step -= starting_epoch * len(train_dataloader)
 
+    print(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
 
@@ -684,7 +677,10 @@ def main(args: FlatArguments):
                         output_dir = f"step_{completed_steps}"
                         if args.output_dir is not None:
                             output_dir = os.path.join(args.output_dir, output_dir)
-                        save_with_accelerate(accelerator, model, tokenizer, output_dir, args)
+                        accelerator.save_state(output_dir)
+                        # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
+                        Path(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED")).touch()
+                        clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
 
                 if completed_steps >= args.max_train_steps:
                     break
@@ -693,8 +689,12 @@ def main(args: FlatArguments):
             output_dir = f"epoch_{epoch}"
             if args.output_dir is not None:
                 output_dir = os.path.join(args.output_dir, output_dir)
-            save_with_accelerate(accelerator, model, tokenizer, output_dir, args)
+            accelerator.save_state(output_dir)
+            # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
+            Path(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED")).touch()
+            clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
 
+    # dont save state, just model. TODO: should we also save the state?
     if args.output_dir is not None:
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)
