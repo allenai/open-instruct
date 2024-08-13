@@ -42,7 +42,7 @@ api = HfApi()
 @dataclass
 class Args:
     model_names_or_paths: List[str] = field(
-        default_factory=lambda: ["cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr"]
+        default_factory=lambda: ["gpt-4"]
     )
     input_filename: str = "completions.jsonl"
     save_filename: str = "rejected_sampling_completions.jsonl"
