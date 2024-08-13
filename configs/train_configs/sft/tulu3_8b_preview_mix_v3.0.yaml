@@ -27,4 +27,4 @@ logging_steps: 1
 checkpointing_steps: epoch
 dataset_mix_dir: /output/
 checkpointing_steps: 1000
-keep_last_n_checkpoints: 3
+keep_last_n_checkpoints: 1
