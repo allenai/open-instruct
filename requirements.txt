@@ -49,3 +49,5 @@ autoflake
 pytest
 hf_transfer
 beaker-py
+tenacity==8.4.1
+fastchat==0.1.0
