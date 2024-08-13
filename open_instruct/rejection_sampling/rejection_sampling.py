@@ -259,7 +259,10 @@ def main(args: Args):
         scores = []
         reference_completion_scores = []
         for result in results:
-            item = result.get()
+            if not use_openai:
+                item = result.get()
+            else:
+                item = result
             scores.append(item[0])
             reference_completion_scores.append(item[1])
 
