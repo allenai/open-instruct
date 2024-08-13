@@ -129,7 +129,6 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
             num_proc=multiprocessing.cpu_count(),
         )
         messages = ds[dataset_args.dataset_train_split]["prompt"]
-        breakpoint()
         responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args.n))
         outputs = [{'outputs': [{'text': response}]} for response in responses]
 

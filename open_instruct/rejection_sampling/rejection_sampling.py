@@ -53,6 +53,8 @@ class Args:
     hf_entity: Optional[str] = None
     hf_repo_id: str = "rejection_sampling"
     add_timestamp: bool = True
+    mode: str = "judgement"
+    skill: str = "chat"
 
 
 def process_shard(
@@ -141,7 +143,8 @@ def process_shard_api(
         lambda x: {"prompt": tokenizer.apply_chat_template(x["messages"][:-1], tokenize=False)},
         num_proc=multiprocessing.cpu_count(),
     )
-    messages = ds["train"]["prompt"]
+    messages = ds[dataset_args.dataset_train_split]["prompt"]
+    response = ds[]
     responses = asyncio.run(generate_with_openai(model_name_or_path, messages, args, args.n))
     scores = [response["score"] for response in responses]
     return torch.Tensor(scores), torch.Tensor(scores)
@@ -227,6 +230,8 @@ def main(args: Args):
     # Split the data into shards
     shard_size = len(completions) // args.num_gpus
     shards = [completions[i : i + shard_size] for i in range(0, len(completions), shard_size)]
+
+    breakpoint()
 
     # Process shards in parallel
     best_offsets_per_model = {}

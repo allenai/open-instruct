@@ -38,15 +38,15 @@ You are an expert assistant and your goal is to provide the most helpful and acc
 }
 
 JUDGMENT_TEMPLATES = {
-    "rating": """
-    You are an evaluator tasked with assessing responses based on three criteria: accuracy, instruction following, and tone/presentation. 
+    "chat": """
+    You are an evaluator tasked with assessing the response to the prompt based on three criteria: accuracy, instruction following, and tone/presentation. 
     For each response provided to the prompt, assign a score from 1 to 3 for each criterion, where 1 is poor, 2 is average, and 3 is excellent.
     
     ### Prompt:
     {prompt}
     
-    ### Responses:
-    {responses}
+    ### Response:
+    {response}
     
     ### Evaluation Criteria:
     1. **Accuracy**: How factually correct and relevant is the response?
@@ -54,17 +54,12 @@ JUDGMENT_TEMPLATES = {
     3. **Tone/Presentation**: How clear, appropriate, and well-structured is the response?
     
     ### Scoring Template:
-    Response 1:
+    Response:
     - **Accuracy**: [Score 1-3]
     - **Instruction Following**: [Score 1-3]
     - **Tone/Presentation**: [Score 1-3]
     
-    Response 2:
-    - **Accuracy**: [Score 1-3]
-    - **Instruction Following**: [Score 1-3]
-    - **Tone/Presentation**: [Score 1-3]
-    
-    ... (Continue for each response)
+    Total score: 
     """
     ,
     "summarization": """
