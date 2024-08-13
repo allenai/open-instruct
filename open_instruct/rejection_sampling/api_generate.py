@@ -1,14 +1,12 @@
 # main.py
 
-from dataclasses import dataclass
-from typing import Optional, List
-import pandas as pd
 import asyncio
-import time
-import random
+import re
+from dataclasses import dataclass
+from typing import List, Optional
+
 from openai import AsyncOpenAI
 from prompt_templates import get_generation_template, get_judgment_template
-import re
 from tqdm.asyncio import tqdm
 
 

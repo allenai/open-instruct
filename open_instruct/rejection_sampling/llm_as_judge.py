@@ -4,12 +4,11 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-from datasets import load_dataset
 import pandas as pd
+from datasets import load_dataset
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm_asyncio
 from transformers import HfArgumentParser
-
 
 
 @dataclass
@@ -119,7 +118,7 @@ def llm_judge(ljc: LLMJudgeConfig, df: pd.DataFrame):
             preferred_label = (
                 "response0"
                 if (df.at[i, "shuffled_index"] == 0 and preferred == "A")
-                   or (df.at[i, "shuffled_index"] == 1 and preferred == "B")
+                or (df.at[i, "shuffled_index"] == 1 and preferred == "B")
                 else "response1"
             )
             df.at[i, "preferred"] = preferred_label
@@ -140,17 +139,13 @@ if __name__ == "__main__":
     # Extract the prompts and reference completions
     df = raw_dataset.to_pandas()
 
-    df["chosen"] = df["chosen"].map(
-        lambda x: x.split("<|endoftext|>")[0].strip()
-    )
-    df["rejected"] = df["rejected"].map(
-        lambda x: x.split("<|endoftext|>")[0].strip()
-    )
+    df["chosen"] = df["chosen"].map(lambda x: x.split("<|endoftext|>")[0].strip())
+    df["rejected"] = df["rejected"].map(lambda x: x.split("<|endoftext|>")[0].strip())
     df["prompt"] = df["query"].map(lambda x: x.strip())
     df["response0"] = df["chosen"].map(lambda x: x.strip())
     df["response1"] = df["rejected"].map(lambda x: x.strip())
     judge_df = llm_judge(ljc, df)
-    df['correct'] = df['preferred'] == 'response0'
-    human_gpt4_agreement_rate = sum(df['correct']) / len(df['correct'])
+    df["correct"] = df["preferred"] == "response0"
+    human_gpt4_agreement_rate = sum(df["correct"]) / len(df["correct"])
     print(f"Human-GPT4 agreement rate: {human_gpt4_agreement_rate}")
     judge_df.to_csv(args.output_path)

@@ -13,23 +13,24 @@
 # limitations under the License.
 
 
+import asyncio
 import copy
 import json
 import multiprocessing
 import os
 from collections import defaultdict
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from typing import Optional
+
 import pandas as pd
+from api_generate import LLMGenerationConfig, LLMProcessor  # Import your classes
 from datasets import load_dataset
 from rich.console import Console
 from rich.pretty import pprint
 from rich.table import Table
 from transformers import AutoTokenizer, HfArgumentParser
 from vllm import LLM, SamplingParams
-from openai import AsyncOpenAI  # For API-based models
-from api_generate import LLMGenerationConfig, LLMProcessor  # Import your classes
-import asyncio
+
 
 @dataclass
 class Args:
@@ -38,12 +39,14 @@ class Args:
     mode: str = "generation"
     skill: str = "chat"
 
+
 @dataclass
 class GenerationArgs:
     n: int = 1
     temperature: float = 0.8
     response_length: int = 53
     tensor_parallel_size: int = 1
+
 
 @dataclass
 class DatasetArgs:
@@ -56,6 +59,7 @@ class DatasetArgs:
     sanity_check: bool = False
     sanity_check_size: int = 100
 
+
 def print_rich_table(df: pd.DataFrame) -> Table:
     console = Console()
     table = Table(show_lines=True)
@@ -65,11 +69,13 @@ def print_rich_table(df: pd.DataFrame) -> Table:
         table.add_row(*row.astype(str).tolist())
     console.print(table)
 
+
 async def generate_with_openai(model_name: str, data_list: list, args: Args, n: int):
     config = LLMGenerationConfig(model=model_name, n=n)
     processor = LLMProcessor(config)
     results = await processor.process_batch(data_list, args)
     return results
+
 
 def generate_with_vllm(model_name_or_path: str, prompt_token_ids, gen_args: GenerationArgs):
     llm = LLM(model=model_name_or_path, tensor_parallel_size=gen_args.tensor_parallel_size)
@@ -93,6 +99,7 @@ def generate_with_vllm(model_name_or_path: str, prompt_token_ids, gen_args: Gene
         }
         for output in outputs
     ]
+
 
 def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
 
@@ -130,7 +137,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
         )
         messages = ds[dataset_args.dataset_train_split]["prompt"]
         responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args.n))
-        outputs = [{'outputs': [{'text': response}]} for response in responses]
+        outputs = [{"outputs": [{"text": response}]} for response in responses]
 
     # Assuming we generate n=3 completions per prompt, the outputs will look like:
     # prompt | completions

@@ -24,6 +24,7 @@ import numpy as np
 import torch
 import torch.multiprocessing as mp
 from datasets import Dataset
+from generation import generate_with_openai
 from huggingface_hub import HfApi
 from transformers import (
     AutoModelForSequenceClassification,
@@ -34,16 +35,13 @@ from transformers import (
 )
 
 from open_instruct.model_utils import get_reward
-from generation import generate_with_openai
 
 api = HfApi()
 
 
 @dataclass
 class Args:
-    model_names_or_paths: List[str] = field(
-        default_factory=lambda: ["gpt-4"]
-    )
+    model_names_or_paths: List[str] = field(default_factory=lambda: ["gpt-4"])
     input_filename: str = "completions.jsonl"
     save_filename: str = "rejected_sampling_completions.jsonl"
     n: int = 1
@@ -116,9 +114,7 @@ def process_shard(
     return scores, reference_completion_scores
 
 
-def process_shard_api(
-    model_name_or_path: str, args: Args, shard: List[str]
-) -> Tuple[torch.Tensor, torch.Tensor]:
+def process_shard_api(model_name_or_path: str, args: Args, shard: List[str]) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     This function processes a shard (subset) of data using api-based models.
     It feeds data through the model to get reward scores, and handles out-of-memory errors by adjusting the batch size.
@@ -146,11 +142,19 @@ def process_shard_api(
     model_responses = ds["model_completion"]
     reference_responses = ds["reference_completion"]
 
-    data_list_model_responses = [{"prompt": prompt, "response": response} for prompt, response in zip(prompts, model_responses)]
-    model_responses_scores = asyncio.run(generate_with_openai(model_name_or_path, data_list_model_responses, args, args.n))
+    data_list_model_responses = [
+        {"prompt": prompt, "response": response} for prompt, response in zip(prompts, model_responses)
+    ]
+    model_responses_scores = asyncio.run(
+        generate_with_openai(model_name_or_path, data_list_model_responses, args, args.n)
+    )
 
-    data_list_reference_responses = [{"prompt": prompt, "response": response} for prompt, response in zip(prompts, reference_responses)]
-    reference_responses_scores = asyncio.run(generate_with_openai(model_name_or_path, data_list_reference_responses, args, args.n))
+    data_list_reference_responses = [
+        {"prompt": prompt, "response": response} for prompt, response in zip(prompts, reference_responses)
+    ]
+    reference_responses_scores = asyncio.run(
+        generate_with_openai(model_name_or_path, data_list_reference_responses, args, args.n)
+    )
 
     return torch.Tensor(model_responses_scores), torch.Tensor(reference_responses_scores)
 
