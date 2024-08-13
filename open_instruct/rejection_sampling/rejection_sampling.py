@@ -142,10 +142,10 @@ def process_shard_api(
         lambda x: {"prompt": tokenizer.apply_chat_template(x["messages"][:-1], tokenize=False)},
         num_proc=multiprocessing.cpu_count(),
     )
-    breakpoint()
-    # messages = ds[dataset_args.dataset_train_split]["prompt"]
-    # response = ds[]
-    responses = asyncio.run(generate_with_openai(model_name_or_path, messages, args, args.n))
+    prompts = ds["prompt"]
+    model_responses = ds["model_completion"]
+    data_list = [{"prompt": prompt, "response": response} for prompt, response in zip(prompts, model_responses)]
+    responses = asyncio.run(generate_with_openai(model_name_or_path, data_list, args, args.n))
     scores = [response["score"] for response in responses]
     return torch.Tensor(scores), torch.Tensor(scores)
 

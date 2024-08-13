@@ -42,7 +42,8 @@ class LLMProcessor:
             text = template.format(prompt=data)
         else:  # judgment mode
             template = get_judgment_template(args.skill)
-            text = template.format(**data)
+            breakpoint()
+            text = template.format(prompt=data["prompt"], response=data["response"])
 
         async with limiter:
             while True:
