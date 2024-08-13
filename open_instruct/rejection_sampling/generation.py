@@ -126,7 +126,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
             num_proc=multiprocessing.cpu_count(),
         )
         prompt_token_ids = ds[dataset_args.dataset_train_split]["prompt_token_ids"]
-        # Generate using vLLM
+        # Generate using vLLM.
         outputs = generate_with_vllm(args.model_name_or_path, prompt_token_ids, gen_args)
 
     else:
