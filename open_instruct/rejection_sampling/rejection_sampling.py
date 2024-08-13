@@ -143,6 +143,7 @@ def process_shard_api(
         lambda x: {"prompt": tokenizer.apply_chat_template(x["messages"][:-1], tokenize=False)},
         num_proc=multiprocessing.cpu_count(),
     )
+    breakpoint()
     # messages = ds[dataset_args.dataset_train_split]["prompt"]
     # response = ds[]
     responses = asyncio.run(generate_with_openai(model_name_or_path, messages, args, args.n))
@@ -230,8 +231,6 @@ def main(args: Args):
     # Split the data into shards
     shard_size = len(completions) // args.num_gpus
     shards = [completions[i : i + shard_size] for i in range(0, len(completions), shard_size)]
-
-    breakpoint()
 
     # Process shards in parallel
     best_offsets_per_model = {}
