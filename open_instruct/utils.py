@@ -17,6 +17,7 @@ import logging
 import os
 import subprocess
 import sys
+import shutil
 from dataclasses import dataclass, field
 from typing import Any, List, NewType, Optional, Tuple, Union
 
@@ -25,7 +26,6 @@ from accelerate.logging import get_logger
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
-from transformers.trainer_utils import get_last_checkpoint
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -792,7 +792,7 @@ def get_last_checkpoint(folder: str, incomplete: bool = False) -> Optional[str]:
     else:
         checkpoints = checkpoint_steps
     if not incomplete:
-        checkpoints = [path for path in checkpoints if os.path.exists(os.path.join(folder, path, 'INCOMPLETE'))]
+        checkpoints = [path for path in checkpoints if os.path.exists(os.path.join(folder, path, 'COMPLETED'))]
     if len(checkpoints) == 0:
         return
     return os.path.join(folder, max(checkpoints, key=lambda x: x.split('_')[-1]))
@@ -812,10 +812,10 @@ def get_last_checkpoint_path(args: FlatArguments, incomplete: bool = False) -> s
         last_checkpoint_path = args.resume_from_checkpoint
     return last_checkpoint_path
 
+
 def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> None:
     # remove the last checkpoint to save space
     if keep_last_n_checkpoints > 0:
         checkpoints = sorted(os.listdir(output_dir), key=lambda x: int(x.split("_")[-1]))
         if len(checkpoints) > keep_last_n_checkpoints:
-            os.remove(os.path.join(output_dir, checkpoints[0]))
-
+            shutil.rmtree(os.path.join(output_dir, checkpoints[0]))
