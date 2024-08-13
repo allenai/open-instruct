@@ -66,20 +66,3 @@ class LLMProcessor:
         limiter = asyncio.Semaphore(self.config.max_parallel_requests)
         tasks = [self.process_text(data, i, limiter, args) for i, data in enumerate(data_list)]
         return await asyncio.gather(*tasks)
-
-
-def main(args: Args):
-    df = pd.read_csv(args.csv)
-    config = LLMGenerationConfig()
-    processor = LLMProcessor(config)
-
-    data_list = df.to_dict('records')
-    results = asyncio.run(processor.process_batch(data_list, args))
-
-    # Process and save results as needed
-    # ...
-
-
-if __name__ == "__main__":
-    args = Args(mode="generation", skill="summarization")  # Example usage
-    main(args)
