@@ -35,6 +35,7 @@ import asyncio
 class Args:
     model_name_or_path: str = "cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr"
     save_filename: str = "completions.jsonl"
+    mode: str = "generation"
 
 @dataclass
 class GenerationArgs:
