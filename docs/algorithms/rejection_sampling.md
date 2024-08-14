@@ -7,18 +7,22 @@ different number of completions per prompt.
 
 # Debug run (use an interactive session)
 
+This code supports HF models, local models and also API-based models (e.g., `gpt-4`). For generating completions, the code now accepts one model at a time, but we're working on adding an ensemble of models. Stay tuned. 
 ```bash
 ## tulu v3 recipe
 # 1. first sample a bunch of completions given prompts
-python open_instruct/generation.py \
+python open_instruct/rejection_sampling/generation.py \
     --dataset_name allenai/tulu-v2-sft-mixture \
     --model_name_or_path allenai/llama-3-tulu-2-8b \
     --n 3 \
     --save_filename output/completions.jsonl \
     --sanity_check \
-    
-# 2. tokenize them and run a reward model to filter them
-python open_instruct/rejection_sampling.py \
+   ```
+### Scoring completions
+You can use either a single RM to score responses or a list of RMs. In the latter case, we will take the majority vote to compute the final score. The RMs can be models explicitly trained as RMs, HF LMs, or API-based models.
+```
+# 2.1 tokenize them and run a reward model to filter them
+python open_instruct/rejection_sampling/rejection_sampling.py \
     --input_filename output/completions.jsonl \
     --model_names_or_paths allenai/llama-3-tulu-2-8b-uf-mean-rm \
     --save_filename output/rejection_sampled_completions.jsonl \
@@ -26,6 +30,16 @@ python open_instruct/rejection_sampling.py \
     --push_to_hub \
     --num_gpus 1 \
 ```
+```
+# 2.2 tokenize them and run multiple reward models
+python open_instruct/rejection_sampling.py \
+    --input_filename output/completions.jsonl \
+    --model_names_or_paths allenai/llama-3-tulu-2-8b-uf-mean-rm gpt-4 \
+    --save_filename output/rejection_sampled_completions.jsonl \
+    --n 3 \
+    --push_to_hub \
+    --num_gpus 1 \
+ ```
 
 # Implementation details
 

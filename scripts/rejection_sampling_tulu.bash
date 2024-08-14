@@ -28,7 +28,7 @@ do
     fi
     
     # Build the command string for this shard
-    shard_command="python open_instruct/generation.py \
+    shard_command="python open_instruct/rejection_sampling/generation.py \
     --dataset_name $sft_dataset \
     --model_name_or_path $generation_model \
     --dataset_start_idx $start_idx \

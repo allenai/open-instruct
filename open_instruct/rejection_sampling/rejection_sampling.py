@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import json
+import multiprocessing
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -22,6 +24,7 @@ import numpy as np
 import torch
 import torch.multiprocessing as mp
 from datasets import Dataset
+from generation import generate_with_openai
 from huggingface_hub import HfApi
 from transformers import (
     AutoModelForSequenceClassification,
@@ -32,15 +35,14 @@ from transformers import (
 )
 
 from open_instruct.model_utils import get_reward
+from generation import format_conversation
 
 api = HfApi()
 
 
 @dataclass
 class Args:
-    model_names_or_paths: List[str] = field(
-        default_factory=lambda: ["cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr"]
-    )
+    model_names_or_paths: List[str] = field(default_factory=lambda: ["gpt-4"])
     input_filename: str = "completions.jsonl"
     save_filename: str = "rejected_sampling_completions.jsonl"
     n: int = 1
@@ -50,6 +52,8 @@ class Args:
     hf_entity: Optional[str] = None
     hf_repo_id: str = "rejection_sampling"
     add_timestamp: bool = True
+    mode: str = "judgement"
+    skill: str = "chat"
 
 
 def process_shard(
@@ -70,12 +74,13 @@ def process_shard(
                       Shape: (num_items_in_shard,)
         torch.Tensor: A tensor containing the reward scores for each reference completion in the shard.
     """
+    # Convert the list of data items (shard) into a Hugging Face Dataset object
+    raw_ds = Dataset.from_list(shard)
+
     device = torch.device(f"cuda:{rank}")
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, padding_side="right")
     tokenizer.add_special_tokens({"pad_token": "[PAD]"})
 
-    # Convert the list of data items (shard) into a Hugging Face Dataset object
-    raw_ds = Dataset.from_list(shard)
     # Apply a tokenization function to each item in the dataset
     ds = raw_ds.map(
         lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])}, remove_columns=raw_ds.column_names
@@ -106,7 +111,52 @@ def process_shard(
     reference_completion_scores = batch_processing_scores(
         args.max_forward_batch_size, device, tokenizer, reference_completion_ds, model, data_collator
     )
+
     return scores, reference_completion_scores
+
+
+def process_shard_api(model_name_or_path: str, args: Args, shard: List[str]) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    This function processes a shard (subset) of data using api-based models.
+    It feeds data through the model to get reward scores, and handles out-of-memory errors by adjusting the batch size.
+
+    Args:
+        model_name_or_path (str): The path or name of the model to load.
+        args (Args): The arguments passed to the script, containing various settings.
+        shard (List[str]): A list of strings representing the shard of data to be processed.
+
+    Returns:
+        torch.Tensor: A tensor containing the reward scores for each item in the shard.
+                      Shape: (num_items_in_shard,)
+        torch.Tensor: A tensor containing the reward scores for each reference completion in the shard.
+    """
+
+    # Convert the list of data items (shard) into a Hugging Face Dataset object
+    raw_ds = Dataset.from_list(shard)
+
+    ds = raw_ds.map(
+        lambda x: {"prompt": format_conversation(x["messages"][:-1])},
+        num_proc=multiprocessing.cpu_count(),
+    )
+    prompts = ds["prompt"]
+    model_responses = ds["model_completion"]
+    reference_responses = ds["reference_completion"]
+
+    data_list_model_responses = [
+        {"prompt": prompt, "response": response} for prompt, response in zip(prompts, model_responses)
+    ]
+    model_responses_scores = asyncio.run(
+        generate_with_openai(model_name_or_path, data_list_model_responses, args, args.n)
+    )
+
+    data_list_reference_responses = [
+        {"prompt": prompt, "response": response} for prompt, response in zip(prompts, reference_responses)
+    ]
+    reference_responses_scores = asyncio.run(
+        generate_with_openai(model_name_or_path, data_list_reference_responses, args, args.n)
+    )
+
+    return torch.Tensor(model_responses_scores), torch.Tensor(reference_responses_scores)
 
 
 def batch_processing_scores(
@@ -195,18 +245,31 @@ def main(args: Args):
     worst_offsets_per_model = {}
     reference_completion_scores_per_model = {}
     for model_name_or_path in args.model_names_or_paths:
-        with mp.Pool(args.num_gpus) as pool:
-            results = []
-            for i in range(args.num_gpus):
-                results.append(pool.apply_async(process_shard, (i, model_name_or_path, args, shards[i])))
+        if "gpt-3.5" in model_name_or_path or "gpt-4" in model_name_or_path:
+            use_openai = True
+        else:
+            use_openai = False
 
-            # Collect results
-            scores = []
-            reference_completion_scores = []
-            for result in results:
+        results = []
+        if not use_openai:
+            with mp.Pool(args.num_gpus) as pool:
+                for i in range(args.num_gpus):
+                    results.append(pool.apply_async(process_shard, (i, model_name_or_path, args, shards[i])))
+        else:
+            # when using LLM as a judge, num_gpus here refers to the number of shards as we query an API and we don't use GPUs
+            for i in range(args.num_gpus):
+                results.append(process_shard_api(model_name_or_path, args, shards[i]))
+
+        # Collect results
+        scores = []
+        reference_completion_scores = []
+        for result in results:
+            if not use_openai:
                 item = result.get()
-                scores.append(item[0])
-                reference_completion_scores.append(item[1])
+            else:
+                item = result
+            scores.append(item[0])
+            reference_completion_scores.append(item[1])
 
         # Combine scores from all GPUs
         scores = torch.cat(scores)
