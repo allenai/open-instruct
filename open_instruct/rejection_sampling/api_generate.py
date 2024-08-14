@@ -54,12 +54,15 @@ class LLMProcessor:
                         ],
                     )
                     response = response.choices[0].message.content
-                    match = re.search(r"Total score:\s*(\d+)", response)
-                    if match:
-                        total_score = int(match.group(1))
+                    if args.mode == "generation":
+                        response = response
                     else:
-                        total_score = -1
-                    response = total_score
+                        match = re.search(r"Total score:\s*(\d+)", response)
+                        if match:
+                            total_score = int(match.group(1))
+                        else:
+                            total_score = -1
+                        response = total_score
                     break
                 except Exception as e:
                     print(f"Error in {i}: {e}")
