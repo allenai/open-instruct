@@ -162,6 +162,8 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     # ...
     table = defaultdict(list)
     for output, messages in zip(outputs, ds[dataset_args.dataset_train_split]["messages"]):
+        if len(set([item.text for item in output.outputs])) == 1:
+            continue
         for item in output["outputs"]:
             new_messages = copy.deepcopy(messages[:-1])
             new_messages.append({"role": "assistant", "content": item["text"]})
