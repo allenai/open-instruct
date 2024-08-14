@@ -61,9 +61,10 @@ echo "Submitting all shards in one command"
 python mason.py \
     --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a100-80g-ib ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
     --image costah/open_instruct_rm \
-    --priority preemptible
     --pure_docker_mode \
-    --budget ai2/allennlp
+    --priority low \
+    --preemptible \
+    --budget ai2/allennlp \
     --gpus $num_gpus -- $command
 
 echo "All shards submitted"

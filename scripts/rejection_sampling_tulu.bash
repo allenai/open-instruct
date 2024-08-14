@@ -1,8 +1,8 @@
 #!/bin/bash
 
 mkdir -p output/shards
-num_prompts=400
-num_shards=2
+num_prompts=1000
+num_shards=4
 prompts_per_shard=$((num_prompts / num_shards))
 shared_hf_repo_id=rejection_sampling_$RANDOM 
 num_generations=5
@@ -60,9 +60,9 @@ echo $command
 echo "Submitting all shards in one command"
 python mason.py \
     --cluster ai2/general-cirrascale-a5000 ai2/allennlp-cirrascale ai2/general-cirrascale-a100-80g-ib \
-    --budget ai2/allennlp \
     --priority low \
     --preemptible \
+    --budget ai2/allennlp \
     --gpus $num_gpus -- $command
 
 echo "All shards submitted"
