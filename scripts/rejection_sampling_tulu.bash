@@ -35,7 +35,7 @@ do
     --dataset_end_idx $end_idx \
     --save_filename output/shards/$shared_hf_repo_id/$i.jsonl \
     --n $num_generations --tensor_parallel_size $num_gpus && \
-    python open_instruct/rejection_sampling.py \
+    python open_instruct/rejection_sampling/rejection_sampling.py \
     --input_filename output/shards/$shared_hf_repo_id/$i.jsonl \
     --model_names_or_paths $reward_model \
     --save_filename output/shards/$shared_hf_repo_id/scores_$i.jsonl \
