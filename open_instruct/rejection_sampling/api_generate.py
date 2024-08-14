@@ -54,6 +54,7 @@ class LLMProcessor:
                         n=3,  # Request multiple completions
                         # n=gen_args.nb_completions,  # Request multiple completions
                     )
+                    breakpoint()
                     response = response.choices[0].message.content
                     if args.mode == "generation":
                         response = response
