@@ -38,7 +38,7 @@ class Args:
     model_name_or_path: str = "cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr"
     save_filename: str = "completions.jsonl"
     skill: str = "chat"
-    mode: str = "judgment"  # Can be "generation" or "judgment"
+    mode: str = "generation"  # Can be "generation" or "judgment"
 
 @dataclass
 class GenerationArgs:
@@ -105,7 +105,7 @@ def format_conversation(messages: list) -> str:
     formatted_conversation = []
 
     # Iterate through the messages
-    for message in messages[:-1]:  # Exclude the last assistant message
+    for message in messages:  # Exclude the last assistant message
         role = "User A" if message["role"] == "user" else "User B"
         content = message["content"].strip()
         formatted_conversation.append(f"{role}: {content}")
@@ -131,7 +131,13 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
         use_openai = False
 
     if use_openai:
-        messages = [format_conversation(messages) for messages in ds[dataset_args.dataset_train_split]["messages"]]
+
+        ds = ds.map(
+            lambda x: {"prompt": format_conversation(x["messages"][:-1])},
+            num_proc=multiprocessing.cpu_count(),
+        )
+        # messages = [format_conversation(messages[:-1]) for messages in ds[dataset_args.dataset_train_split]["messages"]]
+        messages = ds["prompt"]
         responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args.n))
         outputs = [{"outputs": [{"text": response}]} for response in responses]
 

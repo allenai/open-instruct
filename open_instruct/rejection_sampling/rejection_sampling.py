@@ -35,6 +35,7 @@ from transformers import (
 )
 
 from open_instruct.model_utils import get_reward
+from generation import format_conversation
 
 api = HfApi()
 
@@ -133,9 +134,8 @@ def process_shard_api(model_name_or_path: str, args: Args, shard: List[str]) -> 
     # Convert the list of data items (shard) into a Hugging Face Dataset object
     raw_ds = Dataset.from_list(shard)
 
-    tokenizer = AutoTokenizer.from_pretrained("allenai/llama-3-tulu-2-8b")
     ds = raw_ds.map(
-        lambda x: {"prompt": tokenizer.apply_chat_template(x["messages"][:-1], tokenize=False)},
+        lambda x: {"prompt": format_conversation(x["messages"][:-1])},
         num_proc=multiprocessing.cpu_count(),
     )
     prompts = ds["prompt"]
