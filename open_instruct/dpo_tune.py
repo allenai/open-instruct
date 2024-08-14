@@ -319,7 +319,8 @@ def main(args: FlatArguments):
         return model
 
     model = load_model()
-    if args.dpo_loss_type == "dpo":
+    # only simpo is reference model free rn
+    if args.dpo_loss_type != "simpo":
         if not args.use_lora:
             reference_model = load_model()
         else:
@@ -590,12 +591,13 @@ def main(args: FlatArguments):
         else:
             active_dataloader = train_dataloader
         # we need to average the log probs for simpo loss
-        average_log_prob = True if args.dpo_loss_type == "simpo" else False
+        average_log_prob_loss_types = ["simpo", "dpo_norm"]
+        average_log_prob = args.dpo_loss_type in average_log_prob_loss_types
         for step, batch in enumerate(active_dataloader):
             # dpo forward pass & loss
             with accelerator.accumulate(model):
                 policy_chosen_logps, policy_rejected_logps = concatenated_forward(model, batch, average_log_prob=average_log_prob)
-                if args.dpo_loss_type == "dpo":
+                if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                     with torch.no_grad():
                         if args.use_lora:
                             with accelerator.unwrap_model(model).disable_adapter():
