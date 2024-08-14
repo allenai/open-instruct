@@ -24,7 +24,6 @@ import numpy as np
 import torch
 import torch.multiprocessing as mp
 from datasets import Dataset
-from generation import generate_with_openai
 from huggingface_hub import HfApi
 from transformers import (
     AutoModelForSequenceClassification,
@@ -35,7 +34,7 @@ from transformers import (
 )
 
 from open_instruct.model_utils import get_reward
-from generation import format_conversation
+from generation import GenerationArgs, generate_with_openai, format_conversation
 
 api = HfApi()
 
@@ -134,6 +133,8 @@ def process_shard_api(model_name_or_path: str, args: Args, shard: List[str]) -> 
     # Convert the list of data items (shard) into a Hugging Face Dataset object
     raw_ds = Dataset.from_list(shard)
 
+    gen_args = GenerationArgs(args.n)
+
     ds = raw_ds.map(
         lambda x: {"prompt": format_conversation(x["messages"][:-1])},
         num_proc=multiprocessing.cpu_count(),
@@ -146,14 +147,14 @@ def process_shard_api(model_name_or_path: str, args: Args, shard: List[str]) -> 
         {"prompt": prompt, "response": response} for prompt, response in zip(prompts, model_responses)
     ]
     model_responses_scores = asyncio.run(
-        generate_with_openai(model_name_or_path, data_list_model_responses, args, args.n)
+        generate_with_openai(model_name_or_path, data_list_model_responses, args, gen_args)
     )
 
     data_list_reference_responses = [
         {"prompt": prompt, "response": response} for prompt, response in zip(prompts, reference_responses)
     ]
     reference_responses_scores = asyncio.run(
-        generate_with_openai(model_name_or_path, data_list_reference_responses, args, args.n)
+        generate_with_openai(model_name_or_path, data_list_reference_responses, args, gen_args)
     )
 
     return torch.Tensor(model_responses_scores), torch.Tensor(reference_responses_scores)
