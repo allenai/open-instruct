@@ -71,7 +71,7 @@ def print_rich_table(df: pd.DataFrame) -> Table:
 
 
 async def generate_with_openai(model_name: str, data_list: list, args: Args, nb_completions: int):
-    config = LLMGenerationConfig(model=model_name, n=nb_completions)
+    config = LLMGenerationConfig(model=model_name, nb_completions=nb_completions)
     processor = LLMProcessor(config)
     results = await processor.process_batch(data_list, args)
     return results
