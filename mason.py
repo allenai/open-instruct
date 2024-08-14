@@ -158,8 +158,7 @@ def make_task_spec(args, command, i):
     command = ['/bin/bash', '-c']
     setup_commands = (
         "git config --global safe.directory '*' && " # fix the permission issue with git
-        "umask 002 && " # fix the permission issue with the cache folder
-        f"cd {os.getcwd()} && " # go to the current directory
+        "umask 000 && " # fix the permission issue with the cache folder
     )
     if not args.pure_docker_mode:
         setup_commands += f"cd {os.getcwd()} && "
