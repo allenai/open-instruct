@@ -101,6 +101,17 @@ def generate_with_vllm(model_name_or_path: str, prompt_token_ids, gen_args: Gene
     ]
 
 
+def format_conversation(conversation: dict) -> str:
+    formatted_conversation = []
+
+    # Iterate through the messages except the last one
+    for message in conversation["messages"][:-1]:
+        role = "A" if message["role"] == "user" else "B"
+        content = message["content"].strip()
+        formatted_conversation.append(f"{role}: {content}")
+
+    return "\n".join(formatted_conversation)
+
 def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
 
     ds = load_dataset(dataset_args.dataset_name)
@@ -119,7 +130,22 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
         use_openai = False
 
     if use_openai:
-        messages = ds[dataset_args.dataset_train_split]["messages"][:-1]
+        # client = OpenAI() # Make sure env variable "OPENAI_API_KEY" is set
+        # outputs = []
+        # for messages in ds[dataset_args.dataset_train_split]["messages"]:
+        #     chat_completion = client.chat.completions.create(
+        #         model=args.model_name_or_path,
+        #         messages=messages[:-1]
+        #     )
+        #     outputs.append({"outputs": [{"text": response.message.content} for response in chat_completion.choices]})
+
+        # ds = ds.map(
+        #     lambda x: {"prompt": tokenizer.apply_chat_template(x["messages"][:-1], tokenize=False)},
+        #     num_proc=multiprocessing.cpu_count(),
+        # )
+
+        messages = [format_conversation(messages["messages"][:-1]) for messages in ds[dataset_args.dataset_train_split]["messages"]]
+        breakpoint()
         responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args.n))
         outputs = [{"outputs": [{"text": response}]} for response in responses]
 
