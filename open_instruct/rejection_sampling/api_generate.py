@@ -57,7 +57,6 @@ class LLMProcessor:
                         top_p=0.9,  # Top-P (nucleus) sampling
                         stop=None,  # Add stopping criteria if needed
                     )
-
                     # Collect all completions if `n > 1`
                     completions = [choice.message.content for choice in response.choices]
                     breakpoint()
