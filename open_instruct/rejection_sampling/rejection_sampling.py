@@ -256,6 +256,7 @@ def main(args: Args):
                 for i in range(args.num_gpus):
                     results.append(pool.apply_async(process_shard, (i, model_name_or_path, args, shards[i])))
         else:
+            # when using LLM as a judge, num_gpus here refers to the number of shards as we query an API and we don't use GPUs
             for i in range(args.num_gpus):
                 results.append(process_shard_api(model_name_or_path, args, shards[i]))
 
