@@ -42,6 +42,7 @@ while [[ "$#" -gt 0 ]]; do
         --model-name) MODEL_NAME="$2"; shift ;;
         --model-location) MODEL_LOCATION="$2"; shift ;;
         --hf-upload) HF_UPLOAD="true" ;;
+        --multiturn-fewshot) MULTITURN_FS="true" ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -58,6 +59,7 @@ MODEL_NAME_SAFE=${MODEL_NAME//\//_}
 
 # Set defaults for optional arguments
 HF_UPLOAD="${HF_UPLOAD:-false}"
+MULTITURN_FS="${MULTITURN_FS:-false}"
 
 # Set HF_UPLOAD_ARG if HF_UPLOAD is true
 if [ "$HF_UPLOAD" == "true" ]; then
@@ -67,7 +69,13 @@ else
 fi
 
 # Run oe-eval with different tasks
-TASKS=("gsm8k::olmo1" "drop::llama3" "minerva_math::llama3" "codex_humaneval" "codex_humanevalplus" "ifeval::tulu" "popqa" "mmlu:mc::olmes")
+# If the multiturn-fewshot flag is set, also evaluate in task settings where fewshot examples are presented across multiple turns.
+if [ "$MULTITURN_FS" == "true" ]; then
+  TASKS=("gsm8k::tulu" "gsm8k:fsmt::tulu"  "drop::tulu" "drop:fsmt::tulu"  "minerva_math::tulu" "minerva_math:fsmt::tulu"  "codex_humaneval::tulu" "codex_humanevalplus::tulu" "ifeval::tulu" "popqa::tulu" "popqa:fsmt::tulu"  "mmlu:mc::tulu" "mmlu:mc:fsmt::tulu")
+else
+  TASKS=("gsm8k::tulu" "drop::tulu" "minerva_math::tulu" "codex_humaneval::tulu" "codex_humanevalplus::tulu" "ifeval::tulu" "popqa::tulu" "mmlu:mc::tulu")
+fi
+
 MODEL_TYPE="--model-type vllm"
 BATCH_SIZE_VLLM=10000
 BATCH_SIZE_OTHER=1
