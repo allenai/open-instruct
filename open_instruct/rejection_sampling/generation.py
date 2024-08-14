@@ -153,7 +153,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
         # Generate using vLLM.
         outputs = generate_with_vllm(args.model_name_or_path, prompt_token_ids, gen_args)
 
-    # Assuming we generate n=3 completions per prompt, the outputs will look like:
+    # Assuming we generate n=3 completions per prompt; the outputs will look like:
     # prompt | completions
     # -------|------------
     # q1     | a1
