@@ -45,6 +45,7 @@ class GenerationArgs:
     nb_completions: int = 3
     temperature: float = 0.8
     response_length: int = 53
+    top_p: float = 0.9
     tensor_parallel_size: int = 1
 
 

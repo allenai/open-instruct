@@ -52,9 +52,9 @@ class LLMProcessor:
                             {"role": "user", "content": text},
                         ],
                         n=gen_args.nb_completions,  # Request multiple completions
-                        temperature=1,  # Sampling temperature
-                        max_tokens=50,  # Maximum tokens in the response
-                        top_p=0.9,  # Top-P (nucleus) sampling
+                        temperature=gen_args.temperature,  # Sampling temperature
+                        max_tokens=gen_args.response_length,  # Maximum tokens in the response
+                        top_p=gen_args.top_p,  # Top-P (nucleus) sampling
                         stop=None,  # Add stopping criteria if needed
                     )
                     # Collect all completions if `n > 1`
