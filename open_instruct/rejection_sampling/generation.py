@@ -34,6 +34,7 @@ from vllm import LLM, SamplingParams
 
 @dataclass
 class Args:
+    nb_completions: int = 3
     model_name_or_path: str = "cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr"
     save_filename: str = "completions.jsonl"
     skill: str = "chat"
@@ -42,7 +43,6 @@ class Args:
 
 @dataclass
 class GenerationArgs:
-    nb_completions: int = 3
     temperature: float = 0.8
     response_length: int = 53
     tensor_parallel_size: int = 1
