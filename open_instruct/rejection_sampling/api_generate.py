@@ -59,7 +59,6 @@ class LLMProcessor:
                     )
                     # Collect all completions if `n > 1`
                     completions = [choice.message.content for choice in response.choices]
-                    breakpoint()
                     if args.mode == "generation":
                         response = completions
                     else:
