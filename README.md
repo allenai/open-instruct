@@ -54,10 +54,14 @@ pip install -r weight-diff-requirements.txt
 For a second installation strategy, if you'd like to *run experiments within a Docker environment*, you can create one using:
 
 ```bash
-docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 --build-arg REQUIRE=requirements.txt . -t <your tag here>
+docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 --build-arg REQUIRE=requirements.txt . -t open_instruct
+
+# if you are interally at AI2, you can create an image like this:
+beaker image create open_instruct -n open_instruct -w ai2/$(whoami)
 ```
 
 If you are internally at AI2, you can use this pre-built beaker image `hamishivi/open-instruct-eval` (most recent version [here](https://beaker.org/im/01J2CKY81A6N1WG5QS08Y3WNM5/details)). For finetuning, you can use `hamishivi/open-instruct-public` (most recent version [here](https://beaker.org/im/01J2CQFX7076PDHZJR2GB0C3A9/details)). I will try to update these periodically.
+
 
 **Important for OLMo users:** Note that due to version conflicts between deepspeed and vLLM, we cannot support OLMo inference and deepspeed within the same image (this will be fixed once deepspeed allows pydantic >= 2). To build a docker image suitable for inference/evaluation for OLMo, use:
 ```bash
