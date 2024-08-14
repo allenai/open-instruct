@@ -42,7 +42,7 @@ class Args:
 
 @dataclass
 class GenerationArgs:
-    n: int = 3
+    nb_completions: int = 3
     temperature: float = 0.8
     response_length: int = 53
     tensor_parallel_size: int = 1
@@ -70,8 +70,8 @@ def print_rich_table(df: pd.DataFrame) -> Table:
     console.print(table)
 
 
-async def generate_with_openai(model_name: str, data_list: list, args: Args, n: int):
-    config = LLMGenerationConfig(model=model_name, n=n)
+async def generate_with_openai(model_name: str, data_list: list, args: Args, nb_completions: int):
+    config = LLMGenerationConfig(model=model_name, n=nb_completions)
     processor = LLMProcessor(config)
     results = await processor.process_batch(data_list, args)
     return results
@@ -82,7 +82,7 @@ def generate_with_vllm(model_name_or_path: str, prompt_token_ids, gen_args: Gene
     outputs = llm.generate(
         prompt_token_ids=prompt_token_ids,
         sampling_params=SamplingParams(
-            n=gen_args.n,
+            n=gen_args.nb_completions,
             temperature=gen_args.temperature,
             top_p=1.0,
             max_tokens=gen_args.response_length,
@@ -138,7 +138,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
             num_proc=multiprocessing.cpu_count(),
         )
         messages = ds[dataset_args.dataset_train_split]["prompt"]
-        responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args.n))
+        responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args.nb_completions))
         outputs = [{"outputs": [{"text": response}]} for response in responses]
 
     else:
