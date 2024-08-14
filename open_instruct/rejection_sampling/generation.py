@@ -162,9 +162,11 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     # ...
     table = defaultdict(list)
     for output, messages in zip(outputs, ds[dataset_args.dataset_train_split]["messages"]):
-        breakpoint()
-        if len(set(item["text"] for item in output["outputs"])) == 1:
-            continue
+
+        # if args.generation:
+        #     # if the model completions are exactly the same across all completions per prompt, we can skip this
+        #     if len(set(item["text"] for item in output["outputs"])) == 1:
+        #         continue
 
         for item in output["outputs"]:
             new_messages = copy.deepcopy(messages[:-1])

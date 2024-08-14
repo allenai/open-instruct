@@ -52,8 +52,8 @@ class Args:
     hf_entity: Optional[str] = None
     hf_repo_id: str = "rejection_sampling"
     add_timestamp: bool = True
-    mode: str = "judgement"
-    skill: str = "chat"
+    # mode: str = "judgement"
+    # skill: str = "chat"
 
 
 def process_shard(
