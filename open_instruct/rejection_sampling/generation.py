@@ -25,7 +25,6 @@ from typing import Optional
 import pandas as pd
 from api_generate import LLMGenerationConfig, LLMProcessor  # Import your classes
 from datasets import load_dataset
-from openai import OpenAI
 from rich.console import Console
 from rich.pretty import pprint
 from rich.table import Table
@@ -39,6 +38,7 @@ class Args:
     save_filename: str = "completions.jsonl"
     skill: str = "chat"
     mode: str = "generation"  # Can be "generation" or "judgment"
+
 
 @dataclass
 class GenerationArgs:
@@ -112,6 +112,7 @@ def format_conversation(messages: list) -> str:
 
     # Join the conversation with a single newline
     return "\n".join(formatted_conversation)
+
 
 def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
 

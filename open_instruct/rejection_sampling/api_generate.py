@@ -29,7 +29,6 @@ class Args:
     num_trials: int = 1
 
 
-
 class LLMProcessor:
     def __init__(self, config: LLMGenerationConfig):
         self.config = config
