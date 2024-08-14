@@ -71,7 +71,7 @@ class LLMProcessor:
 
         return response
 
-    async def process_batch(self, data_list: List[dict], args: Args, gen_args: GenerationArgs):
+    async def process_batch(self, data_list: List[dict], args: Args, gen_args: Args):
         limiter = asyncio.Semaphore(self.config.max_parallel_requests)
         tasks = [self.process_text(data, i, limiter, args, gen_args) for i, data in enumerate(data_list)]
         # Use tqdm to track progress
