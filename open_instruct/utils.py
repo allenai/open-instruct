@@ -163,6 +163,7 @@ def get_datasets(
     shuffle: bool = True,
     save_data_dir: Optional[str] = None,
     need_columns: Optional[List[str]] = None,
+    keep_ids: bool = False,
 ) -> DatasetDict:
     """
     Loads and mixes datasets according to proportions specified in `dataset_mixer`.
@@ -187,6 +188,9 @@ def get_datasets(
         need_columns (Optional[List[str]], *optional*, defaults to `None`):
             Column names that are required to be in the dataset.
             Quick debugging when mixing heterogeneous datasets.
+        keep_ids (`bool`, *optional*, defaults to `False`):
+            Whether to keep ids for training that are added during mixing.
+            Used primarily in mix_data.py for saving, or the saved dataset has IDs already.
     """
     if isinstance(dataset_mixer, list):
         assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
@@ -348,13 +352,14 @@ def get_datasets(
         for split in raw_datasets:
             raw_datasets[split].to_json(save_data_dir + f"mixed_ds_{split}.json")
 
-    # remove id column
-    if len(raw_train_datasets) > 0:
-        if "id" in raw_datasets["train"].column_names:
-            raw_datasets["train"] = raw_datasets["train"].remove_columns("id")
-    if len(raw_val_datasets) > 0:
-        if "id" in raw_datasets["test"].column_names:
-            raw_datasets["test"] = raw_datasets["test"].remove_columns("id")
+    if not keep_ids:
+        # remove id column
+        if len(raw_train_datasets) > 0:
+            if "id" in raw_datasets["train"].column_names:
+                raw_datasets["train"] = raw_datasets["train"].remove_columns("id")
+        if len(raw_val_datasets) > 0:
+            if "id" in raw_datasets["test"].column_names:
+                raw_datasets["test"] = raw_datasets["test"].remove_columns("id")
 
     return raw_datasets
 
@@ -386,6 +391,18 @@ class FlatArguments:
     dpo_beta: float = field(
         default=0.1,
         metadata={"help": "Beta parameter for DPO loss. Default is 0.1."},
+    )
+    dpo_loss_type: str = field(
+        default="dpo",
+        metadata={"help": "Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."},
+    )
+    dpo_gamma_beta_ratio: float = field(
+        default=0.3,
+        metadata={"help": "Gamma to beta ratio for SimPO loss. Default is 0.3. Not used for DPO loss."},
+    )
+    dpo_label_smoothing: float = field(
+        default=0.0,
+        metadata={"help": "Label smoothing for DPO/SimPO loss. Default is 0 (no smoothing)."},
     )
     tokenizer_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}

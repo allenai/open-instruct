@@ -35,6 +35,7 @@ def main():
         splits=["train"],
         save_data_dir=args.dataset_mix_dir,  # location where dataset is saved as json
         columns_to_keep=["messages"],
+        keep_ids=True,
     )
 
     # print first 5 samples of dataset

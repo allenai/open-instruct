@@ -35,6 +35,7 @@ def dpo_loss(
     reference_rejected_logps: torch.FloatTensor,
     beta: float,
     reference_free: bool = False,
+    label_smoothing: float = 0.0,
 ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
     """Compute the DPO loss for a batch of policy and reference model log probabilities.
 
@@ -66,9 +67,74 @@ def dpo_loss(
 
     logits = pi_logratios - ref_logratios
 
-    losses = -F.logsigmoid(beta * logits)
+    losses = -F.logsigmoid(beta * logits) * (1 - label_smoothing) - F.logsigmoid(-beta * logits) * label_smoothing
     chosen_rewards = beta * (policy_chosen_logps - reference_chosen_logps).detach()
     rejected_rewards = beta * (policy_rejected_logps - reference_rejected_logps).detach()
+
+    return losses, chosen_rewards, rejected_rewards
+
+
+def wpo_loss(
+    policy_chosen_logps: torch.FloatTensor,
+    policy_rejected_logps: torch.FloatTensor,
+    reference_chosen_logps: torch.FloatTensor,
+    reference_rejected_logps: torch.FloatTensor,
+    beta: float,
+    label_smoothing: float = 0.0,
+    chosen_loss_mask: torch.BoolTensor = None,
+    rejected_loss_mask: torch.BoolTensor = None,
+) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+    pi_logratios = policy_chosen_logps - policy_rejected_logps
+    ref_logratios = reference_chosen_logps - reference_rejected_logps
+
+    # compute average logps and use them to compute the weights
+    policy_chosen_logps_average = (policy_chosen_logps * chosen_loss_mask).sum(-1) / chosen_loss_mask.sum(-1)
+    policy_rejected_logps_average = (policy_rejected_logps * rejected_loss_mask).sum(-1) / rejected_loss_mask.sum(-1)
+    policy_weights = torch.clamp(torch.exp(policy_chosen_logps_average + policy_rejected_logps_average), max=1)
+
+    logits = pi_logratios - ref_logratios
+
+    losses = (
+        -F.logsigmoid(beta * logits) * (1 - label_smoothing) * policy_weights
+        - F.logsigmoid(-beta * logits) * label_smoothing * policy_weights
+    )
+
+    chosen_rewards = beta * (policy_chosen_logps - reference_chosen_logps).detach()
+    rejected_rewards = beta * (policy_rejected_logps - reference_rejected_logps).detach()
+
+    return losses, chosen_rewards, rejected_rewards
+
+
+# From https://github.com/princeton-nlp/SimPO/blob/main/scripts/simpo_trainer.py#L560C1-L595C56
+def simpo_loss(
+        policy_chosen_logps: torch.FloatTensor,
+        policy_rejected_logps: torch.FloatTensor,
+        beta: float,
+        gamma_beta_ratio: float,
+        label_smoothing: float = 0.0,
+) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+    """Compute the SimPO loss for a batch of policy model log probabilities.
+
+    Args:
+        policy_chosen_logps: Log probabilities of the policy model for the chosen responses. Shape: (batch_size,)
+        policy_rejected_logps: Log probabilities of the policy model for the rejected responses. Shape: (batch_size,)
+
+    Returns:
+        A tuple of three tensors: (losses, chosen_rewards, rejected_rewards).
+        The losses tensor contains the SimPO loss for each example in the batch.
+        The chosen_rewards and rejected_rewards tensors contain the rewards for the chosen and rejected responses, respectively.
+    """
+    pi_logratios = policy_chosen_logps - policy_rejected_logps
+    logits = pi_logratios - gamma_beta_ratio
+
+    # sigmoid loss type from SimPO.
+    losses = (
+        -F.logsigmoid(beta * logits) * (1 - label_smoothing)
+        - F.logsigmoid(-beta * logits) * label_smoothing
+    )
+
+    chosen_rewards = beta * policy_chosen_logps.detach()
+    rejected_rewards = beta * policy_rejected_logps.detach()
 
     return losses, chosen_rewards, rejected_rewards
 
@@ -139,7 +205,7 @@ def concatenated_inputs(batch: Dict[str, Union[List, torch.LongTensor]]) -> Dict
 
 
 def concatenated_forward(
-    model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]]
+    model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]], average_log_prob: bool = False
 ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
     """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
@@ -150,7 +216,7 @@ def concatenated_forward(
         input_ids=concatenated_batch["concatenated_input_ids"],
         attention_mask=concatenated_batch["concatenated_attention_mask"],
     ).logits.to(torch.float32)
-    all_logps = _get_batch_logps(all_logits, concatenated_batch["concatenated_labels"], average_log_prob=False)
+    all_logps = _get_batch_logps(all_logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob)
     chosen_logps = all_logps[: batch["chosen_input_ids"].shape[0]]
     rejected_logps = all_logps[batch["chosen_input_ids"].shape[0] :]
     return chosen_logps, rejected_logps

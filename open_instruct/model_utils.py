@@ -29,13 +29,13 @@ import torch
 import transformers
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
+from huggingface_hub import HfApi
 from rich import print as rprint
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
-from huggingface_hub import HfApi
 
 
 @dataclass

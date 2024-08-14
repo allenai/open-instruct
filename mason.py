@@ -66,6 +66,12 @@ def get_args():
     parser.add_argument(
         "--pure_docker_mode", action="store_true", help="If given, run in pure docker mode"
     )
+    parser.add_argument(
+        "--no_hf_cache_env", action="store_false", help="If given, do not pass in `HF_DATASETS_CACHE`, `HF_HUB_CACHE`, and `HF_ASSETS_CACHE`"
+    )
+    parser.add_argument(
+        "--no_mount_nfs", action="store_false", help="If given, do nout mount NFS"
+    )
 
 
     # Split up the mason args from the Python args.
@@ -97,20 +103,8 @@ def parse_commands(command_args: List[str]) -> List[List[str]]:
     return commands
 
 
-def get_env_vars(pure_docker_mode):
+def get_env_vars(pure_docker_mode, no_mount_hf_cache):
     env_vars = [
-        beaker.EnvVar(
-            name="HF_DATASETS_CACHE",
-            value=os.getenv("HF_DATASETS_CACHE"),
-        ),
-        beaker.EnvVar(
-            name="HF_HUB_CACHE",
-            value=os.getenv("HF_HUB_CACHE"),
-        ),
-        beaker.EnvVar(
-            name="HF_ASSETS_CACHE",
-            value=os.getenv("HF_ASSETS_CACHE"),
-        ),
         beaker.EnvVar(
             name="HF_TOKEN",
             secret="HF_TOKEN",
@@ -122,21 +116,35 @@ def get_env_vars(pure_docker_mode):
     ]
      # use the user's PATH; including the conda / python PATH
     if not pure_docker_mode:
-        env_vars.append(
+        env_vars.extend([
             beaker.EnvVar(
                 name="PATH",
                 value=os.getenv("PATH"),
-            )
-        )
+            ),
+        ])
+    if not no_mount_hf_cache:
+        env_vars.extend([
+            beaker.EnvVar(
+                name="HF_DATASETS_CACHE",
+                value=os.getenv("HF_DATASETS_CACHE"),
+            ),
+            beaker.EnvVar(
+                name="HF_HUB_CACHE",
+                value=os.getenv("HF_HUB_CACHE"),
+            ),
+            beaker.EnvVar(
+                name="HF_ASSETS_CACHE",
+                value=os.getenv("HF_ASSETS_CACHE"),
+            ),
+        ])
 
     return env_vars
 
 
-def get_datasets(beaker_datasets, pure_docker_mode):
+def get_datasets(beaker_datasets, no_mount_nfs):
     """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
-    if pure_docker_mode:
-        res = []
-    else:
+    res = []
+    if not no_mount_nfs:
         res = [
             beaker.DataMount(
                 source=beaker.DataSource(host_path="/net/nfs.cirrascale"),
@@ -158,8 +166,7 @@ def make_task_spec(args, command, i):
     command = ['/bin/bash', '-c']
     setup_commands = (
         "git config --global safe.directory '*' && " # fix the permission issue with git
-        "umask 002 && " # fix the permission issue with the cache folder
-        f"cd {os.getcwd()} && " # go to the current directory
+        "umask 000 && " # fix the permission issue with the cache folder
     )
     if not args.pure_docker_mode:
         setup_commands += f"cd {os.getcwd()} && "
@@ -173,11 +180,11 @@ def make_task_spec(args, command, i):
         command=command,
         arguments=[fully_command],
         result=beaker.ResultSpec(path="/unused"),
-        datasets=get_datasets(args.beaker_datasets, args.pure_docker_mode),
+        datasets=get_datasets(args.beaker_datasets, args.no_mount_nfs),
         context=beaker.TaskContext(priority=beaker.Priority(args.priority),
                                    preemptible=args.preemptible),
         constraints=beaker.Constraints(cluster=args.cluster),
-        env_vars=get_env_vars(args.pure_docker_mode),
+        env_vars=get_env_vars(args.pure_docker_mode, args.no_hf_cache_env),
         resources=beaker.TaskResources(gpu_count=args.gpus),
     )
 
