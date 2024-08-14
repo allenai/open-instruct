@@ -70,7 +70,7 @@ def get_args():
         "--no_hf_cache_env", action="store_true", help="If given, do not pass in `HF_DATASETS_CACHE`, `HF_HUB_CACHE`, and `HF_ASSETS_CACHE`"
     )
     parser.add_argument(
-        "--no_mount_nfs", action="store_true", help="If given, do nout mount NFS"
+        "--no_mount_nfs", action="store_true", help="If given, do not mount NFS"
     )
 
 
