@@ -389,6 +389,18 @@ class FlatArguments:
         default=0.1,
         metadata={"help": "Beta parameter for DPO loss. Default is 0.1."},
     )
+    dpo_loss_type: str = field(
+        default="dpo",
+        metadata={"help": "Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."},
+    )
+    dpo_gamma_beta_ratio: float = field(
+        default=0.3,
+        metadata={"help": "Gamma to beta ratio for SimPO loss. Default is 0.3. Not used for DPO loss."},
+    )
+    dpo_label_smoothing: float = field(
+        default=0.0,
+        metadata={"help": "Label smoothing for DPO/SimPO loss. Default is 0 (no smoothing)."},
+    )
     tokenizer_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
     )

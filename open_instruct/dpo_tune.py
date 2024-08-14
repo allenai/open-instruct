@@ -53,6 +53,8 @@ from open_instruct.dpo_utils import (
     DataCollatorForSeq2SeqDPO,
     concatenated_forward,
     dpo_loss,
+    simpo_loss,
+    wpo_loss,
 )
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -317,10 +319,14 @@ def main(args: FlatArguments):
         return model
 
     model = load_model()
-    if not args.use_lora:
-        reference_model = load_model()
+    # only simpo is reference model free rn
+    if args.dpo_loss_type != "simpo":
+        if not args.use_lora:
+            reference_model = load_model()
+        else:
+            reference_model = model
     else:
-        reference_model = model
+        reference_model = None
 
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
@@ -498,7 +504,8 @@ def main(args: FlatArguments):
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
-    if not args.use_lora:
+    # reference model may not be none with e.g. SimPO loss.
+    if not args.use_lora and reference_model is not None:
         reference_model = prepare_deepspeed(accelerator, reference_model)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
@@ -583,23 +590,49 @@ def main(args: FlatArguments):
             active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_step)
         else:
             active_dataloader = train_dataloader
+        # we need to average the log probs for simpo loss
+        average_log_prob_loss_types = ["simpo", "dpo_norm"]
+        average_log_prob = args.dpo_loss_type in average_log_prob_loss_types
         for step, batch in enumerate(active_dataloader):
             # dpo forward pass & loss
             with accelerator.accumulate(model):
-                policy_chosen_logps, policy_rejected_logps = concatenated_forward(model, batch)
-                with torch.no_grad():
-                    if args.use_lora:
-                        with accelerator.unwrap_model(model).disable_adapter():
-                            reference_chosen_logps, reference_rejected_logps = concatenated_forward(model, batch)
-                    else:
-                        reference_chosen_logps, reference_rejected_logps = concatenated_forward(reference_model, batch)
-                losses, _, _ = dpo_loss(
-                    policy_chosen_logps,
-                    policy_rejected_logps,
-                    reference_chosen_logps,
-                    reference_rejected_logps,
-                    beta=args.dpo_beta,
-                )
+                policy_chosen_logps, policy_rejected_logps = concatenated_forward(model, batch, average_log_prob=average_log_prob)
+                if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
+                    with torch.no_grad():
+                        if args.use_lora:
+                            with accelerator.unwrap_model(model).disable_adapter():
+                                reference_chosen_logps, reference_rejected_logps = concatenated_forward(model, batch, average_log_prob=average_log_prob)
+                        else:
+                            reference_chosen_logps, reference_rejected_logps = concatenated_forward(reference_model, batch, average_log_prob=average_log_prob)
+                    losses, _, _ = dpo_loss(
+                        policy_chosen_logps,
+                        policy_rejected_logps,
+                        reference_chosen_logps,
+                        reference_rejected_logps,
+                        beta=args.dpo_beta,
+                        label_smoothing=args.dpo_label_smoothing,
+                    )
+                elif args.dpo_loss_type == "simpo":
+                    losses, _, _ = simpo_loss(
+                        policy_chosen_logps,
+                        policy_rejected_logps,
+                        beta=args.dpo_beta,
+                        gamma_beta_ratio=args.dpo_gamma_beta_ratio,
+                        label_smoothing=args.dpo_label_smoothing,
+                    )
+                elif args.dpo_loss_type == "wpo":
+                    losses, _, _ = wpo_loss(
+                        policy_chosen_logps,
+                        policy_rejected_logps,
+                        reference_chosen_logps,
+                        reference_rejected_logps,
+                        beta=args.dpo_beta,
+                        label_smoothing=args.dpo_label_smoothing,
+                        chosen_loss_mask=batch["chosen_labels"] != -100,
+                        rejected_loss_mask=batch["rejected_labels"] != -100,
+                    )
+                else:
+                    raise ValueError(f"Invalid dpo loss type {args.dpo_loss_type}.")
                 # TODO: metric logging
                 loss = losses.mean()
                 # We keep track of the loss at each logged step
