@@ -52,19 +52,29 @@ class LLMProcessor:
                             {"role": "user", "content": text},
                         ],
                         n=3,  # Request multiple completions
-                        # n=gen_args.nb_completions,  # Request multiple completions
+                        temperature=1,  # Sampling temperature
+                        max_tokens=50,  # Maximum tokens in the response
+                        top_k=100,  # Top-K sampling
+                        top_p=0.9,  # Top-P (nucleus) sampling
+                        stop=None,  # Add stopping criteria if needed
                     )
-                    breakpoint()
-                    response = response.choices[0].message.content
+
+                    # Collect all completions if `n > 1`
+                    completions = [choice.message.content for choice in response.choices]
+
                     if args.mode == "generation":
-                        response = response
+                        response = completions
                     else:
-                        match = re.search(r"Total score:\s*(\d+)", response)
-                        if match:
-                            total_score = int(match.group(1))
-                        else:
-                            total_score = -1
-                        response = total_score
+                        # If in judgment mode, process the completions (for example, extracting scores)
+                        responses = []
+                        for completion in completions:
+                            match = re.search(r"Total score:\s*(\d+)", completion)
+                            if match:
+                                total_score = int(match.group(1))
+                            else:
+                                total_score = -1
+                            responses.append(total_score)
+                        response = responses
                     break
                 except Exception as e:
                     print(f"Error in {i}: {e}")
