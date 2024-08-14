@@ -162,6 +162,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     # ...
     table = defaultdict(list)
     for output, messages in zip(outputs, ds[dataset_args.dataset_train_split]["messages"]):
+        breakpoint()
         if len(set(item["text"] for item in output["outputs"])) == 1:
             continue
 
