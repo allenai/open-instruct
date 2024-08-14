@@ -51,7 +51,7 @@ class LLMProcessor:
                             {"role": "system", "content": "You are a helpful assistant."},
                             {"role": "user", "content": text},
                         ],
-                        n=3,  # Request multiple completions
+                        n=gen_args.nb_completions,  # Request multiple completions
                         temperature=1,  # Sampling temperature
                         max_tokens=50,  # Maximum tokens in the response
                         top_p=0.9,  # Top-P (nucleus) sampling

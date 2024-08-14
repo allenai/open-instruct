@@ -164,7 +164,6 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     for output, messages in zip(outputs, ds[dataset_args.dataset_train_split]["messages"]):
 
         # if the model completions are exactly the same across all completions per prompt, we can skip this
-        # if len(set(item["text"] for item in output["outputs"])) == 1:
         if len(set(tuple(item["text"]) for item in output["outputs"])) == 1:
             continue
 
