@@ -353,7 +353,7 @@ def main(args: FlatArguments):
                     "pad_token": "<pad>",
                 }
             )
-            assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
+            assert num_added_tokens <= 1, "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens)."
     elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
         num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
     elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast) and tokenizer.pad_token is None:
