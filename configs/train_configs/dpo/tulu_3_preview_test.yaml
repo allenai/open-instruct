@@ -20,3 +20,5 @@ report_to:
   - wandb
 logging_steps: 1
 use_lora: false
+checkpointing_steps: 1000
+keep_last_n_checkpoints: 1

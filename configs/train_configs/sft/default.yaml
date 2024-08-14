@@ -29,3 +29,5 @@ report_to:
 logging_steps: 1
 add_bos: true # needed for GPTNeoX olmo models
 dataset_mix_dir: null
+checkpointing_steps: 1000
+keep_last_n_checkpoints: 1

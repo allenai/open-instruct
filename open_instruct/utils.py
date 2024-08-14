@@ -17,10 +17,12 @@ import logging
 import os
 import subprocess
 import sys
+import shutil
 from dataclasses import dataclass, field
 from typing import Any, List, NewType, Optional, Tuple, Union
 
 import requests
+from accelerate.logging import get_logger
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
@@ -28,6 +30,7 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
+logger = get_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
 
@@ -611,6 +614,12 @@ class FlatArguments:
             "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
         },
     )
+    overwrite_output_dir: bool = field(
+        default=False, metadata={"help": "Overwrite the content of the output directory. Means that resumption will always start from scratch."},
+    )
+    keep_last_n_checkpoints: int = field(
+        default=3, metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
+    )
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -786,3 +795,44 @@ class ArgumentParserPlus(HfArgumentParser):
         if len(output) == 1:
             output = output[0]
         return output
+
+
+def get_last_checkpoint(folder: str, incomplete: bool = False) -> Optional[str]:
+    content = os.listdir(folder)
+    checkpoint_steps = [path for path in content if path.startswith('step_')]
+    checkpoint_epochs = [path for path in content if path.startswith('epoch_')]
+    if len(checkpoint_steps) > 0 and len(checkpoint_epochs) > 0:
+        logger.info("Mixed step and epoch checkpoints found. Using step checkpoints.")
+        checkpoints = checkpoint_steps
+    elif len(checkpoint_steps) == 0:
+        checkpoints = checkpoint_epochs
+    else:
+        checkpoints = checkpoint_steps
+    if not incomplete:
+        checkpoints = [path for path in checkpoints if os.path.exists(os.path.join(folder, path, 'COMPLETED'))]
+    if len(checkpoints) == 0:
+        return
+    return os.path.join(folder, max(checkpoints, key=lambda x: x.split('_')[-1]))
+
+
+def get_last_checkpoint_path(args: FlatArguments, incomplete: bool = False) -> str:
+    # if output already exists and user does not allow overwriting, resume from there.
+    # otherwise, resume if the user specifies a checkpoint.
+    # else, start from scratch.
+    # if incomplete is true, include folders without "COMPLETE" in the folder.
+    last_checkpoint_path = None
+    if args.output_dir and os.path.isdir(args.output_dir) and not args.overwrite_output_dir:
+        last_checkpoint_path = get_last_checkpoint(args.output_dir, incomplete=incomplete)
+        if last_checkpoint_path is None:
+            logger.warning("Output directory exists but no checkpoint found. Starting from scratch.")
+    elif args.resume_from_checkpoint:
+        last_checkpoint_path = args.resume_from_checkpoint
+    return last_checkpoint_path
+
+
+def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> None:
+    # remove the last checkpoint to save space
+    if keep_last_n_checkpoints > 0:
+        checkpoints = sorted(os.listdir(output_dir), key=lambda x: int(x.split("_")[-1]))
+        if len(checkpoints) > keep_last_n_checkpoints:
+            shutil.rmtree(os.path.join(output_dir, checkpoints[0]))

@@ -29,7 +29,7 @@ import datasets
 import deepspeed
 import torch
 import transformers
-from accelerate import Accelerator
+from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.logging import get_logger
 from accelerate.utils import InitProcessGroupKwargs, set_seed
 from datasets import load_dataset
@@ -61,6 +61,8 @@ from open_instruct.utils import (
     FlatArguments,
     get_wandb_tags,
     maybe_use_ai2_wandb_entity,
+    get_last_checkpoint_path,
+    clean_last_n_checkpoints,
 )
 
 logger = get_logger(__name__)
@@ -217,6 +219,7 @@ def main(args: FlatArguments):
 
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
+        use_seedable_sampler=True,
         **accelerator_log_kwargs,
         kwargs_handlers=[timeout_kwargs],
     )
@@ -357,7 +360,7 @@ def main(args: FlatArguments):
                     "pad_token": "<pad>",
                 }
             )
-            assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
+            assert num_added_tokens <= 1, "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens)."
     elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
         num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
     elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast) and tokenizer.pad_token is None:
@@ -517,7 +520,7 @@ def main(args: FlatArguments):
 
     # Figure out how many steps we should save the Accelerator states
     checkpointing_steps = args.checkpointing_steps
-    if checkpointing_steps is not None and checkpointing_steps.isdigit():
+    if checkpointing_steps is not None:
         checkpointing_steps = int(checkpointing_steps)
 
     # We need to initialize the trackers we use, and also store our configuration.
@@ -551,22 +554,13 @@ def main(args: FlatArguments):
     starting_epoch = 0
 
     # Potentially load in the weights and states from a previous save
-    if args.resume_from_checkpoint:
-        if args.resume_from_checkpoint is not None or args.resume_from_checkpoint != "":
-            checkpoint_path = args.resume_from_checkpoint
-            path = os.path.basename(args.resume_from_checkpoint)
-        else:
-            # Get the most recent checkpoint
-            dirs = [f.name for f in os.scandir(os.getcwd()) if f.is_dir()]
-            dirs.sort(key=os.path.getctime)
-            path = dirs[-1]  # Sorts folders by date modified, most recent checkpoint is the last
-            checkpoint_path = path
-            path = os.path.basename(checkpoint_path)
-
-        accelerator.print(f"Resumed from checkpoint: {checkpoint_path}")
-        accelerator.load_state(path)
+    last_checkpoint_path = get_last_checkpoint_path(args)
+    if last_checkpoint_path:
+        accelerator.print(f"Resumed from checkpoint: {last_checkpoint_path}")
+        accelerator.load_state(last_checkpoint_path)
         # Extract `epoch_{i}` or `step_{i}`
-        training_difference = os.path.splitext(path)[0]
+        last_checkpoint_path = os.path.basename(last_checkpoint_path)
+        training_difference = os.path.splitext(last_checkpoint_path)[0]
 
         if "epoch" in training_difference:
             starting_epoch = int(training_difference.replace("epoch_", "")) + 1
@@ -579,13 +573,15 @@ def main(args: FlatArguments):
             completed_steps = resume_step // args.gradient_accumulation_steps
             resume_step -= starting_epoch * len(train_dataloader)
 
+    print(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
 
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
+        train_dataloader.set_epoch(epoch)
         total_loss = 0
-        if args.resume_from_checkpoint and epoch == starting_epoch and resume_step is not None:
+        if last_checkpoint_path and resume_step is not None:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint
             active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_step)
         else:
@@ -671,7 +667,11 @@ def main(args: FlatArguments):
                         output_dir = f"step_{completed_steps}"
                         if args.output_dir is not None:
                             output_dir = os.path.join(args.output_dir, output_dir)
-                        save_with_accelerate(accelerator, model, tokenizer, output_dir, args)
+                        accelerator.save_state(output_dir)
+                        # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
+                        with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
+                            f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
+                        clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
 
                 if completed_steps >= args.max_train_steps:
                     break
@@ -680,11 +680,16 @@ def main(args: FlatArguments):
             output_dir = f"epoch_{epoch}"
             if args.output_dir is not None:
                 output_dir = os.path.join(args.output_dir, output_dir)
-            save_with_accelerate(accelerator, model, tokenizer, output_dir, args)
+            accelerator.save_state(output_dir)
+            # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
+            with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
+                f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
+            clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
 
     if args.with_tracking:
         accelerator.end_training()
 
+    # save normally at the end
     if args.output_dir is not None:
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)
