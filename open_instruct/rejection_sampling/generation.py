@@ -34,7 +34,6 @@ from vllm import LLM, SamplingParams
 
 @dataclass
 class Args:
-    nb_completions: int = 3
     model_name_or_path: str = "cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr"
     save_filename: str = "completions.jsonl"
     skill: str = "chat"
@@ -71,8 +70,8 @@ def print_rich_table(df: pd.DataFrame) -> Table:
     console.print(table)
 
 
-async def generate_with_openai(model_name: str, data_list: list, args: Args, nb_completions: int):
-    config = LLMGenerationConfig(model=model_name, nb_completions=nb_completions)
+async def generate_with_openai(model_name: str, data_list: list, args: Args, genArgs: GenerationArgs):
+    config = LLMGenerationConfig(model=model_name, nb_completions=genArgs.nb_completions)
     processor = LLMProcessor(config)
     results = await processor.process_batch(data_list, args)
     return results
@@ -139,7 +138,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
             num_proc=multiprocessing.cpu_count(),
         )
         messages = ds[dataset_args.dataset_train_split]["prompt"]
-        responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args.nb_completions))
+        responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args))
         outputs = [{"outputs": [{"text": response}]} for response in responses]
 
     else:
