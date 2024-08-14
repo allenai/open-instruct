@@ -1,8 +1,8 @@
 #!/bin/bash
 
 mkdir -p output/shards
-num_prompts=326154
-num_shards=40
+num_prompts=400
+num_shards=2
 prompts_per_shard=$((num_prompts / num_shards))
 shared_hf_repo_id=rejection_sampling_$RANDOM 
 num_generations=5

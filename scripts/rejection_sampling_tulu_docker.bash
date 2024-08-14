@@ -1,14 +1,14 @@
 #!/bin/bash
 
 mkdir -p output/shards
-num_prompts=400
-num_shards=5
+num_prompts=1000
+num_shards=4
 prompts_per_shard=$((num_prompts / num_shards))
 shared_hf_repo_id=rejection_sampling_$RANDOM 
 num_generations=5
-generation_model=cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr
-reward_model=cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr
-sft_dataset=trl-internal-testing/tldr-preference-sft-trl-style
+generation_model=allenai/llama-3-tulu-2-8b
+reward_model=allenai/llama-3-tulu-2-8b-uf-mean-rm
+sft_dataset=allenai/tulu-v2-sft-mixture
 num_gpus=1
 mkdir -p output/shards/$shared_hf_repo_id
 
@@ -59,10 +59,11 @@ echo $command
 # Run the combined command
 echo "Submitting all shards in one command"
 python mason.py \
-    --cluster ai2/general-cirrascale-a5000 ai2/allennlp-cirrascale ai2/general-cirrascale-a100-80g-ib \
-    --budget ai2/allennlp \
-    --priority low \
-    --preemptible \
+    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a100-80g-ib ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
+    --image costah/open_instruct_rm \
+    --priority preemptible
+    --pure_docker_mode \
+    --budget ai2/allennlp
     --gpus $num_gpus -- $command
 
 echo "All shards submitted"
