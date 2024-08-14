@@ -194,7 +194,7 @@ def main(args: FlatArguments):
 
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        dataloader_config=DataLoaderConfiguration(use_seedable_sampler=True),
+        use_seedable_sampler=True,
         **accelerator_log_kwargs,
         kwargs_handlers=[timeout_kwargs],
     )
@@ -609,11 +609,10 @@ def main(args: FlatArguments):
     print(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
-    # set the dataloader epoch
-    train_dataloader.set_epoch(starting_epoch)
 
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
+        train_dataloader.set_epoch(epoch)
         total_loss = 0
         if last_checkpoint_path and resume_step is not None:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint
