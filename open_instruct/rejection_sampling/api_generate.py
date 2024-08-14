@@ -54,7 +54,6 @@ class LLMProcessor:
                         n=3,  # Request multiple completions
                         temperature=1,  # Sampling temperature
                         max_tokens=50,  # Maximum tokens in the response
-                        top_k=100,  # Top-K sampling
                         top_p=0.9,  # Top-P (nucleus) sampling
                         stop=None,  # Add stopping criteria if needed
                     )
