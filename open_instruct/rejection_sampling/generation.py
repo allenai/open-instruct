@@ -25,6 +25,7 @@ from typing import Optional
 import pandas as pd
 from api_generate import LLMGenerationConfig, LLMProcessor  # Import your classes
 from datasets import load_dataset
+from openai import OpenAI
 from rich.console import Console
 from rich.pretty import pprint
 from rich.table import Table
@@ -117,7 +118,17 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     else:
         use_openai = False
 
-    if not use_openai:
+    if use_openai:
+        client = OpenAI() # Make sure env variable "OPENAI_API_KEY" is set
+
+        outputs = []
+        for messages in ds[dataset_args.dataset_train_split]["messages"]:
+            chat_completion = client.chat.completions.create(
+                model=args.model_name_or_path,
+                messages=messages[:-1]
+            )
+            outputs.append({"outputs": [{"text": response.message.content} for response in chat_completion.choices]})
+    else:
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
         ds = ds.map(
@@ -127,16 +138,6 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
         prompt_token_ids = ds[dataset_args.dataset_train_split]["prompt_token_ids"]
         # Generate using vLLM.
         outputs = generate_with_vllm(args.model_name_or_path, prompt_token_ids, gen_args)
-
-    else:
-        tokenizer = AutoTokenizer.from_pretrained("allenai/llama-3-tulu-2-8b")
-        ds = ds.map(
-            lambda x: {"prompt": tokenizer.apply_chat_template(x["messages"][:-1], tokenize=False)},
-            num_proc=multiprocessing.cpu_count(),
-        )
-        messages = ds[dataset_args.dataset_train_split]["prompt"]
-        responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args.n))
-        outputs = [{"outputs": [{"text": response}]} for response in responses]
 
     # Assuming we generate n=3 completions per prompt, the outputs will look like:
     # prompt | completions
