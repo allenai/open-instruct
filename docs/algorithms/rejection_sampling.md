@@ -58,7 +58,6 @@ beaker secret write WANDB_API_KEY xxxxxxxxxxx
 # You can use docker to do the job submission
 bash scripts/rejection_sampling_tulu_docker.bash
 
-
 # if you are using mason you can debug with the following command(s), the
 # rejection sampling shards should appear in your local foldeer
 bash scripts/rejection_sampling_tulu.bash
