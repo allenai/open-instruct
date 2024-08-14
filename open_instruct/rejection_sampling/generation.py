@@ -119,15 +119,10 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
         use_openai = False
 
     if use_openai:
-        client = OpenAI() # Make sure env variable "OPENAI_API_KEY" is set
+        messages = ds[dataset_args.dataset_train_split]["messages"][:-1]
+        responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args.n))
+        outputs = [{"outputs": [{"text": response}]} for response in responses]
 
-        outputs = []
-        for messages in ds[dataset_args.dataset_train_split]["messages"]:
-            chat_completion = client.chat.completions.create(
-                model=args.model_name_or_path,
-                messages=messages[:-1]
-            )
-            outputs.append({"outputs": [{"text": response.message.content} for response in chat_completion.choices]})
     else:
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
