@@ -101,15 +101,16 @@ def generate_with_vllm(model_name_or_path: str, prompt_token_ids, gen_args: Gene
     ]
 
 
-def format_conversation(conversation: dict) -> str:
+def format_conversation(messages: list) -> str:
     formatted_conversation = []
 
-    # Iterate through the messages except the last one
-    for message in conversation["messages"][:-1]:
+    # Iterate through the messages
+    for message in messages[:-1]:  # Exclude the last assistant message
         role = "A" if message["role"] == "user" else "B"
         content = message["content"].strip()
         formatted_conversation.append(f"{role}: {content}")
 
+    # Join the conversation with a single newline
     return "\n".join(formatted_conversation)
 
 def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
