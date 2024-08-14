@@ -9,6 +9,7 @@ from openai import AsyncOpenAI
 from prompt_templates import get_generation_template, get_judgment_template
 from tqdm.asyncio import tqdm
 
+from generation import GenerationArgs
 
 @dataclass
 class LLMGenerationConfig:
@@ -34,7 +35,7 @@ class LLMProcessor:
         self.config = config
         self.async_client = AsyncOpenAI()
 
-    async def process_text(self, data: dict, i: int, limiter: asyncio.Semaphore, args: Args):
+    async def process_text(self, data: dict, i: int, limiter: asyncio.Semaphore, args: Args, gen_args: GenerationArgs):
         if args.mode == "generation":
             template = get_generation_template(args.skill)
             text = template.format(prompt=data)
@@ -51,7 +52,7 @@ class LLMProcessor:
                             {"role": "system", "content": "You are a helpful assistant."},
                             {"role": "user", "content": text},
                         ],
-                        n=args.nb_completions,  # Request multiple completions
+                        n=gen_args.nb_completions,  # Request multiple completions
                     )
                     response = response.choices[0].message.content
                     if args.mode == "generation":
@@ -70,8 +71,8 @@ class LLMProcessor:
 
         return response
 
-    async def process_batch(self, data_list: List[dict], args: Args):
+    async def process_batch(self, data_list: List[dict], args: Args, gen_args: GenerationArgs):
         limiter = asyncio.Semaphore(self.config.max_parallel_requests)
-        tasks = [self.process_text(data, i, limiter, args) for i, data in enumerate(data_list)]
+        tasks = [self.process_text(data, i, limiter, args, gen_args) for i, data in enumerate(data_list)]
         # Use tqdm to track progress
         return await tqdm.gather(*tasks, total=len(tasks), desc="Processing Batch")

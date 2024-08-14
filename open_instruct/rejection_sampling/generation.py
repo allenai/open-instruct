@@ -70,10 +70,10 @@ def print_rich_table(df: pd.DataFrame) -> Table:
     console.print(table)
 
 
-async def generate_with_openai(model_name: str, data_list: list, args: Args, genArgs: GenerationArgs):
-    config = LLMGenerationConfig(model=model_name, nb_completions=genArgs.nb_completions)
+async def generate_with_openai(model_name: str, data_list: list, args: Args, gen_args: GenerationArgs):
+    config = LLMGenerationConfig(model=model_name, nb_completions=gen_args.nb_completions)
     processor = LLMProcessor(config)
-    results = await processor.process_batch(data_list, args)
+    results = await processor.process_batch(data_list, args, gen_args)
     return results
 
 
