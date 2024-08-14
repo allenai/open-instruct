@@ -136,8 +136,6 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
             lambda x: {"prompt": format_conversation(x["messages"][:-1])},
             num_proc=multiprocessing.cpu_count(),
         )
-        # messages = [format_conversation(messages[:-1]) for messages in ds[dataset_args.dataset_train_split]["messages"]]
-
         messages = ds[dataset_args.dataset_train_split]["prompt"]
         responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args.n))
         outputs = [{"outputs": [{"text": response}]} for response in responses]
