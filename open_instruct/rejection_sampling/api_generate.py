@@ -9,7 +9,6 @@ from openai import AsyncOpenAI
 from prompt_templates import get_generation_template, get_judgment_template
 from tqdm.asyncio import tqdm
 
-from generation import GenerationArgs
 
 @dataclass
 class LLMGenerationConfig:
@@ -35,7 +34,7 @@ class LLMProcessor:
         self.config = config
         self.async_client = AsyncOpenAI()
 
-    async def process_text(self, data: dict, i: int, limiter: asyncio.Semaphore, args: Args, gen_args: GenerationArgs):
+    async def process_text(self, data: dict, i: int, limiter: asyncio.Semaphore, args: Args, gen_args: Args):
         if args.mode == "generation":
             template = get_generation_template(args.skill)
             text = template.format(prompt=data)
@@ -52,7 +51,8 @@ class LLMProcessor:
                             {"role": "system", "content": "You are a helpful assistant."},
                             {"role": "user", "content": text},
                         ],
-                        n=gen_args.nb_completions,  # Request multiple completions
+                        n=3,  # Request multiple completions
+                        # n=gen_args.nb_completions,  # Request multiple completions
                     )
                     response = response.choices[0].message.content
                     if args.mode == "generation":
