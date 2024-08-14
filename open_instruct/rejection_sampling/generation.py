@@ -106,7 +106,7 @@ def format_conversation(messages: list) -> str:
 
     # Iterate through the messages
     for message in messages[:-1]:  # Exclude the last assistant message
-        role = "A" if message["role"] == "user" else "B"
+        role = "User A" if message["role"] == "user" else "User B"
         content = message["content"].strip()
         formatted_conversation.append(f"{role}: {content}")
 
