@@ -24,7 +24,7 @@ import numpy as np
 import torch
 import torch.multiprocessing as mp
 from datasets import Dataset
-from generation import generate_with_openai
+from generation import format_conversation, generate_with_openai
 from huggingface_hub import HfApi
 from transformers import (
     AutoModelForSequenceClassification,
@@ -35,7 +35,6 @@ from transformers import (
 )
 
 from open_instruct.model_utils import get_reward
-from generation import format_conversation
 
 api = HfApi()
 
