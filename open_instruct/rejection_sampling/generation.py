@@ -44,7 +44,7 @@ class Args:
 class GenerationArgs:
     n: int = 1
     temperature: float = 0.8
-    response_length: int = 53
+    response_length: int = 2048
     tensor_parallel_size: int = 1
 
 

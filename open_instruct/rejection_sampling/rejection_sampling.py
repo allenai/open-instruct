@@ -24,7 +24,7 @@ import numpy as np
 import torch
 import torch.multiprocessing as mp
 from datasets import Dataset
-from generation import generate_with_openai
+from generation import format_conversation, generate_with_openai
 from huggingface_hub import HfApi
 from transformers import (
     AutoModelForSequenceClassification,
@@ -35,7 +35,6 @@ from transformers import (
 )
 
 from open_instruct.model_utils import get_reward
-from generation import format_conversation
 
 api = HfApi()
 
@@ -245,31 +244,28 @@ def main(args: Args):
     worst_offsets_per_model = {}
     reference_completion_scores_per_model = {}
     for model_name_or_path in args.model_names_or_paths:
-        if "gpt-3.5" in model_name_or_path or "gpt-4" in model_name_or_path:
-            use_openai = True
-        else:
-            use_openai = False
-
         results = []
-        if not use_openai:
-            with mp.Pool(args.num_gpus) as pool:
-                for i in range(args.num_gpus):
-                    results.append(pool.apply_async(process_shard, (i, model_name_or_path, args, shards[i])))
-        else:
+        # if use openai
+        if "gpt-3.5" in model_name_or_path or "gpt-4" in model_name_or_path:
             # when using LLM as a judge, num_gpus here refers to the number of shards as we query an API and we don't use GPUs
             for i in range(args.num_gpus):
                 results.append(process_shard_api(model_name_or_path, args, shards[i]))
-
-        # Collect results
-        scores = []
-        reference_completion_scores = []
-        for result in results:
-            if not use_openai:
-                item = result.get()
-            else:
-                item = result
-            scores.append(item[0])
-            reference_completion_scores.append(item[1])
+            scores = []
+            reference_completion_scores = []
+            for result in results:
+                scores.append(result[0])
+                reference_completion_scores.append(result[1])
+        else:
+            with mp.Pool(args.num_gpus) as pool:  # NOTE: the `result.get()` need to live in this `mp.Pool` context
+                for i in range(args.num_gpus):
+                    results.append(pool.apply_async(process_shard, (i, model_name_or_path, args, shards[i])))
+                # Collect results
+                scores = []
+                reference_completion_scores = []
+                for result in results:
+                    item = result.get()
+                    scores.append(item[0])
+                    reference_completion_scores.append(item[1])
 
         # Combine scores from all GPUs
         scores = torch.cat(scores)
