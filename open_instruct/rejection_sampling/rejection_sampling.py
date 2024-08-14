@@ -257,7 +257,7 @@ def main(args: Args):
                 scores.append(result[0])
                 reference_completion_scores.append(result[1])
         else:
-            with mp.Pool(args.num_gpus) as pool: # NOTE: the `result.get()` need to live in this `mp.Pool` context
+            with mp.Pool(args.num_gpus) as pool:  # NOTE: the `result.get()` need to live in this `mp.Pool` context
                 for i in range(args.num_gpus):
                     results.append(pool.apply_async(process_shard, (i, model_name_or_path, args, shards[i])))
                 # Collect results
