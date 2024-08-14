@@ -51,7 +51,7 @@ class LLMProcessor:
                             {"role": "system", "content": "You are a helpful assistant."},
                             {"role": "user", "content": text},
                         ],
-                        n=self.args.n,  # Request multiple completions
+                        n=args.n,  # Request multiple completions
                     )
                     response = response.choices[0].message.content
                     if args.mode == "generation":
