@@ -27,8 +27,7 @@ class LLMGenerationConfig:
 class Args:
     output_path: Optional[str] = None
     num_trials: int = 1
-    skill: str = "summarization"
-    mode: str = "generation"  # Can be "generation" or "judgment"
+
 
 
 class LLMProcessor:
