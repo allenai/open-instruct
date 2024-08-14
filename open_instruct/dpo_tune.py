@@ -29,7 +29,7 @@ import datasets
 import deepspeed
 import torch
 import transformers
-from accelerate import Accelerator
+from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.logging import get_logger
 from accelerate.utils import InitProcessGroupKwargs, set_seed
 from datasets import load_dataset
@@ -217,6 +217,7 @@ def main(args: FlatArguments):
 
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
+        dataloader_config=DataLoaderConfiguration(use_seedable_sampler=True),
         **accelerator_log_kwargs,
         kwargs_handlers=[timeout_kwargs],
     )
@@ -568,11 +569,13 @@ def main(args: FlatArguments):
     print(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
+    # set the dataloader epoch
+    train_dataloader.set_epoch(starting_epoch)
 
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
         total_loss = 0
-        if args.resume_from_checkpoint and epoch == starting_epoch and resume_step is not None:
+        if last_checkpoint_path and resume_step is not None:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint
             active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_step)
         else:
