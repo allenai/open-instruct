@@ -38,7 +38,7 @@ class Args:
     model_name_or_path: str = "cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr"
     save_filename: str = "completions.jsonl"
     skill: str = "chat"
-    mode: str = "generation"  # Can be "generation" or "judgment"
+    mode: str = "judgment"  # Can be "generation" or "judgment"
 
 @dataclass
 class GenerationArgs:
