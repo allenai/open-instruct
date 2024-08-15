@@ -1,7 +1,7 @@
 # Rejection sampling
 
 This is a technique used in the Llama 3 paper. The basic idea is to sample `n` (typically between 10 and 30) outputs from the latest chat model policy (usually
-the best performing checkpoint of some kind) and use a reward model to select the best candidate. In the following script, we can vary the `--n` to generate
+the best performing checkpoint of some kind) and use a reward model to select the best candidate. In the following script, we can vary the `--num_completions` to generate
 different number of completions per prompt.
 
 
@@ -14,10 +14,11 @@ This code supports HF models, local models and also API-based models (e.g., `gpt
 python open_instruct/rejection_sampling/generation.py \
     --dataset_name allenai/tulu-v2-sft-mixture \
     --model_name_or_path allenai/llama-3-tulu-2-8b \
-    --n 3 \
+    --num_completions 3 \
     --save_filename output/completions.jsonl \
     --sanity_check \
-   ```
+```
+
 ### Scoring completions
 You can use either a single RM to score responses or a list of RMs. In the latter case, we will take the majority vote to compute the final score. The RMs can be models explicitly trained as RMs, HF LMs, or API-based models.
 
@@ -27,16 +28,25 @@ python open_instruct/rejection_sampling/rejection_sampling.py \
     --input_filename output/completions.jsonl \
     --model_names_or_paths allenai/llama-3-tulu-2-8b-uf-mean-rm \
     --save_filename output/rejection_sampled_completions.jsonl \
-    --n 3 \
+    --num_completions 3 \
     --push_to_hub \
     --num_gpus 1 \
 
-# 2.2 tokenize them and run multiple reward models
-python open_instruct/rejection_sampling.py \
+# 2.2 tokenize them and run llm as a judge
+python open_instruct/rejection_sampling/rejection_sampling.py \
     --input_filename output/completions.jsonl \
-    --model_names_or_paths allenai/llama-3-tulu-2-8b-uf-mean-rm gpt-4 \
+    --model_names_or_paths gpt-4o-mini  \
     --save_filename output/rejection_sampled_completions.jsonl \
-    --n 3 \
+    --num_completions 3 \
+    --push_to_hub \
+    --num_gpus 1 \
+
+# 2.3 tokenize them and run a combination of reward models / llm as a judge
+python open_instruct/rejection_sampling/rejection_sampling.py \
+    --input_filename output/completions.jsonl \
+    --model_names_or_paths allenai/llama-3-tulu-2-8b-uf-mean-rm gpt-4o-mini gpt-4-turbo \
+    --save_filename output/rejection_sampled_completions.jsonl \
+    --num_completions 3 \
     --push_to_hub \
     --num_gpus 1 \
  ```

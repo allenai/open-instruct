@@ -137,7 +137,8 @@ def process_shard_api(model_name_or_path: str, args: Args, shard: List[str]) -> 
     # Convert the list of data items (shard) into a Hugging Face Dataset object
     raw_ds = Dataset.from_list(shard)
 
-    gen_args = GenerationArgs(args.num_completions)
+    # for judgement mode, we need to only generate `num_completions=1`
+    gen_args = GenerationArgs(num_completions=1)
 
     ds = raw_ds.map(
         lambda x: {"prompt": format_conversation(x["messages"][:-1])},
@@ -146,6 +147,10 @@ def process_shard_api(model_name_or_path: str, args: Args, shard: List[str]) -> 
     prompts = ds["prompt"]
     model_responses = ds["model_completion"]
     reference_responses = ds["reference_completion"]
+    unique_prompts = [prompts[i] for i in range(0, len(ds), args.num_completions)]  # remove duplicate prompts
+    reference_responses = [
+        reference_responses[i] for i in range(0, len(ds), args.num_completions)
+    ]  # remove duplicate reference completions
 
     data_list_model_responses = [
         {"prompt": prompt, "response": response} for prompt, response in zip(prompts, model_responses)
@@ -155,7 +160,7 @@ def process_shard_api(model_name_or_path: str, args: Args, shard: List[str]) -> 
     )
 
     data_list_reference_responses = [
-        {"prompt": prompt, "response": response} for prompt, response in zip(prompts, reference_responses)
+        {"prompt": prompt, "response": response} for prompt, response in zip(unique_prompts, reference_responses)
     ]
     reference_responses_scores = asyncio.run(
         generate_with_openai(model_name_or_path, data_list_reference_responses, args, gen_args)
@@ -287,10 +292,14 @@ def main(args: Args):
 
         best_indices = torch.argmax(scores_per_prompt, dim=1)  # (n_prompts, 1) --> (n_prompts, )
         worst_indices = torch.argmin(scores_per_prompt, dim=1)  # (n_prompts, 1) --> (n_prompts, )
-        best_indices_offset = torch.arange(0, len(best_indices) * args.num_completions, args.num_completions) + best_indices
+        best_indices_offset = (
+            torch.arange(0, len(best_indices) * args.num_completions, args.num_completions) + best_indices
+        )
         best_offsets_per_model[model_name_or_path] = best_indices_offset
 
-        worst_indices_offset = torch.arange(0, len(worst_indices) * args.num_completions, args.num_completions) + worst_indices
+        worst_indices_offset = (
+            torch.arange(0, len(worst_indices) * args.num_completions, args.num_completions) + worst_indices
+        )
         worst_offsets_per_model[model_name_or_path] = worst_indices_offset
 
     # Majority vote

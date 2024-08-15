@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional
 
+import numpy as np
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm
 
@@ -42,9 +43,11 @@ class LLMProcessor:
         if args.mode == "generation":
             template = get_generation_template(args.skill)
             text = template.format(prompt=data)
-        else:  # judgment mode
+        elif args.mode == "judgement":  # judgment mode
             template = get_judgment_template(args.skill)
             text = template.format(prompt=data["prompt"], response=data["response"])
+        else:
+            raise ValueError(f"Invalid mode: {args.mode}")
 
         async with limiter:
             while True:
@@ -65,17 +68,19 @@ class LLMProcessor:
                     completions = [choice.message.content for choice in response.choices]
                     if args.mode == "generation":
                         response = completions
-                    else:
+                    elif args.mode == "judgement":
                         # If in judgment mode, process the completions (for example, extracting scores)
-                        responses = []
+                        scores = []
                         for completion in completions:
                             match = re.search(r"Total score:\s*(\d+)", completion)
                             if match:
-                                total_score = int(match.group(1))
+                                score = int(match.group(1))
                             else:
-                                total_score = -1
-                            responses.append(total_score)
-                        response = responses
+                                score = -1
+                            scores.append(score)
+                        response = np.mean(scores)
+                    else:
+                        raise ValueError(f"Invalid mode: {args.mode}")
                     break
                 except Exception as e:
                     print(f"Error in {i}: {e}")
