@@ -37,7 +37,7 @@ sh scripts/dpo_train_with_accelerate.sh
 ## Beaker / job submission scripts
 1. `submit_eval_jobs.py`: Submit eval jobs for tasks in `scripts/evals/`. For example, llama 3 tulu 2 and upload to the tulu-3 eval database.
 ```
-python scripts/submit_eval_jobs.py --model_name llama_31_tulu_2_8b --location 01J4MGRSS3FM1J4E6XSH3459DK --is_tuned --workspace tulu-3-results --preemptible --use_hf_tokenizer_template --beaker_image hamishivi/open-instruct-hf-upload-testing --upload_to_hf allenai/tulu-3-evals//results/testing_oi_hf
+python scripts/submit_eval_jobs.py --model_name llama_31_tulu_2_8b --location 01J4MGRSS3FM1J4E6XSH3459DK --is_tuned --workspace tulu-3-results --preemptible --use_hf_tokenizer_template --beaker_image nathanl/open_instruct_olmo_auto --upload_to_hf allenai/tulu-3-evals
 ```
 2. `submit_finetune_jobs.py`: **Core script** for submitting multiple and configurable instruction tuning jobs. This script works for both single- and multi-node configurations. It by default reads configs in `configs/train_configs`, but also can take in CLI arguments matching those in `open_instruct/utils.py` `FlatArguments` class. 
 Example of running this is in `scripts/submit_finetune_jobs.sh`. 
