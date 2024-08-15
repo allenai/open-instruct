@@ -34,7 +34,11 @@ from transformers import (
 )
 
 from open_instruct.model_utils import get_reward
-from open_instruct.rejection_sampling.generation import GenerationArgs, generate_with_openai, format_conversation, format_conversation, generate_with_openai
+from open_instruct.rejection_sampling.generation import (
+    GenerationArgs,
+    format_conversation,
+    generate_with_openai,
+)
 
 api = HfApi()
 

@@ -6,8 +6,12 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from openai import AsyncOpenAI
-from prompt_templates import get_generation_template, get_judgment_template
 from tqdm.asyncio import tqdm
+
+from open_instruct.rejection_sampling.prompt_templates import (
+    get_generation_template,
+    get_judgment_template,
+)
 
 
 @dataclass

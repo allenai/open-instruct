@@ -23,13 +23,17 @@ from dataclasses import asdict, dataclass
 from typing import Optional
 
 import pandas as pd
-from api_generate import LLMGenerationConfig, LLMProcessor  # Import your classes
 from datasets import load_dataset
 from rich.console import Console
 from rich.pretty import pprint
 from rich.table import Table
 from transformers import AutoTokenizer, HfArgumentParser
 from vllm import LLM, SamplingParams
+
+from open_instruct.rejection_sampling.api_generate import (  # Import your classes
+    LLMGenerationConfig,
+    LLMProcessor,
+)
 
 
 @dataclass
