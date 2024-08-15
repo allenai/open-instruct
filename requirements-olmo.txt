@@ -29,7 +29,7 @@ flask
 vllm>=0.5.4  # for llama 3 + olmo compat.
 openpyxl
 # for ifeval
-nltk
+nltk==3.8.1
 langdetect
 immutabledict
 # for linting

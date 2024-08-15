@@ -1,3 +1,9 @@
+trash
+rejection_sampling/shards
+rejection_sampling/shards1
+token_length.png
+*.tfevents.*
+
 results
 models
 wandb

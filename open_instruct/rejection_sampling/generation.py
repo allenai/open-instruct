@@ -42,9 +42,9 @@ class Args:
 
 @dataclass
 class GenerationArgs:
-    nb_completions: int = 3
+    num_completions: int = 3
     temperature: float = 0.8
-    response_length: int = 53
+    response_length: int = 2048
     top_p: float = 0.9
     tensor_parallel_size: int = 1
 
@@ -72,7 +72,7 @@ def print_rich_table(df: pd.DataFrame) -> Table:
 
 
 async def generate_with_openai(model_name: str, data_list: list, args: Args, gen_args: GenerationArgs):
-    config = LLMGenerationConfig(model=model_name, nb_completions=gen_args.nb_completions)
+    config = LLMGenerationConfig(model=model_name, num_completions=gen_args.num_completions)
     processor = LLMProcessor(config)
     results = await processor.process_batch(data_list, args, gen_args)
     return results
@@ -83,7 +83,7 @@ def generate_with_vllm(model_name_or_path: str, prompt_token_ids, gen_args: Gene
     outputs = llm.generate(
         prompt_token_ids=prompt_token_ids,
         sampling_params=SamplingParams(
-            n=gen_args.nb_completions,
+            n=gen_args.num_completions,
             temperature=gen_args.temperature,
             top_p=1.0,
             max_tokens=gen_args.response_length,
@@ -163,7 +163,6 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     # ...
     table = defaultdict(list)
     for output, messages in zip(outputs, ds[dataset_args.dataset_train_split]["messages"]):
-
         # if the model completions are exactly the same across all completions per prompt, we can skip this
         if len(set(tuple(item["text"]) for item in output["outputs"])) == 1:
             continue

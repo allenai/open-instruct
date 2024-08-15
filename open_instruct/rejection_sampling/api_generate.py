@@ -12,7 +12,7 @@ from tqdm.asyncio import tqdm
 
 @dataclass
 class LLMGenerationConfig:
-    nb_completions: int = 64
+    num_completions: int = 64
     model: str = "gpt-3.5-turbo-0125"
     max_parallel_requests: Optional[int] = None
 
@@ -51,7 +51,7 @@ class LLMProcessor:
                             {"role": "system", "content": "You are a helpful assistant."},
                             {"role": "user", "content": text},
                         ],
-                        n=gen_args.nb_completions,  # Request multiple completions
+                        n=gen_args.num_completions,  # Request multiple completions
                         temperature=gen_args.temperature,  # Sampling temperature
                         max_tokens=gen_args.response_length,  # Maximum tokens in the response
                         top_p=gen_args.top_p,  # Top-P (nucleus) sampling

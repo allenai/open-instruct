@@ -55,9 +55,14 @@ RUN pip install -r requirements.txt
 
 # NLTK download
 RUN python -m nltk.downloader punkt
-RUN python -m nltk.downloader punkt_tab
 
 COPY open_instruct open_instruct
+
+# install the package in editable mode
+COPY pyproject.toml .
+RUN pip install -e .
+COPY .git .
+
 COPY eval eval
 COPY configs configs
 COPY scripts scripts

@@ -19,3 +19,5 @@ with_tracking: true
 report_to:
   - wandb
 logging_steps: 1
+checkpointing_steps: 1000
+keep_last_n_checkpoints: 3
