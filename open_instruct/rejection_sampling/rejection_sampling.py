@@ -48,7 +48,7 @@ class Args:
     model_names_or_paths: List[str] = field(default_factory=lambda: ["gpt-4"])
     input_filename: str = "completions.jsonl"
     save_filename: str = "rejected_sampling_completions.jsonl"
-    n: int = 1
+    num_completions: int = 1
     max_forward_batch_size: int = 64
     num_gpus: int = 1  # New argument for specifying the number of GPUs
     push_to_hub: bool = False
@@ -97,7 +97,7 @@ def process_shard(
         remove_columns=raw_ds.column_names,
     )
     reference_completion_ds = reference_completion_ds.select(
-        range(0, len(ds), args.n)
+        range(0, len(ds), args.num_completions)
     )  # remove duplicate reference completions
     # So this code handles only classification, I should also handle other models judges like Llama3
     model = AutoModelForSequenceClassification.from_pretrained(
@@ -137,7 +137,7 @@ def process_shard_api(model_name_or_path: str, args: Args, shard: List[str]) -> 
     # Convert the list of data items (shard) into a Hugging Face Dataset object
     raw_ds = Dataset.from_list(shard)
 
-    gen_args = GenerationArgs(args.n)
+    gen_args = GenerationArgs(args.num_completions)
 
     ds = raw_ds.map(
         lambda x: {"prompt": format_conversation(x["messages"][:-1])},
@@ -279,7 +279,7 @@ def main(args: Args):
         reference_completion_scores_per_model[model_name_or_path] = reference_completion_scores.tolist()
 
         # Rejection sampling
-        scores_per_prompt = scores.reshape(-1, args.n)  # (n_prompts, n_completions)
+        scores_per_prompt = scores.reshape(-1, args.num_completions)  # (n_prompts, n_completions)
         for i in range(len(completions)):
             if "score" not in completions[i]:
                 completions[i]["score"] = {}
@@ -287,10 +287,10 @@ def main(args: Args):
 
         best_indices = torch.argmax(scores_per_prompt, dim=1)  # (n_prompts, 1) --> (n_prompts, )
         worst_indices = torch.argmin(scores_per_prompt, dim=1)  # (n_prompts, 1) --> (n_prompts, )
-        best_indices_offset = torch.arange(0, len(best_indices) * args.n, args.n) + best_indices
+        best_indices_offset = torch.arange(0, len(best_indices) * args.num_completions, args.num_completions) + best_indices
         best_offsets_per_model[model_name_or_path] = best_indices_offset
 
-        worst_indices_offset = torch.arange(0, len(worst_indices) * args.n, args.n) + worst_indices
+        worst_indices_offset = torch.arange(0, len(worst_indices) * args.num_completions, args.num_completions) + worst_indices
         worst_offsets_per_model[model_name_or_path] = worst_indices_offset
 
     # Majority vote
