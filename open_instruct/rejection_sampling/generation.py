@@ -166,9 +166,11 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     # q2     | a1
     # ...
     table = defaultdict(list)
+    num_prompt_with_identical_completions = 0
     for output, messages in zip(outputs, ds[dataset_args.dataset_train_split]["messages"]):
         # if the model completions are exactly the same across all completions per prompt, we can skip this
         if len(set(tuple(item["text"]) for item in output["outputs"])) == 1:
+            num_prompt_with_identical_completions += 1
             continue
 
         for item in output["outputs"]:
@@ -178,6 +180,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
             table["model_completion"].append(item["text"])
             table["reference_completion"].append(messages[-1]["content"])
 
+    print(f"Number prompts with identical completions: {num_prompt_with_identical_completions}")
     # Save results
     os.makedirs(os.path.dirname(args.save_filename), exist_ok=True)
     with open(args.save_filename, "w") as outfile:
