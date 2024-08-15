@@ -18,21 +18,28 @@ set -ex
 # hf-upload is an optional flag to upload the results to huggingface for result tracking.
 # e.g.:
 # ./scripts/eval/oe-eval.sh --model-name olmo_17_7b_turbo_sft  --model-location beaker://01J28FDK3GDNA2C5E9JXBW1TP4 --hf-upload
-# ./scripts/eval/oe-eval.sh --model-name llama-3-tulu-2-dpo-8b --model-location allenai/llama-3-tulu-2-8b --hf-upload
+# ./scripts/eval/oe-eval.sh --model-name llama-3-tulu-2-dpo-8b --model-location allenai/llama-3-tulu-2-dpo-8b --hf-upload
 
 # Tulu eval dev suite is:
-# gsm8k::olmo1
-# drop::llama3
-# minerva_math::llama3
-# codex_humaneval
-# codex_humanevalplus
+# gsm8k::tulu
+# drop::tulu
+# minerva_math::tulu
+# codex_humaneval::tulu
+# codex_humanevalplus::tulu
 # ifeval::tulu
-# popqa
-# mmlu:mc::olmes
+# popqa::tulu
+# mmlu:mc::tulu
+
+# The following additional multiturn-fewshot variants will also be run if the --multiturn-fewshot flag is set
+# gsm8k:fsmt::tulu
+# drop:fsmt::tulu
+# minerva_math:fsmt::tulu
+# popqa:fsmt::tulu
+# mmlu:mc:fsmt::tulu
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--hf-upload]"
+    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--hf-upload] [--multiturn-fewshot]"
     exit 1
 }
 
@@ -84,7 +91,7 @@ GPU_COUNT_OTHER=2
 MODEL_TYPE_OTHER=""
 
 for TASK in "${TASKS[@]}"; do
-    if [[ "$TASK" == "mmlu:mc::olmes" ]]; then
+    if [[ "$TASK" == "mmlu:mc::tulu" ]] || [[ "$TASK" == "mmlu:mc:fsmt::tulu" ]]; then
         BATCH_SIZE=$BATCH_SIZE_OTHER
         GPU_COUNT=$GPU_COUNT_OTHER
         MODEL_TYPE=$MODEL_TYPE_OTHER
