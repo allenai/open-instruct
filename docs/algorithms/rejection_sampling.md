@@ -24,6 +24,7 @@ You can use either a single RM to score responses or a list of RMs. In the latte
 
 ```bash
 # 2.1 tokenize them and run a reward model to filter them
+# Here is an example created dataset: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_1723742650
 python open_instruct/rejection_sampling/rejection_sampling.py \
     --input_filename output/completions.jsonl \
     --model_names_or_paths allenai/llama-3-tulu-2-8b-uf-mean-rm \
@@ -33,6 +34,9 @@ python open_instruct/rejection_sampling/rejection_sampling.py \
     --num_gpus 1 \
 
 # 2.2 tokenize them and run llm as a judge
+# Note then when using LLM as a judge, it's possible that llm api failed to produce a score in our expected
+# format, so score extraction failed and we simply mark the score -1.
+# Here is an example created dataset: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_1723745040
 python open_instruct/rejection_sampling/rejection_sampling.py \
     --input_filename output/completions.jsonl \
     --model_names_or_paths gpt-4o-mini  \
@@ -42,6 +46,7 @@ python open_instruct/rejection_sampling/rejection_sampling.py \
     --num_gpus 1 \
 
 # 2.3 tokenize them and run a combination of reward models / llm as a judge
+# Here is an example created dataset: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_1723745582
 python open_instruct/rejection_sampling/rejection_sampling.py \
     --input_filename output/completions.jsonl \
     --model_names_or_paths allenai/llama-3-tulu-2-8b-uf-mean-rm gpt-4o-mini gpt-4-turbo \
