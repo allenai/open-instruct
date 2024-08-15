@@ -5,7 +5,7 @@ gradient_checkpointing: true
 tokenizer_name: /model
 use_slow_tokenizer: true
 dataset_name: valpy/uf_anteater_wildchat
-max_seq_length: 4096
+max_seq_length: 2048
 preprocessing_num_workers: 16
 per_device_train_batch_size: 1
 gradient_accumulation_steps: 4 # designed for 8 GPUs, so batch size 32
