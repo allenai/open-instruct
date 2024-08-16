@@ -9,13 +9,13 @@ dataset_mixer:
     jacobmorrison/rejection_sampling_30566: 312493
     # allenai/tulu-v2-sft-mixture: 326154
     # Tulu V3 datasets (WIP)
-    # HuggingFaceH4/no_robots: 9500 # all
-    # ai2-adapt-dev/metamath-qa-reformat: 100000
-    # ai2-adapt-dev/codefeedback-single-turn-reformat: 156526 # all
-    # nvidia/Daring-Anteater: 99532 # all
-    # # tbd:
-    # # AI-MO/NuminaMath-TIR: 72441 # all
-    # # ai2-adapt-dev/slim-orca-300k: 100000
+    HuggingFaceH4/no_robots: 9500 # all
+    ai2-adapt-dev/metamath-qa-reformat: 100000
+    ai2-adapt-dev/codefeedback-single-turn-reformat: 156526 # all
+    nvidia/Daring-Anteater: 99532 # all
+    # tbd:
+    # AI-MO/NuminaMath-TIR: 72441 # all
+    # ai2-adapt-dev/slim-orca-300k: 100000
 max_seq_length: 4096 # Note, reduced from 8192 to fit on one GPU with DeepSpeed Stage3
 preprocessing_num_workers: 128
 per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
