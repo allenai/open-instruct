@@ -16,17 +16,23 @@ For Ai2 users, these scripts all work best in interactive sessions (not in batch
 2. `finetune_qlora_with_acceralate.sh`: Script for running `open_instruct/finetune.py` with QLoRA.
 3. `finetune_with_acceralate_config.sh`: Script for running `open_instruct/finetune.py` with configs found in `configs/train_configs/sft/`. Good for reproducing results. Example usages:
 
-```
+```bash
+sh scripts/finetune_with_accelerate_config.sh 1 configs/train_configs/sft/mini.yaml
 sh scripts/finetune_with_accelerate_config.sh 1 configs/train_configs/sft/default.yaml
 sh scripts/finetune_with_accelerate_config.sh 8 configs/train_configs/sft/olmo_17_sft.yaml
 ```
+
 4. `finetune_with_acceralate.sh`: Script that the `_config` option above is based on. Uses options provided at CLI. **Change hyperparameters by manually editing or copying the script**.
 
 ## Direct Preference Optimization (DPO) scripts
+
 1. `dpo_train_with_accelerate_config.sh`: Script for running `open_instruct/dpo_tune.py` with configs found in `configs/train_configs/dpo/`. Good for reproducing results. E.g.
 ```bash
+sh scripts/dpo_train_with_accelerate_config.sh 1 configs/train_configs/dpo/mini.yaml
+sh scripts/dpo_train_with_accelerate_config.sh 1 configs/train_configs/dpo/default.yaml
 sh scripts/dpo_train_with_accelerate_config.sh 8 configs/train_configs/dpo/default.yaml
 ```
+
 2. `dpo_train_with_accelerate.sh`: Script for running `open_instruct/dpo_tune.py` directly. **Change hyperparameters by manually editing or copying the script**.
 E.g.
 ```bash
