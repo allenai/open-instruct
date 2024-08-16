@@ -5,7 +5,8 @@ tokenizer_name: meta-llama/Meta-Llama-3-8B
 use_slow_tokenizer: true
 dataset_mixer:
     # Tulu V2 datasets
-    jacobmorrison/rejection_sampling_22689: 306688
+    # jacobmorrison/rejection_sampling_22689: 306688
+    allenai/tulu-v2-sft-mixture: 326154
     # Tulu V3 datasets (WIP)
     # HuggingFaceH4/no_robots: 9500 # all
     # ai2-adapt-dev/metamath-qa-reformat: 100000
