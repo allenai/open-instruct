@@ -20,7 +20,7 @@ import multiprocessing
 import os
 from collections import defaultdict
 from dataclasses import asdict, dataclass
-from typing import Optional
+from typing import List, Optional
 
 import pandas as pd
 from datasets import load_dataset
@@ -82,8 +82,16 @@ async def generate_with_openai(model_name: str, data_list: list, args: Args, gen
     return results
 
 
-def generate_with_vllm(model_name_or_path: str, prompt_token_ids, gen_args: GenerationArgs):
+def generate_with_vllm(model_name_or_path: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
     llm = LLM(model=model_name_or_path, tensor_parallel_size=gen_args.tensor_parallel_size)
+
+    # filter out prompts which are beyond the model's max token length
+    max_model_len = llm.llm_engine.scheduler_config.max_model_len
+    prompt_token_ids_len = len(prompt_token_ids)
+    prompt_token_ids = [item for item in prompt_token_ids if len(item) < max_model_len]
+    if len(prompt_token_ids) != prompt_token_ids_len:
+        print(f"Filtered out {prompt_token_ids_len - len(prompt_token_ids)} prompts which exceeds max token length")
+
     outputs = llm.generate(
         prompt_token_ids=prompt_token_ids,
         sampling_params=SamplingParams(
@@ -132,12 +140,6 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     pprint([dataset_args, args, gen_args])
 
     if "gpt-3.5" in args.model_name_or_path or "gpt-4" in args.model_name_or_path:
-        use_openai = True
-    else:
-        use_openai = False
-
-    if use_openai:
-
         ds = ds.map(
             lambda x: {"prompt": format_conversation(x["messages"][:-1])},
             num_proc=multiprocessing.cpu_count(),
@@ -154,7 +156,6 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
             num_proc=multiprocessing.cpu_count(),
         )
         prompt_token_ids = ds[dataset_args.dataset_train_split]["prompt_token_ids"]
-        # Generate using vLLM.
         outputs = generate_with_vllm(args.model_name_or_path, prompt_token_ids, gen_args)
 
     # Assuming we generate n=3 completions per prompt; the outputs will look like:
