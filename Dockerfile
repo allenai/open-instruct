@@ -14,22 +14,11 @@ RUN apt-get update && apt-get install -y \
     jq \
     language-pack-en \
     make \
-    man-db \
-    manpages \
-    manpages-dev \
-    manpages-posix \
-    manpages-posix-dev \
     sudo \
     unzip \
     vim \
     wget \
-    fish \
     parallel \
-    iputils-ping \
-    htop \
-    emacs \
-    zsh \
-    rsync \
     tmux
 
 # This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
