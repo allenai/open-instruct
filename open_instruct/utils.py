@@ -830,9 +830,15 @@ def get_last_checkpoint_path(args: FlatArguments, incomplete: bool = False) -> s
     return last_checkpoint_path
 
 
+def is_checkpoint_folder(dir: str, folder: str) -> bool:
+    return (folder.startswith("step_") or folder.startswith("epoch_")) and os.path.isdir(os.path.join(dir, folder))
+
+
 def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> None:
     # remove the last checkpoint to save space
     if keep_last_n_checkpoints > 0:
-        checkpoints = sorted(os.listdir(output_dir), key=lambda x: int(x.split("_")[-1]))
+        folders = [f for f in os.listdir(output_dir) if is_checkpoint_folder(output_dir, f)]
+        # find the checkpoint with the largest step
+        checkpoints = sorted(folders, key=lambda x: int(x.split("_")[-1]))
         if len(checkpoints) > keep_last_n_checkpoints:
             shutil.rmtree(os.path.join(output_dir, checkpoints[0]))
