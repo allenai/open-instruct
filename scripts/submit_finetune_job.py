@@ -186,7 +186,7 @@ def main():
     })
 
     # optionally, print to debug config
-    # print(d)
+    print(d)
 
     fn = "configs/beaker_configs/auto_created/{}.yaml".format(exp_name)
     file = open(fn, "w")
@@ -194,7 +194,8 @@ def main():
     file.close()
 
     cmd = f"beaker experiment create {fn} --workspace {args.workspace}"
-    subprocess.Popen(cmd, shell=True)
+    print(cmd)
+    print(subprocess.Popen(cmd, shell=True))
 
 def check_dataset_selection(command_string):
     parts = shlex.split(command_string)
