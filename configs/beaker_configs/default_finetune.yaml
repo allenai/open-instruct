@@ -38,7 +38,7 @@ tasks:
       - name: TRANSFORMERS_CACHE
         value: ./cache/
       - name: WANDB_API_KEY
-        secret: WANDB_API_KEY
+        secret: jacobm_wandb_api_key
       - name: WANDB_PROJECT
         value: open-instruct
       - name: WANDB_WATCH
@@ -48,7 +48,7 @@ tasks:
       - name: WANDB_DISABLED
         value: true
       - name: HF_TOKEN
-        secret: HF_TOKEN
+        secret: jacobm_hf_read_token
     # datasets: # example for how to include datasets in mounting
     #   - mountPath: /data
     #     source:
