@@ -172,7 +172,7 @@ def main():
     # WANDB settings
     for env in d['tasks'][0]['envVars']:
         if env['name'] == "WANDB_DISABLED":
-            env['value'] = False
+            env['value'] = True
         if env['name'] == "WANDB_PROJECT":
             env['value'] = wandb_project
     # d['tasks'][0]['envVars'].append({
