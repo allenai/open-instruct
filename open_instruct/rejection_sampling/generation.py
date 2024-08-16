@@ -138,11 +138,15 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     for key in ds:
         ds[key] = ds[key].select(range(dataset_args.dataset_start_idx, dataset_args.dataset_end_idx))
     pprint([dataset_args, args, gen_args])
+    min_length = min(len(ds[key] for key in ds))
+    num_proc = multiprocessing.cpu_count()
+    if num_proc * 10 > min_length:
+        num_proc = 1  # if the dataset is small, we can just use one process to avoid overhead
 
     if "gpt-3.5" in args.model_name_or_path or "gpt-4" in args.model_name_or_path:
         ds = ds.map(
             lambda x: {"prompt": format_conversation(x["messages"][:-1])},
-            num_proc=multiprocessing.cpu_count(),
+            num_proc=num_proc,
         )
         messages = ds[dataset_args.dataset_train_split]["prompt"]
         responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args))
@@ -153,7 +157,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
 
         ds = ds.map(
             lambda x: {"prompt_token_ids": tokenizer.apply_chat_template(x["messages"][:-1])},
-            num_proc=multiprocessing.cpu_count(),
+            num_proc=num_proc,
         )
         prompt_token_ids = ds[dataset_args.dataset_train_split]["prompt_token_ids"]
         outputs = generate_with_vllm(args.model_name_or_path, prompt_token_ids, gen_args)
