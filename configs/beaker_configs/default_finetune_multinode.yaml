@@ -47,6 +47,8 @@ tasks:
         value: PCI_BUS_ID
       - name: TRANSFORMERS_CACHE
         value: ./cache/
+      - name: WANDB_API_KEY
+        secret: WANDB_API_KEY
       - name: WANDB_PROJECT
         value: open-instruct
       - name: WANDB_WATCH

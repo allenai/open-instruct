@@ -155,6 +155,14 @@ def conversations_to_messages(example):
     return example
 
 
+def convert_rejection_samples_to_messages(example):
+    """
+    Convert a rejection sampling dataset to messages.
+    """
+    example["messages"] = example["chosen"]
+    return example
+
+
 def get_datasets(
     dataset_mixer: Union[dict, list],
     splits: Optional[List[str]] = None,
@@ -278,6 +286,13 @@ def get_datasets(
                 and "messages" not in dataset.column_names
             ):
                 dataset = dataset.map(convert_metamath_qa_to_messages, num_proc=10)
+            elif (
+                "chosen" in dataset.column_names
+                and "rejected" in dataset.column_names
+                and "reference_completion" in dataset.column_names
+                and "messages" not in dataset.column_names
+            ):
+                dataset = dataset.map(convert_rejection_samples_to_messages, num_proc=10)
 
             # if id not in dataset, create it as ds-{index}
             if "id" not in dataset.column_names:
