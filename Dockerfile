@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y \
 # This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
 # puts the right NVIDIA things in the right place (that THOR requires).
 ENV NVIDIA_DRIVER_CAPABILITIES=graphics,utility,compute
+
 # Install conda. We give anyone in the users group the ability to run
 # conda commands and install packages in the base (default) environment.
 # Things installed into the default environment won't persist, but we prefer
@@ -35,6 +36,7 @@ RUN wget https://repo.anaconda.com/miniconda/Miniconda3-py310_23.1.0-1-Linux-x86
         | sha256sum --check \
     && bash Miniconda3-py310_23.1.0-1-Linux-x86_64.sh -b -p /opt/miniconda3 \
     && rm Miniconda3-py310_23.1.0-1-Linux-x86_64.sh
+
 ENV PATH=/opt/miniconda3/bin:/opt/miniconda3/condabin:$PATH
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 
