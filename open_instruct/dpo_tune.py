@@ -29,7 +29,7 @@ import datasets
 import deepspeed
 import torch
 import transformers
-from accelerate import Accelerator, DataLoaderConfiguration
+from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import InitProcessGroupKwargs, set_seed
 from datasets import load_dataset
@@ -59,10 +59,10 @@ from open_instruct.dpo_utils import (
 from open_instruct.utils import (
     ArgumentParserPlus,
     FlatArguments,
+    clean_last_n_checkpoints,
+    get_last_checkpoint_path,
     get_wandb_tags,
     maybe_use_ai2_wandb_entity,
-    get_last_checkpoint_path,
-    clean_last_n_checkpoints,
 )
 
 logger = get_logger(__name__)
@@ -360,7 +360,9 @@ def main(args: FlatArguments):
                     "pad_token": "<pad>",
                 }
             )
-            assert num_added_tokens <= 1, "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens)."
+            assert (
+                num_added_tokens <= 1
+            ), "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens)."
     elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
         num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
     elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast) and tokenizer.pad_token is None:
@@ -390,6 +392,8 @@ def main(args: FlatArguments):
         )
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
+    elif args.gradient_checkpointing:
+        model.gradient_checkpointing_enable()
 
     # Preprocessing the datasets.
     if "prompt" in raw_datasets["train"].column_names and "completion" in raw_datasets["train"].column_names:
@@ -404,14 +408,22 @@ def main(args: FlatArguments):
     else:
         raise ValueError("You need to have 'chosen' and 'rejected in your column names.")
 
+    train_dataset = raw_datasets["train"]
+
+    # debugging tool for fewer samples
+    if args.max_train_samples is not None:
+        max_train_samples = min(len(train_dataset), args.max_train_samples)
+        logger.info(f"Limiting training samples to {max_train_samples} from {len(train_dataset)}.")
+        train_dataset = train_dataset.select(range(max_train_samples))
+
     with accelerator.main_process_first():
-        lm_datasets = raw_datasets["train"].map(
+        train_dataset = train_dataset.map(
             encode_function,
             batched=False,
             num_proc=args.preprocessing_num_workers,
             remove_columns=[
                 name
-                for name in raw_datasets["train"].column_names
+                for name in train_dataset.column_names
                 if name
                 not in [
                     "chosen_input_ids",
@@ -424,18 +436,10 @@ def main(args: FlatArguments):
             ],
             desc="Tokenizing and reformatting instruction data",
         )
-        lm_datasets.set_format(type="pt")
+        train_dataset.set_format(type="pt")
         # our thresholding mighta meant some examples have no labels, remove.
-        lm_datasets = lm_datasets.filter(lambda example: (example["chosen_labels"] != -100).any())
-        lm_datasets = lm_datasets.filter(lambda example: (example["rejected_labels"] != -100).any())
-
-    train_dataset = lm_datasets
-
-    # debugging tool for fewer samples
-    if args.max_train_samples is not None:
-        max_train_samples = min(len(train_dataset), args.max_train_samples)
-        logger.info(f"Limiting training samples to {max_train_samples} from {len(train_dataset)}.")
-        train_dataset = train_dataset.select(range(max_train_samples))
+        train_dataset = train_dataset.filter(lambda example: (example["chosen_labels"] != -100).any())
+        train_dataset = train_dataset.filter(lambda example: (example["rejected_labels"] != -100).any())
 
     # Log a few random samples from the training set:
     for index in random.sample(range(len(train_dataset)), 3):
@@ -592,14 +596,20 @@ def main(args: FlatArguments):
         for step, batch in enumerate(active_dataloader):
             # dpo forward pass & loss
             with accelerator.accumulate(model):
-                policy_chosen_logps, policy_rejected_logps = concatenated_forward(model, batch, average_log_prob=average_log_prob)
+                policy_chosen_logps, policy_rejected_logps = concatenated_forward(
+                    model, batch, average_log_prob=average_log_prob
+                )
                 if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                     with torch.no_grad():
                         if args.use_lora:
                             with accelerator.unwrap_model(model).disable_adapter():
-                                reference_chosen_logps, reference_rejected_logps = concatenated_forward(model, batch, average_log_prob=average_log_prob)
+                                reference_chosen_logps, reference_rejected_logps = concatenated_forward(
+                                    model, batch, average_log_prob=average_log_prob
+                                )
                         else:
-                            reference_chosen_logps, reference_rejected_logps = concatenated_forward(reference_model, batch, average_log_prob=average_log_prob)
+                            reference_chosen_logps, reference_rejected_logps = concatenated_forward(
+                                reference_model, batch, average_log_prob=average_log_prob
+                            )
                     losses, _, _ = dpo_loss(
                         policy_chosen_logps,
                         policy_rejected_logps,
@@ -669,7 +679,9 @@ def main(args: FlatArguments):
                             output_dir = os.path.join(args.output_dir, output_dir)
                         accelerator.save_state(output_dir)
                         # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
-                        with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
+                        with open(
+                            os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w"
+                        ) as f:
                             f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
                         clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
 
