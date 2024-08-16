@@ -154,6 +154,7 @@ def conversations_to_messages(example):
     example["messages"] = messages
     return example
 
+
 def convert_rejection_samples_to_messages(example):
     """
     Convert a rejection sampling dataset to messages.
@@ -285,7 +286,7 @@ def get_datasets(
                 and "messages" not in dataset.column_names
             ):
                 dataset = dataset.map(convert_metamath_qa_to_messages, num_proc=10)
-            elif(
+            elif (
                 "chosen" in dataset.column_names
                 and "rejected" in dataset.column_names
                 and "reference_completion" in dataset.column_names
