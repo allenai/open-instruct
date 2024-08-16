@@ -56,7 +56,7 @@ tasks:
       - name: WANDB_LOG_MODEL
         value: false
       - name: WANDB_DISABLED
-        value: false
+        value: True
       - name: HF_TOKEN
         secret: jacobm_hf_read_token
     result:
