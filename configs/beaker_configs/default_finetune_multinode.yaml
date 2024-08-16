@@ -57,10 +57,6 @@ tasks:
         value: false
       - name: WANDB_DISABLED
         value: false
-      - name: NCCL_NET
-        value: IB
-      - name: NCCL_DEBUG
-        value: INFO
       - name: HF_TOKEN
         secret: jacobm_hf_read_token
     result:
