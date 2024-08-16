@@ -194,7 +194,7 @@ def main(args: FlatArguments):
 
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        use_seedable_sampler=True,
+        use_seedable_sampler=False,
         **accelerator_log_kwargs,
         kwargs_handlers=[timeout_kwargs],
     )
