@@ -9,7 +9,7 @@ num_completions=5
 generation_model=allenai/llama-3-tulu-2-8b
 reward_model=allenai/llama-3-tulu-2-8b-uf-mean-rm
 sft_dataset=allenai/tulu-v2-sft-mixture
-on_jupyter=false
+on_jupyter=true
 num_gpus=1
 mkdir -p output/shards/$shared_hf_repo_id
 
@@ -64,7 +64,7 @@ echo "Submitting all shards in one command"
 if [ "$on_jupyter" = true ]; then
     python mason.py \
         --cluster ai2/jupiter-cirrascale-2 \
-        --image costah/costah_open_instruct_rm \
+        --image costah/open_instruct \
         --pure_docker_mode \
         --priority low \
         --preemptible \
