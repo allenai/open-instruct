@@ -5,7 +5,7 @@ num_prompts=1000
 num_shards=4
 prompts_per_shard=$((num_prompts / num_shards))
 shared_hf_repo_id=rejection_sampling_$RANDOM 
-num_generations=5
+num_completions=5
 generation_model=allenai/llama-3-tulu-2-8b
 reward_model=allenai/llama-3-tulu-2-8b-uf-mean-rm
 sft_dataset=allenai/tulu-v2-sft-mixture
@@ -34,14 +34,14 @@ do
     --dataset_start_idx $start_idx \
     --dataset_end_idx $end_idx \
     --save_filename output/shards/$shared_hf_repo_id/$i.jsonl \
-    --n $num_generations --tensor_parallel_size $num_gpus && \
+    --num_completions $num_completions --tensor_parallel_size $num_gpus && \
     python open_instruct/rejection_sampling/rejection_sampling.py \
     --input_filename output/shards/$shared_hf_repo_id/$i.jsonl \
     --model_names_or_paths $reward_model \
     --save_filename output/shards/$shared_hf_repo_id/scores_$i.jsonl \
     --hf_repo_id $shared_hf_repo_id \
     --no_add_timestamp \
-    --n $num_generations \
+    --num_completions $num_completions \
     --push_to_hub \
     --num_gpus $num_gpus && \
     echo Finished shard $((i+1)) of $num_shards"

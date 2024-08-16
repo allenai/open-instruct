@@ -20,16 +20,20 @@ import multiprocessing
 import os
 from collections import defaultdict
 from dataclasses import asdict, dataclass
-from typing import Optional
+from typing import List, Optional
 
 import pandas as pd
-from api_generate import LLMGenerationConfig, LLMProcessor  # Import your classes
 from datasets import load_dataset
 from rich.console import Console
 from rich.pretty import pprint
 from rich.table import Table
 from transformers import AutoTokenizer, HfArgumentParser
 from vllm import LLM, SamplingParams
+
+from open_instruct.rejection_sampling.api_generate import (  # Import your classes
+    LLMGenerationConfig,
+    LLMProcessor,
+)
 
 
 @dataclass
@@ -42,9 +46,10 @@ class Args:
 
 @dataclass
 class GenerationArgs:
-    n: int = 1
+    num_completions: int = 3
     temperature: float = 0.8
     response_length: int = 2048
+    top_p: float = 0.9
     tensor_parallel_size: int = 1
 
 
@@ -70,19 +75,27 @@ def print_rich_table(df: pd.DataFrame) -> Table:
     console.print(table)
 
 
-async def generate_with_openai(model_name: str, data_list: list, args: Args, n: int):
-    config = LLMGenerationConfig(model=model_name, n=n)
+async def generate_with_openai(model_name: str, data_list: list, args: Args, gen_args: GenerationArgs):
+    config = LLMGenerationConfig(model=model_name, num_completions=gen_args.num_completions)
     processor = LLMProcessor(config)
-    results = await processor.process_batch(data_list, args)
+    results = await processor.process_batch(data_list, args, gen_args)
     return results
 
 
-def generate_with_vllm(model_name_or_path: str, prompt_token_ids, gen_args: GenerationArgs):
+def generate_with_vllm(model_name_or_path: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
     llm = LLM(model=model_name_or_path, tensor_parallel_size=gen_args.tensor_parallel_size)
+
+    # filter out prompts which are beyond the model's max token length
+    max_model_len = llm.llm_engine.scheduler_config.max_model_len
+    prompt_token_ids_len = len(prompt_token_ids)
+    prompt_token_ids = [item for item in prompt_token_ids if len(item) < max_model_len]
+    if len(prompt_token_ids) != prompt_token_ids_len:
+        print(f"Filtered out {prompt_token_ids_len - len(prompt_token_ids)} prompts which exceeds max token length")
+
     outputs = llm.generate(
         prompt_token_ids=prompt_token_ids,
         sampling_params=SamplingParams(
-            n=gen_args.n,
+            n=gen_args.num_completions,
             temperature=gen_args.temperature,
             top_p=1.0,
             max_tokens=gen_args.response_length,
@@ -127,19 +140,13 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     pprint([dataset_args, args, gen_args])
 
     if "gpt-3.5" in args.model_name_or_path or "gpt-4" in args.model_name_or_path:
-        use_openai = True
-    else:
-        use_openai = False
-
-    if use_openai:
-
         ds = ds.map(
             lambda x: {"prompt": format_conversation(x["messages"][:-1])},
             num_proc=multiprocessing.cpu_count(),
         )
         messages = ds[dataset_args.dataset_train_split]["prompt"]
-        responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args.n))
-        outputs = [{"outputs": [{"text": response}]} for response in responses]
+        responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args))
+        outputs = [{"outputs": [{"text": response} for response in responses]}]
 
     else:
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
@@ -149,10 +156,9 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
             num_proc=multiprocessing.cpu_count(),
         )
         prompt_token_ids = ds[dataset_args.dataset_train_split]["prompt_token_ids"]
-        # Generate using vLLM.
         outputs = generate_with_vllm(args.model_name_or_path, prompt_token_ids, gen_args)
 
-    # Assuming we generate n=3 completions per prompt, the outputs will look like:
+    # Assuming we generate n=3 completions per prompt; the outputs will look like:
     # prompt | completions
     # -------|------------
     # q1     | a1
@@ -161,12 +167,12 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     # q2     | a1
     # ...
     table = defaultdict(list)
+    num_prompt_with_identical_completions = 0
     for output, messages in zip(outputs, ds[dataset_args.dataset_train_split]["messages"]):
-
-        # if args.generation:
-        #     # if the model completions are exactly the same across all completions per prompt, we can skip this
-        #     if len(set(item["text"] for item in output["outputs"])) == 1:
-        #         continue
+        # if the model completions are exactly the same across all completions per prompt, we can skip this
+        if len(set(tuple(item["text"]) for item in output["outputs"])) == 1:
+            num_prompt_with_identical_completions += 1
+            continue
 
         for item in output["outputs"]:
             new_messages = copy.deepcopy(messages[:-1])
@@ -175,6 +181,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
             table["model_completion"].append(item["text"])
             table["reference_completion"].append(messages[-1]["content"])
 
+    print(f"Number prompts with identical completions: {num_prompt_with_identical_completions}")
     # Save results
     os.makedirs(os.path.dirname(args.save_filename), exist_ok=True)
     with open(args.save_filename, "w") as outfile:
