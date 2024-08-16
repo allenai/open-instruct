@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y \
     vim \
     wget \
     parallel \
+    iputils-ping \
     tmux
 
 # This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
