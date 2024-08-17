@@ -9,7 +9,7 @@ import os
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--workspace", type=str, default="oe-adapt-general")
+    parser.add_argument("--workspace", type=str, default="tulu-3-dev")
     parser.add_argument("--beaker_image", type=str, default="nathanl/open_instruct_auto", help="If given, use this Beaker image.")
     parser.add_argument("--beaker_config", type=str, default="configs/beaker_configs/default_merge.yaml")
     parser.add_argument("--merge_config", type=str, default="configs/merge_configs/example_linear_merge_config.yaml")
