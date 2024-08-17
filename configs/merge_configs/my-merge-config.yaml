@@ -7,5 +7,5 @@ models:
     weight: 0.5
   - name: llama-3-8b-tulu_v2_numina-WEIGHTED_MERGE-_simpo_2048len_ultrafeedback
     location: beaker
-    path: hamishivi/01J542ZEE4JY6JNQ8K1TMK2S8H
+    path: 01J542ZEE4JY6JNQ8K1TMK2S8H
     weight: 0.5
