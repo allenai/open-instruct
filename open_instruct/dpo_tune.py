@@ -683,7 +683,9 @@ def main(args: FlatArguments):
                             os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w"
                         ) as f:
                             f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-                        clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
+                        if accelerator.is_main_process:
+                            clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
+                        accelerator.wait_for_everyone()
 
                 if completed_steps >= args.max_train_steps:
                     break
@@ -696,7 +698,9 @@ def main(args: FlatArguments):
             # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
             with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
                 f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-            clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
+            if accelerator.is_main_process:
+                clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
+            accelerator.wait_for_everyone()
 
     if args.with_tracking:
         accelerator.end_training()
