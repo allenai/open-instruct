@@ -8,7 +8,7 @@ shared_hf_repo_id=rejection_sampling_$RANDOM
 num_completions=16
 generation_model=/model
 reward_model=allenai/llama-3-tulu-2-8b-uf-mean-rm
-sft_dataset=ai2-adapt-dev/metamath-qa-reformat
+sft_dataset=ai2-adapt-dev/metamathqa-gsm8k
 on_jupyter=true
 num_gpus=1
 mkdir -p output/shards/$shared_hf_repo_id
