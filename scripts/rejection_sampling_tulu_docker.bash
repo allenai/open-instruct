@@ -1,14 +1,14 @@
 #!/bin/bash
 
 mkdir -p output/shards
-num_prompts=156526
+num_prompts=326154
 num_shards=100
 prompts_per_shard=$((num_prompts / num_shards))
 shared_hf_repo_id=rejection_sampling_$RANDOM 
-num_completions=16
+num_completions=32
 generation_model=/model
 reward_model=allenai/llama-3-tulu-2-8b-uf-mean-rm
-sft_dataset=ai2-adapt-dev/metamath-qa-reformat
+sft_dataset=ai2-adapt-dev/llama-3-tulu-v2-sft-mixture-with-subset-llama-405b-completions-code_alpaca-open_orca-gpt4_alpaca
 on_jupyter=true
 num_gpus=1
 mkdir -p output/shards/$shared_hf_repo_id
