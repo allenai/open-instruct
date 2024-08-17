@@ -52,6 +52,7 @@ RUN pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url h
 RUN pip install packaging
 RUN pip install flash-attn==2.5.8 --no-build-isolation
 RUN pip install -r requirements.txt
+RUN pip install git+https://github.com/arcee-ai/mergekit.git
 
 # NLTK download
 RUN python -m nltk.downloader punkt
