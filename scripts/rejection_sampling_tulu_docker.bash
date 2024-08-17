@@ -1,14 +1,14 @@
 #!/bin/bash
 
 mkdir -p output/shards
-num_prompts=1000
-num_shards=4
+num_prompts=100000
+num_shards=100
 prompts_per_shard=$((num_prompts / num_shards))
 shared_hf_repo_id=rejection_sampling_$RANDOM 
-num_completions=5
-generation_model=allenai/llama-3-tulu-2-8b
+num_completions=16
+generation_model=/model
 reward_model=allenai/llama-3-tulu-2-8b-uf-mean-rm
-sft_dataset=allenai/tulu-v2-sft-mixture
+sft_dataset=ai2-adapt-dev/metamath-qa-reformat
 on_jupyter=true
 num_gpus=1
 mkdir -p output/shards/$shared_hf_repo_id
@@ -70,6 +70,7 @@ if [ "$on_jupyter" = true ]; then
         --preemptible \
         --no_mount_nfs --no_hf_cache_env \
         --budget ai2/allennlp \
+        --beaker_dataset /model:hamishivi/llama-3-8b-tulu_v2_numina-WEIGHTED_MERGE-_dpo_norm_beta5_uf_1ep
         --gpus $num_gpus -- $command
 else
     echo "Running on Mason"
