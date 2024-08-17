@@ -70,7 +70,7 @@ if [ "$on_jupyter" = true ]; then
         --preemptible \
         --no_mount_nfs --no_hf_cache_env \
         --budget ai2/allennlp \
-        --beaker_dataset /model:hamishivi/llama-3-8b-tulu_v2_numina-WEIGHTED_MERGE-_dpo_norm_beta5_uf_1ep
+        --beaker_dataset /model:hamishivi/llama-3-8b-tulu_v2_numina-WEIGHTED_MERGE-_dpo_norm_beta5_uf_1ep \
         --gpus $num_gpus -- $command
 else
     echo "Running on Mason"
