@@ -1,0 +1,11 @@
+merge_method: linear
+normalize: true
+models:
+  - name: name
+    location: beaker
+    path: jacobm/beaker-dataset
+    weight: 0.5
+  - name: name2
+    location: huggingface
+    path: allenai/llama-3-tulu-2
+    weight: 0.5
