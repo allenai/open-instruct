@@ -8,8 +8,8 @@ dataset_mixer:
     jacobmorrison/rejection_sampling_2860: 314904
     # Tulu V3 datasets (WIP)
     HuggingFaceH4/no_robots: 9500 # all
-    ai2-adapt-dev/metamath-qa-reformat: 100000
-    ai2-adapt-dev/codefeedback-single-turn-reformat: 156526 # all
+    jacobmorrison/rejection_sampling_4458: 100000
+    jacobmorrison/rejection_sampling_18769: 156493 # all
     nvidia/Daring-Anteater: 99532 # all
 max_seq_length: 4096 # Note, reduced from 8192 to fit on one GPU with DeepSpeed Stage3
 preprocessing_num_workers: 128
