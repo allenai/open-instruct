@@ -15,7 +15,7 @@ from open_instruct.rejection_sampling.prompt_templates import (
 )
 
 import anthropic
-import genai
+import google.generativeai as genai
 import os
 import time
 
