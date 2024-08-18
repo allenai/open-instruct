@@ -63,6 +63,8 @@ def main():
     with open(args.beaker_config, 'r') as f:
         beaker_yaml = f.read()
     beakerConfig = yaml.load(beaker_yaml, Loader=yaml.FullLoader)
+
+    beakerConfig['tasks'][0]['image']['beaker'] = args.beaker_image
     
     if len(beakerDatasets) > 0:
         beakerConfig["tasks"][0]["datasets"] = beakerDatasets
