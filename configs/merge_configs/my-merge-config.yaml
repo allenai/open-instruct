@@ -1,11 +1,11 @@
 merge_method: linear
 normalize: true
 models:
-  - name: L38B-rs_2860_v3.2
+  - name: L38B-rs_2860_v3.2_more_rs
     location: beaker
-    path: jacobm/L38B-rs_2860_v3.2
-    weight: 0.6
+    path: jacobm/L38B-rs_2860_v3.2_more_rs
+    weight: 0.5
   - name: L38B-rs_2860_numina
     location: beaker
     path: jacobm/L38B-rs_2860_numina
-    weight: 0.4
+    weight: 0.5
