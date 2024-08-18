@@ -4,8 +4,8 @@ models:
   - name: L38B-rs_2860_v3.2
     location: beaker
     path: jacobm/L38B-rs_2860_v3.2
-    weight: 0.5
+    weight: 0.6
   - name: L38B-rs_2860_numina
     location: beaker
     path: jacobm/L38B-rs_2860_numina
-    weight: 0.5
+    weight: 0.4
