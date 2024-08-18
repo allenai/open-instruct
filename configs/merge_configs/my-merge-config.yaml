@@ -1,11 +1,11 @@
 merge_method: linear
 normalize: true
 models:
-  - name: llama-3-8b-tulu_v2_numina-WEIGHTED_MERGE-_dpo_norm_beta5_uf_1ep
+  - name: llama_3_8b-rs_30566_v3.2
     location: beaker
-    path: hamishivi/llama-3-8b-tulu_v2_numina-WEIGHTED_MERGE-_dpo_norm_beta5_uf_1ep
+    path: jacobm/llama_3_8b-rs_30566_v3.2
     weight: 0.5
-  - name: llama-3-8b-tulu_v2_numina-WEIGHTED_MERGE-_simpo_2048len_ultrafeedback
+  - name: llama_3_8b-rs_30566_numina
     location: beaker
-    path: 01J542ZEE4JY6JNQ8K1TMK2S8H
+    path: jacobm/llama_3_8b-rs_30566_numina
     weight: 0.5
