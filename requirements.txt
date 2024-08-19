@@ -34,7 +34,7 @@ flask
 vllm>=0.4.1
 openpyxl
 # for ifeval
-nltk
+nltk==3.8.1
 langdetect
 immutabledict
 # for math evaluations
