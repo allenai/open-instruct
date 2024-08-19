@@ -1,11 +1,11 @@
 merge_method: linear
 normalize: true
 models:
-  - name: llama_3_8b-rs_30566_v3.2_more_rs
+  - name: L38B-rs_2860_v3.2-dpo_norm_beta5_uf_1ep
     location: beaker
-    path: jacobm/llama_3_8b-rs_30566_v3.2_more_rs
+    path: jacobm/L38B-rs_2860_v3.2-dpo_norm_beta5_uf_1ep
     weight: 0.6
-  - name: llama_3_8b-rs_30566_numina
+  - name: L38B-rs_2860_numina-dpo_norm_beta5_uf_1ep
     location: beaker
-    path: jacobm/llama_3_8b-rs_30566_numina
+    path: jacobm/L38B-rs_2860_numina-dpo_norm_beta5_uf_1ep
     weight: 0.4
