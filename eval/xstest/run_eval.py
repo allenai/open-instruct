@@ -43,6 +43,7 @@ def main(args):
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
+                trust_remote_code=True,
             )
         else:
             print("Loading model and tokenizer with huggingface...")

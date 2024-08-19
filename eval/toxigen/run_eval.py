@@ -84,6 +84,7 @@ def main(args):
                 tokenizer=args.tokenizer_name_or_path if args.model_name_or_path else args.model_name_or_path,
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
+                trust_remote_code=True,
             )
             stop_sequences = args.additional_stop_sequence
             # we only use stop token for non-chat format (usually applied to vanilla pretrained language models).
