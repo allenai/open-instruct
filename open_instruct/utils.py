@@ -15,9 +15,9 @@
 import dataclasses
 import logging
 import os
+import shutil
 import subprocess
 import sys
-import shutil
 from dataclasses import dataclass, field
 from typing import Any, List, NewType, Optional, Tuple, Union
 
@@ -630,10 +630,14 @@ class FlatArguments:
         },
     )
     overwrite_output_dir: bool = field(
-        default=False, metadata={"help": "Overwrite the content of the output directory. Means that resumption will always start from scratch."},
+        default=False,
+        metadata={
+            "help": "Overwrite the content of the output directory. Means that resumption will always start from scratch."
+        },
     )
     keep_last_n_checkpoints: int = field(
-        default=3, metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
+        default=3,
+        metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
     )
 
     def __post_init__(self):
@@ -659,6 +663,24 @@ class FlatArguments:
             or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
+
+
+@dataclass
+class BeakerRuntimeConfig:
+    beaker_workload_id: str
+    beaker_node_hostname: str
+    beaker_experiment_url: str
+
+
+def maybe_get_beaker_config():
+    beaker_runtime_config = None
+    if "BEAKER_JOB_ID" in os.environ:
+        beaker_runtime_config = BeakerRuntimeConfig(
+            beaker_workload_id=os.environ["BEAKER_WORKLOAD_ID"],
+            beaker_node_hostname=os.environ["BEAKER_NODE_HOSTNAME"],
+            beaker_experiment_url=f"https://beaker.org/ex/{os.environ['BEAKER_WORKLOAD_ID']}/",
+        )
+    return beaker_runtime_config
 
 
 def maybe_use_ai2_wandb_entity() -> Optional[str]:
@@ -814,8 +836,8 @@ class ArgumentParserPlus(HfArgumentParser):
 
 def get_last_checkpoint(folder: str, incomplete: bool = False) -> Optional[str]:
     content = os.listdir(folder)
-    checkpoint_steps = [path for path in content if path.startswith('step_')]
-    checkpoint_epochs = [path for path in content if path.startswith('epoch_')]
+    checkpoint_steps = [path for path in content if path.startswith("step_")]
+    checkpoint_epochs = [path for path in content if path.startswith("epoch_")]
     if len(checkpoint_steps) > 0 and len(checkpoint_epochs) > 0:
         logger.info("Mixed step and epoch checkpoints found. Using step checkpoints.")
         checkpoints = checkpoint_steps
@@ -824,10 +846,10 @@ def get_last_checkpoint(folder: str, incomplete: bool = False) -> Optional[str]:
     else:
         checkpoints = checkpoint_steps
     if not incomplete:
-        checkpoints = [path for path in checkpoints if os.path.exists(os.path.join(folder, path, 'COMPLETED'))]
+        checkpoints = [path for path in checkpoints if os.path.exists(os.path.join(folder, path, "COMPLETED"))]
     if len(checkpoints) == 0:
         return
-    return os.path.join(folder, max(checkpoints, key=lambda x: x.split('_')[-1]))
+    return os.path.join(folder, max(checkpoints, key=lambda x: x.split("_")[-1]))
 
 
 def get_last_checkpoint_path(args: FlatArguments, incomplete: bool = False) -> str:
