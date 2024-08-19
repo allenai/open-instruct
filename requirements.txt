@@ -1,5 +1,5 @@
 # TODO When updating flash-attn or torch in the future, make sure to update the version in the Dockerfile 
-torch<=2.3.0
+torch>=2.4.0
 scipy
 packaging
 sentencepiece
@@ -31,7 +31,7 @@ flask
 # if we are not using olmo models, this is fine.
 # once https://github.com/microsoft/DeepSpeed/pull/5167 is merged, we can
 # update vLLM and remove the need for a separate olmo inference file
-vllm>=0.4.1
+vllm==0.5.4
 openpyxl
 # for ifeval
 nltk

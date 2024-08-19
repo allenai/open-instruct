@@ -19,7 +19,20 @@ RUN apt-get update && apt-get install -y \
     vim \
     wget \
     parallel \
+    iputils-ping \
     tmux
+
+ARG BEAKER_VERSION
+RUN curl --silent \
+    --connect-timeout 5 \
+    --max-time 10 \
+    --retry 5 \
+    --retry-delay 0 \
+    --retry-max-time 40 \
+    --output beaker.tar.gz \
+    "https://beaker.org/api/v3/release/cli?os=linux&arch=amd64&version=${BEAKER_VERSION}" \
+    && tar -zxf beaker.tar.gz -C /usr/local/bin/ ./beaker \
+    && rm beaker.tar.gz
 
 # This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
 # puts the right NVIDIA things in the right place (that THOR requires).
@@ -39,6 +52,31 @@ RUN wget https://repo.anaconda.com/miniconda/Miniconda3-py310_23.1.0-1-Linux-x86
 ENV PATH=/opt/miniconda3/bin:/opt/miniconda3/condabin:$PATH
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 
+# Install a few additional utilities via pip
+RUN /opt/miniconda3/bin/pip install --no-cache-dir \
+    gpustat \
+    jupyter \
+    beaker-gantry \
+    oocmap
+
+# Ensure users can modify their container environment.
+RUN echo '%users ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# Make the base image friendlier for interactive workloads. This makes things like the man command
+# work.
+RUN yes | unminimize
+
+# Install MLNX OFED user-space drivers
+# See https://docs.nvidia.com/networking/pages/releaseview.action?pageId=15049785#Howto:DeployRDMAacceleratedDockercontaineroverInfiniBandfabric.-Dockerfile
+ENV MOFED_VER 5.8-1.1.2.1
+ENV OS_VER ubuntu20.04
+ENV PLATFORM x86_64
+RUN wget --quiet https://content.mellanox.com/ofed/MLNX_OFED-${MOFED_VER}/MLNX_OFED_LINUX-${MOFED_VER}-${OS_VER}-${PLATFORM}.tgz && \
+    tar -xvf MLNX_OFED_LINUX-${MOFED_VER}-${OS_VER}-${PLATFORM}.tgz && \
+    MLNX_OFED_LINUX-${MOFED_VER}-${OS_VER}-${PLATFORM}/mlnxofedinstall --basic --user-space-only --without-fw-update -q && \
+    rm -rf MLNX_OFED_LINUX-${MOFED_VER}-${OS_VER}-${PLATFORM} && \
+    rm MLNX_OFED_LINUX-${MOFED_VER}-${OS_VER}-${PLATFORM}.tgz
+
 # The -l flag makes bash act as a login shell and load /etc/profile, etc.
 ENTRYPOINT ["bash", "-l"]
 
@@ -48,15 +86,26 @@ WORKDIR /stage/
 COPY requirements.txt .
 RUN pip install --upgrade pip "setuptools<70.0.0" wheel 
 # TODO, unpin setuptools when this issue in flash attention is resolved
-RUN pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121
+RUN pip install torch==2.3.0 --index-url https://download.pytorch.org/whl/cu121
 RUN pip install packaging
 RUN pip install flash-attn==2.5.8 --no-build-isolation
 RUN pip install -r requirements.txt
 
-# NLTK download
-RUN python -m nltk.downloader punkt
+# # NLTK download
+# RUN python -m nltk.downloader punkt
 
 COPY open_instruct open_instruct
+
+# install the package in editable mode
+COPY pyproject.toml .
+RUN pip install -e .
+COPY .git .
+
+RUN pip install vllm==0.5.4
+
+# For much faster HF download speeds
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
+
 COPY eval eval
 COPY configs configs
 COPY scripts scripts
