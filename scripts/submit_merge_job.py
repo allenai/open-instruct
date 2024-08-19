@@ -66,8 +66,10 @@ def main():
 
     beakerConfig['tasks'][0]['image']['beaker'] = args.beaker_image
     beakerConfig['tasks'][0]['context']['cluster'] = args.cluster
-    # beakerConfig['tasks'][0]['context']['priority'] = args.priority
-    # beakerConfig['tasks'][0]['context']['preemptible'] = args.preemptible # True requried for Jupiter/Pluto
+    beakerConfig['tasks'][0]['context']['priority'] = args.priority
+    beakerConfig['tasks'][0]['context']['preemptible'] = args.preemptible # True requried for Jupiter/Pluto
+
+    print(beakerConfig)
     
     if len(beakerDatasets) > 0:
         beakerConfig["tasks"][0]["datasets"] = beakerDatasets
