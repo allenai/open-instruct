@@ -16,17 +16,23 @@ For Ai2 users, these scripts all work best in interactive sessions (not in batch
 2. `finetune_qlora_with_acceralate.sh`: Script for running `open_instruct/finetune.py` with QLoRA.
 3. `finetune_with_acceralate_config.sh`: Script for running `open_instruct/finetune.py` with configs found in `configs/train_configs/sft/`. Good for reproducing results. Example usages:
 
-```
+```bash
+sh scripts/finetune_with_accelerate_config.sh 1 configs/train_configs/sft/mini.yaml
 sh scripts/finetune_with_accelerate_config.sh 1 configs/train_configs/sft/default.yaml
 sh scripts/finetune_with_accelerate_config.sh 8 configs/train_configs/sft/olmo_17_sft.yaml
 ```
+
 4. `finetune_with_acceralate.sh`: Script that the `_config` option above is based on. Uses options provided at CLI. **Change hyperparameters by manually editing or copying the script**.
 
 ## Direct Preference Optimization (DPO) scripts
+
 1. `dpo_train_with_accelerate_config.sh`: Script for running `open_instruct/dpo_tune.py` with configs found in `configs/train_configs/dpo/`. Good for reproducing results. E.g.
 ```bash
+sh scripts/dpo_train_with_accelerate_config.sh 1 configs/train_configs/dpo/mini.yaml
+sh scripts/dpo_train_with_accelerate_config.sh 1 configs/train_configs/dpo/default.yaml
 sh scripts/dpo_train_with_accelerate_config.sh 8 configs/train_configs/dpo/default.yaml
 ```
+
 2. `dpo_train_with_accelerate.sh`: Script for running `open_instruct/dpo_tune.py` directly. **Change hyperparameters by manually editing or copying the script**.
 E.g.
 ```bash
@@ -36,8 +42,12 @@ sh scripts/dpo_train_with_accelerate.sh
 
 ## Beaker / job submission scripts
 1. `submit_eval_jobs.py`: Submit eval jobs for tasks in `scripts/evals/`. For example, llama 3 tulu 2 and upload to the tulu-3 eval database.
-```
-python scripts/submit_eval_jobs.py --model_name llama_31_tulu_2_8b --location 01J4MGRSS3FM1J4E6XSH3459DK --is_tuned --workspace tulu-3-results --preemptible --use_hf_tokenizer_template --beaker_image hamishivi/open-instruct-hf-upload-testing --upload_to_hf allenai/tulu-3-evals//results/testing_oi_hf
+```bash
+# submit evals on a model in beaker dataset
+python scripts/submit_eval_jobs.py --model_name llama_31_tulu_2_8b --location 01J4MGRSS3FM1J4E6XSH3459DK --is_tuned --workspace tulu-3-results --preemptible --use_hf_tokenizer_template --beaker_image nathanl/open_instruct_olmo_auto --upload_to_hf allenai/tulu-3-evals
+
+# submit evals on a model in huggingface; note you need to 1) prepend the model name with `hf-` and 2) replace `--location` with the hf repo id
+python scripts/submit_eval_jobs.py --model_name hf-llama_31_tulu_2_8b --location allenai/llama-3-tulu-2-8b --is_tuned --workspace tulu-3-results --preemptible --use_hf_tokenizer_template --beaker_image nathanl/open_instruct_olmo_auto --upload_to_hf allenai/tulu-3-evals
 ```
 2. `submit_finetune_jobs.py`: **Core script** for submitting multiple and configurable instruction tuning jobs. This script works for both single- and multi-node configurations. It by default reads configs in `configs/train_configs`, but also can take in CLI arguments matching those in `open_instruct/utils.py` `FlatArguments` class. 
 Example of running this is in `scripts/submit_finetune_jobs.sh`. 
@@ -52,6 +62,12 @@ To use this for multi-node jobs, here is an example that runs IFT on 4 nodes:
 ```
 python scripts/submit_finetune_job.py --default_beaker_config configs/beaker_configs/default_finetune_multinode.yaml --config configs/train_configs/sft/tulu3_8b_preview_mix_v3.1.yaml --cluster ai2/jupiter-cirrascale-2 --workspace ai2/tulu-3-dev --num_nodes 4
 ```
+
+3. `submit_dpo_job.py`: **Core script** for submitting DPO tuning jobs. It should behave like the finetune script, but additionally can take in beaker datasets to mount via `--datasets`, e.g.:
+```
+python scripts/submit_dpo_job.py --config configs/train_configs/dpo/my_dpo_config.yaml --datasets my_beaker_id:/model --experiment_name my_experiment_name
+```
+In this case, we also ask you provide an experiment name, as we don't know the name of the model being finetuned if it is mounted to `/model`.
 
 
 ### Docker-less job submssions

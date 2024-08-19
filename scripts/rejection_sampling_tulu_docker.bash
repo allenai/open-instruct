@@ -9,6 +9,7 @@ num_completions=5
 generation_model=allenai/llama-3-tulu-2-8b
 reward_model=allenai/llama-3-tulu-2-8b-uf-mean-rm
 sft_dataset=allenai/tulu-v2-sft-mixture
+on_jupyter=true
 num_gpus=1
 mkdir -p output/shards/$shared_hf_repo_id
 
@@ -58,11 +59,28 @@ echo $command
 
 # Run the combined command
 echo "Submitting all shards in one command"
-python mason.py \
-    --cluster ai2/general-cirrascale-a5000 ai2/allennlp-cirrascale ai2/general-cirrascale-a100-80g-ib \
+# if running on juptyer, use the following command
+
+if [ "$on_jupyter" = true ]; then
+    python mason.py \
+        --cluster ai2/jupiter-cirrascale-2 \
+        --image costah/open_instruct \
+        --pure_docker_mode \
+        --priority low \
+        --preemptible \
+        --no_mount_nfs --no_hf_cache_env \
+        --budget ai2/allennlp \
+        --gpus $num_gpus -- $command
+else
+    echo "Running on Mason"
+    python mason.py \
+    --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
+    --image costah/open_instruct \
+    --pure_docker_mode \
     --priority low \
     --preemptible \
     --budget ai2/allennlp \
     --gpus $num_gpus -- $command
+fi
 
 echo "All shards submitted"

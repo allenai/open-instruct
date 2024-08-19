@@ -18,7 +18,7 @@
 from .utils import ArgumentParserPlus, FlatArguments, get_datasets
 
 # Run as module for local imports, e.g.:
-# python -m open_instruct.mix_data configs/train_configs/sft/default.yaml --save_data_dir=output/tmp/
+# python -m open_instruct.mix_data configs/train_configs/sft/default.yaml --dataset_mix_dir=output/tmp/
 # can pass --save_to_hub=allenai/tulu-v3.1-mix-preview-4096-OLMoE
 
 
@@ -35,6 +35,7 @@ def main():
         splits=["train"],
         save_data_dir=args.dataset_mix_dir,  # location where dataset is saved as json
         columns_to_keep=["messages"],
+        keep_ids=True,
     )
 
     # print first 5 samples of dataset
@@ -43,7 +44,7 @@ def main():
 
     # if args.save_to_hub is not none, push dataset to hub
     if args.save_to_hub:
-        raw_datasets["train"].push_to_hub(args.save_to_hub)
+        raw_datasets["train"].push_to_hub(args.save_to_hub, private=True)
 
 
 if __name__ == "__main__":

@@ -17,10 +17,12 @@ import logging
 import os
 import subprocess
 import sys
+import shutil
 from dataclasses import dataclass, field
 from typing import Any, List, NewType, Optional, Tuple, Union
 
 import requests
+from accelerate.logging import get_logger
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
@@ -28,6 +30,7 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
+logger = get_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
 
@@ -152,6 +155,14 @@ def conversations_to_messages(example):
     return example
 
 
+def convert_rejection_samples_to_messages(example):
+    """
+    Convert a rejection sampling dataset to messages.
+    """
+    example["messages"] = example["chosen"]
+    return example
+
+
 def get_datasets(
     dataset_mixer: Union[dict, list],
     splits: Optional[List[str]] = None,
@@ -160,6 +171,7 @@ def get_datasets(
     shuffle: bool = True,
     save_data_dir: Optional[str] = None,
     need_columns: Optional[List[str]] = None,
+    keep_ids: bool = False,
 ) -> DatasetDict:
     """
     Loads and mixes datasets according to proportions specified in `dataset_mixer`.
@@ -184,6 +196,9 @@ def get_datasets(
         need_columns (Optional[List[str]], *optional*, defaults to `None`):
             Column names that are required to be in the dataset.
             Quick debugging when mixing heterogeneous datasets.
+        keep_ids (`bool`, *optional*, defaults to `False`):
+            Whether to keep ids for training that are added during mixing.
+            Used primarily in mix_data.py for saving, or the saved dataset has IDs already.
     """
     if isinstance(dataset_mixer, list):
         assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
@@ -271,6 +286,13 @@ def get_datasets(
                 and "messages" not in dataset.column_names
             ):
                 dataset = dataset.map(convert_metamath_qa_to_messages, num_proc=10)
+            elif (
+                "chosen" in dataset.column_names
+                and "rejected" in dataset.column_names
+                and "reference_completion" in dataset.column_names
+                and "messages" not in dataset.column_names
+            ):
+                dataset = dataset.map(convert_rejection_samples_to_messages, num_proc=10)
 
             # if id not in dataset, create it as ds-{index}
             if "id" not in dataset.column_names:
@@ -345,13 +367,14 @@ def get_datasets(
         for split in raw_datasets:
             raw_datasets[split].to_json(save_data_dir + f"mixed_ds_{split}.json")
 
-    # remove id column
-    if len(raw_train_datasets) > 0:
-        if "id" in raw_datasets["train"].column_names:
-            raw_datasets["train"] = raw_datasets["train"].remove_columns("id")
-    if len(raw_val_datasets) > 0:
-        if "id" in raw_datasets["test"].column_names:
-            raw_datasets["test"] = raw_datasets["test"].remove_columns("id")
+    if not keep_ids:
+        # remove id column
+        if len(raw_train_datasets) > 0:
+            if "id" in raw_datasets["train"].column_names:
+                raw_datasets["train"] = raw_datasets["train"].remove_columns("id")
+        if len(raw_val_datasets) > 0:
+            if "id" in raw_datasets["test"].column_names:
+                raw_datasets["test"] = raw_datasets["test"].remove_columns("id")
 
     return raw_datasets
 
@@ -383,6 +406,18 @@ class FlatArguments:
     dpo_beta: float = field(
         default=0.1,
         metadata={"help": "Beta parameter for DPO loss. Default is 0.1."},
+    )
+    dpo_loss_type: str = field(
+        default="dpo",
+        metadata={"help": "Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."},
+    )
+    dpo_gamma_beta_ratio: float = field(
+        default=0.3,
+        metadata={"help": "Gamma to beta ratio for SimPO loss. Default is 0.3. Not used for DPO loss."},
+    )
+    dpo_label_smoothing: float = field(
+        default=0.0,
+        metadata={"help": "Label smoothing for DPO/SimPO loss. Default is 0 (no smoothing)."},
     )
     tokenizer_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
@@ -594,6 +629,12 @@ class FlatArguments:
             "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
         },
     )
+    overwrite_output_dir: bool = field(
+        default=False, metadata={"help": "Overwrite the content of the output directory. Means that resumption will always start from scratch."},
+    )
+    keep_last_n_checkpoints: int = field(
+        default=3, metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
+    )
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -769,3 +810,50 @@ class ArgumentParserPlus(HfArgumentParser):
         if len(output) == 1:
             output = output[0]
         return output
+
+
+def get_last_checkpoint(folder: str, incomplete: bool = False) -> Optional[str]:
+    content = os.listdir(folder)
+    checkpoint_steps = [path for path in content if path.startswith('step_')]
+    checkpoint_epochs = [path for path in content if path.startswith('epoch_')]
+    if len(checkpoint_steps) > 0 and len(checkpoint_epochs) > 0:
+        logger.info("Mixed step and epoch checkpoints found. Using step checkpoints.")
+        checkpoints = checkpoint_steps
+    elif len(checkpoint_steps) == 0:
+        checkpoints = checkpoint_epochs
+    else:
+        checkpoints = checkpoint_steps
+    if not incomplete:
+        checkpoints = [path for path in checkpoints if os.path.exists(os.path.join(folder, path, 'COMPLETED'))]
+    if len(checkpoints) == 0:
+        return
+    return os.path.join(folder, max(checkpoints, key=lambda x: x.split('_')[-1]))
+
+
+def get_last_checkpoint_path(args: FlatArguments, incomplete: bool = False) -> str:
+    # if output already exists and user does not allow overwriting, resume from there.
+    # otherwise, resume if the user specifies a checkpoint.
+    # else, start from scratch.
+    # if incomplete is true, include folders without "COMPLETE" in the folder.
+    last_checkpoint_path = None
+    if args.output_dir and os.path.isdir(args.output_dir) and not args.overwrite_output_dir:
+        last_checkpoint_path = get_last_checkpoint(args.output_dir, incomplete=incomplete)
+        if last_checkpoint_path is None:
+            logger.warning("Output directory exists but no checkpoint found. Starting from scratch.")
+    elif args.resume_from_checkpoint:
+        last_checkpoint_path = args.resume_from_checkpoint
+    return last_checkpoint_path
+
+
+def is_checkpoint_folder(dir: str, folder: str) -> bool:
+    return (folder.startswith("step_") or folder.startswith("epoch_")) and os.path.isdir(os.path.join(dir, folder))
+
+
+def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> None:
+    # remove the last checkpoint to save space
+    if keep_last_n_checkpoints > 0:
+        folders = [f for f in os.listdir(output_dir) if is_checkpoint_folder(output_dir, f)]
+        # find the checkpoint with the largest step
+        checkpoints = sorted(folders, key=lambda x: int(x.split("_")[-1]))
+        if len(checkpoints) > keep_last_n_checkpoints:
+            shutil.rmtree(os.path.join(output_dir, checkpoints[0]))

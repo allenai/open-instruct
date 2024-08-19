@@ -53,10 +53,14 @@ from open_instruct.dpo_utils import (
     DataCollatorForSeq2SeqDPO,
     concatenated_forward,
     dpo_loss,
+    simpo_loss,
+    wpo_loss,
 )
 from open_instruct.utils import (
     ArgumentParserPlus,
     FlatArguments,
+    clean_last_n_checkpoints,
+    get_last_checkpoint_path,
     get_wandb_tags,
     maybe_use_ai2_wandb_entity,
 )
@@ -215,6 +219,7 @@ def main(args: FlatArguments):
 
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
+        use_seedable_sampler=True,
         **accelerator_log_kwargs,
         kwargs_handlers=[timeout_kwargs],
     )
@@ -317,10 +322,14 @@ def main(args: FlatArguments):
         return model
 
     model = load_model()
-    if not args.use_lora:
-        reference_model = load_model()
+    # only simpo is reference model free rn
+    if args.dpo_loss_type != "simpo":
+        if not args.use_lora:
+            reference_model = load_model()
+        else:
+            reference_model = model
     else:
-        reference_model = model
+        reference_model = None
 
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
@@ -351,7 +360,9 @@ def main(args: FlatArguments):
                     "pad_token": "<pad>",
                 }
             )
-            assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
+            assert (
+                num_added_tokens <= 1
+            ), "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens)."
     elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
         num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
     elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast) and tokenizer.pad_token is None:
@@ -381,6 +392,8 @@ def main(args: FlatArguments):
         )
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
+    elif args.gradient_checkpointing:
+        model.gradient_checkpointing_enable()
 
     # Preprocessing the datasets.
     if "prompt" in raw_datasets["train"].column_names and "completion" in raw_datasets["train"].column_names:
@@ -395,14 +408,22 @@ def main(args: FlatArguments):
     else:
         raise ValueError("You need to have 'chosen' and 'rejected in your column names.")
 
+    train_dataset = raw_datasets["train"]
+
+    # debugging tool for fewer samples
+    if args.max_train_samples is not None:
+        max_train_samples = min(len(train_dataset), args.max_train_samples)
+        logger.info(f"Limiting training samples to {max_train_samples} from {len(train_dataset)}.")
+        train_dataset = train_dataset.select(range(max_train_samples))
+
     with accelerator.main_process_first():
-        lm_datasets = raw_datasets["train"].map(
+        train_dataset = train_dataset.map(
             encode_function,
             batched=False,
             num_proc=args.preprocessing_num_workers,
             remove_columns=[
                 name
-                for name in raw_datasets["train"].column_names
+                for name in train_dataset.column_names
                 if name
                 not in [
                     "chosen_input_ids",
@@ -415,18 +436,10 @@ def main(args: FlatArguments):
             ],
             desc="Tokenizing and reformatting instruction data",
         )
-        lm_datasets.set_format(type="pt")
+        train_dataset.set_format(type="pt")
         # our thresholding mighta meant some examples have no labels, remove.
-        lm_datasets = lm_datasets.filter(lambda example: (example["chosen_labels"] != -100).any())
-        lm_datasets = lm_datasets.filter(lambda example: (example["rejected_labels"] != -100).any())
-
-    train_dataset = lm_datasets
-
-    # debugging tool for fewer samples
-    if args.max_train_samples is not None:
-        max_train_samples = min(len(train_dataset), args.max_train_samples)
-        logger.info(f"Limiting training samples to {max_train_samples} from {len(train_dataset)}.")
-        train_dataset = train_dataset.select(range(max_train_samples))
+        train_dataset = train_dataset.filter(lambda example: (example["chosen_labels"] != -100).any())
+        train_dataset = train_dataset.filter(lambda example: (example["rejected_labels"] != -100).any())
 
     # Log a few random samples from the training set:
     for index in random.sample(range(len(train_dataset)), 3):
@@ -498,7 +511,8 @@ def main(args: FlatArguments):
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
-    if not args.use_lora:
+    # reference model may not be none with e.g. SimPO loss.
+    if not args.use_lora and reference_model is not None:
         reference_model = prepare_deepspeed(accelerator, reference_model)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
@@ -510,7 +524,7 @@ def main(args: FlatArguments):
 
     # Figure out how many steps we should save the Accelerator states
     checkpointing_steps = args.checkpointing_steps
-    if checkpointing_steps is not None and checkpointing_steps.isdigit():
+    if checkpointing_steps is not None and checkpointing_steps.lower() != "epoch":
         checkpointing_steps = int(checkpointing_steps)
 
     # We need to initialize the trackers we use, and also store our configuration.
@@ -544,22 +558,13 @@ def main(args: FlatArguments):
     starting_epoch = 0
 
     # Potentially load in the weights and states from a previous save
-    if args.resume_from_checkpoint:
-        if args.resume_from_checkpoint is not None or args.resume_from_checkpoint != "":
-            checkpoint_path = args.resume_from_checkpoint
-            path = os.path.basename(args.resume_from_checkpoint)
-        else:
-            # Get the most recent checkpoint
-            dirs = [f.name for f in os.scandir(os.getcwd()) if f.is_dir()]
-            dirs.sort(key=os.path.getctime)
-            path = dirs[-1]  # Sorts folders by date modified, most recent checkpoint is the last
-            checkpoint_path = path
-            path = os.path.basename(checkpoint_path)
-
-        accelerator.print(f"Resumed from checkpoint: {checkpoint_path}")
-        accelerator.load_state(path)
+    last_checkpoint_path = get_last_checkpoint_path(args)
+    if last_checkpoint_path:
+        accelerator.print(f"Resumed from checkpoint: {last_checkpoint_path}")
+        accelerator.load_state(last_checkpoint_path)
         # Extract `epoch_{i}` or `step_{i}`
-        training_difference = os.path.splitext(path)[0]
+        last_checkpoint_path = os.path.basename(last_checkpoint_path)
+        training_difference = os.path.splitext(last_checkpoint_path)[0]
 
         if "epoch" in training_difference:
             starting_epoch = int(training_difference.replace("epoch_", "")) + 1
@@ -572,34 +577,68 @@ def main(args: FlatArguments):
             completed_steps = resume_step // args.gradient_accumulation_steps
             resume_step -= starting_epoch * len(train_dataloader)
 
+    print(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
 
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
+        train_dataloader.set_epoch(epoch)
         total_loss = 0
-        if args.resume_from_checkpoint and epoch == starting_epoch and resume_step is not None:
+        if last_checkpoint_path and resume_step is not None:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint
             active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_step)
         else:
             active_dataloader = train_dataloader
+        # we need to average the log probs for simpo loss
+        average_log_prob_loss_types = ["simpo", "dpo_norm"]
+        average_log_prob = args.dpo_loss_type in average_log_prob_loss_types
         for step, batch in enumerate(active_dataloader):
             # dpo forward pass & loss
             with accelerator.accumulate(model):
-                policy_chosen_logps, policy_rejected_logps = concatenated_forward(model, batch)
-                with torch.no_grad():
-                    if args.use_lora:
-                        with accelerator.unwrap_model(model).disable_adapter():
-                            reference_chosen_logps, reference_rejected_logps = concatenated_forward(model, batch)
-                    else:
-                        reference_chosen_logps, reference_rejected_logps = concatenated_forward(reference_model, batch)
-                losses, _, _ = dpo_loss(
-                    policy_chosen_logps,
-                    policy_rejected_logps,
-                    reference_chosen_logps,
-                    reference_rejected_logps,
-                    beta=args.dpo_beta,
+                policy_chosen_logps, policy_rejected_logps = concatenated_forward(
+                    model, batch, average_log_prob=average_log_prob
                 )
+                if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
+                    with torch.no_grad():
+                        if args.use_lora:
+                            with accelerator.unwrap_model(model).disable_adapter():
+                                reference_chosen_logps, reference_rejected_logps = concatenated_forward(
+                                    model, batch, average_log_prob=average_log_prob
+                                )
+                        else:
+                            reference_chosen_logps, reference_rejected_logps = concatenated_forward(
+                                reference_model, batch, average_log_prob=average_log_prob
+                            )
+                    losses, _, _ = dpo_loss(
+                        policy_chosen_logps,
+                        policy_rejected_logps,
+                        reference_chosen_logps,
+                        reference_rejected_logps,
+                        beta=args.dpo_beta,
+                        label_smoothing=args.dpo_label_smoothing,
+                    )
+                elif args.dpo_loss_type == "simpo":
+                    losses, _, _ = simpo_loss(
+                        policy_chosen_logps,
+                        policy_rejected_logps,
+                        beta=args.dpo_beta,
+                        gamma_beta_ratio=args.dpo_gamma_beta_ratio,
+                        label_smoothing=args.dpo_label_smoothing,
+                    )
+                elif args.dpo_loss_type == "wpo":
+                    losses, _, _ = wpo_loss(
+                        policy_chosen_logps,
+                        policy_rejected_logps,
+                        reference_chosen_logps,
+                        reference_rejected_logps,
+                        beta=args.dpo_beta,
+                        label_smoothing=args.dpo_label_smoothing,
+                        chosen_loss_mask=batch["chosen_labels"] != -100,
+                        rejected_loss_mask=batch["rejected_labels"] != -100,
+                    )
+                else:
+                    raise ValueError(f"Invalid dpo loss type {args.dpo_loss_type}.")
                 # TODO: metric logging
                 loss = losses.mean()
                 # We keep track of the loss at each logged step
@@ -638,7 +677,15 @@ def main(args: FlatArguments):
                         output_dir = f"step_{completed_steps}"
                         if args.output_dir is not None:
                             output_dir = os.path.join(args.output_dir, output_dir)
-                        save_with_accelerate(accelerator, model, tokenizer, output_dir, args)
+                        accelerator.save_state(output_dir)
+                        # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
+                        with open(
+                            os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w"
+                        ) as f:
+                            f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
+                        if accelerator.is_main_process:
+                            clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
+                        accelerator.wait_for_everyone()
 
                 if completed_steps >= args.max_train_steps:
                     break
@@ -647,11 +694,18 @@ def main(args: FlatArguments):
             output_dir = f"epoch_{epoch}"
             if args.output_dir is not None:
                 output_dir = os.path.join(args.output_dir, output_dir)
-            save_with_accelerate(accelerator, model, tokenizer, output_dir, args)
+            accelerator.save_state(output_dir)
+            # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
+            with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
+                f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
+            if accelerator.is_main_process:
+                clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
+            accelerator.wait_for_everyone()
 
     if args.with_tracking:
         accelerator.end_training()
 
+    # save normally at the end
     if args.output_dir is not None:
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)
