@@ -74,7 +74,7 @@ parser.add_argument("--model_name", type=str, default="hf-opt-7B")
 parser.add_argument("--location", type=str, default=None)
 parser.add_argument("--beaker_image", type=str, default="hamishivi/open-instruct-eval", help="If given, use this Beaker image.")
 parser.add_argument("--beaker_subfolder", type=str, default=None)
-parser.add_argument("--cluster", nargs='+', default=["ai2/allennlp-cirrascale", "ai2/general-cirrascale", "ai2/general-cirrascale-a100-80g-ib", "ai2/s2-cirrascale-l40"])
+parser.add_argument("--cluster", nargs='+', default=["ai2/allennlp-cirrascale", "ai2/pluto-cirrascale"])
 parser.add_argument("--is_tuned", action="store_true")
 parser.add_argument("--use_hf_tokenizer_template", action="store_true")
 parser.add_argument("--priority", type=str, default="low")
@@ -117,27 +117,27 @@ if args.beaker_image is not None:
 
 # modify here, or use "--experiments", for different set of experiments
 experiment_groups_default = [
-    # "mmlu_0shot",
-    # # "mmlu_5shot",
-    # # "gsm_direct",
-    # "gsm_cot",
-    # # "MATH_cot",
-    # # "bbh_direct",
-    # "bbh_cot",
-    # # "tydiqa_goldp_1shot",
-    # # "tydiqa_no_context_1shot",
-    # # "codex_eval_temp_0.1",
-    # "codex_eval_temp_0.8",
-    # # "codex_evalplus_temp_0.1",
-    # # "codex_evalplus_temp_0.8",
-    # # "mbpp_evalplus_temp_0.1",
-    # # "mbpp_evalplus_temp_0.8",
-    # "ifeval",
+    "mmlu_0shot",
+    # "mmlu_5shot",
+    # "gsm_direct",
+    "gsm_cot",
+    # "MATH_cot",
+    # "bbh_direct",
+    "bbh_cot",
+    # "tydiqa_goldp_1shot",
+    # "tydiqa_no_context_1shot",
+    # "codex_eval_temp_0.1",
+    "codex_eval_temp_0.8",
+    # "codex_evalplus_temp_0.1",
+    # "codex_evalplus_temp_0.8",
+    # "mbpp_evalplus_temp_0.1",
+    # "mbpp_evalplus_temp_0.8",
+    "ifeval",
     "trutufulqa",
-    # "toxigen",
-    # "xstest",
-    # "alpaca_eval",
-    # "alpaca_eval_2",
+    "toxigen",
+    "xstest",
+    "alpaca_eval",
+    "alpaca_eval_2",
 ]
 experiment_groups = args.experiments or experiment_groups_default
 
@@ -513,9 +513,9 @@ for experiment_group in experiment_groups:
         ]
 
     # if any([x in model_info[0] for x in ["opt", "pythia", "falcon"]]) or "olmoe" in model_info[0]:
-    if "--use_vllm" in task_spec['arguments'][0]:
-        print(f"Removing --use_vllm for {model_info[0]}")
-        task_spec['arguments'] = [task_spec['arguments'][0].replace("--use_vllm", "")] 
+    # if "--use_vllm" in task_spec['arguments'][0]:
+        # print(f"Removing --use_vllm for {model_info[0]}")
+        # task_spec['arguments'] = [task_spec['arguments'][0].replace("--use_vllm", "")] 
 
     # Add additional stop sequences if needed.
     # mainly for llama-3-instruct eot.

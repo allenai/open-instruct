@@ -1,0 +1,46 @@
+version: v2
+description: open-instruct-finetune-olmoe-annealed
+tasks:
+  - name: open-instruct-finetune-olmoe-c
+    replicas: 4
+    leaderSelection: true
+    hostNetworking: true
+    image:
+      beaker: jacobm/open-instruct-olmoe-ds-fixed-save-and-evals-for-real
+    command: [/bin/sh, -c]
+    arguments: [' unset CUDA_LAUNCH_BLOCKING && accelerate launch --mixed_precision bf16 --num_machines 4 --num_processes 32 --machine_rank $BEAKER_REPLICA_RANK --main_process_ip $BEAKER_LEADER_REPLICA_HOSTNAME --main_process_port 29400 --use_deepspeed --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf --deepspeed_multinode_launcher standard open_instruct/finetune.py --model_name_or_path allenai/OLMoE-7B-A1B --tokenizer_name allenai/OLMoE-7B-A1B --dataset_name allenai/tulu-v3.1-mix-preview-4096-OLMoE --use_flash_attn --max_seq_length 4096 --preprocessing_num_workers 16 --per_device_train_batch_size 2 --gradient_accumulation_steps 2 --learning_rate 2e-5 --lr_scheduler_type linear --warmup_ratio 0.03 --weight_decay 0. --num_train_epochs 2 --output_dir /output/ --with_tracking --report_to tensorboard --logging_steps 1 --reduce_loss sum --add_bos --model_revision step1223842-tokens5100B --tokenizer_revision step1223842-tokens5100B ']
+    envVars:
+      - name: CUDA_DEVICE_ORDER
+        value: PCI_BUS_ID
+      - name: TRANSFORMERS_CACHE
+        value: ./cache/
+      - name: WANDB_PROJECT
+        value: olmoe
+      - name: WANDB_WATCH
+        value: "false"
+      - name: WANDB_LOG_MODEL
+        value: "false"
+      - name: WANDB_DISABLED
+        value: "false"
+      - name: NCCL_NET
+        value: IB
+      - name: NCCL_DEBUG
+        value: INFO
+      - name: HF_TOKEN
+        secret: jacobm_hf_read_token
+    datasets:
+      - mountPath: /data
+        subPath: jacobm/tulu-3-dev/data
+        source:
+          weka: oe-adapt-default
+    result:
+      path: /output
+    resources:
+      gpuCount: 8
+    context:
+      priority: urgent
+      preemptible: true
+    constraints:
+      cluster:
+        - ai2/jupiter-cirrascale-2
+    hostNetworking: true

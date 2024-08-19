@@ -231,7 +231,13 @@ def load_hf_lm(
 
     # Loading OLMo models from HF requires `trust_remote_code=True`.
     # TODO: Implement this via command-line flag rather than hardcoded list.
-    trusted_models = ["allenai/OLMo-7B", "allenai/OLMo-7B-Twin-2T", "allenai/OLMo-1B"]
+    trusted_models = [
+        "allenai/OLMo-7B",
+        "allenai/OLMo-7B-Twin-2T",
+        "allenai/OLMo-1B",
+        "deepseek-ai/deepseek-moe-16b-base",
+        "deepseek-ai/deepseek-moe-16b-chat"
+    ]
     if model_name_or_path in trusted_models:
         trust_remote_code = True
     else:
