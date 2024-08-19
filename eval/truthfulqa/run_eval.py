@@ -278,11 +278,13 @@ def main(args):
         print("Loading model and tokenizer...")
         tokenizer = load_hf_tokenizer(
             model_name_or_path=args.model_name_or_path,
+            revision=args.hf_revision,
             tokenizer_name_or_path=args.tokenizer_name_or_path,
             use_fast_tokenizer=not args.use_slow_tokenizer,
         )
         model = load_hf_lm(
             model_name_or_path=args.model_name_or_path, 
+            revision=args.hf_revision,
             load_in_8bit=args.load_in_8bit, 
             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
             gptq_model=args.gptq,

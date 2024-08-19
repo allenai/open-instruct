@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, List, NewType, Optional, Tuple, Union
 
 import requests
+from huggingface_hub import HfApi
 from accelerate.logging import get_logger
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
@@ -653,8 +654,8 @@ class FlatArguments:
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
     hf_repo_url: Optional[str] = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    output_dir: Optional[str] = None
-    """Where to save the model"""
+    launch_beaker_eval_jobs: bool = False
+    """Whether to launch beaker evaluation jobs after training"""
 
 
     def __post_init__(self):
@@ -902,3 +903,40 @@ def maybe_use_ai2_wandb_entity() -> Optional[str]:
         return "ai2-llm"
     else:
         return None
+
+
+def maybe_use_ai2_hf_entity() -> Optional[str]:
+    """Ai2 internal logic: try use the allenai entity if possible. Should not affect external users."""
+    orgs = HfApi().whoami()
+    orgs = [item["name"] for item in orgs["orgs"]]
+    if "allenai" in orgs:
+        return "allenai"
+    else:
+        return None
+    
+
+def submit_beaker_eval_jobs(hf_repo_id: str, hf_repo_revision: str) -> None:
+
+    command = f'''
+    python scripts/submit_eval_jobs.py \
+        --model_name hf-{hf_repo_revision} \
+        --hf_revision {hf_repo_revision} \
+        --location {hf_repo_id} \
+        --is_tuned \
+        --workspace tulu-3-results \
+        --preemptible \
+        --use_hf_tokenizer_template \
+        --beaker_image nathanl/open_instruct_olmo_auto \
+        --upload_to_hf allenai/tulu-3-evals
+    '''
+
+    process = subprocess.Popen(['bash', '-c', command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+
+    print("STDOUT:")
+    print(stdout.decode())
+
+    print("STDERR:")
+    print(stderr.decode())
+
+    print(f"Exit code: {process.returncode}")

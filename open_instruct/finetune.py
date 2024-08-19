@@ -20,11 +20,14 @@ import os
 import random
 from datetime import timedelta
 from functools import partial
+import time
+import uuid
 
 import datasets
 import deepspeed
 import torch
 import transformers
+from huggingface_hub import HfApi
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import InitProcessGroupKwargs, set_seed
@@ -46,6 +49,7 @@ from transformers import (
     get_scheduler,
 )
 
+from open_instruct.model_utils import save_with_accelerate
 from open_instruct.utils import (
     ArgumentParserPlus,
     FlatArguments,
@@ -54,7 +58,9 @@ from open_instruct.utils import (
     get_last_checkpoint_path,
     get_wandb_tags,
     maybe_get_beaker_config,
+    maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
+    submit_beaker_eval_jobs,
 )
 
 logger = get_logger(__name__)
@@ -150,40 +156,24 @@ def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=Fals
     }
 
 
-def save_with_accelerate(accelerator, model, tokenizer, output_dir, args):
-    # set the generation config to an empty setting to be safe.
-    # we usually do greedy decoding for generation, so this should be okay.
-    # otherwise, we get an error thrown at save time.
-    model.generation_config = transformers.GenerationConfig(
-        temperature=None, top_p=None, eos_token_id=tokenizer.eos_token_id, bos_token_id=tokenizer.bos_token_id
-    )
-
-    unwrapped_model = accelerator.unwrap_model(model)
-    # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
-    # Otherwise, sometimes the model will be saved with only part of the parameters.
-    # Also, accelerator needs to use the wrapped model to get the state_dict.
-    state_dict = accelerator.get_state_dict(model)
-    if args.use_lora:
-        # When using lora, the unwrapped model is a PeftModel, which doesn't support the is_main_process
-        # and has its own save_pretrained function for only saving lora modules.
-        # We have to manually specify the is_main_process outside the save_pretrained function.
-        if accelerator.is_main_process:
-            unwrapped_model.save_pretrained(output_dir, state_dict=state_dict)
-    else:
-        # don't use safetensors for saving for now
-        unwrapped_model.save_pretrained(
-            output_dir,
-            is_main_process=accelerator.is_main_process,
-            save_function=accelerator.save,
-            state_dict=state_dict,
-            safe_serialization=False,
-        )
-
-
 def main(args: FlatArguments):
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
+    exp_name = os.path.basename(__file__)[: -len(".py")]
+    if args.push_to_hub:
+        if args.hf_repo_id is None:  # auto-generate one
+            args.hf_repo_id = "open_instruct_dev"
+        if args.hf_entity is None: # first try to use AI2 entity
+            args.hf_entity = maybe_use_ai2_hf_entity()
+        if args.hf_entity is None: # then try to use the user's entity
+            args.hf_entity = HfApi().whoami()["name"]
+        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
+        if args.hf_repo_revision is None:  # auto-generate one
+            args.hf_repo_revision = f"{exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
+        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+
+
     accelerator_log_kwargs = {}
 
     if args.with_tracking:
@@ -569,7 +559,6 @@ def main(args: FlatArguments):
         beaker_config = maybe_get_beaker_config()
         if beaker_config is not None:
             experiment_config.update(vars(beaker_config))
-        exp_name = os.path.basename(__file__)[: -len(".py")]
         accelerator.init_trackers(
             "open_instruct_internal",
             experiment_config,
@@ -714,7 +703,18 @@ def main(args: FlatArguments):
     if args.output_dir is not None:
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)
-        save_with_accelerate(accelerator, model, tokenizer, args.output_dir, args)
+        save_with_accelerate(
+            accelerator,
+            model,
+            tokenizer,
+            args.output_dir,
+            args.use_lora,
+            args.push_to_hub,
+            args.hf_repo_id,
+            args.hf_repo_revision,
+        )
+    if accelerator.is_main_process and args.launch_beaker_eval_jobs:
+        submit_beaker_eval_jobs(args.hf_repo_id, args.hf_repo_revision)
 
     accelerator.wait_for_everyone()
     if args.with_tracking:
