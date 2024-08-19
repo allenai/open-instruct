@@ -22,10 +22,10 @@ from dataclasses import dataclass, field
 from typing import Any, List, NewType, Optional, Tuple, Union
 
 import requests
-from huggingface_hub import HfApi
 from accelerate.logging import get_logger
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
+from huggingface_hub import HfApi
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
@@ -657,7 +657,6 @@ class FlatArguments:
     launch_beaker_eval_jobs: bool = False
     """Whether to launch beaker evaluation jobs after training"""
 
-
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
             raise ValueError("reduce_loss must be either 'mean' or 'sum'")
@@ -913,11 +912,11 @@ def maybe_use_ai2_hf_entity() -> Optional[str]:
         return "allenai"
     else:
         return None
-    
+
 
 def submit_beaker_eval_jobs(hf_repo_id: str, hf_repo_revision: str) -> None:
 
-    command = f'''
+    command = f"""
     python scripts/submit_eval_jobs.py \
         --model_name hf-{hf_repo_revision} \
         --hf_revision {hf_repo_revision} \
@@ -928,9 +927,9 @@ def submit_beaker_eval_jobs(hf_repo_id: str, hf_repo_revision: str) -> None:
         --use_hf_tokenizer_template \
         --beaker_image nathanl/open_instruct_olmo_auto \
         --upload_to_hf allenai/tulu-3-evals
-    '''
+    """
 
-    process = subprocess.Popen(['bash', '-c', command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
 
     print("STDOUT:")

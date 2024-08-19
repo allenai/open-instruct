@@ -18,20 +18,19 @@ import logging
 import math
 import os
 import random
+import time
 from datetime import timedelta
 from functools import partial
-import time
-import uuid
 
 import datasets
 import deepspeed
 import torch
 import transformers
-from huggingface_hub import HfApi
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import InitProcessGroupKwargs, set_seed
 from datasets import load_dataset
+from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
@@ -164,15 +163,16 @@ def main(args: FlatArguments):
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
-        if args.hf_entity is None: # first try to use AI2 entity
+        if args.hf_entity is None:  # first try to use AI2 entity
             args.hf_entity = maybe_use_ai2_hf_entity()
-        if args.hf_entity is None: # then try to use the user's entity
+        if args.hf_entity is None:  # then try to use the user's entity
             args.hf_entity = HfApi().whoami()["name"]
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
         if args.hf_repo_revision is None:  # auto-generate one
-            args.hf_repo_revision = f"{exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
+            args.hf_repo_revision = (
+                f"{exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
+            )
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-
 
     accelerator_log_kwargs = {}
 
