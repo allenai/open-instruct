@@ -47,6 +47,8 @@ Commented out Args not currently used
 """
 
 
+# ----------------------------------------------------------------------------
+# Dataset utilities
 def is_openai_format(messages: Any) -> bool:
     """
     Check if the input messages are in OpenAI format.
@@ -379,6 +381,8 @@ def get_datasets(
     return raw_datasets
 
 
+# ----------------------------------------------------------------------------
+# Arguments utilities
 @dataclass
 class FlatArguments:
     """
@@ -639,6 +643,19 @@ class FlatArguments:
         default=3,
         metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
     )
+    push_to_hub: bool = True
+    """Whether to upload the saved model to huggingface"""
+    hf_entity: Optional[str] = None
+    """The user or org name of the model repository from the Hugging Face Hub"""
+    hf_repo_id: Optional[str] = None
+    """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
+    hf_repo_revision: Optional[str] = None
+    """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
+    hf_repo_url: Optional[str] = None
+    """The url of the saved model in the Hugging Face Hub (will be autoset)"""
+    output_dir: Optional[str] = None
+    """Where to save the model"""
+
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -663,100 +680,6 @@ class FlatArguments:
             or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
-
-
-@dataclass
-class BeakerRuntimeConfig:
-    beaker_workload_id: str
-    beaker_node_hostname: str
-    beaker_experiment_url: str
-
-
-def maybe_get_beaker_config():
-    beaker_runtime_config = None
-    if "BEAKER_JOB_ID" in os.environ:
-        beaker_runtime_config = BeakerRuntimeConfig(
-            beaker_workload_id=os.environ["BEAKER_WORKLOAD_ID"],
-            beaker_node_hostname=os.environ["BEAKER_NODE_HOSTNAME"],
-            beaker_experiment_url=f"https://beaker.org/ex/{os.environ['BEAKER_WORKLOAD_ID']}/",
-        )
-    return beaker_runtime_config
-
-
-def maybe_use_ai2_wandb_entity() -> Optional[str]:
-    """Ai2 internal logic: try use the ai2-llm team if possible. Should not affect external users."""
-    import wandb
-
-    wandb.login()
-    api = wandb.Api()
-    current_user = api.viewer
-    teams = current_user.teams
-    if "ai2-llm" in teams:
-        return "ai2-llm"
-    else:
-        return None
-
-
-def get_git_tag() -> str:
-    """Try to get the latest Git tag (e.g., `no-tag-404-g98dc659` or `v1.0.0-4-g98dc659`)"""
-    git_tag = ""
-    try:
-        git_tag = (
-            subprocess.check_output(["git", "describe", "--tags"], stderr=subprocess.DEVNULL).decode("ascii").strip()
-        )
-    except subprocess.CalledProcessError as e:
-        logging.debug(f"Failed to get Git tag: {e}")
-
-    # If no Git tag found, create a custom tag based on commit count and hash
-    if len(git_tag) == 0:
-        try:
-            count = int(
-                subprocess.check_output(["git", "rev-list", "--count", "HEAD"], stderr=subprocess.DEVNULL)
-                .decode("ascii")
-                .strip()
-            )
-            hash = (
-                subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL)
-                .decode("ascii")
-                .strip()
-            )
-            git_tag = f"no-tag-{count}-g{hash}"
-        except subprocess.CalledProcessError as e:
-            logging.debug(f"Failed to get commit count and hash: {e}")
-
-    return git_tag
-
-
-def get_pr_tag() -> str:
-    """Try to find associated pull request on GitHub (e.g., `pr-123`)"""
-    pr_tag = ""
-    try:
-        git_commit = (
-            subprocess.check_output(["git", "rev-parse", "--verify", "HEAD"], stderr=subprocess.DEVNULL)
-            .decode("ascii")
-            .strip()
-        )
-        # try finding the pull request number on github
-        prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
-        if prs.status_code == 200:
-            prs = prs.json()
-            if len(prs["items"]) > 0:
-                pr = prs["items"][0]
-                pr_number = pr["number"]
-                pr_tag = f"pr-{pr_number}"
-    except Exception as e:
-        logging.debug(f"Failed to get PR number: {e}")
-
-    return pr_tag
-
-
-def get_wandb_tags() -> List[str]:
-    """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123`)"""
-    existing_wandb_tags = os.environ.get("WANDB_TAGS", "")
-    git_tag = get_git_tag()
-    pr_tag = get_pr_tag()
-    non_empty_tags = [tag for tag in [existing_wandb_tags, git_tag, pr_tag] if len(tag) > 0]
-    return non_empty_tags
 
 
 class ArgumentParserPlus(HfArgumentParser):
@@ -834,6 +757,72 @@ class ArgumentParserPlus(HfArgumentParser):
         return output
 
 
+# ----------------------------------------------------------------------------
+# Experiment tracking utilities
+def get_git_tag() -> str:
+    """Try to get the latest Git tag (e.g., `no-tag-404-g98dc659` or `v1.0.0-4-g98dc659`)"""
+    git_tag = ""
+    try:
+        git_tag = (
+            subprocess.check_output(["git", "describe", "--tags"], stderr=subprocess.DEVNULL).decode("ascii").strip()
+        )
+    except subprocess.CalledProcessError as e:
+        logging.debug(f"Failed to get Git tag: {e}")
+
+    # If no Git tag found, create a custom tag based on commit count and hash
+    if len(git_tag) == 0:
+        try:
+            count = int(
+                subprocess.check_output(["git", "rev-list", "--count", "HEAD"], stderr=subprocess.DEVNULL)
+                .decode("ascii")
+                .strip()
+            )
+            hash = (
+                subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL)
+                .decode("ascii")
+                .strip()
+            )
+            git_tag = f"no-tag-{count}-g{hash}"
+        except subprocess.CalledProcessError as e:
+            logging.debug(f"Failed to get commit count and hash: {e}")
+
+    return git_tag
+
+
+def get_pr_tag() -> str:
+    """Try to find associated pull request on GitHub (e.g., `pr-123`)"""
+    pr_tag = ""
+    try:
+        git_commit = (
+            subprocess.check_output(["git", "rev-parse", "--verify", "HEAD"], stderr=subprocess.DEVNULL)
+            .decode("ascii")
+            .strip()
+        )
+        # try finding the pull request number on github
+        prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
+        if prs.status_code == 200:
+            prs = prs.json()
+            if len(prs["items"]) > 0:
+                pr = prs["items"][0]
+                pr_number = pr["number"]
+                pr_tag = f"pr-{pr_number}"
+    except Exception as e:
+        logging.debug(f"Failed to get PR number: {e}")
+
+    return pr_tag
+
+
+def get_wandb_tags() -> List[str]:
+    """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123`)"""
+    existing_wandb_tags = os.environ.get("WANDB_TAGS", "")
+    git_tag = get_git_tag()
+    pr_tag = get_pr_tag()
+    non_empty_tags = [tag for tag in [existing_wandb_tags, git_tag, pr_tag] if len(tag) > 0]
+    return non_empty_tags
+
+
+# ----------------------------------------------------------------------------
+# Check pointing utilities
 def get_last_checkpoint(folder: str, incomplete: bool = False) -> Optional[str]:
     content = os.listdir(folder)
     checkpoint_steps = [path for path in content if path.startswith("step_")]
@@ -879,3 +868,37 @@ def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> N
         checkpoints = sorted(folders, key=lambda x: int(x.split("_")[-1]))
         if len(checkpoints) > keep_last_n_checkpoints:
             shutil.rmtree(os.path.join(output_dir, checkpoints[0]))
+
+
+# ----------------------------------------------------------------------------
+# Ai2 user utilities
+@dataclass
+class BeakerRuntimeConfig:
+    beaker_workload_id: str
+    beaker_node_hostname: str
+    beaker_experiment_url: str
+
+
+def maybe_get_beaker_config():
+    beaker_runtime_config = None
+    if "BEAKER_JOB_ID" in os.environ:
+        beaker_runtime_config = BeakerRuntimeConfig(
+            beaker_workload_id=os.environ["BEAKER_WORKLOAD_ID"],
+            beaker_node_hostname=os.environ["BEAKER_NODE_HOSTNAME"],
+            beaker_experiment_url=f"https://beaker.org/ex/{os.environ['BEAKER_WORKLOAD_ID']}/",
+        )
+    return beaker_runtime_config
+
+
+def maybe_use_ai2_wandb_entity() -> Optional[str]:
+    """Ai2 internal logic: try use the ai2-llm team if possible. Should not affect external users."""
+    import wandb
+
+    wandb.login()
+    api = wandb.Api()
+    current_user = api.viewer
+    teams = current_user.teams
+    if "ai2-llm" in teams:
+        return "ai2-llm"
+    else:
+        return None

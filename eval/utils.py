@@ -213,7 +213,8 @@ def score_completions(model, tokenizer, scoring_examples, batch_size=1, aggregat
 
 
 def load_hf_lm(
-        model_name_or_path, 
+        model_name_or_path,
+        revision=None,
         device_map="auto", 
         torch_dtype="auto",
         load_in_8bit=False, 
@@ -240,6 +241,7 @@ def load_hf_lm(
     elif load_in_8bit:
         model = AutoModelForCausalLM.from_pretrained(
             model_name_or_path, 
+            revision=revision,
             device_map=device_map, 
             load_in_8bit=True,
             token=token,
@@ -270,6 +272,7 @@ def load_hf_lm(
 
 def load_hf_tokenizer(
         model_name_or_path, 
+        revision=None,
         tokenizer_name_or_path=None, 
         use_fast_tokenizer=True,
         padding_side="left",
@@ -279,10 +282,10 @@ def load_hf_tokenizer(
         if not tokenizer_name_or_path:
             tokenizer_name_or_path = model_name_or_path
         try:
-            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=use_fast_tokenizer, token=token)
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=use_fast_tokenizer, token=token, revision=revision)
         except:
             # some tokenizers (e.g., GPTNeoXTokenizer) don't have the slow or fast version, so we just roll back to the default one
-            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, token=token)
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, token=token, revision=revision)
         # set padding side to left for batch generation
         tokenizer.padding_side = padding_side
         # set pad token to eos token if pad token is not set (as is the case for llama models)
@@ -293,6 +296,7 @@ def load_hf_tokenizer(
 
 def load_hf_lm_and_tokenizer(
         model_name_or_path, 
+        revision=None,
         tokenizer_name_or_path=None,
         device_map="auto", 
         torch_dtype="auto",
@@ -305,6 +309,7 @@ def load_hf_lm_and_tokenizer(
     ):
         tokenizer = load_hf_tokenizer(
             model_name_or_path=model_name_or_path,
+            revision=revision,
             tokenizer_name_or_path=tokenizer_name_or_path,
             use_fast_tokenizer=use_fast_tokenizer,
             padding_side=padding_side,
@@ -312,6 +317,7 @@ def load_hf_lm_and_tokenizer(
         )
         model = load_hf_lm(
             model_name_or_path=model_name_or_path,
+            revision=revision,
             device_map=device_map,
             torch_dtype=torch_dtype,
             load_in_8bit=load_in_8bit,
