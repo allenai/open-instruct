@@ -48,6 +48,7 @@ python scripts/submit_eval_jobs.py --model_name llama_31_tulu_2_8b --location 01
 
 # submit evals on a model in huggingface; note you need to 1) prepend the model name with `hf-` and 2) replace `--location` with the hf repo id
 python scripts/submit_eval_jobs.py --model_name hf-llama_31_tulu_2_8b --location allenai/llama-3-tulu-2-8b --is_tuned --workspace tulu-3-results --preemptible --use_hf_tokenizer_template --beaker_image nathanl/open_instruct_olmo_auto --upload_to_hf allenai/tulu-3-evals
+python scripts/submit_eval_jobs.py --model_name hf-llama_31_tulu_2_8b --location vwxyzjn/online_dpo_tulu_2 --is_tuned --workspace tulu-3-results --preemptible --use_hf_tokenizer_template --beaker_image nathanl/open_instruct_olmo_auto --upload_to_hf allenai/tulu-3-evals
 ```
 2. `submit_finetune_jobs.py`: **Core script** for submitting multiple and configurable instruction tuning jobs. This script works for both single- and multi-node configurations. It by default reads configs in `configs/train_configs`, but also can take in CLI arguments matching those in `open_instruct/utils.py` `FlatArguments` class. 
 Example of running this is in `scripts/submit_finetune_jobs.sh`. 
@@ -93,10 +94,10 @@ After setting it up successfully, say you are running `sh scripts/dpo_train_with
 
 ```bash
 python mason.py \
-    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/general-cirrascale-a100-80g-ib \
+    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000  \
     --priority low \
     --budget ai2/allennlp \
-    --gpus 1 -- sh scripts/dpo_train_with_accelerate_config.sh 8 configs/train_configs/dpo/default.yaml
+    --gpus 8 -- sh scripts/dpo_train_with_accelerate_config.sh 8 configs/train_configs/dpo/default.yaml
 ```
 
 
