@@ -33,6 +33,7 @@ from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import InitProcessGroupKwargs, set_seed
 from datasets import load_dataset
+from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
@@ -63,7 +64,9 @@ from open_instruct.utils import (
     get_last_checkpoint_path,
     get_wandb_tags,
     maybe_get_beaker_config,
+    maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
+    submit_beaker_eval_jobs,
 )
 
 logger = get_logger(__name__)
@@ -209,6 +212,21 @@ def main(args: FlatArguments):
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
+    exp_name = os.path.basename(__file__)[: -len(".py")]
+    if args.push_to_hub:
+        if args.hf_repo_id is None:  # auto-generate one
+            args.hf_repo_id = "open_instruct_dev"
+        if args.hf_entity is None:  # first try to use AI2 entity
+            args.hf_entity = maybe_use_ai2_hf_entity()
+        if args.hf_entity is None:  # then try to use the user's entity
+            args.hf_entity = HfApi().whoami()["name"]
+        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
+        if args.hf_repo_revision is None:  # auto-generate one
+            args.hf_repo_revision = (
+                f"{exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
+            )
+        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+
     accelerator_log_kwargs = {}
 
     if args.with_tracking:
@@ -487,8 +505,8 @@ def main(args: FlatArguments):
         overrode_max_train_steps = True
 
     # Create the learning rate scheduler.
-    # Note: the current accelerator.step() calls the .step() of the
-    # real scheduler for the `num_processes` times. This is because they assume
+    # Note: the current accelerator.step() calls the .step() of the real scheduler
+    # for the `num_processes` times. This is because they assume
     # the user initialize the scheduler with the entire training set.
     # In the case of data parallel training, each process only
     # sees a subset (1/num_processes) of the training set.
@@ -507,7 +525,6 @@ def main(args: FlatArguments):
         num_training_steps=num_training_steps_for_scheduler,
         num_warmup_steps=int(num_training_steps_for_scheduler * args.warmup_ratio),
     )
-
     # Prepare everything with `accelerator`.
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
@@ -541,7 +558,6 @@ def main(args: FlatArguments):
         beaker_config = maybe_get_beaker_config()
         if beaker_config is not None:
             experiment_config.update(vars(beaker_config))
-        exp_name = os.path.basename(__file__)[: -len(".py")]
         accelerator.init_trackers(
             "open_instruct_internal",
             experiment_config,
@@ -696,7 +712,7 @@ def main(args: FlatArguments):
                 if completed_steps >= args.max_train_steps:
                     break
 
-        if args.checkpointing_steps == "epoch":
+        if checkpointing_steps == "epoch":
             output_dir = f"epoch_{epoch}"
             if args.output_dir is not None:
                 output_dir = os.path.join(args.output_dir, output_dir)
@@ -708,14 +724,21 @@ def main(args: FlatArguments):
                 clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
             accelerator.wait_for_everyone()
 
-    if args.with_tracking:
-        accelerator.end_training()
-
-    # save normally at the end
     if args.output_dir is not None:
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)
-        save_with_accelerate(accelerator, model, tokenizer, args.output_dir, args)
+        save_with_accelerate(
+            accelerator,
+            model,
+            tokenizer,
+            args.output_dir,
+            args.use_lora,
+            args.push_to_hub,
+            args.hf_repo_id,
+            args.hf_repo_revision,
+        )
+    if accelerator.is_main_process and args.launch_beaker_eval_jobs:
+        submit_beaker_eval_jobs(args.hf_repo_id, args.hf_repo_revision)
 
     accelerator.wait_for_everyone()
     if args.with_tracking:

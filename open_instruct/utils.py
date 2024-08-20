@@ -925,7 +925,7 @@ def submit_beaker_eval_jobs(hf_repo_id: str, hf_repo_revision: str) -> None:
         --workspace tulu-3-results \
         --preemptible \
         --use_hf_tokenizer_template \
-        --beaker_image nathanl/open_instruct_olmo_auto \
+        --beaker_image costah/open_instruct_test \
         --upload_to_hf allenai/tulu-3-evals
     """
 

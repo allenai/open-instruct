@@ -516,10 +516,10 @@ def main(args: FlatArguments):
     # sees a subset (1/num_processes) of the training set.
     # So each time the process needs to update the lr multiple times so that the total
     # number of updates in the end matches the num_training_steps here.
-    # Here we need to set the num_training_steps to either using
-    # the entire training set (when epochs is specified) or we need to multiply the
-    # num_training_steps by num_processes so that the total number
-    # of updates matches the num_training_steps.
+    # Here we need to set the num_training_steps to either using the
+    # entire training set (when epochs is specified) or we need to multiply the
+    # num_training_steps by num_processes so that the total number of
+    # updates matches the num_training_steps.
     num_training_steps_for_scheduler = (
         args.max_train_steps if overrode_max_train_steps else args.max_train_steps * accelerator.num_processes
     )
@@ -699,7 +699,6 @@ def main(args: FlatArguments):
                 clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
             accelerator.wait_for_everyone()
 
-    # dont save state, just model to the top-level dir.
     if args.output_dir is not None:
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)
