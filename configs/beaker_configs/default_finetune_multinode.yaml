@@ -57,6 +57,10 @@ tasks:
         value: false
       - name: WANDB_DISABLED
         value: true
+      - name: NCCL_SOCKET_IFNAME
+        value: ib
+      - name: NCCL_IB_HCA
+        value: ^=mlx5_bond_0
       - name: NCCL_NET
         value: IB
       - name: NCCL_DEBUG

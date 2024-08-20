@@ -132,6 +132,18 @@ def convert_open_orca_to_messages(example):
     return example
 
 
+def convert_coconot_to_messages(example):
+    """
+    Convert a prompt-response pair to a list of messages.
+    e.g. Coconot"""
+    messages = [
+        {"role": "user", "content": example["prompt"]},
+        {"role": "assistant", "content": example["response"]},
+    ]
+    example["messages"] = messages
+    return example
+
+
 def conversations_to_messages(example):
     """
     Convert from conversations format to messages.
@@ -293,6 +305,12 @@ def get_datasets(
                 and "messages" not in dataset.column_names
             ):
                 dataset = dataset.map(convert_rejection_samples_to_messages, num_proc=10)
+            elif (
+                "prompt" in dataset.column_names
+                and "response" in dataset.column_names
+                and "messages" not in dataset.column_names
+            ): 
+                dataset = dataset.map(convert_coconot_to_messages, num_proc=10)
 
             # if id not in dataset, create it as ds-{index}
             if "id" not in dataset.column_names:
