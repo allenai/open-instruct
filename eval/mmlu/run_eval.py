@@ -302,12 +302,6 @@ if __name__ == "__main__":
         help="if specified, we will load the model from a revision of the model in the hub"
     )
     parser.add_argument(
-        "--hf_revision",
-        type=str,
-        default=None,
-        help="if specified, we will load the model from a revision of the model in the hub"
-    )
-    parser.add_argument(
         "--tokenizer_name_or_path",
         type=str,
         default=None,

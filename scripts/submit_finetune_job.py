@@ -184,6 +184,9 @@ def main():
     d['tasks'][0]['envVars'].append({
         'name': 'WANDB_RUN_GROUP', 'value': experiment_group
     })
+    d['tasks'][0]['envVars'].append({
+        'name': 'BEAKER_TOKEN', 'secret': "BEAKER_TOKEN"
+    })
 
     # optionally, print to debug config
     # print(d)
