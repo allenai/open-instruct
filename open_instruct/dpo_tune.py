@@ -62,6 +62,7 @@ from open_instruct.utils import (
     clean_last_n_checkpoints,
     get_last_checkpoint_path,
     get_wandb_tags,
+    maybe_get_beaker_config,
     maybe_use_ai2_wandb_entity,
 )
 
@@ -523,7 +524,7 @@ def main(args: FlatArguments):
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
     # Figure out how many steps we should save the Accelerator states
-    checkpointing_steps = args.checkpointing_steps
+    checkpointing_steps = str(args.checkpointing_steps)
     if checkpointing_steps is not None and checkpointing_steps.lower() != "epoch":
         checkpointing_steps = int(checkpointing_steps)
 
@@ -533,8 +534,13 @@ def main(args: FlatArguments):
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
         experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"]
+
+        # (Optional) Ai2 internal tracking
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
+        beaker_config = maybe_get_beaker_config()
+        if beaker_config is not None:
+            experiment_config.update(vars(beaker_config))
         exp_name = os.path.basename(__file__)[: -len(".py")]
         accelerator.init_trackers(
             "open_instruct_internal",

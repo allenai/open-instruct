@@ -6,6 +6,9 @@ tasks:
     replicas: 4
     leaderSelection: true
     hostNetworking: true
+    propagateFailure: true
+    propagatePreemption: true
+    synchronizedStartTimeout: 15m
     image:
       beaker: nathanl/open_instruct_auto
     command: [
