@@ -48,7 +48,7 @@ from transformers import (
     get_scheduler,
 )
 
-from open_instruct.model_utils import save_with_accelerate
+from open_instruct.model_utils import push_folder_and_tokenizer_to_hub, save_with_accelerate
 from open_instruct.utils import (
     ArgumentParserPlus,
     FlatArguments,
@@ -56,6 +56,7 @@ from open_instruct.utils import (
     get_datasets,
     get_last_checkpoint_path,
     get_wandb_tags,
+    is_beaker_job,
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
@@ -160,6 +161,7 @@ def main(args: FlatArguments):
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
     exp_name = os.path.basename(__file__)[: -len(".py")]
+    run_name = f"{exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -169,9 +171,7 @@ def main(args: FlatArguments):
             args.hf_entity = HfApi().whoami()["name"]
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
         if args.hf_repo_revision is None:  # auto-generate one
-            args.hf_repo_revision = (
-                f"{exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
-            )
+            args.hf_repo_revision = run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
 
     accelerator_log_kwargs = {}
@@ -556,8 +556,8 @@ def main(args: FlatArguments):
         # (Optional) Ai2 internal tracking
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
-        beaker_config = maybe_get_beaker_config()
-        if beaker_config is not None:
+        if is_beaker_job():
+            beaker_config = maybe_get_beaker_config()
             experiment_config.update(vars(beaker_config))
         accelerator.init_trackers(
             "open_instruct_internal",
@@ -708,12 +708,24 @@ def main(args: FlatArguments):
             tokenizer,
             args.output_dir,
             args.use_lora,
-            args.push_to_hub,
+        )
+
+    if accelerator.is_main_process:
+        if is_beaker_job() and args.try_launch_beaker_eval_jobs and args.output_dir in ["/output/", "/output"]:
+            submit_beaker_eval_jobs(model_name=run_name, location=beaker_config.beaker_dataset_ids[0])
+            args.try_launch_beaker_eval_jobs = False # don't launch the eval jobs for HF model then
+
+    if args.push_to_hub:
+        push_folder_and_tokenizer_to_hub(
+            accelerator,
+            tokenizer,
+            args.output_dir,
             args.hf_repo_id,
             args.hf_repo_revision,
         )
-    if accelerator.is_main_process and args.launch_beaker_eval_jobs:
-        submit_beaker_eval_jobs(args.hf_repo_id, args.hf_repo_revision)
+    if accelerator.is_main_process:
+        if is_beaker_job() and args.try_launch_beaker_eval_jobs:
+            submit_beaker_eval_jobs(model_name=f"hf-{args.hf_repo_revision}", location=args.hf_repo_id, hf_repo_revision=args.hf_repo_revision)
 
     accelerator.wait_for_everyone()
     if args.with_tracking:

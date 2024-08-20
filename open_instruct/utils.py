@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import dataclasses
+import json
 import logging
 import os
 import shutil
@@ -654,7 +655,7 @@ class FlatArguments:
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
     hf_repo_url: Optional[str] = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    launch_beaker_eval_jobs: bool = False
+    try_launch_beaker_eval_jobs: bool = False
     """Whether to launch beaker evaluation jobs after training"""
 
     def __post_init__(self):
@@ -877,17 +878,42 @@ class BeakerRuntimeConfig:
     beaker_workload_id: str
     beaker_node_hostname: str
     beaker_experiment_url: str
+    beaker_dataset_ids: Optional[List[str]] = None
+
+
+def is_beaker_job() -> bool:
+    return "BEAKER_JOB_ID" in os.environ
+
+
+def get_beaker_dataset_ids(experiment_id: str) -> Optional[List[str]]:
+    get_experiment_command = f"beaker experiment get {experiment_id} --format json"
+    process = subprocess.Popen(["bash", "-c", get_experiment_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    if process.returncode != 0:
+        logger.error(f"Failed to get Beaker experiment: {stderr}")
+        return None
+    experiment = json.loads(stdout)[0]
+    result_ids = [job["result"]["beaker"] for job in experiment["jobs"]]
+    dataset_ids = []
+    for result_id in result_ids:
+        get_dataset_command = f"beaker dataset get {result_id} --format json"
+        process = subprocess.Popen(["bash", "-c", get_dataset_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+        if process.returncode != 0:
+            logger.error(f"Failed to get Beaker dataset: {stderr}")
+            return None
+        dataset = json.loads(stdout)
+        dataset_ids.append(dataset["id"])
+    return dataset_ids
 
 
 def maybe_get_beaker_config():
-    beaker_runtime_config = None
-    if "BEAKER_JOB_ID" in os.environ:
-        beaker_runtime_config = BeakerRuntimeConfig(
-            beaker_workload_id=os.environ["BEAKER_WORKLOAD_ID"],
-            beaker_node_hostname=os.environ["BEAKER_NODE_HOSTNAME"],
-            beaker_experiment_url=f"https://beaker.org/ex/{os.environ['BEAKER_WORKLOAD_ID']}/",
-        )
-    return beaker_runtime_config
+    return BeakerRuntimeConfig(
+        beaker_workload_id=os.environ["BEAKER_WORKLOAD_ID"],
+        beaker_node_hostname=os.environ["BEAKER_NODE_HOSTNAME"],
+        beaker_experiment_url=f"https://beaker.org/ex/{os.environ['BEAKER_WORKLOAD_ID']}/",
+        beaker_dataset_ids=get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"]),
+    )
 
 
 def maybe_use_ai2_wandb_entity() -> Optional[str]:
@@ -914,28 +940,35 @@ def maybe_use_ai2_hf_entity() -> Optional[str]:
         return None
 
 
-def submit_beaker_eval_jobs(hf_repo_id: str, hf_repo_revision: str) -> None:
+    
 
+
+def submit_beaker_eval_jobs(
+    model_name: str,
+    location: str,
+    hf_repo_revision: str = "",
+    workspace: str = "tulu-3-results",
+    beaker_image: str = "costah/open_instruct_test",
+    upload_to_hf: str = "allenai/tulu-3-evals",
+) -> None:
     command = f"""
     python scripts/submit_eval_jobs.py \
-        --model_name hf-{hf_repo_revision} \
-        --hf_revision {hf_repo_revision} \
-        --location {hf_repo_id} \
+        --model_name {model_name} \
+        --location {location} \
         --is_tuned \
-        --workspace tulu-3-results \
+        --workspace {workspace} \
         --preemptible \
         --use_hf_tokenizer_template \
-        --beaker_image costah/open_instruct_test \
-        --upload_to_hf allenai/tulu-3-evals
+        --beaker_image {beaker_image} \
     """
+    if len(hf_repo_revision) > 0:
+        command += f" --hf_revision {hf_repo_revision}"
+    if len(upload_to_hf) > 0:
+        command += f" --upload_to_hf {upload_to_hf}"
 
     process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
 
-    print("STDOUT:")
-    print(stdout.decode())
-
-    print("STDERR:")
-    print(stderr.decode())
-
-    print(f"Exit code: {process.returncode}")
+    logger.info(f"Beaker evaluation jobs: Stdout:\n{stdout.decode()}")
+    logger.error(f"Beaker evaluation jobs: Stderr:\n{stderr.decode()}")
+    logger.info(f"Beaker evaluation jobs: process return code: {process.returncode}")

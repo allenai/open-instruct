@@ -738,7 +738,7 @@ def main(args: FlatArguments):
             args.hf_repo_id,
             args.hf_repo_revision,
         )
-    if accelerator.is_main_process and args.launch_beaker_eval_jobs:
+    if accelerator.is_main_process and args.try_launch_beaker_eval_jobs:
         submit_beaker_eval_jobs(args.hf_repo_id, args.hf_repo_revision)
 
     accelerator.wait_for_everyone()

@@ -350,7 +350,6 @@ def main(args):
                     elif args.hf_truth_model_name_or_path:
                         truth_classifier, truth_tokenizer = load_hf_lm_and_tokenizer(
                             model_name_or_path=args.hf_truth_model_name_or_path,
-                            revision=args.hf_revision,
                             tokenizer_name_or_path=args.hf_truth_model_name_or_path,
                             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                         )
@@ -360,7 +359,6 @@ def main(args):
                         questions = run_gpt_classifier_eval(model_key, 'info', args.gpt_info_model_name, questions, info=True)
                     elif args.hf_info_model_name_or_path:
                         info_classifier, info_tokenizer = load_hf_lm_and_tokenizer(
-                            revision=args.hf_revision,
                             model_name_or_path=args.hf_info_model_name_or_path, 
                             tokenizer_name_or_path=args.hf_info_model_name_or_path,
                             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
