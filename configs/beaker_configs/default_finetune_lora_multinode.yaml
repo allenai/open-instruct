@@ -7,7 +7,7 @@ tasks:
     hostNetworking: true
     propagateFailure: true
     propagatePreemption: true
-    synchronizedStartTimeout: 30m
+    synchronizedStartTimeout: 15m
     image:
       beaker: Yizhongw03/open-instruct-multi-node
     command: [
