@@ -48,7 +48,10 @@ from transformers import (
     get_scheduler,
 )
 
-from open_instruct.model_utils import push_folder_and_tokenizer_to_hub, save_with_accelerate
+from open_instruct.model_utils import (
+    push_folder_and_tokenizer_to_hub,
+    save_with_accelerate,
+)
 from open_instruct.utils import (
     ArgumentParserPlus,
     FlatArguments,
@@ -710,11 +713,6 @@ def main(args: FlatArguments):
             args.use_lora,
         )
 
-    if accelerator.is_main_process:
-        if is_beaker_job() and args.try_launch_beaker_eval_jobs and args.output_dir in ["/output/", "/output"]:
-            submit_beaker_eval_jobs(model_name=run_name, location=beaker_config.beaker_dataset_ids[0])
-            args.try_launch_beaker_eval_jobs = False # don't launch the eval jobs for HF model then
-
     if args.push_to_hub:
         push_folder_and_tokenizer_to_hub(
             accelerator,
@@ -723,9 +721,12 @@ def main(args: FlatArguments):
             args.hf_repo_id,
             args.hf_repo_revision,
         )
-    if accelerator.is_main_process:
-        if is_beaker_job() and args.try_launch_beaker_eval_jobs:
-            submit_beaker_eval_jobs(model_name=f"hf-{args.hf_repo_revision}", location=args.hf_repo_id, hf_repo_revision=args.hf_repo_revision)
+        if accelerator.is_main_process and is_beaker_job() and args.try_launch_beaker_eval_jobs:
+            submit_beaker_eval_jobs(
+                model_name=f"hf-{args.hf_repo_revision}",
+                location=args.hf_repo_id,
+                hf_repo_revision=args.hf_repo_revision,
+            )
 
     accelerator.wait_for_everyone()
     if args.with_tracking:

@@ -682,6 +682,9 @@ class FlatArguments:
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
 
+        if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
+            raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
+
 
 class ArgumentParserPlus(HfArgumentParser):
     def parse_yaml_and_args(self, yaml_arg: str, other_args: Optional[List[str]] = None) -> List[dataclass]:
@@ -879,6 +882,7 @@ class BeakerRuntimeConfig:
     beaker_node_hostname: str
     beaker_experiment_url: str
     beaker_dataset_ids: Optional[List[str]] = None
+    beaker_dataset_id_urls: Optional[List[str]] = None
 
 
 def is_beaker_job() -> bool:
@@ -908,11 +912,14 @@ def get_beaker_dataset_ids(experiment_id: str) -> Optional[List[str]]:
 
 
 def maybe_get_beaker_config():
+    beaker_dataset_ids = [get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"])]
+    beaker_dataset_id_urls = [f"https://beaker.org/ds/{dataset_id}" for dataset_id in beaker_dataset_ids]
     return BeakerRuntimeConfig(
         beaker_workload_id=os.environ["BEAKER_WORKLOAD_ID"],
         beaker_node_hostname=os.environ["BEAKER_NODE_HOSTNAME"],
         beaker_experiment_url=f"https://beaker.org/ex/{os.environ['BEAKER_WORKLOAD_ID']}/",
         beaker_dataset_ids=get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"]),
+        beaker_dataset_id_urls=beaker_dataset_id_urls,
     )
 
 
@@ -938,9 +945,6 @@ def maybe_use_ai2_hf_entity() -> Optional[str]:
         return "allenai"
     else:
         return None
-
-
-    
 
 
 def submit_beaker_eval_jobs(
