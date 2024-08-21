@@ -4,8 +4,8 @@ models:
   - name: llama_3_8b-rs_2860_v3.2_ccn
     location: beaker
     path: jacobm/llama_3_8b-rs_2860_v3.2_ccn
-    weight: 0.5
+    weight: 0.6
   - name: llama_3_8b-rs_2860_numina_ccn
     location: beaker
     path: jacobm/llama_3_8b-rs_2860_numina_ccn
-    weight: 0.5
+    weight: 0.4
