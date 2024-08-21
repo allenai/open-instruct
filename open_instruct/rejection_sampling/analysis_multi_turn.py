@@ -1,4 +1,5 @@
 from datasets import load_dataset
+from collections import Counter
 
 def count_turns_per_conversation(dataset_name):
     # Load the dataset
@@ -26,12 +27,21 @@ def count_turns_per_conversation(dataset_name):
         chosen_turn_counts.append(chosen_turn_count)
         rejected_turn_counts.append(rejected_turn_count)
 
-    return chosen_turn_counts, rejected_turn_counts
+    # Use Counter to count how many conversations have each number of turns
+    chosen_turn_distribution = Counter(chosen_turn_counts)
+    rejected_turn_distribution = Counter(rejected_turn_counts)
+
+    return chosen_turn_distribution, rejected_turn_distribution
 
 # Example usage
 dataset_name = 'Anthropic/hh-rlhf'
-chosen_turn_counts, rejected_turn_counts = count_turns_per_conversation(dataset_name)
+chosen_turn_distribution, rejected_turn_distribution = count_turns_per_conversation(dataset_name)
 
-# Print the turn counts for each conversation
-for i, (chosen_count, rejected_count) in enumerate(zip(chosen_turn_counts, rejected_turn_counts), start=1):
-    print(f'Conversation {i} has {chosen_count} turns in "chosen" and {rejected_count} turns in "rejected".')
+# Print the distributions
+print("Chosen conversation turn distribution:")
+for k, v in chosen_turn_distribution.items():
+    print(f"{v} conversations have {k} turns.")
+
+print("\nRejected conversation turn distribution:")
+for k, v in rejected_turn_distribution.items():
+    print(f"{v} conversations have {k} turns.")
