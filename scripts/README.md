@@ -81,7 +81,15 @@ python scripts/submit_finetune_job.py --config=configs/train_configs/sft/default
 python scripts/submit_finetune_job.py --config=configs/train_configs/sft/default.yaml  --learning_rate 4e-5 --exp_name sft_lr_search
 ```
 
-You may want to add the `--exp_name` which will be the name that shows up in the internal leaderboard.
+
+You may want to add the `--exp_name`, the name that appears in the internal leaderboard.
+
+<img width="1132" alt="image" src="https://github.com/user-attachments/assets/f99ff0d6-5436-4932-9fa7-d6266a68fba0">
+
+<img width="1294" alt="image" src="https://github.com/user-attachments/assets/17251833-e90f-44d1-88f9-dd12c9465914">
+
+
+
 
 To use this for multi-node jobs, here is an example that runs IFT on 4 nodes:
 ```
