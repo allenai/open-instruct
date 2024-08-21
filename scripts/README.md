@@ -41,6 +41,22 @@ sh scripts/dpo_train_with_accelerate.sh
 3. `dpo_train_with_qlora.sh`: Same as (2) with QLoRA quantization.
 
 ## Beaker / job submission scripts
+
+
+0. First-time setup: You need to first obtain API key or tokens from the following website:
+
+* `BEAKER_TOKEN`: https://beaker.org/user
+* `WANDB_API_KEY`: https://wandb.ai/authorize
+* `HF_TOKEN`: https://huggingface.co/settings/tokens
+
+Then you need to write them in beaker secret as follows (replace the `xxxx` with your own API key or token)
+```
+beaker secret write -w ai2/tulu-2-improvements $(whoami)_BEAKER_TOKEN xxxx
+beaker secret write -w ai2/tulu-2-improvements $(whoami)_WANDB_API_KEY xxxx
+beaker secret write -w ai2/tulu-2-improvements $(whoami)_HF_TOKEN xxxx
+```
+
+
 1. `submit_eval_jobs.py`: Submit eval jobs for tasks in `scripts/evals/`. For example, llama 3 tulu 2 and upload to the tulu-3 eval database.
 ```bash
 # submit evals on a model in beaker dataset
@@ -49,6 +65,12 @@ python scripts/submit_eval_jobs.py --model_name llama_31_tulu_2_8b --location 01
 # submit evals on a model in huggingface; note you need to 1) prepend the model name with `hf-` and 2) replace `--location` with the hf repo id
 python scripts/submit_eval_jobs.py --model_name hf-llama_31_tulu_2_8b --location allenai/llama-3-tulu-2-8b --is_tuned --workspace tulu-3-results --preemptible --use_hf_tokenizer_template --beaker_image nathanl/open_instruct_olmo_auto --upload_to_hf allenai/tulu-3-evals
 python scripts/submit_eval_jobs.py --model_name hf-llama_31_tulu_2_8b --location vwxyzjn/online_dpo_tulu_2 --is_tuned --workspace tulu-3-results --preemptible --use_hf_tokenizer_template --beaker_image nathanl/open_instruct_olmo_auto --upload_to_hf allenai/tulu-3-evals
+
+
+python scripts/submit_eval_jobs.py --model_name hf-online-dpo-llama-tulu2-longer --beaker_image costah/open_instruct_test --location vwxyzjn/online_dpo_vllm__allenai_llama-3-tulu-2-8b --hf_revision online_dpo_vllm__1__1724038538 --is_tuned --workspace tulu-3-results --preemptible --use_hf_tokenizer_template --upload_to_hf allenai/tulu-3-evals
+
+
+https://huggingface.co/vwxyzjn/online_dpo_vllm__allenai_llama-3-tulu-2-8b/tree/online_dpo_vllm__1__1724038538
 ```
 2. `submit_finetune_jobs.py`: **Core script** for submitting multiple and configurable instruction tuning jobs. This script works for both single- and multi-node configurations. It by default reads configs in `configs/train_configs`, but also can take in CLI arguments matching those in `open_instruct/utils.py` `FlatArguments` class. 
 Example of running this is in `scripts/submit_finetune_jobs.sh`. 
@@ -97,7 +119,7 @@ python mason.py \
     --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000  \
     --priority low \
     --budget ai2/allennlp \
-    --gpus 8 -- sh scripts/dpo_train_with_accelerate_config.sh 8 configs/train_configs/dpo/default.yaml
+    --gpus 1 -- sh scripts/finetune_with_accelerate_config.sh 1 configs/train_configs/sft/mini.yaml
 ```
 
 
