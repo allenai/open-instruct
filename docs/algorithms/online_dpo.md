@@ -146,6 +146,46 @@ python mason.py \
     --learning_rate 5e-7 \
     --output_dir models/minimal/online_dpo_tulu2_llama3 \
     --chat_template tulu \
+    --per_device_train_batch_size 4 \
+    --per_device_eval_batch_size 4 \
+    --gradient_accumulation_steps 16 \
+    --local_rollout_forward_batch_size 4 \
+    --vllm_device cuda:7 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 400000 \
+    --model_name_or_path allenai/llama-3-tulu-2-8b  \
+    --reward_model_path allenai/reward_modeling__allenai_llama-3-tulu-2-8b_ultrafeedback \
+    --non_stop_penalty \
+    --stop_token eos \
+    --penalty_reward_value -10.0 \
+    --beta 0.03 \
+    --num_evals 10 \
+    --response_length 1024 \
+    --gradient_checkpointing \
+    --with_tracking \
+    --push_to_hub
+
+
+python mason.py \
+    --cluster ai2/jupiter-cirrascale-2 \
+    --image costah/open_instruct_onlinedpo \
+    --pure_docker_mode \
+    --priority low \
+    --preemptible \
+    --no_mount_nfs --no_hf_cache_env \
+    --budget ai2/allennlp \
+    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+     open_instruct/ppo_vllm.py \
+    --dataset_name allenai/ultrafeedback_binarized_cleaned \
+    --dataset_train_split train_prefs \
+    --dataset_eval_split test_prefs \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --sft_messages_key chosen \
+    --learning_rate 5e-7 \
+    --output_dir models/minimal/online_dpo_tulu2_llama3 \
+    --chat_template tulu \
     --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 2 \
     --gradient_accumulation_steps 32 \
@@ -159,8 +199,88 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --penalty_reward_value -10.0 \
-    --beta 0.07 \
-    --num_evals 10 \
+    --beta 0.03 \
+    --num_evals 1 \
+    --response_length 1024 \
+    --gradient_checkpointing \
+    --with_tracking \
+    --push_to_hub
+
+
+python mason.py \
+    --cluster ai2/jupiter-cirrascale-2 \
+    --image costah/open_instruct_onlinedpo \
+    --pure_docker_mode \
+    --priority low \
+    --preemptible \
+    --no_mount_nfs --no_hf_cache_env \
+    --budget ai2/allennlp \
+    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+     open_instruct/ppo_vllm.py \
+    --dataset_name allenai/ultrafeedback_binarized_cleaned \
+    --dataset_train_split train_prefs \
+    --dataset_eval_split test_prefs \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --sft_messages_key chosen \
+    --learning_rate 5e-7 \
+    --output_dir models/minimal/online_dpo_tulu2_llama3 \
+    --chat_template tulu \
+    --per_device_train_batch_size 2 \
+    --per_device_eval_batch_size 2 \
+    --gradient_accumulation_steps 32 \
+    --local_rollout_forward_batch_size 2 \
+    --vllm_device cuda:7 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 400000 \
+    --model_name_or_path allenai/llama-3-tulu-2-8b  \
+    --reward_model_path allenai/reward_modeling__allenai_llama-3-tulu-2-8b_ultrafeedback \
+    --non_stop_penalty \
+    --stop_token eos \
+    --penalty_reward_value -10.0 \
+    --beta 0.03 \
+    --num_evals 1 \
+    --response_length 1024 \
+    --gradient_checkpointing \
+    --with_tracking \
+    --push_to_hub
+
+
+python mason.py \
+    --cluster ai2/jupiter-cirrascale-2 \
+    --image costah/open_instruct_onlinedpo \
+    --pure_docker_mode \
+    --priority low \
+    --preemptible \
+    --no_mount_nfs --no_hf_cache_env \
+    --budget ai2/allennlp \
+    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+     open_instruct/ppo_vllm.py \
+    --dataset_name allenai/ultrafeedback_binarized_cleaned \
+    --dataset_train_split train_prefs \
+    --dataset_eval_split test_prefs \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --sft_messages_key chosen \
+    --learning_rate 5e-7 \
+    --output_dir models/minimal/online_dpo_tulu2_llama3 \
+    --chat_template tulu \
+    --per_device_train_batch_size 2 \
+    --per_device_eval_batch_size 2 \
+    --gradient_accumulation_steps 32 \
+    --local_rollout_forward_batch_size 2 \
+    --vllm_device cuda:7 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 400000 \
+    --model_name_or_path vwxyzjn/btulu  \
+    --reward_model_path allenai/llama-3.1-tulu-2-8b-uf-mean-rm \
+    --non_stop_penalty \
+    --stop_token eos \
+    --penalty_reward_value -10.0 \
+    --beta 0.05 \
+    --num_evals 1 \
     --response_length 1024 \
     --gradient_checkpointing \
     --with_tracking \
