@@ -319,7 +319,7 @@ class FlatArguments:
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
     hf_repo_url: Optional[str] = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    try_launch_beaker_eval_jobs: bool = False
+    try_launch_beaker_eval_jobs: bool = True
     """Whether to launch beaker evaluation jobs after training"""
 
     def __post_init__(self):
