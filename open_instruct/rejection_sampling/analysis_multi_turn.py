@@ -26,6 +26,7 @@ def count_turns_per_conversation(dataset_name):
 dataset_name = 'Anthropic/hh-rlhf'
 turn_counts = count_turns_per_conversation(dataset_name)
 
+print("Done")
 # Print the turn counts for each conversation
 for i, count in enumerate(turn_counts, start=1):
     print(f'Conversation {i} has {count} turns.')
