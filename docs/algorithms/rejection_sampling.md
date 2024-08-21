@@ -52,7 +52,8 @@ python open_instruct/rejection_sampling/rejection_sampling.py \
     --num_gpus 1 \
 
 # 2.3 tokenize them and run a combination of reward models / llm as a judge
-# Here is an example created dataset: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_1723745582
+# Here is an example created dataset: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_1724273702
+# Here is an example created dataset for raw scores: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_scores_1724273702
 python open_instruct/rejection_sampling/rejection_sampling.py \
     --input_filename output/completions.jsonl \
     --model_names_or_paths allenai/llama-3-tulu-2-8b-uf-mean-rm gpt-4o-mini gpt-4-turbo \
