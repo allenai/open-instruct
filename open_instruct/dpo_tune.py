@@ -58,7 +58,10 @@ from open_instruct.dpo_utils import (
     simpo_loss,
     wpo_loss,
 )
-from open_instruct.model_utils import push_folder_and_tokenizer_to_hub
+from open_instruct.model_utils import (
+    push_folder_and_tokenizer_to_hub,
+    save_with_accelerate,
+)
 from open_instruct.utils import (
     ArgumentParserPlus,
     FlatArguments,
