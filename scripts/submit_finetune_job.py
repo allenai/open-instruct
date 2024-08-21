@@ -5,6 +5,7 @@ from datetime import datetime
 import argparse
 import re 
 import shlex
+import getpass
 
 def load_yaml(file_path):
     with open(file_path, 'r') as f:
@@ -175,9 +176,7 @@ def main():
             env['value'] = False
         if env['name'] == "WANDB_PROJECT":
             env['value'] = wandb_project
-    # d['tasks'][0]['envVars'].append({
-    #     'name': 'WANDB_API_KEY', 'value': wandb_api_key
-    # })
+
     d['tasks'][0]['envVars'].append({
         'name': 'WANDB_NAME', 'value': exp_name
     })
@@ -185,7 +184,13 @@ def main():
         'name': 'WANDB_RUN_GROUP', 'value': experiment_group
     })
     d['tasks'][0]['envVars'].append({
-        'name': 'BEAKER_TOKEN', 'secret': "BEAKER_TOKEN"
+        'name': 'BEAKER_TOKEN', 'secret': f"{getpass.getuser()}_BEAKER_TOKEN"
+    })
+    d['tasks'][0]['envVars'].append({
+        'name': 'HF_TOKEN', 'secret': f"{getpass.getuser()}_HF_TOKEN"
+    })
+    d['tasks'][0]['envVars'].append({
+        'name': 'WANDB_API_KEY', 'secret': f"{getpass.getuser()}_WANDB_API_KEY"
     })
 
     # optionally, print to debug config
