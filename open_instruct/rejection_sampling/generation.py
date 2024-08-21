@@ -20,21 +20,27 @@ import multiprocessing
 import os
 from collections import defaultdict
 from dataclasses import asdict, dataclass
-from typing import List, Optional
+import sys
+from typing import Dict, List, Optional
+from pprint import pformat
+
 
 import pandas as pd
+from huggingface_hub import HfApi
+import time
 from datasets import load_dataset
 from rich.console import Console
 from rich.pretty import pprint
 from rich.table import Table
 from transformers import AutoTokenizer, HfArgumentParser
 from vllm import LLM, SamplingParams
+from huggingface_hub.repocard import RepoCard
 
 from open_instruct.rejection_sampling.api_generate import (  # Import your classes
     LLMGenerationConfig,
     LLMProcessor,
 )
-
+api = HfApi()
 
 @dataclass
 class Args:
@@ -43,6 +49,11 @@ class Args:
     skill: str = "chat"
     mode: str = "generation"  # Can be "generation" or "judgment"
 
+    # upload config
+    hf_repo_id: str = os.path.basename(__file__)[: -len(".py")]
+    push_to_hub: bool = False
+    hf_entity: Optional[str] = None
+    add_timestamp: bool = True
 
 @dataclass
 class GenerationArgs:
@@ -64,15 +75,13 @@ class DatasetArgs:
     sanity_check: bool = False
     sanity_check_size: int = 100
 
-
-def print_rich_table(df: pd.DataFrame) -> Table:
-    console = Console()
-    table = Table(show_lines=True)
-    for column in df.columns:
-        table.add_column(column)
-    for _, row in df.iterrows():
-        table.add_row(*row.astype(str).tolist())
-    console.print(table)
+def save_jsonl(save_filename: str, table: Dict[str, List]):
+    first_key = list(table.keys())[0]
+    os.makedirs(os.path.dirname(save_filename), exist_ok=True)
+    with open(save_filename, "w") as outfile:
+        for i in range(len(table[first_key])):
+            json.dump({key: table[key][i] for key in table}, outfile)
+            outfile.write("\n")
 
 
 async def generate_with_openai(model_name: str, data_list: list, args: Args, gen_args: GenerationArgs):
@@ -182,21 +191,53 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
             table["reference_completion"].append(messages[-1]["content"])
 
     print(f"Number prompts with identical completions: {num_prompt_with_identical_completions}")
-    # Save results
-    os.makedirs(os.path.dirname(args.save_filename), exist_ok=True)
-    with open(args.save_filename, "w") as outfile:
-        for i in range(len(table["messages"])):
-            json.dump(
-                {
-                    "messages": table["messages"][i],
-                    "model_completion": table["model_completion"][i],
-                    "reference_completion": table["reference_completion"][i],
-                    "model": args.model_name_or_path,
-                },
-                outfile,
-            )
-            outfile.write("\n")
+    save_jsonl(args.save_filename, table)
 
+    if args.push_to_hub:
+        if args.hf_entity is None:
+            args.hf_entity = api.whoami()["name"]
+        full_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
+        if args.add_timestamp:
+            full_repo_id += f"_{int(time.time())}"
+        api.create_repo(full_repo_id, repo_type="dataset", exist_ok=True)
+        for f in [__file__, args.save_filename]:
+            api.upload_file(
+                path_or_fileobj=f,
+                path_in_repo=f.split("/")[-1],
+                repo_id=full_repo_id,
+                repo_type="dataset",
+            )
+        repo_full_url = f"https://huggingface.co/datasets/{full_repo_id}"
+        print(f"Pushed to {repo_full_url}")
+
+        run_command = " ".join(["python"] + sys.argv)
+        sft_card = RepoCard(content=f"""\
+# allenai/open_instruct: Generation Dataset
+
+See https://github.com/allenai/open-instruct/blob/main/docs/algorithms/rejection_sampling.md for more detail
+
+## Configs
+
+```
+args:
+{pformat(vars(args))}
+
+dataset_args:
+{pformat(vars(dataset_args))}
+
+gen_args:
+{pformat(vars(gen_args))}
+```
+
+## Reproduce this dataset
+
+1. Download the `{[f.split("/")[-1] for f in [__file__, args.save_filename]]}` from the {repo_full_url}.
+2. Run `{run_command}`
+""")
+        sft_card.push_to_hub(
+            full_repo_id,
+            repo_type="dataset",
+        )
 
 if __name__ == "__main__":
     parser = HfArgumentParser((Args, DatasetArgs, GenerationArgs))

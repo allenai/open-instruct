@@ -15,10 +15,13 @@
 import asyncio
 import json
 import multiprocessing
+import os
+import sys
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
+from pprint import pformat
 
 import numpy as np
 import torch
@@ -32,6 +35,7 @@ from transformers import (
     HfArgumentParser,
     PreTrainedTokenizer,
 )
+from huggingface_hub.repocard import RepoCard
 
 from open_instruct.model_utils import get_reward
 from open_instruct.rejection_sampling.generation import (
@@ -48,16 +52,27 @@ class Args:
     model_names_or_paths: List[str] = field(default_factory=lambda: ["gpt-4"])
     input_filename: str = "completions.jsonl"
     save_filename: str = "rejected_sampling_completions.jsonl"
+    save_filename_scores: str = "completion_scores.jsonl"
     num_completions: int = 1
     max_forward_batch_size: int = 64
     num_gpus: int = 1  # New argument for specifying the number of GPUs
-    push_to_hub: bool = False
-    hf_entity: Optional[str] = None
-    hf_repo_id: str = "rejection_sampling"
-    add_timestamp: bool = True
     mode: str = "judgement"
     skill: str = "chat"
 
+    # upload config
+    hf_repo_id: str = os.path.basename(__file__)[: -len(".py")]
+    hf_repo_id_scores: str = os.path.basename(__file__)[: -len(".py")] + "_scores"
+    push_to_hub: bool = False
+    hf_entity: Optional[str] = None
+    add_timestamp: bool = True
+
+def save_jsonl(save_filename: str, table: Dict[str, List]):
+    first_key = list(table.keys())[0]
+    os.makedirs(os.path.dirname(save_filename), exist_ok=True)
+    with open(save_filename, "w") as outfile:
+        for i in range(len(table[first_key])):
+            json.dump({key: table[key][i] for key in table}, outfile)
+            outfile.write("\n")
 
 def process_shard(
     rank: int, model_name_or_path: str, args: Args, shard: List[str]
@@ -239,6 +254,9 @@ def majority_vote(offsets_per_model: dict[str, torch.tensor]) -> torch.tensor:
     return majority_votes
 
 
+
+
+
 def main(args: Args):
     mp.set_start_method("spawn", force=True)
 
@@ -289,6 +307,7 @@ def main(args: Args):
             if "score" not in completions[i]:
                 completions[i]["score"] = {}
             completions[i]["score"][model_name_or_path] = scores[i].item()
+            completions[i]["reference_completion_score"][model_name_or_path] = reference_completion_scores[i // args.num_completions].item()
 
         best_indices = torch.argmax(scores_per_prompt, dim=1)  # (n_prompts, 1) --> (n_prompts, )
         worst_indices = torch.argmin(scores_per_prompt, dim=1)  # (n_prompts, 1) --> (n_prompts, )
@@ -321,18 +340,22 @@ def main(args: Args):
         assert worst_completions[i]["messages"][:-1] == best_completions[i]["messages"][:-1]
         table["chosen_score"].append(best_completions[i]["score"])
         table["rejected_score"].append(worst_completions[i]["score"])
-    first_key = list(table.keys())[0]
-    with open(args.save_filename, "w") as outfile:
-        for i in range(len(table[first_key])):
-            json.dump({key: table[key][i] for key in table}, outfile)
-            outfile.write("\n")
+    save_jsonl(args.save_filename, table)
+
+    table_scores = defaultdict(list)
+    keys = list(completions[0].keys())
+    for i in range(len(completions)):
+        for key in keys:
+            table_scores[key].append(completions[i][key])
+    save_jsonl(args.save_filename_scores, table_scores)
 
     if args.push_to_hub:
         if args.hf_entity is None:
             args.hf_entity = api.whoami()["name"]
         full_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
+        timestamp = f"_{int(time.time())}"
         if args.add_timestamp:
-            full_repo_id += f"_{int(time.time())}"
+            full_repo_id += timestamp
         api.create_repo(full_repo_id, repo_type="dataset", exist_ok=True)
         for f in [__file__, args.save_filename]:
             api.upload_file(
@@ -341,7 +364,48 @@ def main(args: Args):
                 repo_id=full_repo_id,
                 repo_type="dataset",
             )
-        print(f"Pushed to https://huggingface.co/datasets/{full_repo_id}/")
+        repo_full_url = f"https://huggingface.co/datasets/{full_repo_id}"
+        print(f"Pushed to {repo_full_url}")
+        run_command = " ".join(["python"] + sys.argv)
+        sft_card = RepoCard(content=f"""\
+# allenai/open_instruct: Rejection Sampling Dataset
+
+See https://github.com/allenai/open-instruct/blob/main/docs/algorithms/rejection_sampling.md for more detail
+
+## Configs
+
+```
+args:
+{pformat(vars(args))}
+```
+
+## Reproduce this dataset
+
+1. Download the `{[f.split("/")[-1] for f in [__file__, args.save_filename]]}` from the {repo_full_url}.
+2. Run `{run_command}`
+""")
+        sft_card.push_to_hub(
+            full_repo_id,
+            repo_type="dataset",
+        )
+
+        full_repo_id_scores = f"{args.hf_entity}/{args.hf_repo_id_scores}"
+        if args.add_timestamp:
+            full_repo_id_scores += timestamp
+        api.create_repo(full_repo_id_scores, repo_type="dataset", exist_ok=True)
+        for f in [__file__, args.save_filename_scores]:
+            api.upload_file(
+                path_or_fileobj=f,
+                path_in_repo=f.split("/")[-1],
+                repo_id=full_repo_id_scores,
+                repo_type="dataset",
+            )
+        repo_full_url_scores = f"https://huggingface.co/datasets/{full_repo_id_scores}"
+        print(f"Pushed to {repo_full_url_scores}")
+        sft_card.push_to_hub(
+            full_repo_id_scores,
+            repo_type="dataset",
+        )
 
 
 if __name__ == "__main__":

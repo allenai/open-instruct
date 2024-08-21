@@ -17,6 +17,7 @@ python open_instruct/rejection_sampling/generation.py \
     --num_completions 3 \
     --save_filename output/completions.jsonl \
     --sanity_check \
+    --push_to_hub 
 ```
 
 ### Scoring completions
