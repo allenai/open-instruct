@@ -45,7 +45,9 @@ from open_instruct.rejection_sampling.generation import (
 )
 
 api = HfApi()
-
+# we don't use `multiprocessing.cpu_count()` because typically we only have 12 CPUs
+# and that the shards might be small
+NUM_CPUS_FOR_DATASET_MAP = 4
 
 @dataclass
 class Args:
@@ -68,7 +70,9 @@ class Args:
 
 def save_jsonl(save_filename: str, table: Dict[str, List]):
     first_key = list(table.keys())[0]
-    os.makedirs(os.path.dirname(save_filename), exist_ok=True)
+    dirname = os.path.dirname(save_filename)
+    if dirname:
+        os.makedirs(os.path.dirname(save_filename), exist_ok=True)
     with open(save_filename, "w") as outfile:
         for i in range(len(table[first_key])):
             json.dump({key: table[key][i] for key in table}, outfile)
@@ -101,7 +105,8 @@ def process_shard(
 
     # Apply a tokenization function to each item in the dataset
     ds = raw_ds.map(
-        lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])}, remove_columns=raw_ds.column_names
+        lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])}, remove_columns=raw_ds.column_names,
+        num_proc=NUM_CPUS_FOR_DATASET_MAP,
     )
     reference_completion_ds = raw_ds.map(
         lambda x: {
@@ -110,6 +115,7 @@ def process_shard(
             )
         },
         remove_columns=raw_ds.column_names,
+        num_proc=NUM_CPUS_FOR_DATASET_MAP,
     )
     reference_completion_ds = reference_completion_ds.select(
         range(0, len(ds), args.num_completions)
@@ -157,7 +163,7 @@ def process_shard_api(model_name_or_path: str, args: Args, shard: List[str]) -> 
 
     ds = raw_ds.map(
         lambda x: {"prompt": format_conversation(x["messages"][:-1])},
-        num_proc=multiprocessing.cpu_count(),
+        num_proc=NUM_CPUS_FOR_DATASET_MAP,
     )
     prompts = ds["prompt"]
     model_responses = ds["model_completion"]
@@ -254,9 +260,6 @@ def majority_vote(offsets_per_model: dict[str, torch.tensor]) -> torch.tensor:
     return majority_votes
 
 
-
-
-
 def main(args: Args):
     mp.set_start_method("spawn", force=True)
 
@@ -307,6 +310,8 @@ def main(args: Args):
             if "score" not in completions[i]:
                 completions[i]["score"] = {}
             completions[i]["score"][model_name_or_path] = scores[i].item()
+            if "reference_completion_score" not in completions[i]:
+                completions[i]["reference_completion_score"] = {}
             completions[i]["reference_completion_score"][model_name_or_path] = reference_completion_scores[i // args.num_completions].item()
 
         best_indices = torch.argmax(scores_per_prompt, dim=1)  # (n_prompts, 1) --> (n_prompts, )
@@ -379,10 +384,9 @@ args:
 {pformat(vars(args))}
 ```
 
-## Reproduce this dataset
+## Additional Information
 
-1. Download the `{[f.split("/")[-1] for f in [__file__, args.save_filename]]}` from the {repo_full_url}.
-2. Run `{run_command}`
+1. Command used to run `{run_command}`
 """)
         sft_card.push_to_hub(
             full_repo_id,

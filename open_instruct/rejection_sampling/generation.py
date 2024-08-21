@@ -41,6 +41,9 @@ from open_instruct.rejection_sampling.api_generate import (  # Import your class
     LLMProcessor,
 )
 api = HfApi()
+# we don't use `multiprocessing.cpu_count()` because typically we only have 12 CPUs
+# and that the shards might be small
+NUM_CPUS_FOR_DATASET_MAP = 4
 
 @dataclass
 class Args:
@@ -151,7 +154,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     if "gpt-3.5" in args.model_name_or_path or "gpt-4" in args.model_name_or_path:
         ds = ds.map(
             lambda x: {"prompt": format_conversation(x["messages"][:-1])},
-            num_proc=multiprocessing.cpu_count(),
+            num_proc=NUM_CPUS_FOR_DATASET_MAP,
         )
         messages = ds[dataset_args.dataset_train_split]["prompt"]
         responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args))
@@ -162,7 +165,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
 
         ds = ds.map(
             lambda x: {"prompt_token_ids": tokenizer.apply_chat_template(x["messages"][:-1])},
-            num_proc=multiprocessing.cpu_count(),
+            num_proc=NUM_CPUS_FOR_DATASET_MAP,
         )
         prompt_token_ids = ds[dataset_args.dataset_train_split]["prompt_token_ids"]
         outputs = generate_with_vllm(args.model_name_or_path, prompt_token_ids, gen_args)
@@ -197,8 +200,9 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
         if args.hf_entity is None:
             args.hf_entity = api.whoami()["name"]
         full_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
+        timestamp = f"_{int(time.time())}"
         if args.add_timestamp:
-            full_repo_id += f"_{int(time.time())}"
+            full_repo_id += timestamp
         api.create_repo(full_repo_id, repo_type="dataset", exist_ok=True)
         for f in [__file__, args.save_filename]:
             api.upload_file(
@@ -209,7 +213,6 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
             )
         repo_full_url = f"https://huggingface.co/datasets/{full_repo_id}"
         print(f"Pushed to {repo_full_url}")
-
         run_command = " ".join(["python"] + sys.argv)
         sft_card = RepoCard(content=f"""\
 # allenai/open_instruct: Generation Dataset
