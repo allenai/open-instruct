@@ -906,8 +906,8 @@ def get_beaker_dataset_ids(experiment_id: str) -> Optional[List[str]]:
         if process.returncode != 0:
             logger.error(f"Failed to get Beaker dataset: {stderr}")
             return None
-        dataset = json.loads(stdout)
-        dataset_ids.append(dataset["id"])
+        datasets = json.loads(stdout)
+        dataset_ids.extend([dataset["id"] for dataset in datasets])
     return dataset_ids
 
 
