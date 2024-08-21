@@ -17,7 +17,8 @@ import unittest
 
 import pytest
 
-from open_instruct.utils import FlatArguments, get_datasets
+from open_instruct.utils import get_datasets
+from open_instruct.finetune import FlatArguments
 
 
 class GetDatasetsTest(unittest.TestCase):
