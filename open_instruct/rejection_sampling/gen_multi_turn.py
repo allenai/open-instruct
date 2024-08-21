@@ -118,6 +118,7 @@ def format_conversation(messages: list) -> str:
     formatted_conversation = []
 
     breakpoint()
+
     # Iterate through the messages
     for message in messages:  # Exclude the last assistant message
         role = "User A" if message["role"] == "user" else "User B"
