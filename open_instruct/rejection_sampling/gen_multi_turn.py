@@ -153,6 +153,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     pprint([dataset_args, args, gen_args])
 
     if "gpt-3.5" in args.model_name_or_path or "gpt-4" in args.model_name_or_path:
+        breakpoint()
         ds = ds.map(
             lambda x: {"prompt": format_conversation(x["messages"][:-1])},
             num_proc=multiprocessing.cpu_count(),
