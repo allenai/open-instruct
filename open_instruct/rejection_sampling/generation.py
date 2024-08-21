@@ -16,34 +16,31 @@
 import asyncio
 import copy
 import json
-import multiprocessing
 import os
+import sys
+import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass
-import sys
-from typing import Dict, List, Optional
 from pprint import pformat
+from typing import Dict, List, Optional
 
-
-import pandas as pd
-from huggingface_hub import HfApi
-import time
 from datasets import load_dataset
-from rich.console import Console
+from huggingface_hub import HfApi
+from huggingface_hub.repocard import RepoCard
 from rich.pretty import pprint
-from rich.table import Table
 from transformers import AutoTokenizer, HfArgumentParser
 from vllm import LLM, SamplingParams
-from huggingface_hub.repocard import RepoCard
 
 from open_instruct.rejection_sampling.api_generate import (  # Import your classes
     LLMGenerationConfig,
     LLMProcessor,
 )
+
 api = HfApi()
 # we don't use `multiprocessing.cpu_count()` because typically we only have 12 CPUs
 # and that the shards might be small
 NUM_CPUS_FOR_DATASET_MAP = 4
+
 
 @dataclass
 class Args:
@@ -57,6 +54,7 @@ class Args:
     push_to_hub: bool = False
     hf_entity: Optional[str] = None
     add_timestamp: bool = True
+
 
 @dataclass
 class GenerationArgs:
@@ -77,6 +75,7 @@ class DatasetArgs:
     dataset_end_idx: Optional[int] = 100
     sanity_check: bool = False
     sanity_check_size: int = 100
+
 
 def save_jsonl(save_filename: str, table: Dict[str, List]):
     first_key = list(table.keys())[0]
@@ -214,7 +213,8 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
         repo_full_url = f"https://huggingface.co/datasets/{full_repo_id}"
         print(f"Pushed to {repo_full_url}")
         run_command = " ".join(["python"] + sys.argv)
-        sft_card = RepoCard(content=f"""\
+        sft_card = RepoCard(
+            content=f"""\
 # allenai/open_instruct: Generation Dataset
 
 See https://github.com/allenai/open-instruct/blob/main/docs/algorithms/rejection_sampling.md for more detail
@@ -236,11 +236,13 @@ gen_args:
 
 1. Download the `{[f.split("/")[-1] for f in [__file__, args.save_filename]]}` from the {repo_full_url}.
 2. Run `{run_command}`
-""")
+"""
+        )
         sft_card.push_to_hub(
             full_repo_id,
             repo_type="dataset",
         )
+
 
 if __name__ == "__main__":
     parser = HfArgumentParser((Args, DatasetArgs, GenerationArgs))

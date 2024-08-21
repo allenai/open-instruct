@@ -14,20 +14,20 @@
 
 import asyncio
 import json
-import multiprocessing
 import os
 import sys
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
 from pprint import pformat
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
 import torch.multiprocessing as mp
 from datasets import Dataset
 from huggingface_hub import HfApi
+from huggingface_hub.repocard import RepoCard
 from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
@@ -35,7 +35,6 @@ from transformers import (
     HfArgumentParser,
     PreTrainedTokenizer,
 )
-from huggingface_hub.repocard import RepoCard
 
 from open_instruct.model_utils import get_reward
 from open_instruct.rejection_sampling.generation import (
@@ -48,6 +47,7 @@ api = HfApi()
 # we don't use `multiprocessing.cpu_count()` because typically we only have 12 CPUs
 # and that the shards might be small
 NUM_CPUS_FOR_DATASET_MAP = 4
+
 
 @dataclass
 class Args:
@@ -68,6 +68,7 @@ class Args:
     hf_entity: Optional[str] = None
     add_timestamp: bool = True
 
+
 def save_jsonl(save_filename: str, table: Dict[str, List]):
     first_key = list(table.keys())[0]
     dirname = os.path.dirname(save_filename)
@@ -77,6 +78,7 @@ def save_jsonl(save_filename: str, table: Dict[str, List]):
         for i in range(len(table[first_key])):
             json.dump({key: table[key][i] for key in table}, outfile)
             outfile.write("\n")
+
 
 def process_shard(
     rank: int, model_name_or_path: str, args: Args, shard: List[str]
@@ -105,7 +107,8 @@ def process_shard(
 
     # Apply a tokenization function to each item in the dataset
     ds = raw_ds.map(
-        lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])}, remove_columns=raw_ds.column_names,
+        lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])},
+        remove_columns=raw_ds.column_names,
         num_proc=NUM_CPUS_FOR_DATASET_MAP,
     )
     reference_completion_ds = raw_ds.map(
@@ -312,7 +315,9 @@ def main(args: Args):
             completions[i]["score"][model_name_or_path] = scores[i].item()
             if "reference_completion_score" not in completions[i]:
                 completions[i]["reference_completion_score"] = {}
-            completions[i]["reference_completion_score"][model_name_or_path] = reference_completion_scores[i // args.num_completions].item()
+            completions[i]["reference_completion_score"][model_name_or_path] = reference_completion_scores[
+                i // args.num_completions
+            ].item()
 
         best_indices = torch.argmax(scores_per_prompt, dim=1)  # (n_prompts, 1) --> (n_prompts, )
         worst_indices = torch.argmin(scores_per_prompt, dim=1)  # (n_prompts, 1) --> (n_prompts, )
@@ -372,7 +377,8 @@ def main(args: Args):
         repo_full_url = f"https://huggingface.co/datasets/{full_repo_id}"
         print(f"Pushed to {repo_full_url}")
         run_command = " ".join(["python"] + sys.argv)
-        sft_card = RepoCard(content=f"""\
+        sft_card = RepoCard(
+            content=f"""\
 # allenai/open_instruct: Rejection Sampling Dataset
 
 See https://github.com/allenai/open-instruct/blob/main/docs/algorithms/rejection_sampling.md for more detail
@@ -387,7 +393,8 @@ args:
 ## Additional Information
 
 1. Command used to run `{run_command}`
-""")
+"""
+        )
         sft_card.push_to_hub(
             full_repo_id,
             repo_type="dataset",
