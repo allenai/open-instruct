@@ -31,6 +31,7 @@ model_to_max_input_tokens = {
     "google/flan-ul2": 8192,
     "bigscience/T0pp": 8192,
     "allenai/tulu-v2.5-ppo-13b-hh-rlhf-60k": 4096,
+    "allenai/tulu-2-dpo-7b": 8192,
 }
 
 
@@ -147,6 +148,7 @@ def main(args):
         prompts = []
         tokenized_prompts = []
         for i, example in enumerate(data["test"]):
+            breakpoint()
             if 0 < max_examples_per_task == i:
                 print(f"Reached {max_examples_per_task} for {dataset}. Breaking")
                 break
@@ -202,15 +204,11 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--data_dir",
-        type=str,
-        default="data/bbh"
-    )
+
     parser.add_argument(
         "--save_dir",
         type=str,
-        default="results/bbh"
+        default="results/zero_scrolls"
     )
     parser.add_argument(
         "--model_name_or_path",
