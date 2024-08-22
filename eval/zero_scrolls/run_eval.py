@@ -102,8 +102,8 @@ def process_model_input(tokenizer, example, max_tokens, device):
 def process_model_input_with_vllm(tokenizer, example, max_tokens, device):
     input_full = example["input"]
     tokenized_input_full = tokenizer(input_full, return_tensors="pt").input_ids.to(device)
-    messages = [{"role": "user", "content": input_full}]
     if tokenized_input_full.shape[1] <= max_tokens:
+        messages = [{"role": "user", "content": input_full}]
         return tokenized_input_full, messages, input_full
 
     seperator_and_query_text = example['truncation_seperator'] + example["input"][example['query_start_index']:]
@@ -149,10 +149,19 @@ def main(args):
 
         prompts = []
         tokenized_prompts = []
+        nb_examples_more_seq_length = 0
+        nb_examples_less_seq_length = 0
         for i, example in enumerate(data["test"]):
             if 0 < max_examples_per_task == i:
                 print(f"Reached {max_examples_per_task} for {dataset}. Breaking")
                 break
+
+            input_full = example["input"]
+            tokenized_input_full = tokenizer(input_full, return_tensors="pt").input_ids.to(device)
+            if tokenized_input_full.shape[1] >= max_input_length:
+                nb_examples_more_seq_length+=1
+            else:
+                nb_examples_less_seq_length+=1
 
             tokenized_input, messages, full_input = process_model_input_with_vllm(tokenizer, example, max_input_length, device)
             tokenized_prompts.append(tokenized_input)
@@ -162,7 +171,9 @@ def main(args):
             else:
                 prompts.append(full_input)
 
-
+        print(f"Nb examples exceeding max_seq_length: {nb_examples_more_seq_length}")
+        print(f"Nb examples not exceeding max_seq_length: {nb_examples_less_seq_length}")
+        breakpoint()
         if args.use_vllm:
             stop = args.additional_stop_sequence
             if not args.use_chat_format or args.stop_at_double_newline:
