@@ -47,5 +47,5 @@ flake8
 isort
 autoflake
 pytest
-hf_transfer
 beaker-py
+hf_transfer
