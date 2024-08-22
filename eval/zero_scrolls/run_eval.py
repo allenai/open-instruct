@@ -187,6 +187,7 @@ def main(args):
             prompt_to_output = {
                 g.prompt: g.outputs[0].text for g in generations
             }
+            breakpoint()
             outputs = [prompt_to_output[prompt] if prompt in prompt_to_output else "" for prompt in prompts]
         else:
             # generate with hf model
