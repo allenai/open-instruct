@@ -14,6 +14,7 @@ from eval.utils import (
     generate_completions,
     score_completions,
     dynamic_import_function,
+    upload_results_to_hf,
 )
 from eval.truthfulqa.utilities import (
     format_prompt,
@@ -277,11 +278,13 @@ def main(args):
         print("Loading model and tokenizer...")
         tokenizer = load_hf_tokenizer(
             model_name_or_path=args.model_name_or_path,
+            revision=args.hf_revision,
             tokenizer_name_or_path=args.tokenizer_name_or_path,
             use_fast_tokenizer=not args.use_slow_tokenizer,
         )
         model = load_hf_lm(
             model_name_or_path=args.model_name_or_path, 
+            revision=args.hf_revision,
             load_in_8bit=args.load_in_8bit, 
             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
             gptq_model=args.gptq,
@@ -349,7 +352,7 @@ def main(args):
                         questions = run_gpt_classifier_eval(model_key, 'truth', args.gpt_truth_model_name, questions, info=False)
                     elif args.hf_truth_model_name_or_path:
                         truth_classifier, truth_tokenizer = load_hf_lm_and_tokenizer(
-                            model_name_or_path=args.hf_truth_model_name_or_path, 
+                            model_name_or_path=args.hf_truth_model_name_or_path,
                             tokenizer_name_or_path=args.hf_truth_model_name_or_path,
                             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                         )
@@ -397,6 +400,19 @@ def main(args):
     with open(os.path.join(args.save_dir, 'metrics.json'), 'w') as f:
         json.dump(results, f, indent=2)
 
+    if args.upload_to_hf is not None:
+        # upload metrics to HF. Main metric is the accuracy
+        task_name = "oi_truthfulqa"
+        primary_score = results["truth-info acc"]
+        upload_results_to_hf(
+            results,
+            args.upload_to_hf,
+            args.hf_upload_name,
+            task_name=task_name,
+            primary_score=primary_score,
+            prepend_timestamp=True,
+        )
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -404,6 +420,12 @@ if __name__ == '__main__':
         "--model_name_or_path", 
         type=str, 
         help="The HuggingFace model to be evaluated."
+    )
+    parser.add_argument(
+        "--hf_revision",
+        type=str,
+        default=None,
+        help="if specified, we will load the model from a revision of the model in the hub"
     )
     parser.add_argument(
         "--tokenizer_name_or_path", 
@@ -503,6 +525,19 @@ if __name__ == '__main__':
         type=str,
         help='A trained HuggingFace judge model name to be used for computing the metrics for `info` if it is specified.' \
             'Either `gpt_info_model_name` or `hf_info_model_name_or_path` should be specified for computing the metric.'
+    )
+    parser.add_argument(
+        "--upload_to_hf",
+        type=str,
+        default=None,
+        help="If specified, we will upload the results to Hugging Face Datasets. "
+             "This should be the name of the dataset to upload to."
+    )
+    parser.add_argument(
+        "--hf_upload_name",
+        type=str,
+        default=None,
+        help="If uploading to hf, this is the model name"
     )
     args = parser.parse_args()
     main(args)

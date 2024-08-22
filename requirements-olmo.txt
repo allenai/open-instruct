@@ -1,5 +1,5 @@
 # TODO When updating flash-attn or torch in the future, make sure to update the version in the Dockerfile 
-torch<=2.3.0
+torch
 scipy
 packaging
 sentencepiece
@@ -26,13 +26,14 @@ fire
 alpaca-eval==0.6.2
 # for human eval web app
 flask
-vllm>=0.4.2  # for compatibility with olmo
+vllm>=0.5.4  # for llama 3 + olmo compat.
 openpyxl
 # for ifeval
-nltk
+nltk==3.8.1
 langdetect
 immutabledict
 # for linting
 black
 flake8
 isort
+autoflake

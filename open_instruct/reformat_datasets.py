@@ -25,7 +25,6 @@ import re
 
 import pandas as pd
 
-
 encoding_templates_w_input = [
     # input encoding template, output encoding template, weight
     ("{instruction}\n\n{input}\n\n", "{output}", 0.2),

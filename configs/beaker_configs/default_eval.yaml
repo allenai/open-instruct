@@ -35,7 +35,7 @@ tasks:
       - name: OPENAI_API_KEY
         secret: openai_api_key
       - name: HF_TOKEN
-        secret: hf_read_token
+        secret: HF_TOKEN
     datasets:
       - mountPath: /data/
         source:

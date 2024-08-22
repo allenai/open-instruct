@@ -11,6 +11,7 @@ from eval.utils import (
     query_openai_chat_model,
     dynamic_import_function,
     load_hf_tokenizer,
+    upload_results_to_hf,
 )
 from eval.codex_humaneval.data import write_jsonl
 from eval.mbpp.evaluation import compute_code_eval
@@ -66,6 +67,7 @@ def main(args):
         if args.model_name_or_path:
             tokenizer = load_hf_tokenizer(
                 model_name_or_path=args.model_name_or_path,
+                revision=args.hf_revision,
                 tokenizer_name_or_path=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
                 use_fast_tokenizer=not args.use_slow_tokenizer,
             )
@@ -75,6 +77,8 @@ def main(args):
                     tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
                     tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                     tensor_parallel_size=torch.cuda.device_count(),
+                    tokenizer_revision=args.hf_revision,
+                    revision=args.hf_revision,
                 )
                 sampling_params = vllm.SamplingParams(
                     n=args.unbiased_sampling_size_n,
@@ -94,6 +98,7 @@ def main(args):
                 print("Loading model and tokenizer...")
                 model = load_hf_lm(
                     model_name_or_path=args.model_name_or_path, 
+                    revision=args.hf_revision,
                     load_in_8bit=args.load_in_8bit, 
                     # device map is determined by the number of gpus available.
                     device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
@@ -179,13 +184,29 @@ def main(args):
         timeout=10.0
     )
 
-    print(pass_at_k_results)
     if args.use_chat_format:
         with open(os.path.join(args.save_dir, "metrics.json"), "w") as fout:
             json.dump(pass_at_k_results, fout)
     else:
         with open(os.path.join(args.save_dir, "metrics.json"), "w") as fout:
             json.dump(pass_at_k_results, fout)
+
+    if args.upload_to_hf is not None:
+        # upload metrics to HF.
+        # main metric is p@10 for temp=.8,
+        # p@1 for temp=.1, maybe default to p@10 otherwise.
+        results = pass_at_k_results
+        pass_at = 1 if args.temperature == 0.1 else 10
+        task_name = f"oi_mbpp_p@{str(pass_at)}"
+        primary_score = results[f"pass@{str(pass_at)}"]
+        upload_results_to_hf(
+            results,
+            args.upload_to_hf,
+            args.hf_upload_name,
+            task_name=task_name,
+            primary_score=primary_score,
+            prepend_timestamp=True,
+        )
 
 
 if __name__ == "__main__":
@@ -195,6 +216,12 @@ if __name__ == "__main__":
         type=str, 
         default=None, 
         help="If specified, we will load the model to generate the predictions."
+    )
+    parser.add_argument(
+        "--hf_revision",
+        type=str,
+        default=None,
+        help="if specified, we will load the model from a revision of the model in the hub"
     )
     parser.add_argument(
         "--tokenizer_name_or_path", 
@@ -285,6 +312,19 @@ if __name__ == "__main__":
         '--use_evalplus_prompt',
         action="store_true",
         help="If given, we will use the evalplus prompting setup, to better match scores on the evalplus leaderboard."
+    )
+    parser.add_argument(
+        "--upload_to_hf",
+        type=str,
+        default=None,
+        help="If specified, we will upload the results to Hugging Face Datasets. "
+             "This should be the name of the dataset to upload to."
+    )
+    parser.add_argument(
+        "--hf_upload_name",
+        type=str,
+        default=None,
+        help="If uploading to hf, this is the model name"
     )
     parser.add_argument("--results_file", type=str)
     args = parser.parse_args()

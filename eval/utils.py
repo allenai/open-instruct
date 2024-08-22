@@ -7,7 +7,7 @@ import os
 from importlib import import_module
 from transformers import StoppingCriteria
 from eval.dispatch_openai_requests import dispatch_openai_chat_requesets, dispatch_openai_prompt_requesets
-import warnings
+from huggingface_hub import HfApi
 
 
 class KeyWordsCriteria(StoppingCriteria):
@@ -220,7 +220,8 @@ def score_completions(model, tokenizer, scoring_examples, batch_size=1, aggregat
 
 
 def load_hf_lm(
-        model_name_or_path, 
+        model_name_or_path,
+        revision=None,
         device_map="auto", 
         torch_dtype="auto",
         load_in_8bit=False, 
@@ -253,6 +254,7 @@ def load_hf_lm(
     elif load_in_8bit:
         model = AutoModelForCausalLM.from_pretrained(
             model_name_or_path, 
+            revision=revision,
             device_map=device_map, 
             load_in_8bit=True,
             token=token,
@@ -295,6 +297,7 @@ def load_hf_lm(
 
 def load_hf_tokenizer(
         model_name_or_path, 
+        revision=None,
         tokenizer_name_or_path=None, 
         use_fast_tokenizer=True,
         padding_side="left",
@@ -325,6 +328,7 @@ def load_hf_tokenizer(
 
 def load_hf_lm_and_tokenizer(
         model_name_or_path, 
+        revision=None,
         tokenizer_name_or_path=None,
         device_map="auto", 
         torch_dtype="auto",
@@ -337,6 +341,7 @@ def load_hf_lm_and_tokenizer(
     ):
         tokenizer = load_hf_tokenizer(
             model_name_or_path=model_name_or_path,
+            revision=revision,
             tokenizer_name_or_path=tokenizer_name_or_path,
             use_fast_tokenizer=use_fast_tokenizer,
             padding_side=padding_side,
@@ -344,6 +349,7 @@ def load_hf_lm_and_tokenizer(
         )
         model = load_hf_lm(
             model_name_or_path=model_name_or_path,
+            revision=revision,
             device_map=device_map,
             torch_dtype=torch_dtype,
             load_in_8bit=load_in_8bit,
@@ -501,3 +507,34 @@ def dynamic_import_function(function_path):
     function = getattr(module, function_name)
     return function
  
+def upload_results_to_hf(
+        results_dict,
+        hf_dataset_name,
+        hf_dataset_save_dir,
+        task_name=None,
+        primary_score=None,
+        prepend_timestamp=False,
+    ):
+    # A bunch of stuff for making the results file setup follow
+    # the oe-eval standards
+    if task_name is not None:
+        results_dict["task_name"] = task_name
+    if primary_score is not None:
+        results_dict["metrics"] = {}
+        results_dict["metrics"]["primary_score"] = primary_score
+    if prepend_timestamp:
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        hf_dataset_save_path = f"{hf_dataset_save_dir}/{timestamp}-{task_name}.json"
+    else:
+        hf_dataset_save_path = f"{hf_dataset_save_dir}/{task_name}.json"
+    # actual save and upload
+    with open("results.json", "w") as f:
+        json.dump(results_dict, f)
+    api = HfApi(token=os.getenv("HF_TOKEN", None))
+    api.upload_file(
+        path_or_fileobj="results.json",
+        path_in_repo=hf_dataset_save_path,
+        repo_id=hf_dataset_name,
+        repo_type="dataset",
+    )
+    os.remove("results.json")

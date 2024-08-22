@@ -14,23 +14,25 @@ RUN apt-get update && apt-get install -y \
     jq \
     language-pack-en \
     make \
-    man-db \
-    manpages \
-    manpages-dev \
-    manpages-posix \
-    manpages-posix-dev \
     sudo \
     unzip \
     vim \
     wget \
-    fish \
     parallel \
     iputils-ping \
-    htop \
-    emacs \
-    zsh \
-    rsync \
     tmux
+
+ARG BEAKER_VERSION
+RUN curl --silent \
+    --connect-timeout 5 \
+    --max-time 10 \
+    --retry 5 \
+    --retry-delay 0 \
+    --retry-max-time 40 \
+    --output beaker.tar.gz \
+    "https://beaker.org/api/v3/release/cli?os=linux&arch=amd64&version=${BEAKER_VERSION}" \
+    && tar -zxf beaker.tar.gz -C /usr/local/bin/ ./beaker \
+    && rm beaker.tar.gz
 
 # This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
 # puts the right NVIDIA things in the right place (that THOR requires).
@@ -64,19 +66,6 @@ RUN echo '%users ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 # work.
 RUN yes | unminimize
 
-# Install AWS CLI
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
-    && unzip awscliv2.zip \
-    && ./aws/install \
-    && rm awscliv2.zip
-
-# Install Google Cloud CLI
-RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" \
-        | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list \
-    && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg \
-        | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - \
-    && apt-get update -y && apt-get install google-cloud-sdk -y
-
 # Install MLNX OFED user-space drivers
 # See https://docs.nvidia.com/networking/pages/releaseview.action?pageId=15049785#Howto:DeployRDMAacceleratedDockercontaineroverInfiniBandfabric.-Dockerfile
 ENV MOFED_VER 5.8-1.1.2.1
@@ -88,32 +77,8 @@ RUN wget --quiet https://content.mellanox.com/ofed/MLNX_OFED-${MOFED_VER}/MLNX_O
     rm -rf MLNX_OFED_LINUX-${MOFED_VER}-${OS_VER}-${PLATFORM} && \
     rm MLNX_OFED_LINUX-${MOFED_VER}-${OS_VER}-${PLATFORM}.tgz
 
-# Install Docker CLI. Version matches Beaker on-premise servers.
-RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-20.10.21.tgz -o docker.tgz \
-    && sudo tar xzvf docker.tgz --strip 1 -C /usr/local/bin docker/docker \
-    && rm docker.tgz
-
-# Install Beaker
-ARG BEAKER_VERSION
-RUN curl --silent \
-    --connect-timeout 5 \
-    --max-time 10 \
-    --retry 5 \
-    --retry-delay 0 \
-    --retry-max-time 40 \
-    --output beaker.tar.gz \
-    "https://beaker.org/api/v3/release/cli?os=linux&arch=amd64&version=${BEAKER_VERSION}" \
-    && tar -zxf beaker.tar.gz -C /usr/local/bin/ ./beaker \
-    && rm beaker.tar.gz
-
 # The -l flag makes bash act as a login shell and load /etc/profile, etc.
 ENTRYPOINT ["bash", "-l"]
-
-RUN apt update && apt install -y openjdk-8-jre-headless
-
-RUN curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | bash
-RUN apt-get -y install git-lfs
-RUN apt-get install -y --reinstall python-pkg-resources
 
 WORKDIR /stage/
 
@@ -131,6 +96,12 @@ RUN pip install git+https://github.com/Muennighoff/transformers.git@olmoe
 RUN python -m nltk.downloader punkt
 
 COPY open_instruct open_instruct
+
+# install the package in editable mode
+COPY pyproject.toml .
+RUN pip install -e .
+COPY .git .
+
 COPY eval eval
 COPY configs configs
 COPY scripts scripts

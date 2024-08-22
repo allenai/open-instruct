@@ -71,10 +71,11 @@ today = date.today().strftime("%m%d%Y")
 parser = argparse.ArgumentParser()
 parser.add_argument("--workspace", type=str, default="oe-adapt-general")
 parser.add_argument("--model_name", type=str, default="hf-opt-7B")
+parser.add_argument("--hf_revision", type=str, default=None)
 parser.add_argument("--location", type=str, default=None)
 parser.add_argument("--beaker_image", type=str, default="hamishivi/open-instruct-eval", help="If given, use this Beaker image.")
 parser.add_argument("--beaker_subfolder", type=str, default=None)
-parser.add_argument("--cluster", nargs='+', default=["ai2/allennlp-cirrascale", "ai2/pluto-cirrascale"])
+parser.add_argument("--cluster", nargs='+', default=["ai2/allennlp-cirrascale", "ai2/general-cirrascale", "ai2/mosaic-cirrascale-a100", "ai2/s2-cirrascale-l40", "ai2/jupiter-cirrascale-2"])
 parser.add_argument("--is_tuned", action="store_true")
 parser.add_argument("--use_hf_tokenizer_template", action="store_true")
 parser.add_argument("--priority", type=str, default="low")
@@ -86,6 +87,9 @@ parser.add_argument("--gpu_multiplier", type=int, default=None, help="Multiply t
 parser.add_argument("--gsm_stop_at_double_newline", action="store_true", help="Stop GSM generation at the first double newline.")
 parser.add_argument("--no-nfs", action="store_true", help="Don't mount the NFS.")
 parser.add_argument("--add_stop_sequence", type=str, nargs="+", default=[], help="Additional stop sequences to use when generating completions.") # e.g. \"<|eot_id|>\" for llama 3
+parser.add_argument("--upload_to_hf", type=str, default=None, help="If given, upload the eval results to the Hugging Face model hub. Provide the HF dataset and path in form <hf dataset>//<hf path>.")
+parser.add_argument("--hf_upload_experiments", type=str, nargs="*", default=None, help="Upload given experiment to the Hugging Face model hub.")
+parser.add_argument("--run_oe_eval_experiments", action="store_true", help="Run the OE eval tool and experiments too.")
 args = parser.parse_args()
 
 
@@ -443,12 +447,12 @@ for experiment_group in experiment_groups:
         raise ValueError("experiment_group not supported")
 
     if model_info[0].startswith("hf-"):  # if it's a huggingface model, load it from the model hub
-        task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
-        task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path "+model_info[1])]
+        task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", f"--model_name_or_path {model_info[1]} --hf_revision {args.hf_revision}")]
+        task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", f"--tokenizer_name_or_path {model_info[1]}")]
     elif model_info[1].startswith("/"):  # if it's a local model, load it from the local directory
         assert nfs_available, "NFS is required for path-based models."  # to be safe.
-        task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
-        task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path "+model_info[1])]
+        task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", f"--model_name_or_path {model_info[1]}")]
+        task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", f"--tokenizer_name_or_path {model_info[1]}")]
     else:  # if it's a beaker model, mount the beaker dataset to `/model`
         task_spec['datasets'][1]['source']['beaker'] = model_info[1]
 
@@ -512,16 +516,38 @@ for experiment_group in experiment_groups:
             "--chat_formatting_function eval.templates.create_prompt_with_olmo_chat_format")
         ]
 
-    # if any([x in model_info[0] for x in ["opt", "pythia", "falcon"]]) or "olmoe" in model_info[0]:
-    # if "--use_vllm" in task_spec['arguments'][0]:
-        # print(f"Removing --use_vllm for {model_info[0]}")
-        # task_spec['arguments'] = [task_spec['arguments'][0].replace("--use_vllm", "")] 
+    if any([x in model_info[0] for x in ["opt", "pythia", "falcon"]]) or "olmoe" in model_info[0]:
+        if "--use_vllm" in task_spec['arguments'][0]:
+            print(f"Removing --use_vllm for {model_info[0]}")
+            task_spec['arguments'] = [task_spec['arguments'][0].replace("--use_vllm", "")] 
 
     # Add additional stop sequences if needed.
     # mainly for llama-3-instruct eot.
     tasks_without_addition_stop = ["mmlu_0shot", "mmlu_5shot", "trutufulqa"]
     if args.add_stop_sequence and experiment_group not in tasks_without_addition_stop:
         task_spec['arguments'] = [task_spec['arguments'][0] + " --additional_stop_sequence " + " ".join(args.add_stop_sequence)]
+
+    # add HF hub upload if specified
+    if args.upload_to_hf:
+        if args.hf_upload_experiments is None or len(args.hf_upload_experiments) == 0:
+            # use defaults for tulu dev evals.
+            args.hf_upload_experiments = [
+                "MATH_cot",
+                "bbh_cot",
+                "trutufulqa",
+                "xstest",
+                "alpaca_eval",
+                "alpaca_eval_2",
+            ]
+        if experiment_group not in args.hf_upload_experiments:
+            print(f"Skipping HF upload for {experiment_group}")
+        else:
+            hf_dataset = args.upload_to_hf
+            # to match the way oe-eval script works.
+            # if we prepended hf- to the model name, remove it.
+            if model_name.startswith("hf-"):
+                model_name = model_name[3:]
+            task_spec['arguments'] = [task_spec['arguments'][0] + f" --upload_to_hf {hf_dataset} --hf_upload_name results/{model_name}"]
 
     eval_task_specs.append(task_spec)
 
@@ -541,3 +567,15 @@ with open(fn, "w") as file:
 
 cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
 subprocess.Popen(cmd, shell=True)
+
+if args.run_oe_eval_experiments:
+    # if so, run oe-eval. We assume it is cloned in the top-level repo directory.
+    oe_eval_cmd = f"scripts/eval/oe-eval.sh --model-name {model_name}"
+    if args.upload_to_hf:
+        oe_eval_cmd += " --hf-upload"
+    ## model location munging: if beaker, use beaker://. If hf, just name
+    if model_info[0].startswith("hf-"):
+        oe_eval_cmd += f" --model-location {model_info[1]}"
+    else:
+        oe_eval_cmd += f" --model-location beaker://{model_info[1]}"
+    subprocess.Popen(oe_eval_cmd, shell=True)
