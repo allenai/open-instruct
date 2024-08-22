@@ -60,15 +60,10 @@ def load_model(model_name_or_path, use_vllm):
         )
         if use_vllm:
             print("Loading vllm model...")
-
             model = vllm.LLM(
                 model=args.model_name_or_path,
-                # tokenizer=tokenizer,
-                # tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
             )
-            breakpoint()
-
         else:
             print("Loading model and tokenizer with huggingface...")
             model = load_hf_lm(
@@ -105,7 +100,6 @@ def process_model_input(tokenizer, example, max_tokens, device):
     return tokenized_input
 
 def process_model_input_with_vllm(tokenizer, example, max_tokens, device):
-    breakpoint()
     input_full = example["input"]
     tokenized_input_full = tokenizer(input_full, return_tensors="pt").input_ids.to(device)
     messages = [{"role": "user", "content": input_full}]
@@ -162,7 +156,7 @@ def main(args):
 
             tokenized_input, messages, full_input = process_model_input_with_vllm(tokenizer, example, max_input_length, device)
             tokenized_prompts.append(tokenized_input)
-
+            breakpoint()
             if args.use_chat_format:
                 prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
                 prompts.append(prompt)
