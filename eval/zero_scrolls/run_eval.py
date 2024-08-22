@@ -58,7 +58,6 @@ def load_model(model_name_or_path, use_vllm):
             tokenizer_name_or_path=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
             use_fast_tokenizer=not args.use_slow_tokenizer,
         )
-        breakpoint()
         if use_vllm:
             print("Loading vllm model...")
             model = vllm.LLM(
@@ -67,6 +66,7 @@ def load_model(model_name_or_path, use_vllm):
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
             )
+            breakpoint()
         else:
             print("Loading model and tokenizer with huggingface...")
             model = load_hf_lm(
