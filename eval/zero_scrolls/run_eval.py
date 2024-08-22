@@ -183,7 +183,7 @@ def main(args):
                 max_tokens=512,
                 stop=stop,
             )
-            generations = model.generate(prompts, sampling_params)
+            generations = model.generate(prompts[:5], sampling_params)
             prompt_to_output = {
                 g.prompt: g.outputs[0].text for g in generations
             }
