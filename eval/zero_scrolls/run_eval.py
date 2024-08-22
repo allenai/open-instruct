@@ -161,19 +161,19 @@ def main(args):
             if tokenized_input_full.shape[1] >= max_input_length:
                 nb_examples_more_seq_length+=1
             else:
+                tokenized_input, messages, full_input = process_model_input_with_vllm(tokenizer, example,
+                                                                                      max_input_length, device)
+                tokenized_prompts.append(tokenized_input)
+                if args.use_chat_format:
+                    prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
+                    prompts.append(prompt)
+                else:
+                    prompts.append(full_input)
                 nb_examples_less_seq_length+=1
-
-            tokenized_input, messages, full_input = process_model_input_with_vllm(tokenizer, example, max_input_length, device)
-            tokenized_prompts.append(tokenized_input)
-            if args.use_chat_format:
-                prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
-                prompts.append(prompt)
-            else:
-                prompts.append(full_input)
 
         print(f"Nb examples exceeding max_seq_length: {nb_examples_more_seq_length}")
         print(f"Nb examples not exceeding max_seq_length: {nb_examples_less_seq_length}")
-        breakpoint()
+
         if args.use_vllm:
             stop = args.additional_stop_sequence
             if not args.use_chat_format or args.stop_at_double_newline:
