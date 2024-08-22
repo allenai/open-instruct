@@ -63,8 +63,8 @@ def load_model(model_name_or_path, use_vllm):
             breakpoint()
             model = vllm.LLM(
                 model=args.model_name_or_path,
-                tokenizer=tokenizer,
-                tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
+                # tokenizer=tokenizer,
+                # tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
             )
 
