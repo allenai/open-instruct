@@ -50,10 +50,11 @@ sh scripts/dpo_train_with_accelerate.sh
 * `HF_TOKEN`: https://huggingface.co/settings/tokens
 
 Then you need to write them in beaker secret as follows (replace the `xxxx` with your own API key or token)
-```
-beaker secret write -w ai2/tulu-2-improvements $(whoami)_BEAKER_TOKEN xxxx
-beaker secret write -w ai2/tulu-2-improvements $(whoami)_WANDB_API_KEY xxxx
-beaker secret write -w ai2/tulu-2-improvements $(whoami)_HF_TOKEN xxxx
+```bash
+beaker_whoami=$(beaker account whoami --format json | jq -r '.[0].name')
+beaker secret write -w ai2/tulu-2-improvements "${beaker_whoami}_BEAKER_TOKEN" xxxx
+beaker secret write -w ai2/tulu-2-improvements "${beaker_whoami}_WANDB_API_KEY" xxxx
+beaker secret write -w ai2/tulu-2-improvements "${beaker_whoami}_HF_TOKEN" xxxx
 ```
 
 

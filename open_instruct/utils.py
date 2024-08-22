@@ -610,6 +610,19 @@ def get_beaker_dataset_ids(experiment_id: str) -> Optional[List[str]]:
     return dataset_ids
 
 
+def get_beaker_whoami() -> Optional[str]:
+    get_beaker_whoami_command = "beaker account whoami --format json"
+    process = subprocess.Popen(
+        ["bash", "-c", get_beaker_whoami_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    stdout, stderr = process.communicate()
+    if process.returncode != 0:
+        logger.error(f"Failed to get Beaker account: {stderr}")
+        return None
+    accounts = json.loads(stdout)
+    return accounts[0]["name"]
+
+
 def maybe_get_beaker_config():
     beaker_dataset_ids = [get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"])]
     beaker_dataset_id_urls = [f"https://beaker.org/ds/{dataset_id}" for dataset_id in beaker_dataset_ids]

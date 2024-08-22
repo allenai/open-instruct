@@ -7,6 +7,8 @@ import re
 import shlex
 import getpass
 
+from open_instruct.utils import get_beaker_whoami
+
 def load_yaml(file_path):
     with open(file_path, 'r') as f:
         return yaml.load(f, Loader=yaml.FullLoader)
@@ -183,6 +185,7 @@ def main():
             env['value'] = False
         if env['name'] == "WANDB_PROJECT":
             env['value'] = wandb_project
+    beaker_whoami = get_beaker_whoami()
     d['tasks'][0]['envVars'].append({
         'name': 'WANDB_NAME', 'value': exp_name
     })
@@ -190,13 +193,13 @@ def main():
         'name': 'WANDB_RUN_GROUP', 'value': experiment_group
     })
     d['tasks'][0]['envVars'].append({
-        'name': 'BEAKER_TOKEN', 'secret': f"{getpass.getuser()}_BEAKER_TOKEN"
+        'name': 'BEAKER_TOKEN', 'secret': f"{beaker_whoami}_BEAKER_TOKEN"
     })
     d['tasks'][0]['envVars'].append({
-        'name': 'HF_TOKEN', 'secret': f"{getpass.getuser()}_HF_TOKEN"
+        'name': 'HF_TOKEN', 'secret': f"{beaker_whoami}_HF_TOKEN"
     })
     d['tasks'][0]['envVars'].append({
-        'name': 'WANDB_API_KEY', 'secret': f"{getpass.getuser()}_WANDB_API_KEY"
+        'name': 'WANDB_API_KEY', 'secret': f"{beaker_whoami}_WANDB_API_KEY"
     })
 
     # mount datasets
