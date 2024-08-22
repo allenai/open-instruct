@@ -8,6 +8,7 @@ import torch
 import random
 import vllm
 import evaluate
+from vllm import LLM, SamplingParams
 from datasets import load_dataset
 from eval.utils import (
     load_hf_lm,
@@ -48,14 +49,16 @@ datasets = [
             # 'book_sum_sort'
 ]
 
+
+
 def load_model(model_name_or_path, use_vllm):
     if model_name_or_path:
-        breakpoint()
         tokenizer = load_hf_tokenizer(
             model_name_or_path=args.model_name_or_path,
             tokenizer_name_or_path=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
             use_fast_tokenizer=not args.use_slow_tokenizer,
         )
+        breakpoint()
         if use_vllm:
             print("Loading vllm model...")
             model = vllm.LLM(
