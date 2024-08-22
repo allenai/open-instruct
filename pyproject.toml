@@ -1,17 +1,31 @@
-[build-system]
-requires = ["setuptools", "setuptools-scm"]
-build-backend = "setuptools.build_meta"
-
 [project]
-name = "open_instruct"
-authors = [
-    {name = "Example Author", email = "author@example.com"}
-]
-description = "package description"
-version = "0.0.1"
+name = "open-instruct"
+version = "0.1.0"
+description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.7"
-dependencies = []
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.4.0",
+    "datasets>=2.21.0",
+    "deepspeed>=0.14.5",
+    "accelerate>=0.33.0",
+    "peft>=0.12.0",
+    "bitsandbytes>=0.43.3",
+    "evaluate>=0.4.2",
+    "transformers>=4.44.1",
+    "openai>=1.42.0",
+    "tiktoken>=0.7.0",
+    "tensorboard>=2.17.1",
+    "wandb>=0.17.7",
+    "fire>=0.6.0",
+    "vllm>=0.5.4",
+    "hf-transfer>=0.1.8",
+    "hatchling>=1.25.0",
+    "einops>=0.8.0",
+    "editables>=0.5",
+    "flash-attn>=2.6.3",
+]
 
-[tool.setuptools]
-py-modules = ["open_instruct"]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
