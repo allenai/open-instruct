@@ -84,7 +84,7 @@ def load_model(model_name_or_path, use_vllm):
     return model, tokenizer
 
 def process_model_input(tokenizer, example, max_tokens, device):
-    breakpoint()
+
     tokenized_input_full = tokenizer(example["input"], return_tensors="pt").input_ids.to(device)
 
     if tokenized_input_full.shape[1] <= max_tokens:
@@ -100,6 +100,7 @@ def process_model_input(tokenizer, example, max_tokens, device):
     return tokenized_input
 
 def process_model_input_with_vllm(tokenizer, example, max_tokens, device):
+    breakpoint()
     input_full = example["input"]
     tokenized_input_full = tokenizer(example["input"], return_tensors="pt").input_ids.to(device)
     messages = [{"role": "user", "content": input_full}]
