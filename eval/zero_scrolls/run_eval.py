@@ -60,13 +60,14 @@ def load_model(model_name_or_path, use_vllm):
         )
         if use_vllm:
             print("Loading vllm model...")
-            breakpoint()
+
             model = vllm.LLM(
                 model=args.model_name_or_path,
                 # tokenizer=tokenizer,
                 # tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
             )
+            breakpoint()
 
         else:
             print("Loading model and tokenizer with huggingface...")
