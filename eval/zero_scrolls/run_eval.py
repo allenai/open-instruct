@@ -52,11 +52,10 @@ def load_model(model_name_or_path, use_vllm):
     if model_name_or_path:
         tokenizer = load_hf_tokenizer(
             model_name_or_path=args.model_name_or_path,
-            tokenizer_name_or_path=args.tokenizer_name_or_path,
+            tokenizer_name_or_path=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
             use_fast_tokenizer=not args.use_slow_tokenizer,
         )
         if use_vllm:
-            tokenizer = args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path
             print("Loading vllm model...")
             model = vllm.LLM(
                 model=args.model_name_or_path,
@@ -102,7 +101,7 @@ def process_model_input(tokenizer, example, max_tokens, device):
 def process_model_input_with_vllm(tokenizer, example, max_tokens, device):
     breakpoint()
     input_full = example["input"]
-    tokenized_input_full = tokenizer(example["input"], return_tensors="pt").input_ids.to(device)
+    tokenized_input_full = tokenizer(input_full, return_tensors="pt").input_ids.to(device)
     messages = [{"role": "user", "content": input_full}]
     if tokenized_input_full.shape[1] <= max_tokens:
         return tokenized_input_full, messages, input_full
