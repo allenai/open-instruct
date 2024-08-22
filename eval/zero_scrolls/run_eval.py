@@ -142,7 +142,7 @@ def main(args):
         print(f"time as start {dataset}: {time}")
         print(f"Loading {dataset}")
         # load the data using HF
-        data = load_dataset("tau/zero_scrolls", dataset)
+        data = load_dataset("tau/zero_scrolls", dataset, trust_remote_code=True)
         print(f"Loaded {dataset}")
 
         prompts = []
