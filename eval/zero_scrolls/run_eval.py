@@ -85,6 +85,7 @@ def load_model(model_name_or_path, use_vllm):
 
 def process_model_input(tokenizer, example, max_tokens, device):
     tokenized_input_full = tokenizer(example["input"], return_tensors="pt").input_ids.to(device)
+    breakpoint()
     if tokenized_input_full.shape[1] <= max_tokens:
         return tokenized_input_full
 
@@ -148,7 +149,6 @@ def main(args):
         prompts = []
         tokenized_prompts = []
         for i, example in enumerate(data["test"]):
-            breakpoint()
             if 0 < max_examples_per_task == i:
                 print(f"Reached {max_examples_per_task} for {dataset}. Breaking")
                 break
