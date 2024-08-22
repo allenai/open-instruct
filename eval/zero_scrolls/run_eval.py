@@ -50,6 +50,7 @@ datasets = [
 
 def load_model(model_name_or_path, use_vllm):
     if model_name_or_path:
+        breakpoint()
         tokenizer = load_hf_tokenizer(
             model_name_or_path=args.model_name_or_path,
             tokenizer_name_or_path=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
