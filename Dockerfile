@@ -22,6 +22,18 @@ RUN apt-get update && apt-get install -y \
     iputils-ping \
     tmux
 
+ARG BEAKER_VERSION
+RUN curl --silent \
+    --connect-timeout 5 \
+    --max-time 10 \
+    --retry 5 \
+    --retry-delay 0 \
+    --retry-max-time 40 \
+    --output beaker.tar.gz \
+    "https://beaker.org/api/v3/release/cli?os=linux&arch=amd64&version=${BEAKER_VERSION}" \
+    && tar -zxf beaker.tar.gz -C /usr/local/bin/ ./beaker \
+    && rm beaker.tar.gz
+
 # This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
 # puts the right NVIDIA things in the right place (that THOR requires).
 ENV NVIDIA_DRIVER_CAPABILITIES=graphics,utility,compute

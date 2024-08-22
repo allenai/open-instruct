@@ -21,9 +21,12 @@ import logging
 import math
 import os
 import random
+import time
 from copy import deepcopy
+from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
+from typing import List, Optional, Union
 
 import datasets
 import deepspeed
@@ -33,6 +36,7 @@ from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import InitProcessGroupKwargs, set_seed
 from datasets import load_dataset
+from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
@@ -56,17 +60,326 @@ from open_instruct.dpo_utils import (
     simpo_loss,
     wpo_loss,
 )
+from open_instruct.model_utils import (
+    push_folder_and_tokenizer_to_hub,
+    save_with_accelerate,
+)
 from open_instruct.utils import (
     ArgumentParserPlus,
-    FlatArguments,
     clean_last_n_checkpoints,
     get_last_checkpoint_path,
     get_wandb_tags,
+    is_beaker_job,
     maybe_get_beaker_config,
+    maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
+    submit_beaker_eval_jobs,
 )
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class FlatArguments:
+    """
+    Full arguments class for all fine-tuning jobs.
+    """
+
+    exp_name: str = os.path.basename(__file__)[: -len(".py")]
+    """The name of this experiment"""
+    model_name_or_path: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The model checkpoint for weights initialization. Don't set if you want to train a model from scratch."
+            )
+        },
+    )
+    config_name: Optional[str] = field(
+        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
+    )
+    dpo_use_paged_optimizer: bool = field(
+        default=False,
+        metadata={
+            "help": "Use paged optimizer from bitsandbytes."
+            " Not compatible with deepspeed (use deepspeed config instead)."
+        },
+    )
+    dpo_beta: float = field(
+        default=0.1,
+        metadata={"help": "Beta parameter for DPO loss. Default is 0.1."},
+    )
+    dpo_loss_type: str = field(
+        default="dpo",
+        metadata={"help": "Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."},
+    )
+    dpo_gamma_beta_ratio: float = field(
+        default=0.3,
+        metadata={"help": "Gamma to beta ratio for SimPO loss. Default is 0.3. Not used for DPO loss."},
+    )
+    dpo_label_smoothing: float = field(
+        default=0.0,
+        metadata={"help": "Label smoothing for DPO/SimPO loss. Default is 0 (no smoothing)."},
+    )
+    tokenizer_name: Optional[str] = field(
+        default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
+    )
+    tokenizer_revision: Optional[str] = field(
+        default="main",
+        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+    )
+    use_flash_attn: bool = field(
+        default=True,
+        metadata={"help": "Whether to use flash attention in the model training"},
+    )
+    use_slow_tokenizer: bool = field(
+        default=True,
+        metadata={"help": "Whether to use one of the slow tokenizer or not (which is then fast tokenizer)."},
+    )
+    model_revision: str = field(
+        default="main",
+        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+    )
+    trust_remote_code: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Whether or not to allow for custom models defined on the Hub in their own modeling files. "
+                "This option should only be set to `True` for repositories you trust and in which you "
+                "have read the code, as it will execute code present on the Hub on your local machine."
+            )
+        },
+    )
+    low_cpu_mem_usage: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "It is an option to create the model as an empty shell, "
+                "then only materialize its parameters when the pretrained weights are loaded. "
+                "set True will benefit LLM loading time and RAM consumption."
+            )
+        },
+    )
+    dataset_name: Optional[str] = field(
+        default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
+    )
+    dataset_mixer: Optional[dict] = field(
+        default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
+    )
+    dataset_mixer_list: Optional[list[str]] = field(
+        default=None, metadata={"help": "A list of datasets (local or HF) to sample from."}
+    )
+    dataset_mix_dir: Optional[str] = field(
+        default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
+    )
+    dataset_config_name: Optional[str] = field(
+        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
+    )
+    train_file: Optional[str] = field(
+        default=None, metadata={"help": "The input training data file (a json/jsonl file)."}
+    )
+    max_train_samples: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "For debugging purposes or quicker training, truncate the number of training examples to this "
+                "value if set."
+            )
+        },
+    )
+    preprocessing_num_workers: Optional[int] = field(
+        default=None,
+        metadata={"help": "The number of processes to use for the preprocessing."},
+    )
+    max_seq_length: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The maximum total input sequence length after tokenization. "
+                "Sequences longer than this will be truncated,"
+            )
+        },
+    )
+    overwrite_cache: bool = field(
+        default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
+    )
+    add_bos: bool = field(
+        default=False,
+        metadata={
+            "help": "Forcibly add bos token to the beginning of the input sequence."
+            " Use only when tokenizer does not add bos token by default."
+        },
+    )
+    clip_grad_norm: float = field(
+        default=-1,
+        metadata={"help": "Clip gradient norm. Not compatible with deepspeed (use deepspeed config instead)."},
+    )
+    gradient_accumulation_steps: int = field(
+        default=1,
+        metadata={"help": "Number of updates steps to accumulate before performing a backward/update pass."},
+    )
+    learning_rate: float = field(
+        default=2e-5,
+        metadata={"help": "The initial learning rate for AdamW optimizer."},
+    )
+    logging_steps: Optional[int] = field(
+        default=None,
+        metadata={"help": "Log the training loss and learning rate every logging_steps steps."},
+    )
+    lora_rank: int = field(
+        default=64,
+        metadata={"help": "The rank of lora."},
+    )
+    lora_alpha: float = field(
+        default=16,
+        metadata={"help": "The alpha parameter of lora."},
+    )
+    lora_dropout: float = field(
+        default=0.1,
+        metadata={"help": "The dropout rate of lora modules."},
+    )
+    lr_scheduler_type: str = field(
+        default="linear",
+        metadata={
+            "help": "The scheduler type to use for learning rate adjustment.",
+            "choices": ["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
+        },
+    )
+    num_train_epochs: int = field(
+        default=2,
+        metadata={"help": "Total number of training epochs to perform."},
+    )
+    output_dir: str = field(
+        default="output/",
+        metadata={"help": "The output directory where the model predictions and checkpoints will be written."},
+    )
+    per_device_train_batch_size: int = field(
+        default=8,
+        metadata={"help": "Batch size per GPU/TPU core/CPU for training."},
+    )
+    use_lora: bool = field(
+        default=False,
+        metadata={"help": "If True, will use LORA (low-rank parameter-efficient training) to train the model."},
+    )
+    use_qlora: bool = field(
+        default=False,
+        metadata={"help": "Use qLoRA training - initializes model in quantized form. Not compatible with deepspeed."},
+    )
+    use_8bit_optimizer: bool = field(
+        default=False,
+        metadata={"help": "Use 8bit optimizer from bitsandbytes. Not compatible with deepspeed."},
+    )
+    warmup_ratio: float = field(
+        default=0.03,
+        metadata={"help": "Linear warmup over warmup_ratio fraction of total steps."},
+    )
+    weight_decay: float = field(
+        default=0.0,
+        metadata={"help": "Weight decay for AdamW if we apply some."},
+    )
+    timeout: int = field(
+        default=1800,
+        metadata={
+            "help": "Timeout for the training process in seconds."
+            "Useful if tokenization process is long. Default is 1800 seconds (30 minutes)."
+        },
+    )
+    reduce_loss: str = field(
+        default="mean",
+        metadata={
+            "help": "How to reduce loss over tokens. Options are 'mean' or 'sum'."
+            "Using 'sum' can improve chat model performance."
+        },
+    )
+    wandb_entity: Optional[str] = field(
+        default=None,
+        metadata={"help": "Entity to use for logging to wandb."},
+    )
+    resume_from_checkpoint: Optional[str] = field(
+        default=None,
+        metadata={"help": "If the training should continue from a checkpoint folder."},
+    )
+    with_tracking: bool = field(
+        default=False,
+        metadata={"help": "Whether to enable experiment trackers for logging."},
+    )
+    report_to: Union[str, List[str]] = field(
+        default="all",
+        metadata={
+            "help": "The integration(s) to report results and logs to. "
+            "Can be a single string or a list of strings. "
+            "Options are 'tensorboard', 'wandb', 'comet_ml', 'clearml', or 'all'. "
+            "Specify multiple by listing them: e.g., ['tensorboard', 'wandb']"
+        },
+    )
+    save_to_hub: Optional[str] = field(
+        default=None,
+        metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"},
+    )
+    gradient_checkpointing: bool = field(
+        default=False,
+        metadata={"help": "Turn on gradient checkpointing. Saves memory but slows training."},
+    )
+    max_train_steps: Optional[int] = field(
+        default=None,
+        metadata={"help": "If set, overrides the number of training steps. Otherwise, num_train_epochs is used."},
+    )
+    seed: int = field(default=42, metadata={"help": "Random seed for initialization and dataset shuffling."})
+    checkpointing_steps: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
+        },
+    )
+    overwrite_output_dir: bool = field(
+        default=False,
+        metadata={
+            "help": "Overwrite the content of the output directory. Means that resumption will always start from scratch."
+        },
+    )
+    keep_last_n_checkpoints: int = field(
+        default=3,
+        metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
+    )
+    push_to_hub: bool = True
+    """Whether to upload the saved model to huggingface"""
+    hf_entity: Optional[str] = None
+    """The user or org name of the model repository from the Hugging Face Hub"""
+    hf_repo_id: Optional[str] = None
+    """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
+    hf_repo_revision: Optional[str] = None
+    """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
+    hf_repo_url: Optional[str] = None
+    """The url of the saved model in the Hugging Face Hub (will be autoset)"""
+    try_launch_beaker_eval_jobs: bool = True
+    """Whether to launch beaker evaluation jobs after training"""
+
+    def __post_init__(self):
+        if self.reduce_loss not in ["mean", "sum"]:
+            raise ValueError("reduce_loss must be either 'mean' or 'sum'")
+        if (
+            self.dataset_name is None
+            and self.train_file is None
+            and self.dataset_mixer is None
+            and self.dataset_mixer_list is None
+        ):
+            raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
+        else:
+            if self.train_file is not None:
+                extension = self.train_file.split(".")[-1]
+                assert extension in ["json", "jsonl"], "`train_file` should be a json or a jsonl file."
+        if (
+            (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
+            or (self.dataset_name is not None and self.train_file is not None)
+            or (
+                (self.dataset_mixer is not None or self.dataset_mixer_list is not None) and self.train_file is not None
+            )
+            or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
+        ):
+            raise ValueError("Cannot provide two dataset selection mechanisms.")
+
+        if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
+            raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
 
 
 def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=False):
@@ -149,28 +462,6 @@ def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=Fals
     }
 
 
-def save_with_accelerate(accelerator, model, tokenizer, output_dir, args):
-    unwrapped_model = accelerator.unwrap_model(model)
-    # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
-    # Otherwise, sometimes the model will be saved with only part of the parameters.
-    # Also, accelerator needs to use the wrapped model to get the state_dict.
-    state_dict = accelerator.get_state_dict(model)
-    if args.use_lora:
-        # When using lora, the unwrapped model is a PeftModel, which doesn't support the is_main_process
-        # and has its own save_pretrained function for only saving lora modules.
-        # We have to manually specify the is_main_process outside the save_pretrained function.
-        if accelerator.is_main_process:
-            unwrapped_model.save_pretrained(output_dir, state_dict=state_dict)
-    else:
-        unwrapped_model.save_pretrained(
-            output_dir,
-            is_main_process=accelerator.is_main_process,
-            save_function=accelerator.save,
-            state_dict=state_dict,
-            safe_serialization=False,  # errors with safetensors...
-        )
-
-
 # from trl, we have to prep the ref model separately.
 def prepare_deepspeed(accelerator, model):
     deepspeed_plugin = accelerator.state.deepspeed_plugin
@@ -209,6 +500,20 @@ def main(args: FlatArguments):
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
+    if args.push_to_hub:
+        if args.hf_repo_id is None:  # auto-generate one
+            args.hf_repo_id = "open_instruct_dev"
+        if args.hf_entity is None:  # first try to use AI2 entity
+            args.hf_entity = maybe_use_ai2_hf_entity()
+        if args.hf_entity is None:  # then try to use the user's entity
+            args.hf_entity = HfApi().whoami()["name"]
+        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
+        if args.hf_repo_revision is None:  # auto-generate one
+            args.hf_repo_revision = (
+                f"{args.exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
+            )
+        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+
     accelerator_log_kwargs = {}
 
     if args.with_tracking:
@@ -487,8 +792,8 @@ def main(args: FlatArguments):
         overrode_max_train_steps = True
 
     # Create the learning rate scheduler.
-    # Note: the current accelerator.step() calls the .step() of the
-    # real scheduler for the `num_processes` times. This is because they assume
+    # Note: the current accelerator.step() calls the .step() of the real scheduler
+    # for the `num_processes` times. This is because they assume
     # the user initialize the scheduler with the entire training set.
     # In the case of data parallel training, each process only
     # sees a subset (1/num_processes) of the training set.
@@ -507,7 +812,6 @@ def main(args: FlatArguments):
         num_training_steps=num_training_steps_for_scheduler,
         num_warmup_steps=int(num_training_steps_for_scheduler * args.warmup_ratio),
     )
-
     # Prepare everything with `accelerator`.
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
@@ -538,14 +842,13 @@ def main(args: FlatArguments):
         # (Optional) Ai2 internal tracking
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
-        beaker_config = maybe_get_beaker_config()
-        if beaker_config is not None:
+        if is_beaker_job():
+            beaker_config = maybe_get_beaker_config()
             experiment_config.update(vars(beaker_config))
-        exp_name = os.path.basename(__file__)[: -len(".py")]
         accelerator.init_trackers(
             "open_instruct_internal",
             experiment_config,
-            init_kwargs={"wandb": {"entity": args.wandb_entity, "tags": [exp_name] + get_wandb_tags()}},
+            init_kwargs={"wandb": {"entity": args.wandb_entity, "tags": [args.exp_name] + get_wandb_tags()}},
         )
 
     # Train!
@@ -696,7 +999,7 @@ def main(args: FlatArguments):
                 if completed_steps >= args.max_train_steps:
                     break
 
-        if args.checkpointing_steps == "epoch":
+        if checkpointing_steps == "epoch":
             output_dir = f"epoch_{epoch}"
             if args.output_dir is not None:
                 output_dir = os.path.join(args.output_dir, output_dir)
@@ -708,14 +1011,31 @@ def main(args: FlatArguments):
                 clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
             accelerator.wait_for_everyone()
 
-    if args.with_tracking:
-        accelerator.end_training()
-
-    # save normally at the end
     if args.output_dir is not None:
         if accelerator.is_main_process:
             tokenizer.save_pretrained(args.output_dir)
-        save_with_accelerate(accelerator, model, tokenizer, args.output_dir, args)
+        save_with_accelerate(
+            accelerator,
+            model,
+            tokenizer,
+            args.output_dir,
+            args.use_lora,
+        )
+
+    if args.push_to_hub:
+        push_folder_and_tokenizer_to_hub(
+            accelerator,
+            tokenizer,
+            args.output_dir,
+            args.hf_repo_id,
+            args.hf_repo_revision,
+        )
+        if accelerator.is_main_process and is_beaker_job() and args.try_launch_beaker_eval_jobs:
+            submit_beaker_eval_jobs(
+                model_name=f"hf-{args.hf_repo_revision}",
+                location=args.hf_repo_id,
+                hf_repo_revision=args.hf_repo_revision,
+            )
 
     accelerator.wait_for_everyone()
     if args.with_tracking:

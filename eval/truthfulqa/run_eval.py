@@ -278,11 +278,13 @@ def main(args):
         print("Loading model and tokenizer...")
         tokenizer = load_hf_tokenizer(
             model_name_or_path=args.model_name_or_path,
+            revision=args.hf_revision,
             tokenizer_name_or_path=args.tokenizer_name_or_path,
             use_fast_tokenizer=not args.use_slow_tokenizer,
         )
         model = load_hf_lm(
             model_name_or_path=args.model_name_or_path, 
+            revision=args.hf_revision,
             load_in_8bit=args.load_in_8bit, 
             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
             gptq_model=args.gptq,
@@ -347,7 +349,7 @@ def main(args):
                         questions = run_gpt_classifier_eval(model_key, 'truth', args.gpt_truth_model_name, questions, info=False)
                     elif args.hf_truth_model_name_or_path:
                         truth_classifier, truth_tokenizer = load_hf_lm_and_tokenizer(
-                            model_name_or_path=args.hf_truth_model_name_or_path, 
+                            model_name_or_path=args.hf_truth_model_name_or_path,
                             tokenizer_name_or_path=args.hf_truth_model_name_or_path,
                             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                         )
@@ -414,6 +416,12 @@ if __name__ == '__main__':
         "--model_name_or_path", 
         type=str, 
         help="The HuggingFace model to be evaluated."
+    )
+    parser.add_argument(
+        "--hf_revision",
+        type=str,
+        default=None,
+        help="if specified, we will load the model from a revision of the model in the hub"
     )
     parser.add_argument(
         "--tokenizer_name_or_path", 

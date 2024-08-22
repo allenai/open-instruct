@@ -107,11 +107,11 @@ def wpo_loss(
 
 # From https://github.com/princeton-nlp/SimPO/blob/main/scripts/simpo_trainer.py#L560C1-L595C56
 def simpo_loss(
-        policy_chosen_logps: torch.FloatTensor,
-        policy_rejected_logps: torch.FloatTensor,
-        beta: float,
-        gamma_beta_ratio: float,
-        label_smoothing: float = 0.0,
+    policy_chosen_logps: torch.FloatTensor,
+    policy_rejected_logps: torch.FloatTensor,
+    beta: float,
+    gamma_beta_ratio: float,
+    label_smoothing: float = 0.0,
 ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
     """Compute the SimPO loss for a batch of policy model log probabilities.
 
@@ -128,10 +128,7 @@ def simpo_loss(
     logits = pi_logratios - gamma_beta_ratio
 
     # sigmoid loss type from SimPO.
-    losses = (
-        -F.logsigmoid(beta * logits) * (1 - label_smoothing)
-        - F.logsigmoid(-beta * logits) * label_smoothing
-    )
+    losses = -F.logsigmoid(beta * logits) * (1 - label_smoothing) - F.logsigmoid(-beta * logits) * label_smoothing
 
     chosen_rewards = beta * policy_chosen_logps.detach()
     rejected_rewards = beta * policy_rejected_logps.detach()
@@ -216,7 +213,9 @@ def concatenated_forward(
         input_ids=concatenated_batch["concatenated_input_ids"],
         attention_mask=concatenated_batch["concatenated_attention_mask"],
     ).logits.to(torch.float32)
-    all_logps = _get_batch_logps(all_logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob)
+    all_logps = _get_batch_logps(
+        all_logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob
+    )
     chosen_logps = all_logps[: batch["chosen_input_ids"].shape[0]]
     rejected_logps = all_logps[batch["chosen_input_ids"].shape[0] :]
     return chosen_logps, rejected_logps
