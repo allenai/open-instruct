@@ -179,12 +179,11 @@ def main(args):
             if not args.use_chat_format or args.stop_at_double_newline:
                 stop += ["\n\n"]
             sampling_params = vllm.SamplingParams(
-                temperature=0,
+                temperature=1,
                 max_tokens=512,
                 stop=stop,
             )
             generations = model.generate(prompts, sampling_params)
-            breakpoint()
             prompt_to_output = {
                 g.prompt: g.outputs[0].text for g in generations
             }
