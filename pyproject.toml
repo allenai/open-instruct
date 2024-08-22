@@ -24,7 +24,6 @@ dependencies = [
     "hatchling>=1.25.0",
     "einops>=0.8.0",
     "editables>=0.5",
-    "flash-attn>=2.6.3",
     "rich>=13.7.1",
     "matplotlib>=3.9.2",
     "nltk>=3.9.1",

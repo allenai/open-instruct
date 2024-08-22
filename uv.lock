@@ -537,16 +537,6 @@ wheels = [
 ]
 
 [[package]]
-name = "flash-attn"
-version = "2.6.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "einops" },
-    { name = "torch" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/cd/1e/21321670cd3c2f225026d9fd89272cae661529238850e79f48ccf2f9e4e3/flash_attn-2.6.3.tar.gz", hash = "sha256:5bfae9500ad8e7d2937ebccb4906f3bc464d1bf66eedd0e4adabd520811c7b52", size = 2631958 }
-
-[[package]]
 name = "fonttools"
 version = "4.53.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1330,7 +1320,6 @@ dependencies = [
     { name = "einops" },
     { name = "evaluate" },
     { name = "fire" },
-    { name = "flash-attn" },
     { name = "hatchling" },
     { name = "hf-transfer" },
     { name = "immutabledict" },
@@ -1371,7 +1360,6 @@ requires-dist = [
     { name = "einops", specifier = ">=0.8.0" },
     { name = "evaluate", specifier = ">=0.4.2" },
     { name = "fire", specifier = ">=0.6.0" },
-    { name = "flash-attn", specifier = ">=2.6.3" },
     { name = "hatchling", specifier = ">=1.25.0" },
     { name = "hf-transfer", specifier = ">=0.1.8" },
     { name = "immutabledict", specifier = ">=4.2.0" },
@@ -1393,12 +1381,12 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "autoflake" },
-    { name = "beaker-py" },
+    { name = "autoflake", specifier = ">=2.3.1" },
+    { name = "beaker-py", specifier = ">=1.31.2" },
     { name = "black", specifier = ">=24.8.0" },
-    { name = "flake8" },
-    { name = "isort" },
-    { name = "pytest" },
+    { name = "flake8", specifier = ">=7.1.1" },
+    { name = "isort", specifier = ">=5.13.2" },
+    { name = "pytest", specifier = ">=8.3.2" },
 ]
 
 [[package]]
