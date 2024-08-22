@@ -175,15 +175,14 @@ def main(args):
         print(f"Nb examples not exceeding max_seq_length: {nb_examples_less_seq_length}")
 
         if args.use_vllm:
-            stop = args.additional_stop_sequence
-            if not args.use_chat_format or args.stop_at_double_newline:
-                stop += ["\n\n"]
             sampling_params = vllm.SamplingParams(
                 temperature=1,
                 max_tokens=512,
-                stop=stop,
+                top_p=1.0,
+                include_stop_str_in_output=True,
             )
-            generations = model.generate(prompts[:5], sampling_params)
+            breakpoint()
+            generations = model.generate(prompts[0][:10], sampling_params)
             prompt_to_output = {
                 g.prompt: g.outputs[0].text for g in generations
             }
