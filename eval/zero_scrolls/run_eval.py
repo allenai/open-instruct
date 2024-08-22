@@ -156,7 +156,6 @@ def main(args):
 
             tokenized_input, messages, full_input = process_model_input_with_vllm(tokenizer, example, max_input_length, device)
             tokenized_prompts.append(tokenized_input)
-            breakpoint()
             if args.use_chat_format:
                 prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
                 prompts.append(prompt)
@@ -174,6 +173,7 @@ def main(args):
                 stop=stop,
             )
             generations = model.generate(prompts, sampling_params)
+            breakpoint()
             prompt_to_output = {
                 g.prompt: g.outputs[0].text for g in generations
             }
