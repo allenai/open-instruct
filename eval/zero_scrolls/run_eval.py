@@ -151,7 +151,7 @@ def main(args):
         tokenized_prompts = []
         nb_examples_more_seq_length = 0
         nb_examples_less_seq_length = 0
-        for i, example in tqdm(enumerate(data["test"])):
+        for i, example in tqdm(enumerate(data["test"]), desc="Reading data"):
             if 0 < max_examples_per_task == i:
                 print(f"Reached {max_examples_per_task} for {dataset}. Breaking")
                 break
