@@ -2,7 +2,7 @@ import argparse
 import os
 import re
 import json
-import tqdm
+from tqdm import tqdm
 import glob
 import torch
 import random
