@@ -185,11 +185,9 @@ def main(args):
                 include_stop_str_in_output=True,
             )
             generations = model.generate(prompts[0], sampling_params)
-            breakpoint()
             prompt_to_output = {
                 g.prompt: g.outputs[0].text for g in generations
             }
-            breakpoint()
             outputs = [prompt_to_output[prompt] if prompt in prompt_to_output else "" for prompt in prompts]
         else:
             # generate with hf model
