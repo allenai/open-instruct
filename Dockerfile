@@ -100,6 +100,7 @@ RUN python -m nltk.downloader punkt
 COPY open_instruct open_instruct
 
 # install the package in editable mode
+RUN ls
 COPY trl trl
 COPY pyproject.toml .
 RUN pip install -e .
