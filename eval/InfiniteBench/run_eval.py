@@ -128,7 +128,6 @@ def main(args):
 
             data = open(file_path, 'r')
             for i, example in tqdm(enumerate(data), total=total, desc="Reading data"):
-                breakpoint()
                 example = json.loads(example)
                 if 0 < max_examples_per_task == i:
                     print(f"Reached {max_examples_per_task}. Breaking")
