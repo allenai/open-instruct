@@ -124,7 +124,8 @@ def main(args):
             task = get_file_name_without_extension(filename)
             print(f'Processing file: {file_path}')
             data = open(file_path, 'r')
-            for i, example in tqdm(enumerate(data), desc="Reading data"):
+            total = sum(1 for _ in data)
+            for i, example in tqdm(enumerate(data), total=total, desc="Reading data"):
                 example = json.loads(example)
                 if 0 < max_examples_per_task == i:
                     print(f"Reached {max_examples_per_task}. Breaking")
