@@ -103,30 +103,45 @@ def main(args):
     nb_examples_less_seq_length = 0
     tokenized_prompts =[]
     prompts = []
-    for i, example in tqdm(enumerate(data["test"]), desc="Reading data"):
-        if 0 < max_examples_per_task == i:
-            print(f"Reached {max_examples_per_task}. Breaking")
-            break
+    exclude_extensions = {'.py', '.json'}
+    exclude_filenames = {'kv_retrieval.jsonl'}
 
-        input_full = example["context"] + " " + example["input"]
-        breakpoint()
-        tokenized_input_full = tokenizer(input_full, return_tensors="pt").input_ids.to(device)
-        if tokenized_input_full.shape[1] >= max_input_length:
-            nb_examples_more_seq_length += 1
-        else:
-            tokenized_input, messages, full_input = process_model_input_with_vllm(tokenizer, example,
-                                                                                  max_input_length, device)
-            tokenized_prompts.append(tokenized_input)
-            if args.use_chat_format:
-                prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
-                # prompt = full_input
-                prompts.append(prompt)
-            else:
-                prompts.append(full_input)
-            nb_examples_less_seq_length += 1
+    # Loop over files in the given directory
+    for filename in os.listdir(args.data_dir):
+        file_path = os.path.join(args.data_dir, filename)
+        if os.path.isfile(file_path):
+            # Get the file extension
+            file_ext = os.path.splitext(filename)[1]
+            # Check if the file should be excluded
+            if file_ext in exclude_extensions or filename in exclude_filenames:
+                continue
+            # Process the file (example: print the filename)
+            print(f'Processing file: {file_path}')
+            breakpoint()
+            for i, example in tqdm(enumerate(data["test"]), desc="Reading data"):
+                if 0 < max_examples_per_task == i:
+                    print(f"Reached {max_examples_per_task}. Breaking")
+                    break
 
-    print(f"Nb examples exceeding max_seq_length: {nb_examples_more_seq_length}")
-    print(f"Nb examples not exceeding max_seq_length: {nb_examples_less_seq_length}")
+                input_full = example["context"] + " " + example["input"]
+                breakpoint()
+                tokenized_input_full = tokenizer(input_full, return_tensors="pt").input_ids.to(device)
+                if tokenized_input_full.shape[1] >= max_input_length:
+                    nb_examples_more_seq_length += 1
+                else:
+                    tokenized_input, messages, full_input = process_model_input_with_vllm(tokenizer, example,
+                                                                                          max_input_length, device)
+                    tokenized_prompts.append(tokenized_input)
+                    if args.use_chat_format:
+                        prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
+                        # prompt = full_input
+                        prompts.append(prompt)
+                    else:
+                        prompts.append(full_input)
+                    nb_examples_less_seq_length += 1
+
+            print(f"Nb examples exceeding max_seq_length: {nb_examples_more_seq_length}")
+            print(f"Nb examples not exceeding max_seq_length: {nb_examples_less_seq_length}")
 
     if args.use_vllm:
         sampling_params = vllm.SamplingParams(
@@ -157,6 +172,12 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
+
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        default="/net/nfs.cirrascale/mosaic/nouhad/projects/InfiniteBench/data"
+    )
     parser.add_argument(
         "--save_dir",
         type=str,
