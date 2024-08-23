@@ -22,7 +22,7 @@ set -ex
 
 # Tulu eval dev suite is:
 # gsm8k::tulu
-# drop::tulu
+# drop::llama3
 # minerva_math::tulu
 # codex_humaneval::tulu
 # codex_humanevalplus::tulu
@@ -30,16 +30,9 @@ set -ex
 # popqa::tulu
 # mmlu:mc::tulu
 
-# The following additional multiturn-fewshot variants will also be run if the --multiturn-fewshot flag is set
-# gsm8k:fsmt::tulu
-# drop:fsmt::tulu
-# minerva_math:fsmt::tulu
-# popqa:fsmt::tulu
-# mmlu:mc:fsmt::tulu
-
 # Function to print usage
 usage() {
-    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--hf-upload] [--multiturn-fewshot]"
+    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--hf-upload]"
     exit 1
 }
 
@@ -49,7 +42,6 @@ while [[ "$#" -gt 0 ]]; do
         --model-name) MODEL_NAME="$2"; shift ;;
         --model-location) MODEL_LOCATION="$2"; shift ;;
         --hf-upload) HF_UPLOAD="true" ;;
-        --multiturn-fewshot) MULTITURN_FS="true" ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -66,7 +58,6 @@ MODEL_NAME_SAFE=${MODEL_NAME//\//_}
 
 # Set defaults for optional arguments
 HF_UPLOAD="${HF_UPLOAD:-false}"
-MULTITURN_FS="${MULTITURN_FS:-false}"
 
 # Set HF_UPLOAD_ARG if HF_UPLOAD is true
 if [ "$HF_UPLOAD" == "true" ]; then
@@ -76,12 +67,7 @@ else
 fi
 
 # Run oe-eval with different tasks
-# If the multiturn-fewshot flag is set, also evaluate in task settings where fewshot examples are presented across multiple turns.
-if [ "$MULTITURN_FS" == "true" ]; then
-  TASKS=("gsm8k::tulu" "gsm8k:fsmt::tulu"  "drop::tulu" "drop:fsmt::tulu"  "minerva_math::tulu" "minerva_math:fsmt::tulu"  "codex_humaneval::tulu" "codex_humanevalplus::tulu" "ifeval::tulu" "popqa::tulu" "popqa:fsmt::tulu"  "mmlu:mc::tulu" "mmlu:mc:fsmt::tulu")
-else
-  TASKS=("gsm8k::tulu" "drop::tulu" "minerva_math::tulu" "codex_humaneval::tulu" "codex_humanevalplus::tulu" "ifeval::tulu" "popqa::tulu" "mmlu:mc::tulu")
-fi
+TASKS=("gsm8k::tulu" "drop::llama3" "minerva_math::tulu" "codex_humaneval::tulu" "codex_humanevalplus::tulu" "ifeval::tulu" "popqa::tulu" "mmlu:mc::tulu")
 
 MODEL_TYPE="--model-type vllm"
 BATCH_SIZE_VLLM=10000
@@ -91,7 +77,7 @@ GPU_COUNT_OTHER=2
 MODEL_TYPE_OTHER=""
 
 for TASK in "${TASKS[@]}"; do
-    if [[ "$TASK" == "mmlu:mc::tulu" ]] || [[ "$TASK" == "mmlu:mc:fsmt::tulu" ]]; then
+    if [[ "$TASK" == "mmlu:mc::tulu" ]]; then
         BATCH_SIZE=$BATCH_SIZE_OTHER
         GPU_COUNT=$GPU_COUNT_OTHER
         MODEL_TYPE=$MODEL_TYPE_OTHER
