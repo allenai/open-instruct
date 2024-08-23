@@ -168,7 +168,6 @@ def main(args):
                     # prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
                     prompt = full_input
                     prompts.append(prompt)
-                    breakpoint()
                 else:
                     prompts.append(full_input)
                 nb_examples_less_seq_length+=1
@@ -184,7 +183,7 @@ def main(args):
                 include_stop_str_in_output=True,
             )
             breakpoint()
-            generations = model.generate(prompts[0][:10], sampling_params)
+            generations = model.generate(prompts[0][:300], sampling_params)
             prompt_to_output = {
                 g.prompt: g.outputs[0].text for g in generations
             }
