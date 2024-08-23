@@ -124,8 +124,6 @@ def process_model_input_with_vllm(tokenizer, example, max_tokens, device):
 
 def main(args):
     random.seed(42)
-
-
     # Load model if not using OpenAI API
     model, tokenizer = load_model(args.model_name_or_path, args.use_vllm)
     ###### compute performance ####
