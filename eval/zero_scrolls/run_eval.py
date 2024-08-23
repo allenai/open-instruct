@@ -167,8 +167,8 @@ def main(args):
                                                                                       max_input_length, device)
                 tokenized_prompts.append(tokenized_input)
                 if args.use_chat_format:
-                    # prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
-                    prompt = full_input
+                    prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
+                    # prompt = full_input
                     prompts.append(prompt)
                 else:
                     prompts.append(full_input)
