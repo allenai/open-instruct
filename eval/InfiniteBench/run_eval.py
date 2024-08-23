@@ -114,7 +114,10 @@ def main(args):
             # Process the file (example: print the filename)
             print(f'Processing file: {file_path}')
             breakpoint()
-            for i, example in tqdm(enumerate(data["test"]), desc="Reading data"):
+            data = open(file_path, 'r')
+            breakpoint()
+            for i, example in tqdm(enumerate(data), desc="Reading data"):
+                example = json.loads(example)
                 if 0 < max_examples_per_task == i:
                     print(f"Reached {max_examples_per_task}. Breaking")
                     break
