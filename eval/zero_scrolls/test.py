@@ -78,7 +78,7 @@ def main(model_name="allenai/tulu-2-dpo-7b", generations_dir="generations", max_
     print("Loading tokenizer")
     # tokenizer = T5Tokenizer.from_pretrained(model_name)
     # Load the tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
 
 
     print(f"Loading model: {model_name}")
@@ -87,7 +87,7 @@ def main(model_name="allenai/tulu-2-dpo-7b", generations_dir="generations", max_
     max_input_length = model_to_max_input_tokens[model_name]
 
     # Load the model
-    model = AutoModel.from_pretrained(model_name_or_path)
+    model = AutoModel.from_pretrained(model_name)
 
     model = model.eval()
 
