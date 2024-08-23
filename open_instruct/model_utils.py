@@ -369,6 +369,7 @@ def push_folder_and_tokenizer_to_hub(
             api.create_repo(hf_repo_id, exist_ok=True, private=private)
         api.upload_folder(
             repo_id=hf_repo_id,
+            revision=hf_repo_revision,
             folder_path=output_dir,
             commit_message="upload checkpoint",
             run_as_future=False,
