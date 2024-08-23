@@ -95,10 +95,6 @@ def main(args):
 
     generations = dict()
     time = datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
-    # load the data using HF
-    data = load_dataset("xinrongzhang2022/InfiniteBench")
-
-    breakpoint()
     nb_examples_more_seq_length = 0
     nb_examples_less_seq_length = 0
     tokenized_prompts =[]
