@@ -60,7 +60,7 @@ def process_model_input(tokenizer, example, max_tokens, device):
     tokenized_input = torch.cat([tokenized_input_without_query, tokenized_seperator_and_query], dim=1)
     return tokenized_input
 
-
+from transformers import AutoTokenizer, AutoModel
 def main(model_name="allenai/tulu-2-dpo-7b", generations_dir="generations", max_examples_per_task=-1):
     seed = 43
     random.seed(seed)
@@ -76,14 +76,18 @@ def main(model_name="allenai/tulu-2-dpo-7b", generations_dir="generations", max_
     print(f"time as start: {time}")
 
     print("Loading tokenizer")
-    tokenizer = T5Tokenizer.from_pretrained(model_name)
+    # tokenizer = T5Tokenizer.from_pretrained(model_name)
+    # Load the tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+
+
     print(f"Loading model: {model_name}")
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     max_input_length = model_to_max_input_tokens[model_name]
 
-    model = T5ForConditionalGeneration.from_pretrained(model_name, device_map="auto",
-                                                       torch_dtype=torch.float16)
+    # Load the model
+    model = AutoModel.from_pretrained(model_name_or_path)
 
     model = model.eval()
 
