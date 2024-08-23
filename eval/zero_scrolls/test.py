@@ -34,6 +34,7 @@ model_to_max_input_tokens = {
     "google/flan-t5-small": 8192,
     "google/flan-ul2": 8192,
     "bigscience/T0pp": 8192,
+    "allenai/tulu-2-dpo-7b": 8192
 }
 
 
