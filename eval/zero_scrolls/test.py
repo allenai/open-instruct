@@ -116,6 +116,7 @@ def main(model_name="google/flan-t5-small", generations_dir="generations", max_e
                                                   temperature=1)
 
             predicted_text = tokenizer.decode(prediction_token_ids[0], skip_special_tokens=True)
+            breakpoint()
             generations[example["id"]] = predicted_text
 
         out_file_path = os.path.join(generations_dir, f"preds_{dataset}.json")
