@@ -33,7 +33,7 @@ model_to_max_input_tokens = {
     "bigscience/T0pp": 8192,
     "allenai/tulu-v2.5-ppo-13b-hh-rlhf-60k": 4096,
     "allenai/tulu-2-dpo-7b": 8192,
-    "allenai/tulu-2-7b":
+    "allenai/tulu-2-7b":2100,
 }
 
 
