@@ -61,7 +61,7 @@ def process_model_input(tokenizer, example, max_tokens, device):
     return tokenized_input
 
 
-def main(model_name="google/flan-t5-small", generations_dir="generations", max_examples_per_task=-1):
+def main(model_name="allenai/tulu-2-dpo-7b", generations_dir="generations", max_examples_per_task=-1):
     seed = 43
     random.seed(seed)
     np.random.seed(seed)
