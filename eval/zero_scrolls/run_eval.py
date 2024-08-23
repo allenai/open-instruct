@@ -33,6 +33,7 @@ model_to_max_input_tokens = {
     "bigscience/T0pp": 8192,
     "allenai/tulu-v2.5-ppo-13b-hh-rlhf-60k": 4096,
     "allenai/tulu-2-dpo-7b": 8192,
+    "allenai/tulu-2-7b":
 }
 
 
@@ -182,8 +183,8 @@ def main(args):
                 top_p=1.0,
                 include_stop_str_in_output=True,
             )
+            generations = model.generate(prompts[0], sampling_params)
             breakpoint()
-            generations = model.generate(prompts[0][:300], sampling_params)
             prompt_to_output = {
                 g.prompt: g.outputs[0].text for g in generations
             }
