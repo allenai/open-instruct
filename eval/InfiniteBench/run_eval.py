@@ -10,6 +10,7 @@ import vllm
 import evaluate
 from vllm import LLM, SamplingParams
 from datasets import load_dataset
+from collections import defaultdict
 from eval.utils import (
     load_hf_lm,
     generate_completions,
@@ -78,6 +79,15 @@ def process_model_input_with_vllm(tokenizer, example, max_tokens, device):
     return tokenized_input_full, messages, input_full
 
 
+def get_file_name_without_extension(file_path):
+    last_dot_index = file_path.rfind('.')
+
+    if last_dot_index != -1 and file_path.endswith('.jsonl'):
+        base_name = file_path[:last_dot_index - len('.jsonl')]
+        return base_name
+    else:
+        raise ValueError("The file does not have a .jsonl extension")
+
 def main(args):
     random.seed(42)
     # Load model if not using OpenAI API
@@ -98,7 +108,7 @@ def main(args):
     nb_examples_more_seq_length = 0
     nb_examples_less_seq_length = 0
     tokenized_prompts =[]
-    prompts = []
+    prompts = defaultdict(list)
     exclude_extensions = {'.py', '.json'}
     exclude_filenames = {'kv_retrieval.jsonl'}
 
@@ -111,11 +121,9 @@ def main(args):
             # Check if the file should be excluded
             if file_ext in exclude_extensions or filename in exclude_filenames:
                 continue
-            # Process the file (example: print the filename)
+            task = get_file_name_without_extension(filename)
             print(f'Processing file: {file_path}')
-            breakpoint()
             data = open(file_path, 'r')
-            breakpoint()
             for i, example in tqdm(enumerate(data), desc="Reading data"):
                 example = json.loads(example)
                 if 0 < max_examples_per_task == i:
@@ -123,7 +131,7 @@ def main(args):
                     break
 
                 input_full = example["context"] + " " + example["input"]
-                breakpoint()
+                gold_answer = example["answer"]
                 tokenized_input_full = tokenizer(input_full, return_tensors="pt").input_ids.to(device)
                 if tokenized_input_full.shape[1] >= max_input_length:
                     nb_examples_more_seq_length += 1
@@ -134,39 +142,43 @@ def main(args):
                     if args.use_chat_format:
                         prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
                         # prompt = full_input
-                        prompts.append(prompt)
+                        prompts[task].append({"prompt": prompt, "gold_answer": gold_answer})
                     else:
-                        prompts.append(full_input)
+                        prompts[task].append({"prompt": full_input, "gold_answer": gold_answer})
                     nb_examples_less_seq_length += 1
 
             print(f"Nb examples exceeding max_seq_length: {nb_examples_more_seq_length}")
             print(f"Nb examples not exceeding max_seq_length: {nb_examples_less_seq_length}")
 
-    if args.use_vllm:
-        sampling_params = vllm.SamplingParams(
-            temperature=1,
-            max_tokens=512,
-            top_p=1.0,
-            include_stop_str_in_output=True,
-        )
-        generations = model.generate(prompts[0], sampling_params)
-        prompt_to_output = {
-            g.prompt: g.outputs[0].text for g in generations
-        }
-        outputs = [prompt_to_output[prompt] if prompt in prompt_to_output else "" for prompt in prompts]
-    else:
-        # generate with hf model
-        outputs = []
-        for model_input in tokenized_prompts:
-            prediction_token_ids = model.generate(model_input,
-                                                  max_new_tokens=1024,
-                                                  do_sample=False,
-                                                  top_p=0,
-                                                  top_k=0,
-                                                  temperature=1)
+        ## get all prompts
+        golds = [example["gold_answer"] for example in prompts[task]]
+        prompts = [example["prompt"] for example in prompts[task]]
+        if args.use_vllm:
+            sampling_params = vllm.SamplingParams(
+                temperature=1,
+                max_tokens=512,
+                top_p=1.0,
+                include_stop_str_in_output=True,
+            )
+            generations = model.generate(prompts[0], sampling_params)
+            breakpoint()
+            prompt_to_output = {
+                g.prompt: g.outputs[0].text for g in generations
+            }
+            outputs = [prompt_to_output[prompt] if prompt in prompt_to_output else "" for prompt in prompts]
+        else:
+            # generate with hf model
+            outputs = []
+            for model_input in tokenized_prompts:
+                prediction_token_ids = model.generate(model_input,
+                                                      max_new_tokens=1024,
+                                                      do_sample=False,
+                                                      top_p=0,
+                                                      top_k=0,
+                                                      temperature=1)
 
-            predicted_text = tokenizer.decode(prediction_token_ids[0], skip_special_tokens=True)
-            outputs.append(predicted_text)
+                predicted_text = tokenizer.decode(prediction_token_ids[0], skip_special_tokens=True)
+                outputs.append(predicted_text)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
