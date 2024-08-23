@@ -113,12 +113,13 @@ def main(model_name="allenai/tulu-2-dpo-7b", generations_dir="generations", max_
 
             model_input = process_model_input(tokenizer, example, max_input_length, device)
 
-            prediction_token_ids = model.generate(model_input,
-                                                  max_new_tokens=1024,
-                                                  do_sample=False,
-                                                  top_p=0,
-                                                  top_k=0,
-                                                  temperature=1)
+            outputs = model(**model_input)
+            # prediction_token_ids = model.generate(model_input,
+            #                                       max_new_tokens=1024,
+            #                                       do_sample=False,
+            #                                       top_p=0,
+            #                                       top_k=0,
+            #                                       temperature=1)
 
             predicted_text = tokenizer.decode(prediction_token_ids[0], skip_special_tokens=True)
             breakpoint()
