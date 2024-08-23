@@ -125,7 +125,8 @@ def main(args):
             print(f'Processing file: {file_path}')
             data = open(file_path, 'r')
             total = sum(1 for _ in data)
-            for i, example in tqdm(enumerate(data), total=total, desc="Reading data"):
+
+            for i, example in tqdm(enumerate(data), desc="Reading data"):
                 breakpoint()
                 example = json.loads(example)
                 if 0 < max_examples_per_task == i:
