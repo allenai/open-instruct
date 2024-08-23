@@ -128,7 +128,6 @@ def main(args):
 
     # Load model if not using OpenAI API
     model, tokenizer = load_model(args.model_name_or_path, args.use_vllm)
-
     ###### compute performance ####
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -158,6 +157,7 @@ def main(args):
                 print(f"Reached {max_examples_per_task} for {dataset}. Breaking")
                 break
 
+            breakpoint()
             input_full = example["input"]
             tokenized_input_full = tokenizer(input_full, return_tensors="pt").input_ids.to(device)
             if tokenized_input_full.shape[1] >= max_input_length:
