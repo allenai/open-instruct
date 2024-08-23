@@ -123,10 +123,11 @@ def main(args):
                 continue
             task = get_file_name_without_extension(filename)
             print(f'Processing file: {file_path}')
-            data = open(file_path, 'r')
-            total = sum(1 for _ in data)
+            with open(file_path, 'r') as f:
+                total = sum(1 for _ in f)
 
-            for i, example in tqdm(enumerate(data), desc="Reading data"):
+            data = open(file_path, 'r')
+            for i, example in tqdm(enumerate(data), total=total, desc="Reading data"):
                 breakpoint()
                 example = json.loads(example)
                 if 0 < max_examples_per_task == i:
