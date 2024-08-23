@@ -125,6 +125,7 @@ def main(args):
             print(f'Processing file: {file_path}')
             data = open(file_path, 'r')
             total = sum(1 for _ in data)
+            breakpoint()
             for i, example in tqdm(enumerate(data), total=total, desc="Reading data"):
                 example = json.loads(example)
                 if 0 < max_examples_per_task == i:
@@ -161,8 +162,9 @@ def main(args):
                 top_p=1.0,
                 include_stop_str_in_output=True,
             )
-            generations = model.generate(prompts[0], sampling_params)
             breakpoint()
+            generations = model.generate(prompts[0], sampling_params)
+
             prompt_to_output = {
                 g.prompt: g.outputs[0].text for g in generations
             }
