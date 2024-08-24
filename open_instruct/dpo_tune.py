@@ -828,6 +828,7 @@ def main(args: FlatArguments):
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
     # Figure out how many steps we should save the Accelerator states
+    checkpointing_steps = args.checkpointing_steps
     if checkpointing_steps is not None and str(checkpointing_steps).lower() != "epoch":
         checkpointing_steps = int(checkpointing_steps)
 
