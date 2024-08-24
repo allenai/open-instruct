@@ -61,7 +61,7 @@ from open_instruct.dpo_utils import (
     wpo_loss,
 )
 from open_instruct.model_utils import (
-    push_folder_and_tokenizer_to_hub,
+    push_folder_to_hub,
     save_with_accelerate,
 )
 from open_instruct.utils import (
@@ -1012,8 +1012,6 @@ def main(args: FlatArguments):
             accelerator.wait_for_everyone()
 
     if args.output_dir is not None:
-        if accelerator.is_main_process:
-            tokenizer.save_pretrained(args.output_dir)
         save_with_accelerate(
             accelerator,
             model,
@@ -1023,9 +1021,8 @@ def main(args: FlatArguments):
         )
 
     if args.push_to_hub:
-        push_folder_and_tokenizer_to_hub(
+        push_folder_to_hub(
             accelerator,
-            tokenizer,
             args.output_dir,
             args.hf_repo_id,
             args.hf_repo_revision,
