@@ -13,18 +13,20 @@
 # limitations under the License.
 
 import dataclasses
+import json
 import logging
 import os
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, List, NewType, Optional, Tuple, Union
 
 import requests
 from accelerate.logging import get_logger
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
+from huggingface_hub import HfApi
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
@@ -47,6 +49,8 @@ Commented out Args not currently used
 """
 
 
+# ----------------------------------------------------------------------------
+# Dataset utilities
 def is_openai_format(messages: Any) -> bool:
     """
     Check if the input messages are in OpenAI format.
@@ -379,386 +383,8 @@ def get_datasets(
     return raw_datasets
 
 
-@dataclass
-class FlatArguments:
-    """
-    Full arguments class for all fine-tuning jobs.
-    """
-
-    model_name_or_path: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": (
-                "The model checkpoint for weights initialization. Don't set if you want to train a model from scratch."
-            )
-        },
-    )
-    config_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
-    )
-    dpo_use_paged_optimizer: bool = field(
-        default=False,
-        metadata={
-            "help": "Use paged optimizer from bitsandbytes."
-            " Not compatible with deepspeed (use deepspeed config instead)."
-        },
-    )
-    dpo_beta: float = field(
-        default=0.1,
-        metadata={"help": "Beta parameter for DPO loss. Default is 0.1."},
-    )
-    dpo_loss_type: str = field(
-        default="dpo",
-        metadata={"help": "Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."},
-    )
-    dpo_gamma_beta_ratio: float = field(
-        default=0.3,
-        metadata={"help": "Gamma to beta ratio for SimPO loss. Default is 0.3. Not used for DPO loss."},
-    )
-    dpo_label_smoothing: float = field(
-        default=0.0,
-        metadata={"help": "Label smoothing for DPO/SimPO loss. Default is 0 (no smoothing)."},
-    )
-    tokenizer_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
-    )
-    tokenizer_revision: Optional[str] = field(
-        default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
-    )
-    use_flash_attn: bool = field(
-        default=True,
-        metadata={"help": "Whether to use flash attention in the model training"},
-    )
-    use_slow_tokenizer: bool = field(
-        default=True,
-        metadata={"help": "Whether to use one of the slow tokenizer or not (which is then fast tokenizer)."},
-    )
-    model_revision: str = field(
-        default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
-    )
-    trust_remote_code: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "Whether or not to allow for custom models defined on the Hub in their own modeling files. "
-                "This option should only be set to `True` for repositories you trust and in which you "
-                "have read the code, as it will execute code present on the Hub on your local machine."
-            )
-        },
-    )
-    low_cpu_mem_usage: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "It is an option to create the model as an empty shell, "
-                "then only materialize its parameters when the pretrained weights are loaded. "
-                "set True will benefit LLM loading time and RAM consumption."
-            )
-        },
-    )
-    dataset_name: Optional[str] = field(
-        default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
-    )
-    dataset_mixer: Optional[dict] = field(
-        default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
-    )
-    dataset_mixer_list: Optional[list[str]] = field(
-        default=None, metadata={"help": "A list of datasets (local or HF) to sample from."}
-    )
-    dataset_mix_dir: Optional[str] = field(
-        default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
-    )
-    dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
-    )
-    train_file: Optional[str] = field(
-        default=None, metadata={"help": "The input training data file (a json/jsonl file)."}
-    )
-    max_train_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of training examples to this "
-                "value if set."
-            )
-        },
-    )
-    preprocessing_num_workers: Optional[int] = field(
-        default=None,
-        metadata={"help": "The number of processes to use for the preprocessing."},
-    )
-    max_seq_length: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "The maximum total input sequence length after tokenization. "
-                "Sequences longer than this will be truncated,"
-            )
-        },
-    )
-    overwrite_cache: bool = field(
-        default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
-    )
-    add_bos: bool = field(
-        default=False,
-        metadata={
-            "help": "Forcibly add bos token to the beginning of the input sequence."
-            " Use only when tokenizer does not add bos token by default."
-        },
-    )
-    clip_grad_norm: float = field(
-        default=-1,
-        metadata={"help": "Clip gradient norm. Not compatible with deepspeed (use deepspeed config instead)."},
-    )
-    gradient_accumulation_steps: int = field(
-        default=1,
-        metadata={"help": "Number of updates steps to accumulate before performing a backward/update pass."},
-    )
-    learning_rate: float = field(
-        default=2e-5,
-        metadata={"help": "The initial learning rate for AdamW optimizer."},
-    )
-    logging_steps: Optional[int] = field(
-        default=None,
-        metadata={"help": "Log the training loss and learning rate every logging_steps steps."},
-    )
-    lora_rank: int = field(
-        default=64,
-        metadata={"help": "The rank of lora."},
-    )
-    lora_alpha: float = field(
-        default=16,
-        metadata={"help": "The alpha parameter of lora."},
-    )
-    lora_dropout: float = field(
-        default=0.1,
-        metadata={"help": "The dropout rate of lora modules."},
-    )
-    lr_scheduler_type: str = field(
-        default="linear",
-        metadata={
-            "help": "The scheduler type to use for learning rate adjustment.",
-            "choices": ["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
-        },
-    )
-    num_train_epochs: int = field(
-        default=2,
-        metadata={"help": "Total number of training epochs to perform."},
-    )
-    output_dir: str = field(
-        default="output/",
-        metadata={"help": "The output directory where the model predictions and checkpoints will be written."},
-    )
-    per_device_train_batch_size: int = field(
-        default=8,
-        metadata={"help": "Batch size per GPU/TPU core/CPU for training."},
-    )
-    use_lora: bool = field(
-        default=False,
-        metadata={"help": "If True, will use LORA (low-rank parameter-efficient training) to train the model."},
-    )
-    use_qlora: bool = field(
-        default=False,
-        metadata={"help": "Use qLoRA training - initializes model in quantized form. Not compatible with deepspeed."},
-    )
-    use_8bit_optimizer: bool = field(
-        default=False,
-        metadata={"help": "Use 8bit optimizer from bitsandbytes. Not compatible with deepspeed."},
-    )
-    warmup_ratio: float = field(
-        default=0.03,
-        metadata={"help": "Linear warmup over warmup_ratio fraction of total steps."},
-    )
-    weight_decay: float = field(
-        default=0.0,
-        metadata={"help": "Weight decay for AdamW if we apply some."},
-    )
-    timeout: int = field(
-        default=1800,
-        metadata={
-            "help": "Timeout for the training process in seconds."
-            "Useful if tokenization process is long. Default is 1800 seconds (30 minutes)."
-        },
-    )
-    reduce_loss: str = field(
-        default="mean",
-        metadata={
-            "help": "How to reduce loss over tokens. Options are 'mean' or 'sum'."
-            "Using 'sum' can improve chat model performance."
-        },
-    )
-    wandb_entity: Optional[str] = field(
-        default=None,
-        metadata={"help": "Entity to use for logging to wandb."},
-    )
-    resume_from_checkpoint: Optional[str] = field(
-        default=None,
-        metadata={"help": "If the training should continue from a checkpoint folder."},
-    )
-    with_tracking: bool = field(
-        default=False,
-        metadata={"help": "Whether to enable experiment trackers for logging."},
-    )
-    report_to: Union[str, List[str]] = field(
-        default="all",
-        metadata={
-            "help": "The integration(s) to report results and logs to. "
-            "Can be a single string or a list of strings. "
-            "Options are 'tensorboard', 'wandb', 'comet_ml', 'clearml', or 'all'. "
-            "Specify multiple by listing them: e.g., ['tensorboard', 'wandb']"
-        },
-    )
-    save_to_hub: Optional[str] = field(
-        default=None,
-        metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"},
-    )
-    gradient_checkpointing: bool = field(
-        default=False,
-        metadata={"help": "Turn on gradient checkpointing. Saves memory but slows training."},
-    )
-    max_train_steps: Optional[int] = field(
-        default=None,
-        metadata={"help": "If set, overrides the number of training steps. Otherwise, num_train_epochs is used."},
-    )
-    seed: int = field(default=42, metadata={"help": "Random seed for initialization and dataset shuffling."})
-    checkpointing_steps: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
-        },
-    )
-    overwrite_output_dir: bool = field(
-        default=False,
-        metadata={
-            "help": "Overwrite the content of the output directory. Means that resumption will always start from scratch."
-        },
-    )
-    keep_last_n_checkpoints: int = field(
-        default=3,
-        metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
-    )
-
-    def __post_init__(self):
-        if self.reduce_loss not in ["mean", "sum"]:
-            raise ValueError("reduce_loss must be either 'mean' or 'sum'")
-        if (
-            self.dataset_name is None
-            and self.train_file is None
-            and self.dataset_mixer is None
-            and self.dataset_mixer_list is None
-        ):
-            raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
-        else:
-            if self.train_file is not None:
-                extension = self.train_file.split(".")[-1]
-                assert extension in ["json", "jsonl"], "`train_file` should be a json or a jsonl file."
-        if (
-            (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
-            or (self.dataset_name is not None and self.train_file is not None)
-            or (
-                (self.dataset_mixer is not None or self.dataset_mixer_list is not None) and self.train_file is not None
-            )
-            or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
-        ):
-            raise ValueError("Cannot provide two dataset selection mechanisms.")
-
-
-@dataclass
-class BeakerRuntimeConfig:
-    beaker_workload_id: str
-    beaker_node_hostname: str
-    beaker_experiment_url: str
-
-
-def maybe_get_beaker_config():
-    beaker_runtime_config = None
-    if "BEAKER_JOB_ID" in os.environ:
-        beaker_runtime_config = BeakerRuntimeConfig(
-            beaker_workload_id=os.environ["BEAKER_WORKLOAD_ID"],
-            beaker_node_hostname=os.environ["BEAKER_NODE_HOSTNAME"],
-            beaker_experiment_url=f"https://beaker.org/ex/{os.environ['BEAKER_WORKLOAD_ID']}/",
-        )
-    return beaker_runtime_config
-
-
-def maybe_use_ai2_wandb_entity() -> Optional[str]:
-    """Ai2 internal logic: try use the ai2-llm team if possible. Should not affect external users."""
-    import wandb
-
-    wandb.login()
-    api = wandb.Api()
-    current_user = api.viewer
-    teams = current_user.teams
-    if "ai2-llm" in teams:
-        return "ai2-llm"
-    else:
-        return None
-
-
-def get_git_tag() -> str:
-    """Try to get the latest Git tag (e.g., `no-tag-404-g98dc659` or `v1.0.0-4-g98dc659`)"""
-    git_tag = ""
-    try:
-        git_tag = (
-            subprocess.check_output(["git", "describe", "--tags"], stderr=subprocess.DEVNULL).decode("ascii").strip()
-        )
-    except subprocess.CalledProcessError as e:
-        logging.debug(f"Failed to get Git tag: {e}")
-
-    # If no Git tag found, create a custom tag based on commit count and hash
-    if len(git_tag) == 0:
-        try:
-            count = int(
-                subprocess.check_output(["git", "rev-list", "--count", "HEAD"], stderr=subprocess.DEVNULL)
-                .decode("ascii")
-                .strip()
-            )
-            hash = (
-                subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL)
-                .decode("ascii")
-                .strip()
-            )
-            git_tag = f"no-tag-{count}-g{hash}"
-        except subprocess.CalledProcessError as e:
-            logging.debug(f"Failed to get commit count and hash: {e}")
-
-    return git_tag
-
-
-def get_pr_tag() -> str:
-    """Try to find associated pull request on GitHub (e.g., `pr-123`)"""
-    pr_tag = ""
-    try:
-        git_commit = (
-            subprocess.check_output(["git", "rev-parse", "--verify", "HEAD"], stderr=subprocess.DEVNULL)
-            .decode("ascii")
-            .strip()
-        )
-        # try finding the pull request number on github
-        prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
-        if prs.status_code == 200:
-            prs = prs.json()
-            if len(prs["items"]) > 0:
-                pr = prs["items"][0]
-                pr_number = pr["number"]
-                pr_tag = f"pr-{pr_number}"
-    except Exception as e:
-        logging.debug(f"Failed to get PR number: {e}")
-
-    return pr_tag
-
-
-def get_wandb_tags() -> List[str]:
-    """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123`)"""
-    existing_wandb_tags = os.environ.get("WANDB_TAGS", "")
-    git_tag = get_git_tag()
-    pr_tag = get_pr_tag()
-    non_empty_tags = [tag for tag in [existing_wandb_tags, git_tag, pr_tag] if len(tag) > 0]
-    return non_empty_tags
-
-
+# ----------------------------------------------------------------------------
+# Arguments utilities
 class ArgumentParserPlus(HfArgumentParser):
     def parse_yaml_and_args(self, yaml_arg: str, other_args: Optional[List[str]] = None) -> List[dataclass]:
         """
@@ -834,6 +460,72 @@ class ArgumentParserPlus(HfArgumentParser):
         return output
 
 
+# ----------------------------------------------------------------------------
+# Experiment tracking utilities
+def get_git_tag() -> str:
+    """Try to get the latest Git tag (e.g., `no-tag-404-g98dc659` or `v1.0.0-4-g98dc659`)"""
+    git_tag = ""
+    try:
+        git_tag = (
+            subprocess.check_output(["git", "describe", "--tags"], stderr=subprocess.DEVNULL).decode("ascii").strip()
+        )
+    except subprocess.CalledProcessError as e:
+        logging.debug(f"Failed to get Git tag: {e}")
+
+    # If no Git tag found, create a custom tag based on commit count and hash
+    if len(git_tag) == 0:
+        try:
+            count = int(
+                subprocess.check_output(["git", "rev-list", "--count", "HEAD"], stderr=subprocess.DEVNULL)
+                .decode("ascii")
+                .strip()
+            )
+            hash = (
+                subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL)
+                .decode("ascii")
+                .strip()
+            )
+            git_tag = f"no-tag-{count}-g{hash}"
+        except subprocess.CalledProcessError as e:
+            logging.debug(f"Failed to get commit count and hash: {e}")
+
+    return git_tag
+
+
+def get_pr_tag() -> str:
+    """Try to find associated pull request on GitHub (e.g., `pr-123`)"""
+    pr_tag = ""
+    try:
+        git_commit = (
+            subprocess.check_output(["git", "rev-parse", "--verify", "HEAD"], stderr=subprocess.DEVNULL)
+            .decode("ascii")
+            .strip()
+        )
+        # try finding the pull request number on github
+        prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
+        if prs.status_code == 200:
+            prs = prs.json()
+            if len(prs["items"]) > 0:
+                pr = prs["items"][0]
+                pr_number = pr["number"]
+                pr_tag = f"pr-{pr_number}"
+    except Exception as e:
+        logging.debug(f"Failed to get PR number: {e}")
+
+    return pr_tag
+
+
+def get_wandb_tags() -> List[str]:
+    """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123`)"""
+    existing_wandb_tags = os.environ.get("WANDB_TAGS", "")
+    git_tag = get_git_tag()
+    pr_tag = get_pr_tag()
+    non_empty_tags = [tag for tag in [existing_wandb_tags, git_tag, pr_tag] if len(tag) > 0]
+    return non_empty_tags
+
+
+# ----------------------------------------------------------------------------
+# Check pointing utilities
 def get_last_checkpoint(folder: str, incomplete: bool = False) -> Optional[str]:
     content = os.listdir(folder)
     checkpoint_steps = [path for path in content if path.startswith("step_")]
@@ -852,7 +544,7 @@ def get_last_checkpoint(folder: str, incomplete: bool = False) -> Optional[str]:
     return os.path.join(folder, max(checkpoints, key=lambda x: x.split("_")[-1]))
 
 
-def get_last_checkpoint_path(args: FlatArguments, incomplete: bool = False) -> str:
+def get_last_checkpoint_path(args, incomplete: bool = False) -> str:
     # if output already exists and user does not allow overwriting, resume from there.
     # otherwise, resume if the user specifies a checkpoint.
     # else, start from scratch.
@@ -879,3 +571,120 @@ def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> N
         checkpoints = sorted(folders, key=lambda x: int(x.split("_")[-1]))
         if len(checkpoints) > keep_last_n_checkpoints:
             shutil.rmtree(os.path.join(output_dir, checkpoints[0]))
+
+
+# ----------------------------------------------------------------------------
+# Ai2 user utilities
+@dataclass
+class BeakerRuntimeConfig:
+    beaker_workload_id: str
+    beaker_node_hostname: str
+    beaker_experiment_url: str
+    beaker_dataset_ids: Optional[List[str]] = None
+    beaker_dataset_id_urls: Optional[List[str]] = None
+
+
+def is_beaker_job() -> bool:
+    return "BEAKER_JOB_ID" in os.environ
+
+
+def get_beaker_dataset_ids(experiment_id: str) -> Optional[List[str]]:
+    get_experiment_command = f"beaker experiment get {experiment_id} --format json"
+    process = subprocess.Popen(["bash", "-c", get_experiment_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    if process.returncode != 0:
+        logger.error(f"Failed to get Beaker experiment: {stderr}")
+        return None
+    experiment = json.loads(stdout)[0]
+    result_ids = [job["result"]["beaker"] for job in experiment["jobs"]]
+    dataset_ids = []
+    for result_id in result_ids:
+        get_dataset_command = f"beaker dataset get {result_id} --format json"
+        process = subprocess.Popen(["bash", "-c", get_dataset_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+        if process.returncode != 0:
+            logger.error(f"Failed to get Beaker dataset: {stderr}")
+            return None
+        datasets = json.loads(stdout)
+        dataset_ids.extend([dataset["id"] for dataset in datasets])
+    return dataset_ids
+
+
+def get_beaker_whoami() -> Optional[str]:
+    get_beaker_whoami_command = "beaker account whoami --format json"
+    process = subprocess.Popen(
+        ["bash", "-c", get_beaker_whoami_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    stdout, stderr = process.communicate()
+    if process.returncode != 0:
+        logger.error(f"Failed to get Beaker account: {stderr}")
+        return None
+    accounts = json.loads(stdout)
+    return accounts[0]["name"]
+
+
+def maybe_get_beaker_config():
+    beaker_dataset_ids = [get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"])]
+    beaker_dataset_id_urls = [f"https://beaker.org/ds/{dataset_id}" for dataset_id in beaker_dataset_ids]
+    return BeakerRuntimeConfig(
+        beaker_workload_id=os.environ["BEAKER_WORKLOAD_ID"],
+        beaker_node_hostname=os.environ["BEAKER_NODE_HOSTNAME"],
+        beaker_experiment_url=f"https://beaker.org/ex/{os.environ['BEAKER_WORKLOAD_ID']}/",
+        beaker_dataset_ids=get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"]),
+        beaker_dataset_id_urls=beaker_dataset_id_urls,
+    )
+
+
+def maybe_use_ai2_wandb_entity() -> Optional[str]:
+    """Ai2 internal logic: try use the ai2-llm team if possible. Should not affect external users."""
+    import wandb
+
+    wandb.login()
+    api = wandb.Api()
+    current_user = api.viewer
+    teams = current_user.teams
+    if "ai2-llm" in teams:
+        return "ai2-llm"
+    else:
+        return None
+
+
+def maybe_use_ai2_hf_entity() -> Optional[str]:
+    """Ai2 internal logic: try use the allenai entity if possible. Should not affect external users."""
+    orgs = HfApi().whoami()
+    orgs = [item["name"] for item in orgs["orgs"]]
+    if "allenai" in orgs:
+        return "allenai"
+    else:
+        return None
+
+
+def submit_beaker_eval_jobs(
+    model_name: str,
+    location: str,
+    hf_repo_revision: str = "",
+    workspace: str = "tulu-3-results",
+    beaker_image: str = "nathanl/open_instruct_olmo_auto",
+    upload_to_hf: str = "allenai/tulu-3-evals",
+) -> None:
+    command = f"""
+    python scripts/submit_eval_jobs.py \
+        --model_name {model_name} \
+        --location {location} \
+        --is_tuned \
+        --workspace {workspace} \
+        --preemptible \
+        --use_hf_tokenizer_template \
+        --beaker_image {beaker_image} \
+    """
+    if len(hf_repo_revision) > 0:
+        command += f" --hf_revision {hf_repo_revision}"
+    if len(upload_to_hf) > 0:
+        command += f" --upload_to_hf {upload_to_hf}"
+
+    process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+
+    logger.info(f"Beaker evaluation jobs: Stdout:\n{stdout.decode()}")
+    logger.error(f"Beaker evaluation jobs: Stderr:\n{stderr.decode()}")
+    logger.info(f"Beaker evaluation jobs: process return code: {process.returncode}")
