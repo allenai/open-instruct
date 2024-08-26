@@ -991,6 +991,10 @@ def main(args: FlatArguments):
             args.output_dir,
             args.use_lora,
         )
+    
+    # remove all checkpoints to save space
+    if accelerator.is_main_process:
+        clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
 
     if args.push_to_hub:
         push_folder_to_hub(
