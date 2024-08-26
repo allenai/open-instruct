@@ -676,6 +676,7 @@ def submit_beaker_eval_jobs(
         --workspace {workspace} \
         --preemptible \
         --use_hf_tokenizer_template \
+        --run_oe_eval_experiments \
         --beaker_image {beaker_image} \
     """
     if len(hf_repo_revision) > 0:
