@@ -350,10 +350,8 @@ class FlatArguments:
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     try_launch_beaker_eval_jobs: bool = True
     """Whether to launch beaker evaluation jobs after training"""
-    upload_hf_metadata: bool = True
-    """Whether to upload metadata about run to HF or not"""
     hf_metadata_dataset: Optional[str] = None
-    """What dataset to upload the metadata to"""
+    """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -1040,7 +1038,7 @@ def main(args: FlatArguments):
                 location=args.hf_repo_id,
                 hf_repo_revision=args.hf_repo_revision,
             )
-    if args.upload_hf_metadata:
+    if args.hf_metadata_dataset:
         # dpo script only supports these two options right now for datasets
         dataset_name = args.dataset_name if args.dataset_name else args.train_file
         beaker_config = maybe_get_beaker_config()
