@@ -1,6 +1,10 @@
-# beaker image pull ai2/cuda12.0-cudnn8-dev-ubuntu20.04
+# you should make sure
+# `beaker image pull ai2/cuda12.0-cudnn8-dev-ubuntu20.04`
+# creates the following image
 # gcr.io/ai2-beaker-core/public/cr2hkoafi8esc8vl9pqg
-FROM --platform=linux/amd64 gcr.io/ai2-beaker-core/public/cr2hkoafi8esc8vl9pqg
+# `beaker image get ai2/cuda12.0-cudnn8-dev-ubuntu20.04
+ARG BEAKER_BASE_IMAGE_DOCKER_TAG
+FROM --platform=linux/amd64 ${BEAKER_BASE_IMAGE_DOCKER_TAG}
 
 WORKDIR /stage/
 
