@@ -537,6 +537,16 @@ wheels = [
 ]
 
 [[package]]
+name = "flash-attn"
+version = "2.6.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "einops" },
+    { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/cd/1e/21321670cd3c2f225026d9fd89272cae661529238850e79f48ccf2f9e4e3/flash_attn-2.6.3.tar.gz", hash = "sha256:5bfae9500ad8e7d2937ebccb4906f3bc464d1bf66eedd0e4adabd520811c7b52", size = 2631958 }
+
+[[package]]
 name = "fonttools"
 version = "4.53.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1339,6 +1349,11 @@ dependencies = [
     { name = "wandb" },
 ]
 
+[package.optional-dependencies]
+compile = [
+    { name = "flash-attn" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "autoflake" },
@@ -1360,6 +1375,7 @@ requires-dist = [
     { name = "einops", specifier = ">=0.8.0" },
     { name = "evaluate", specifier = ">=0.4.2" },
     { name = "fire", specifier = ">=0.6.0" },
+    { name = "flash-attn", marker = "extra == 'compile'" },
     { name = "hatchling", specifier = ">=1.25.0" },
     { name = "hf-transfer", specifier = ">=0.1.8" },
     { name = "immutabledict", specifier = ">=4.2.0" },
@@ -2294,7 +2310,6 @@ dependencies = [
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fe/7b/7757205dee3628f75e7991021d15cd1bd0c9b044ca9affe99b50879fc0e1/triton-3.0.0-1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:34e509deb77f1c067d8640725ef00c5cbfcb2052a1a3cb6a6d343841f92624eb", size = 209464695 },
-    { url = "https://files.pythonhosted.org/packages/ae/b2/048c9ecfdba0e6b0ae3c02eed2d9dd3e9e990a6d46da98555cf0c2232168/triton-3.0.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0d5e10de8c011adeb7c878c6ce0dd6073b14367749e34467f1cff2bde1b78253", size = 209468633 },
 ]
 
 [[package]]
