@@ -14,6 +14,8 @@
 # limitations under the License.
 
 
+from collections import defaultdict
+from rich.panel import Panel
 import itertools
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -362,6 +364,7 @@ def batch_generation_vllm(
         g_queries_list = [
             [inneritem for inneritem in item if inneritem != pad_token_id] for item in g_queries_list
         ]
+        generation_start_time = time.time()
         outputs = llm.generate(prompt_token_ids=g_queries_list, sampling_params=generation_config)
         padded_response_token_ids = []
         for output in outputs:
@@ -369,6 +372,7 @@ def batch_generation_vllm(
             DUMMY_PAD_TOKEN = 0  # we can't use tokenizer.pad_token_id because it's outside vocab and `torch.gather(all_logprob, 2, response.unsqueeze(-1))` will error out
             padded_token_ids = token_ids + [DUMMY_PAD_TOKEN] * (response_length - len(token_ids))
             padded_response_token_ids.append(padded_token_ids)
+        print(f"🔥🔥🔥 Generation time: {time.time() - generation_start_time:.2f} seconds")
         padded_response_token_ids = torch.tensor(padded_response_token_ids, device=device)
         g_vllm_responses[:] = padded_response_token_ids
 
@@ -390,8 +394,11 @@ def save_with_accelerate(
     hf_repo_id: Optional[str] = None,
     hf_repo_revision: Optional[str] = None,
     private: bool = True,
+    model_attribute_to_save: Optional[str] = None,
 ) -> None:
     unwrapped_model: PreTrainedModel = accelerator.unwrap_model(model)
+    if model_attribute_to_save is not None:
+        unwrapped_model = getattr(unwrapped_model, model_attribute_to_save)
     # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
     # Otherwise, sometimes the model will be saved with only part of the parameters.
     # Also, accelerator needs to use the wrapped model to get the state_dict.
@@ -561,19 +568,40 @@ def format_value(value):
 
 
 def print_rich_single_line_metrics(metrics):
-    formatted_metrics = []
+    # Create main table
+    table = Table(show_header=False, box=None)
+    table.add_column("Category", style="cyan")
+    table.add_column("Values", style="magenta")
+    
+    # Group metrics by their prefix
+    grouped_metrics = defaultdict(list)
     for key, value in metrics.items():
-        # Shortening the key names
-        short_key = key.split("/")[-1] if "/" in key else key
-
-        # Create a colored text object
-        metric_text = Text()
-        metric_text.append(short_key + ": ", style="bold cyan")  # Keys in cyan
-        metric_text.append(format_value(value), style="yellow")  # Values in yellow
-
-        formatted_metrics.append(metric_text)
-
-    rprint(" | ".join(str(metric) for metric in formatted_metrics))
+        category = key.split('/')[0] if '/' in key else 'other'
+        grouped_metrics[category].append((key, value))
+    
+    # Sort groups by category name
+    for category in sorted(grouped_metrics.keys()):
+        values = grouped_metrics[category]
+        value_strings = []
+        for key, value in values:
+            # Use the last part of the key as the display name
+            display_name = key.split('/')[-1]
+            value_strings.append(f"{display_name}: {format_value(value)}")
+        
+        # Join all values for this category into a single string
+        values_str = " | ".join(value_strings)
+        table.add_row(category, values_str)
+    
+    # Create a panel with the table
+    panel = Panel(
+        table,
+        title="Metrics",
+        expand=False,
+        border_style="bold green",
+    )
+    
+    # Print the panel
+    rprint(panel)
 
 
 def exact_div(a, b, custom_error_message=""):

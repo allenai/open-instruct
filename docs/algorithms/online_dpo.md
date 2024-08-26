@@ -33,20 +33,20 @@ python open_instruct/online_dpo.py \
 
 
 python mason.py \
-    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a100-80g-ib ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/mosaic-cirrascale \
+    --cluster ai2/allennlp-cirrascale ai2/aristo-cirrascale ai2/pluto-cirrascale ai2/general-cirrascale ai2/mosaic-cirrascale ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale  \
     --priority preemptible \
     --budget ai2/allennlp \
     --workspace ai2/costah \
-    --gpus 8 -- accelerate launch  --config_file configs/ds_configs/deepspeed_zero3.yaml \
-     open_instruct/online_dpo.py \
+    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+     open_instruct/online_dpo_vllm_thread.py \
     --dataset_name trl-internal-testing/tldr-preference-sft-trl-style \
     --dataset_train_split train \
     --dataset_eval_split validation \
     --learning_rate 3e-6 \
-    --output_dir models/minimal/online_dpo_tldr \
-    --per_device_train_batch_size 4 \
-    --gradient_accumulation_steps 16 \
-    --local_rollout_forward_batch_size 8 \
+    --output_dir models/minimal/online_dpo_vllm_thread_tldr \
+    --per_device_train_batch_size 16 \
+    --local_rollout_forward_batch_size 32 \
+    --gradient_accumulation_steps 4 \
     --num_epochs 1 \
     --num_mini_batches 1 \
     --total_episodes 1000000 \
@@ -55,10 +55,40 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --beta 0.1 \
-    --num_evals 10 \
     --response_length 53 \
     --with_tracking \
     --push_to_hub \
+    --vllm_device cuda:7 \
+
+
+python mason.py \
+    --cluster ai2/allennlp-cirrascale ai2/aristo-cirrascale ai2/pluto-cirrascale ai2/general-cirrascale ai2/mosaic-cirrascale ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale  \
+    --priority preemptible \
+    --budget ai2/allennlp \
+    --workspace ai2/costah \
+    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+     open_instruct/online_dpo_vllm_thread.py \
+    --dataset_name trl-internal-testing/tldr-preference-sft-trl-style \
+    --dataset_train_split train \
+    --dataset_eval_split validation \
+    --learning_rate 3e-6 \
+    --output_dir models/minimal/online_dpo_vllm_thread_tldr \
+    --per_device_train_batch_size 64 \
+    --per_device_eval_batch_size 64 \
+    --gradient_accumulation_steps 1 \
+    --local_rollout_forward_batch_size 64 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 1000000 \
+    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr  \
+    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
+    --non_stop_penalty \
+    --stop_token eos \
+    --beta 0.1 \
+    --response_length 53 \
+    --with_tracking \
+    --push_to_hub \
+    --vllm_device cuda:7 \
 
 
 

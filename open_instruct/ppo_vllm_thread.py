@@ -165,13 +165,21 @@ class Args:
     non_stop_penalty: bool = False
     """whether to penalize responses that do not contain `stop_token_id`"""
 
-    # online DPO specific args
+    # online PPO specific args
     beta: float = 0.05
     """the beta value of the RLHF objective (KL coefficient)"""
-    num_generation_per_prompt: int = 2
-    """the number of generations per prompt (currently only support 2)"""
-    loss_type: Literal["sigmoid", "ipo"] = "sigmoid"
-    """the loss type for the DPO algorithm"""
+    whiten_rewards: bool = False
+    """whether to whiten the rewards"""
+    cliprange: float = 0.2
+    """the clip range"""
+    vf_coef: float = 0.1
+    """the value function coefficient"""
+    cliprange_value: float = 0.2
+    """the clip range for the value function"""
+    gamma: float = 1
+    """the discount factor"""
+    lam: float = 0.95
+    """the lambda value for GAE"""
 
     # vLLM settings. NOTE: currently we need to place the vLLM model on a separate GPU
     # for generation to work properly because vLLM would pre-alocate the memory.
@@ -207,12 +215,12 @@ def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig
     )
     args.num_training_steps = args.total_episodes // args.batch_size
     args.eval_freq = max(1, args.num_training_steps // args.num_evals)
-    # DPO logic: repeats the same prompt `num_generation_per_prompt` times
-    args.local_dataloader_batch_size = exact_div(
-        args.local_batch_size,
-        args.num_generation_per_prompt,
-        "`local_batch_size` must be a multiple of `num_generation_per_prompt`",
-    )
+    # PPO logic: do checks and set up dataloader batch size
+    if args.whiten_rewards:
+        assert (
+            args.local_mini_batch_size >= 8
+        ), f"Per-rank minibatch size {args.local_mini_batch_size} is insufficient for whitening"
+    args.local_dataloader_batch_size = args.local_batch_size
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = f"{args.exp_name}__{model_config.model_name_or_path.replace('/', '_')}"
@@ -269,6 +277,63 @@ def send_queries(accelerator, unwrapped_model, tokenizer, param_prompt_Q, querie
             [inneritem for inneritem in item if inneritem != tokenizer.pad_token_id] for item in g_queries_list
         ] # remove padding
         param_prompt_Q.put((unwrapped_model, g_queries_list))
+
+
+# taken from https://github.com/OpenLMLab/MOSS-RLHF/blob/40b91eb2f2b71b16919addede0341d2bef70825d/ppo/ppo_trainer.py#L29
+# we did this we can do a single `model = accelerator.prepare(model)`
+class PolicyAndValueWrapper(torch.nn.Module):
+    def __init__(self, policy, value_model) -> None:
+        super().__init__()
+        self.policy = policy
+        self.value_model = value_model
+        self.critic_backbone = getattr(value_model, value_model.base_model_prefix)
+
+    def forward(self, **kwargs):
+        output = self.critic_backbone(
+            **kwargs,
+        )
+        logits = self.value_model.score(output.hidden_states[-1])
+        return self.policy(**kwargs), logits
+    
+    def gradient_checkpointing_enable(self):
+        self.policy.gradient_checkpointing_enable()
+        self.value_model.gradient_checkpointing_enable()
+
+
+def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[bool] = None) -> torch.Tensor:
+    """Compute mean of tensor with a masked values."""
+    if axis is not None:
+        return (values * mask).sum(axis=axis) / mask.sum(axis=axis)
+    else:
+        return (values * mask).sum() / mask.sum()
+
+
+def masked_var(values: torch.Tensor, mask: torch.Tensor, unbiased: bool = True) -> torch.Tensor:
+    """Compute variance of tensor with masked values."""
+    mean = masked_mean(values, mask)
+    centered_values = values - mean
+    variance = masked_mean(centered_values**2, mask)
+    if unbiased:
+        mask_sum = mask.sum()
+        if mask_sum == 0:
+            raise ValueError(
+                "The sum of the mask is zero, which can happen when `mini_batch_size=1`;"
+                "try increase the `mini_batch_size` or `gradient_accumulation_steps`"
+            )
+        # note that if mask_sum == 1, then there is a division by zero issue
+        # to avoid it you just need to use a larger minibatch_size
+        bessel_correction = mask_sum / (mask_sum - 1)
+        variance = variance * bessel_correction
+    return variance
+
+
+def masked_whiten(values: torch.Tensor, mask: torch.Tensor, shift_mean: bool = True) -> torch.Tensor:
+    """Whiten values with masked values."""
+    mean, var = masked_mean(values, mask), masked_var(values, mask)
+    whitened = (values - mean) * torch.rsqrt(var + 1e-8)
+    if not shift_mean:
+        whitened += mean
+    return whitened
 
 
 def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
@@ -343,6 +408,13 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         attn_implementation="flash_attention_2",
         use_cache=False,
     )
+    value_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
+        args.reward_model_path,
+        num_labels=1,
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
+        use_cache=False,
+    )
     reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
         args.reward_model_path,
         num_labels=1,
@@ -350,7 +422,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         attn_implementation="flash_attention_2",
         use_cache=False,
     )
-    model = policy
+    model = PolicyAndValueWrapper(policy, value_model)
     if args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
     for module in [model, ref_model, reward_model]:
@@ -427,11 +499,13 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # set up the metrics and initial states
     stats_shape = (args.num_epochs, args.num_mini_batches, args.gradient_accumulation_steps)
-    loss_stats = torch.zeros(stats_shape, device=device)
-    chosen_rewards_stats = torch.zeros(stats_shape, device=device)
-    rejected_rewards_stats = torch.zeros(stats_shape, device=device)
-    chosen_logprobs_stats = torch.zeros(stats_shape, device=device)
-    rejected_logprobs_stats = torch.zeros(stats_shape, device=device)
+    approxkl_stats = torch.zeros(stats_shape, device=device)
+    pg_clipfrac_stats = torch.zeros(stats_shape, device=device)
+    pg_loss_stats = torch.zeros(stats_shape, device=device)
+    vf_loss_stats = torch.zeros(stats_shape, device=device)
+    vf_clipfrac_stats = torch.zeros(stats_shape, device=device)
+    entropy_stats = torch.zeros(stats_shape, device=device)
+    ratio_stats = torch.zeros(stats_shape, device=device)
     episode = 0
     model.train()
 
@@ -439,7 +513,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     start_time = time.time()
     data = next(iter_dataloader)
     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
-    queries_next = queries_next.repeat(args.num_generation_per_prompt, 1)
     send_queries(accelerator, None, tokenizer, param_prompt_Q, queries_next)
 
     for training_step in range(1, args.num_training_steps + 1):
@@ -449,18 +522,16 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
         with unwrap_model_for_generation(model, accelerator) as unwrapped_model:
             # (optionally) evaluate the model
-            generation_model = unwrapped_model
+            generation_model = unwrapped_model.policy
             if args.async_mode:
                 if training_step != 1:
                     data = next(iter_dataloader)
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
-                    queries_next = queries_next.repeat(args.num_generation_per_prompt, 1)
                 send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
             else:
                 if training_step != 1:
                     data = next(iter_dataloader)
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
-                    queries_next = queries_next.repeat(args.num_generation_per_prompt, 1)
                     # NOTE: important: the indent here is different for sync mode
                     send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
 
@@ -473,6 +544,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 ref_logprobs = []
                 scores = []
                 sequence_lengths = []
+                values = []
                 if accelerator.is_main_process:
                     g_response_token_ids = response_ids_Q.get()
                     DUMMY_PAD_TOKEN = 0  # we can't use tokenizer.pad_token_id because it's outside vocab and `torch.gather(all_logprob, 2, response.unsqueeze(-1))` will error out
@@ -518,6 +590,11 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     _, score, _ = get_reward(
                         reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
+                    unwrapped_value_model = accelerator.unwrap_model(model).value_model
+                    full_value, _, _ = get_reward(
+                        unwrapped_value_model, query_response, tokenizer.pad_token_id, context_length
+                    )
+                    value = full_value[:, context_length - 1 : -1].squeeze(-1)
 
                     responses.append(response)
                     postprocessed_responses.append(postprocessed_response)
@@ -525,13 +602,15 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     ref_logprobs.append(ref_logprob)
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
+                    values.append(value)
                 responses = torch.cat(responses, 0)
                 postprocessed_responses = torch.cat(postprocessed_responses, 0)
                 logprobs = torch.cat(logprobs, 0)
                 ref_logprobs = torch.cat(ref_logprobs, 0)
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
-                del (logprob, ref_logprob, score)
+                values = torch.cat(values, 0)
+                del (logprob, ref_logprob, full_value, value, score)
                 gc.collect()
                 torch.cuda.empty_cache()
 
@@ -550,133 +629,124 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 padding_mask = response_idxs > sequence_lengths.unsqueeze(1)
                 logprobs = torch.masked_fill(logprobs, padding_mask, INVALID_LOGPROB)
                 ref_logprobs = torch.masked_fill(ref_logprobs, padding_mask, INVALID_LOGPROB)
+                sequence_lengths_p1 = sequence_lengths + 1
+                padding_mask_p1 = response_idxs > (sequence_lengths_p1.unsqueeze(1))
+                values = torch.masked_fill(values, padding_mask_p1, 0)
 
                 # 4. compute rewards
                 kl = logprobs - ref_logprobs
                 non_score_reward = -args.beta * kl
                 non_score_reward_sum = non_score_reward.sum(1)
                 rlhf_reward = scores + non_score_reward_sum
+                rewards = non_score_reward.clone()
+                actual_start = torch.arange(rewards.size(0), device=rewards.device)
+                actual_end = torch.where(sequence_lengths_p1 < rewards.size(1), sequence_lengths_p1, sequence_lengths)
+                rewards[[actual_start, actual_end]] += scores
 
-                # num_examples should be same as args.local_batch_size divided by 2
-                num_examples = scores.size(0) // 2
-                first_half = scores[:num_examples]
-                second_half = scores[num_examples:]
+                # 5. whiten rewards
+                if args.whiten_rewards:
+                    rewards = masked_whiten(rewards, mask=~padding_mask_p1, shift_mean=False)
+                    rewards = torch.masked_fill(rewards, padding_mask_p1, 0)
 
-                num_examples_range = torch.arange(num_examples).to(scores.device)
-                chosen_indices = torch.where(
-                    first_half >= second_half, num_examples_range.clone(), num_examples_range.clone() + num_examples
-                )
-                rejected_indices = torch.where(
-                    first_half < second_half, num_examples_range.clone(), num_examples_range.clone() + num_examples
-                )
-                scores_margin = scores[chosen_indices] - scores[rejected_indices]
+                # 6. compute advantages and returns
+                lastgaelam = 0
+                advantages_reversed = []
+                gen_length = responses.shape[1]
+                for t in reversed(range(gen_length)):
+                    nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
+                    delta = rewards[:, t] + args.gamma * nextvalues - values[:, t]
+                    lastgaelam = delta + args.gamma * args.lam * lastgaelam
+                    advantages_reversed.append(lastgaelam)
+                advantages = torch.stack(advantages_reversed[::-1], axis=1)
+                returns = advantages + values
+                advantages = masked_whiten(advantages, ~padding_mask)
+                advantages = torch.masked_fill(advantages, padding_mask, 0)
+                torch.cuda.empty_cache()
 
         # Do multiple epochs of PPO training, with a fresh random shuffle in each epoch
         for epoch_idx in range(args.num_epochs):
-            b_inds = np.random.permutation(args.local_batch_size // args.num_generation_per_prompt)
+            b_inds = np.random.permutation(args.local_batch_size)
             minibatch_idx = 0
-            for mini_batch_start in range(
-                0,
-                args.local_batch_size // args.num_generation_per_prompt,
-                args.local_mini_batch_size // args.num_generation_per_prompt,
-            ):
-                mini_batch_end = mini_batch_start + args.local_mini_batch_size // args.num_generation_per_prompt
+            for mini_batch_start in range(0, args.local_batch_size, args.local_mini_batch_size):
+                mini_batch_end = mini_batch_start + args.local_mini_batch_size
                 mini_batch_inds = b_inds[mini_batch_start:mini_batch_end]
                 gradient_accumulation_idx = 0
-                for micro_batch_start in range(
-                    0,
-                    args.local_mini_batch_size // args.num_generation_per_prompt,
-                    args.per_device_train_batch_size,
-                ):
+                for micro_batch_start in range(0, args.local_mini_batch_size, args.per_device_train_batch_size):
                     with accelerator.accumulate(model):
                         micro_batch_end = micro_batch_start + args.per_device_train_batch_size
                         micro_batch_inds = mini_batch_inds[micro_batch_start:micro_batch_end]
-                        chosen_mb_inds = chosen_indices[micro_batch_inds]
-                        chosen_responses = responses[chosen_mb_inds]
-                        rejected_mb_inds = rejected_indices[micro_batch_inds]
-                        rejected_responses = responses[rejected_mb_inds]
+                        mb_advantage = advantages[micro_batch_inds]
+                        mb_responses = responses[micro_batch_inds]
+                        mb_query_responses = query_responses[micro_batch_inds]
+                        mb_logprobs = logprobs[micro_batch_inds]
+                        mb_return = returns[micro_batch_inds]
+                        mb_values = values[micro_batch_inds]
 
-                        concat_mb_inds = torch.cat((chosen_mb_inds, rejected_mb_inds), dim=0)
-                        concat_query_responses = query_responses[concat_mb_inds]
-                        concat_output = forward(model, concat_query_responses, tokenizer.pad_token_id)
-                        num_examples = chosen_mb_inds.shape[0]
-                        chosen_logits = concat_output.logits[:num_examples]
-                        rejected_logits = concat_output.logits[num_examples:]
-
-                        # chosen
-                        chosen_logits = chosen_logits[:, context_length - 1 : -1]
-                        chosen_logits /= args.temperature + 1e-7
-                        chosen_all_logprobs = F.log_softmax(chosen_logits, dim=-1)
-                        chosen_logprobs = torch.gather(chosen_all_logprobs, 2, chosen_responses.unsqueeze(-1)).squeeze(
-                            -1
+                        output, vpred_temp = forward(model, mb_query_responses, tokenizer.pad_token_id)
+                        logits = output.logits[:, context_length - 1 : -1]
+                        logits /= args.temperature + 1e-7
+                        new_all_logprobs = F.log_softmax(logits, dim=-1)
+                        new_logprobs = torch.gather(new_all_logprobs, 2, mb_responses.unsqueeze(-1)).squeeze(-1)
+                        new_logprobs = torch.masked_fill(
+                            new_logprobs, padding_mask[micro_batch_inds], INVALID_LOGPROB
                         )
-                        chosen_logprobs = torch.masked_fill(
-                            chosen_logprobs, padding_mask[chosen_mb_inds], INVALID_LOGPROB
+                        vpred = vpred_temp[:, context_length - 1 : -1].squeeze(-1)
+                        vpred = torch.masked_fill(vpred, padding_mask_p1[micro_batch_inds], 0)
+                        vpredclipped = torch.clamp(
+                            vpred,
+                            mb_values - args.cliprange_value,
+                            mb_values + args.cliprange_value,
                         )
-                        chosen_ref_logprobs = ref_logprobs[chosen_mb_inds]
-                        chosen_logprobs_sum = (chosen_logprobs * ~padding_mask[chosen_mb_inds]).sum(1)
-                        chosen_ref_logprobs_sum = (chosen_ref_logprobs * ~padding_mask[chosen_mb_inds]).sum(1)
+                        vf_losses1 = torch.square(vpred - mb_return)
+                        vf_losses2 = torch.square(vpredclipped - mb_return)
+                        vf_loss_max = torch.max(vf_losses1, vf_losses2)
+                        vf_loss = 0.5 * masked_mean(vf_loss_max, ~padding_mask_p1[micro_batch_inds])
+                        logprobs_diff = new_logprobs - mb_logprobs
+                        ratio = torch.exp(logprobs_diff)
+                        pg_losses = -mb_advantage * ratio
+                        pg_losses2 = -mb_advantage * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
+                        pg_loss_max = torch.max(pg_losses, pg_losses2)
+                        pg_loss = masked_mean(pg_loss_max, ~padding_mask[micro_batch_inds])
+                        loss = pg_loss + args.vf_coef * vf_loss
 
-                        # rejected
-                        rejected_logits = rejected_logits[:, context_length - 1 : -1]
-                        rejected_logits /= args.temperature + 1e-7
-                        rejected_all_logprobs = F.log_softmax(rejected_logits, dim=-1)
-                        rejected_logprobs = torch.gather(
-                            rejected_all_logprobs, 2, rejected_responses.unsqueeze(-1)
-                        ).squeeze(-1)
-                        rejected_logprobs = torch.masked_fill(
-                            rejected_logprobs, padding_mask[rejected_mb_inds], INVALID_LOGPROB
-                        )
-                        rejected_ref_logprobs = ref_logprobs[rejected_mb_inds]
-                        rejected_logprobs_sum = (rejected_logprobs * ~padding_mask[rejected_mb_inds]).sum(1)
-                        rejected_ref_logprobs_sum = (rejected_ref_logprobs * ~padding_mask[rejected_mb_inds]).sum(1)
-
-                        pi_logratios = chosen_logprobs_sum - rejected_logprobs_sum
-                        ref_logratios = chosen_ref_logprobs_sum - rejected_ref_logprobs_sum
-
-                        logits = pi_logratios - ref_logratios
-
-                        if args.loss_type == "sigmoid":
-                            losses = -F.logsigmoid(args.beta * logits)
-                        elif args.loss_type == "ipo":
-                            losses = (logits - 1 / (2 * args.beta)) ** 2
-                        else:
-                            raise NotImplementedError(f"invalid loss type {args.loss_type}")
-
-                        loss = losses.mean()
                         accelerator.backward(loss)
                         optimizer.step()
                         optimizer.zero_grad()
                         with torch.no_grad():
-                            chosen_rewards = args.beta * (chosen_logprobs_sum - chosen_ref_logprobs_sum)
-                            rejected_rewards = args.beta * (rejected_logprobs_sum - rejected_ref_logprobs_sum)
-                            loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = loss
-                            chosen_rewards_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = (
-                                chosen_rewards.mean()
+                            pg_clipfrac = masked_mean(
+                                (pg_losses2 > pg_losses).float(), ~padding_mask[micro_batch_inds]
                             )
-                            rejected_rewards_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = (
-                                rejected_rewards.mean()
+                            vf_clipfrac = masked_mean(
+                                (vf_losses2 > vf_losses1).float(), ~padding_mask_p1[micro_batch_inds]
                             )
-                            chosen_logprobs_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = (
-                                chosen_logprobs_sum.mean()
-                            )
-                            rejected_logprobs_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = (
-                                rejected_logprobs_sum.mean()
-                            )
+                            prob_dist = torch.nn.functional.softmax(logits, dim=-1)
+                            entropy = torch.logsumexp(logits, dim=-1) - torch.sum(prob_dist * logits, dim=-1)
+                            approxkl = 0.5 * (logprobs_diff**2).mean()
+                            approxkl_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = approxkl
+                            pg_clipfrac_stats[
+                                epoch_idx, minibatch_idx, gradient_accumulation_idx
+                            ] = pg_clipfrac
+                            pg_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = pg_loss
+                            vf_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = vf_loss
+                            vf_clipfrac_stats[
+                                epoch_idx, minibatch_idx, gradient_accumulation_idx
+                            ] = vf_clipfrac
+                            entropy_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = entropy.mean()
+                            ratio_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = ratio.mean()
+
                     gradient_accumulation_idx += 1
                 minibatch_idx += 1
                 # fmt: off
                 del (
-                    loss, logits, concat_output, concat_query_responses,
-                    chosen_logits, rejected_logits, chosen_logprobs, rejected_logprobs,
-                    chosen_responses, rejected_responses,
+                    output, vpred_temp, logits, new_all_logprobs, new_logprobs, vpred, vpredclipped,
+                    vf_losses1, vf_losses2, vf_loss, vf_clipfrac, logprobs_diff, ratio, pg_losses, pg_losses2, pg_loss_max,
+                    pg_loss, loss, pg_clipfrac, prob_dist, entropy, approxkl, mb_return,
+                    mb_advantage, mb_values, mb_responses, mb_query_responses, mb_logprobs,
                 )
                 # fmt: on
                 # del everything and empty cache
                 torch.cuda.empty_cache()
         with torch.no_grad():
-            g_chosen_reward = accelerator.gather(chosen_rewards_stats)
-            g_rejected_reward = accelerator.gather(rejected_rewards_stats)
             metrics = {
                 "episode": episode,
                 "lr": scheduler.get_last_lr()[0],
@@ -690,14 +760,14 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 "objective/non_score_reward": accelerator.gather(non_score_reward_sum).mean().item(),
                 "objective/rlhf_reward": accelerator.gather(rlhf_reward).mean().item(),
                 "objective/scores": accelerator.gather(scores.mean()).mean().item(),
-                "objective/scores_margin": accelerator.gather(scores_margin.mean()).mean().item(),
-                "objective/loss": accelerator.gather(loss_stats).mean().item(),
-                "rewards/chosen": g_chosen_reward.mean().item(),
-                "rewards/rejected": g_rejected_reward.mean().item(),
-                "rewards/accuracies": (g_chosen_reward > g_rejected_reward).float().mean().item(),
-                "rewards/margins": (g_chosen_reward - g_rejected_reward).mean().item(),
-                "logps/chosen": accelerator.gather(chosen_logprobs_stats).mean().item(),
-                "logps/rejected": accelerator.gather(rejected_logprobs_stats).mean().item(),
+                "policy/approxkl_avg": accelerator.gather(approxkl_stats).mean().item(),
+                "policy/clipfrac_avg": accelerator.gather(pg_clipfrac_stats).mean().item(),
+                "loss/policy_avg": accelerator.gather(pg_loss_stats).mean().item(),
+                "loss/value_avg": accelerator.gather(vf_loss_stats).mean().item(),
+                "val/clipfrac_avg": accelerator.gather(vf_clipfrac_stats).mean().item(),
+                "policy/entropy_avg": accelerator.gather(entropy_stats).mean().item(),
+                "val/ratio": accelerator.gather(ratio_stats).mean().item(),
+                "val/ratio_var": accelerator.gather(ratio_stats).var().item(),
             }
             if accelerator.is_main_process:
                 print_rich_single_line_metrics(metrics)
@@ -705,7 +775,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     writer.add_scalar(key, value, episode)
         del (queries, responses, postprocessed_responses, logprobs, ref_logprobs, sequence_lengths, scores)
         del (metrics, kl, non_score_reward, rlhf_reward)
-        del (g_chosen_reward, g_rejected_reward)
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -721,6 +790,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         args.push_to_hub,
         args.hf_repo_id,
         args.hf_repo_revision,
+        model_attribute_to_save="policy",
     )
 
 
