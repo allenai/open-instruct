@@ -100,7 +100,7 @@ COPY open_instruct open_instruct
 # install the package in editable mode
 COPY pyproject.toml .
 RUN pip install -e .
-COPY .git .
+COPY .git/ ./.git/
 
 COPY eval eval
 COPY configs configs

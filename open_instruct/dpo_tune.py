@@ -851,6 +851,8 @@ def main(args: FlatArguments):
             experiment_config,
             init_kwargs={"wandb": {"entity": args.wandb_entity, "tags": [args.exp_name] + get_wandb_tags()}},
         )
+        wandb_tracker = accelerator.get_tracker("wandb")
+
 
     # Train!
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
@@ -1041,18 +1043,23 @@ def main(args: FlatArguments):
     if args.upload_hf_metadata:
         # dpo script only supports these two options right now for datasets
         dataset_name = args.dataset_name if args.dataset_name else args.train_file
+        beaker_config = maybe_get_beaker_config()
+        # mainly just focussing here on what would be useful for the leaderboard.
+        # wandb will have even more useful information.
         metadata_blob = {
             "model_name": args.exp_name,
-            "model_type": "dpo",
-            "dpo_type": args.dpo_loss_type,
+            "model_type": "sft",
             "datasets": [dataset_name],
-            "base_model": args.model_name_or_path
+            "base_model": args.model_name_or_path,
+            "wandb_path": wandb_tracker.run.get_url(),
+            "beaker_experiment": beaker_config.beaker_experiment_url,
+            "beaker_datasets": beaker_config.beaker_dataset_id_urls
         }
         upload_metadata_to_hf(
             metadata_blob,
             "metadata.json",
             args.hf_metadata_dataset,
-            args.exp_name,
+            'results/' + args.hf_repo_revision,  # to match what the auto-evals name as.
         )
 
     accelerator.wait_for_everyone()
