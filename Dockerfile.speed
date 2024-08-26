@@ -1,0 +1,33 @@
+# beaker image pull ai2/cuda12.0-cudnn8-dev-ubuntu20.04
+# gcr.io/ai2-beaker-core/public/cr2hkoafi8esc8vl9pqg
+FROM --platform=linux/amd64 gcr.io/ai2-beaker-core/public/cr2hkoafi8esc8vl9pqg
+
+WORKDIR /stage/
+
+# TODO When updating flash-attn or torch in the future, make sure to update the version in the requirements.txt file. 
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
+COPY requirements.txt .
+RUN pip install --upgrade pip "setuptools<70.0.0" wheel 
+# TODO, unpin setuptools when this issue in flash attention is resolved
+RUN pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121
+RUN pip install packaging
+RUN pip install flash-attn==2.5.8 --no-build-isolation
+RUN pip install -r requirements.txt
+
+# NLTK download
+RUN python -m nltk.downloader punkt
+
+COPY open_instruct open_instruct
+
+# install the package in editable mode
+COPY pyproject.toml .
+RUN pip install -e .
+COPY .git .
+
+COPY eval eval
+COPY configs configs
+COPY scripts scripts
+RUN chmod +x scripts/*
+
+# for interactive session
+RUN chmod -R 777 /stage/
