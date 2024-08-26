@@ -318,6 +318,12 @@ class FlatArguments:
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     try_launch_beaker_eval_jobs: bool = True
     """Whether to launch beaker evaluation jobs after training"""
+    fused_optimizer: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to use fused AdamW or not.",
+        },
+    )
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -780,7 +786,7 @@ def main(args: FlatArguments):
             is_paged=True,
         )
     else:
-        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
+        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
