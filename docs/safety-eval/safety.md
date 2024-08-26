@@ -6,6 +6,20 @@ We are using the Ai2 Safety Evaluation suite for safety evals. This contains a b
 
 This should be the most relevant thing for internal Ai2 users of open-instruct. To run evals, simply add `--run_safety_evaluations` when calling `submit_eval_jobs.py`. This will auto-add a job that uploads and runs the safety evaluations (and uploads to the leaderboard if the appropriate flag is set). This uses the `hamishivi/safety-eval` image, which is build from [the eval-safety fork](https://github.com/nouhadziri/safety-eval-fork).
 
+An example command would be:
+```bash
+python scripts/submit_eval_jobs.py \
+      --model_name <model name> \
+      --location <beaker id> \
+      --is_tuned --workspace tulu-3-results \
+      --preemptible \
+      --use_hf_tokenizer_template \
+      --beaker_image nathanl/open_instruct_olmo_auto \
+      --upload_to_hf allenai/tulu-3-evals \
+      --run_oe_eval_experiments \
+      --run_safety_evaluations
+```
+
 ## Running on an interactive session
 
 Clone [the fork](https://github.com/nouhadziri/safety-eval-fork) and run from that location.
