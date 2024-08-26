@@ -570,7 +570,8 @@ def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> N
         # find the checkpoint with the largest step
         checkpoints = sorted(folders, key=lambda x: int(x.split("_")[-1]))
         if len(checkpoints) > keep_last_n_checkpoints:
-            shutil.rmtree(os.path.join(output_dir, checkpoints[0]))
+            for checkpoint in checkpoints[:len(checkpoints) - keep_last_n_checkpoints]:
+                shutil.rmtree(os.path.join(output_dir, checkpoint))
 
 
 # ----------------------------------------------------------------------------
