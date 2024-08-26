@@ -37,3 +37,5 @@ black
 flake8
 isort
 autoflake
+anthropic
+google-generativeai
