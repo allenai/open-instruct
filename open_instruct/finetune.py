@@ -318,6 +318,10 @@ class FlatArguments:
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     try_launch_beaker_eval_jobs: bool = True
     """Whether to launch beaker evaluation jobs after training"""
+    upload_hf_metadata: bool = True
+    """Whether to upload metadata about run to HF or not"""
+    hf_metadata_dataset: Optional[str] = None
+    """What dataset to upload the metadata to"""
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -1006,6 +1010,28 @@ def main(args: FlatArguments):
                 location=args.hf_repo_id,
                 hf_repo_revision=args.hf_repo_revision,
             )
+    if args.upload_hf_metadata:
+        # dpo script only supports these two options right now for datasets
+        if args.dataset_mixer:
+            datasets = args.dataset_mixer.keys()
+        elif args.dataset_mixer_list:
+            datasets = args.dataset_mixer_list[::2]  # even indices
+        elif args.dataset_name:
+            datasets = [args.dataset_name]
+        else:
+            datasets = [args.train_file]
+        metadata_blob = {
+            "model_name": args.exp_name,
+            "model_type": "sft",
+            "datasets": datasets,
+            "base_model": args.model_name_or_path
+        }
+        upload_metadata_to_hf(
+            metadata_blob,
+            "metadata.json",
+            args.hf_metadata_dataset,
+            args.exp_name,
+        )
 
     accelerator.wait_for_everyone()
     if args.with_tracking:
