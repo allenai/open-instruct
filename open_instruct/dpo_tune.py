@@ -71,6 +71,7 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     submit_beaker_eval_jobs,
+    upload_metadata_to_hf,
 )
 
 logger = get_logger(__name__)
@@ -850,7 +851,6 @@ def main(args: FlatArguments):
             init_kwargs={"wandb": {"entity": args.wandb_entity, "tags": [args.exp_name] + get_wandb_tags()}},
         )
         wandb_tracker = accelerator.get_tracker("wandb")
-
 
     # Train!
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps

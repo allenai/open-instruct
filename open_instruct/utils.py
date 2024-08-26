@@ -691,12 +691,13 @@ def submit_beaker_eval_jobs(
     logger.error(f"Beaker evaluation jobs: Stderr:\n{stderr.decode()}")
     logger.info(f"Beaker evaluation jobs: process return code: {process.returncode}")
 
+
 def upload_metadata_to_hf(
         metadata_dict,
         filename,
         hf_dataset_name,
         hf_dataset_save_dir,
-    ):
+):
     # upload a random dict to HF. Originally for uploading metadata to HF
     # about a model for leaderboard displays.
     with open("tmp.json", "w") as f:
