@@ -43,6 +43,9 @@ jobs:
     if: (github.event_name != 'workflow_run') || (github.event.workflow_run.conclusion == 'success')
     steps:
       - uses: actions/checkout@v3
+        with:
+          repository: allenai/oe-eval-internal
+          path: './oe-eval-internal'
 
       - name: Setup environment
         uses: ./.github/actions/setup
