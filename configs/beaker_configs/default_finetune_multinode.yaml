@@ -8,7 +8,7 @@ tasks:
     hostNetworking: true
     propagateFailure: true
     propagatePreemption: true
-    synchronizedStartTimeout: 30m
+    synchronizedStartTimeout: 15m
     image:
       beaker: nathanl/open_instruct_auto
     command: [
@@ -60,14 +60,6 @@ tasks:
         value: false
       - name: WANDB_DISABLED
         value: true
-      - name: NCCL_NET
-        value: IB
-      - name: NCCL_SOCKET_IFNAME
-        value: ib
-      - name: NCCL_IB_HCA
-        value: ^=mlx5_bond_0
-      - name: NCCL_DEBUG
-        value: INFO  
       - name: HF_TOKEN
         secret: HF_TOKEN
     result:

@@ -5,12 +5,12 @@ tokenizer_name: meta-llama/Meta-Llama-3.1-70B
 use_slow_tokenizer: true
 dataset_mixer:
     # Tulu V2 datasets
-    # ai2-adapt-dev/llama-3-tulu-v2-sft-mixture-with-subset-llama-405b-completions-code_alpaca-open_orca-gpt4_alpaca: 326154
+    ai2-adapt-dev/llama-3-tulu-v2-sft-mixture-with-subset-llama-405b-completions-code_alpaca-open_orca-gpt4_alpaca: 326154
     # Tulu V3 datasets (WIP)
     HuggingFaceH4/no_robots: 9500 # all
-    # ai2-adapt-dev/metamath-qa-reformat: 100000
-    # ai2-adapt-dev/codefeedback-single-turn-reformat: 156526 # all
-    # nvidia/Daring-Anteater: 99532 # all
+    ai2-adapt-dev/metamath-qa-reformat: 100000
+    ai2-adapt-dev/codefeedback-single-turn-reformat: 156526 # all
+    nvidia/Daring-Anteater: 99532 # all
     # tbd:
     # AI-MO/NuminaMath-TIR: 72441 # all
     # ai2-adapt-dev/slim-orca-300k: 100000
