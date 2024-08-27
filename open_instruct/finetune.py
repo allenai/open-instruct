@@ -604,7 +604,7 @@ def main(args: FlatArguments):
                 device_map=device_map,
                 trust_remote_code=args.trust_remote_code,
                 torch_dtype=torch.bfloat16,
-                use_flash_attention_2=True if args.use_flash_attn else False,
+                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
                 revision=args.model_revision,
                 token=os.getenv("HF_TOKEN", None),
             )
@@ -616,7 +616,7 @@ def main(args: FlatArguments):
                 trust_remote_code=args.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 torch_dtype=torch.bfloat16,
-                use_flash_attention_2=True if args.use_flash_attn else False,
+                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
                 revision=args.model_revision,
                 token=os.getenv("HF_TOKEN", None),
             )

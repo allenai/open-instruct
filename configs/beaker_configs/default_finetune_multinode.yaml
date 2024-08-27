@@ -8,7 +8,7 @@ tasks:
     hostNetworking: true
     propagateFailure: true
     propagatePreemption: true
-    synchronizedStartTimeout: 15m
+    synchronizedStartTimeout: 30m
     image:
       beaker: nathanl/open_instruct_auto
     command: [
@@ -23,7 +23,7 @@ tasks:
         --main_process_ip $BEAKER_LEADER_REPLICA_HOSTNAME
         --main_process_port 29400
         --use_deepspeed
-        --deepspeed_config_file configs/ds_configs/stage3_offloading_accelerate.conf
+        --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf
         --deepspeed_multinode_launcher standard
         open_instruct/finetune.py
         --model_name_or_path meta-llama/Meta-Llama-3-8B
@@ -62,8 +62,12 @@ tasks:
         value: true
       - name: NCCL_NET
         value: IB
+      - name: NCCL_SOCKET_IFNAME
+        value: ib
+      - name: NCCL_IB_HCA
+        value: ^=mlx5_bond_0
       - name: NCCL_DEBUG
-        value: INFO
+        value: INFO  
       - name: HF_TOKEN
         secret: HF_TOKEN
     result:
