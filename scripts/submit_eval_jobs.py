@@ -579,6 +579,8 @@ if args.run_oe_eval_experiments:
         oe_eval_cmd += f" --model-location {model_info[1]}"
     else:
         oe_eval_cmd += f" --model-location beaker://{model_info[1]}"
+    if args.hf_revision:
+        oe_eval_cmd += f" --revision {args.hf_revision}"
     subprocess.Popen(oe_eval_cmd, shell=True)
 
 # create an experiment that runs the safety eval tasks

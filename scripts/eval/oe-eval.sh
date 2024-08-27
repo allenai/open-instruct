@@ -32,7 +32,7 @@ set -ex
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--hf-upload]"
+    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--revision REVISION] [--hf-upload]"
     exit 1
 }
 
@@ -41,6 +41,7 @@ while [[ "$#" -gt 0 ]]; do
     case $1 in
         --model-name) MODEL_NAME="$2"; shift ;;
         --model-location) MODEL_LOCATION="$2"; shift ;;
+        --revision) REVISION="$2"; shift ;;
         --hf-upload) HF_UPLOAD="true" ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
@@ -58,6 +59,7 @@ MODEL_NAME_SAFE=${MODEL_NAME//\//_}
 
 # Set defaults for optional arguments
 HF_UPLOAD="${HF_UPLOAD:-false}"
+REVISION="${REVISION:-main}"
 
 # Set HF_UPLOAD_ARG if HF_UPLOAD is true
 if [ "$HF_UPLOAD" == "true" ]; then
@@ -83,5 +85,13 @@ for TASK in "${TASKS[@]}"; do
     else
         BATCH_SIZE=$BATCH_SIZE_VLLM
     fi
-    python oe-eval-internal/oe_eval/launch.py --model "$MODEL_NAME" --beaker-workspace "ai2/tulu-3-results" --beaker-budget ai2/oe-adapt --task "$TASK" $MODEL_TYPE --batch-size "$BATCH_SIZE" --model-args {\"model_path\":\"${MODEL_LOCATION}\"} ${HF_UPLOAD_ARG} --gpus "$GPU_COUNT"
+    python oe-eval-internal/oe_eval/launch.py \
+        --revision "$REVISION" \
+        --model "$MODEL_NAME" \
+        --beaker-workspace "ai2/tulu-3-results" \
+        --beaker-budget ai2/oe-adapt \
+        --task "$TASK" $MODEL_TYPE \
+        --batch-size "$BATCH_SIZE" \
+        --model-args {\"model_path\":\"${MODEL_LOCATION}\"} ${HF_UPLOAD_ARG} \
+        --gpus "$GPU_COUNT"
 done
