@@ -319,7 +319,7 @@ class FlatArguments:
     try_launch_beaker_eval_jobs: bool = True
     """Whether to launch beaker evaluation jobs after training"""
     fused_optimizer: bool = field(
-        default=False,
+        default=True,
         metadata={
             "help": "Whether to use fused AdamW or not.",
         },

@@ -30,5 +30,4 @@ report_to:
 logging_steps: 1
 checkpointing_steps: epoch
 dataset_mix_dir: /output/
-fused_optimizer: true
 gradient_checkpointing: true
