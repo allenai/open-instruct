@@ -1038,10 +1038,9 @@ def main(args: FlatArguments):
                 location=args.hf_repo_id,
                 hf_repo_revision=args.hf_repo_revision,
             )
-    if args.hf_metadata_dataset:
+    if args.hf_metadata_dataset and accelerator.is_main_process and is_beaker_job():
         # dpo script only supports these two options right now for datasets
         dataset_name = args.dataset_name if args.dataset_name else args.train_file
-        beaker_config = maybe_get_beaker_config()
         # mainly just focussing here on what would be useful for the leaderboard.
         # wandb will have even more useful information.
         metadata_blob = {
