@@ -62,6 +62,7 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     submit_beaker_eval_jobs,
+    upload_metadata_to_hf,
 )
 
 logger = get_logger(__name__)
@@ -306,6 +307,12 @@ class FlatArguments:
         default=3,
         metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
     )
+    fused_optimizer: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to use fused AdamW or not.",
+        },
+    )
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: Optional[str] = None
@@ -318,12 +325,8 @@ class FlatArguments:
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     try_launch_beaker_eval_jobs: bool = True
     """Whether to launch beaker evaluation jobs after training"""
-    fused_optimizer: bool = field(
-        default=True,
-        metadata={
-            "help": "Whether to use fused AdamW or not.",
-        },
-    )
+    hf_metadata_dataset: Optional[str] = None
+    """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -852,6 +855,7 @@ def main(args: FlatArguments):
             experiment_config,
             init_kwargs={"wandb": {"entity": args.wandb_entity, "tags": [args.exp_name] + get_wandb_tags()}},
         )
+        wandb_tracker = accelerator.get_tracker("wandb")
 
     # Train!
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
@@ -1013,6 +1017,34 @@ def main(args: FlatArguments):
                 location=args.hf_repo_id,
                 hf_repo_revision=args.hf_repo_revision,
             )
+    if args.hf_metadata_dataset:
+        # dpo script only supports these two options right now for datasets
+        if args.dataset_mixer:
+            dataset_list = args.dataset_mixer.keys()
+        elif args.dataset_mixer_list:
+            dataset_list = args.dataset_mixer_list[::2]  # even indices
+        elif args.dataset_name:
+            dataset_list = [args.dataset_name]
+        else:
+            dataset_list = [args.train_file]
+        beaker_config = maybe_get_beaker_config()
+        # mainly just focussing here on what would be useful for the leaderboard.
+        # wandb will have even more useful information.
+        metadata_blob = {
+            "model_name": args.exp_name,
+            "model_type": "sft",
+            "datasets": dataset_list,
+            "base_model": args.model_name_or_path,
+            "wandb_path": wandb_tracker.run.get_url(),
+            "beaker_experiment": beaker_config.beaker_experiment_url,
+            "beaker_datasets": beaker_config.beaker_dataset_id_urls
+        }
+        upload_metadata_to_hf(
+            metadata_blob,
+            "metadata.json",
+            args.hf_metadata_dataset,
+            'results/' + args.hf_repo_revision,  # to match what the auto-evals name as.
+        )
 
     accelerator.wait_for_everyone()
     if args.with_tracking:

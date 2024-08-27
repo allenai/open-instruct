@@ -71,6 +71,7 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     submit_beaker_eval_jobs,
+    upload_metadata_to_hf,
 )
 
 logger = get_logger(__name__)
@@ -350,6 +351,8 @@ class FlatArguments:
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     try_launch_beaker_eval_jobs: bool = True
     """Whether to launch beaker evaluation jobs after training"""
+    hf_metadata_dataset: Optional[str] = None
+    """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -847,6 +850,7 @@ def main(args: FlatArguments):
             experiment_config,
             init_kwargs={"wandb": {"entity": args.wandb_entity, "tags": [args.exp_name] + get_wandb_tags()}},
         )
+        wandb_tracker = accelerator.get_tracker("wandb")
 
     # Train!
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
@@ -1034,6 +1038,26 @@ def main(args: FlatArguments):
                 location=args.hf_repo_id,
                 hf_repo_revision=args.hf_repo_revision,
             )
+    if args.hf_metadata_dataset and accelerator.is_main_process and is_beaker_job():
+        # dpo script only supports these two options right now for datasets
+        dataset_name = args.dataset_name if args.dataset_name else args.train_file
+        # mainly just focussing here on what would be useful for the leaderboard.
+        # wandb will have even more useful information.
+        metadata_blob = {
+            "model_name": args.exp_name,
+            "model_type": "sft",
+            "datasets": [dataset_name],
+            "base_model": args.model_name_or_path,
+            "wandb_path": wandb_tracker.run.get_url(),
+            "beaker_experiment": beaker_config.beaker_experiment_url,
+            "beaker_datasets": beaker_config.beaker_dataset_id_urls
+        }
+        upload_metadata_to_hf(
+            metadata_blob,
+            "metadata.json",
+            args.hf_metadata_dataset,
+            'results/' + args.hf_repo_revision,  # to match what the auto-evals name as.
+        )
 
     accelerator.wait_for_everyone()
     if args.with_tracking:
