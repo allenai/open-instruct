@@ -92,6 +92,6 @@ for TASK in "${TASKS[@]}"; do
         --beaker-budget ai2/oe-adapt \
         --task "$TASK" $MODEL_TYPE \
         --batch-size "$BATCH_SIZE" \
-        --model-args "{\"model_path\":\"${MODEL_LOCATION}\",\"revision\":\"${REVISION}\",\"tokenizer_revision\":\"${REVISION}\"}" \ ${HF_UPLOAD_ARG} \
+        --model-args "{\"model_path\":\"${MODEL_LOCATION}\",\"revision\":\"${REVISION}\",\"tokenizer_revision\":\"${REVISION}\"}" ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT"
 done
