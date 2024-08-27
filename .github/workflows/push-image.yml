@@ -47,7 +47,7 @@ jobs:
 
       - uses: actions/checkout@v3
         with:
-          repository: vwxyzjn/learn-fsdp2 # dummy private repo to test out deploy keys
+          repository: allenai/oe-eval-internal
           path: './oe-eval-internal'
           ssh-key: ${{ secrets.OE_EVAL_GIT_CLONE_ACCESS_PRIVATE_SSH_DEPLOY_KEY }}
 
