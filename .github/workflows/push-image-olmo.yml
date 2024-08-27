@@ -45,10 +45,12 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - uses: actions/checkout@v3
-        with:
-          repository: vwxyzjn/learn-fsdp2 # dummy private repo to test out deploy keys
-          path: './oe-eval-internal'
+      - name: Clone oe-eval-internal
+        run: |
+          eval `ssh-agent -s`
+          ssh-add - <<< '${{ secrets.OE_EVAL_GIT_CLONE_ACCESS_PRIVATE_SSH_DEPLOY_KEY }}'
+          git clone https://github.com/vwxyzjn/learn-fsdp2.git
+          mv learn-fsdp2 oe-eval-internal
 
       - name: Setup environment
         uses: ./.github/actions/setup
