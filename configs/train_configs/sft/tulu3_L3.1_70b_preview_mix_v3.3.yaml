@@ -1,0 +1,30 @@
+model_name_or_path: meta-llama/Meta-Llama-3.1-70B
+model_revision: main
+use_flash_attn: true
+tokenizer_name: meta-llama/Meta-Llama-3.1-70B
+use_slow_tokenizer: true
+dataset_mixer:
+    # Tulu V2 datasets
+    ai2-adapt-dev/llama-3-tulu-v2-sft-mixture-with-subset-llama-405b-completions-code_alpaca-open_orca-gpt4_alpaca: 326154
+    # Tulu V3 datasets (WIP)
+    HuggingFaceH4/no_robots: 9500 # all
+    ai2-adapt-dev/metamath-qa-reformat: 100000
+    ai2-adapt-dev/codefeedback-single-turn-reformat: 156526 # all
+    nvidia/Daring-Anteater: 99532 # all
+max_seq_length: 4096
+preprocessing_num_workers: 128
+per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
+gradient_accumulation_steps: 4 # effective batch size 128 with 4 nodes
+learning_rate: 5.0e-06 # best LR so far
+lr_scheduler_type: linear
+warmup_ratio: 0.03
+weight_decay: 0.0
+num_train_epochs: 2
+output_dir: /output/
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+checkpointing_steps: epoch
+dataset_mix_dir: /output/
+gradient_checkpointing: true
