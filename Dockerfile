@@ -83,8 +83,8 @@ ENTRYPOINT ["bash", "-l"]
 WORKDIR /stage/
 
 # TODO When updating flash-attn or torch in the future, make sure to update the version in the requirements.txt file. 
-COPY requirements.txt .
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
+COPY requirements.txt .
 RUN pip install --upgrade pip "setuptools<70.0.0" wheel 
 # TODO, unpin setuptools when this issue in flash attention is resolved
 RUN pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121
