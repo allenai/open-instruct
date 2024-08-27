@@ -60,10 +60,6 @@ tasks:
         value: false
       - name: WANDB_DISABLED
         value: true
-      - name: NCCL_NET
-        value: IB
-      - name: NCCL_DEBUG
-        value: INFO
       - name: HF_TOKEN
         secret: HF_TOKEN
     result:

@@ -307,6 +307,12 @@ class FlatArguments:
         default=3,
         metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
     )
+    fused_optimizer: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to use fused AdamW or not.",
+        },
+    )
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: Optional[str] = None
@@ -601,7 +607,7 @@ def main(args: FlatArguments):
                 device_map=device_map,
                 trust_remote_code=args.trust_remote_code,
                 torch_dtype=torch.bfloat16,
-                use_flash_attention_2=True if args.use_flash_attn else False,
+                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
                 revision=args.model_revision,
                 token=os.getenv("HF_TOKEN", None),
             )
@@ -612,7 +618,8 @@ def main(args: FlatArguments):
                 config=config,
                 trust_remote_code=args.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
-                use_flash_attention_2=True if args.use_flash_attn else False,
+                torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
                 revision=args.model_revision,
                 token=os.getenv("HF_TOKEN", None),
             )
@@ -783,7 +790,7 @@ def main(args: FlatArguments):
             is_paged=True,
         )
     else:
-        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
+        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
