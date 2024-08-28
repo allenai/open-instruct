@@ -203,6 +203,7 @@ def main(args):
                                                                                       max_input_length, device)
                 tokenized_prompts.append(tokenized_input)
                 if args.use_chat_format:
+                    breakpoint()
                     prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
                     breakpoint()
                     prompts[task_name].append(prompt)
