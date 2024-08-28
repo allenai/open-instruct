@@ -1058,14 +1058,20 @@ def main(args: FlatArguments):
                 hf_repo_revision=args.hf_repo_revision,
             )
     if args.hf_metadata_dataset and accelerator.is_main_process and is_beaker_job():
-        # dpo script only supports these two options right now for datasets
-        dataset_name = args.dataset_name if args.dataset_name else args.train_file
+        if args.dataset_mixer:
+            dataset_list = args.dataset_mixer.keys()
+        elif args.dataset_mixer_list:
+            dataset_list = args.dataset_mixer_list[::2]  # even indices
+        elif args.dataset_name:
+            dataset_list = [args.dataset_name]
+        else:
+            dataset_list = [args.train_file]
         # mainly just focussing here on what would be useful for the leaderboard.
         # wandb will have even more useful information.
         metadata_blob = {
             "model_name": args.exp_name,
             "model_type": "sft",
-            "datasets": [dataset_name],
+            "datasets": dataset_list,
             "base_model": args.model_name_or_path,
             "wandb_path": wandb_tracker.run.get_url(),
             "beaker_experiment": beaker_config.beaker_experiment_url,
