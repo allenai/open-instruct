@@ -267,14 +267,12 @@ def concatenated_forward(
         attention_mask=concatenated_batch["concatenated_attention_mask"],
         output_router_logits=True,
     )
-    logits = outputs.logits.to(torch.float32)
-    aux_loss = outputs.aux_loss
     all_logps = _get_batch_logps(
-        all_logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob
+        outputs.logits.to(torch.float32), concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob
     )
     chosen_logps = all_logps[: batch["chosen_input_ids"].shape[0]]
     rejected_logps = all_logps[batch["chosen_input_ids"].shape[0] :]
-    return chosen_logps, rejected_logps, aux_loss
+    return chosen_logps, rejected_logps, outputs.aux_loss
 
 
 def pad_to_length(tensor: torch.Tensor, length: int, pad_value: Union[int, float], dim: int = -1) -> torch.Tensor:
