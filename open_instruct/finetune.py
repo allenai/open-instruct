@@ -1041,6 +1041,7 @@ def main(args: FlatArguments):
                 --priority low \
                 --preemptible \
                 --budget ai2/allennlp \
+                --workspace tulu-3-results \
                 --gpus 0 -- python scripts/evaluate_beaker_model_when_finished.py \
                 --beaker_workload_id {beaker_config.beaker_workload_id} \
                 --model_name {args.hf_repo_revision}
