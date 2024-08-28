@@ -197,6 +197,7 @@ def main(args):
                 break
             input_full = example["input"]
             tokenized_input_full = tokenizer(input_full, return_tensors="pt").input_ids.to(device)
+            breakpoint()
             if tokenized_input_full.shape[1] >= max_input_length:
                 nb_examples_more_seq_length+=1
             else:
