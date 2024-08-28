@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import Any, List, NewType, Optional, Tuple, Union
 
 import requests
-from accelerate.logging import get_logger
+# from accelerate.logging import get_logger
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from huggingface_hub import HfApi
@@ -32,7 +32,7 @@ from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
-logger = get_logger(__name__)
+# logger = get_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
 
@@ -549,7 +549,7 @@ def get_last_checkpoint(folder: str, incomplete: bool = False) -> Optional[str]:
     checkpoint_steps = [path for path in content if path.startswith("step_")]
     checkpoint_epochs = [path for path in content if path.startswith("epoch_")]
     if len(checkpoint_steps) > 0 and len(checkpoint_epochs) > 0:
-        logger.info("Mixed step and epoch checkpoints found. Using step checkpoints.")
+        # logger.info("Mixed step and epoch checkpoints found. Using step checkpoints.")
         checkpoints = checkpoint_steps
     elif len(checkpoint_steps) == 0:
         checkpoints = checkpoint_epochs
@@ -571,7 +571,8 @@ def get_last_checkpoint_path(args, incomplete: bool = False) -> str:
     if args.output_dir and os.path.isdir(args.output_dir) and not args.overwrite_output_dir:
         last_checkpoint_path = get_last_checkpoint(args.output_dir, incomplete=incomplete)
         if last_checkpoint_path is None:
-            logger.warning("Output directory exists but no checkpoint found. Starting from scratch.")
+            # logger.warning("Output directory exists but no checkpoint found. Starting from scratch.")
+            pass
     elif args.resume_from_checkpoint:
         last_checkpoint_path = args.resume_from_checkpoint
     return last_checkpoint_path
@@ -635,7 +636,7 @@ def get_beaker_whoami() -> Optional[str]:
     )
     stdout, stderr = process.communicate()
     if process.returncode != 0:
-        logger.error(f"Failed to get Beaker account: {stderr}")
+        # logger.error(f"Failed to get Beaker account: {stderr}")
         return None
     accounts = json.loads(stdout)
     return accounts[0]["name"]
@@ -703,9 +704,9 @@ def submit_beaker_eval_jobs(
     process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
 
-    logger.info(f"Beaker evaluation jobs: Stdout:\n{stdout.decode()}")
-    logger.error(f"Beaker evaluation jobs: Stderr:\n{stderr.decode()}")
-    logger.info(f"Beaker evaluation jobs: process return code: {process.returncode}")
+    # logger.info(f"Beaker evaluation jobs: Stdout:\n{stdout.decode()}")
+    # logger.error(f"Beaker evaluation jobs: Stderr:\n{stderr.decode()}")
+    # logger.info(f"Beaker evaluation jobs: process return code: {process.returncode}")
 
 
 def upload_metadata_to_hf(
