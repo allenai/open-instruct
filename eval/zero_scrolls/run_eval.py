@@ -174,7 +174,7 @@ def main(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     max_input_length = model_to_max_input_tokens[args.model_name_or_path]
     chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
-    for dataset in datasets:
+    for dataset in tqdm(datasets):
         generations = dict()
         print(f"Processing {dataset}")
         time = datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
@@ -191,6 +191,7 @@ def main(args):
         metrics = defaultdict(list)
         for i, example in tqdm(enumerate(data["validation"]), desc="Reading data"):
             task_name = dataset
+            breakpoint()
             if 0 < max_examples_per_task == i:
                 print(f"Reached {max_examples_per_task} for {dataset}. Breaking")
                 break
@@ -209,6 +210,7 @@ def main(args):
                     prompts[task_name].append(full_input)
                 nb_examples_less_seq_length+=1
                 if args.use_vllm:
+                    breakpoint()
                     sampling_params = vllm.SamplingParams(
                         temperature=1,
                         max_tokens=512,
