@@ -905,18 +905,18 @@ def main(args: FlatArguments):
         for step, batch in enumerate(active_dataloader):
             # dpo forward pass & loss
             with accelerator.accumulate(model):
-                policy_chosen_logps, policy_rejected_logps = concatenated_forward(
+                policy_chosen_logps, policy_rejected_logps, aux_loss = concatenated_forward(
                     model, batch, average_log_prob=average_log_prob
                 )
                 if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                     with torch.no_grad():
                         if args.use_lora:
                             with accelerator.unwrap_model(model).disable_adapter():
-                                reference_chosen_logps, reference_rejected_logps = concatenated_forward(
+                                reference_chosen_logps, reference_rejected_logps, _ = concatenated_forward(
                                     model, batch, average_log_prob=average_log_prob
                                 )
                         else:
-                            reference_chosen_logps, reference_rejected_logps = concatenated_forward(
+                            reference_chosen_logps, reference_rejected_logps, _ = concatenated_forward(
                                 reference_model, batch, average_log_prob=average_log_prob
                             )
                     losses, _, _ = dpo_loss(
@@ -949,7 +949,7 @@ def main(args: FlatArguments):
                 else:
                     raise ValueError(f"Invalid dpo loss type {args.dpo_loss_type}.")
                 # TODO: metric logging
-                loss = losses.mean()
+                loss = losses.mean() + getattr(model.config, "router_aux_loss_coef", 0.001) * aux_loss
                 # We keep track of the loss at each logged step
                 total_loss += loss.detach().float()
                 accelerator.backward(loss)

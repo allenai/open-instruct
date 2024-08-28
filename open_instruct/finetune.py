@@ -901,7 +901,7 @@ def main(args: FlatArguments):
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
             with accelerator.accumulate(model):
-                outputs = model(**batch, use_cache=False, output_router_logits=False)
+                outputs = model(**batch, use_cache=False, output_router_logits=True)
                 if args.reduce_loss == "mean":
                     loss = outputs.loss
                 else:
@@ -923,7 +923,7 @@ def main(args: FlatArguments):
                     shift_labels = shift_labels.view(-1)
                     # Enable model parallelism
                     shift_labels = shift_labels.to(shift_logits.device)
-                    loss = loss_fct(shift_logits, shift_labels)
+                    loss = loss_fct(shift_logits, shift_labels) + getattr(model.config, "router_aux_loss_coef", 0.001) * outputs.aux_loss
                 # We keep track of the loss at each logged step
                 total_loss += loss.detach().float()
                 accelerator.backward(loss)
