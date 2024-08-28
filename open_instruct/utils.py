@@ -569,7 +569,7 @@ def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> N
     # find the checkpoint with the largest step
     checkpoints = sorted(folders, key=lambda x: int(x.split("_")[-1]))
     if len(checkpoints) > keep_last_n_checkpoints:
-        for checkpoint in checkpoints[:len(checkpoints) - keep_last_n_checkpoints]:
+        for checkpoint in checkpoints[: len(checkpoints) - keep_last_n_checkpoints]:
             shutil.rmtree(os.path.join(output_dir, checkpoint))
 
 
@@ -691,10 +691,10 @@ def submit_beaker_eval_jobs(
 
 
 def upload_metadata_to_hf(
-        metadata_dict,
-        filename,
-        hf_dataset_name,
-        hf_dataset_save_dir,
+    metadata_dict,
+    filename,
+    hf_dataset_name,
+    hf_dataset_save_dir,
 ):
     # upload a random dict to HF. Originally for uploading metadata to HF
     # about a model for leaderboard displays.

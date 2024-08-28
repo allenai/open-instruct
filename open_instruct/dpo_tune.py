@@ -64,6 +64,7 @@ from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.utils import (
     ArgumentParserPlus,
     clean_last_n_checkpoints,
+    get_datasets,
     get_last_checkpoint_path,
     get_wandb_tags,
     is_beaker_job,
@@ -559,6 +560,24 @@ def main(args: FlatArguments):
             args.dataset_name,
             args.dataset_config_name,
         )
+    elif args.dataset_mixer is not None:
+        # mixing datasets via config
+        raw_datasets = get_datasets(
+            args.dataset_mixer,
+            configs=args.dataset_config_name,
+            splits=["train"],
+            save_data_dir=args.dataset_mix_dir,
+            columns_to_keep=["messages"],
+        )
+    elif args.dataset_mixer_list is not None:
+        # mixing datasets via config
+        raw_datasets = get_datasets(
+            args.dataset_mixer_list,
+            configs=args.dataset_config_name,
+            splits=["train"],
+            save_data_dir=args.dataset_mix_dir,
+            columns_to_keep=["messages"],
+        )
     else:
         data_files = {}
         dataset_args = {}
@@ -1050,13 +1069,13 @@ def main(args: FlatArguments):
             "base_model": args.model_name_or_path,
             "wandb_path": wandb_tracker.run.get_url(),
             "beaker_experiment": beaker_config.beaker_experiment_url,
-            "beaker_datasets": beaker_config.beaker_dataset_id_urls
+            "beaker_datasets": beaker_config.beaker_dataset_id_urls,
         }
         upload_metadata_to_hf(
             metadata_blob,
             "metadata.json",
             args.hf_metadata_dataset,
-            'results/' + args.hf_repo_revision,  # to match what the auto-evals name as.
+            "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
         )
 
     accelerator.wait_for_everyone()
