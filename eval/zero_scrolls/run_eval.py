@@ -199,13 +199,10 @@ def main(args):
             if tokenized_input_full.shape[1] >= max_input_length:
                 nb_examples_more_seq_length+=1
             else:
-                breakpoint()
                 nb_examples_less_seq_length+=1
                 messages, full_input = process_model_input_with_vllm(tokenizer, example,max_input_length, device)
                 if args.use_chat_format:
-                    breakpoint()
                     prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
-                    breakpoint()
                     prompts[task_name].append(prompt)
 
                 if args.use_vllm:
