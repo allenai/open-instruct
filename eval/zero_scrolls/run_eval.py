@@ -206,7 +206,6 @@ def main(args):
                     prompts[task_name].append(prompt)
 
                 if args.use_vllm:
-                    breakpoint()
                     sampling_params = vllm.SamplingParams(
                         temperature=1,
                         max_tokens=512,
@@ -218,6 +217,8 @@ def main(args):
                         g.prompt: g.outputs[0].text for g in generations
                     }
                     for g in generations:
+                        breakpoint()
+
                         prompt = g.prompt
                         generation = g.outputs[0].text
                         gold = 1
