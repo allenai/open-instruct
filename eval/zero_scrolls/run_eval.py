@@ -10,6 +10,8 @@ import torch
 import random
 import vllm
 import evaluate
+from rouge_score import rouge_scorer
+
 from vllm import LLM, SamplingParams
 from datasets import load_dataset
 from eval.utils import (
@@ -47,10 +49,6 @@ datasets = [
             'qasper',
             'narrative_qa',
             'quality',
-            'musique',
-            'squality',
-            'space_digest',
-            'book_sum_sort'
 ]
 
 
@@ -110,6 +108,58 @@ def process_model_input_with_vllm(tokenizer, example, max_tokens, device):
     return tokenized_input_full, messages, input_full
 
 
+def unigram_f1_score(response, ground_truth):
+    # Tokenize the text into unigrams
+    response_unigrams = response.split()
+    ground_truth_unigrams = ground_truth.split()
+
+    # Count the occurrences of each unigram
+    response_counter = Counter(response_unigrams)
+    ground_truth_counter = Counter(ground_truth_unigrams)
+
+    # Compute the intersection of unigrams
+    intersection = sum((response_counter & ground_truth_counter).values())
+
+    # Compute precision, recall, and F1 score
+    precision = intersection / len(response_unigrams) if len(response_unigrams) > 0 else 0
+    recall = intersection / len(ground_truth_unigrams) if len(ground_truth_unigrams) > 0 else 0
+    f1_score = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+
+    return f1_score
+
+
+def exact_match_contains(response, gold_answer):
+    """
+    Check if the gold answer is contained within the model's response.
+
+    Args:
+        response (str): The model's response.
+        gold_answer (str): The correct answer.
+
+    Returns:
+        bool: True if the gold answer is contained in the response, False otherwise.
+    """
+    return gold_answer.strip() in response.strip()
+
+def compute_metric(task_name, generated_response, gold):
+    if task_name in ['gov_report', 'summ_screen_fd', 'qmsum']:
+        scorer = rouge_scorer.RougeScorer(
+            metrics=['rouge1', 'rouge2', 'rougeL'],
+            max_n=2,  # For ROUGE-2
+            apply_avg=True
+        )
+        metric = scorer.score(generated_response, gold)
+
+    elif task_name in ['qasper', 'narrative_qa']:
+        metric = unigram_f1_score(generated_response, gold)
+
+    else:
+        metric = int(exact_match_contains(generated_response, gold))
+
+    return metric
+
+
+
 def main(args):
     random.seed(42)
     # Load model if not using OpenAI API
@@ -138,6 +188,7 @@ def main(args):
         tokenized_prompts = []
         nb_examples_more_seq_length = 0
         nb_examples_less_seq_length = 0
+        metrics = defaultdict(list)
         for i, example in tqdm(enumerate(data["validation"]), desc="Reading data"):
             task_name = dataset
             if 0 < max_examples_per_task == i:
@@ -157,37 +208,41 @@ def main(args):
                 else:
                     prompts[task_name].append(full_input)
                 nb_examples_less_seq_length+=1
+                if args.use_vllm:
+                    sampling_params = vllm.SamplingParams(
+                        temperature=1,
+                        max_tokens=512,
+                        top_p=1.0,
+                        include_stop_str_in_output=True,
+                    )
+                    generations = model.generate(prompts[task_name], sampling_params)
+                    prompt_to_output = {
+                        g.prompt: g.outputs[0].text for g in generations
+                    }
+                    metrics[task_name].append()
+                    outputs = {
+                        "task_name": task_name
+                    }
+                    for prompt in prompts:
+                        outputs[prompt] = prompt_to_output.get(prompt, "")
+                else:
+                    # generate with hf model
+                    outputs = []
+                    for model_input in tokenized_prompts:
+                        prediction_token_ids = model.generate(model_input,
+                                                              max_new_tokens=1024,
+                                                              do_sample=False,
+                                                              top_p=0,
+                                                              top_k=0,
+                                                              temperature=1)
+
+                        predicted_text = tokenizer.decode(prediction_token_ids[0], skip_special_tokens=True)
+                        outputs.append(predicted_text)
 
         print(f"Nb examples exceeding max_seq_length: {nb_examples_more_seq_length}")
         print(f"Nb examples not exceeding max_seq_length: {nb_examples_less_seq_length}")
 
-        if args.use_vllm:
-            sampling_params = vllm.SamplingParams(
-                temperature=1,
-                max_tokens=512,
-                top_p=1.0,
-                include_stop_str_in_output=True,
-            )
-            generations = model.generate(prompts, sampling_params)
-            prompt_to_output = {
-                g.prompt: g.outputs[0].text for g in generations
-            }
-            breakpoint()
-            outputs = [prompt_to_output[prompt] if prompt in prompt_to_output else "" for prompt in prompts]
-            outputs["task_name"] = task_name
-        else:
-            # generate with hf model
-            outputs = []
-            for model_input in tokenized_prompts:
-                prediction_token_ids = model.generate(model_input,
-                                                      max_new_tokens=1024,
-                                                      do_sample=False,
-                                                      top_p=0,
-                                                      top_k=0,
-                                                      temperature=1)
 
-                predicted_text = tokenizer.decode(prediction_token_ids[0], skip_special_tokens=True)
-                outputs.append(predicted_text)
 
         out_file_path = os.path.join(generations_dir, f"preds_{dataset}.json")
         with open(out_file_path, 'w') as f_out:
