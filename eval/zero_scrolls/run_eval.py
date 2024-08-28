@@ -206,6 +206,7 @@ def main(args):
                 tokenized_prompts.append(tokenized_input)
                 if args.use_chat_format:
                     prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
+                    breakpoint()
                     prompts[task_name].append(prompt)
                 else:
                     prompts[task_name].append(full_input)
