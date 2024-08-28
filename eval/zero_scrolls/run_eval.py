@@ -136,9 +136,8 @@ def main(args):
         tokenized_prompts = []
         nb_examples_more_seq_length = 0
         nb_examples_less_seq_length = 0
-        for i, example in tqdm(enumerate(data["test"]), desc="Reading data"):
-            breakpoint()
-            task_name = example["task_name"]
+        for i, example in tqdm(enumerate(data["validation"]), desc="Reading data"):
+            task_name = example["dataset"]
             if 0 < max_examples_per_task == i:
                 print(f"Reached {max_examples_per_task} for {dataset}. Breaking")
                 break
@@ -152,10 +151,9 @@ def main(args):
                 tokenized_prompts.append(tokenized_input)
                 if args.use_chat_format:
                     prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
-                    # prompt = full_input
                     prompts[task_name].append(prompt)
                 else:
-                    prompts.append(full_input)
+                    prompts[task_name].append(full_input)
                 nb_examples_less_seq_length+=1
 
         print(f"Nb examples exceeding max_seq_length: {nb_examples_more_seq_length}")
@@ -168,11 +166,13 @@ def main(args):
                 top_p=1.0,
                 include_stop_str_in_output=True,
             )
-            generations = model.generate(prompts[0], sampling_params)
+            generations = model.generate(prompts, sampling_params)
             prompt_to_output = {
                 g.prompt: g.outputs[0].text for g in generations
             }
+            breakpoint()
             outputs = [prompt_to_output[prompt] if prompt in prompt_to_output else "" for prompt in prompts]
+            outputs["task_name"] = task_name
         else:
             # generate with hf model
             outputs = []
@@ -186,7 +186,6 @@ def main(args):
 
                 predicted_text = tokenizer.decode(prediction_token_ids[0], skip_special_tokens=True)
                 outputs.append(predicted_text)
-                # generations[example["id"]] = predicted_text
 
         out_file_path = os.path.join(generations_dir, f"preds_{dataset}.json")
         with open(out_file_path, 'w') as f_out:
