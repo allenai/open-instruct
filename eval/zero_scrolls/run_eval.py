@@ -137,6 +137,7 @@ def main(args):
         nb_examples_more_seq_length = 0
         nb_examples_less_seq_length = 0
         for i, example in tqdm(enumerate(data["test"]), desc="Reading data"):
+            breakpoint()
             task_name = example["task_name"]
             if 0 < max_examples_per_task == i:
                 print(f"Reached {max_examples_per_task} for {dataset}. Breaking")
