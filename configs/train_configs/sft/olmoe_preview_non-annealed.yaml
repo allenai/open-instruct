@@ -1,7 +1,7 @@
 # Note, the exact model was trained on TPUs in a different repo
 # Example file for mixing, use exact tulu 2 mixture for replication allenai/tulu-v2-sft-mixture
 model_name_or_path: OLMoE/OLMoE-1B-7B-0824
-model_revision: main
+model_revision: step1200000-tokens5033B
 use_flash_attn: true
 tokenizer_name: OLMoE/OLMoE-1B-7B-0824
 use_slow_tokenizer: true
@@ -24,5 +24,3 @@ report_to:
 logging_steps: 1
 checkpointing_steps: epoch
 add_bos: true
-# checkpointing_steps: 1000
-# keep_last_n_checkpoints: 1
