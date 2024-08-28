@@ -179,7 +179,7 @@ def make_task_spec(args, command, i):
         image=beaker.ImageSource(beaker=args.image),
         command=command,
         arguments=[fully_command],
-        result=beaker.ResultSpec(path="/unused"),
+        result=beaker.ResultSpec(path="/output"),
         datasets=get_datasets(args.beaker_datasets, args.no_mount_nfs),
         context=beaker.TaskContext(priority=beaker.Priority(args.priority),
                                    preemptible=args.preemptible),
