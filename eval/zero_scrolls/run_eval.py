@@ -200,6 +200,7 @@ def main(args):
                 nb_examples_more_seq_length+=1
             else:
                 breakpoint()
+                nb_examples_less_seq_length+=1
                 messages, full_input = process_model_input_with_vllm(tokenizer, example,max_input_length, device)
                 if args.use_chat_format:
                     breakpoint()
@@ -207,7 +208,6 @@ def main(args):
                     breakpoint()
                     prompts[task_name].append(prompt)
 
-                nb_examples_less_seq_length+=1
                 if args.use_vllm:
                     breakpoint()
                     sampling_params = vllm.SamplingParams(
