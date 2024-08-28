@@ -94,7 +94,6 @@ RUN pip install -r requirements.txt
 
 # NLTK download
 RUN python -m nltk.downloader punkt
-COPY oe-eval-internal oe-eval-internal
 COPY open_instruct open_instruct
 
 # install the package in editable mode
