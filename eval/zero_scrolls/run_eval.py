@@ -2,6 +2,8 @@ import argparse
 import os
 import re
 import json
+from collections import defaultdict
+
 from tqdm import tqdm
 import glob
 import torch
@@ -132,7 +134,7 @@ def main(args):
         data = load_dataset("tau/zero_scrolls", dataset, trust_remote_code=True)
         print(f"Loaded {dataset}")
 
-        prompts = {}
+        prompts = defaultdict(list)
         tokenized_prompts = []
         nb_examples_more_seq_length = 0
         nb_examples_less_seq_length = 0
