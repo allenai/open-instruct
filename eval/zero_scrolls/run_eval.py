@@ -102,10 +102,10 @@ def process_model_input(tokenizer, example, max_tokens, device):
 
 def process_model_input_with_vllm(tokenizer, example, max_tokens, device):
     input_full = example["input"]
-    tokenized_input_full = tokenizer(input_full, return_tensors="pt").input_ids.to(device)
+    # tokenized_input_full = tokenizer(input_full, return_tensors="pt").input_ids.to(device)
     messages = [{"role": "user", "content": input_full}]
 
-    return tokenized_input_full, messages, input_full
+    return messages, input_full
 
 
 def unigram_f1_score(response, ground_truth):
@@ -199,16 +199,14 @@ def main(args):
             if tokenized_input_full.shape[1] >= max_input_length:
                 nb_examples_more_seq_length+=1
             else:
-                tokenized_input, messages, full_input = process_model_input_with_vllm(tokenizer, example,
-                                                                                      max_input_length, device)
-                tokenized_prompts.append(tokenized_input)
+                breakpoint()
+                messages, full_input = process_model_input_with_vllm(tokenizer, example,max_input_length, device)
                 if args.use_chat_format:
                     breakpoint()
                     prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
                     breakpoint()
                     prompts[task_name].append(prompt)
-                else:
-                    prompts[task_name].append(full_input)
+
                 nb_examples_less_seq_length+=1
                 if args.use_vllm:
                     breakpoint()
