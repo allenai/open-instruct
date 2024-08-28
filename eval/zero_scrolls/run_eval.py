@@ -39,18 +39,17 @@ model_to_max_input_tokens = {
 
 
 datasets = [
-            # 'gov_report',
-            # 'summ_screen_fd',
-            # 'qmsum',
-            # 'qasper',
-            # 'narrative_qa',
+            'gov_report',
+            'summ_screen_fd',
+            'qmsum',
+            'qasper',
+            'narrative_qa',
             'quality',
-            # 'musique',
-            # 'squality',
-            # 'space_digest',
-            # 'book_sum_sort'
+            'musique',
+            'squality',
+            'space_digest',
+            'book_sum_sort'
 ]
-
 
 
 def load_model(model_name_or_path, use_vllm):
@@ -104,22 +103,9 @@ def process_model_input(tokenizer, example, max_tokens, device):
 def process_model_input_with_vllm(tokenizer, example, max_tokens, device):
     input_full = example["input"]
     tokenized_input_full = tokenizer(input_full, return_tensors="pt").input_ids.to(device)
-    if tokenized_input_full.shape[1] <= max_tokens:
-        messages = [{"role": "user", "content": input_full}]
-        return tokenized_input_full, messages, input_full
+    messages = [{"role": "user", "content": input_full}]
 
-    seperator_and_query_text = example['truncation_seperator'] + example["input"][example['query_start_index']:]
-
-    tokenized_seperator_and_query = tokenizer(seperator_and_query_text, return_tensors="pt").input_ids.to(device)
-    input_without_query = example['input'][:example['query_start_index']]
-    full_input = input_without_query + seperator_and_query_text
-    messages = [{"role": "user", "content": full_input}]
-    tokenized_input_without_query = tokenizer(input_without_query, return_tensors="pt").input_ids.to(device)
-    tokenized_input_without_query = tokenized_input_without_query[:,
-                                    :max_tokens - tokenized_seperator_and_query.shape[1]]
-    tokenized_input = torch.cat([tokenized_input_without_query, tokenized_seperator_and_query], dim=1)
-
-    return tokenized_input, messages, full_input
+    return tokenized_input_full, messages, input_full
 
 
 def main(args):
@@ -146,16 +132,15 @@ def main(args):
         data = load_dataset("tau/zero_scrolls", dataset, trust_remote_code=True)
         print(f"Loaded {dataset}")
 
-        prompts = []
+        prompts = {}
         tokenized_prompts = []
         nb_examples_more_seq_length = 0
         nb_examples_less_seq_length = 0
         for i, example in tqdm(enumerate(data["test"]), desc="Reading data"):
+            task_name = example["task_name"]
             if 0 < max_examples_per_task == i:
                 print(f"Reached {max_examples_per_task} for {dataset}. Breaking")
                 break
-
-            breakpoint()
             input_full = example["input"]
             tokenized_input_full = tokenizer(input_full, return_tensors="pt").input_ids.to(device)
             if tokenized_input_full.shape[1] >= max_input_length:
@@ -167,7 +152,7 @@ def main(args):
                 if args.use_chat_format:
                     prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
                     # prompt = full_input
-                    prompts.append(prompt)
+                    prompts[task].append(prompt)
                 else:
                     prompts.append(full_input)
                 nb_examples_less_seq_length+=1
