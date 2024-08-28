@@ -83,6 +83,7 @@ ENTRYPOINT ["bash", "-l"]
 WORKDIR /stage/
 
 # TODO When updating flash-attn or torch in the future, make sure to update the version in the requirements.txt file. 
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
 COPY requirements.txt .
 RUN pip install --upgrade pip "setuptools<70.0.0" wheel 
 # TODO, unpin setuptools when this issue in flash attention is resolved
@@ -96,7 +97,6 @@ RUN pip install git+https://github.com/Muennighoff/transformers.git@olmoe
 
 # NLTK download
 RUN python -m nltk.downloader punkt
-
 COPY open_instruct open_instruct
 
 # install the package in editable mode
@@ -104,7 +104,7 @@ COPY open_instruct open_instruct
 # COPY trl trl
 COPY pyproject.toml .
 RUN pip install -e .
-COPY .git .
+COPY .git/ ./.git/
 
 COPY eval eval
 COPY configs configs

@@ -50,10 +50,7 @@ from transformers import (
     get_scheduler,
 )
 
-from open_instruct.model_utils import (
-    push_folder_and_tokenizer_to_hub,
-    save_with_accelerate,
-)
+from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.utils import (
     ArgumentParserPlus,
     clean_last_n_checkpoints,
@@ -65,6 +62,7 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     submit_beaker_eval_jobs,
+    upload_metadata_to_hf,
 )
 
 logger = get_logger(__name__)
@@ -309,6 +307,12 @@ class FlatArguments:
         default=3,
         metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
     )
+    fused_optimizer: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to use fused AdamW or not.",
+        },
+    )
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: Optional[str] = None
@@ -321,6 +325,8 @@ class FlatArguments:
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     try_launch_beaker_eval_jobs: bool = True
     """Whether to launch beaker evaluation jobs after training"""
+    hf_metadata_dataset: Optional[str] = None
+    """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -603,7 +609,7 @@ def main(args: FlatArguments):
                 device_map=device_map,
                 trust_remote_code=args.trust_remote_code,
                 torch_dtype=torch.bfloat16,
-                use_flash_attention_2=True if args.use_flash_attn else False,
+                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
                 revision=args.model_revision,
                 token=os.getenv("HF_TOKEN", None),
             )
@@ -614,7 +620,8 @@ def main(args: FlatArguments):
                 config=config,
                 trust_remote_code=args.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
-                use_flash_attention_2=True if args.use_flash_attn else False,
+                torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
                 revision=args.model_revision,
                 token=os.getenv("HF_TOKEN", None),
             )
@@ -785,7 +792,7 @@ def main(args: FlatArguments):
             is_paged=True,
         )
     else:
-        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
+        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
@@ -828,8 +835,8 @@ def main(args: FlatArguments):
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
     # Figure out how many steps we should save the Accelerator states
-    checkpointing_steps = str(args.checkpointing_steps)
-    if checkpointing_steps is not None and checkpointing_steps.lower() != "epoch":
+    checkpointing_steps = args.checkpointing_steps
+    if checkpointing_steps is not None and str(checkpointing_steps).lower() != "epoch":
         checkpointing_steps = int(checkpointing_steps)
 
     # We need to initialize the trackers we use, and also store our configuration.
@@ -850,6 +857,7 @@ def main(args: FlatArguments):
             experiment_config,
             init_kwargs={"wandb": {"entity": args.wandb_entity, "tags": [args.exp_name] + get_wandb_tags()}},
         )
+        wandb_tracker = accelerator.get_tracker("wandb")
 
     # Train!
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
@@ -986,8 +994,6 @@ def main(args: FlatArguments):
             accelerator.wait_for_everyone()
 
     if args.output_dir is not None:
-        if accelerator.is_main_process:
-            tokenizer.save_pretrained(args.output_dir)
         save_with_accelerate(
             accelerator,
             model,
@@ -996,10 +1002,13 @@ def main(args: FlatArguments):
             args.use_lora,
         )
 
+    # remove all checkpoints to save space
+    if accelerator.is_main_process:
+        clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
+
     if args.push_to_hub:
-        push_folder_and_tokenizer_to_hub(
+        push_folder_to_hub(
             accelerator,
-            tokenizer,
             args.output_dir,
             args.hf_repo_id,
             args.hf_repo_revision,
@@ -1010,6 +1019,34 @@ def main(args: FlatArguments):
                 location=args.hf_repo_id,
                 hf_repo_revision=args.hf_repo_revision,
             )
+    if args.hf_metadata_dataset:
+        # dpo script only supports these two options right now for datasets
+        if args.dataset_mixer:
+            dataset_list = args.dataset_mixer.keys()
+        elif args.dataset_mixer_list:
+            dataset_list = args.dataset_mixer_list[::2]  # even indices
+        elif args.dataset_name:
+            dataset_list = [args.dataset_name]
+        else:
+            dataset_list = [args.train_file]
+        beaker_config = maybe_get_beaker_config()
+        # mainly just focussing here on what would be useful for the leaderboard.
+        # wandb will have even more useful information.
+        metadata_blob = {
+            "model_name": args.exp_name,
+            "model_type": "sft",
+            "datasets": dataset_list,
+            "base_model": args.model_name_or_path,
+            "wandb_path": wandb_tracker.run.get_url(),
+            "beaker_experiment": beaker_config.beaker_experiment_url,
+            "beaker_datasets": beaker_config.beaker_dataset_id_urls
+        }
+        upload_metadata_to_hf(
+            metadata_blob,
+            "metadata.json",
+            args.hf_metadata_dataset,
+            'results/' + args.hf_repo_revision,  # to match what the auto-evals name as.
+        )
 
     accelerator.wait_for_everyone()
     if args.with_tracking:

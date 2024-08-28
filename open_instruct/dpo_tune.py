@@ -60,10 +60,7 @@ from open_instruct.dpo_utils import (
     simpo_loss,
     wpo_loss,
 )
-from open_instruct.model_utils import (
-    push_folder_and_tokenizer_to_hub,
-    save_with_accelerate,
-)
+from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.utils import (
     ArgumentParserPlus,
     clean_last_n_checkpoints,
@@ -74,6 +71,7 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     submit_beaker_eval_jobs,
+    upload_metadata_to_hf,
 )
 
 logger = get_logger(__name__)
@@ -353,6 +351,8 @@ class FlatArguments:
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     try_launch_beaker_eval_jobs: bool = True
     """Whether to launch beaker evaluation jobs after training"""
+    hf_metadata_dataset: Optional[str] = None
+    """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -828,8 +828,8 @@ def main(args: FlatArguments):
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
     # Figure out how many steps we should save the Accelerator states
-    checkpointing_steps = str(args.checkpointing_steps)
-    if checkpointing_steps is not None and checkpointing_steps.lower() != "epoch":
+    checkpointing_steps = args.checkpointing_steps
+    if checkpointing_steps is not None and str(checkpointing_steps).lower() != "epoch":
         checkpointing_steps = int(checkpointing_steps)
 
     # We need to initialize the trackers we use, and also store our configuration.
@@ -850,6 +850,7 @@ def main(args: FlatArguments):
             experiment_config,
             init_kwargs={"wandb": {"entity": args.wandb_entity, "tags": [args.exp_name] + get_wandb_tags()}},
         )
+        wandb_tracker = accelerator.get_tracker("wandb")
 
     # Train!
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
@@ -1012,8 +1013,6 @@ def main(args: FlatArguments):
             accelerator.wait_for_everyone()
 
     if args.output_dir is not None:
-        if accelerator.is_main_process:
-            tokenizer.save_pretrained(args.output_dir)
         save_with_accelerate(
             accelerator,
             model,
@@ -1022,10 +1021,13 @@ def main(args: FlatArguments):
             args.use_lora,
         )
 
+    # remove all checkpoints to save space
+    if accelerator.is_main_process:
+        clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
+
     if args.push_to_hub:
-        push_folder_and_tokenizer_to_hub(
+        push_folder_to_hub(
             accelerator,
-            tokenizer,
             args.output_dir,
             args.hf_repo_id,
             args.hf_repo_revision,
@@ -1036,6 +1038,26 @@ def main(args: FlatArguments):
                 location=args.hf_repo_id,
                 hf_repo_revision=args.hf_repo_revision,
             )
+    if args.hf_metadata_dataset and accelerator.is_main_process and is_beaker_job():
+        # dpo script only supports these two options right now for datasets
+        dataset_name = args.dataset_name if args.dataset_name else args.train_file
+        # mainly just focussing here on what would be useful for the leaderboard.
+        # wandb will have even more useful information.
+        metadata_blob = {
+            "model_name": args.exp_name,
+            "model_type": "sft",
+            "datasets": [dataset_name],
+            "base_model": args.model_name_or_path,
+            "wandb_path": wandb_tracker.run.get_url(),
+            "beaker_experiment": beaker_config.beaker_experiment_url,
+            "beaker_datasets": beaker_config.beaker_dataset_id_urls
+        }
+        upload_metadata_to_hf(
+            metadata_blob,
+            "metadata.json",
+            args.hf_metadata_dataset,
+            'results/' + args.hf_repo_revision,  # to match what the auto-evals name as.
+        )
 
     accelerator.wait_for_everyone()
     if args.with_tracking:

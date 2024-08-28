@@ -266,6 +266,7 @@ def load_hf_lm(
                 print("loading olmoe annealed")
                 model = AutoModelForCausalLM.from_pretrained(
                     model_name_or_path,
+                    revision=revision,
                     device_map=device_map,
                     torch_dtype=torch_dtype,
                     token=token,
@@ -276,6 +277,7 @@ def load_hf_lm(
                 print(f"loading other model {model_name_or_path}")
                 model = AutoModelForCausalLM.from_pretrained(
                     model_name_or_path,
+                    revision=revision,
                     device_map=device_map,
                     torch_dtype=torch_dtype,
                     token=token,
@@ -284,6 +286,7 @@ def load_hf_lm(
         else:
             model = AutoModelForCausalLM.from_pretrained(
                 model_name_or_path,
+                revision=revision,
                 torch_dtype=torch_dtype,
                 token=token,
                 trust_remote_code=trust_remote_code,
