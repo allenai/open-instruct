@@ -931,7 +931,7 @@ def main(args: FlatArguments):
                     shift_labels = shift_labels.view(-1)
                     # Enable model parallelism
                     shift_labels = shift_labels.to(shift_logits.device)
-                    loss = loss_fct(shift_logits, shift_labels) + getattr(model.config, "router_aux_loss_coef", 0.001) * outputs.aux_loss
+                    loss = loss_fct(shift_logits, shift_labels) + getattr(model.config, "router_aux_loss_coef", 0.01) * outputs.aux_loss
                 # We keep track of the loss at each logged step
                 total_loss += loss.detach().float()
                 accelerator.backward(loss)
