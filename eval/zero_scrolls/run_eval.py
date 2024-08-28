@@ -191,13 +191,11 @@ def main(args):
         metrics = defaultdict(list)
         for i, example in tqdm(enumerate(data["validation"]), desc="Reading data"):
             task_name = dataset
-            breakpoint()
             if 0 < max_examples_per_task == i:
                 print(f"Reached {max_examples_per_task} for {dataset}. Breaking")
                 break
             input_full = example["input"]
             tokenized_input_full = tokenizer(input_full, return_tensors="pt").input_ids.to(device)
-            breakpoint()
             if tokenized_input_full.shape[1] >= max_input_length:
                 nb_examples_more_seq_length+=1
             else:
