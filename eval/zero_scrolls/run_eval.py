@@ -219,7 +219,15 @@ def main(args):
                     prompt_to_output = {
                         g.prompt: g.outputs[0].text for g in generations
                     }
-                    metrics[task_name].append()
+                    for g in generations:
+                        prompt = g.prompt
+                        generation = g.outputs[0].text
+                        gold = 1
+                        breakpoint()
+                        # if task_name in ['gov_report', 'summ_screen_fd', 'qmsum']:
+                        #     scores = compute_metric(task_name, generated_response, gold)
+                        #     metrics[task_name] = {""}
+
                     outputs = {
                         "task_name": task_name
                     }
