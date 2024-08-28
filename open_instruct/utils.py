@@ -625,7 +625,11 @@ def get_beaker_whoami() -> Optional[str]:
 
 def maybe_get_beaker_config():
     beaker_dataset_ids = get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"])
-    beaker_dataset_id_urls = [f"https://beaker.org/ds/{dataset_id}" for dataset_id in beaker_dataset_ids]
+    # fix condition on basic interactive jobs
+    if beaker_dataset_ids is None:
+        beaker_dataset_id_urls = []
+    else:
+        beaker_dataset_id_urls = [f"https://beaker.org/ds/{dataset_id}" for dataset_id in beaker_dataset_ids]
     return BeakerRuntimeConfig(
         beaker_workload_id=os.environ["BEAKER_WORKLOAD_ID"],
         beaker_node_hostname=os.environ["BEAKER_NODE_HOSTNAME"],

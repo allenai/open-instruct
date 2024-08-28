@@ -1,5 +1,5 @@
 model_name_or_path: allenai/OLMo-1B-0724-hf
-use_flash_attn: true
+use_flash_attn: false
 gradient_checkpointing: true
 tokenizer_name: allenai/OLMo-1B-0724-hf
 dataset_mixer:
