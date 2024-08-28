@@ -932,8 +932,8 @@ def main(args: FlatArguments):
                     shift_labels = shift_labels.view(-1)
                     # Enable model parallelism
                     shift_labels = shift_labels.to(shift_logits.device)
-                    aux_loss = 2 * outputs.aux_loss
-                    loss = loss_fct(shift_logits, shift_labels) + 2 * outputs.aux_loss
+                    aux_loss = 0.5 * outputs.aux_loss
+                    loss = loss_fct(shift_logits, shift_labels) + 0.5 * outputs.aux_loss
                 # We keep track of the loss at each logged step
                 total_loss += loss.detach().float()
                 total_aux_loss += aux_loss.detach().float()
