@@ -20,6 +20,7 @@ on:
       - '!open_instruct/README.md'
       - 'requirements-olmo.txt'
       - 'Dockerfile.olmo'
+      - '.github/workflows/push-image-olmo.yml'
       # Note, add .olmo dockerfile + requirements if adding auto build to those
     branches: [main]
   # pull_request: # note, comment this out for running on every push

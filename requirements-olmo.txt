@@ -37,3 +37,5 @@ black
 flake8
 isort
 autoflake
+hf_transfer
+beaker-py

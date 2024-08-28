@@ -22,6 +22,18 @@ RUN apt-get update && apt-get install -y \
     iputils-ping \
     tmux
 
+ARG BEAKER_VERSION
+RUN curl --silent \
+    --connect-timeout 5 \
+    --max-time 10 \
+    --retry 5 \
+    --retry-delay 0 \
+    --retry-max-time 40 \
+    --output beaker.tar.gz \
+    "https://beaker.org/api/v3/release/cli?os=linux&arch=amd64&version=${BEAKER_VERSION}" \
+    && tar -zxf beaker.tar.gz -C /usr/local/bin/ ./beaker \
+    && rm beaker.tar.gz
+
 # This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
 # puts the right NVIDIA things in the right place (that THOR requires).
 ENV NVIDIA_DRIVER_CAPABILITIES=graphics,utility,compute
@@ -71,6 +83,7 @@ ENTRYPOINT ["bash", "-l"]
 WORKDIR /stage/
 
 # TODO When updating flash-attn or torch in the future, make sure to update the version in the requirements.txt file. 
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
 COPY requirements.txt .
 RUN pip install --upgrade pip "setuptools<70.0.0" wheel 
 # TODO, unpin setuptools when this issue in flash attention is resolved
@@ -81,13 +94,12 @@ RUN pip install -r requirements.txt
 
 # NLTK download
 RUN python -m nltk.downloader punkt
-
 COPY open_instruct open_instruct
 
 # install the package in editable mode
 COPY pyproject.toml .
 RUN pip install -e .
-COPY .git .
+COPY .git/ ./.git/
 
 COPY eval eval
 COPY configs configs

@@ -17,19 +17,11 @@ import unittest
 
 import pytest
 
-from open_instruct.utils import FlatArguments, get_datasets
+from open_instruct.utils import get_datasets
 
 
 class GetDatasetsTest(unittest.TestCase):
     """Each of these test datasets has 100 examples"""
-
-    def assert_args_type(self):
-        dataset_mixer = {
-            "HuggingFaceH4/testing_alpaca_small": 0.5,
-            "HuggingFaceH4/testing_self_instruct_small": 0.3,
-            "HuggingFaceH4/testing_codealpaca_small": 0.2,
-        }
-        _ = FlatArguments(dataset_mixer, columns_to_keep=["prompt", "completion"])
 
     def test_loading_data_args(self):
         dataset_mixer = {
