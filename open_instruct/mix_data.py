@@ -15,12 +15,33 @@
 # limitations under the License.
 
 # script for mixing and saving data
-from .utils import ArgumentParserPlus, FlatArguments, get_datasets
+from .utils import ArgumentParserPlus, get_datasets
+from dataclasses import dataclass, field
+from typing import Optional
 
 # Run as module for local imports, e.g.:
 # python -m open_instruct.mix_data configs/train_configs/sft/default.yaml --dataset_mix_dir=output/tmp/
 # can pass --save_to_hub=allenai/tulu-v3.1-mix-preview-4096-OLMoE
 
+@dataclass
+class FlatArguments:
+    """
+    Full arguments class for all data mixing jobs.
+    """
+
+    dataset_mixer: Optional[dict] = field(
+        default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
+    )
+    dataset_config_name: Optional[str] = field(
+        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
+    )
+    dataset_mix_dir: Optional[str] = field(
+        default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
+    )
+    save_to_hub: Optional[str] = field(
+        default=None,
+        metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"},
+    )
 
 def main():
     parser = ArgumentParserPlus((FlatArguments))
