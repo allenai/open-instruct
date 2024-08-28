@@ -205,46 +205,33 @@ def main(args):
                     prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
                     prompts[task_name].append(prompt)
 
-                if args.use_vllm:
-                    sampling_params = vllm.SamplingParams(
-                        temperature=1,
-                        max_tokens=512,
-                        top_p=1.0,
-                        include_stop_str_in_output=True,
-                    )
-                    generations = model.generate(prompts[task_name], sampling_params)
-                    prompt_to_output = {
-                        g.prompt: g.outputs[0].text for g in generations
-                    }
-                    for g in generations:
-                        breakpoint()
+        if args.use_vllm:
+            sampling_params = vllm.SamplingParams(
+                temperature=1,
+                max_tokens=512,
+                top_p=1.0,
+                include_stop_str_in_output=True,
+            )
+            generations = model.generate(prompts[task_name], sampling_params)
+            prompt_to_output = {
+                g.prompt: g.outputs[0].text for g in generations
+            }
+            for g in generations:
+                breakpoint()
+                prompt = g.prompt
+                generation = g.outputs[0].text
+                gold = 1
+                breakpoint()
+                # if task_name in ['gov_report', 'summ_screen_fd', 'qmsum']:
+                #     scores = compute_metric(task_name, generated_response, gold)
+                #     metrics[task_name] = {""}
 
-                        prompt = g.prompt
-                        generation = g.outputs[0].text
-                        gold = 1
-                        breakpoint()
-                        # if task_name in ['gov_report', 'summ_screen_fd', 'qmsum']:
-                        #     scores = compute_metric(task_name, generated_response, gold)
-                        #     metrics[task_name] = {""}
+            outputs = {
+                "task_name": task_name
+            }
+            for prompt in prompts:
+                outputs[prompt] = prompt_to_output.get(prompt, "")
 
-                    outputs = {
-                        "task_name": task_name
-                    }
-                    for prompt in prompts:
-                        outputs[prompt] = prompt_to_output.get(prompt, "")
-                else:
-                    # generate with hf model
-                    outputs = []
-                    for model_input in tokenized_prompts:
-                        prediction_token_ids = model.generate(model_input,
-                                                              max_new_tokens=1024,
-                                                              do_sample=False,
-                                                              top_p=0,
-                                                              top_k=0,
-                                                              temperature=1)
-
-                        predicted_text = tokenizer.decode(prediction_token_ids[0], skip_special_tokens=True)
-                        outputs.append(predicted_text)
 
         print(f"Nb examples exceeding max_seq_length: {nb_examples_more_seq_length}")
         print(f"Nb examples not exceeding max_seq_length: {nb_examples_less_seq_length}")
