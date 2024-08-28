@@ -2,7 +2,7 @@ import argparse
 import os
 import re
 import json
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 from tqdm import tqdm
 import glob
