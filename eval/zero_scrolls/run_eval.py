@@ -153,7 +153,7 @@ def main(args):
                 if args.use_chat_format:
                     prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
                     # prompt = full_input
-                    prompts[task].append(prompt)
+                    prompts[task_name].append(prompt)
                 else:
                     prompts.append(full_input)
                 nb_examples_less_seq_length+=1
