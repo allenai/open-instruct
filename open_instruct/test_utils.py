@@ -71,7 +71,7 @@ class GetDatasetsTest(unittest.TestCase):
     def test_loading_preference_data(self):
         dataset_mixer = {
             "ai2-adapt-dev/ultrafeedback-small": 1000,
-            "ai2-adapt-dev/summarize_small": 1000,
+            "ai2-adapt-dev/summarize_fom_feedback_small": 1000,
         }
         pref_datasets = get_datasets(dataset_mixer, splits=["train"], columns_to_keep=["chosen", "rejected"])
         self.assertEqual(len(pref_datasets["train"]), 2000)
