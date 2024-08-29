@@ -65,6 +65,7 @@ from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.utils import (
     ArgumentParserPlus,
     clean_last_n_checkpoints,
+    get_datasets,
     get_last_checkpoint_path,
     get_wandb_tags,
     is_beaker_job,
@@ -559,6 +560,24 @@ def main(args: FlatArguments):
             args.dataset_name,
             args.dataset_config_name,
         )
+    elif args.dataset_mixer is not None:
+        # mixing datasets via config
+        raw_datasets = get_datasets(
+            args.dataset_mixer,
+            configs=args.dataset_config_name,
+            splits=["train"],
+            save_data_dir=args.dataset_mix_dir,
+            columns_to_keep=["chosen", "rejected"],
+        )
+    elif args.dataset_mixer_list is not None:
+        # mixing datasets via config
+        raw_datasets = get_datasets(
+            args.dataset_mixer_list,
+            configs=args.dataset_config_name,
+            splits=["train"],
+            save_data_dir=args.dataset_mix_dir,
+            columns_to_keep=["chosen", "rejected"],
+        )
     else:
         data_files = {}
         dataset_args = {}
@@ -1028,13 +1047,20 @@ def main(args: FlatArguments):
     if is_beaker_job() and accelerator.is_main_process:
         if args.hf_metadata_dataset:
             # dpo script only supports these two options right now for datasets
-            dataset_name = args.dataset_name if args.dataset_name else args.train_file
+            if args.dataset_mixer:
+                dataset_list = args.dataset_mixer.keys()
+            elif args.dataset_mixer_list:
+                dataset_list = args.dataset_mixer_list[::2]  # even indices
+            elif args.dataset_name:
+                dataset_list = [args.dataset_name]
+            else:
+                dataset_list = [args.train_file]
             # mainly just focussing here on what would be useful for the leaderboard.
             # wandb will have even more useful information.
             metadata_blob = {
                 "model_name": args.exp_name,
                 "model_type": "sft",
-                "datasets": [dataset_name],
+                "datasets": dataset_list,
                 "base_model": args.model_name_or_path,
                 "wandb_path": wandb_tracker.run.get_url(),
                 "beaker_experiment": beaker_config.beaker_experiment_url,
