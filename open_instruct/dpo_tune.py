@@ -576,7 +576,7 @@ def main(args: FlatArguments):
             configs=args.dataset_config_name,
             splits=["train"],
             save_data_dir=args.dataset_mix_dir,
-            columns_to_keep=["messages"],
+            columns_to_keep=["chosen", "rejected"],
         )
     else:
         data_files = {}
