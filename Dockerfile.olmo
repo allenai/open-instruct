@@ -107,6 +107,7 @@ COPY .git/ ./.git/
 COPY eval eval
 COPY configs configs
 COPY scripts scripts
+COPY mason.py mason.py
 RUN chmod +x scripts/*
 
 # for interactive session
