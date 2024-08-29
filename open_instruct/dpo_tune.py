@@ -895,6 +895,7 @@ def main(args: FlatArguments):
         model.train()
         train_dataloader.set_epoch(epoch)
         total_loss = 0
+        total_aux_loss = 0
         if last_checkpoint_path and resume_step is not None:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint
             active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_step)
@@ -950,9 +951,10 @@ def main(args: FlatArguments):
                 else:
                     raise ValueError(f"Invalid dpo loss type {args.dpo_loss_type}.")
                 # TODO: metric logging
-                loss = losses.mean() + getattr(model.config, "router_aux_loss_coef", 0.001) * aux_loss
+                loss = losses.mean() + 0.001 * aux_loss
                 # We keep track of the loss at each logged step
                 total_loss += loss.detach().float()
+                total_aux_loss += 0.001 * aux_loss.detach().float()
                 accelerator.backward(loss)
                 # clip gradient norm. don't do this with deepspeed
                 if accelerator.sync_gradients and args.clip_grad_norm > 0:
@@ -971,16 +973,23 @@ def main(args: FlatArguments):
                         / args.gradient_accumulation_steps
                         / args.logging_steps
                     )
-                    logger.info(f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}")
+                    avg_aux_loss = (
+                        accelerator.gather(total_aux_loss).mean().item()
+                        / args.gradient_accumulation_steps
+                        / args.logging_steps
+                    )
+                    logger.info(f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, Aux Loss: {avg_aux_loss}")
                     if args.with_tracking:
                         accelerator.log(
                             {
                                 "learning_rate": lr_scheduler.get_last_lr()[0],
                                 "train_loss": avg_loss,
+                                "aux_loss": avg_aux_loss
                             },
                             step=completed_steps,
                         )
                     total_loss = 0
+                    total_aux_loss = 0
 
                 if isinstance(checkpointing_steps, int):
                     if completed_steps % checkpointing_steps == 0:
