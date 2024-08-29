@@ -106,5 +106,6 @@ COPY configs configs
 COPY scripts scripts
 RUN chmod +x scripts/*
 
+
 # for interactive session
 RUN chmod -R 777 /stage/
