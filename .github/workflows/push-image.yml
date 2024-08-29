@@ -23,14 +23,14 @@ on:
       - '.github/workflows/push-image.yml'
       # Note, add .olmo dockerfile + requirements if adding auto build to those
     branches: [main]
-  # pull_request: # note, comment this out for running on every push
-  #   # Also run on PRs that update the files in the image's directory (other than README).
-  #   branches: [main]
-  #   paths:
-  #     - 'open_instruct/**'
-  #     - '!open_instruct/README.md'
-  #     - 'requirements.txt'
-  #     - 'Dockerfile'
+  pull_request: # note, comment this out for running on every push
+    # Also run on PRs that update the files in the image's directory (other than README).
+    branches: [main]
+    paths:
+      - 'open_instruct/**'
+      - '!open_instruct/README.md'
+      - 'requirements.txt'
+      - 'Dockerfile'
   workflow_dispatch:  # This allows us to manually trigger a build through the GitHub UI.
 
 env:
@@ -56,24 +56,28 @@ jobs:
       - name: Delete huge unnecessary tools folder
         run: rm -rf /opt/hostedtoolcache /usr/share/dotnet "$AGENT_TOOLSDIRECTORY"
   
-      - name: Build image
-        run: |
-          docker build \
-              --build-arg BUILDKIT_INLINE_CACHE=1 \
-              --build-arg CUDA=12.1.0 --build-arg \
-              TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 \
-              --build-arg REQUIRE=requirements.txt . \
-              -t open_instruct
-              
-
-      - name: Check image
-        run: |
-          docker run --rm open_instruct
-
-      - name: Push image
-        # if: github.event_name != 'pull_request'
-        uses: ./.github/actions/push
+      - name: Build and push
+        uses: docker/build-push-action@v6
         with:
-          image: open_instruct  # this is the tag of the image we just built in the previous step
-          beaker: open_instruct_auto  # this is the name of the image on Beaker
-          latest: true  # this flag says we should also push this as the 'latest' version to GHCR
+          context: .
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+        build-args: |
+          BUILDKIT_INLINE_CACHE=1
+          CUDA=12.1.0
+          TARGET=cudnn8-devel
+          DIST=ubuntu20.04
+          REQUIRE=requirements.txt
+        tags: open_instruct
+
+      # - name: Check image
+      #   run: |
+      #     docker run --rm open_instruct
+
+      # - name: Push image
+      #   # if: github.event_name != 'pull_request'
+      #   uses: ./.github/actions/push
+      #   with:
+      #     image: open_instruct  # this is the tag of the image we just built in the previous step
+      #     beaker: open_instruct_auto  # this is the name of the image on Beaker
+      #     latest: true  # this flag says we should also push this as the 'latest' version to GHCR
