@@ -271,7 +271,6 @@ def load_hf_lm(
                     torch_dtype=torch_dtype,
                     token=token,
                     trust_remote_code=trust_remote_code,
-                    revision="step1223842-tokens5100B",
                 )
             else:
                 print(f"loading other model {model_name_or_path}")
@@ -311,10 +310,10 @@ def load_hf_tokenizer(
             tokenizer_name_or_path = model_name_or_path
         if "OLMoE" in tokenizer_name_or_path:
             try:
-                tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=use_fast_tokenizer, token=token, revision="step1223842-tokens5100B")
+                tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=use_fast_tokenizer, token=token)
             except:
                 # some tokenizers (e.g., GPTNeoXTokenizer) don't have the slow or fast version, so we just roll back to the default one
-                tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, token=token, revision="step1223842-tokens5100B")
+                tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, token=token)
         else:
             try:
                 tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=use_fast_tokenizer, token=token)
