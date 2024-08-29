@@ -71,7 +71,6 @@ from open_instruct.utils import (
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
-    submit_beaker_eval_jobs,
     upload_metadata_to_hf,
 )
 
@@ -1056,6 +1055,8 @@ def main(args: FlatArguments):
                 --preemptible \
                 --budget ai2/allennlp \
                 --workspace ai2/tulu-2-improvements \
+                --image nathanl/open_instruct_auto \
+                --pure_docker_mode \
                 --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
                 --beaker_workload_id {beaker_config.beaker_workload_id} \
                 --model_name {args.hf_repo_revision}
