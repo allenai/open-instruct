@@ -25,7 +25,7 @@ dataset_mixer:
 
     # Datasets to regenerate responses for
     nvidia/Daring-Anteater: 99532 # all
-    ai2-adapt-dev/WildChat-1M-Full-GPT4-Only: 254663 # all
+    ai2-adapt-dev/WildChat-1M-Full-GPT4-Only: 100000 # all
     HuggingFaceH4/no_robots: 9500 # all
     ai2-adapt-dev/SlimOrca-reformat: 100000
 
