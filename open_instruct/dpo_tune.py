@@ -21,6 +21,7 @@ import logging
 import math
 import os
 import random
+import subprocess
 import time
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -834,6 +835,8 @@ def main(args: FlatArguments):
 
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
+    if is_beaker_job():
+        beaker_config = maybe_get_beaker_config()
     if args.with_tracking:
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
@@ -842,8 +845,6 @@ def main(args: FlatArguments):
         # (Optional) Ai2 internal tracking
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
-        if is_beaker_job():
-            beaker_config = maybe_get_beaker_config()
             experiment_config.update(vars(beaker_config))
         accelerator.init_trackers(
             "open_instruct_internal",
@@ -1025,6 +1026,46 @@ def main(args: FlatArguments):
     if accelerator.is_main_process:
         clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
 
+    if is_beaker_job() and accelerator.is_main_process:
+        if args.hf_metadata_dataset:
+            # dpo script only supports these two options right now for datasets
+            dataset_name = args.dataset_name if args.dataset_name else args.train_file
+            # mainly just focussing here on what would be useful for the leaderboard.
+            # wandb will have even more useful information.
+            metadata_blob = {
+                "model_name": args.exp_name,
+                "model_type": "sft",
+                "datasets": [dataset_name],
+                "base_model": args.model_name_or_path,
+                "wandb_path": wandb_tracker.run.get_url(),
+                "beaker_experiment": beaker_config.beaker_experiment_url,
+                "beaker_datasets": beaker_config.beaker_dataset_id_urls,
+            }
+            upload_metadata_to_hf(
+                metadata_blob,
+                "metadata.json",
+                args.hf_metadata_dataset,
+                "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
+            )
+
+        if args.try_launch_beaker_eval_jobs:
+            command = f"""\
+            python mason.py  \
+                --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/s2-cirrascale ai2/general-cirrascale \
+                --priority low \
+                --preemptible \
+                --budget ai2/allennlp \
+                --workspace ai2/tulu-2-improvements \
+                --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
+                --beaker_workload_id {beaker_config.beaker_workload_id} \
+                --model_name {args.hf_repo_revision}
+            """
+            process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = process.communicate()
+            print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
+            print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
+            print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+
     if args.push_to_hub:
         push_folder_to_hub(
             accelerator,
@@ -1032,33 +1073,6 @@ def main(args: FlatArguments):
             args.hf_repo_id,
             args.hf_repo_revision,
         )
-        if accelerator.is_main_process and is_beaker_job() and args.try_launch_beaker_eval_jobs:
-            submit_beaker_eval_jobs(
-                model_name=f"hf-{args.hf_repo_revision}",
-                location=args.hf_repo_id,
-                hf_repo_revision=args.hf_repo_revision,
-            )
-    if args.hf_metadata_dataset and accelerator.is_main_process and is_beaker_job():
-        # dpo script only supports these two options right now for datasets
-        dataset_name = args.dataset_name if args.dataset_name else args.train_file
-        # mainly just focussing here on what would be useful for the leaderboard.
-        # wandb will have even more useful information.
-        metadata_blob = {
-            "model_name": args.exp_name,
-            "model_type": "sft",
-            "datasets": [dataset_name],
-            "base_model": args.model_name_or_path,
-            "wandb_path": wandb_tracker.run.get_url(),
-            "beaker_experiment": beaker_config.beaker_experiment_url,
-            "beaker_datasets": beaker_config.beaker_dataset_id_urls
-        }
-        upload_metadata_to_hf(
-            metadata_blob,
-            "metadata.json",
-            args.hf_metadata_dataset,
-            'results/' + args.hf_repo_revision,  # to match what the auto-evals name as.
-        )
-
     accelerator.wait_for_everyone()
     if args.with_tracking:
         accelerator.end_training()

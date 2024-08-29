@@ -1033,7 +1033,7 @@ def main(args: FlatArguments):
                 args.hf_metadata_dataset,
                 "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
             )
-        
+
         if args.try_launch_beaker_eval_jobs:
             command = f"""\
             python mason.py  \
@@ -1041,8 +1041,8 @@ def main(args: FlatArguments):
                 --priority low \
                 --preemptible \
                 --budget ai2/allennlp \
-                --workspace tulu-3-results \
-                --gpus 0 -- python scripts/evaluate_beaker_model_when_finished.py \
+                --workspace ai2/tulu-2-improvements \
+                --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
                 --beaker_workload_id {beaker_config.beaker_workload_id} \
                 --model_name {args.hf_repo_revision}
             """

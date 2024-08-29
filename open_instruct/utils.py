@@ -13,12 +13,14 @@
 # limitations under the License.
 
 import dataclasses
+import functools
 import json
 import logging
 import os
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any, List, NewType, Optional, Tuple, Union
 
@@ -570,7 +572,9 @@ def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> N
     checkpoints = sorted(folders, key=lambda x: int(x.split("_")[-1]))
     if len(checkpoints) > keep_last_n_checkpoints:
         for checkpoint in checkpoints[: len(checkpoints) - keep_last_n_checkpoints]:
+            logger.info(f"Removing checkpoint {checkpoint}")
             shutil.rmtree(os.path.join(output_dir, checkpoint))
+    logger.info("Remaining files:" + str(os.listdir(output_dir)))
 
 
 # ----------------------------------------------------------------------------
@@ -648,6 +652,43 @@ def maybe_get_beaker_config():
     )
 
 
+def retry_on_exception(max_attempts=4, delay=1, backoff=2):
+    """
+    Retry a function on exception. Useful for HF API calls that may fail due to
+    network issues. E.g., https://beaker.org/ex/01J69P87HJQQ7X5DXE1CPWF974
+    `huggingface_hub.utils._errors.HfHubHTTPError: 429 Client Error`
+
+    We can test it with the following code.
+    @retry_on_exception(max_attempts=4, delay=1, backoff=2)
+    def test():
+        raise Exception("Test exception")
+
+    test()
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            attempts = 0
+            local_delay = delay
+            while attempts < max_attempts:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    attempts += 1
+                    if attempts == max_attempts:
+                        raise e
+                    print(f"Attempt {attempts} failed. Retrying in {local_delay} seconds...")
+                    time.sleep(local_delay)
+                    local_delay *= backoff
+            return None
+
+        return wrapper
+
+    return decorator
+
+
+@retry_on_exception()
 def maybe_use_ai2_wandb_entity() -> Optional[str]:
     """Ai2 internal logic: try use the ai2-llm team if possible. Should not affect external users."""
     import wandb
@@ -662,6 +703,7 @@ def maybe_use_ai2_wandb_entity() -> Optional[str]:
         return None
 
 
+@retry_on_exception()
 def maybe_use_ai2_hf_entity() -> Optional[str]:
     """Ai2 internal logic: try use the allenai entity if possible. Should not affect external users."""
     orgs = HfApi().whoami()
@@ -706,6 +748,7 @@ def submit_beaker_eval_jobs(
     print(f"Beaker evaluation jobs: process return code: {process.returncode}")
 
 
+@retry_on_exception()
 def upload_metadata_to_hf(
     metadata_dict,
     filename,
@@ -716,7 +759,7 @@ def upload_metadata_to_hf(
     # about a model for leaderboard displays.
     with open("tmp.json", "w") as f:
         json.dump(metadata_dict, f)
-    api = HfApi(token=os.getenv("HF_TOKEN", None))
+    api = HfApi()
     api.upload_file(
         path_or_fileobj="tmp.json",
         path_in_repo=f"{hf_dataset_save_dir}/{filename}",

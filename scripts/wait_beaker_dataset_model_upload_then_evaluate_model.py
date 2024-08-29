@@ -12,7 +12,7 @@ from open_instruct.utils import (
 
 """
 example usage
-python scripts/evaluate_beaker_model_when_finished.py --beaker_workload_id 01J6ASGRDTH9G9DWF9FPDWM6C1 --model_name "eval_beaker_experiment_until_finished"
+python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py --beaker_workload_id 01J6ASGRDTH9G9DWF9FPDWM6C1 --model_name "eval_beaker_experiment_until_finished"
 """
 
 
