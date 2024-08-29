@@ -376,6 +376,7 @@ def push_folder_to_hub(
             run_as_future=False,
         )
         print(f"🔥 pushed to {hf_repo_url}")
+        print("xixi")
 
 
 # ----------------------------------------------------------------------------
