@@ -14,6 +14,7 @@
 
 ## UltraInteract Variants
 Split by category and by selecting the longest conversations per prompt or a random length per prompt.
+From [UltraInteract_pair](https://huggingface.co/datasets/openbmb/UltraInteract_pair).
 
 * [ai2-adapt-dev/UltraInteract_pair_maxlen_Coding](https://huggingface.co/datasets/ai2-adapt-dev/UltraInteract_pair_maxlen_Coding)
 * [ai2-adapt-dev/UltraInteract_pair_randomlen_Coding](https://huggingface.co/datasets/ai2-adapt-dev/UltraInteract_pair_randomlen_Coding)
@@ -25,7 +26,7 @@ Split by category and by selecting the longest conversations per prompt or a ran
 * [ai2-adapt-dev/UltraInteract_pair_randomlen_Logic](https://huggingface.co/datasets/ai2-adapt-dev/UltraInteract_pair_randomlen_Logic)
 
 ## Tulu 2.5 Data
-
+Split from [this dataset](https://huggingface.co/datasets/allenai/tulu-2.5-preference-data) for easier mixing:
 * [ai2-adapt-dev/tulu-2.5-prefs-alpaca_farm_gpt4_pref](https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-alpaca_farm_gpt4_pref)
 * [ai2-adapt-dev/tulu-2.5-prefs-alpaca_farm_human_pref](https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-alpaca_farm_human_pref)
 * [ai2-adapt-dev/tulu-2.5-prefs-argilla_dpo_mix](https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-argilla_dpo_mix)
