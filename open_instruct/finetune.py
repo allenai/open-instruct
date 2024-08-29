@@ -1018,7 +1018,6 @@ def main(args: FlatArguments):
                 hf_repo_revision=args.hf_repo_revision,
             )
     if args.hf_metadata_dataset and accelerator.is_main_process and is_beaker_job():
-        # dpo script only supports these two options right now for datasets
         if args.dataset_mixer:
             dataset_list = args.dataset_mixer.keys()
         elif args.dataset_mixer_list:
@@ -1036,13 +1035,13 @@ def main(args: FlatArguments):
             "base_model": args.model_name_or_path,
             "wandb_path": wandb_tracker.run.get_url(),
             "beaker_experiment": beaker_config.beaker_experiment_url,
-            "beaker_datasets": beaker_config.beaker_dataset_id_urls
+            "beaker_datasets": beaker_config.beaker_dataset_id_urls,
         }
         upload_metadata_to_hf(
             metadata_blob,
             "metadata.json",
             args.hf_metadata_dataset,
-            'results/' + args.hf_repo_revision,  # to match what the auto-evals name as.
+            "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
         )
 
     accelerator.wait_for_everyone()
