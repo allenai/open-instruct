@@ -101,7 +101,6 @@ COPY oe-eval-internal oe-eval-internal
 COPY pyproject.toml .
 RUN pip install -e .
 COPY .git/ ./.git/
-
 COPY eval eval
 COPY configs configs
 COPY scripts scripts
