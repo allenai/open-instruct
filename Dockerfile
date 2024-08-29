@@ -105,7 +105,7 @@ COPY eval eval
 COPY configs configs
 COPY scripts scripts
 RUN chmod +x scripts/*
-
+RUN ls
 
 # for interactive session
 RUN chmod -R 777 /stage/
