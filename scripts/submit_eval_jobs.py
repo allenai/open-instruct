@@ -81,7 +81,7 @@ parser.add_argument("--use_hf_tokenizer_template", action="store_true")
 parser.add_argument("--priority", type=str, default="low")
 parser.add_argument("--preemptible", action="store_true", default=False, help="for using preemtipble jobs (required on some instances)")
 parser.add_argument("--olmo", action="store_true", help="Pass this flag if evaluating an OLMo model and `olmo` isn't in the model name.")
-parser.add_argument("--experiments", type=str, nargs="+", default=None, help="Experiments to run, e.g., '--experiments mmlu_5shot gsm_cot'")
+parser.add_argument("--experiments", type=str, nargs="+", default=None, help="Experiments to run, e.g., '--experiments mmlu_5shot gsm_cot'. Or use --experiments all for all.")
 parser.add_argument("--batch_size_reduction", type=int, default=None, help="Reduce batch size by this factor.")
 parser.add_argument("--gpu_multiplier", type=int, default=None, help="Multiply the number of GPUs by this factor.")
 parser.add_argument("--gsm_stop_at_double_newline", action="store_true", help="Stop GSM generation at the first double newline.")
@@ -91,6 +91,7 @@ parser.add_argument("--upload_to_hf", type=str, default=None, help="If given, up
 parser.add_argument("--hf_upload_experiments", type=str, nargs="*", default=None, help="Upload given experiment to the Hugging Face model hub.")
 parser.add_argument("--run_oe_eval_experiments", action="store_true", help="Run the OE eval tool and experiments too.")
 parser.add_argument("--run_safety_evaluations", action="store_true", help="Run the OE safety evaluations too.")
+parser.add_argument("--skip_oi_evals", action="store_true", help="Don't run open instruct evals.")
 args = parser.parse_args()
 
 
@@ -121,6 +122,7 @@ if args.beaker_image is not None:
     d1['tasks'][0]['image']['beaker'] = args.beaker_image
 
 # modify here, or use "--experiments", for different set of experiments
+# by default, is just the experiments we need to upload.
 experiment_groups_default = [
     "mmlu_0shot",
     "mmlu_5shot",
@@ -555,19 +557,20 @@ for experiment_group in experiment_groups:
 
 # Create an experiment that runs all the eval tasks.
 
-experiment_name = f"open_instruct_eval_{model_name}_{today}" 
-d["description"] = experiment_name
-d["tasks"] = eval_task_specs
-# if configs/beaker_configs/auto_created doesn't exist, create it with os
-if not os.path.exists("configs/beaker_configs/auto_created"):
-    os.makedirs("configs/beaker_configs/auto_created")
-fn = "configs/beaker_configs/auto_created/{}.yaml".format(experiment_name)
-os.makedirs(os.path.dirname(fn), exist_ok=True)
-with open(fn, "w") as file:
-    yaml.dump(d, file, default_flow_style=True)
+if not args.skip_oi_evals:
+    experiment_name = f"open_instruct_eval_{model_name}_{today}" 
+    d["description"] = experiment_name
+    d["tasks"] = eval_task_specs
+    # if configs/beaker_configs/auto_created doesn't exist, create it with os
+    if not os.path.exists("configs/beaker_configs/auto_created"):
+        os.makedirs("configs/beaker_configs/auto_created")
+    fn = "configs/beaker_configs/auto_created/{}.yaml".format(experiment_name)
+    os.makedirs(os.path.dirname(fn), exist_ok=True)
+    with open(fn, "w") as file:
+        yaml.dump(d, file, default_flow_style=True)
 
-cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
-subprocess.Popen(cmd, shell=True)
+    cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
+    subprocess.Popen(cmd, shell=True)
 
 if args.run_oe_eval_experiments:
     # if so, run oe-eval. We assume it is cloned in the top-level repo directory.
@@ -615,7 +618,7 @@ PYTHONPATH=. python evaluation/run_all_generation_benchmarks.py \
         # if we prepended hf- to the model name, remove it.
         if model_name.startswith("hf-"):
             model_name = model_name[3:]
-        task_spec['arguments'] = [task_spec['arguments'][0] + f" --upload_to_hf {hf_dataset} --hf_upload_name results/{model_name}"]
+        task_spec['arguments'] = [task_spec['arguments'][0] + f" --upload_to_hf {hf_dataset} --hf_upload_name results2/{model_name}"]
 
     d["tasks"] = [task_spec]
     if not os.path.exists("configs/beaker_configs/auto_created"):
