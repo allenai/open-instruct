@@ -71,7 +71,19 @@ else
     HF_UPLOAD_ARG=""
 fi
 
-TASKS=("alpaca_eval_v2::tulu")
+TASKS=(
+    "gsm8k::tulu"
+    "bbh:cot::tulu"
+    "drop::llama3"
+    "minerva_math::tulu"
+    "codex_humaneval::tulu"
+    "codex_humanevalplus::tulu"
+    "ifeval::tulu"
+    "popqa::tulu"
+    "mmlu:mc::tulu"
+    "alpaca_eval_v2::tulu"
+    "truthfulqa::tulu"
+)
 MODEL_TYPE="--model-type vllm"
 BATCH_SIZE_VLLM=10000
 BATCH_SIZE_OTHER=1
