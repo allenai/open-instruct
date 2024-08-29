@@ -31,7 +31,6 @@ on:
       - '!open_instruct/README.md'
       - 'requirements.txt'
       - 'Dockerfile'
-      - .github/workflows/push-image.yml
   workflow_dispatch:  # This allows us to manually trigger a build through the GitHub UI.
 
 env:
@@ -56,24 +55,24 @@ jobs:
       # big images fail, trying this
       - name: Delete huge unnecessary tools folder
         run: rm -rf /opt/hostedtoolcache /usr/share/dotnet "$AGENT_TOOLSDIRECTORY"
-  
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           cache-from: type=gha
           cache-to: type=gha,mode=max
-        build-args: |
-          BUILDKIT_INLINE_CACHE=1
-          CUDA=12.1.0
-          TARGET=cudnn8-devel
-          DIST=ubuntu20.04
-          REQUIRE=requirements.txt
-        tags: open_instruct
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+            CUDA=12.1.0
+            TARGET=cudnn8-devel
+            DIST=ubuntu20.04
+            REQUIRE=requirements.txt
+          tags: open_instruct
 
-      # - name: Check image
-      #   run: |
-      #     docker run --rm open_instruct
+      - name: Check image
+        run: |
+          docker run --rm open_instruct
 
       # - name: Push image
       #   # if: github.event_name != 'pull_request'
