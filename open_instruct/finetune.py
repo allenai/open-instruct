@@ -307,6 +307,12 @@ class FlatArguments:
         default=3,
         metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
     )
+    fused_optimizer: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to use fused AdamW or not.",
+        },
+    )
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: Optional[str] = None
@@ -601,7 +607,7 @@ def main(args: FlatArguments):
                 device_map=device_map,
                 trust_remote_code=args.trust_remote_code,
                 torch_dtype=torch.bfloat16,
-                use_flash_attention_2=True if args.use_flash_attn else False,
+                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
                 revision=args.model_revision,
                 token=os.getenv("HF_TOKEN", None),
             )
@@ -612,7 +618,8 @@ def main(args: FlatArguments):
                 config=config,
                 trust_remote_code=args.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
-                use_flash_attention_2=True if args.use_flash_attn else False,
+                torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
                 revision=args.model_revision,
                 token=os.getenv("HF_TOKEN", None),
             )
@@ -783,7 +790,7 @@ def main(args: FlatArguments):
             is_paged=True,
         )
     else:
-        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
+        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
@@ -1010,8 +1017,7 @@ def main(args: FlatArguments):
                 location=args.hf_repo_id,
                 hf_repo_revision=args.hf_repo_revision,
             )
-    if args.hf_metadata_dataset:
-        # dpo script only supports these two options right now for datasets
+    if args.hf_metadata_dataset and accelerator.is_main_process and is_beaker_job():
         if args.dataset_mixer:
             dataset_list = args.dataset_mixer.keys()
         elif args.dataset_mixer_list:
@@ -1020,7 +1026,6 @@ def main(args: FlatArguments):
             dataset_list = [args.dataset_name]
         else:
             dataset_list = [args.train_file]
-        beaker_config = maybe_get_beaker_config()
         # mainly just focussing here on what would be useful for the leaderboard.
         # wandb will have even more useful information.
         metadata_blob = {
@@ -1030,13 +1035,13 @@ def main(args: FlatArguments):
             "base_model": args.model_name_or_path,
             "wandb_path": wandb_tracker.run.get_url(),
             "beaker_experiment": beaker_config.beaker_experiment_url,
-            "beaker_datasets": beaker_config.beaker_dataset_id_urls
+            "beaker_datasets": beaker_config.beaker_dataset_id_urls,
         }
         upload_metadata_to_hf(
             metadata_blob,
             "metadata.json",
             args.hf_metadata_dataset,
-            'results/' + args.hf_repo_revision,  # to match what the auto-evals name as.
+            "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
         )
 
     accelerator.wait_for_everyone()

@@ -565,13 +565,12 @@ def is_checkpoint_folder(dir: str, folder: str) -> bool:
 
 def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> None:
     # remove the last checkpoint to save space
-    if keep_last_n_checkpoints > 0:
-        folders = [f for f in os.listdir(output_dir) if is_checkpoint_folder(output_dir, f)]
-        # find the checkpoint with the largest step
-        checkpoints = sorted(folders, key=lambda x: int(x.split("_")[-1]))
-        if len(checkpoints) > keep_last_n_checkpoints:
-            for checkpoint in checkpoints[:len(checkpoints) - keep_last_n_checkpoints]:
-                shutil.rmtree(os.path.join(output_dir, checkpoint))
+    folders = [f for f in os.listdir(output_dir) if is_checkpoint_folder(output_dir, f)]
+    # find the checkpoint with the largest step
+    checkpoints = sorted(folders, key=lambda x: int(x.split("_")[-1]))
+    if len(checkpoints) > keep_last_n_checkpoints:
+        for checkpoint in checkpoints[: len(checkpoints) - keep_last_n_checkpoints]:
+            shutil.rmtree(os.path.join(output_dir, checkpoint))
 
 
 # ----------------------------------------------------------------------------
@@ -626,7 +625,11 @@ def get_beaker_whoami() -> Optional[str]:
 
 def maybe_get_beaker_config():
     beaker_dataset_ids = get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"])
-    beaker_dataset_id_urls = [f"https://beaker.org/ds/{dataset_id}" for dataset_id in beaker_dataset_ids]
+    # fix condition on basic interactive jobs
+    if beaker_dataset_ids is None:
+        beaker_dataset_id_urls = []
+    else:
+        beaker_dataset_id_urls = [f"https://beaker.org/ds/{dataset_id}" for dataset_id in beaker_dataset_ids]
     return BeakerRuntimeConfig(
         beaker_workload_id=os.environ["BEAKER_WORKLOAD_ID"],
         beaker_node_hostname=os.environ["BEAKER_NODE_HOSTNAME"],
@@ -676,7 +679,6 @@ def submit_beaker_eval_jobs(
         --workspace {workspace} \
         --preemptible \
         --use_hf_tokenizer_template \
-        --run_oe_eval_experiments \
         --beaker_image {beaker_image} \
     """
     if len(hf_repo_revision) > 0:
@@ -693,10 +695,10 @@ def submit_beaker_eval_jobs(
 
 
 def upload_metadata_to_hf(
-        metadata_dict,
-        filename,
-        hf_dataset_name,
-        hf_dataset_save_dir,
+    metadata_dict,
+    filename,
+    hf_dataset_name,
+    hf_dataset_save_dir,
 ):
     # upload a random dict to HF. Originally for uploading metadata to HF
     # about a model for leaderboard displays.
