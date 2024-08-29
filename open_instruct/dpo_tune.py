@@ -559,6 +559,22 @@ def main(args: FlatArguments):
             args.dataset_name,
             args.dataset_config_name,
         )
+    elif args.dataset_mixer is not None:
+        # mixing datasets via config
+        raw_datasets = get_datasets(
+            args.dataset_mixer,
+            configs=args.dataset_config_name,
+            splits=["train"],
+            save_data_dir=args.dataset_mix_dir,
+        )
+    elif args.dataset_mixer_list is not None:
+        # mixing datasets via config
+        raw_datasets = get_datasets(
+            args.dataset_mixer_list,
+            configs=args.dataset_config_name,
+            splits=["train"],
+            save_data_dir=args.dataset_mix_dir,
+        )
     else:
         data_files = {}
         dataset_args = {}
