@@ -175,7 +175,7 @@ for experiment_group in experiment_groups:
             --save_dir /output/ \
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
-            --eval_batch_size 4 \
+            --eval_batch_size 32 \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
@@ -215,6 +215,7 @@ for experiment_group in experiment_groups:
             --max_num_examples_per_task 40 \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
+            --eval_batch_size 64 \
         '''
     elif experiment_group == "gsm_direct":
         task_spec['arguments'][0] = '''
@@ -246,6 +247,7 @@ for experiment_group in experiment_groups:
             --n_shot 8 \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
+            --eval_batch_size 64 \
         ''' 
         if args.gsm_stop_at_double_newline:
             task_spec['arguments'][0] += " --stop_at_double_newline"
@@ -314,6 +316,7 @@ for experiment_group in experiment_groups:
             --use_vllm \
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
+            --eval_batch_size 64 \
         '''
     elif experiment_group == "codex_evalplus_temp_0.1":
         task_spec['arguments'][0] = '''
@@ -380,6 +383,7 @@ for experiment_group in experiment_groups:
                 --use_chat_format \
                 --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
                 --use_vllm \
+                --eval_batch_size 64 \
         '''
     elif experiment_group == "trutufulqa":
         task_spec['arguments'][0] = '''
@@ -415,10 +419,10 @@ for experiment_group in experiment_groups:
             --save_dir /output/ \
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
-            --eval_batch_size 32 \
             --use_vllm \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
+            --eval_batch_size 64 \
         '''
     elif experiment_group == "alpaca_eval":
         task_spec['arguments'][0] = '''
@@ -429,6 +433,7 @@ for experiment_group in experiment_groups:
             --save_dir /output/ \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
+            --eval_batch_size 128 \
         '''
     elif experiment_group == "alpaca_eval_2":
         task_spec['arguments'][0] = '''
