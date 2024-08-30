@@ -723,7 +723,7 @@ def submit_beaker_eval_jobs(
     location: str,
     hf_repo_revision: str = "",
     workspace: str = "tulu-3-results",
-    beaker_image: str = "nathanl/open_instruct_olmo_auto",
+    beaker_image: str = "nathanl/open_instruct_auto",
     upload_to_hf: str = "allenai/tulu-3-evals",
     run_oe_eval_experiments: bool = False,
 ) -> None:

@@ -14,7 +14,7 @@ python scripts/submit_eval_jobs.py \
       --is_tuned --workspace tulu-3-results \
       --preemptible \
       --use_hf_tokenizer_template \
-      --beaker_image nathanl/open_instruct_olmo_auto \
+      --beaker_image nathanl/open_instruct_auto \
       --upload_to_hf allenai/tulu-3-evals \
       --run_oe_eval_experiments \
       --run_safety_evaluations
