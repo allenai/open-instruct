@@ -95,15 +95,16 @@ RUN pip install -r requirements.txt
 # NLTK download
 RUN python -m nltk.downloader punkt
 COPY open_instruct open_instruct
+COPY oe-eval-internal oe-eval-internal
 
 # install the package in editable mode
 COPY pyproject.toml .
 RUN pip install -e .
 COPY .git/ ./.git/
-
 COPY eval eval
 COPY configs configs
 COPY scripts scripts
+COPY mason.py mason.py
 RUN chmod +x scripts/*
 
 # for interactive session

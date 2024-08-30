@@ -13,12 +13,14 @@
 # limitations under the License.
 
 import dataclasses
+import functools
 import json
 import logging
 import os
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any, List, NewType, Optional, Tuple, Union
 
@@ -570,7 +572,9 @@ def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> N
     checkpoints = sorted(folders, key=lambda x: int(x.split("_")[-1]))
     if len(checkpoints) > keep_last_n_checkpoints:
         for checkpoint in checkpoints[: len(checkpoints) - keep_last_n_checkpoints]:
+            logger.info(f"Removing checkpoint {checkpoint}")
             shutil.rmtree(os.path.join(output_dir, checkpoint))
+    logger.info("Remaining files:" + str(os.listdir(output_dir)))
 
 
 # ----------------------------------------------------------------------------
@@ -578,8 +582,8 @@ def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> N
 @dataclass
 class BeakerRuntimeConfig:
     beaker_workload_id: str
-    beaker_node_hostname: str
-    beaker_experiment_url: str
+    beaker_node_hostname: Optional[List[str]] = None
+    beaker_experiment_url: Optional[List[str]] = None
     beaker_dataset_ids: Optional[List[str]] = None
     beaker_dataset_id_urls: Optional[List[str]] = None
 
@@ -588,14 +592,27 @@ def is_beaker_job() -> bool:
     return "BEAKER_JOB_ID" in os.environ
 
 
-def get_beaker_dataset_ids(experiment_id: str) -> Optional[List[str]]:
+def get_beaker_experiment_info(experiment_id: str) -> Optional[dict]:
     get_experiment_command = f"beaker experiment get {experiment_id} --format json"
     process = subprocess.Popen(["bash", "-c", get_experiment_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
     if process.returncode != 0:
-        logger.error(f"Failed to get Beaker experiment: {stderr}")
+        print(f"Failed to get Beaker experiment: {stderr}")
         return None
-    experiment = json.loads(stdout)[0]
+    return json.loads(stdout)[0]
+
+
+def beaker_experiment_succeeded(experiment_id: str) -> bool:
+    experiment = get_beaker_experiment_info(experiment_id)
+    if not experiment:
+        return False
+    return all(["finalized" in job["status"] and job["status"]["exitCode"] == 0 for job in experiment["jobs"]])
+
+
+def get_beaker_dataset_ids(experiment_id: str) -> Optional[List[str]]:
+    experiment = get_beaker_experiment_info(experiment_id)
+    if not experiment:
+        return None
     result_ids = [job["result"]["beaker"] for job in experiment["jobs"]]
     dataset_ids = []
     for result_id in result_ids:
@@ -603,7 +620,7 @@ def get_beaker_dataset_ids(experiment_id: str) -> Optional[List[str]]:
         process = subprocess.Popen(["bash", "-c", get_dataset_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = process.communicate()
         if process.returncode != 0:
-            logger.error(f"Failed to get Beaker dataset: {stderr}")
+            print(f"Failed to get Beaker dataset: {stderr}")
             return None
         datasets = json.loads(stdout)
         dataset_ids.extend([dataset["id"] for dataset in datasets])
@@ -617,7 +634,7 @@ def get_beaker_whoami() -> Optional[str]:
     )
     stdout, stderr = process.communicate()
     if process.returncode != 0:
-        logger.error(f"Failed to get Beaker account: {stderr}")
+        print(f"Failed to get Beaker account: {stderr}")
         return None
     accounts = json.loads(stdout)
     return accounts[0]["name"]
@@ -639,6 +656,43 @@ def maybe_get_beaker_config():
     )
 
 
+def retry_on_exception(max_attempts=4, delay=1, backoff=2):
+    """
+    Retry a function on exception. Useful for HF API calls that may fail due to
+    network issues. E.g., https://beaker.org/ex/01J69P87HJQQ7X5DXE1CPWF974
+    `huggingface_hub.utils._errors.HfHubHTTPError: 429 Client Error`
+
+    We can test it with the following code.
+    @retry_on_exception(max_attempts=4, delay=1, backoff=2)
+    def test():
+        raise Exception("Test exception")
+
+    test()
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            attempts = 0
+            local_delay = delay
+            while attempts < max_attempts:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    attempts += 1
+                    if attempts == max_attempts:
+                        raise e
+                    print(f"Attempt {attempts} failed. Retrying in {local_delay} seconds...")
+                    time.sleep(local_delay)
+                    local_delay *= backoff
+            return None
+
+        return wrapper
+
+    return decorator
+
+
+@retry_on_exception()
 def maybe_use_ai2_wandb_entity() -> Optional[str]:
     """Ai2 internal logic: try use the ai2-llm team if possible. Should not affect external users."""
     import wandb
@@ -653,6 +707,7 @@ def maybe_use_ai2_wandb_entity() -> Optional[str]:
         return None
 
 
+@retry_on_exception()
 def maybe_use_ai2_hf_entity() -> Optional[str]:
     """Ai2 internal logic: try use the allenai entity if possible. Should not affect external users."""
     orgs = HfApi().whoami()
@@ -670,6 +725,7 @@ def submit_beaker_eval_jobs(
     workspace: str = "tulu-3-results",
     beaker_image: str = "nathanl/open_instruct_auto",
     upload_to_hf: str = "allenai/tulu-3-evals",
+    run_oe_eval_experiments: bool = False,
 ) -> None:
     command = f"""
     python scripts/submit_eval_jobs.py \
@@ -685,15 +741,18 @@ def submit_beaker_eval_jobs(
         command += f" --hf_revision {hf_repo_revision}"
     if len(upload_to_hf) > 0:
         command += f" --upload_to_hf {upload_to_hf}"
+    if run_oe_eval_experiments:
+        command += " --run_oe_eval_experiments"
 
     process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
 
-    logger.info(f"Beaker evaluation jobs: Stdout:\n{stdout.decode()}")
-    logger.error(f"Beaker evaluation jobs: Stderr:\n{stderr.decode()}")
-    logger.info(f"Beaker evaluation jobs: process return code: {process.returncode}")
+    print(f"Beaker evaluation jobs: Stdout:\n{stdout.decode()}")
+    print(f"Beaker evaluation jobs: Stderr:\n{stderr.decode()}")
+    print(f"Beaker evaluation jobs: process return code: {process.returncode}")
 
 
+@retry_on_exception()
 def upload_metadata_to_hf(
     metadata_dict,
     filename,
@@ -704,7 +763,7 @@ def upload_metadata_to_hf(
     # about a model for leaderboard displays.
     with open("tmp.json", "w") as f:
         json.dump(metadata_dict, f)
-    api = HfApi(token=os.getenv("HF_TOKEN", None))
+    api = HfApi()
     api.upload_file(
         path_or_fileobj="tmp.json",
         path_in_repo=f"{hf_dataset_save_dir}/{filename}",

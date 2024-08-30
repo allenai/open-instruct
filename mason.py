@@ -103,17 +103,29 @@ def parse_commands(command_args: List[str]) -> List[List[str]]:
     return commands
 
 
-def get_env_vars(pure_docker_mode, no_mount_hf_cache):
-    env_vars = [
-        beaker.EnvVar(
-            name="HF_TOKEN",
-            secret="HF_TOKEN",
-        ),
-        beaker.EnvVar(
-            name="WANDB_API_KEY",
-            secret="WANDB_API_KEY",
-        ),
+def get_env_vars(pure_docker_mode, no_mount_hf_cache, beaker_secrets, whoami):
+    env_vars = []
+    useful_secrets = [
+        "HF_TOKEN",
+        "WANDB_API_KEY",
+        "BEAKER_TOKEN",
     ]
+    for useful_secret in useful_secrets:
+        if f"{whoami}_{useful_secret}" in beaker_secrets:
+            env_vars.append(
+                beaker.EnvVar(
+                    name=useful_secret,
+                    secret=f"{whoami}_{useful_secret}",
+                )
+            )
+        elif useful_secret in beaker_secrets:
+            env_vars.append(
+                beaker.EnvVar(
+                    name=useful_secret,
+                    secret=useful_secret,
+                )
+            )
+
      # use the user's PATH; including the conda / python PATH
     if not pure_docker_mode:
         env_vars.extend([
@@ -161,7 +173,7 @@ def get_datasets(beaker_datasets, no_mount_nfs):
     return res
 
 
-def make_task_spec(args, command, i):
+def make_task_spec(args, command, i, beaker_secrets, whoami):
     full_command = command
     command = ['/bin/bash', '-c']
     setup_commands = (
@@ -184,7 +196,7 @@ def make_task_spec(args, command, i):
         context=beaker.TaskContext(priority=beaker.Priority(args.priority),
                                    preemptible=args.preemptible),
         constraints=beaker.Constraints(cluster=args.cluster),
-        env_vars=get_env_vars(args.pure_docker_mode, args.no_hf_cache_env),
+        env_vars=get_env_vars(args.pure_docker_mode, args.no_hf_cache_env, beaker_secrets, whoami),
         resources=beaker.TaskResources(gpu_count=args.gpus),
     )
 
@@ -193,15 +205,18 @@ def make_task_spec(args, command, i):
 
 def main():
     args, commands = get_args()
-    experiment_spec = beaker.ExperimentSpec(
-        description=args.description,
-        tasks=[make_task_spec(args, command, i) for i, command in enumerate(commands)],
-        budget=args.budget,
-    )
     if args.workspace:
         beaker_client = beaker.Beaker.from_env(default_workspace=args.workspace)
     else:
         beaker_client = beaker.Beaker.from_env()
+
+    beaker_secrets = [secret.name for secret in beaker_client.workspace.secrets()]
+    whoami = beaker_client.account.whoami().name
+    experiment_spec = beaker.ExperimentSpec(
+        description=args.description,
+        tasks=[make_task_spec(args, command, i, beaker_secrets, whoami) for i, command in enumerate(commands)],
+        budget=args.budget,
+    )
 
     exp = beaker_client.experiment.create(spec=experiment_spec)
     print(f"Kicked off Beaker job. https://beaker.org/ex/{exp.id}")
