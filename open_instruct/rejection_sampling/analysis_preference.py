@@ -8,6 +8,7 @@ def count_turns_by_source(dataset):
     # Process each split in the dataset
     for split in dataset.keys():
         split_data = dataset[split]
+        breakpoint()
         turn_counts[split] = {"user_avg_turn_ch": [], "assistant_avg_turn_ch": [], "user_avg_turn_rej": [],
                               "assistant_avg_turn_rej": []}
 
@@ -44,6 +45,7 @@ def count_turns_by_source(dataset):
             turn_counts[split]["user_avg_turn_rej"].append(turn_counts_user_rej)
             turn_counts[split]["assistant_avg_turn_rej"].append(turn_counts_ass_rej)
     return turn_counts
+
 
 
 # Load the dataset from HF
