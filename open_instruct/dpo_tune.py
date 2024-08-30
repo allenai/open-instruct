@@ -1046,6 +1046,15 @@ def main(args: FlatArguments):
         clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
 
     if is_beaker_job() and accelerator.is_main_process:
+        # dpo script only supports these two options right now for datasets
+        if args.dataset_mixer:
+            dataset_list = args.dataset_mixer.keys()
+        elif args.dataset_mixer_list:
+            dataset_list = args.dataset_mixer_list[::2]  # even indices
+        elif args.dataset_name:
+            dataset_list = [args.dataset_name]
+        else:
+            dataset_list = [args.train_file]
         # mainly just focussing here on what would be useful for the leaderboard.
         # wandb will have even more useful information.
         metadata_blob = {
@@ -1060,17 +1069,8 @@ def main(args: FlatArguments):
         # save in the output directory
         with open(os.path.join(args.output_dir, "metadata.json"), "w") as f:
             json.dump(metadata_blob, f)
-        
+
         if args.hf_metadata_dataset:
-            # dpo script only supports these two options right now for datasets
-            if args.dataset_mixer:
-                dataset_list = args.dataset_mixer.keys()
-            elif args.dataset_mixer_list:
-                dataset_list = args.dataset_mixer_list[::2]  # even indices
-            elif args.dataset_name:
-                dataset_list = [args.dataset_name]
-            else:
-                dataset_list = [args.train_file]
             upload_metadata_to_hf(
                 metadata_blob,
                 "metadata.json",
