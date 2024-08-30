@@ -301,7 +301,7 @@ def main(args: Args):
                     item = result.get()
                     scores.append(item[0])
                     reference_completion_scores.append(item[1])
-
+        breakpoint()
         # Combine scores from all GPUs
         scores = torch.cat(scores)
         reference_completion_scores = torch.cat(reference_completion_scores)
