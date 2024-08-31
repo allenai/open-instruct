@@ -579,6 +579,8 @@ if args.run_oe_eval_experiments:
         oe_eval_cmd += f" --model-location {model_info[1]}"
     else:
         oe_eval_cmd += f" --model-location beaker://{model_info[1]}"
+    if args.hf_revision:
+        oe_eval_cmd += f" --revision {args.hf_revision}"
     subprocess.Popen(oe_eval_cmd, shell=True)
 
 # create an experiment that runs the safety eval tasks
@@ -600,8 +602,8 @@ PYTHONPATH=. python evaluation/run_all_generation_benchmarks.py \
 '''
     # some copied logic
     if model_info[0].startswith("hf-"):  # if it's a huggingface model, load it from the model hub
-        task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
-        task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path "+model_info[1])]
+        task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", f"--model_name_or_path {model_info[1]} --hf_revision {args.hf_revision}")]
+        task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", f"--tokenizer_name_or_path {model_info[1]}")]
     elif model_info[1].startswith("/"):  # if it's a local model, load it from the local directory
         assert nfs_available, "NFS is required for path-based models."  # to be safe.
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
