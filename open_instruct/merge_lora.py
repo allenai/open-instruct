@@ -66,6 +66,7 @@ def parse_args():
     parser.add_argument("--qlora", action="store_true")  # qlora requires special treatment.
     parser.add_argument("--save_tokenizer", action="store_true")
     parser.add_argument("--use_fast_tokenizer", action="store_true")
+    parser.add_argument("--pad_to_multiple_of", type=int, default=0)  # if you want to pad the token embeddings
     return parser.parse_args()
 
 
@@ -114,7 +115,10 @@ if __name__ == "__main__":
             f"The vocabulary the tokenizer contains {len(tokenizer)-embedding_size} more tokens than the base model."
         )
         print("Resizing the token embeddings of the merged model...")
-        base_model.resize_token_embeddings(len(tokenizer))
+        if args.pad_to_multiple_of > 0:
+            base_model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=args.pad_to_multiple_of)
+        else:
+            base_model.resize_token_embeddings(len(tokenizer))
 
     print("Loading the lora model...")
     lora_model = PeftModel.from_pretrained(base_model, args.lora_model_name_or_path)
