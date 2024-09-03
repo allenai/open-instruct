@@ -938,14 +938,9 @@ def main(args: FlatArguments):
         for step, batch in enumerate(active_dataloader):
             # dpo forward pass & loss
             with accelerator.accumulate(model):
-                if args.load_balancing_loss:
-                    policy_chosen_logps, policy_rejected_logps, aux_loss = concatenated_forward(
-                        model, batch, average_log_prob=average_log_prob, output_router_logits=True
-                    )
-                else:
-                    policy_chosen_logps, policy_rejected_logps, _ = concatenated_forward(
-                        model, batch, average_log_prob=average_log_prob
-                    )
+                policy_chosen_logps, policy_rejected_logps, aux_loss = concatenated_forward(
+                    model, batch, average_log_prob=average_log_prob, output_router_logits=True
+                ) # `aux_loss` is only used when `args.load_balancing_loss = True`
                 if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                     with torch.no_grad():
                         if args.use_lora:
