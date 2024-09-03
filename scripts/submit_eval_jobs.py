@@ -123,23 +123,23 @@ if args.beaker_image is not None:
 # modify here, or use "--experiments", for different set of experiments
 experiment_groups_default = [
     "mmlu_0shot",
-    # "mmlu_5shot",
-    # "gsm_direct",
+    "mmlu_5shot",
+    "gsm_direct",
     "gsm_cot",
-    # "MATH_cot",
-    # "bbh_direct",
+    "MATH_cot",
+    "bbh_direct",
     "bbh_cot",
-    # "tydiqa_goldp_1shot",
-    # "tydiqa_no_context_1shot",
-    # "codex_eval_temp_0.1",
+    "tydiqa_goldp_1shot",
+    "tydiqa_no_context_1shot",
+    "codex_eval_temp_0.1",
     "codex_eval_temp_0.8",
-    # "codex_evalplus_temp_0.1",
-    # "codex_evalplus_temp_0.8",
-    # "mbpp_evalplus_temp_0.1",
-    # "mbpp_evalplus_temp_0.8",
+    "codex_evalplus_temp_0.1",
+    "codex_evalplus_temp_0.8",
+    "mbpp_evalplus_temp_0.1",
+    "mbpp_evalplus_temp_0.8",
     "ifeval",
     "trutufulqa",
-    # "toxigen",
+    "toxigen",
     "xstest",
     "alpaca_eval",
     "alpaca_eval_2",
@@ -175,7 +175,7 @@ for experiment_group in experiment_groups:
             --save_dir /output/ \
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
-            --eval_batch_size 32 \
+            --eval_batch_size 4 \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
         '''
@@ -215,7 +215,6 @@ for experiment_group in experiment_groups:
             --max_num_examples_per_task 40 \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
-            --eval_batch_size 64 \
         '''
     elif experiment_group == "gsm_direct":
         task_spec['arguments'][0] = '''
@@ -247,7 +246,6 @@ for experiment_group in experiment_groups:
             --n_shot 8 \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
-            --eval_batch_size 64 \
         ''' 
         if args.gsm_stop_at_double_newline:
             task_spec['arguments'][0] += " --stop_at_double_newline"
@@ -316,7 +314,6 @@ for experiment_group in experiment_groups:
             --use_vllm \
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
-            --eval_batch_size 64 \
         '''
     elif experiment_group == "codex_evalplus_temp_0.1":
         task_spec['arguments'][0] = '''
@@ -383,7 +380,6 @@ for experiment_group in experiment_groups:
                 --use_chat_format \
                 --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
                 --use_vllm \
-                --eval_batch_size 64 \
         '''
     elif experiment_group == "trutufulqa":
         task_spec['arguments'][0] = '''
@@ -419,10 +415,10 @@ for experiment_group in experiment_groups:
             --save_dir /output/ \
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \
+            --eval_batch_size 32 \
             --use_vllm \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
-            --eval_batch_size 64 \
         '''
     elif experiment_group == "alpaca_eval":
         task_spec['arguments'][0] = '''
@@ -433,7 +429,6 @@ for experiment_group in experiment_groups:
             --save_dir /output/ \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
-            --eval_batch_size 128 \
         '''
     elif experiment_group == "alpaca_eval_2":
         task_spec['arguments'][0] = '''
@@ -522,7 +517,7 @@ for experiment_group in experiment_groups:
             "--chat_formatting_function eval.templates.create_prompt_with_olmo_chat_format")
         ]
 
-    if any([x in model_info[0] for x in ["opt", "pythia", "falcon"]]) or "olmoe" in model_info[0]:
+    if any([x in model_info[0] for x in ["opt", "pythia", "falcon", "olmoe"]]):
         if "--use_vllm" in task_spec['arguments'][0]:
             print(f"Removing --use_vllm for {model_info[0]}")
             task_spec['arguments'] = [task_spec['arguments'][0].replace("--use_vllm", "")] 
