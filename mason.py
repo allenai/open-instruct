@@ -174,6 +174,12 @@ def get_datasets(beaker_datasets, no_mount_nfs):
 
 
 def make_task_spec(args, command, i, beaker_secrets, whoami):
+    # special logic to deal with escape like
+    # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
+    # we need to wrap the json string with single quote
+    for idx in range(len(command)):
+        if "{" in command[idx]:
+            command[idx] = "'" + command[idx] + "'"
     full_command = command
     command = ['/bin/bash', '-c']
     setup_commands = (

@@ -87,6 +87,8 @@ class Args:
     """Which scheduler to use"""
     warm_up_steps: int = 0
     """Number of warm up steps for the scheduler"""
+    gradient_checkpointing: bool = True
+    """Whether to use gradient checkpointing"""
 
     # various batch sizes
     num_train_epochs: int = 1
@@ -256,6 +258,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
         model_config.model_name_or_path, num_labels=1
     )
+    if args.gradient_checkpointing:
+        model.gradient_checkpointing_enable()
     disable_dropout_in_model(model)  # see p.3. in https://arxiv.org/pdf/1909.08593
     layer_init(
         model.score, std=1 / np.sqrt(model.config.hidden_size + 1)
