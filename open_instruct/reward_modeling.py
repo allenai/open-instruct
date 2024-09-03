@@ -87,8 +87,6 @@ class Args:
     """Which scheduler to use"""
     warm_up_steps: int = 0
     """Number of warm up steps for the scheduler"""
-    gradient_checkpointing: bool = True
-    """Whether to use gradient checkpointing"""
 
     # various batch sizes
     num_train_epochs: int = 1
