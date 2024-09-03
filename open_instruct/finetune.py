@@ -320,7 +320,7 @@ class FlatArguments:
         },
     )
     load_balancing_weight: float = field(
-        default=0.001,
+        default=0.5,
         metadata={"help": "Weight for load balancing loss if applicable."},
     )
     push_to_hub: bool = True
