@@ -939,8 +939,8 @@ def main(args: FlatArguments):
             # dpo forward pass & loss
             with accelerator.accumulate(model):
                 policy_chosen_logps, policy_rejected_logps, aux_loss = concatenated_forward(
-                    model, batch, average_log_prob=average_log_prob, output_router_logits=True
-                ) # `aux_loss` is only used when `args.load_balancing_loss = True`
+                    model, batch, average_log_prob=average_log_prob, output_router_logits=args.load_balancing_loss
+                )  # `aux_loss` is only used when `args.load_balancing_loss = True`
                 if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                     with torch.no_grad():
                         if args.use_lora:
@@ -1007,6 +1007,10 @@ def main(args: FlatArguments):
                         / args.gradient_accumulation_steps
                         / args.logging_steps
                     )
+                    metrics_to_log = {
+                        "learning_rate": lr_scheduler.get_last_lr()[0],
+                        "train_loss": avg_loss,
+                    }
                     logger_str = f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}"
                     if args.load_balancing_loss:
                         avg_aux_loss = (
