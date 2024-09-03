@@ -627,3 +627,4 @@ PYTHONPATH=. python evaluation/run_all_generation_benchmarks.py \
 
     cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
     subprocess.Popen(cmd, shell=True)
+    
