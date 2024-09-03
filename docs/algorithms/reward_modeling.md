@@ -31,6 +31,26 @@ python open_instruct/reward_modeling.py \
 You would typically get a track run like https://wandb.ai/ai2-llm/open-instruct/runs/ztgnw64l
 
 
+You can also mix datasets by specifying `--dataset_mixer` and `--dataset_train_splits`
+```bash
+python open_instruct/reward_modeling.py \
+    --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0, "ai2-adapt-dev/summarize_from_feedback_small": 1.0}' \
+    --dataset_train_splits train train \
+    --dataset_eval_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}' \
+    --dataset_eval_splits test \
+    --model_name_or_path EleutherAI/pythia-1b-deduped \
+    --chat_template simple_concat_with_space \
+    --learning_rate 3e-6 \
+    --per_device_train_batch_size 64 \
+    --per_device_eval_batch_size 64 \
+    --gradient_accumulation_steps 1 \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 1024 \
+    --num_train_epochs 1 \
+    --output_dir models/rm/rm_sentiment_1b \
+    --with_tracking \
+    --push_to_hub \
+```
 
 ### Quality of life tools
 
