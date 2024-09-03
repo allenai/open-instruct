@@ -122,7 +122,6 @@ if args.beaker_image is not None:
     d1['tasks'][0]['image']['beaker'] = args.beaker_image
 
 # modify here, or use "--experiments", for different set of experiments
-# by default, is just the experiments we need to upload.
 experiment_groups_default = [
     "mmlu_0shot",
     "mmlu_5shot",
