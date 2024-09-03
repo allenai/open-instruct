@@ -1,6 +1,6 @@
 model_name_or_path: /model
 model_revision: main
-# use_flash_attn: true
+use_flash_attn: true
 gradient_checkpointing: true
 tokenizer_name: /model
 use_slow_tokenizer: true

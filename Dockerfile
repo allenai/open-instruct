@@ -91,9 +91,6 @@ RUN pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url h
 RUN pip install packaging
 RUN pip install flash-attn==2.6.3 --no-build-isolation
 RUN pip install -r requirements.txt
-RUN pip install trl
-RUN git clone https://github.com/huggingface/trl.git
-RUN pip install git+https://github.com/Muennighoff/transformers.git@olmoe
 
 # NLTK download
 RUN python -m nltk.downloader punkt
@@ -101,8 +98,6 @@ COPY open_instruct open_instruct
 COPY oe-eval-internal oe-eval-internal
 
 # install the package in editable mode
-# RUN ls
-# COPY trl trl
 COPY pyproject.toml .
 RUN pip install -e .
 COPY .git/ ./.git/
