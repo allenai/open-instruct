@@ -340,6 +340,16 @@ class FlatArguments:
         default=3,
         metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
     )
+    load_balancing_loss: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to include a load balancing loss (for OLMoE) or not.",
+        },
+    )
+    load_balancing_weight: float = field(
+        default=0.001,
+        metadata={"help": "Weight for load balancing loss if applicable."},
+    )
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: Optional[str] = None
@@ -591,9 +601,9 @@ def main(args: FlatArguments):
 
     # Load pretrained model and tokenizer
     if args.config_name:
-        config = AutoConfig.from_pretrained(args.config_name, trust_remote_code=args.trust_remote_code, output_router_logits=True,)
+        config = AutoConfig.from_pretrained(args.config_name, trust_remote_code=args.trust_remote_code)
     elif args.model_name_or_path:
-        config = AutoConfig.from_pretrained(args.model_name_or_path, trust_remote_code=args.trust_remote_code, output_router_logits=True,)
+        config = AutoConfig.from_pretrained(args.model_name_or_path, trust_remote_code=args.trust_remote_code)
     else:
         raise ValueError(
             "You are instantiating a new config instance from scratch. This is not supported by this script."

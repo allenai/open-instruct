@@ -202,25 +202,33 @@ def concatenated_inputs(batch: Dict[str, Union[List, torch.LongTensor]]) -> Dict
 
 
 def concatenated_forward(
-    model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]], average_log_prob: bool = False
+    model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]], average_log_prob: bool = False, output_router_logits: bool = False,
 ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
     """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
     We do this to avoid doing two forward passes, because it's faster for FSDP.
     """
     concatenated_batch = concatenated_inputs(batch)
-    outputs = model(
-        input_ids=concatenated_batch["concatenated_input_ids"],
-        attention_mask=concatenated_batch["concatenated_attention_mask"],
-        output_router_logits=True,
-    )
+    if output_router_logits:
+        outputs = model(
+            input_ids=concatenated_batch["concatenated_input_ids"],
+            attention_mask=concatenated_batch["concatenated_attention_mask"],
+            output_router_logits=True,
+        )
+        logits = outputs.logits.to(torch.float32)
+        aux_loss = outputs.aux_loss
+    else:
+        logits = model(
+            input_ids=concatenated_batch["concatenated_input_ids"],
+            attention_mask=concatenated_batch["concatenated_attention_mask"],
+        )
+        aux_loss = None
     all_logps = _get_batch_logps(
-        outputs.logits.to(torch.float32), concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob
+        logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob
     )
     chosen_logps = all_logps[: batch["chosen_input_ids"].shape[0]]
     rejected_logps = all_logps[batch["chosen_input_ids"].shape[0] :]
-    return chosen_logps, rejected_logps, outputs.aux_loss
-
+    return chosen_logps, rejected_logps, aux_loss
 
 def pad_to_length(tensor: torch.Tensor, length: int, pad_value: Union[int, float], dim: int = -1) -> torch.Tensor:
     if tensor.size(dim) >= length:
