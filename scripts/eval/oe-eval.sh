@@ -66,7 +66,7 @@ MAX_LENGTH="${MAX_LENGTH:-4096}"
 
 # Set HF_UPLOAD_ARG if HF_UPLOAD is true
 if [ "$HF_UPLOAD" == "true" ]; then
-    HF_UPLOAD_ARG="--hf-save-dir allenai/tulu-3-evals//results2/${MODEL_NAME_SAFE}"
+    HF_UPLOAD_ARG="--hf-save-dir allenai/tulu-3-evals//results/${MODEL_NAME_SAFE}"
 else
     HF_UPLOAD_ARG=""
 fi

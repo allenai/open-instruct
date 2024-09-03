@@ -618,7 +618,7 @@ PYTHONPATH=. python evaluation/run_all_generation_benchmarks.py \
         # if we prepended hf- to the model name, remove it.
         if model_name.startswith("hf-"):
             model_name = model_name[3:]
-        task_spec['arguments'] = [task_spec['arguments'][0] + f" --upload_to_hf {hf_dataset} --hf_upload_name results2/{model_name}"]
+        task_spec['arguments'] = [task_spec['arguments'][0] + f" --upload_to_hf {hf_dataset} --hf_upload_name results/{model_name}"]
 
     d["tasks"] = [task_spec]
     if not os.path.exists("configs/beaker_configs/auto_created"):
