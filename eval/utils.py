@@ -510,6 +510,7 @@ def upload_results_to_hf(
     os.remove("results.json")
 
 
+@retry_on_exception
 def check_and_upload_model_metadata(model_name_or_path, hf_dataset_name, hf_dataset_save_dir, hf_revision=None):
     # if metadata.json exists in the model directory, upload it to the dataset
     api = HfApi()
