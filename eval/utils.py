@@ -45,7 +45,6 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
             attention_mask = attention_mask.cuda()
 
         try:
-            print("Trying to generate batch outputs")
             batch_outputs = model.generate(
                 input_ids=batch_input_ids,
                 attention_mask=attention_mask,
@@ -53,7 +52,6 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
                 stopping_criteria=[KeyWordsCriteria(stop_id_sequences)] if stop_id_sequences else None,
                 **generation_kwargs
             )
-            print("Generated batch outputs")
         
             # the stopping criteria is applied at batch level, so if other examples are not stopped, the entire batch will continue to generate.
             # so some outputs still have the stop sequence, which we need to remove.
@@ -64,22 +62,17 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
                             batch_outputs[output_idx, token_idx:] = tokenizer.pad_token_id
                             break
 
-            print("Batch output padding thing done")
-
             # remove the prompt from the output
             # we need to re-encode the prompt because we need to make sure the special tokens are treated the same way as in the outputs.
             # we changed our previous way of truncating the output token ids dicrectly because some tokenizer (e.g., llama) won't add space token before the first token.
             # space is important for some tasks (e.g., code completion).
             batch_outputs = tokenizer.batch_decode(batch_outputs, skip_special_tokens=True)
-            print("batch decode 1 done")
             batch_prompts = tokenizer.batch_decode(batch_input_ids, skip_special_tokens=True)
-            print("batch decode 2 done")
             # duplicate the prompts to match the number of return sequences
             batch_prompts = [prompt for prompt in batch_prompts for _ in range(num_return_sequences)]
             batch_generations = [
                 output[len(prompt):] for prompt, output in zip(batch_prompts, batch_outputs)
             ]
-            print("done")
         except Exception as e:
             print("Error when generating completions for batch:")
             print(batch_prompts)
@@ -232,13 +225,7 @@ def load_hf_lm(
 
     # Loading OLMo models from HF requires `trust_remote_code=True`.
     # TODO: Implement this via command-line flag rather than hardcoded list.
-    trusted_models = [
-        "allenai/OLMo-7B",
-        "allenai/OLMo-7B-Twin-2T",
-        "allenai/OLMo-1B",
-        "deepseek-ai/deepseek-moe-16b-base",
-        "deepseek-ai/deepseek-moe-16b-chat"
-    ]
+    trusted_models = ["allenai/OLMo-7B", "allenai/OLMo-7B-Twin-2T", "allenai/OLMo-1B"]
     if model_name_or_path in trusted_models:
         trust_remote_code = True
     else:
@@ -262,26 +249,14 @@ def load_hf_lm(
         )
     else:
         if device_map:
-            if "OLMoE" in model_name_or_path:
-                print("loading olmoe annealed")
-                model = AutoModelForCausalLM.from_pretrained(
-                    model_name_or_path,
-                    revision=revision,
-                    device_map=device_map,
-                    torch_dtype=torch_dtype,
-                    token=token,
-                    trust_remote_code=trust_remote_code,
-                )
-            else:
-                print(f"loading other model {model_name_or_path}")
-                model = AutoModelForCausalLM.from_pretrained(
-                    model_name_or_path,
-                    revision=revision,
-                    device_map=device_map,
-                    torch_dtype=torch_dtype,
-                    token=token,
-                    trust_remote_code=trust_remote_code,
-                )
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name_or_path,
+                revision=revision,
+                device_map=device_map,
+                torch_dtype=torch_dtype,
+                token=token,
+                trust_remote_code=trust_remote_code,
+            )
         else:
             model = AutoModelForCausalLM.from_pretrained(
                 model_name_or_path,
@@ -308,18 +283,11 @@ def load_hf_tokenizer(
         from transformers import AutoTokenizer
         if not tokenizer_name_or_path:
             tokenizer_name_or_path = model_name_or_path
-        if "OLMoE" in tokenizer_name_or_path:
-            try:
-                tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=use_fast_tokenizer, token=token)
-            except:
-                # some tokenizers (e.g., GPTNeoXTokenizer) don't have the slow or fast version, so we just roll back to the default one
-                tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, token=token)
-        else:
-            try:
-                tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=use_fast_tokenizer, token=token)
-            except:
-                # some tokenizers (e.g., GPTNeoXTokenizer) don't have the slow or fast version, so we just roll back to the default one
-                tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, token=token)
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=use_fast_tokenizer, token=token)
+        except:
+            # some tokenizers (e.g., GPTNeoXTokenizer) don't have the slow or fast version, so we just roll back to the default one
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, token=token)
         # set padding side to left for batch generation
         tokenizer.padding_side = padding_side
         # set pad token to eos token if pad token is not set (as is the case for llama models)
