@@ -313,6 +313,16 @@ class FlatArguments:
             "help": "Whether to use fused AdamW or not.",
         },
     )
+    load_balancing_loss: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to include a load balancing loss (for OLMoE) or not.",
+        },
+    )
+    load_balancing_weight: float = field(
+        default=0.001,
+        metadata={"help": "Weight for load balancing loss if applicable."},
+    )
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: Optional[str] = None
@@ -932,12 +942,15 @@ def main(args: FlatArguments):
                     shift_labels = shift_labels.view(-1)
                     # Enable model parallelism
                     shift_labels = shift_labels.to(shift_logits.device)
-                    aux_loss = 0.5 * outputs.aux_loss
-                    loss = loss_fct(shift_logits, shift_labels) + 0.5 * outputs.aux_loss
+                    loss = loss_fct(shift_logits, shift_labels)
+                    if args.load_balancing_loss:
+                        aux_loss = args.load_balancing_weight * outputs.aux_loss
+                        loss += aux_loss
                 # We keep track of the loss at each logged step
                 total_loss += loss.detach().float()
-                total_aux_loss += aux_loss.detach().float()
                 accelerator.backward(loss)
+                if args.load_balancing_loss:
+                    total_aux_loss += aux_loss.detach().float()
                 # clip gradient norm. don't do this with deepspeed
                 if accelerator.sync_gradients and args.clip_grad_norm > 0:
                     accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
@@ -955,12 +968,15 @@ def main(args: FlatArguments):
                         / args.gradient_accumulation_steps
                         / args.logging_steps
                     )
-                    avg_aux_loss = (
-                        accelerator.gather(total_aux_loss).mean().item()
-                        / args.gradient_accumulation_steps
-                        / args.logging_steps
-                    )
-                    logger.info(f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, Aux Loss: {avg_aux_loss}")
+                    if args.load_balancing_loss:
+                        avg_aux_loss = (
+                            accelerator.gather(total_aux_loss).mean().item()
+                            / args.gradient_accumulation_steps
+                            / args.logging_steps
+                        )
+                        logger.info(f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, Aux Loss: {avg_aux_loss}")
+                    else:
+                        logger.info(f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}")
                     if args.with_tracking:
                         accelerator.log(
                             {
