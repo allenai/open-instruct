@@ -46,8 +46,10 @@ from open_instruct.model_utils import (
 from open_instruct.reward_modeling_eval import evaluate
 from open_instruct.utils import (
     ArgumentParserPlus,
-    get_datasets,
+    combine_dataset,
     get_wandb_tags,
+    is_beaker_job,
+    maybe_get_beaker_config,
     maybe_use_ai2_wandb_entity,
 )
 
@@ -173,6 +175,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     accelerator = calculate_runtime_args_and_accelerator(args, model_config)
     local_seed = args.seed + accelerator.process_index
 
+    if is_beaker_job():
+        beaker_config = maybe_get_beaker_config()
+
     # set up experiment tracking and seeds
     if accelerator.is_main_process:
         if args.with_tracking:
@@ -182,7 +187,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 project=args.wandb_project_name,
                 entity=args.wandb_entity,
                 sync_tensorboard=True,
-                config={**asdict(args), **asdict(dataset_config), **asdict(model_config)},
+                config={**asdict(args), **asdict(dataset_config), **asdict(model_config), **asdict(beaker_config)},
                 name=args.run_name,
                 save_code=True,
                 tags=[args.exp_name] + get_wandb_tags(),
@@ -206,11 +211,11 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     # create the dataset
     dataset_dict = DatasetDict()
     dataset_processor = PreferenceDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
-    train_dataset = get_datasets(
+    train_dataset = combine_dataset(
         args.dataset_mixer,
         splits=args.dataset_train_splits,
         columns_to_keep=["chosen", "rejected"],
-    )["train"]
+    )
     if dataset_config.sanity_check:
         train_dataset = train_dataset.select(
             range(0, min(len(train_dataset), dataset_config.sanity_check_max_samples))
@@ -221,11 +226,11 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     dataset_dict["train"] = train_dataset
     eval_dataset = None
     if args.dataset_eval_mixer is not None:
-        eval_dataset = get_datasets(
+        eval_dataset = combine_dataset(
             args.dataset_eval_mixer,
             splits=args.dataset_eval_splits,
             columns_to_keep=["chosen", "rejected"],
-        )["test"]
+        )
         eval_dataset = eval_dataset.select(range(0, min(len(eval_dataset), dataset_config.sanity_check_max_samples)))
         with accelerator.main_process_first():
             eval_dataset = dataset_processor.tokenize(eval_dataset)
