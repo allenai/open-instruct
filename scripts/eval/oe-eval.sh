@@ -36,7 +36,7 @@ set -ex
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--hf-upload] [--max-length <max_length>]"
+    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--hf-upload] [--revision REVISION] [--max-length <max_length>]"
     exit 1
 }
 
@@ -46,6 +46,7 @@ while [[ "$#" -gt 0 ]]; do
         --model-name) MODEL_NAME="$2"; shift ;;
         --model-location) MODEL_LOCATION="$2"; shift ;;
         --hf-upload) HF_UPLOAD="true" ;;
+        --revision) REVISION="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -102,5 +103,5 @@ for TASK in "${TASKS[@]}"; do
         MODEL_TYPE="--model-type vllm"
         GPU_COUNT=1
     fi
-    python ../oe-eval-internal/oe_eval/launch.py --model "$MODEL_NAME" --beaker-workspace "ai2/tulu-3-results" --beaker-budget ai2/oe-adapt --task "$TASK" $MODEL_TYPE --batch-size "$BATCH_SIZE" --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" ${HF_UPLOAD_ARG} --gpus "$GPU_COUNT" --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key"}'
+    python ../oe-eval-internal/oe_eval/launch.py --model "$MODEL_NAME" --beaker-workspace "ai2/tulu-3-results" --beaker-budget ai2/oe-adapt --task "$TASK" $MODEL_TYPE --batch-size "$BATCH_SIZE" --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" ${HF_UPLOAD_ARG} --gpus "$GPU_COUNT" --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key"}' --revision "$REVISION"
 done

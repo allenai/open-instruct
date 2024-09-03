@@ -19,6 +19,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple, Union
 
+from open_instruct.utils import retry_on_exception
+
 try:
     import deepspeed
     from deepspeed.runtime.engine import DeepSpeedEngine
@@ -354,6 +356,7 @@ def save_with_accelerate(
     # customize model card (TODO (Costa): this can be prettier)
 
 
+@retry_on_exception()
 def push_folder_to_hub(
     accelerator: Accelerator,
     output_dir: str,
