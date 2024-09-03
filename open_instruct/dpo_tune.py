@@ -1012,24 +1012,16 @@ def main(args: FlatArguments):
                         / args.gradient_accumulation_steps
                         / args.logging_steps
                     )
-                    metrics_to_log = {
-                        "learning_rate": lr_scheduler.get_last_lr()[0],
-                        "train_loss": avg_loss,
-                    }
+                    logger_str = f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}"
                     if args.load_balancing_loss:
                         avg_aux_loss = (
                             accelerator.gather(total_aux_loss).mean().item()
                             / args.gradient_accumulation_steps
                             / args.logging_steps
                         )
-                        logger.info(
-                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, Aux Loss: {avg_aux_loss}"
-                        )
+                        logger_str += f" Aux Loss: {avg_aux_loss}"
                         metrics_to_log["aux_loss"] = avg_aux_loss
-                    else:
-                        logger.info(
-                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}"
-                        )
+                    logger.info(logger_str)
                     if args.with_tracking:
                         accelerator.log(
                             metrics_to_log,
