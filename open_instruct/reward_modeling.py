@@ -3,7 +3,7 @@ import os
 import random
 import time
 from dataclasses import asdict, dataclass
-from typing import List, Literal, Optional, Union
+from typing import List, Literal, Optional
 
 import numpy as np
 import pandas as pd
@@ -29,11 +29,9 @@ from open_instruct.dataset_processor import (
     CHAT_TEMPLATES,
     INPUT_IDS_CHOSEN_KEY,
     INPUT_IDS_REJECTED_KEY,
-    TOKENIZED_PREFERENCE_DATASET_KEYS,
     DatasetConfig,
     PreferenceDatasetProcessor,
     SimplePreferenceCollator,
-    select_nested,
     visualize_token,
 )
 from open_instruct.model_utils import (
@@ -48,9 +46,9 @@ from open_instruct.model_utils import (
 from open_instruct.reward_modeling_eval import evaluate
 from open_instruct.utils import (
     ArgumentParserPlus,
+    get_datasets,
     get_wandb_tags,
     maybe_use_ai2_wandb_entity,
-    get_datasets,
 )
 
 api = HfApi()
@@ -137,9 +135,9 @@ class Args:
 
 def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig) -> Accelerator:
     """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
-    if type(args.dataset_mixer) == str:
+    if isinstance(args.dataset_mixer, str):
         args.dataset_mixer = json.loads(args.dataset_mixer)
-    if type(args.dataset_eval_mixer) == str:
+    if isinstance(args.dataset_eval_mixer, str):
         args.dataset_eval_mixer = json.loads(args.dataset_eval_mixer)
     accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
     args.world_size = accelerator.num_processes
@@ -214,7 +212,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         columns_to_keep=["chosen", "rejected"],
     )["train"]
     if dataset_config.sanity_check:
-        train_dataset = train_dataset.select(range(0, min(len(train_dataset), dataset_config.sanity_check_max_samples)))
+        train_dataset = train_dataset.select(
+            range(0, min(len(train_dataset), dataset_config.sanity_check_max_samples))
+        )
     with accelerator.main_process_first():
         train_dataset = dataset_processor.tokenize(train_dataset)
         train_dataset = dataset_processor.filter(train_dataset)
@@ -269,7 +269,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         shuffle=True,
         collate_fn=data_collator,
     )
-    
+
     eval_dataloader = DataLoader(
         eval_dataset,
         batch_size=args.per_device_eval_batch_size,
