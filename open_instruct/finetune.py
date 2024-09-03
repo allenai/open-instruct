@@ -554,7 +554,6 @@ def main(args: FlatArguments):
             args.config_name,
             trust_remote_code=args.trust_remote_code,
             revision=args.model_revision,
-            output_router_logits=True,
             token=os.getenv("HF_TOKEN", None),
         )
     elif args.model_name_or_path:
@@ -562,7 +561,6 @@ def main(args: FlatArguments):
             args.model_name_or_path,
             trust_remote_code=args.trust_remote_code,
             revision=args.model_revision,
-            output_router_logits=True,
             token=os.getenv("HF_TOKEN", None),
         )
     else:
@@ -583,7 +581,7 @@ def main(args: FlatArguments):
         tokenizer = AutoTokenizer.from_pretrained(
             args.tokenizer_name,
             trust_remote_code=args.trust_remote_code,
-            use_fast=True,
+            use_fast=not args.use_slow_tokenizer,
             revision=tokenizer_revision,
             token=os.getenv("HF_TOKEN", None),
         )
@@ -591,7 +589,7 @@ def main(args: FlatArguments):
         tokenizer = AutoTokenizer.from_pretrained(
             args.model_name_or_path,
             trust_remote_code=args.trust_remote_code,
-            use_fast=True,
+            use_fast=not args.use_slow_tokenizer,
             revision=tokenizer_revision,
             token=os.getenv("HF_TOKEN", None),
         )
@@ -920,7 +918,10 @@ def main(args: FlatArguments):
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
             with accelerator.accumulate(model):
-                outputs = model(**batch, use_cache=False, output_router_logits=True)
+                if args.load_balancing_loss:
+                    outputs = model(**batch, use_cache=False, output_router_logits=True)
+                else:
+                    outputs = model(**batch, use_cache=False)
                 if args.reduce_loss == "mean":
                     loss = outputs.loss
                 else:
