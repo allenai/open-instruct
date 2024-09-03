@@ -256,7 +256,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
         model_config.model_name_or_path, num_labels=1
     )
-    if args.gradient_checkpointing:
+    if model_config.gradient_checkpointing:
         model.gradient_checkpointing_enable()
     disable_dropout_in_model(model)  # see p.3. in https://arxiv.org/pdf/1909.08593
     layer_init(
