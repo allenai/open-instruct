@@ -323,11 +323,14 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         model,
         original_tokenizer,
         args.output_dir,
-        False,
-        args.push_to_hub,
-        args.hf_repo_id,
-        args.hf_repo_revision,
     )
+    if args.push_to_hub:
+        push_folder_to_hub(
+            accelerator,
+            args.output_dir,
+            args.hf_repo_id,
+            args.hf_repo_revision,
+        )
 
 
 if __name__ == "__main__":
