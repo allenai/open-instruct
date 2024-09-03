@@ -726,6 +726,8 @@ def submit_beaker_eval_jobs(
     beaker_image: str = "nathanl/open_instruct_auto",
     upload_to_hf: str = "allenai/tulu-3-evals",
     run_oe_eval_experiments: bool = False,
+    run_safety_evaluations: bool = False,
+    skip_oi_evals: bool = False,
 ) -> None:
     command = f"""
     python scripts/submit_eval_jobs.py \
@@ -743,6 +745,10 @@ def submit_beaker_eval_jobs(
         command += f" --upload_to_hf {upload_to_hf}"
     if run_oe_eval_experiments:
         command += " --run_oe_eval_experiments"
+    if run_safety_evaluations:
+        command += " --run_safety_evaluations"
+    if skip_oi_evals:
+        command += " --skip_oi_evals"
 
     process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
