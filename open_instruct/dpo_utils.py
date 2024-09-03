@@ -202,7 +202,10 @@ def concatenated_inputs(batch: Dict[str, Union[List, torch.LongTensor]]) -> Dict
 
 
 def concatenated_forward(
-    model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]], average_log_prob: bool = False, output_router_logits: bool = False,
+    model: nn.Module,
+    batch: Dict[str, Union[List, torch.LongTensor]],
+    average_log_prob: bool = False,
+    output_router_logits: bool = False,
 ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
     """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
@@ -223,12 +226,11 @@ def concatenated_forward(
             attention_mask=concatenated_batch["concatenated_attention_mask"],
         )
         aux_loss = None
-    all_logps = _get_batch_logps(
-        logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob
-    )
+    all_logps = _get_batch_logps(logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob)
     chosen_logps = all_logps[: batch["chosen_input_ids"].shape[0]]
     rejected_logps = all_logps[batch["chosen_input_ids"].shape[0] :]
     return chosen_logps, rejected_logps, aux_loss
+
 
 def pad_to_length(tensor: torch.Tensor, length: int, pad_value: Union[int, float], dim: int = -1) -> torch.Tensor:
     if tensor.size(dim) >= length:
