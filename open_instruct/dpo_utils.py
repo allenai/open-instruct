@@ -136,59 +136,6 @@ def simpo_loss(
     return losses, chosen_rewards, rejected_rewards
 
 
-# https://github.com/ContextualAI/HALOs/blob/main/trainers.py#L813-L862
-def kto_loss(
-    policy_chosen_logps: torch.FloatTensor,
-    policy_rejected_logps: torch.FloatTensor,
-    reference_chosen_logps: torch.FloatTensor,
-    reference_rejected_logps: torch.FloatTensor,
-    beta: float,
-    policy_KL_logps: torch.FloatTensor, # ?
-    reference_KL_logps # ? 
-) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
-        """Compute the Kahneman-Tversky loss for a batch of policy and reference model log probabilities.
-
-        If generation y ~ p_desirable, we have the 'desirable' loss:
-            L(x, y) := 1 - sigmoid(beta * ([log p_policy(y|x) - log p_reference(y|x)] - KL(p_policy || p_reference)))
-        If generation y ~ p_undesirable, we have the 'undesirable' loss:
-            L(x, y) := 1 - sigmoid(beta * (KL(p_policy || p_reference) - [log p_policy(y|x) - log p_reference(y|x)]))
-
-        The desirable losses are weighed by config.loss.desirable_weight.
-        The undesirable losses are weighed by config.loss.undesirable_weight.
-        This should be used to address imbalances in the ratio of desirable:undesirable examples respectively.
-
-        The KL term is estimated by matching x with unrelated outputs y', then calculating the average log ratio
-        log p_policy(y'|x) - log p_reference(y'|x). Doing so avoids the requirement that there be equal numbers of 
-        desirable and undesirable examples in the microbatch.
-        """
-        KL = (policy_KL_logps - reference_KL_logps).mean().detach()
-        # nn.all_reduce sums up the KL estimates across all devices (gradient will also be scaled by world size)
-        dist.nn.all_reduce(KL, op=dist.ReduceOp.SUM)
-        # take average (will also scale gradients appropriately)
-        KL = (KL / self.world_size).clamp(min=0)
-
-        if policy_chosen_logps.shape[0] != 0:
-            chosen_logratios = (policy_chosen_logps - reference_chosen_logps)
-            chosen_losses = 1 - F.sigmoid(beta * (chosen_logratios - KL))
-            chosen_rewards = beta * chosen_logratios.detach()
-        else:
-            # important to cast to policy_dtype; otherwise error will occur during all_gather
-            chosen_losses = torch.Tensor([]).to(self.policy_dtype).to(self.device)
-            chosen_rewards = torch.Tensor([]).to(self.policy_dtype).to(self.device)
-        
-        if policy_rejected_logps.shape[0] != 0:
-            rejected_logratios = (policy_rejected_logps - reference_rejected_logps)
-            rejected_losses = 1 - F.sigmoid(beta * (KL - rejected_logratios))
-            rejected_rewards = beta * rejected_logratios.detach()
-        else:
-            # important to cast to policy_dtype; otherwise error will occur during all_gather
-            rejected_losses = torch.Tensor([]).to(self.policy_dtype).to(self.device)
-            rejected_rewards = torch.Tensor([]).to(self.policy_dtype).to(self.device)
-
-        losses = torch.cat((self.config.loss.desirable_weight * chosen_losses, self.config.loss.undesirable_weight * rejected_losses), 0)
-
-        return losses, chosen_rewards, rejected_rewards, KL
-
 def _get_batch_logps(
     logits: torch.FloatTensor, labels: torch.LongTensor, average_log_prob: bool = False
 ) -> torch.FloatTensor:
@@ -306,25 +253,3 @@ class DataCollatorForSeq2SeqDPO(DataCollatorForSeq2Seq):
         for k in rejected_features:
             result["rejected_" + k] = rejected_features[k]
         return result
-
-@dataclass
-class DataCollatorForKTO(DataCollatorForSeq2Seq):
-    """
-    Alternate version of the hf DataCollatorForSeq2Seq for use with DPO.
-    adapted from https://github.com/huggingface/transformers/blob/main/src/transformers/data/data_collator.py#L517C1
-    """
-
-    def __call__(self, features, return_tensors=None):
-        # call the original collator on chosen and rejected separately, then combine
-        def filter_batch(match_string, features):
-            return [{k.replace(match_string, ""): v for k, v in f.items() if match_string in k} for f in features]
-
-        chosen_features = super().__call__(filter_batch("chosen_", features), return_tensors=return_tensors)
-        rejected_features = super().__call__(filter_batch("rejected_", features), return_tensors=return_tensors)
-        result = {}
-        for k in chosen_features:
-            result["chosen_" + k] = chosen_features[k]
-        for k in rejected_features:
-            result["rejected_" + k] = rejected_features[k]
-        return result
-
