@@ -14,6 +14,7 @@
 # limitations under the License.
 
 
+from collections import defaultdict
 import itertools
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -35,7 +36,7 @@ from huggingface_hub import HfApi
 from rich import print as rprint
 from rich.console import Console
 from rich.table import Table
-from rich.text import Text
+from rich.panel import Panel
 from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
@@ -509,19 +510,40 @@ def format_value(value):
 
 
 def print_rich_single_line_metrics(metrics):
-    formatted_metrics = []
+    # Create main table
+    table = Table(show_header=False, box=None)
+    table.add_column("Category", style="cyan")
+    table.add_column("Values", style="magenta")
+    
+    # Group metrics by their prefix
+    grouped_metrics = defaultdict(list)
     for key, value in metrics.items():
-        # Shortening the key names
-        short_key = key.split("/")[-1] if "/" in key else key
-
-        # Create a colored text object
-        metric_text = Text()
-        metric_text.append(short_key + ": ", style="bold cyan")  # Keys in cyan
-        metric_text.append(format_value(value), style="yellow")  # Values in yellow
-
-        formatted_metrics.append(metric_text)
-
-    rprint(" | ".join(str(metric) for metric in formatted_metrics))
+        category = key.split('/')[0] if '/' in key else 'other'
+        grouped_metrics[category].append((key, value))
+    
+    # Sort groups by category name
+    for category in sorted(grouped_metrics.keys()):
+        values = grouped_metrics[category]
+        value_strings = []
+        for key, value in values:
+            # Use the last part of the key as the display name
+            display_name = key.split('/')[-1]
+            value_strings.append(f"{display_name}: {format_value(value)}")
+        
+        # Join all values for this category into a single string
+        values_str = " | ".join(value_strings)
+        table.add_row(category, values_str)
+    
+    # Create a panel with the table
+    panel = Panel(
+        table,
+        title="Metrics",
+        expand=False,
+        border_style="bold green",
+    )
+    
+    # Print the panel
+    rprint(panel)
 
 
 def exact_div(a, b, custom_error_message=""):

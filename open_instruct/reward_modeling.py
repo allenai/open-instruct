@@ -1,8 +1,9 @@
+import json
 import os
 import random
 import time
 from dataclasses import asdict, dataclass
-from typing import Literal, Optional
+from typing import List, Literal, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -12,7 +13,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from accelerate import Accelerator
 from accelerate.utils import broadcast, gather_object
-from datasets import load_dataset
+from datasets import DatasetDict
 from huggingface_hub import HfApi
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
@@ -32,6 +33,7 @@ from open_instruct.dataset_processor import (
     DatasetConfig,
     PreferenceDatasetProcessor,
     SimplePreferenceCollator,
+    select_nested,
     visualize_token,
 )
 from open_instruct.model_utils import (
@@ -40,6 +42,7 @@ from open_instruct.model_utils import (
     get_reward,
     print_rich_single_line_metrics,
     print_rich_table,
+    push_folder_to_hub,
     save_with_accelerate,
 )
 from open_instruct.reward_modeling_eval import evaluate
@@ -47,6 +50,7 @@ from open_instruct.utils import (
     ArgumentParserPlus,
     get_wandb_tags,
     maybe_use_ai2_wandb_entity,
+    get_datasets,
 )
 
 api = HfApi()
@@ -54,6 +58,16 @@ api = HfApi()
 
 @dataclass
 class Args:
+    # required dataset args
+    dataset_mixer: str = None
+    """A dictionary of datasets (local or HF) to sample from."""
+    dataset_train_splits: List[str] = None
+    """The dataset splits to use for training"""
+    dataset_eval_mixer: Optional[str] = None
+    """A dictionary of datasets (local or HF) to sample from for evaluation"""
+    dataset_eval_splits: Optional[List[str]] = None
+    """The dataset splits to use for evaluation"""
+
     # common args
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
@@ -123,6 +137,10 @@ class Args:
 
 def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig) -> Accelerator:
     """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
+    if type(args.dataset_mixer) == str:
+        args.dataset_mixer = json.loads(args.dataset_mixer)
+    if type(args.dataset_eval_mixer) == str:
+        args.dataset_eval_mixer = json.loads(args.dataset_eval_mixer)
     accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
     args.world_size = accelerator.num_processes
     args.local_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps
@@ -188,15 +206,31 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
 
     # create the dataset
-    dataset = load_dataset(dataset_config.dataset_name)
+    dataset_dict = DatasetDict()
     dataset_processor = PreferenceDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
-    dataset_processor.sanity_check_(dataset)
+    train_dataset = get_datasets(
+        args.dataset_mixer,
+        splits=args.dataset_train_splits,
+        columns_to_keep=["chosen", "rejected"],
+    )["train"]
+    if dataset_config.sanity_check:
+        train_dataset = train_dataset.select(range(0, min(len(train_dataset), dataset_config.sanity_check_max_samples)))
     with accelerator.main_process_first():
-        dataset = dataset_processor.tokenize(dataset)
-        dataset = dataset_processor.filter(dataset)
-    train_dataset = dataset[dataset_config.dataset_train_split]
-    eval_dataset = dataset[dataset_config.dataset_eval_split]
-    train_dataset = train_dataset.select_columns(TOKENIZED_PREFERENCE_DATASET_KEYS)
+        train_dataset = dataset_processor.tokenize(train_dataset)
+        train_dataset = dataset_processor.filter(train_dataset)
+    dataset_dict["train"] = train_dataset
+    eval_dataset = None
+    if args.dataset_eval_mixer is not None:
+        eval_dataset = get_datasets(
+            args.dataset_eval_mixer,
+            splits=args.dataset_eval_splits,
+            columns_to_keep=["chosen", "rejected"],
+        )["test"]
+        eval_dataset = eval_dataset.select(range(0, min(len(eval_dataset), dataset_config.sanity_check_max_samples)))
+        with accelerator.main_process_first():
+            eval_dataset = dataset_processor.tokenize(eval_dataset)
+            eval_dataset = dataset_processor.filter(eval_dataset)
+        dataset_dict["eval"] = eval_dataset
 
     # some more runtime logging
     if args.total_episodes is None:
@@ -209,7 +243,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         if args.with_tracking:
             # upload the visualized token length
             dataset_processor.get_token_length_visualization(
-                dataset, save_path=f"runs/{args.run_name}/token_length.png"
+                dataset_dict, save_path=f"runs/{args.run_name}/token_length.png"
             )
             wandb.log({"token_length": wandb.Image(f"runs/{args.run_name}/token_length.png")})
 
@@ -235,6 +269,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         shuffle=True,
         collate_fn=data_collator,
     )
+    
     eval_dataloader = DataLoader(
         eval_dataset,
         batch_size=args.per_device_eval_batch_size,
@@ -255,6 +290,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     chosen_rewards = torch.zeros((args.gradient_accumulation_steps,), device=device)
     rejected_rewards = torch.zeros((args.gradient_accumulation_steps,), device=device)
     reward_margin = torch.zeros((args.gradient_accumulation_steps,), device=device)
+    local_metrics = torch.zeros((5,), device=device)
     training_step = 0
     gradient_accumulation_idx = 0
     episode = 0
@@ -265,22 +301,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         for data in dataloader:
             episode += args.micro_batch_size
             training_step += 1
-
-            # (optionally) evaluate the model
-            if args.num_evals > 0 and training_step > 1 and training_step % args.eval_freq == 0:
-                eval_metrics, table = evaluate(model, eval_dataloader, tokenizer, max_sampled_texts=10)
-                for key in table:
-                    table[key] = gather_object(table[key])
-                df = pd.DataFrame(table)
-                if accelerator.is_main_process:
-                    print_rich_single_line_metrics(eval_metrics)
-                    for key, value in eval_metrics.items():
-                        writer.add_scalar(f"eval/rm/{key}", value, episode)
-                    if args.with_tracking:
-                        wandb.log({"preference_sample_texts": wandb.Table(dataframe=df)})
-                    else:
-                        print_rich_table(df)
-
             query_responses = torch.cat((data[INPUT_IDS_CHOSEN_KEY], data[INPUT_IDS_REJECTED_KEY]), dim=0)
             with accelerator.accumulate(model):
                 _, predicted_reward, _ = get_reward(model, query_responses, tokenizer.pad_token_id, 0)
@@ -300,20 +320,42 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
             if training_step % args.gradient_accumulation_steps == 0:
                 scheduler.step()
+                local_metrics[0] = accuracies.mean()
+                local_metrics[1] = losses.mean()
+                local_metrics[2] = chosen_rewards.mean()
+                local_metrics[3] = rejected_rewards.mean()
+                local_metrics[4] = reward_margin.mean()
+                global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
+
                 metrics = {
                     "episode": episode,
                     "epoch": episode / len(train_dataset),
-                    "train/rm/accuracy": accelerator.gather(accuracies).mean().item(),
-                    "train/rm/loss": accelerator.gather(losses).mean().item(),
-                    "train/rm/chosen_reward": accelerator.gather(chosen_rewards).mean().item(),
-                    "train/rm/rejected_reward": accelerator.gather(rejected_rewards).mean().item(),
-                    "train/rm/reward_margin": accelerator.gather(reward_margin).mean().item(),
+                    "train/rm/accuracy": global_metrics[0],
+                    "train/rm/loss": global_metrics[1],
+                    "train/rm/chosen_rewards": global_metrics[2],
+                    "train/rm/rejected_rewards": global_metrics[3],
+                    "train/rm/reward_margin": global_metrics[4],
                     "train/rm/lr": scheduler.get_last_lr()[0],
                 }
                 if accelerator.is_main_process:
                     print_rich_single_line_metrics(metrics)
                     for key, value in metrics.items():
                         writer.add_scalar(key, value, episode)
+
+            # (optionally) evaluate the model
+            if args.num_evals > 0 and training_step > 1 and training_step % args.eval_freq == 0:
+                eval_metrics, table = evaluate(model, eval_dataloader, tokenizer, max_sampled_texts=10)
+                for key in table:
+                    table[key] = gather_object(table[key])
+                df = pd.DataFrame(table)
+                if accelerator.is_main_process:
+                    print_rich_single_line_metrics(eval_metrics)
+                    for key, value in eval_metrics.items():
+                        writer.add_scalar(key, value, episode)
+                    if args.with_tracking:
+                        wandb.log({"preference_sample_texts": wandb.Table(dataframe=df)})
+                    else:
+                        print_rich_table(df)
 
     # save model
     os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
@@ -323,11 +365,14 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         model,
         original_tokenizer,
         args.output_dir,
-        False,
-        args.push_to_hub,
-        args.hf_repo_id,
-        args.hf_repo_revision,
     )
+    if args.push_to_hub:
+        push_folder_to_hub(
+            accelerator,
+            args.output_dir,
+            args.hf_repo_id,
+            args.hf_repo_revision,
+        )
 
 
 if __name__ == "__main__":
