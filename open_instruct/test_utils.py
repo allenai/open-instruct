@@ -68,6 +68,14 @@ class GetDatasetsTest(unittest.TestCase):
         self.assertEqual(len(datasets["test"]), 100)
         self.assertRaises(KeyError, lambda: datasets["train"])
 
+    def test_loading_preference_data(self):
+        dataset_mixer = {
+            "ai2-adapt-dev/ultrafeedback-small": 1000,
+            "ai2-adapt-dev/summarize_from_feedback_small": 1000,
+        }
+        pref_datasets = get_datasets(dataset_mixer, splits=["train"], columns_to_keep=["chosen", "rejected"])
+        self.assertEqual(len(pref_datasets["train"]), 2000)
+
 
 # useful for checking if public datasets are still available
 # class CheckTuluDatasetsTest(unittest.TestCase):
