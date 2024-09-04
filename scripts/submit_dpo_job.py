@@ -5,6 +5,9 @@ from datetime import datetime
 import argparse
 import re 
 import shlex
+import getpass
+
+from open_instruct.utils import get_beaker_whoami
 
 def load_yaml(file_path):
     with open(file_path, 'r') as f:
@@ -17,7 +20,6 @@ def main():
                         help="Path to the default Beaker config file")
     parser.add_argument("--config", default=None, 
                         help="Path to an additional config file to override default settings")
-    # parser.add_argument("--wandb_api_key", required=False, help="Weights & Biases API key")
     parser.add_argument("--cluster", type=str, default="ai2/allennlp-cirrascale", help="Beaker cluster to use")
     parser.add_argument("--priority", type=str, default="high", help="Priority of the job")
     parser.add_argument("--preemptible", type=bool, default=True, help="Whether to use preemptible instances")
@@ -183,14 +185,21 @@ def main():
             env['value'] = False
         if env['name'] == "WANDB_PROJECT":
             env['value'] = wandb_project
-    # d['tasks'][0]['envVars'].append({
-    #     'name': 'WANDB_API_KEY', 'value': wandb_api_key
-    # })
+    beaker_whoami = get_beaker_whoami()
     d['tasks'][0]['envVars'].append({
         'name': 'WANDB_NAME', 'value': exp_name
     })
     d['tasks'][0]['envVars'].append({
         'name': 'WANDB_RUN_GROUP', 'value': experiment_group
+    })
+    d['tasks'][0]['envVars'].append({
+        'name': 'BEAKER_TOKEN', 'secret': f"{beaker_whoami}_BEAKER_TOKEN"
+    })
+    d['tasks'][0]['envVars'].append({
+        'name': 'HF_TOKEN', 'secret': f"{beaker_whoami}_HF_TOKEN"
+    })
+    d['tasks'][0]['envVars'].append({
+        'name': 'WANDB_API_KEY', 'secret': f"{beaker_whoami}_WANDB_API_KEY"
     })
 
     # mount datasets
