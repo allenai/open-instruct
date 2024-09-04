@@ -500,7 +500,7 @@ def upload_results_to_hf(
     # actual save and upload
     with open("results.json", "w") as f:
         json.dump(results_dict, f)
-    api = HfApi(token=os.getenv("HF_TOKEN", None))
+    api = HfApi()
     api.upload_file(
         path_or_fileobj="results.json",
         path_in_repo=hf_dataset_save_path,
@@ -508,3 +508,37 @@ def upload_results_to_hf(
         repo_type="dataset",
     )
     os.remove("results.json")
+
+
+@retry_on_exception
+def check_and_upload_model_metadata(model_name_or_path, hf_dataset_name, hf_dataset_save_dir, hf_revision=None):
+    # if metadata.json exists in the model directory, upload it to the dataset
+    api = HfApi()
+    if os.path.exists(f"{model_name_or_path}/metadata.json"):
+        api.upload_file(
+            path_or_fileobj=f"{model_name_or_path}/metadata.json",
+            path_in_repo=f"{hf_dataset_save_dir}/metadata.json",
+            repo_id=hf_dataset_name,
+            repo_type="dataset",
+        )
+    else:
+        # assume its a HF model and try to download the metadata
+        try:
+            from huggingface_hub import hf_hub_download
+            hf_hub_download(
+                model_name_or_path,
+                filename="metadata.json",
+                local_dir=".",
+                revision=hf_revision,
+            )
+        except Exception as e:
+            print(f"Failed to download metadata.json from {model_name_or_path}")
+            print(e)
+            return
+        api.upload_file(
+            path_or_fileobj=f"metadata.json",
+            path_in_repo=f"{hf_dataset_save_dir}/metadata.json",
+            repo_id=hf_dataset_name,
+            repo_type="dataset",
+        )
+    

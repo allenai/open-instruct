@@ -6,7 +6,7 @@ import pandas as pd
 import json
 from tqdm import tqdm
 from eval.mmlu.categories import subcategories, categories
-from eval.utils import get_next_word_predictions, load_hf_tokenizer, load_hf_lm, query_openai_chat_model, dynamic_import_function, upload_results_to_hf
+from eval.utils import get_next_word_predictions, load_hf_tokenizer, load_hf_lm, query_openai_chat_model, dynamic_import_function, upload_results_to_hf, check_and_upload_model_metadata
 
 
 choices = ["A", "B", "C", "D"]
@@ -269,6 +269,9 @@ def main(args):
             task_name=task_name,
             primary_score=primary_score,
             prepend_timestamp=True,
+        )
+        check_and_upload_model_metadata(
+            args.model_name_or_path, args.upload_to_hf, args.hf_upload_name, hf_revision=args.hf_revision
         )
 
 
