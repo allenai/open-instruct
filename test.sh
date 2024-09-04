@@ -1,4 +1,20 @@
 beaker session create \
+    --gpus 1 \
+    --budget ai2/allennlp  \
+    --workdir $PWD \
+    --image beaker://costah/open_instruct_onlinedpo1 \
+    --priority normal \
+    --workspace ai2/costah
+beaker session create \
+    --gpus 1 \
+    --budget ai2/allennlp  \
+    --workdir $PWD \
+    --image beaker://costah/open_instruct_dev_uv \
+    --priority normal \
+    --workspace ai2/costah
+
+
+beaker session create \
     --gpus 3 \
     --budget ai2/allennlp  \
     --workdir $PWD \
@@ -219,9 +235,9 @@ python open_instruct/online_dpo_vllm.py \
 
 pip install git+https://github.com/vwxyzjn/vllm.git@costa-single-gpu-fix
 
-docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 --build-arg REQUIRE=requirements.txt . -t open_instruct_onlinedpo1
-beaker image delete $(whoami)/open_instruct_onlinedpo1 
-beaker image create open_instruct_onlinedpo1 -n open_instruct_onlinedpo1 -w ai2/$(whoami)
+docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 --build-arg REQUIRE=requirements.txt . -t open_instruct_onlinedpo2
+beaker image delete $(whoami)/open_instruct_onlinedpo2 
+beaker image create open_instruct_onlinedpo2 -n open_instruct_onlinedpo2 -w ai2/$(whoami)
 
 
 accelerate launch --num_processes 2 open_instruct/online_dpo_vllm.py \
@@ -349,6 +365,7 @@ accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_z
     --response_length 1024 \
     --gradient_checkpointing --sanity_check \
 
+g = AutoModelForSequenceClassification.from_pretrained("allenai/llama-3-tulu-2-8b", num_labels=1)
 
 accelerate launch --num_processes 2 --config_file configs/ds_configs/deepspeed_zero3.yaml \
      open_instruct/online_dpo_vllm_thread.py \
@@ -471,3 +488,68 @@ accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_z
 
 
 accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml ds3.py
+
+
+
+
+accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+    open_instruct/online_dpo_vllm_thread.py \
+    --dataset_name allenai/ultrafeedback_binarized_cleaned \
+    --dataset_train_split train_prefs \
+    --dataset_eval_split test_prefs \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --sft_messages_key chosen \
+    --learning_rate 5e-7 \
+    --output_dir /output/ \
+    --chat_template tulu \
+    --per_device_train_batch_size 4 \
+    --per_device_eval_batch_size 4 \
+    --gradient_accumulation_steps 16 \
+    --local_rollout_forward_batch_size 4 \
+    --vllm_device cuda:7 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 200000 \
+    --model_name_or_path OLMoE/OLMoE-1B-7B-0824-SFT  \
+    --reward_model_path allenai/llama-3.1-tulu-2-8b-uf-mean-rm \
+    --non_stop_penalty \
+    --stop_token eos \
+    --penalty_reward_value -10.0 \
+    --beta 0.05 \
+    --num_evals 1 \
+    --response_length 1024 \
+    --gradient_checkpointing \
+    --with_tracking \
+    --push_to_hub
+
+
+accelerate launch --num_processes 8 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+    open_instruct/online_dpo.py \
+    --dataset_name allenai/ultrafeedback_binarized_cleaned \
+    --dataset_train_split train_prefs \
+    --dataset_eval_split test_prefs \
+    --max_token_length 512 \
+    --max_prompt_token_lenth 256 \
+    --sft_messages_key chosen \
+    --learning_rate 5e-7 \
+    --output_dir /output/ \
+    --chat_template tulu \
+    --per_device_train_batch_size 4 \
+    --per_device_eval_batch_size 4 \
+    --gradient_accumulation_steps 16 \
+    --local_rollout_forward_batch_size 4 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 200000 \
+    --model_name_or_path OLMoE/OLMoE-1B-7B-0824-SFT  \
+    --reward_model_path allenai/llama-3.1-tulu-2-8b-uf-mean-rm \
+    --non_stop_penalty \
+    --stop_token eos \
+    --penalty_reward_value -10.0 \
+    --beta 0.05 \
+    --num_evals 1 \
+    --response_length 512 \
+    --gradient_checkpointing \
+    --with_tracking \
+    --push_to_hub

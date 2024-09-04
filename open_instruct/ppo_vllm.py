@@ -167,15 +167,6 @@ class Args:
     non_stop_penalty: bool = False
     """whether to penalize responses that do not contain `stop_token_id`"""
 
-    # vllm deivce: only applies if we use the vllm mode
-    # We actually needed to do precise model placement for the vllm model.
-    # For this reason we created our own fork https://github.com/vwxyzjn/vllm/pull/1
-    # you have to install via `pip install vllm-online`
-    vllm_device: str = "cuda:1"
-    """the device placement of the vllm model; typically we place the vllm model on a decicated GPU"""
-    vllm_gpu_memory_utilization: float = 0.8
-    """the GPU memory utilization of the vllm model; passed to `gpu_memory_utilization` to the `vLLM` instance"""
-
     # online PPO specific args
     beta: float = 0.05
     """the beta value of the RLHF objective (KL coefficient)"""
@@ -192,6 +183,14 @@ class Args:
     lam: float = 0.95
     """the lambda value for GAE"""
 
+    # vLLM settings. NOTE: currently we need to place the vLLM model on a separate GPU
+    # for generation to work properly because vLLM would pre-alocate the memory.
+    # To do so, we would need to do a moneky patch `vllm_single_gpu_patch` to make sure
+    # the vLLM model is placed on the correct GPU.
+    vllm_device: str = "cuda:1"
+    """the device placement of the vllm model; typically we place the vllm model on a decicated GPU"""
+    vllm_gpu_memory_utilization: float = 0.8
+    """the GPU memory utilization of the vllm model; passed to `gpu_memory_utilization` to the `vLLM` instance"""
 
 def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig) -> Accelerator:
     """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
@@ -744,6 +743,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         args.push_to_hub,
         args.hf_repo_id,
         args.hf_repo_revision,
+        model_attribute_to_save="policy",
     )
 
 

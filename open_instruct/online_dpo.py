@@ -72,6 +72,26 @@ class Args:
     run_name: Optional[str] = None
     """A unique name of this run"""
 
+    # wandb and HF tracking configs
+    with_tracking: bool = False
+    """If toggled, this experiment will be tracked with Weights and Biases"""
+    wandb_project_name: str = "open_instruct_internal"
+    """The wandb's project name"""
+    wandb_entity: Optional[str] = None
+    """The entity (team) of wandb's project"""
+    push_to_hub: bool = False
+    """Whether to upload the saved model to huggingface"""
+    hf_entity: Optional[str] = None
+    """The user or org name of the model repository from the Hugging Face Hub"""
+    hf_repo_id: Optional[str] = None
+    """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
+    hf_repo_revision: Optional[str] = None
+    """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
+    hf_repo_url: Optional[str] = None
+    """The url of the saved model in the Hugging Face Hub (will be autoset)"""
+    output_dir: Optional[str] = None
+    """Where to save the model"""
+
     # optimizer args
     eps: float = 1e-5
     """The epsilon value for the optimizer"""
@@ -83,6 +103,8 @@ class Args:
     """Which scheduler to use"""
     warm_up_steps: int = 0
     """Number of warm up steps for the scheduler"""
+    gradient_checkpointing: bool = True
+    """Whether to use gradient checkpointing"""
 
     # various batch sizes
     num_train_epochs: int = 1
@@ -112,7 +134,9 @@ class Args:
     local_dataloader_batch_size: Optional[int] = None
     """The batch size per GPU for the dataloader"""
 
-    # online DPO specific args
+    # online settings
+    num_epochs: int = 4
+    """the number of epochs to train"""
     num_mini_batches: int = 1
     """Number of minibatches to split a batch into"""
     local_mini_batch_size: Optional[int] = None
@@ -121,6 +145,10 @@ class Args:
     """the mini batch size across GPUs"""
     local_rollout_forward_batch_size: int = 64
     """per rank no grad forward pass in the rollout phase"""
+    reward_model_path: str = "EleutherAI/pythia-160m"
+    """the path to the reward model"""
+
+    # generation config
     response_length: int = 53
     """the length of the response"""
     stop_token: Optional[Literal["eos", "period"]] = None
@@ -131,40 +159,18 @@ class Args:
     """stop only after this many tokens"""
     temperature: float = 0.7
     """the sampling temperature"""
-    penalty_reward_value: int = -1
+    penalty_reward_value: float = -1.0
     """the reward value for responses that do not contain `stop_token_id`"""
     non_stop_penalty: bool = False
     """whether to penalize responses that do not contain `stop_token_id`"""
-    reward_model_path: str = "EleutherAI/pythia-160m"
-    """the path to the reward model"""
-    num_epochs: int = 4
-    """the number of epochs to train"""
-    num_generation_per_prompt: int = 2
-    """the number of generations per prompt (currently only support 2)"""
+
+    # online DPO specific args
     beta: float = 0.05
     """the beta value of the RLHF objective (KL coefficient)"""
+    num_generation_per_prompt: int = 2
+    """the number of generations per prompt (currently only support 2)"""
     loss_type: Literal["sigmoid", "ipo"] = "sigmoid"
     """the loss type for the DPO algorithm"""
-
-    # wandb and HF tracking configs
-    with_tracking: bool = False
-    """If toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "open_instruct_internal"
-    """The wandb's project name"""
-    wandb_entity: Optional[str] = None
-    """The entity (team) of wandb's project"""
-    push_to_hub: bool = True
-    """Whether to upload the saved model to huggingface"""
-    hf_entity: Optional[str] = None
-    """The user or org name of the model repository from the Hugging Face Hub"""
-    hf_repo_id: Optional[str] = None
-    """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_revision: Optional[str] = None
-    """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_url: Optional[str] = None
-    """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    output_dir: Optional[str] = None
-    """Where to save the model"""
 
 
 def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig) -> Accelerator:
@@ -188,11 +194,12 @@ def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig
     )
     args.num_training_steps = args.total_episodes // args.batch_size
     args.eval_freq = max(1, args.num_training_steps // args.num_evals)
+    # DPO logic: repeats the same prompt `num_generation_per_prompt` times
     args.local_dataloader_batch_size = exact_div(
         args.local_batch_size,
         args.num_generation_per_prompt,
         "`local_batch_size` must be a multiple of `num_generation_per_prompt`",
-    )  # DPO logic: repeats the same prompt `num_generation_per_prompt` times
+    )
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = f"{args.exp_name}__{model_config.model_name_or_path.replace('/', '_')}"
@@ -232,7 +239,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             "hyperparameters",
             "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
         )
-    device = accelerator.device
+    device = torch.device(f"cuda:{accelerator.local_process_index}")
     random.seed(local_seed)
     np.random.seed(local_seed)
     torch.manual_seed(local_seed)
@@ -265,22 +272,28 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             wandb.log({"token_length": wandb.Image(f"runs/{args.run_name}/token_length.png")})
 
     # create the model and optimizer
-    model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+    policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
         model_config.model_name_or_path,
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
+        use_cache=False,
     )
     ref_model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
         model_config.model_name_or_path,
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
+        use_cache=False,
     )
     reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
         args.reward_model_path,
         num_labels=1,
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
+        use_cache=False,
     )
+    model = policy
+    if args.gradient_checkpointing:
+        model.gradient_checkpointing_enable()
     for module in [model, ref_model, reward_model]:
         disable_dropout_in_model(module)
     if args.stop_token:
@@ -356,31 +369,32 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     model.train()
 
     # training loop
+    start_time = time.time()
     for training_step in range(1, args.num_training_steps + 1):
         episode += 1 * args.batch_size
         scheduler.step()
         data = next(iter_dataloader)
 
-        # (optionally) evaluate the model
-        if args.num_evals > 0 and (training_step - 1) % args.eval_freq == 0:
-            table = evaluate(
-                model,
-                reward_model,
-                accelerator,
-                args.stop_token_id,
-                eval_dataloader,
-                tokenizer,
-                args.response_length,
-            )
-            for key in table:
-                table[key] = gather_object(table[key])
-            df = pd.DataFrame(table)
-            if accelerator.is_main_process:
-                if args.with_tracking:
-                    wandb.log({"sample_completions": wandb.Table(dataframe=df)})
-                else:
-                    print_rich_table(df)
-            del table, df
+        # # (optionally) evaluate the model
+        # if args.num_evals > 0 and (training_step - 1) % args.eval_freq == 0:
+        #     table = evaluate(
+        #         model,
+        #         reward_model,
+        #         accelerator,
+        #         args.stop_token_id,
+        #         eval_dataloader,
+        #         tokenizer,
+        #         args.response_length,
+        #     )
+        #     for key in table:
+        #         table[key] = gather_object(table[key])
+        #     df = pd.DataFrame(table)
+        #     if accelerator.is_main_process:
+        #         if args.with_tracking:
+        #             wandb.log({"sample_completions": wandb.Table(dataframe=df)})
+        #         else:
+        #             print_rich_table(df)
+        #     del table, df
 
         with torch.no_grad():
             queries = data[INPUT_IDS_PROMPT_KEY].to(device)
@@ -401,6 +415,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     generation_config,
                 )
 
+            training_time_start = time.time()
             for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
                 query = queries[i : i + args.local_rollout_forward_batch_size]
                 query_response = query_responses[i : i + args.local_rollout_forward_batch_size]
@@ -466,9 +481,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
             # 4. compute rewards
             kl = logprobs - ref_logprobs
-            # breakpoint()
-            non_score_reward = (-args.beta * kl).sum(1)
-            rlhf_reward = scores + non_score_reward
+            non_score_reward = -args.beta * kl
+            non_score_reward_sum = non_score_reward.sum(1)
+            rlhf_reward = scores + non_score_reward_sum
 
             # num_examples should be same as args.local_batch_size divided by 2
             num_examples = scores.size(0) // 2
@@ -578,7 +593,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                             )
                     gradient_accumulation_idx += 1
                 minibatch_idx += 1
-                # del everything and empty cache
                 # fmt: off
                 del (
                     loss, logits, concat_output, concat_query_responses,
@@ -586,37 +600,39 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     chosen_responses, rejected_responses,
                 )
                 # fmt: on
+                # del everything and empty cache
                 torch.cuda.empty_cache()
         with torch.no_grad():
-            mean_kl = kl.sum(1).mean()
-            mean_entropy = (-logprobs).sum(1).mean()
-            mean_non_score_reward = non_score_reward.mean()
             g_chosen_reward = accelerator.gather(chosen_rewards_stats)
             g_rejected_reward = accelerator.gather(rejected_rewards_stats)
             metrics = {
                 "episode": episode,
+                "lr": scheduler.get_last_lr()[0],
                 "epoch": episode / len(train_dataset),
-                "objective/kl": accelerator.gather(mean_kl).mean().item(),
-                "objective/entropy": accelerator.gather(mean_entropy).mean().item(),
-                "objective/non_score_reward": accelerator.gather(mean_non_score_reward).mean().item(),
+                "time/from_scratch": time.time() - start_time,
+                "time/training": time.time() - training_time_start,
+                "val/num_stop_token_ids": (responses == args.stop_token_id).sum().item(),
+                "objective/kl": accelerator.gather(kl.sum(1).mean()).mean().item(),
+                "objective/entropy": accelerator.gather((-logprobs).sum(1).mean()).mean().item(),
+                "objective/non_score_reward": accelerator.gather(non_score_reward_sum).mean().item(),
                 "objective/rlhf_reward": accelerator.gather(rlhf_reward).mean().item(),
                 "objective/scores": accelerator.gather(scores.mean()).mean().item(),
                 "objective/scores_margin": accelerator.gather(scores_margin.mean()).mean().item(),
+                "objective/loss": accelerator.gather(loss_stats).mean().item(),
                 "rewards/chosen": g_chosen_reward.mean().item(),
                 "rewards/rejected": g_rejected_reward.mean().item(),
                 "rewards/accuracies": (g_chosen_reward > g_rejected_reward).float().mean().item(),
                 "rewards/margins": (g_chosen_reward - g_rejected_reward).mean().item(),
-                "loss/policy_avg": accelerator.gather(loss_stats).mean().item(),
                 "logps/chosen": accelerator.gather(chosen_logprobs_stats).mean().item(),
                 "logps/rejected": accelerator.gather(rejected_logprobs_stats).mean().item(),
-                "val/num_eos_tokens": (responses == tokenizer.eos_token_id).sum().item(),
-                "lr": scheduler.get_last_lr()[0],
             }
             if accelerator.is_main_process:
                 print_rich_single_line_metrics(metrics)
                 for key, value in metrics.items():
                     writer.add_scalar(key, value, episode)
-        del (kl, mean_kl, mean_entropy, scores, scores_margin)
+        del (queries, responses, postprocessed_responses, logprobs, ref_logprobs, sequence_lengths, scores)
+        del (metrics, kl, non_score_reward, rlhf_reward)
+        del (g_chosen_reward, g_rejected_reward)
         gc.collect()
         torch.cuda.empty_cache()
 

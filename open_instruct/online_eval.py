@@ -37,7 +37,6 @@ from open_instruct.model_utils import (
 )
 from vllm import SamplingParams, LLM
 
-from open_instruct.online_dpo_vllm_thread import VLLMGenerator
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -92,65 +91,6 @@ def evaluate(
 
             if len(table["query"]) >= max_sampled_texts:
                 break
-    return table
-
-
-def evaluate_vllm(
-    eval_data,
-    g_response_token_ids,
-    reward_model: nn.Module,
-    accelerator: Accelerator,
-    stop_token_id: int,
-    dataset: Dataset,
-    data_collator: SimpleGenerateCollator,
-    tokenizer: PreTrainedTokenizer,
-    response_length: int,
-    device: torch.device,
-    per_device_eval_batch_size: int,
-    world_size: int,
-    max_sampled_texts: int = 10,
-) -> Dict[str, List[str]]:
-    if accelerator.is_main_process:
-        vllm_generator.send_param_query("eval", unwrapped_model, eval_data, generation_config)
-        print(f"Waiting for response...{vllm_generator.queue_pairs['eval'].response_ids_Q.qsize()}")
-        all_response_token_ids = vllm_generator.get_responses("eval")
-
-    per_device_eval_batch_size = min(per_device_eval_batch_size, max_sampled_texts)
-    g_vllm_responses = torch.zeros(
-        (per_device_eval_batch_size * world_size, response_length),
-        device=device,
-        dtype=torch.long,
-    )
-    table = defaultdict(list)
-    local_rank = accelerator.local_process_index
-    with torch.no_grad():
-        for i in range(0, max_sampled_texts * world_size, per_device_eval_batch_size * world_size):
-            g_query = eval_data[i: i + per_device_eval_batch_size * world_size]
-            query = g_query[local_rank * per_device_eval_batch_size : (local_rank + 1) * per_device_eval_batch_size]
-            query = data_collator([{INPUT_IDS_PROMPT_KEY: item} for item in query])[INPUT_IDS_PROMPT_KEY].to(device)
-            
-            if accelerator.is_main_process:
-                DUMMY_PAD_TOKEN = 0  # we can't use tokenizer.pad_token_id because it's outside vocab and `torch.gather(all_logprob, 2, response.unsqueeze(-1))` will error out
-                g_response_token_ids = all_response_token_ids[i: i + per_device_eval_batch_size * world_size]
-                g_response_token_ids = [response + [DUMMY_PAD_TOKEN] * (response_length - len(response)) for response in g_response_token_ids]
-                g_response_token_ids = torch.tensor(g_response_token_ids, device=device)
-                g_vllm_responses[:] = g_response_token_ids
-            broadcast(g_vllm_responses, 0)
-
-            response = g_vllm_responses[local_rank * per_device_eval_batch_size : (local_rank + 1) * per_device_eval_batch_size]
-            context_length = query.shape[1]
-            postprocessed_response = response
-            if stop_token_id is not None:  # handle the edge case when stop_token_id exists but is 0
-                postprocessed_response = truncate_response(stop_token_id, tokenizer.pad_token_id, response)
-            table["query"].extend(tokenizer.batch_decode(query, skip_special_tokens=True))
-            model_response = tokenizer.batch_decode(postprocessed_response)
-            model_response = [item.replace(tokenizer.pad_token, "") for item in model_response]
-            table["model response"].extend(model_response)
-            postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
-            _, score, _ = get_reward(
-                reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
-            )
-            table["score"].extend(score.float().cpu().numpy())
     return table
 
 
