@@ -162,6 +162,10 @@ def get_datasets(beaker_datasets, no_mount_nfs):
                 source=beaker.DataSource(host_path="/net/nfs.cirrascale"),
                 mount_path="/net/nfs.cirrascale",
             ),
+            beaker.DataMount(
+                source=beaker.DataSource(host_path="/net/nfs.cirrascale"),
+                mount_path="/net/nfs", # this is an alias: keep it because some people use it
+            ),
         ]
     for beaker_dataset in beaker_datasets:
         to_append = beaker.DataMount(
