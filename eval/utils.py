@@ -2,12 +2,51 @@ import torch
 import tqdm
 import json
 import time
+import functools
 import asyncio
 import os
 from importlib import import_module
 from transformers import StoppingCriteria
-from eval.dispatch_openai_requests import dispatch_openai_chat_requesets, dispatch_openai_prompt_requesets
 from huggingface_hub import HfApi
+
+from eval.dispatch_openai_requests import dispatch_openai_chat_requesets, dispatch_openai_prompt_requesets
+
+
+# from open_instruct.utils
+def retry_on_exception(max_attempts=4, delay=1, backoff=2):
+    """
+    Retry a function on exception. Useful for HF API calls that may fail due to
+    network issues. E.g., https://beaker.org/ex/01J69P87HJQQ7X5DXE1CPWF974
+    `huggingface_hub.utils._errors.HfHubHTTPError: 429 Client Error`
+
+    We can test it with the following code.
+    @retry_on_exception(max_attempts=4, delay=1, backoff=2)
+    def test():
+        raise Exception("Test exception")
+
+    test()
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            attempts = 0
+            local_delay = delay
+            while attempts < max_attempts:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    attempts += 1
+                    if attempts == max_attempts:
+                        raise e
+                    print(f"Attempt {attempts} failed. Retrying in {local_delay} seconds...")
+                    time.sleep(local_delay)
+                    local_delay *= backoff
+            return None
+
+        return wrapper
+
+    return decorator
 
 
 class KeyWordsCriteria(StoppingCriteria):
