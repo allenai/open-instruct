@@ -63,11 +63,6 @@ beaker image create open_instruct -n open_instruct -w ai2/$(whoami)
 If you are internally at AI2, you can use this pre-built beaker image `hamishivi/open-instruct-eval` (most recent version [here](https://beaker.org/im/01J2CKY81A6N1WG5QS08Y3WNM5/details)). For finetuning, you can use `hamishivi/open-instruct-public` (most recent version [here](https://beaker.org/im/01J2CQFX7076PDHZJR2GB0C3A9/details)). I will try to update these periodically.
 
 
-**Important for OLMo users:** Note that due to version conflicts between deepspeed and vLLM, we cannot support OLMo inference and deepspeed within the same image (this will be fixed once deepspeed allows pydantic >= 2). To build a docker image suitable for inference/evaluation for OLMo, use:
-```bash
-docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 --build-arg REQUIRE=requirements-olmo.txt -f Dockerfile.olmo . -t <your tag here>
-```
-
 For training, you can use the previous image.
 
 ### Developing
@@ -89,8 +84,7 @@ make quality
 ├── open_instruct/              <- Source code (flat)
 ├── quantize/                   <- Scripts for quantization
 ├── scripts/                    <- Core training and evaluation scripts
-├── Dockerfile                  <- Main Dockerfile
-└── Dockerfile.olmo             <- Dockerfile for OLMo users (version conflict currently.)
+└── Dockerfile                  <- Dockerfile
 ```
 
 ## Training
@@ -203,11 +197,13 @@ python scripts/submit_eval_jobs.py \
       --is_tuned --workspace tulu-3-results \
       --preemptible \
       --use_hf_tokenizer_template \
-      --beaker_image nathanl/open_instruct_olmo_auto \
+      --beaker_image nathanl/open_instruct_auto \
       --upload_to_hf allenai/tulu-3-evals \
       --run_oe_eval_experiments
 ```
 Replace location with your beaker ID, and model name with your model name (note this will affect experiment naming, so make it unique and memorable!). For HF models, use a name with `hf-<model-name>` for the model_name argument, and for location give the HF path (e.g. `meta-llama/Meta-Llama-3-8B-Instruct`). Note this assumes your model has a valid HF tokenizer chat template.
+
+You can then also add `--run_safety_evaluations` to run the [oe-safety evaluations](./docs/safety-eval/safety.md).
 
 To make this script work you have to clone the [following repository](https://github.com/allenai/oe-eval-internal/tree/main) to the top level directory of the open-instruct repository.
 
