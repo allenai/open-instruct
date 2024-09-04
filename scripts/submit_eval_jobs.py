@@ -532,15 +532,8 @@ for experiment_group in experiment_groups:
     # add HF hub upload if specified
     if args.upload_to_hf:
         if args.hf_upload_experiments is None or len(args.hf_upload_experiments) == 0:
-            # use defaults for tulu dev evals.
-            args.hf_upload_experiments = [
-                "MATH_cot",
-                "bbh_cot",
-                "trutufulqa",
-                "xstest",
-                "alpaca_eval",
-                "alpaca_eval_2",
-            ]
+            # by default, we dont upload oi-evals, only safety and oe-evals.
+            args.hf_upload_experiments = []
         if experiment_group not in args.hf_upload_experiments:
             print(f"Skipping HF upload for {experiment_group}")
         else:
