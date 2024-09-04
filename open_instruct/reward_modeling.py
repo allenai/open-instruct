@@ -185,9 +185,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         if is_beaker_job():
             beaker_config = maybe_get_beaker_config()
             # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
-            if len(beaker_config.beaker_dataset_ids) > 0:
+            if len(beaker_config.beaker_dataset_id_urls) > 0:
                 args.output_dir = "/output"
-            all_configs.update(beaker_config)
+            all_configs.update(vars(beaker_config))
 
         if args.with_tracking:
             import wandb
