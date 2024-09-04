@@ -1323,6 +1323,7 @@ source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
     { name = "antlr4-python3-runtime" },
+    { name = "beaker-py" },
     { name = "bitsandbytes" },
     { name = "datasets" },
     { name = "deepspeed" },
@@ -1368,6 +1369,7 @@ dev = [
 requires-dist = [
     { name = "accelerate", specifier = ">=0.33.0" },
     { name = "antlr4-python3-runtime", specifier = ">=4.13.2" },
+    { name = "beaker-py", specifier = ">=1.31.2" },
     { name = "bitsandbytes", specifier = ">=0.43.3" },
     { name = "datasets", specifier = ">=2.21.0" },
     { name = "deepspeed", specifier = ">=0.14.5" },
