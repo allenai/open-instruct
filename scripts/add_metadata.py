@@ -29,7 +29,7 @@ valid_model_types = ["sft", "dpo", "ppo", "merge", "reject", "online-dpo"]
 model_type = take_and_check_valid_input(f"Model type {valid_model_types}:", valid_model_types)
 wandb_link = input("Link to wandb run: ")
 beaker_datasets = [input("Beaker dataset: ")]
-base_model = input("Base model HF name (e.g. meta-llama/Meta-Llama-3.1-8B): ")
+base_model = input("Base model HF name (e.g. meta-llama/Meta-Llama-3.1-8B, or the starting SFT checkpoint for DPO/etc models): ")
 print("Thanks! Uploading metadata...")
 # construct metadata
 metadata = {
