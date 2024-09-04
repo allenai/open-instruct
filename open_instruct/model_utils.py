@@ -17,6 +17,7 @@
 from collections import defaultdict
 from rich.panel import Panel
 import itertools
+from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple, Union
@@ -37,8 +38,8 @@ from accelerate.state import AcceleratorState
 from huggingface_hub import HfApi
 from rich import print as rprint
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 try:
@@ -62,7 +63,7 @@ class ModelConfig:
     you must install this manually by running `pip install flash-attn --no-build-isolation`"""
     use_cache: Optional[bool] = None
     """Whether to use cache in the model."""
-    gradient_checkpointing: Optional[bool] = None
+    gradient_checkpointing: bool = False
     """Whether to use gradient checkpointing in the model."""
 
     # PEFT-related args
@@ -590,7 +591,7 @@ def print_rich_single_line_metrics(metrics):
         expand=False,
         border_style="bold green",
     )
-    
+
     # Print the panel
     rprint(panel)
 

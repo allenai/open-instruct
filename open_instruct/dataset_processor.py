@@ -22,17 +22,22 @@
 # * `max_length`, `max_target_length` in RM / DPO,
 # * `max_prompt_length` in DPO
 
+
+import copy
 import logging
 import math
 import multiprocessing
+import os
+from collections import defaultdict
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Dict, List, Optional, Union
 
 import matplotlib.pyplot as plt
 import torch
 from datasets import Dataset, DatasetDict
 from rich.console import Console
 from rich.text import Text
+from tqdm import tqdm
 from transformers import PreTrainedTokenizer
 
 logging.basicConfig(level=logging.INFO)
@@ -46,24 +51,35 @@ INPUT_IDS_REJECTED_KEY = "input_ids_rejected"
 ATTENTION_MASK_REJECTED_KEY = "attention_mask_rejected"
 INPUT_IDS_PROMPT_KEY = "input_ids_prompt"
 ATTENTION_MASK_PROMPT_KEY = "attention_mask_prompt"
-TOKENIZED_PREFERENCE_DATASET_KEYS = [
-    INPUT_IDS_CHOSEN_KEY,
-    # ATTENTION_MASK_CHOSEN_KEY,
-    INPUT_IDS_REJECTED_KEY,
-    # ATTENTION_MASK_REJECTED_KEY,
-    # INPUT_IDS_PROMPT_KEY,
-    # ATTENTION_MASK_PROMPT_KEY,
-]
 
 # NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
 # also we don't really need `ATTENTION_MASK_CHOSEN_KEY` and `ATTENTION_MASK_REJECTED_KEY`
 # since we are always padding from the right with a collator; however they might become
 # more useful if we want to do some sort of packing in the future. The nice thing is
 # that the tokenization logic would work for both DPO and RM training.
+TOKENIZED_PREFERENCE_DATASET_KEYS = [
+    INPUT_IDS_CHOSEN_KEY,
+    INPUT_IDS_REJECTED_KEY,
+    # ATTENTION_MASK_CHOSEN_KEY,
+    # ATTENTION_MASK_REJECTED_KEY,
+    # INPUT_IDS_PROMPT_KEY,
+    # ATTENTION_MASK_PROMPT_KEY,
+]
+
 
 # SFT dataset
+SFT_MESSAGE_KEY = "messages"
 INPUT_IDS_KEY = "input_ids"
+ATTENTION_MASK_KEY = "attention_mask"
+LABELS_KEY = "labels"
 
+# Binary dataset
+BINARY_LABEL_KEY = "binary_labels"
+BINARY_DATASET_KEYS = [
+    INPUT_IDS_KEY,
+    LABELS_KEY,
+    BINARY_LABEL_KEY,
+]
 
 # Chat templates
 # flake8: noqa
@@ -120,19 +136,28 @@ CHAT_TEMPLATES = {
 }
 # flake8: noqa
 
+# Performance tuning. Some rough numbers:
+APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU = 400
+FILTER_EXAMPLE_PER_SECOND_PER_CPU = 1130
+
 
 @dataclass
 class DatasetConfig:
     # dataset specs
-    dataset_name: str
-    dataset_train_split: str = "train"
-    dataset_eval_split: str = "test"
     chat_template: str = "simple_chat"
 
-    # columns names
+    # columns names for preference dataset
     preference_chosen_key: str = "chosen"
     preference_rejected_key: str = "rejected"
-    sft_messages_key: str = "messages"
+
+    # columns names for SFT dataset
+    sft_messages_key: str = SFT_MESSAGE_KEY
+
+    # columns names for binary dataset
+    binary_messages_key: str = SFT_MESSAGE_KEY
+    label: str = BINARY_LABEL_KEY
+    # extra setting for binary dataset
+    convert_preference_to_binary_dataset: bool = False
 
     # filter config
     max_token_length: Optional[int] = None
@@ -145,6 +170,9 @@ class DatasetConfig:
     load_from_cache_file: Optional[bool] = None
     num_proc: Optional[int] = None
 
+    # other config
+    train_only_on_prompt: bool = False
+
     # visualization configs
     ncols: int = 2
 
@@ -153,11 +181,22 @@ class DatasetConfig:
             self.num_proc = 1
             self.load_from_cache_file = False
         else:
-            self.num_proc = multiprocessing.cpu_count()
+            # beaker specific logic; we may get assigned 15.5 CPU, so we convert it to float then int
+            self.num_proc = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count())))
             self.load_from_cache_file = True
 
         if self.chat_template not in CHAT_TEMPLATES:
             raise ValueError(f"chat_template must be one of {list(CHAT_TEMPLATES.keys())}")
+
+
+def get_num_proc(dataset_len: int, num_available_cpus: int, example_per_second_per_cpu) -> int:
+    num_required_cpus = max(1, dataset_len // example_per_second_per_cpu)
+    return min(num_required_cpus, num_available_cpus)
+
+
+def select_nested(dataset: DatasetDict, max_examples_per_split: int):
+    """select the dataset nested in a DatasetDict"""
+    return {key: dataset[key].select(range(min(max_examples_per_split, len(dataset[key])))) for key in dataset}
 
 
 class DatasetProcessor:
@@ -177,12 +216,6 @@ class DatasetProcessor:
             logging.warn("No config provided, skipping filtering")
             return dataset
         raise NotImplementedError
-
-    def sanity_check_(self, dataset: DatasetDict):
-        """Sanity check the dataset by selecting a subset of samples to speed up tokenization: only useful for debugging"""
-        if self.config.sanity_check:
-            for key in dataset:
-                dataset[key] = dataset[key].select(range(min(self.config.sanity_check_max_samples, len(dataset[key]))))
 
     def get_token_length_stats(self, features: list[str], dataset: Union[Dataset, DatasetDict]):
         """Get token length statistics for the dataset"""
@@ -261,7 +294,7 @@ class PreferenceDatasetProcessor(DatasetProcessor):
 
         return dataset.map(
             tokenize_fn,
-            num_proc=self.config.num_proc,
+            num_proc=get_num_proc(len(dataset), self.config.num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
             load_from_cache_file=self.config.load_from_cache_file,
         )
 
@@ -283,7 +316,7 @@ class PreferenceDatasetProcessor(DatasetProcessor):
 
         filtered_dataset = dataset.filter(
             filter_fn,
-            num_proc=self.config.num_proc,
+            num_proc=get_num_proc(len(dataset), self.config.num_proc, FILTER_EXAMPLE_PER_SECOND_PER_CPU),
             load_from_cache_file=self.config.load_from_cache_file,
         )
         if isinstance(dataset, DatasetDict):
@@ -318,37 +351,45 @@ class PreferenceDatasetProcessor(DatasetProcessor):
 
 
 class SFTDatasetProcessor(DatasetProcessor):
-    def tokenize(self, dataset: Union[Dataset, DatasetDict]):
+    def tokenize(self, dataset: Dataset):
         def tokenize_fn(row):
             row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(
                 row[self.config.sft_messages_key][:-1],
                 add_generation_prompt=True,
             )
             row[INPUT_IDS_KEY] = self.tokenizer.apply_chat_template(row[self.config.sft_messages_key])
+            row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
+            labels = copy.deepcopy(row[INPUT_IDS_KEY])
+            if self.config.train_only_on_prompt:
+                labels[: len(row[INPUT_IDS_PROMPT_KEY])] = [-100] * len(row[INPUT_IDS_PROMPT_KEY])
+            row[LABELS_KEY] = labels
             return row
 
         return dataset.map(
             tokenize_fn,
-            num_proc=self.config.num_proc,
+            num_proc=get_num_proc(len(dataset), self.config.num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
             load_from_cache_file=self.config.load_from_cache_file,
+            desc="Tokenizing and reformatting SFT data",
         )
 
     def filter(self, dataset: Dataset):
         def filter_fn(row):
-            return (
-                len(row[INPUT_IDS_PROMPT_KEY]) <= self.config.max_prompt_token_lenth
-                if self.config.max_prompt_token_lenth is not None
-                else (
-                    True and len(row[INPUT_IDS_KEY]) <= self.config.max_token_length
-                    if self.config.max_token_length is not None
-                    else True
-                )
-            )
+            max_prompt_token_length_ok = True
+            if self.config.max_prompt_token_lenth is not None:
+                max_prompt_token_length_ok = len(row[INPUT_IDS_PROMPT_KEY]) <= self.config.max_prompt_token_lenth
+
+            max_token_length_ok = True
+            if self.config.max_token_length is not None:
+                max_token_length_ok = len(row[INPUT_IDS_KEY]) <= self.config.max_token_length
+
+            contain_some_labels = any(x != -100 for x in row[LABELS_KEY])
+            return max_prompt_token_length_ok and max_token_length_ok and contain_some_labels
 
         return dataset.filter(
             filter_fn,
-            num_proc=self.config.num_proc,
+            num_proc=get_num_proc(len(dataset), self.config.num_proc, FILTER_EXAMPLE_PER_SECOND_PER_CPU),
             load_from_cache_file=self.config.load_from_cache_file,
+            desc="Filtering SFT data",
         )
 
     def get_token_length_stats(self, dataset: Union[Dataset, DatasetDict]):
@@ -363,6 +404,16 @@ class SFTDatasetProcessor(DatasetProcessor):
         )
 
 
+def convert_preference_dataset_to_binary_dataset(ds: Dataset):
+    binary_ds = defaultdict(list)
+    for i in tqdm(range(len(ds))):
+        binary_ds[SFT_MESSAGE_KEY].append(ds[i]["chosen"])
+        binary_ds[BINARY_LABEL_KEY].append(True)
+        binary_ds[SFT_MESSAGE_KEY].append(ds[i]["rejected"])
+        binary_ds[BINARY_LABEL_KEY].append(False)
+    return Dataset.from_dict(binary_ds)
+
+
 def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
     i = 0
     console = Console()
@@ -375,11 +426,11 @@ def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
 
 
 class SimplePreferenceCollator:
-    def __init__(self, pad_token_id):
+    def __init__(self, pad_token_id: int):
         """Simple collator for preference dataset (always pad from the RIGHT)"""
         self.pad_token_id = pad_token_id
 
-    def __call__(self, batch):
+    def __call__(self, batch: List[Dict[str, int]]):
         """the input will have input_ids_chosen, input_ids_rejected"""
         # Find max length in the batch
         max_length_chosen = -1
@@ -449,3 +500,14 @@ class SimpleGenerateCollator:
         return {
             INPUT_IDS_PROMPT_KEY: padded_sequences,
         }
+
+
+if __name__ == "__main__":
+    # too little data; it should just use 1 CPU despite the number of available CPUs
+    assert get_num_proc(296, 120, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU) == 1
+
+    # try to determine the number of CPUs to use
+    assert get_num_proc(1500, 120, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU) == 3
+
+    # too much data; it should use all available CPUs
+    assert get_num_proc(1000000, 120, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU) == 120
