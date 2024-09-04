@@ -31,6 +31,7 @@ on:
   #     - '!open_instruct/README.md'
   #     - 'requirements.txt'
   #     - 'Dockerfile'
+  #     - '.github/workflows/push-image.yml'
   workflow_dispatch:  # This allows us to manually trigger a build through the GitHub UI.
 
 env:
@@ -44,6 +45,12 @@ jobs:
     if: (github.event_name != 'workflow_run') || (github.event.workflow_run.conclusion == 'success')
     steps:
       - uses: actions/checkout@v3
+
+      - uses: actions/checkout@v3
+        with:
+          repository: allenai/oe-eval-internal
+          path: './oe-eval-internal'
+          ssh-key: ${{ secrets.OE_EVAL_GIT_CLONE_ACCESS_PRIVATE_SSH_DEPLOY_KEY }}
 
       - name: Setup environment
         uses: ./.github/actions/setup

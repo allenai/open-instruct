@@ -37,16 +37,16 @@ do
     --model_name_or_path $generation_model \
     --dataset_start_idx $start_idx \
     --dataset_end_idx $end_idx \
-    --save_filename output/shards/$timestamp/$i.jsonl \
+    --save_filename /output/shards/$timestamp/$i.jsonl \
     --hf_repo_id $shared_generation_hf_repo_id \
     --no_add_timestamp \
     --push_to_hub \
     --num_completions $num_completions --tensor_parallel_size $num_gpus && \
     python open_instruct/rejection_sampling/rejection_sampling.py \
-    --input_filename output/shards/$timestamp/$i.jsonl \
+    --input_filename /output/shards/$timestamp/$i.jsonl \
     --model_names_or_paths $reward_model \
-    --save_filename output/shards/$timestamp/rs_$i.jsonl \
-    --save_filename_scores output/shards/$timestamp/scores_$i.jsonl \
+    --save_filename /output/shards/$timestamp/rs_$i.jsonl \
+    --save_filename_scores /output/shards/$timestamp/scores_$i.jsonl \
     --hf_repo_id $shared_rs_hf_repo_id \
     --hf_repo_id_scores $shared_scores_hf_repo_id \
     --no_add_timestamp \
