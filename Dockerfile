@@ -85,8 +85,12 @@ RUN python -m nltk.downloader punkt
 COPY open_instruct open_instruct
 
 # install the package in editable mode
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 COPY pyproject.toml .
-RUN pip install -e .
+COPY README.md .
+COPY uv.lock .
+RUN uv sync
+RUN uv sync --extra compile --no-build-isolation
 COPY .git .
 
 COPY eval eval
