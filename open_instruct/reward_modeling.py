@@ -179,11 +179,16 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     accelerator = calculate_runtime_args_and_accelerator(args, model_config)
     local_seed = args.seed + accelerator.process_index
 
-    if is_beaker_job():
-        beaker_config = maybe_get_beaker_config()
-
     # set up experiment tracking and seeds
     if accelerator.is_main_process:
+        all_configs = {**asdict(args), **asdict(dataset_config), **asdict(model_config)}
+        if is_beaker_job():
+            beaker_config = maybe_get_beaker_config()
+            # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
+            if len(beaker_config.beaker_dataset_ids) > 0:
+                args.output_dir = "/output"
+            all_configs.update(beaker_config)
+
         if args.with_tracking:
             import wandb
 
@@ -191,7 +196,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 project=args.wandb_project_name,
                 entity=args.wandb_entity,
                 sync_tensorboard=True,
-                config={**asdict(args), **asdict(dataset_config), **asdict(model_config), **asdict(beaker_config)},
+                config=all_configs,
                 name=args.run_name,
                 save_code=True,
                 tags=[args.exp_name] + get_wandb_tags(),
