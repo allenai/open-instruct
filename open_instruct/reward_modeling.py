@@ -67,6 +67,10 @@ class Args:
     """A dictionary of datasets (local or HF) to sample from for evaluation"""
     dataset_eval_splits: Optional[List[str]] = None
     """The dataset splits to use for evaluation"""
+    dataset_mixer_dict: Optional[dict] = None
+    """The dataset mixer as a dictionary"""
+    dataset_eval_mixer_dict: Optional[dict] = None
+    """The dataset eval mixer as a dictionary"""
 
     # common args
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -134,13 +138,13 @@ class Args:
     output_dir: Optional[str] = None
     """Where to save the model"""
 
+    def __post_init__(self):
+        self.dataset_mixer_dict = json.loads(self.dataset_mixer)
+        self.dataset_eval_mixer_dict = json.loads(self.dataset_eval_mixer)
+
 
 def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig) -> Accelerator:
     """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
-    if isinstance(args.dataset_mixer, str):
-        args.dataset_mixer = json.loads(args.dataset_mixer)
-    if isinstance(args.dataset_eval_mixer, str):
-        args.dataset_eval_mixer = json.loads(args.dataset_eval_mixer)
     accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
     args.world_size = accelerator.num_processes
     args.local_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps
@@ -212,7 +216,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     dataset_dict = DatasetDict()
     dataset_processor = PreferenceDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
     train_dataset = combine_dataset(
-        args.dataset_mixer,
+        args.dataset_mixer_dict,
         splits=args.dataset_train_splits,
         columns_to_keep=["chosen", "rejected"],
     )
@@ -227,7 +231,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     eval_dataset = None
     if args.dataset_eval_mixer is not None:
         eval_dataset = combine_dataset(
-            args.dataset_eval_mixer,
+            args.dataset_eval_mixer_dict,
             splits=args.dataset_eval_splits,
             columns_to_keep=["chosen", "rejected"],
         )

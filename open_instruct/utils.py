@@ -463,13 +463,12 @@ def combine_dataset(
             [col for col in dataset.column_names if col not in (columns_to_keep + ["id"])]
         )
         datasets.append(dataset)
-    
-    datasets = concatenate_datasets(datasets)
 
+    datasets = concatenate_datasets(datasets)
 
     # optional save
     if save_data_dir:
-        datasets.to_json(save_data_dir + f"mixed_ds.json")
+        datasets.to_json(save_data_dir + "mixed_ds.json")
 
     if not keep_ids:
         # remove id column
@@ -477,7 +476,6 @@ def combine_dataset(
             datasets = datasets.remove_columns("id")
 
     return datasets
-
 
 
 # ----------------------------------------------------------------------------
