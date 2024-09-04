@@ -148,6 +148,10 @@ def get_env_vars(pure_docker_mode, no_mount_hf_cache, beaker_secrets, whoami):
                 name="HF_ASSETS_CACHE",
                 value=os.getenv("HF_ASSETS_CACHE"),
             ),
+            beaker.EnvVar(
+                name="UV_CACHE_DIR",
+                value=os.getenv("UV_CACHE_DIR"),
+            ),
         ])
 
     return env_vars
