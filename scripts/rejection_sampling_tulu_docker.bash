@@ -4,7 +4,7 @@
 reward_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo-RM
 # reward_model_path=L3.18B-RM
 generation_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo
-num_completions=256
+num_completions=64
 priority=normal
 image=nathanl/open_instruct_auto
 # image=costah/open_instruct_rs
@@ -20,7 +20,7 @@ shared_scores_hf_repo_id=scores_$timestamp
 generation_model=/generation_model
 reward_model=/reward_model
 sft_dataset=ai2-adapt-dev/rs-base-mix-L3.1-8B-generations
-on_jupyter=false
+on_jupyter=true
 num_gpus=1
 mkdir -p output/shards/$timestamp
 
