@@ -48,7 +48,7 @@ for _ in range(3):
         api = HfApi(token=os.getenv("HF_TOKEN", None))
         api.upload_file(
             path_or_fileobj="metadata.json",
-            path_in_repo=f"results2/{model_name}",
+            path_in_repo=f"results2/{model_name}/metadata.json",
             repo_id="allenai/tulu-3-evals",
             repo_type="dataset",
         )
