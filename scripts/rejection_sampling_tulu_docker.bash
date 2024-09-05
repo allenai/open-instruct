@@ -20,7 +20,7 @@ shared_scores_hf_repo_id=scores_$timestamp
 generation_model=/generation_model
 reward_model=/reward_model
 sft_dataset=ai2-adapt-dev/rs-base-mix-L3.1-8B-generations
-on_jupyter=false
+on_jupyter=true
 num_gpus=1
 mkdir -p output/shards/$timestamp
 
