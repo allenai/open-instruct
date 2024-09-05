@@ -199,13 +199,17 @@ python scripts/submit_eval_jobs.py \
       --use_hf_tokenizer_template \
       --beaker_image nathanl/open_instruct_auto \
       --upload_to_hf allenai/tulu-3-evals \
-      --run_oe_eval_experiments
+      --run_oe_eval_experiments \
+      --run_safety_evaluations \
+      --skip_oi_evals
 ```
 Replace location with your beaker ID, and model name with your model name (note this will affect experiment naming, so make it unique and memorable!). For HF models, use a name with `hf-<model-name>` for the model_name argument, and for location give the HF path (e.g. `meta-llama/Meta-Llama-3-8B-Instruct`). Note this assumes your model has a valid HF tokenizer chat template.
 
-You can then also add `--run_safety_evaluations` to run the [oe-safety evaluations](./docs/safety-eval/safety.md).
-
 To make this script work you have to clone the [following repository](https://github.com/allenai/oe-eval-internal/tree/main) to the top level directory of the open-instruct repository.
+
+You can additionally run other evaluations in this repository through varied arguments to the script.
+
+You can also upload metadata via the `scripts/add_metadata.py` script. Just run `python scripts/add_metadata.py` and follow the prompts.
 
 ### Human evaluation
 

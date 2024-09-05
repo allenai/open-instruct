@@ -91,6 +91,7 @@ parser.add_argument("--upload_to_hf", type=str, default=None, help="If given, up
 parser.add_argument("--hf_upload_experiments", type=str, nargs="*", default=None, help="Upload given experiment to the Hugging Face model hub.")
 parser.add_argument("--run_oe_eval_experiments", action="store_true", help="Run the OE eval tool and experiments too.")
 parser.add_argument("--run_safety_evaluations", action="store_true", help="Run the OE safety evaluations too.")
+parser.add_argument("--skip_oi_evals", action="store_true", help="Don't run open instruct evals.")
 args = parser.parse_args()
 
 
@@ -531,15 +532,8 @@ for experiment_group in experiment_groups:
     # add HF hub upload if specified
     if args.upload_to_hf:
         if args.hf_upload_experiments is None or len(args.hf_upload_experiments) == 0:
-            # use defaults for tulu dev evals.
-            args.hf_upload_experiments = [
-                "MATH_cot",
-                "bbh_cot",
-                "trutufulqa",
-                "xstest",
-                "alpaca_eval",
-                "alpaca_eval_2",
-            ]
+            # by default, we dont upload oi-evals, only safety and oe-evals.
+            args.hf_upload_experiments = []
         if experiment_group not in args.hf_upload_experiments:
             print(f"Skipping HF upload for {experiment_group}")
         else:
@@ -555,19 +549,20 @@ for experiment_group in experiment_groups:
 
 # Create an experiment that runs all the eval tasks.
 
-experiment_name = f"open_instruct_eval_{model_name}_{today}" 
-d["description"] = experiment_name
-d["tasks"] = eval_task_specs
-# if configs/beaker_configs/auto_created doesn't exist, create it with os
-if not os.path.exists("configs/beaker_configs/auto_created"):
-    os.makedirs("configs/beaker_configs/auto_created")
-fn = "configs/beaker_configs/auto_created/{}.yaml".format(experiment_name)
-os.makedirs(os.path.dirname(fn), exist_ok=True)
-with open(fn, "w") as file:
-    yaml.dump(d, file, default_flow_style=True)
+if not args.skip_oi_evals:
+    experiment_name = f"open_instruct_eval_{model_name}_{today}" 
+    d["description"] = experiment_name
+    d["tasks"] = eval_task_specs
+    # if configs/beaker_configs/auto_created doesn't exist, create it with os
+    if not os.path.exists("configs/beaker_configs/auto_created"):
+        os.makedirs("configs/beaker_configs/auto_created")
+    fn = "configs/beaker_configs/auto_created/{}.yaml".format(experiment_name)
+    os.makedirs(os.path.dirname(fn), exist_ok=True)
+    with open(fn, "w") as file:
+        yaml.dump(d, file, default_flow_style=True)
 
-cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
-subprocess.Popen(cmd, shell=True)
+    cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
+    subprocess.Popen(cmd, shell=True)
 
 if args.run_oe_eval_experiments:
     # if so, run oe-eval. We assume it is cloned in the top-level repo directory.

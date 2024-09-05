@@ -39,6 +39,8 @@ def main(args: Args, beaker_runtime_config: BeakerRuntimeConfig):
                 model_name=args.model_name,
                 location=beaker_dataset_ids[0],
                 run_oe_eval_experiments=True,
+                run_safety_evaluations=True,
+                skip_oi_evals=True,
             )
             return
         time.sleep(args.check_interval_seconds)
