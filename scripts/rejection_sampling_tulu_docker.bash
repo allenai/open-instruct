@@ -98,4 +98,5 @@ else
     --gpus $num_gpus -- $command
 fi
 
+echo $timestamp
 echo "All shards submitted"
