@@ -206,7 +206,7 @@ def make_task_spec(args, command, i, beaker_secrets, whoami):
 def main():
     args, commands = get_args()
     if args.workspace:
-        beaker_client = beaker.Beaker.from_env(default_workspace=args.workspace)
+        beaker_client = beaker.Beaker.from_env(default_workspace=args.workspace, timeout=120)
     else:
         beaker_client = beaker.Beaker.from_env()
 
