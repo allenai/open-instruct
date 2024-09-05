@@ -4,7 +4,7 @@
 reward_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo-RM
 # reward_model_path=L3.18B-RM
 generation_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo
-num_completions=4
+num_completions=16
 priority=normal
 image=nathanl/open_instruct_auto-f89d7e4-10726144311
 # image=nathanl/open_instruct_auto
