@@ -3,7 +3,7 @@ import os
 import random
 import time
 from dataclasses import asdict, dataclass
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -139,8 +139,20 @@ class Args:
     """Where to save the model"""
 
     def __post_init__(self):
-        self.dataset_mixer_dict = json.loads(self.dataset_mixer)
-        self.dataset_eval_mixer_dict = json.loads(self.dataset_eval_mixer)
+        self.dataset_mixer_dict, self.dataset_mixer = process_dataset_mixer(self.dataset_mixer)
+        if self.dataset_eval_mixer is not None:
+            self.dataset_eval_mixer_dict, self.dataset_eval_mixer = process_dataset_mixer(self.dataset_eval_mixer)
+
+
+def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
+    # if passed through cli: convert the dataset mixers to dictionaries
+    if isinstance(value, str):
+        return json.loads(value), value
+    # if passed through yaml: convert the dataset mixers to strings
+    elif isinstance(value, dict):
+        return value, json.dumps(value)
+    else:
+        raise ValueError("Input must be either a string or a dictionary")
 
 
 def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig) -> Accelerator:
@@ -178,6 +190,7 @@ def layer_init(layer: nn.Module, std: float):
 def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     accelerator = calculate_runtime_args_and_accelerator(args, model_config)
     local_seed = args.seed + accelerator.process_index
+    breakpoint()
 
     # set up experiment tracking and seeds
     if accelerator.is_main_process:

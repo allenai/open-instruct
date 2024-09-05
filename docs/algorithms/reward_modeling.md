@@ -80,6 +80,7 @@ To debug you can run the command with `--sanity_check`, this way it will only de
 python -i open_instruct/reward_modeling.py \
     --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}' \
     --dataset_train_splits train \
+    --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}' \
     --dataset_eval_splits test \
     --model_name_or_path EleutherAI/pythia-14m \
     --chat_template simple_concat_with_space \
