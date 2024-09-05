@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # my variables
-# reward_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo-RM
-reward_model_path=L3.18B-RM
+reward_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo-RM
+# reward_model_path=L3.18B-RM
 generation_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo
-num_completions=8
-priority=high
+num_completions=1
+priority=normal
 image=nathanl/open_instruct_auto
 # image=costah/open_instruct_rs
 
@@ -20,7 +20,7 @@ shared_scores_hf_repo_id=scores_$timestamp
 generation_model=/generation_model
 reward_model=/reward_model
 sft_dataset=ai2-adapt-dev/rs-base-mix-L3.1-8B-generations
-on_jupyter=true
+on_jupyter=false
 num_gpus=1
 mkdir -p output/shards/$timestamp
 
@@ -92,12 +92,14 @@ if [ "$on_jupyter" = true ]; then
 else
     echo "Running on Mason"
     python mason.py \
-    --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
-    --image nathanl/open_instruct_auto \
+    --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale ai2/s2-cirrascale-l40 \
+    --image $image \
     --pure_docker_mode \
     --priority $priority \
     --preemptible \
     --budget ai2/oe-adapt \
+    --beaker_dataset /reward_model:jacobm/$reward_model_path \
+    /generation_model:jacobm/$generation_model_path \
     --gpus $num_gpus -- $command
 fi
 
