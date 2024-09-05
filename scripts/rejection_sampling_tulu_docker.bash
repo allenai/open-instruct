@@ -20,7 +20,7 @@ shared_scores_hf_repo_id=scores_$timestamp
 generation_model=/generation_model
 reward_model=/reward_model
 sft_dataset=ai2-adapt-dev/rs-base-mix-L3.1-8B-generations
-on_jupyter=true
+on_jupyter=false
 num_gpus=1
 mkdir -p output/shards/$timestamp
 
@@ -92,7 +92,7 @@ if [ "$on_jupyter" = true ]; then
 else
     echo "Running on Mason"
     python mason.py \
-    --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale ai2/s2-cirrascale-l40 \
+    --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale \
     --image $image \
     --pure_docker_mode \
     --priority $priority \
