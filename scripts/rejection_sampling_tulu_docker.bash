@@ -2,9 +2,10 @@
 
 # my variables
 reward_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo-RM
+# reward_model_path=L3.18B-RM
 generation_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo
-num_completions=16
-priority=low
+num_completions=8
+priority=high
 
 mkdir -p output/shards
 num_prompts=296461
@@ -77,7 +78,7 @@ echo "Submitting all shards in one command"
 if [ "$on_jupyter" = true ]; then
     python mason.py \
         --cluster ai2/jupiter-cirrascale-2 \
-        --image costah/open_instruct_rs \
+        --image nathanl/open_instruct_auto \
         --pure_docker_mode \
         --priority $priority \
         --preemptible \
@@ -90,7 +91,7 @@ else
     echo "Running on Mason"
     python mason.py \
     --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
-    --image costah/open_instruct_rs \
+    --image nathanl/open_instruct_auto \
     --pure_docker_mode \
     --priority $priority \
     --preemptible \
