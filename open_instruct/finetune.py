@@ -14,13 +14,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import logging
 import math
 import os
 import random
 import subprocess
 import time
-import json
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
@@ -55,6 +55,7 @@ from transformers import (
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.utils import (
     ArgumentParserPlus,
+    check_hf_olmo_availability,
     clean_last_n_checkpoints,
     get_datasets,
     get_last_checkpoint_path,
@@ -448,6 +449,11 @@ def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=Fals
 
 
 def main(args: FlatArguments):
+    # try to import OLMo for automodel
+    if check_hf_olmo_availability():
+        # allows AutoModel... to work with not in transformers olmo models
+        import hf_olmo  # noqa
+
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
