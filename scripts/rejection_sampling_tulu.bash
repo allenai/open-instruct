@@ -6,10 +6,10 @@ reward_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo-RM
 generation_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo
 num_completions=8
 priority=high
+num_shards=32
 
 mkdir -p output/shards
 num_prompts=296461
-num_shards=100
 prompts_per_shard=$((num_prompts / num_shards))
 timestamp=$RANDOM
 shared_generation_hf_repo_id=generation_$timestamp
