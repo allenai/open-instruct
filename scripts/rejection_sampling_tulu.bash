@@ -1,17 +1,23 @@
 #!/bin/bash
 
+# my variables
+reward_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo-RM
+# reward_model_path=L3.18B-RM
+generation_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo
+num_completions=8
+priority=high
+
 mkdir -p output/shards
-num_prompts=1000
-num_shards=4
+num_prompts=296461
+num_shards=100
 prompts_per_shard=$((num_prompts / num_shards))
 timestamp=$RANDOM
 shared_generation_hf_repo_id=generation_$timestamp
 shared_rs_hf_repo_id=rejection_sampling_$timestamp
 shared_scores_hf_repo_id=scores_$timestamp
-num_completions=5
-generation_model=allenai/llama-3-tulu-2-8b
-reward_model=allenai/llama-3-tulu-2-8b-uf-mean-rm
-sft_dataset=allenai/tulu-v2-sft-mixture
+generation_model=/generation_model
+reward_model=/reward_model
+sft_dataset=ai2-adapt-dev/rs-base-mix-L3.1-8B-generations
 num_gpus=1
 mkdir -p output/shards/$timestamp
 
@@ -67,10 +73,13 @@ echo $command
 # Run the combined command
 echo "Submitting all shards in one command"
 python mason.py \
-    --cluster ai2/general-cirrascale-a5000 ai2/allennlp-cirrascale ai2/s2-cirrascale ai2/mosaic-cirrascale \
-    --priority low \
+    --cluster ai2/jupiter-cirrascale-2 \
+    --priority $priority \
     --preemptible \
-    --budget ai2/allennlp \
+    --no_mount_nfs --no_hf_cache_env \
+    --budget ai2/oe-adapt \
+    --beaker_dataset /reward_model:jacobm/$reward_model_path \
+    /generation_model:jacobm/$generation_model_path \
     --gpus $num_gpus -- $command
 
 echo "All shards submitted"
