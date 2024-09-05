@@ -1,6 +1,17 @@
 # Current preference datasets
 
+To build all the datasets at once (use this carefully), run:
+```
+sh scripts/data/preferences/prepare_all.sh
+```
+
 ## Chat
+Build these datasets (a subset only) with:
+```
+python scripts/data/preferences/webgpt.py --push_to_hub --hf_entity=ai2-adapt-dev
+python scripts/data/preferences/hh-harmless.py --push_to_hub --hf_entity=ai2-adapt-dev
+python scripts/data/preferences/hh-helpful.py --push_to_hub --hf_entity=ai2-adapt-dev
+```
 * [allenai/ultrafeedback_binarized_cleaned_train](https://huggingface.co/datasets/allenai/ultrafeedback_binarized_cleaned_train)
 * [ai2-adapt-dev/summarize_from_feedback](https://huggingface.co/datasets/ai2-adapt-dev/summarize_from_feedback)
 * [ai2-adapt-dev/hh-rlhf-helpful](https://huggingface.co/datasets/ai2-adapt-dev/hh-rlhf-helpful)
@@ -13,6 +24,10 @@
 
 
 ## UltraInteract Variants
+Build these datasets with:
+```
+python scripts/data/preferences/ultrainteract.py --push_to_hub --hf_entity=ai2-adapt-dev
+```
 Split by category and by selecting the longest conversations per prompt or a random length per prompt.
 From [UltraInteract_pair](https://huggingface.co/datasets/openbmb/UltraInteract_pair).
 
@@ -26,6 +41,11 @@ From [UltraInteract_pair](https://huggingface.co/datasets/openbmb/UltraInteract_
 * [ai2-adapt-dev/UltraInteract_pair_randomlen_Logic](https://huggingface.co/datasets/ai2-adapt-dev/UltraInteract_pair_randomlen_Logic)
 
 ## Tulu 2.5 Data
+Build these datasets with:
+```
+python scripts/data/preferences/split_tulu2.5_prefs.py --push_to_hub --hf_entity=ai2-adapt-dev
+
+```
 Split from [this dataset](https://huggingface.co/datasets/allenai/tulu-2.5-preference-data) for easier mixing:
 * [ai2-adapt-dev/tulu-2.5-prefs-alpaca_farm_gpt4_pref](https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-alpaca_farm_gpt4_pref)
 * [ai2-adapt-dev/tulu-2.5-prefs-alpaca_farm_human_pref](https://huggingface.co/datasets/ai2-adapt-dev/tulu-2.5-prefs-alpaca_farm_human_pref)
