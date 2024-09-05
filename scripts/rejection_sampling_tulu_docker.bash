@@ -6,6 +6,8 @@ reward_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo-RM
 generation_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo
 num_completions=8
 priority=high
+# image=nathanl/open_instruct_auto
+image=costah/open_instruct
 
 mkdir -p output/shards
 num_prompts=296461
@@ -78,7 +80,7 @@ echo "Submitting all shards in one command"
 if [ "$on_jupyter" = true ]; then
     python mason.py \
         --cluster ai2/jupiter-cirrascale-2 \
-        --image nathanl/open_instruct_auto \
+        --image $image \
         --pure_docker_mode \
         --priority $priority \
         --preemptible \
