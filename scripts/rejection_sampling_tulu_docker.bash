@@ -3,7 +3,7 @@
 # my variables
 reward_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo-RM
 generation_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo
-num_completions=2
+num_completions=4
 priority=low
 
 mkdir -p output/shards
