@@ -92,7 +92,7 @@ RUN pip install packaging
 RUN pip install flash-attn==2.6.3 --no-build-isolation
 # for newest olmo's, move to requirements when ai2-olmo supports torch 2.4
 # core is a dependency of ai2-olmo
-RUN pip install ai2-olmo-core==0.1.0
+RUN pip install ai2-olmo-core==0.1.0 omegaconf
 RUN pip install ai2-olmo>=0.5.0 --no-deps
 RUN pip install -r requirements.txt
 
