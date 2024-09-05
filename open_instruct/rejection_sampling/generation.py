@@ -95,7 +95,12 @@ async def generate_with_openai(model_name: str, data_list: list, args: Args, gen
 
 
 def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
-    llm = LLM(model=model_name_or_path, revision=revision, tokenizer_revision=revision, tensor_parallel_size=gen_args.tensor_parallel_size)
+    llm = LLM(
+        model=model_name_or_path,
+        revision=revision,
+        tokenizer_revision=revision,
+        tensor_parallel_size=gen_args.tensor_parallel_size,
+    )
 
     # filter out prompts which are beyond the model's max token length
     max_model_len = llm.llm_engine.scheduler_config.max_model_len
