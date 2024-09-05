@@ -8,7 +8,7 @@ set -ex
 # sadly, this is internal at Ai2 for now, but we are working on making it public!
 
 # Example usages:
-# ./scripts/eval/oe-eval.sh --model-name <model_name>  --model-location <model_path> [--hf-upload]
+# ./scripts/eval/oe-eval.sh --model-name <model_name>  --model-location <model_path> [--hf-upload] [--max-length <max_length>]
 # model_name should be a human-readable name for the model/run. This will be used in experiment tracking.
 # model_path should be
 #   (a) a huggingface name (e.g. allenai/llama-3-tulu-2-8b),
@@ -17,22 +17,26 @@ set -ex
 #   (d) (untested) an absolute path to a model on cirrascale nfs.
 # hf-upload is an optional flag to upload the results to huggingface for result tracking.
 # e.g.:
-# ./scripts/eval/oe-eval.sh --model-name olmo_17_7b_turbo_sft  --model-location beaker://01J28FDK3GDNA2C5E9JXBW1TP4 --hf-upload
+# ./scripts/eval/oe-eval.sh --model-name olmo_17_7b_turbo_sft  --model-location beaker://01J28FDK3GDNA2C5E9JXBW1TP4 --hf-upload --max-length 2048
 # ./scripts/eval/oe-eval.sh --model-name llama-3-tulu-2-dpo-8b --model-location allenai/llama-3-tulu-2-8b --hf-upload
 
 # Tulu eval dev suite is:
-# gsm8k::olmo1
+# gsm8k::tulu
+# bbh:cot::tulu
 # drop::llama3
-# minerva_math::llama3
-# codex_humaneval
-# codex_humanevalplus
+# minerva_math::tulu
+# codex_humaneval::tulu
+# codex_humanevalplus::tulu
 # ifeval::tulu
-# popqa
-# mmlu:mc::olmes
+# popqa::tulu
+# mmlu:mc::tulu
+# alpaca_eval_v2::tulu
+# truthfulqa::tulu
+
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--hf-upload] [--revision REVISION]"
+    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--hf-upload] [--revision REVISION] [--max-length <max_length>]"
     exit 1
 }
 
@@ -59,6 +63,7 @@ MODEL_NAME_SAFE=${MODEL_NAME//\//_}
 
 # Set defaults for optional arguments
 HF_UPLOAD="${HF_UPLOAD:-false}"
+MAX_LENGTH="${MAX_LENGTH:-4096}"
 
 # Set HF_UPLOAD_ARG if HF_UPLOAD is true
 if [ "$HF_UPLOAD" == "true" ]; then
@@ -67,8 +72,26 @@ else
     HF_UPLOAD_ARG=""
 fi
 
-# Run oe-eval with different tasks
-TASKS=("gsm8k::olmo1" "drop::llama3" "minerva_math::llama3" "codex_humaneval" "codex_humanevalplus" "ifeval::tulu" "popqa" "mmlu:mc::olmes")
+# Set REVISION if not provided
+if [[ -n "$REVISION" ]]; then
+    REVISION_ARG="--revision $REVISION"
+else
+    REVISION_ARG=""
+fi
+
+TASKS=(
+    "gsm8k::tulu"
+    "bbh:cot::tulu"
+    "drop::llama3"
+    "minerva_math::tulu"
+    "codex_humaneval::tulu"
+    "codex_humanevalplus::tulu"
+    "ifeval::tulu"
+    "popqa::tulu"
+    "mmlu:mc::tulu"
+    "alpaca_eval_v2::tulu"
+    "truthfulqa::tulu"
+)
 MODEL_TYPE="--model-type vllm"
 BATCH_SIZE_VLLM=10000
 BATCH_SIZE_OTHER=1
@@ -77,12 +100,16 @@ GPU_COUNT_OTHER=2
 MODEL_TYPE_OTHER=""
 
 for TASK in "${TASKS[@]}"; do
-    if [[ "$TASK" == "mmlu:mc::olmes" ]]; then
+    # mmlu and truthfulqa need different batch sizes and gpu counts
+    if [[ "$TASK" == "mmlu:mc::tulu" || "$TASK" == "truthfulqa::tulu" ]]; then
         BATCH_SIZE=$BATCH_SIZE_OTHER
         GPU_COUNT=$GPU_COUNT_OTHER
         MODEL_TYPE=$MODEL_TYPE_OTHER
     else
         BATCH_SIZE=$BATCH_SIZE_VLLM
+        MODEL_TYPE="--model-type vllm"
+        GPU_COUNT=1
     fi
-    python oe-eval-internal/oe_eval/launch.py --model "$MODEL_NAME" --beaker-workspace "ai2/tulu-3-results" --beaker-budget ai2/oe-adapt --task "$TASK" $MODEL_TYPE --batch-size "$BATCH_SIZE" --model-args {\"model_path\":\"${MODEL_LOCATION}\"} ${HF_UPLOAD_ARG} --gpus "$GPU_COUNT" --revision "$REVISION"
+    
+    python oe-eval-internal/oe_eval/launch.py --model "$MODEL_NAME" --beaker-workspace "ai2/tulu-3-results" --beaker-budget ai2/oe-adapt --task "$TASK" $MODEL_TYPE --batch-size "$BATCH_SIZE" --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" ${HF_UPLOAD_ARG} --gpus "$GPU_COUNT" --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key"}' ${REVISION_ARG}
 done
