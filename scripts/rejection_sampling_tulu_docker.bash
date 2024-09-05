@@ -8,7 +8,7 @@ priority=high
 
 mkdir -p output/shards
 num_prompts=296461
-num_shards=50
+num_shards=20
 prompts_per_shard=$((num_prompts / num_shards))
 timestamp=$RANDOM
 shared_generation_hf_repo_id=generation_$timestamp
