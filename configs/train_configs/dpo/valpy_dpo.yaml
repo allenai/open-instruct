@@ -2,9 +2,12 @@ model_name_or_path: /model
 model_revision: main
 use_flash_attn: true
 gradient_checkpointing: true
+dataset_mixer:
+  allenai/ultrafeedback_binarized_cleaned_train: 61814
+  ai2-adapt-dev/DaringAnteater-prefs-RM-filter: 1618
+  ai2-adapt-dev/WildChat-prefs-280824: 11487
 tokenizer_name: /model
 use_slow_tokenizer: true
-dataset_name: allenai/UF_anteater_wildchat_RM_cleaned
 max_seq_length: 2048
 preprocessing_num_workers: 16
 per_device_train_batch_size: 1

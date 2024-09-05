@@ -1,17 +1,22 @@
 #!/bin/bash
 
+# my variables
+reward_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo-RM
+generation_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo
+num_completions=8
+priority=high
+
 mkdir -p output/shards
-num_prompts=326154
-num_shards=100
+num_prompts=296461
+num_shards=32
 prompts_per_shard=$((num_prompts / num_shards))
 timestamp=$RANDOM
 shared_generation_hf_repo_id=generation_$timestamp
 shared_rs_hf_repo_id=rejection_sampling_$timestamp
 shared_scores_hf_repo_id=scores_$timestamp
-num_completions=5
-generation_model=/model
-reward_model=allenai/llama-3-tulu-2-8b-uf-mean-rm
-sft_dataset=ai2-adapt-dev/llama-3-tulu-v2-sft-mixture-with-subset-llama-405b-completions-code_alpaca-open_orca-gpt4_alpaca
+generation_model=/generation_model
+reward_model=/reward_model
+sft_dataset=ai2-adapt-dev/rs-base-mix-L3.1-8B-generations
 on_jupyter=true
 num_gpus=1
 mkdir -p output/shards/$timestamp
@@ -74,11 +79,12 @@ if [ "$on_jupyter" = true ]; then
         --cluster ai2/jupiter-cirrascale-2 \
         --image costah/open_instruct_rs \
         --pure_docker_mode \
-        --priority low \
+        --priority $priority \
         --preemptible \
         --no_mount_nfs --no_hf_cache_env \
-        --budget ai2/allennlp \
-        --beaker_dataset /model:hamishivi/llama-3-8b-tulu_v2_numina-WEIGHTED_MERGE-_dpo_norm_beta5_uf_1ep \
+        --budget ai2/oe-adapt \
+        --beaker_dataset /reward_model:jacobm/$reward_model_path \
+        /generation_model:jacobm/$generation_model_path \
         --gpus $num_gpus -- $command
 else
     echo "Running on Mason"
@@ -86,9 +92,9 @@ else
     --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
     --image costah/open_instruct_rs \
     --pure_docker_mode \
-    --priority low \
+    --priority $priority \
     --preemptible \
-    --budget ai2/allennlp \
+    --budget ai2/oe-adapt \
     --gpus $num_gpus -- $command
 fi
 
