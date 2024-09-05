@@ -15,6 +15,7 @@
 
 
 import itertools
+from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple, Union
@@ -34,8 +35,8 @@ from accelerate.state import AcceleratorState
 from huggingface_hub import HfApi
 from rich import print as rprint
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
@@ -55,7 +56,7 @@ class ModelConfig:
     you must install this manually by running `pip install flash-attn --no-build-isolation`"""
     use_cache: Optional[bool] = None
     """Whether to use cache in the model."""
-    gradient_checkpointing: Optional[bool] = None
+    gradient_checkpointing: bool = False
     """Whether to use gradient checkpointing in the model."""
 
     # PEFT-related args
@@ -509,19 +510,40 @@ def format_value(value):
 
 
 def print_rich_single_line_metrics(metrics):
-    formatted_metrics = []
+    # Create main table
+    table = Table(show_header=False, box=None)
+    table.add_column("Category", style="cyan")
+    table.add_column("Values", style="magenta")
+
+    # Group metrics by their prefix
+    grouped_metrics = defaultdict(list)
     for key, value in metrics.items():
-        # Shortening the key names
-        short_key = key.split("/")[-1] if "/" in key else key
+        category = key.split("/")[0] if "/" in key else "other"
+        grouped_metrics[category].append((key, value))
 
-        # Create a colored text object
-        metric_text = Text()
-        metric_text.append(short_key + ": ", style="bold cyan")  # Keys in cyan
-        metric_text.append(format_value(value), style="yellow")  # Values in yellow
+    # Sort groups by category name
+    for category in sorted(grouped_metrics.keys()):
+        values = grouped_metrics[category]
+        value_strings = []
+        for key, value in values:
+            # Use the last part of the key as the display name
+            display_name = key.split("/")[-1]
+            value_strings.append(f"{display_name}: {format_value(value)}")
 
-        formatted_metrics.append(metric_text)
+        # Join all values for this category into a single string
+        values_str = " | ".join(value_strings)
+        table.add_row(category, values_str)
 
-    rprint(" | ".join(str(metric) for metric in formatted_metrics))
+    # Create a panel with the table
+    panel = Panel(
+        table,
+        title="Metrics",
+        expand=False,
+        border_style="bold green",
+    )
+
+    # Print the panel
+    rprint(panel)
 
 
 def exact_div(a, b, custom_error_message=""):

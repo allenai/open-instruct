@@ -5,14 +5,109 @@
 
 ## Get started
 
+In the sections below, we will include some examples on how to train reward models and demonstrating different features. A couple of notes:
+
+* You should adjust your `per_device_train_batch_size` and `gradient_accumulation_steps` accordingly to maximize throughput
+* To launch jobs using docker and beaker, you should run the following, where `$NUM_GPUS` is the number of GPUs you want the job to use and $YOUR_COMMAND is the command to invoke training
+
+```bash
+python mason.py \
+    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
+    --pure_docker_mode --no_mount_nfs --no_hf_cache_env \
+    --priority preemptible \
+    --budget ai2/allennlp \
+    --gpus $NUM_GPUS -- $YOUR_COMMAND
+```
+
+
+For example:
+
+```bash
+# single GPU
+python mason.py \
+    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
+    --pure_docker_mode --no_mount_nfs --no_hf_cache_env \
+    --priority preemptible \
+    --budget ai2/allennlp \
+    --gpus 1 -- python open_instruct/reward_modeling.py \
+    --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_splits test \
+    --model_name_or_path EleutherAI/pythia-14m \
+    --chat_template simple_concat_with_space \
+    --learning_rate 3e-6 \
+    --per_device_train_batch_size 1 \
+    --per_device_eval_batch_size 1 \
+    --gradient_accumulation_steps 32 \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 1024 \
+    --num_train_epochs 1 \
+    --output_dir models/rm/rm \
+    --sanity_check \
+    --push_to_hub
+# 8 GPU
+python mason.py \
+    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
+    --pure_docker_mode --no_mount_nfs --no_hf_cache_env \
+    --priority preemptible \
+    --budget ai2/allennlp \
+    --gpus 8 -- accelerate launch  --config_file configs/ds_configs/deepspeed_zero2.yaml \
+    open_instruct/reward_modeling.py \
+    --dataset_mixer '{"trl-internal-testing/tldr-preference-trl-style": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-trl-style": 1.0}' \
+    --dataset_eval_splits validation \
+    --model_name_or_path EleutherAI/pythia-1b-deduped \
+    --chat_template simple_concat_with_space \
+    --learning_rate 3e-6 \
+    --per_device_train_batch_size 32 \
+    --per_device_eval_batch_size 32 \
+    --gradient_accumulation_steps 1 \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --num_train_epochs 1 \
+    --output_dir models/rm/rm_tldr_1b \
+    --with_tracking \
+    --push_to_hub
+```
+
+
+### Level 0: Debug
+
+To debug you can run the command with `--sanity_check`, this way it will only deal with 100 samples from the dataset and cut down dataset processing time.
+
+```bash
+python -i open_instruct/reward_modeling.py \
+    --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}' \
+    --dataset_eval_splits test \
+    --model_name_or_path EleutherAI/pythia-14m \
+    --chat_template simple_concat_with_space \
+    --learning_rate 3e-6 \
+    --per_device_train_batch_size 1 \
+    --per_device_eval_batch_size 1 \
+    --gradient_accumulation_steps 32 \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 1024 \
+    --num_train_epochs 1 \
+    --output_dir models/rm/rm \
+    --sanity_check \
+    --push_to_hub
+```
+
+
+### LEVEL 1: single GPU model training
+
 Here is a command to train a simple reward model on the sentiment dataset taken from [https://arxiv.org/abs/1909.08593](https://arxiv.org/abs/1909.08593) using the `pythia-1b-deduped` model. The training should take 2-10 minutes on a single GPU.
 
 
 ```bash
 python open_instruct/reward_modeling.py \
-    --dataset_name trl-internal-testing/sentiment-trl-style \
-    --dataset_train_split train \
-    --dataset_eval_split test \
+    --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}' \
+    --dataset_eval_splits test \
     --model_name_or_path EleutherAI/pythia-1b-deduped \
     --chat_template simple_concat_with_space \
     --learning_rate 3e-6 \
@@ -26,8 +121,113 @@ python open_instruct/reward_modeling.py \
     --with_tracking \
     --push_to_hub \
 ```
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/091a0tix
+* Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1725461002
 
-You would typically get a track run like https://wandb.ai/ai2-llm/open-instruct/runs/ztgnw64l
+
+### Level 1.1: Dataset mixing
+You can run the following commands to launch experiments. Note that you can mix datasets by specifying `--dataset_mixer` and `--dataset_train_splits`
+
+
+```bash
+python open_instruct/reward_modeling.py \
+    --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0, "ai2-adapt-dev/summarize_from_feedback_small": 1.0}' \
+    --dataset_train_splits train train \
+    --dataset_eval_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}' \
+    --dataset_eval_splits test \
+    --model_name_or_path EleutherAI/pythia-1b-deduped \
+    --chat_template simple_concat_with_space \
+    --learning_rate 3e-6 \
+    --per_device_train_batch_size 8 \
+    --per_device_eval_batch_size 8 \
+    --gradient_accumulation_steps 8 \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --num_train_epochs 1 \
+    --output_dir models/rm/rm_sentiment_1b \
+    --with_tracking \
+    --push_to_hub
+```
+
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/hop8gzww
+* Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1725459456
+
+
+### LEVEL 2: multi-gpu training using DS2 with the TL;DR summarization dataset
+```bash
+accelerate launch  --config_file configs/ds_configs/deepspeed_zero2.yaml \
+    open_instruct/reward_modeling.py \
+    --dataset_mixer '{"trl-internal-testing/tldr-preference-trl-style": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-trl-style": 1.0}' \
+    --dataset_eval_splits validation \
+    --model_name_or_path EleutherAI/pythia-1b-deduped \
+    --chat_template simple_concat_with_space \
+    --learning_rate 3e-6 \
+    --per_device_train_batch_size 32 \
+    --per_device_eval_batch_size 32 \
+    --gradient_accumulation_steps 1 \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --num_train_epochs 1 \
+    --output_dir models/rm/rm_tldr_1b \
+    --with_tracking \
+    --push_to_hub
+```
+
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/mlycj9qb
+* Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1725460477
+
+
+### LEVEL 2.1: multi-gpu training using DS2 with the anthropic HH dataset
+```bash
+accelerate launch --config_file configs/ds_configs/deepspeed_zero2.yaml \
+    open_instruct/reward_modeling.py \
+    --dataset_mixer '{"trl-internal-testing/hh-rlhf-trl-style": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"trl-internal-testing/hh-rlhf-trl-style": 1.0}' \
+    --dataset_eval_splits test \
+    --model_name_or_path EleutherAI/pythia-1b-deduped \
+    --chat_template simple_chat \
+    --learning_rate 3e-6 \
+    --per_device_train_batch_size 8 \
+    --per_device_eval_batch_size 8 \
+    --gradient_accumulation_steps 4 \
+    --max_token_length 2048 \
+    --max_prompt_token_lenth 1024 \
+    --num_train_epochs 1 \
+    --output_dir models/rm/rm_hh_1b \
+    --with_tracking \
+    --push_to_hub 
+```
+
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/h02kp2ua
+* Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1725459462
+
+
+
+
+### LEVEL 3: multi-gpu training using DS2 with the ultrafeedback dataset
+```bash
+accelerate launch --config_file examples/accelerate_configs/deepspeed_zero2.yaml \
+    open_instruct/rm_zephyr.py \
+    --dataset_mixer '{"HuggingFaceH4/ultrafeedback_binarized": 1.0}' \
+    --dataset_train_splits train_prefs \
+    --dataset_eval_mixer '{"HuggingFaceH4/ultrafeedback_binarized": 1.0}' \
+    --dataset_eval_splits test_prefs \
+    --chat_template zephyr \
+    --learning_rate 3e-6 \
+    --per_device_train_batch_size 1 \
+    --per_device_eval_batch_size 1 \
+    --gradient_accumulation_steps 32 \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 1024 \
+    --num_train_epochs 1 \
+    --bf16 \
+    --output_dir models/rm/rm_zephyr_7b \
+```
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/di1f6p0b
+* Trained model: https://huggingface.co/vwxyzjn/reward_modeling__allenai_llama-3-tulu-2-8b/tree/reward_modeling__1__1725459452
 
 
 
@@ -50,29 +250,30 @@ Finally, we also include samples
 ![reward modeling preference sample texts](reward_modeling_preference_sample_texts.png)
 
 
+## Explanation of the logged metrics
 
-## To debug
 
-To debug you can run the command with `--sanity_check`, this way it will only deal with 100 samples from the dataset and cut down dataset processing time.
+* `episode`: the global episode number training has gone through (e.g., `3000` means we have trained on 3000 data points already)
+* `epoch`: the fraction or multiple of the epoch (e.g., `2.7` means we have trained on the dataset for 2 epochs and 70% of the third epoch)
+* `train/rm/accuracy`: the training accuracy of the training batch
+* `train/rm/loss`: the logsigmoid loss of the reward modeling of the training batch
+* `train/rm/chosen_reward`: the reward of the chosen responses of the training batch
+* `train/rm/rejected_reward`: the reward of the rejected responses of the training batch
+* `train/rm/reward_margin`: the reward margin (chosen_reward - rejected_reward) of the training batch
+* `train/rm/lr`: the training learning rate
 
-```bash
-python -i open_instruct/reward_modeling.py \
-    --dataset_name trl-internal-testing/sentiment-trl-style \
-    --dataset_train_split train \
-    --dataset_eval_split test \
-    --model_name_or_path EleutherAI/pythia-14m \
-    --chat_template simple_concat_with_space \
-    --learning_rate 3e-6 \
-    --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 32 \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 1024 \
-    --num_train_epochs 1 \
-    --output_dir models/rm/rm \
-    --sanity_check \
-    --push_to_hub
-```
+
+We also have `eval/rm/accuracy`, `eval/rm/loss`, `eval/rm/chosen_rewards`, `eval/rm/rejected_rewards`, `eval/rm/reward_margin` for the evalation dataset.
+
+
+
+## Implementation details
+
+These are relevant implementation details on reward modeling:
+
+1. The tokenizer pads from the right: when the length of the data points differ, the tokenizer pads from the right
+1. Disable dropout in the model: this is actually an implementation detail in PPO training, but for consistency we also disable dropout in the reward model training (see p.3. in https://arxiv.org/pdf/1909.08593)
+1. Layer initialization: we initialize the score's weight according to `std=1 / np.sqrt(model.config.hidden_size + 1)` (see p. 11 in https://arxiv.org/abs/2009.01325)
 
 
 ## How does it work?
@@ -247,130 +448,3 @@ The `dataset_processor.get_token_length_visualization` will output the visualiza
 ### Model training
 
 Then given the tokenized datasets, we train on those using the logsigmoid loss. Namely `loss = -F.logsigmoid(chosen_rewards - rejected_rewards).mean()`. 
-
-
-## Explanation of the logged metrics
-
-
-* `episode`: the global episode number training has gone through (e.g., `3000` means we have trained on 3000 data points already)
-* `epoch`: the fraction or multiple of the epoch (e.g., `2.7` means we have trained on the dataset for 2 epochs and 70% of the third epoch)
-* `train/rm/accuracy`: the training accuracy of the training batch
-* `train/rm/loss`: the logsigmoid loss of the reward modeling of the training batch
-* `train/rm/chosen_reward`: the reward of the chosen responses of the training batch
-* `train/rm/rejected_reward`: the reward of the rejected responses of the training batch
-* `train/rm/reward_margin`: the reward margin (chosen_reward - rejected_reward) of the training batch
-* `train/rm/lr`: the training learning rate
-
-
-We also have `eval/rm/accuracy`, `eval/rm/loss`, `eval/rm/chosen_rewards`, `eval/rm/rejected_rewards`, `eval/rm/reward_margin` for the evalation dataset.
-
-
-## Implementation details
-
-These are relevant implementation details on reward modeling:
-
-1. The tokenizer pads from the right: when the length of the data points differ, the tokenizer pads from the right
-1. Disable dropout in the model: this is actually an implementation detail in PPO training, but for consistency we also disable dropout in the reward model training (see p.3. in https://arxiv.org/pdf/1909.08593)
-1. Layer initialization: we initialize the score's weight according to `std=1 / np.sqrt(model.config.hidden_size + 1)` (see p. 11 in https://arxiv.org/abs/2009.01325)
-
-
-## Experiment results
-
-
-
-```bash
-# LEVEL 1: single GPU model training; adjust your `per_device_train_batch_size` and
-# `gradient_accumulation_steps` accordingly
-# you can also use the `trl-internal-testing/descriptiveness-trl-style` dataset
-python open_instruct/reward_modeling.py \
-    --dataset_name trl-internal-testing/sentiment-trl-style \
-    --dataset_train_split train \
-    --dataset_eval_split test \
-    --model_name_or_path EleutherAI/pythia-1b-deduped \
-    --chat_template simple_concat_with_space \
-    --learning_rate 3e-6 \
-    --per_device_train_batch_size 32 \
-    --per_device_eval_batch_size 32 \
-    --gradient_accumulation_steps 1 \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 1024 \
-    --num_train_epochs 1 \
-    --output_dir models/rm/rm_sentiment_1b \
-    --with_tracking \
-    --push_to_hub \
-```
-
-* Tracked experiment: https://wandb.ai/ai2-llm/open-instruct/runs/ztgnw64l
-* Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1722961506
-
-
-
-```bash
-# LEVEL 2: multi-gpu training using DS2 with the TL;DR summarization dataset
-accelerate launch  --config_file configs/ds_configs/deepspeed_zero2.yaml \
-    open_instruct/reward_modeling.py \
-    --dataset_name trl-internal-testing/tldr-preference-trl-style \
-    --dataset_train_split train \
-    --dataset_eval_split validation \
-    --model_name_or_path EleutherAI/pythia-1b-deduped \
-    --chat_template simple_concat_with_space \
-    --learning_rate 3e-6 \
-    --per_device_train_batch_size 32 \
-    --per_device_eval_batch_size 32 \
-    --gradient_accumulation_steps 1 \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
-    --num_train_epochs 1 \
-    --output_dir models/rm/rm_tldr_1b \
-    --with_tracking \
-    --push_to_hub
-```
-
-* Tracked experiment: https://wandb.ai/ai2-llm/open-instruct/runs/etfpvan2
-* Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1722961863
-
-```bash
-# LEVEL 2: multi-gpu training using DS2 with the anthropic HH dataset
-accelerate launch --config_file configs/ds_configs/deepspeed_zero2.yaml \
-    open_instruct/reward_modeling.py \
-    --dataset_name trl-internal-testing/hh-rlhf-trl-style \
-    --dataset_train_split train \
-    --dataset_eval_split test \
-    --model_name_or_path EleutherAI/pythia-1b-deduped \
-    --chat_template simple_chat \
-    --learning_rate 3e-6 \
-    --per_device_train_batch_size 8 \
-    --per_device_eval_batch_size 8 \
-    --gradient_accumulation_steps 4 \
-    --max_token_length 2048 \
-    --max_prompt_token_lenth 1024 \
-    --num_train_epochs 1 \
-    --output_dir models/rm/rm_hh_1b \
-    --with_tracking \
-    --push_to_hub 
-```
-
-* Tracked experiment: https://wandb.ai/ai2-llm/open-instruct/runs/0uwj4pmt
-* Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1722962876
-
-
-
-```bash
-# TODO (Costa): to be tested
-# LEVEL 3: multi-gpu training using DS2 with the ultrafeedback dataset
-accelerate launch --config_file examples/accelerate_configs/deepspeed_zero2.yaml \
-    open_instruct/rm_zephyr.py \
-    --dataset_name HuggingFaceH4/ultrafeedback_binarized \
-    --dataset_train_split train_prefs \
-    --dataset_eval_split test_prefs \
-    --chat_template zephyr \
-    --learning_rate 3e-6 \
-    --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 32 \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 1024 \
-    --num_train_epochs 1 \
-    --bf16 \
-    --output_dir models/rm/rm_zephyr_7b \
-```
