@@ -21,6 +21,7 @@ python scripts/data/preferences/hh-helpful.py --push_to_hub --hf_entity=ai2-adap
 * [ai2-adapt-dev/DaringAnteater-prefs-RM-filter](https://huggingface.co/datasets/ai2-adapt-dev/DaringAnteater-prefs-RM-filter)
 * [ai2-adapt-dev/WildChat-prefs-280824](https://huggingface.co/datasets/ai2-adapt-dev/WildChat-prefs-280824)
 * [ai2-adapt-dev/helpsteer2-binarized-mean-aspects](https://huggingface.co/datasets/ai2-adapt-dev/helpsteer2-binarized-mean-aspects)
+* [ai2-adapt-dev/Skywork-Magpie](https://huggingface.co/datasets/ai2-adapt-dev/Skywork-Magpie): Subset of the [Skywork Preference Dataset](https://huggingface.co/datasets/Skywork/Skywork-Reward-Preference-80K-v0.1) for only the [Magpie](https://arxiv.org/abs/2406.08464) splits.
 
 More versions of HelpSteer2 exist. 
 They are created with:
@@ -38,6 +39,13 @@ Some examples include:
 * [ai2-adapt-dev/helpsteer-2-binarized-above-2.0-margin-0.5-ignore-verbosity](https://huggingface.co/datasets/ai2-adapt-dev/helpsteer-2-binarized-above-2.0-margin-0.5-ignore-verbosity)
 * [ai2-adapt-dev/helpsteer-2-binarized-ignore-verbosity](https://huggingface.co/datasets/ai2-adapt-dev/helpsteer-2-binarized-ignore-verbosity)
 * [ai2-adapt-dev/helpsteer2-binarized-nvidia-spec](https://huggingface.co/datasets/ai2-adapt-dev/helpsteer2-binarized-nvidia-spec)
+
+Also, specific splits of Nectar (randomly binarized from top 3 completions and a bottom completion) are included with:
+```
+python scripts/data/preferences/nectar.py --push_to_hub --hf_entity ai2-adapt-dev
+python scripts/data/preferences/nectar.py --push_to_hub --hf_entity ai2-adapt-dev
+```
+The default split is `lmsys-chat-1m`.
 
 ## UltraInteract Variants
 Build these datasets with:
