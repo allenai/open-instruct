@@ -70,10 +70,9 @@ class GenerationArgs:
 class DatasetArgs:
     dataset_name: str = None
     dataset_text_field: str = "prompt"
-    dataset_train_split: str = "train"
-    dataset_test_split: str = "validation"
+    split: str = "train"
     dataset_start_idx: int = 0
-    dataset_end_idx: Optional[int] = 100
+    dataset_end_idx: Optional[int] = None
     sanity_check: bool = False
     sanity_check_size: int = 100
 
@@ -100,10 +99,11 @@ def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids:
         revision=revision,
         tokenizer_revision=revision,
         tensor_parallel_size=gen_args.tensor_parallel_size,
+        max_model_len=gen_args.response_length,
     )
 
     # filter out prompts which are beyond the model's max token length
-    max_model_len = llm.llm_engine.scheduler_config.max_model_len
+    max_model_len = gen_args.response_length
     prompt_token_ids_len = len(prompt_token_ids)
     prompt_token_ids = [item for item in prompt_token_ids if len(item) < max_model_len]
     if len(prompt_token_ids) != prompt_token_ids_len:
@@ -146,14 +146,12 @@ def format_conversation(messages: list) -> str:
 
 def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
 
-    ds = load_dataset(dataset_args.dataset_name)
+    ds = load_dataset(dataset_args.dataset_name, split=dataset_args.split)
     if dataset_args.sanity_check:
-        for key in ds:
-            ds[key] = ds[key].select(range(min(dataset_args.sanity_check_size, len(ds[key]))))
+        ds = ds.select(range(min(dataset_args.sanity_check_size, len(ds))))
     if dataset_args.dataset_end_idx is None:
-        dataset_args.dataset_end_idx = len(ds[dataset_args.dataset_train_split])
-    for key in ds:
-        ds[key] = ds[key].select(range(dataset_args.dataset_start_idx, dataset_args.dataset_end_idx))
+        dataset_args.dataset_end_idx = len(ds)
+    ds = ds.select(range(dataset_args.dataset_start_idx, dataset_args.dataset_end_idx))
     pprint([dataset_args, args, gen_args])
 
     if "gpt-3.5" in args.model_name_or_path or "gpt-4" in args.model_name_or_path:
@@ -161,7 +159,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
             lambda x: {"prompt": format_conversation(x["messages"][:-1])},
             num_proc=NUM_CPUS_FOR_DATASET_MAP,
         )
-        messages = ds[dataset_args.dataset_train_split]["prompt"]
+        messages = ds["prompt"]
         responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args))
         outputs = [{"outputs": [{"text": response} for response in responses]}]
 
@@ -172,7 +170,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
             lambda x: {"prompt_token_ids": tokenizer.apply_chat_template(x["messages"][:-1])},
             num_proc=NUM_CPUS_FOR_DATASET_MAP,
         )
-        prompt_token_ids = ds[dataset_args.dataset_train_split]["prompt_token_ids"]
+        prompt_token_ids = ds["prompt_token_ids"]
         outputs = generate_with_vllm(args.model_name_or_path, args.revision, prompt_token_ids, gen_args)
 
     # Assuming we generate n=3 completions per prompt; the outputs will look like:
@@ -185,7 +183,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     # ...
     table = defaultdict(list)
     num_prompt_with_identical_completions = 0
-    for output, messages in zip(outputs, ds[dataset_args.dataset_train_split]["messages"]):
+    for output, messages in zip(outputs, ds["messages"]):
         # if the model completions are exactly the same across all completions per prompt, we can skip this
         if len(set(tuple(item["text"]) for item in output["outputs"])) == 1:
             num_prompt_with_identical_completions += 1
