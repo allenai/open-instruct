@@ -334,6 +334,9 @@ def main(args):
             if "mc" in args.metrics:
                 raise ValueError("OpenAI Chat engines does not support MC metrics.")
 
+    del model
+    torch.cuda.empty_cache()
+
     # run metrics
     print("Running metrics!")
 

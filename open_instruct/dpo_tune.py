@@ -341,6 +341,16 @@ class FlatArguments:
         default=3,
         metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
     )
+    load_balancing_loss: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to include a load balancing loss (for OLMoE) or not.",
+        },
+    )
+    load_balancing_weight: float = field(
+        default=0.001,
+        metadata={"help": "Weight for load balancing loss if applicable."},
+    )
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: Optional[str] = None
@@ -601,7 +611,9 @@ def main(args: FlatArguments):
         )
 
     if args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, trust_remote_code=args.trust_remote_code)
+        tokenizer = AutoTokenizer.from_pretrained(
+            args.tokenizer_name, use_fast=not args.use_slow_tokenizer, trust_remote_code=args.trust_remote_code
+        )
     elif args.model_name_or_path:
         tokenizer = AutoTokenizer.from_pretrained(
             args.model_name_or_path, use_fast=not args.use_slow_tokenizer, trust_remote_code=args.trust_remote_code
@@ -915,6 +927,7 @@ def main(args: FlatArguments):
         model.train()
         train_dataloader.set_epoch(epoch)
         total_loss = 0
+        total_aux_loss = 0
         if last_checkpoint_path and resume_step is not None:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint
             active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_step)
@@ -926,18 +939,18 @@ def main(args: FlatArguments):
         for step, batch in enumerate(active_dataloader):
             # dpo forward pass & loss
             with accelerator.accumulate(model):
-                policy_chosen_logps, policy_rejected_logps = concatenated_forward(
-                    model, batch, average_log_prob=average_log_prob
-                )
+                policy_chosen_logps, policy_rejected_logps, aux_loss = concatenated_forward(
+                    model, batch, average_log_prob=average_log_prob, output_router_logits=args.load_balancing_loss
+                )  # `aux_loss` is only used when `args.load_balancing_loss = True`
                 if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                     with torch.no_grad():
                         if args.use_lora:
                             with accelerator.unwrap_model(model).disable_adapter():
-                                reference_chosen_logps, reference_rejected_logps = concatenated_forward(
+                                reference_chosen_logps, reference_rejected_logps, _ = concatenated_forward(
                                     model, batch, average_log_prob=average_log_prob
                                 )
                         else:
-                            reference_chosen_logps, reference_rejected_logps = concatenated_forward(
+                            reference_chosen_logps, reference_rejected_logps, _ = concatenated_forward(
                                 reference_model, batch, average_log_prob=average_log_prob
                             )
                     losses, _, _ = dpo_loss(
@@ -971,6 +984,10 @@ def main(args: FlatArguments):
                     raise ValueError(f"Invalid dpo loss type {args.dpo_loss_type}.")
                 # TODO: metric logging
                 loss = losses.mean()
+                if args.load_balancing_loss:
+                    weighted_aux_loss = args.load_balancing_weight * aux_loss
+                    loss += weighted_aux_loss
+                    total_aux_loss += weighted_aux_loss.detach().float()
                 # We keep track of the loss at each logged step
                 total_loss += loss.detach().float()
                 accelerator.backward(loss)
@@ -991,16 +1008,27 @@ def main(args: FlatArguments):
                         / args.gradient_accumulation_steps
                         / args.logging_steps
                     )
-                    logger.info(f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}")
+                    metrics_to_log = {
+                        "learning_rate": lr_scheduler.get_last_lr()[0],
+                        "train_loss": avg_loss,
+                    }
+                    logger_str = f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}"
+                    if args.load_balancing_loss:
+                        avg_aux_loss = (
+                            accelerator.gather(total_aux_loss).mean().item()
+                            / args.gradient_accumulation_steps
+                            / args.logging_steps
+                        )
+                        logger_str += f" Aux Loss: {avg_aux_loss}"
+                        metrics_to_log["aux_loss"] = avg_aux_loss
+                    logger.info(logger_str)
                     if args.with_tracking:
                         accelerator.log(
-                            {
-                                "learning_rate": lr_scheduler.get_last_lr()[0],
-                                "train_loss": avg_loss,
-                            },
+                            metrics_to_log,
                             step=completed_steps,
                         )
                     total_loss = 0
+                    total_aux_loss = 0
 
                 if isinstance(checkpointing_steps, int):
                     if completed_steps % checkpointing_steps == 0:
