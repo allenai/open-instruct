@@ -22,6 +22,22 @@ python scripts/data/preferences/hh-helpful.py --push_to_hub --hf_entity=ai2-adap
 * [ai2-adapt-dev/WildChat-prefs-280824](https://huggingface.co/datasets/ai2-adapt-dev/WildChat-prefs-280824)
 * [ai2-adapt-dev/helpsteer2-binarized-mean-aspects](https://huggingface.co/datasets/ai2-adapt-dev/helpsteer2-binarized-mean-aspects)
 
+More versions of HelpSteer2 exist. 
+They are created with:
+```
+python scripts/data/preferences/helpsteer2.py --push_to_hub --min_score 2.5 --hf_entity=ai2-adapt-dev
+python scripts/data/preferences/helpsteer2.py --push_to_hub --min_score 2 --hf_entity=ai2-adapt-dev
+python scripts/data/preferences/helpsteer2.py --push_to_hub --min_score 2 --hf_entity=ai2-adapt-dev --aspects_to_ignore verbosity
+python scripts/data/preferences/helpsteer2.py --push_to_hub --hf_entity=ai2-adapt-dev --aspects_to_ignore verbosity
+```
+The binarization weighting that Nvidia recommends can be used with:
+```
+python scripts/data/preferences/helpsteer2_nvidia.py --push_to_hub --hf_entity ai2-adapt-dev
+```
+Some examples include:
+* [ai2-adapt-dev/helpsteer-2-binarized-above-2.0-margin-0.5-ignore-verbosity](https://huggingface.co/datasets/ai2-adapt-dev/helpsteer-2-binarized-above-2.0-margin-0.5-ignore-verbosity)
+* [ai2-adapt-dev/helpsteer-2-binarized-ignore-verbosity](https://huggingface.co/datasets/ai2-adapt-dev/helpsteer-2-binarized-ignore-verbosity)
+* [ai2-adapt-dev/helpsteer2-binarized-nvidia-spec](https://huggingface.co/datasets/ai2-adapt-dev/helpsteer2-binarized-nvidia-spec)
 
 ## UltraInteract Variants
 Build these datasets with:
