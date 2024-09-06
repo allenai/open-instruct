@@ -45,6 +45,7 @@ NUM_CPUS_FOR_DATASET_MAP = 4
 @dataclass
 class Args:
     model_name_or_path: str = "cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr"
+    revision: str = "main"
     save_filename: str = "completions.jsonl"
     skill: str = "chat"
     mode: str = "generation"  # Can be "generation" or "judgment"
@@ -93,8 +94,13 @@ async def generate_with_openai(model_name: str, data_list: list, args: Args, gen
     return results
 
 
-def generate_with_vllm(model_name_or_path: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
-    llm = LLM(model=model_name_or_path, tensor_parallel_size=gen_args.tensor_parallel_size)
+def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
+    llm = LLM(
+        model=model_name_or_path,
+        revision=revision,
+        tokenizer_revision=revision,
+        tensor_parallel_size=gen_args.tensor_parallel_size,
+    )
 
     # filter out prompts which are beyond the model's max token length
     max_model_len = llm.llm_engine.scheduler_config.max_model_len
@@ -160,14 +166,14 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
         outputs = [{"outputs": [{"text": response} for response in responses]}]
 
     else:
-        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, revision=args.revision)
 
         ds = ds.map(
             lambda x: {"prompt_token_ids": tokenizer.apply_chat_template(x["messages"][:-1])},
             num_proc=NUM_CPUS_FOR_DATASET_MAP,
         )
         prompt_token_ids = ds[dataset_args.dataset_train_split]["prompt_token_ids"]
-        outputs = generate_with_vllm(args.model_name_or_path, prompt_token_ids, gen_args)
+        outputs = generate_with_vllm(args.model_name_or_path, args.revision, prompt_token_ids, gen_args)
 
     # Assuming we generate n=3 completions per prompt; the outputs will look like:
     # prompt | completions
