@@ -39,6 +39,33 @@ Some examples include:
 * [ai2-adapt-dev/helpsteer-2-binarized-ignore-verbosity](https://huggingface.co/datasets/ai2-adapt-dev/helpsteer-2-binarized-ignore-verbosity)
 * [ai2-adapt-dev/helpsteer2-binarized-nvidia-spec](https://huggingface.co/datasets/ai2-adapt-dev/helpsteer2-binarized-nvidia-spec)
 
+### UltraFeedback Replication
+
+**The current replications have fewer prompts than the original. We are working on merging them.**
+
+Build these datasets with:
+```
+python scripts/data/preferences/ultrafeedback.py --push_to_hub --hf_entity=ai2-adapt-dev
+```
+The master version of the UltraFeedback pipeline replication can be found here:
+[ai2-adapt-dev/ultrafeedback-pipeline-replication](https://huggingface.co/datasets/ai2-adapt-dev/ultrafeedback-pipeline-replication)
+
+UltraFeedback variants explore different combinations of prompt sources, model diversity, sampling methods, and prompt templates:
+
+- Setup 0: Replication of original UltraFeedback
+- Setup 1-2: Custom prompts with UltraFeedback methodology
+- Setup 3-4: Custom prompts with varied model diversity and principle sampling
+- Setup 5: Custom prompts with UltraFeedback template
+- Setup 6: Increased model diversity
+
+- [ai2-adapt-dev/ultrafeedback-replication-p0](https://huggingface.co/datasets/ai2-adapt-dev/ultrafeedback-replication-p0)
+- [ai2-adapt-dev/ultrafeedback-replication-p1](https://huggingface.co/datasets/ai2-adapt-dev/ultrafeedback-replication-p1)
+- [ai2-adapt-dev/ultrafeedback-replication-p2](https://huggingface.co/datasets/ai2-adapt-dev/ultrafeedback-replication-p2)
+- [ai2-adapt-dev/ultrafeedback-replication-p3](https://huggingface.co/datasets/ai2-adapt-dev/ultrafeedback-replication-p3)
+- [ai2-adapt-dev/ultrafeedback-replication-p4](https://huggingface.co/datasets/ai2-adapt-dev/ultrafeedback-replication-p4)
+- [ai2-adapt-dev/ultrafeedback-replication-p5](https://huggingface.co/datasets/ai2-adapt-dev/ultrafeedback-replication-p5)
+- [ai2-adapt-dev/ultrafeedback-replication-p6](https://huggingface.co/datasets/ai2-adapt-dev/ultrafeedback-replication-p6)
+
 ## UltraInteract Variants
 Build these datasets with:
 ```
