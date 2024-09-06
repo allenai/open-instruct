@@ -97,11 +97,11 @@ def evaluate(
 
     model.train()
     return {
-        "accuracy": total_accuracy / total_batches,
-        "loss": total_loss / total_batches,
-        "chosen_rewards": total_chosen_rewards / total_batches,
-        "rejected_rewards": total_rejected_rewards / total_batches,
-        "reward_margin": total_reward_margin / total_batches,
+        "eval/rm/accuracy": total_accuracy / total_batches,
+        "eval/rm/loss": total_loss / total_batches,
+        "eval/rm/chosen_rewards": total_chosen_rewards / total_batches,
+        "eval/rm/rejected_rewards": total_rejected_rewards / total_batches,
+        "eval/rm/reward_margin": total_reward_margin / total_batches,
     }, table
 
 

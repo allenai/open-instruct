@@ -20,6 +20,7 @@ import os
 import random
 import subprocess
 import time
+import json
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
@@ -1005,27 +1006,32 @@ def main(args: FlatArguments):
         clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
 
     if is_beaker_job() and accelerator.is_main_process:
+        # dpo script only supports these two options right now for datasets
+        if args.dataset_mixer:
+            dataset_list = args.dataset_mixer.keys()
+        elif args.dataset_mixer_list:
+            dataset_list = args.dataset_mixer_list[::2]  # even indices
+        elif args.dataset_name:
+            dataset_list = [args.dataset_name]
+        else:
+            dataset_list = [args.train_file]
+        # mainly just focussing here on what would be useful for the leaderboard.
+        # wandb will have even more useful information.
+        metadata_blob = {
+            "model_name": args.exp_name,
+            "model_type": "sft",
+            "datasets": dataset_list,
+            "base_model": args.model_name_or_path,
+            "wandb_path": wandb_tracker.run.get_url(),
+            "beaker_experiment": beaker_config.beaker_experiment_url,
+            "beaker_datasets": beaker_config.beaker_dataset_id_urls,
+        }
+        # save metadata to the output directory. then it should also get pushed to HF.
+        with open(os.path.join(args.output_dir, "metadata.json"), "w") as f:
+            json.dump(metadata_blob, f)
+
+        # upload metadata to the dataset if set
         if args.hf_metadata_dataset:
-            # dpo script only supports these two options right now for datasets
-            if args.dataset_mixer:
-                dataset_list = args.dataset_mixer.keys()
-            elif args.dataset_mixer_list:
-                dataset_list = args.dataset_mixer_list[::2]  # even indices
-            elif args.dataset_name:
-                dataset_list = [args.dataset_name]
-            else:
-                dataset_list = [args.train_file]
-            # mainly just focussing here on what would be useful for the leaderboard.
-            # wandb will have even more useful information.
-            metadata_blob = {
-                "model_name": args.exp_name,
-                "model_type": "sft",
-                "datasets": dataset_list,
-                "base_model": args.model_name_or_path,
-                "wandb_path": wandb_tracker.run.get_url(),
-                "beaker_experiment": beaker_config.beaker_experiment_url,
-                "beaker_datasets": beaker_config.beaker_dataset_id_urls,
-            }
             upload_metadata_to_hf(
                 metadata_blob,
                 "metadata.json",
