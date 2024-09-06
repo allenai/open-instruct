@@ -61,9 +61,13 @@ class Args:
 class GenerationArgs:
     num_completions: int = 3
     temperature: float = 0.8
+    max_model_length: int = 4096
     response_length: int = 2048
     top_p: float = 0.9
     tensor_parallel_size: int = 1
+    
+    def __post_init__(self):
+        assert self.response_length <= self.max_model_length, "response_length should be less than or equal to max_model_length"
 
 
 @dataclass
@@ -94,20 +98,19 @@ async def generate_with_openai(model_name: str, data_list: list, args: Args, gen
 
 
 def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
-    max_context_length = gen_args.response_length - 1
     llm = LLM(
         model=model_name_or_path,
         revision=revision,
         tokenizer_revision=revision,
         tensor_parallel_size=gen_args.tensor_parallel_size,
-        max_model_len=max_context_length,
+        max_model_len=gen_args.max_model_length,
     )
 
     # filter out prompts which are beyond the model's max token length
     prompt_token_ids_len = len(prompt_token_ids)
-    prompt_token_ids = [item for item in prompt_token_ids if len(item) <= max_context_length]
+    prompt_token_ids = [item for item in prompt_token_ids if len(item) < gen_args.max_model_length]
     if len(prompt_token_ids) != prompt_token_ids_len:
-        print(f"Filtered out {prompt_token_ids_len - len(prompt_token_ids)} prompts which exceeds max token length")
+        print(f"Filtered out {prompt_token_ids_len - len(prompt_token_ids)} prompts which exceeds max context length")
 
     outputs = llm.generate(
         prompt_token_ids=prompt_token_ids,
