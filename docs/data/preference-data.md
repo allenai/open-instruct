@@ -43,9 +43,11 @@ Some examples include:
 Also, specific splits of Nectar (randomly binarized from top 3 completions and a bottom completion) are included with:
 ```
 python scripts/data/preferences/nectar.py --push_to_hub --hf_entity ai2-adapt-dev
-python scripts/data/preferences/nectar.py --push_to_hub --hf_entity ai2-adapt-dev
+python scripts/data/preferences/nectar.py --push_to_hub --subset anthropic-hh --hf_entity ai2-adapt-dev
+python scripts/data/preferences/nectar.py --push_to_hub --deduplication --hf_entity ai2-adapt-dev
 ```
 The default split is `lmsys-chat-1m`.
+The last example is called "deduplication" due to potential overlap with UltraFeedback, given they source from the same underlying dataset. Basic tests showed they did not use the same prompts, but slight modifications could've occured.
 
 ## UltraInteract Variants
 Build these datasets with:

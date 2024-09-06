@@ -1,32 +1,61 @@
 from datasets import load_dataset, Dataset
 import random
 import argparse
+from tqdm import tqdm
 
-def load_nectar_dataset(subset=None, deduplication=False):
-    # Load the dataset
-    dataset = load_dataset("berkeley-nest/Nectar", split="train")
-    print(f"Original dataset size: {len(dataset)}")
+def clean_prompt(prompt):
+    if prompt.startswith("Human:"):
+        prompt = prompt[6:]
+    if prompt.endswith("Assistant:"):
+        prompt = prompt[:-10]
+    return prompt.strip()
+
+def is_valid_response(response):
+    return "Human:" not in response and "Assistant:" not in response
+
+def load_nectar_dataset(subset="lmsys-chat-1m", deduplication=False):
+    # Load the Nectar dataset
+    nectar_dataset = load_dataset("berkeley-nest/Nectar", split="train")
+    print(f"Original Nectar dataset size: {len(nectar_dataset)}")
     
-    # Filter the dataset based on the subset
-    filtered_dataset = dataset.filter(lambda example: example['source'] == [subset])
+    if deduplication:
+        print("Deduplication enabled. Loading UltraFeedback dataset...")
+        ultra_feedback = load_dataset("openbmb/UltraFeedback", split="train")
+        print(f"UltraFeedback dataset size: {len(ultra_feedback)}")
+        
+        # Create a set of UltraFeedback instructions for faster lookup
+        ultra_feedback_instructions = set(ultra_feedback['instruction'])
+
+        # Filter Nectar dataset, excluding lmsys-chat-1m and anthropic-hh
+        filtered_dataset = nectar_dataset.filter(lambda example: example['source'][0] not in ["lmsys-chat-1m", "anthropic-hh"])
+    else:
+        # Filter the dataset based on the subset
+        filtered_dataset = nectar_dataset.filter(lambda example: example['source'] == [subset])
+    
     print(f"Filtered dataset size: {len(filtered_dataset)}")
     
     binarized_data = []
+    excluded_count = 0
     
-    for example in filtered_dataset:
-        prompt = example['prompt']
+    # Use tqdm for progress bar
+    for example in tqdm(filtered_dataset, desc="Processing examples", unit="example"):
+        prompt = clean_prompt(example['prompt'])
+        
+        # Skip if the prompt is in UltraFeedback dataset (when deduplication is enabled)
+        if deduplication and prompt in ultra_feedback_instructions:
+            # print found duplicate
+            print(f"Found duplicate prompt: {prompt}")
+            excluded_count += 1
+            continue
+        
         answers = example['answers']
-        
-        # Sort answers by rank (lower rank is better)
         sorted_answers = sorted(answers, key=lambda x: x['rank'])
+        valid_answers = [a for a in sorted_answers if is_valid_response(a['answer'])]
         
-        if len(sorted_answers) >= 2:
-            # Randomly select the chosen answer from the top 4 (or all if less than 4)
-            top_n = min(4, len(sorted_answers))
-            chosen = random.choice(sorted_answers[:top_n])
-            
-            # Select the rejected answer from the remaining answers
-            remaining_answers = [a for a in sorted_answers if a != chosen]
+        if len(valid_answers) >= 2:
+            top_n = min(4, len(valid_answers))
+            chosen = random.choice(valid_answers[:top_n])
+            remaining_answers = [a for a in valid_answers if a != chosen]
             rejected = random.choice(remaining_answers)
             
             binarized_example = {
@@ -39,16 +68,14 @@ def load_nectar_dataset(subset=None, deduplication=False):
                     {"role": "user", "content": prompt},
                     {"role": "assistant", "content": rejected['answer']}
                 ],
-                "subset": example['source'],
             }
             
             binarized_data.append(binarized_example)
+        else:
+            excluded_count += 1
     
     print(f"Number of binarized examples: {len(binarized_data)}")
-    
-    # TODO: Implement deduplication logic here when needed
-    if deduplication:
-        pass  # Placeholder for future implementation
+    print(f"Number of excluded examples: {excluded_count}")
     
     return binarized_data
 
