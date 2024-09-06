@@ -4,16 +4,16 @@ use_flash_attn: true
 tokenizer_name: meta-llama/Meta-Llama-3.1-8B
 use_slow_tokenizer: true
 dataset_mixer:
-    ai2-adapt-dev/rs-base-mix-L3.1-8B-generations: 296461
+    jacobmorrison/rejection_sampling_4036: 296180
 
     # Static datasets
-    # ai2-adapt-dev/metamath-qa-reformat: 100000
-    # AI-MO/NuminaMath-CoT: 100000
-    # m-a-p/CodeFeedback-Filtered-Instruction: 156526
+    ai2-adapt-dev/metamath-qa-reformat: 100000
+    AI-MO/NuminaMath-CoT: 100000
+    m-a-p/CodeFeedback-Filtered-Instruction: 156526
 max_seq_length: 4096 # Note, reduced from 8192 to fit on one GPU with DeepSpeed Stage3
 preprocessing_num_workers: 128
 per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
-gradient_accumulation_steps: 4 # effective batch size 128 with 4 nodes
+gradient_accumulation_steps: 4 # effective batch size 128 with 2 nodes
 learning_rate: 5.0e-06 # best LR so far
 lr_scheduler_type: linear
 warmup_ratio: 0.03
