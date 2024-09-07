@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # my variables
-reward_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo-RM
-# reward_model_path=L3.18B-RM
+# reward_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo-RM
+reward_model_path=L3.18B-RM
 generation_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo
-num_completions=64
+num_completions=16
 priority=normal
 image=nathanl/open_instruct_auto-f89d7e4-10726144311
 # image=nathanl/open_instruct_auto
@@ -12,7 +12,7 @@ image=nathanl/open_instruct_auto-f89d7e4-10726144311
 
 mkdir -p output/shards
 num_prompts=296461
-num_shards=60
+num_shards=100
 prompts_per_shard=$((num_prompts / num_shards))
 timestamp=$RANDOM
 shared_generation_hf_repo_id=generation_$timestamp
