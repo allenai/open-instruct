@@ -68,10 +68,13 @@ def main(args):
     if args.use_chat_format:
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
         def apply_chat_format(example, tokenizer):
-            messages = [{"role": "user", "content": prompt_prefix + "Question: " + example["question"].strip()}]
+            messages = [
+                {"role": "system", "content": "You are a world-class AI system, capable of complex reasoning and reflection. Reason through the query inside <thinking> tags, and if you detect that you made a mistake in your reasoning at any point, correct yourself inside <reflection> tags. Repeat reasoning steps and reflection steps as many times as needed before providing your final response. Provide your final response inside <output> tags."},
+                {"role": "user", "content": prompt_prefix + "Question: " + example["question"].strip()}
+            ]
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
             prompt += "Answer:" if prompt[-1] in ["\n", " "] else " Answer:"
-            prompt += "\n<|reserved_special_token_248|>\n"
+            # prompt += "\n<|reserved_special_token_248|>\n"
             return prompt
 
     if args.model_name_or_path:
