@@ -191,7 +191,10 @@ def run_hf_model(questions, model, tokenizer, tag, preset="qa", batch_size=1, ma
     ]
     if chat_formatting_function is not None:
         for idx, prompt in enumerate(prompts):
-            messages = [{"role": "user", "content": prompt}]
+            messages = [
+                {"role": "system", "content": "You are a world-class AI system, capable of complex reasoning and reflection. Reason through the query inside <thinking> tags, and if you detect that you made a mistake in your reasoning at any point, correct yourself inside <reflection> tags. Repeat reasoning steps and reflection steps as many times as needed before providing your final response. Provide your final response inside <output> tags."},
+                {"role": "user", "content": prompt}
+            ]
             prompts[idx] = chat_formatting_function(messages, tokenizer, add_bos=False)
             prompt += "A:" if prompt[-1] in ["\n", " "] else " A:"
     

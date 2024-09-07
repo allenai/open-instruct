@@ -104,10 +104,13 @@ def main(args):
                 chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
                 for example in task_examples:
                     prompt = task_prompt.strip() + "\n\nQ: " + example["input"]
-                    messages = [{"role": "user", "content": prompt}]
+                    messages = [
+                        {"role": "system", "content": "You are a world-class AI system, capable of complex reasoning and reflection. Reason through the query inside <thinking> tags, and if you detect that you made a mistake in your reasoning at any point, correct yourself inside <reflection> tags. Repeat reasoning steps and reflection steps as many times as needed before providing your final response. Provide your final response inside <output> tags."},
+                        {"role": "user", "content": prompt}
+                    ]
                     prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
                     prompt += "A:" if prompt[-1] in ["\n", " "] else " A:"
-                    prompt += "\n<|reserved_special_token_248|>\n"
+                    # prompt += "\n<|reserved_special_token_248|>\n"
                     prompts.append(prompt)
             else:
                 prompts = [task_prompt.strip() + "\n\nQ: " + example["input"] + "\nA:" for example in task_examples]
@@ -163,9 +166,9 @@ def main(args):
             
             # extract the first answer after `the answer is` and before the next period.
             # if there is no such answer, we will just use the raw output.
-            filtered_output = re.search(r"<\|reserved_special_token_249\|>\n(.*)", output, re.DOTALL)
-            if filtered_output:
-                output = filtered_output.group(1).strip()
+            # filtered_output = re.search(r"<\|reserved_special_token_249\|>\n(.*)", output, re.DOTALL)
+            # if filtered_output:
+                # output = filtered_output.group(1).strip()
             extracted_answer = re.search(r"[t|T]he answer is (.*?)\.", output)
             if extracted_answer:
                 example["prediction"] = extracted_answer.group(1).strip()
