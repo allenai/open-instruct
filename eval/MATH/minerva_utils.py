@@ -101,6 +101,8 @@ def get_unnormalized_answer(text: str) -> str:
     INVALID_ANSWER = "[invalidanswer]"
     end_seq = "I hope it is correct."
     text += end_seq
+    text.replace("<output>", " ")
+    text.replace("</output>", "")
     match = re.search(
         r"Final Answer: The final answer is(.*?). I hope it is correct.",
         text,
