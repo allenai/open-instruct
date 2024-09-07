@@ -66,7 +66,8 @@ def main(args):
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
         def apply_chat_format(example, demonstrations, tokenizer):
             messages = []
-            messages.append({"role": "system", "content": "You are a world-class AI system, capable of complex reasoning and reflection. Reason through the query inside <thinking> tags, and if you detect that you made a mistake in your reasoning at any point, correct yourself inside <reflection> tags. Repeat reasoning steps and reflection steps as many times as needed before providing your final response. Provide your final response inside <output> tags."})
+            # messages.append({"role": "system", "content": "You are a world-class AI system, capable of complex reasoning and reflection. Reason through the query inside <thinking> tags, and if you detect that you made a mistake in your reasoning at any point, correct yourself inside <reflection> tags. Repeat reasoning steps and reflection steps as many times as needed before providing your final response. Provide your final response inside <output> tags."})
+            messages.append({"role": "system", "content": "You are a world-class AI system, capable of complex reasoning and reflection. Reason through the query inside <thinking> tags, and then provide your final response inside <output> tags. If you detect that you made a mistake in your reasoning at any point, correct yourself inside <reflection> tags."})
             for user_turn, assistant_turn in demonstrations:
                 messages.append({"role": "user", "content": user_turn})
                 messages.append({"role": "assistant", "content": assistant_turn})
