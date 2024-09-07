@@ -67,13 +67,13 @@ echo "Downloading ShareGPT dataset..."
 wget -P data/raw_train/sharegpt/ https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/HTML_cleaned_raw_dataset/sg_90k_part1_html_cleaned.json
 wget -P data/raw_train/sharegpt/ https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/HTML_cleaned_raw_dataset/sg_90k_part2_html_cleaned.json
 echo "Splitting the ShareGPT dataset with 2048 max tokens per conversation..."
-python scripts/split_sharegpt_conversations.py \
+python scripts/data/split_sharegpt_conversations.py \
     --in-files data/raw_train/sharegpt/sg_90k_part1_html_cleaned.json data/raw_train/sharegpt/sg_90k_part2_html_cleaned.json \
     --out-file data/raw_train/sharegpt/sharegpt_html_cleaned_and_split_2048.json \
     --model-name-or-path oobabooga/llama-tokenizer \
     --max-length 2048
 echo "Splitting the ShareGPT dataset with 4096 max tokens per conversation..."
-python scripts/split_sharegpt_conversations.py \
+python scripts/data/split_sharegpt_conversations.py \
     --in-files data/raw_train/sharegpt/sg_90k_part1_html_cleaned.json data/raw_train/sharegpt/sg_90k_part2_html_cleaned.json \
     --out-file data/raw_train/sharegpt/sharegpt_html_cleaned_and_split_4096.json \
     --model-name-or-path oobabooga/llama-tokenizer \
@@ -88,7 +88,7 @@ fi
 
 echo "Downloading WizardLM dataset..."
 # original data removed wget -P data/raw_train/wizardlm/ https://huggingface.co/datasets/WizardLM/WizardLM_evol_instruct_V2_196k/resolve/main/WizardLM_evol_instruct_V2_143k.json
-wget -P data/raw_train/wizardlm/ https://huggingface.co/datasets/ai2-adapt-dev/wizardlm-backup/resolve/main/data/train-00000-of-00001.parquet?download=true
+wget -P data/raw_train/wizardlm/ https://huggingface.co/datasets/ai2-adapt-dev/wizardlm-backup/resolve/main/data/train-00000-of-00001.parquet
 
 
 echo "Downloading the OpenOrca dataset..."

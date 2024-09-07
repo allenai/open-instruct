@@ -1,0 +1,32 @@
+model_name_or_path: EleutherAI/pythia-14m
+model_revision: main
+use_flash_attn: true
+tokenizer_name: EleutherAI/pythia-14m
+use_slow_tokenizer: false # olmo models only use fast tokenizers
+# train_file: data/processed/tulu_v2/tulu_v2_data.jsonl
+# dataset_name: allenai/tulu-v2-sft-mixture
+dataset_mixer:
+ allenai/tulu-v2-sft-mixture: 100
+#  data/processed/tulu_v2/tulu_v2_filtered_data.jsonl: 0.1
+# dataset_mixer:
+#  allenai/tulu-v2-sft-mixture: 100000
+#  HuggingFaceH4/no_robots: 5000
+max_seq_length: 4096
+max_train_samples: 100
+preprocessing_num_workers: 1
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 8
+learning_rate: 2.0e-05
+lr_scheduler_type: linear
+warmup_ratio: 0.03
+weight_decay: 0.0
+num_train_epochs: 2
+output_dir: output/sft_pythia_14m/
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+add_bos: true # needed for GPTNeoX olmo models
+dataset_mix_dir: null
+checkpointing_steps: 1000
+keep_last_n_checkpoints: 1

@@ -10,7 +10,9 @@ from eval.utils import (
     load_hf_lm,
     query_openai_chat_model,
     dynamic_import_function,
-    load_hf_tokenizer
+    load_hf_tokenizer,
+    upload_results_to_hf,
+    check_and_upload_model_metadata
 )
 from eval.MATH.examplars import EXAMPLARS as MATH_EXAMPLARS
 from eval.MATH.utilities import last_boxed_only_string, remove_boxed
@@ -76,6 +78,7 @@ def main(args):
         print("Loading model and tokenizer...")
         tokenizer = load_hf_tokenizer(
             model_name_or_path=args.model_name_or_path,
+            revision=args.hf_revision,
             tokenizer_name_or_path=args.tokenizer_name_or_path,
             use_fast_tokenizer=not args.use_slow_tokenizer,
         )
@@ -85,6 +88,8 @@ def main(args):
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
+                tokenizer_revision=args.hf_revision,
+                revision=args.hf_revision,
             )
             stop_strings = args.additional_stop_sequence + ["Problem:"]
             # we only use stop token for non-chat format (usually applied to vanilla pretrained language models).
@@ -110,7 +115,8 @@ def main(args):
             outputs = [prompt_to_output[prompt] if prompt in prompt_to_output else "" for prompt in prompts]
         else:
             model = load_hf_lm(
-                model_name_or_path=args.model_name_or_path, 
+                model_name_or_path=args.model_name_or_path,
+                revision=args.hf_revision,
                 load_in_8bit=args.load_in_8bit, 
                 device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                 gptq_model=args.gptq,
@@ -197,6 +203,23 @@ def main(args):
     with open(os.path.join(args.save_dir, "metrics.json"), "w") as fout:
         json.dump(metrics, fout, indent=4)
 
+    if args.upload_to_hf is not None:
+        # upload metrics to HF. Main metric is the accuracy
+        results = metrics
+        task_name = "oi_MATH_cot"
+        primary_score = results["accuracy"]
+        upload_results_to_hf(
+            results,
+            args.upload_to_hf,
+            args.hf_upload_name,
+            task_name=task_name,
+            primary_score=primary_score,
+            prepend_timestamp=True,
+        )
+        check_and_upload_model_metadata(
+            args.model_name_or_path, args.upload_to_hf, args.hf_upload_name, hf_revision=args.hf_revision
+        )
+
 
 if __name__ == "__main__":
 
@@ -222,6 +245,12 @@ if __name__ == "__main__":
         type=str, 
         default=None, 
         help="if specified, we will load the model to generate the predictions."
+    )
+    parser.add_argument(
+        "--hf_revision",
+        type=str,
+        default=None,
+        help="if specified, we will load the model from a revision of the model in the hub"
     )
     parser.add_argument(
         "--tokenizer_name_or_path", 
@@ -306,6 +335,19 @@ if __name__ == "__main__":
         nargs="+",
         default=[],
         help="Additional stop sequences to use when generating completions. Useful for e.g. llama-3-instruct."
+    )
+    parser.add_argument(
+        "--upload_to_hf",
+        type=str,
+        default=None,
+        help="If specified, we will upload the results to Hugging Face Datasets. "
+             "This should be the name of the dataset to upload to."
+    )
+    parser.add_argument(
+        "--hf_upload_name",
+        type=str,
+        default=None,
+        help="If uploading to hf, this is the model name"
     )
     args = parser.parse_args()
 

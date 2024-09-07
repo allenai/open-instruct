@@ -1,17 +1,17 @@
 # TODO When updating flash-attn or torch in the future, make sure to update the version in the Dockerfile 
-torch<=2.3.0
+torch==2.4.0
 scipy
 packaging
 sentencepiece
 datasets
-deepspeed==0.14.4
+deepspeed==0.15.0
 accelerate==0.31.0
 peft>=0.11.1
 bitsandbytes>=0.41.1
 evaluate>=0.4.0
 tokenizers==0.19.1
 protobuf
-transformers==4.40.2
+transformers==4.43.4
 openai>=1.0.0
 tiktoken
 rouge_score
@@ -22,19 +22,15 @@ termcolor
 jsonlines
 unidic-lite
 einops
-flash-attn==2.5.8 # should really only be in dockerfile. Local env often doesn't have GPUs
+flash-attn==2.6.3 # should really only be in dockerfile. Local env often doesn't have GPUs
 fire
 alpaca-eval==0.6.2
 # for human eval web app
 flask
-# Newer vLLM requires pydantic >= 2, but deepspeed requires pydantic < 2
-# if we are not using olmo models, this is fine.
-# once https://github.com/microsoft/DeepSpeed/pull/5167 is merged, we can
-# update vLLM and remove the need for a separate olmo inference file
-vllm>=0.4.1
+vllm>=0.5.4  # for llama 3 + olmo compat.
 openpyxl
 # for ifeval
-nltk
+nltk==3.8.1
 langdetect
 immutabledict
 # for math evaluations
@@ -45,4 +41,7 @@ sympy==1.12.0
 black
 flake8
 isort
+autoflake
 pytest
+hf_transfer
+beaker-py

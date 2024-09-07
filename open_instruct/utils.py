@@ -13,18 +13,28 @@
 # limitations under the License.
 
 import dataclasses
+import functools
+import json
+import logging
 import os
+import shutil
+import subprocess
 import sys
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass
 from typing import Any, List, NewType, Optional, Tuple, Union
 
+import requests
+from accelerate.logging import get_logger
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
+from huggingface_hub import HfApi
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
+logger = get_logger(__name__)
 
 DataClassType = NewType("DataClassType", Any)
 
@@ -41,6 +51,8 @@ Commented out Args not currently used
 """
 
 
+# ----------------------------------------------------------------------------
+# Dataset utilities
 def is_openai_format(messages: Any) -> bool:
     """
     Check if the input messages are in OpenAI format.
@@ -56,19 +68,28 @@ def is_openai_format(messages: Any) -> bool:
 
 
 # functions for handling different formats of messages
-def instruction_output_to_messages(example):
+def convert_alpaca_gpt4_to_messages(example):
     """
     Convert an instruction in inst-output to a list of messages.
     e.g. vicgalle/alpaca-gpt4"""
     messages = [
-        {"role": "user", "content": example["instruction"]},
+        {
+            "role": "user",
+            "content": (
+                "Below is an instruction that describes a task, paired with an input that provides "
+                "further context. Write a response that appropriately completes the request.\n\n"
+                f"### Instruction:\n{example['instruction']}\n\n"
+                f"### Input:\n{example['input']}\n\n"
+                "### Response:"
+            ),
+        },
         {"role": "assistant", "content": example["output"]},
     ]
     example["messages"] = messages
     return example
 
 
-def query_answer_to_messages(example):
+def convert_codefeedback_single_turn_to_messages(example):
     """
     Convert a query-answer pair to a list of messages.
     e.g. m-a-p/CodeFeedback-Filtered-Instruction"""
@@ -80,7 +101,7 @@ def query_answer_to_messages(example):
     return example
 
 
-def query_response_to_messages(example):
+def convert_metamath_qa_to_messages(example):
     """
     Convert a query-response pair to a list of messages.
     e.g. meta-math/MetaMathQA"""
@@ -92,7 +113,7 @@ def query_response_to_messages(example):
     return example
 
 
-def prompt_completion_to_messages(example):
+def convert_code_alpaca_to_messages(example):
     """
     Convert a prompt-completion pair to a list of messages.
     e.g. HuggingFaceH4/CodeAlpaca_20K"""
@@ -104,11 +125,12 @@ def prompt_completion_to_messages(example):
     return example
 
 
-def question_response_to_messages(example):
+def convert_open_orca_to_messages(example):
     """
     Convert a question-response pair to a list of messages.
     e.g. Open-Orca/OpenOrca"""
     messages = [
+        {"role": "system", "content": example["system_prompt"]},
         {"role": "user", "content": example["question"]},
         {"role": "assistant", "content": example["response"]},
     ]
@@ -126,28 +148,45 @@ def conversations_to_messages(example):
 
     WizardLMTeam/WizardLM_evol_instruct_V2_196k
     """
-    name_mapping = {"gpt": "assistant", "user": "user", "human": "user"}
+    name_mapping = {
+        "gpt": "assistant",
+        "Assistant": "assistant",
+        "assistant": "assistant",
+        "user": "user",
+        "User": "user",
+        "human": "user",
+    }
     messages = [{"role": name_mapping[conv["from"]], "content": conv["value"]} for conv in example["conversations"]]
     example["messages"] = messages
     return example
 
 
+def convert_rejection_samples_to_messages(example):
+    """
+    Convert a rejection sampling dataset to messages.
+    """
+    example["messages"] = example["chosen"]
+    return example
+
+
 def get_datasets(
-    dataset_mixer: dict,
+    dataset_mixer: Union[dict, list],
     splits: Optional[List[str]] = None,
     configs: Optional[List[str]] = None,
     columns_to_keep: Optional[List[str]] = None,
     shuffle: bool = True,
     save_data_dir: Optional[str] = None,
     need_columns: Optional[List[str]] = None,
+    keep_ids: bool = False,
 ) -> DatasetDict:
     """
     Loads and mixes datasets according to proportions specified in `dataset_mixer`.
 
     Args:
-        dataset_mixer (`dict`):
-            Dictionary containing the dataset names and their training proportions.
-            By default, all test proportions are 1.
+        dataset_mixer (`list` or `dict`):
+            Dictionary or list containing the dataset names and their training proportions.
+            By default, all test proportions are 1. Lists are formatted as
+            `key1 value1 key2 value2 ...` If a list is passed in, it will be converted to a dictionary.
         splits (Optional[List[str]], *optional*, defaults to `None`):
             Dataset splits to load and mix. Assumes the splits exist in
             all datasets and have a `train_` or `test_` prefix.
@@ -163,7 +202,24 @@ def get_datasets(
         need_columns (Optional[List[str]], *optional*, defaults to `None`):
             Column names that are required to be in the dataset.
             Quick debugging when mixing heterogeneous datasets.
+        keep_ids (`bool`, *optional*, defaults to `False`):
+            Whether to keep ids for training that are added during mixing.
+            Used primarily in mix_data.py for saving, or the saved dataset has IDs already.
     """
+    if isinstance(dataset_mixer, list):
+        assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
+        mixer_dict = {}
+        i = 0
+        while i < len(dataset_mixer) - 1:
+            assert isinstance(dataset_mixer[i], str), f"Invalid type in data mixer: {dataset_mixer}"
+            if "." in dataset_mixer[i + 1]:
+                value = float(dataset_mixer[i + 1])
+            else:
+                value = int(dataset_mixer[i + 1])
+            mixer_dict[dataset_mixer[i]] = value
+            i += 2
+        dataset_mixer = mixer_dict
+
     splits = ["train", "test"] if splits is None else splits
     configs = [None] * len(dataset_mixer) if not configs else configs
     columns_to_keep = [] if columns_to_keep is None else columns_to_keep
@@ -200,7 +256,7 @@ def get_datasets(
             # assert that needed columns are present
             if need_columns:
                 if not all(col in dataset.column_names for col in need_columns):
-                    raise ValueError(f"Needed column {need_columns} not found in dataset {dataset.coulmn_names}.")
+                    raise ValueError(f"Needed column {need_columns} not found in dataset {dataset.column_names}.")
 
             # handle per-case conversions
             # if "instruction" and "output" columns are present and "messages" is not, convert to messages
@@ -209,13 +265,13 @@ def get_datasets(
                 and "output" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(instruction_output_to_messages, num_proc=10)
+                dataset = dataset.map(convert_alpaca_gpt4_to_messages, num_proc=10)
             elif (
                 "prompt" in dataset.column_names
                 and "completion" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(prompt_completion_to_messages, num_proc=10)
+                dataset = dataset.map(convert_code_alpaca_to_messages, num_proc=10)
             elif "conversations" in dataset.column_names and "messages" not in dataset.column_names:
                 dataset = dataset.map(conversations_to_messages, num_proc=10)
             elif (
@@ -223,19 +279,26 @@ def get_datasets(
                 and "response" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(question_response_to_messages, num_proc=10)
+                dataset = dataset.map(convert_open_orca_to_messages, num_proc=10)
             elif (
                 "query" in dataset.column_names
                 and "answer" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(query_answer_to_messages, num_proc=10)
+                dataset = dataset.map(convert_codefeedback_single_turn_to_messages, num_proc=10)
             elif (
                 "query" in dataset.column_names
                 and "response" in dataset.column_names
                 and "messages" not in dataset.column_names
             ):
-                dataset = dataset.map(query_response_to_messages, num_proc=10)
+                dataset = dataset.map(convert_metamath_qa_to_messages, num_proc=10)
+            elif (
+                "chosen" in dataset.column_names
+                and "rejected" in dataset.column_names
+                and "reference_completion" in dataset.column_names
+                and "messages" not in dataset.column_names
+            ):
+                dataset = dataset.map(convert_rejection_samples_to_messages, num_proc=10)
 
             # if id not in dataset, create it as ds-{index}
             if "id" not in dataset.column_names:
@@ -310,266 +373,113 @@ def get_datasets(
         for split in raw_datasets:
             raw_datasets[split].to_json(save_data_dir + f"mixed_ds_{split}.json")
 
-    # remove id column
-    if len(raw_train_datasets) > 0:
-        if "id" in raw_datasets["train"].column_names:
-            raw_datasets["train"] = raw_datasets["train"].remove_columns("id")
-    if len(raw_val_datasets) > 0:
-        if "id" in raw_datasets["test"].column_names:
-            raw_datasets["test"] = raw_datasets["test"].remove_columns("id")
+    if not keep_ids:
+        # remove id column
+        if len(raw_train_datasets) > 0:
+            if "id" in raw_datasets["train"].column_names:
+                raw_datasets["train"] = raw_datasets["train"].remove_columns("id")
+        if len(raw_val_datasets) > 0:
+            if "id" in raw_datasets["test"].column_names:
+                raw_datasets["test"] = raw_datasets["test"].remove_columns("id")
 
     return raw_datasets
 
 
-@dataclass
-class FlatArguments:
+def combine_dataset(
+    dataset_mixer: Union[dict, list],
+    splits: List[str],
+    configs: Optional[List[str]] = None,
+    columns_to_keep: Optional[List[str]] = None,
+    shuffle: bool = False,
+    save_data_dir: Optional[str] = None,
+    keep_ids: bool = False,
+) -> DatasetDict:
     """
-    Full arguments class for all fine-tuning jobs.
+    Loads and mixes datasets according to proportions specified in `dataset_mixer`.
+
+    Args:
+        dataset_mixer (`dict`):
+            Dictionary containing the dataset names and their training proportions.
+        splits (Optional[List[str]], *optional*, defaults to `None`):
+            Dataset splits to load and mix. Assumes the splits exist in
+            all datasets and have a `train_` or `test_` prefix.
+        configs (Optional[List[str]], *optional*, defaults to `None`):
+            List of dataset config names. If given must be the same length as 'dataset_mixer' keys.
+        columns_to_keep (Optional[List[str]], *optional*, defaults to `None`):
+            Column names to keep in the dataset. Useful in the datamixer to avoid schema conflicts,
+            and for cpt this should be (at least) the text column.
+        shuffle (`bool`, *optional*, defaults to `False`):
+            Whether to shuffle the training and testing/validation data.
+        save_data_dir (Optional[str], *optional*, defaults to `None`):
+            Optional directory to save training/test mixes on.
+        keep_ids (`bool`, *optional*, defaults to `False`):
+            Whether to keep ids for training that are added during mixing.
+            Used primarily in mix_data.py for saving, or the saved dataset has IDs already.
     """
+    if any(frac_or_samples < 0 for frac_or_samples in dataset_mixer.values()):
+        raise ValueError("Dataset fractions / lengths cannot be negative.")
 
-    model_name_or_path: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": (
-                "The model checkpoint for weights initialization. Don't set if you want to train a model from scratch."
-            )
-        },
-    )
-    config_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
-    )
-    dpo_use_paged_optimizer: bool = field(
-        default=False,
-        metadata={
-            "help": "Use paged optimizer from bitsandbytes."
-            " Not compatible with deepspeed (use deepspeed config instead)."
-        },
-    )
-    dpo_beta: float = field(
-        default=0.1,
-        metadata={"help": "Beta parameter for DPO loss. Default is 0.1."},
-    )
-    tokenizer_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
-    )
-    tokenizer_revision: Optional[str] = field(
-        default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
-    )
-    use_flash_attn: bool = field(
-        default=True,
-        metadata={"help": "Whether to use flash attention in the model training"},
-    )
-    use_slow_tokenizer: bool = field(
-        default=True,
-        metadata={"help": "Whether to use one of the slow tokenizer or not (which is then fast tokenizer)."},
-    )
-    model_revision: str = field(
-        default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
-    )
-    trust_remote_code: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "Whether or not to allow for custom models defined on the Hub in their own modeling files. "
-                "This option should only be set to `True` for repositories you trust and in which you "
-                "have read the code, as it will execute code present on the Hub on your local machine."
-            )
-        },
-    )
-    low_cpu_mem_usage: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "It is an option to create the model as an empty shell, "
-                "then only materialize its parameters when the pretrained weights are loaded. "
-                "set True will benefit LLM loading time and RAM consumption."
-            )
-        },
-    )
-    dataset_name: Optional[str] = field(
-        default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
-    )
-    dataset_mixer: Optional[dict] = field(
-        default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
-    )
-    dataset_mix_dir: Optional[str] = field(
-        default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
-    )
-    dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
-    )
-    train_file: Optional[str] = field(
-        default=None, metadata={"help": "The input training data file (a json/jsonl file)."}
-    )
-    max_train_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of training examples to this "
-                "value if set."
-            )
-        },
-    )
-    preprocessing_num_workers: Optional[int] = field(
-        default=None,
-        metadata={"help": "The number of processes to use for the preprocessing."},
-    )
-    max_seq_length: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "The maximum total input sequence length after tokenization. "
-                "Sequences longer than this will be truncated,"
-            )
-        },
-    )
-    overwrite_cache: bool = field(
-        default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
-    )
-    add_bos: bool = field(
-        default=False,
-        metadata={
-            "help": "Forcibly add bos token to the beginning of the input sequence."
-            " Use only when tokenizer does not add bos token by default."
-        },
-    )
-    clip_grad_norm: float = field(
-        default=-1,
-        metadata={"help": "Clip gradient norm. Not compatible with deepspeed (use deepspeed config instead)."},
-    )
-    gradient_accumulation_steps: int = field(
-        default=1,
-        metadata={"help": "Number of updates steps to accumulate before performing a backward/update pass."},
-    )
-    learning_rate: float = field(
-        default=2e-5,
-        metadata={"help": "The initial learning rate for AdamW optimizer."},
-    )
-    logging_steps: Optional[int] = field(
-        default=None,
-        metadata={"help": "Log the training loss and learning rate every logging_steps steps."},
-    )
-    lora_rank: int = field(
-        default=64,
-        metadata={"help": "The rank of lora."},
-    )
-    lora_alpha: float = field(
-        default=16,
-        metadata={"help": "The alpha parameter of lora."},
-    )
-    lora_dropout: float = field(
-        default=0.1,
-        metadata={"help": "The dropout rate of lora modules."},
-    )
-    lr_scheduler_type: str = field(
-        default="linear",
-        metadata={
-            "help": "The scheduler type to use for learning rate adjustment.",
-            "choices": ["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
-        },
-    )
-    num_train_epochs: int = field(
-        default=2,
-        metadata={"help": "Total number of training epochs to perform."},
-    )
-    output_dir: str = field(
-        default="output/",
-        metadata={"help": "The output directory where the model predictions and checkpoints will be written."},
-    )
-    per_device_train_batch_size: int = field(
-        default=8,
-        metadata={"help": "Batch size per GPU/TPU core/CPU for training."},
-    )
-    use_lora: bool = field(
-        default=False,
-        metadata={"help": "If True, will use LORA (low-rank parameter-efficient training) to train the model."},
-    )
-    use_qlora: bool = field(
-        default=False,
-        metadata={"help": "Use qLoRA training - initializes model in quantized form. Not compatible with deepspeed."},
-    )
-    use_8bit_optimizer: bool = field(
-        default=False,
-        metadata={"help": "Use 8bit optimizer from bitsandbytes. Not compatible with deepspeed."},
-    )
-    warmup_ratio: float = field(
-        default=0.03,
-        metadata={"help": "Linear warmup over warmup_ratio fraction of total steps."},
-    )
-    weight_decay: float = field(
-        default=0.0,
-        metadata={"help": "Weight decay for AdamW if we apply some."},
-    )
-    timeout: int = field(
-        default=1800,
-        metadata={
-            "help": "Timeout for the training process in seconds."
-            "Useful if tokenization process is long. Default is 1800 seconds (30 minutes)."
-        },
-    )
-    reduce_loss: str = field(
-        default="mean",
-        metadata={
-            "help": "How to reduce loss over tokens. Options are 'mean' or 'sum'."
-            "Using 'sum' can improve chat model performance."
-        },
-    )
-    wandb_entity: Optional[str] = field(
-        default=None,
-        metadata={"help": "Entity to use for logging to wandb."},
-    )
-    resume_from_checkpoint: Optional[str] = field(
-        default=None,
-        metadata={"help": "If the training should continue from a checkpoint folder."},
-    )
-    with_tracking: bool = field(
-        default=False,
-        metadata={"help": "Whether to enable experiment trackers for logging."},
-    )
-    report_to: Union[str, List[str]] = field(
-        default="all",
-        metadata={
-            "help": "The integration(s) to report results and logs to. "
-            "Can be a single string or a list of strings. "
-            "Options are 'tensorboard', 'wandb', 'comet_ml', 'clearml', or 'all'. "
-            "Specify multiple by listing them: e.g., ['tensorboard', 'wandb']"
-        },
-    )
-    gradient_checkpointing: bool = field(
-        default=False,
-        metadata={"help": "Turn on gradient checkpointing. Saves memory but slows training."},
-    )
-    max_train_steps: Optional[int] = field(
-        default=None,
-        metadata={"help": "If set, overrides the number of training steps. Otherwise, num_train_epochs is used."},
-    )
-    seed: int = field(default=42, metadata={"help": "Random seed for initialization and dataset shuffling."})
-    checkpointing_steps: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
-        },
-    )
+    configs = [None] * len(dataset_mixer) if not configs else configs
+    columns_to_keep = [] if columns_to_keep is None else columns_to_keep
 
-    def __post_init__(self):
-        if self.reduce_loss not in ["mean", "sum"]:
-            raise ValueError("reduce_loss must be either 'mean' or 'sum'")
-        if self.dataset_name is None and self.train_file is None and self.dataset_mixer is None:
-            raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
+    if configs is not None and len(configs) != len(dataset_mixer):
+        raise ValueError("The number of given dataset config names must be the same as the given number of datasets.")
+
+    # print save location
+    if save_data_dir:
+        print(f"Saving mixed dataset to {save_data_dir}")
+
+    datasets = []
+    for (ds, frac_or_samples), ds_config, split in zip(dataset_mixer.items(), configs, splits):
+        # if dataset ends with .json or .jsonl, load from file
+        if ds.endswith(".json") or ds.endswith(".jsonl"):
+            dataset = load_dataset("json", data_files=ds, split=split)
         else:
-            if self.train_file is not None:
-                extension = self.train_file.split(".")[-1]
-                assert extension in ["json", "jsonl"], "`train_file` should be a json or a jsonl file."
-        if (
-            (self.dataset_name is not None and self.dataset_mixer is not None)
-            or (self.dataset_name is not None and self.train_file is not None)
-            or (self.dataset_mixer is not None and self.train_file is not None)
-        ):
-            raise ValueError("Cannot provide two dataset selection mechanisms.")
+            try:
+                # Try first if dataset on a Hub repo
+                dataset = load_dataset(ds, ds_config, split=split)
+            except DatasetGenerationError:
+                # If not, check local dataset
+                dataset = load_from_disk(os.path.join(ds, split))
+
+        # shuffle dataset if set
+        if shuffle:
+            dataset = dataset.shuffle(seed=42)
+
+        # select a fraction of the dataset
+        if frac_or_samples > 1.0:
+            samples = int(frac_or_samples)
+        else:
+            samples = int(frac_or_samples * len(dataset))
+        dataset = dataset.select(range(samples))
+
+        # if id not in dataset, create it as ds-{index}
+        if "id" not in dataset.column_names:
+            id_col = [f"{ds}_{i}_{split}" for i in range(len(dataset))]
+            dataset = dataset.add_column("id", id_col)
+
+        # Remove redundant columns to avoid schema conflicts on load
+        dataset = dataset.remove_columns(
+            [col for col in dataset.column_names if col not in (columns_to_keep + ["id"])]
+        )
+        datasets.append(dataset)
+
+    datasets = concatenate_datasets(datasets)
+
+    # optional save
+    if save_data_dir:
+        datasets.to_json(save_data_dir + "mixed_ds.json")
+
+    if not keep_ids:
+        # remove id column
+        if "id" in datasets.column_names:
+            datasets = datasets.remove_columns("id")
+
+    return datasets
 
 
+# ----------------------------------------------------------------------------
+# Arguments utilities
 class ArgumentParserPlus(HfArgumentParser):
     def parse_yaml_and_args(self, yaml_arg: str, other_args: Optional[List[str]] = None) -> List[dataclass]:
         """
@@ -628,7 +538,7 @@ class ArgumentParserPlus(HfArgumentParser):
 
         return outputs
 
-    def parse(self) -> DataClassType | Tuple[DataClassType]:
+    def parse(self) -> Union[DataClassType, Tuple[DataClassType]]:
         if len(sys.argv) == 2 and sys.argv[1].endswith(".yaml"):
             # If we pass only one argument to the script and it's the path to a YAML file,
             # let's parse it to get our arguments.
@@ -643,3 +553,320 @@ class ArgumentParserPlus(HfArgumentParser):
         if len(output) == 1:
             output = output[0]
         return output
+
+
+# ----------------------------------------------------------------------------
+# Experiment tracking utilities
+def get_git_tag() -> str:
+    """Try to get the latest Git tag (e.g., `no-tag-404-g98dc659` or `v1.0.0-4-g98dc659`)"""
+    git_tag = ""
+    try:
+        git_tag = (
+            subprocess.check_output(["git", "describe", "--tags"], stderr=subprocess.DEVNULL).decode("ascii").strip()
+        )
+    except subprocess.CalledProcessError as e:
+        logging.debug(f"Failed to get Git tag: {e}")
+
+    # If no Git tag found, create a custom tag based on commit count and hash
+    if len(git_tag) == 0:
+        try:
+            count = int(
+                subprocess.check_output(["git", "rev-list", "--count", "HEAD"], stderr=subprocess.DEVNULL)
+                .decode("ascii")
+                .strip()
+            )
+            hash = (
+                subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL)
+                .decode("ascii")
+                .strip()
+            )
+            git_tag = f"no-tag-{count}-g{hash}"
+        except subprocess.CalledProcessError as e:
+            logging.debug(f"Failed to get commit count and hash: {e}")
+
+    return git_tag
+
+
+def get_pr_tag() -> str:
+    """Try to find associated pull request on GitHub (e.g., `pr-123`)"""
+    pr_tag = ""
+    try:
+        git_commit = (
+            subprocess.check_output(["git", "rev-parse", "--verify", "HEAD"], stderr=subprocess.DEVNULL)
+            .decode("ascii")
+            .strip()
+        )
+        # try finding the pull request number on github
+        prs = requests.get(f"https://api.github.com/search/issues?q=repo:allenai/open-instruct+is:pr+{git_commit}")
+        if prs.status_code == 200:
+            prs = prs.json()
+            if len(prs["items"]) > 0:
+                pr = prs["items"][0]
+                pr_number = pr["number"]
+                pr_tag = f"pr-{pr_number}"
+    except Exception as e:
+        logging.debug(f"Failed to get PR number: {e}")
+
+    return pr_tag
+
+
+def get_wandb_tags() -> List[str]:
+    """Get tags for Weights & Biases (e.g., `no-tag-404-g98dc659,pr-123`)"""
+    existing_wandb_tags = os.environ.get("WANDB_TAGS", "")
+    git_tag = get_git_tag()
+    pr_tag = get_pr_tag()
+    non_empty_tags = [tag for tag in [existing_wandb_tags, git_tag, pr_tag] if len(tag) > 0]
+    return non_empty_tags
+
+
+# ----------------------------------------------------------------------------
+# Check pointing utilities
+def get_last_checkpoint(folder: str, incomplete: bool = False) -> Optional[str]:
+    content = os.listdir(folder)
+    checkpoint_steps = [path for path in content if path.startswith("step_")]
+    checkpoint_epochs = [path for path in content if path.startswith("epoch_")]
+    if len(checkpoint_steps) > 0 and len(checkpoint_epochs) > 0:
+        logger.info("Mixed step and epoch checkpoints found. Using step checkpoints.")
+        checkpoints = checkpoint_steps
+    elif len(checkpoint_steps) == 0:
+        checkpoints = checkpoint_epochs
+    else:
+        checkpoints = checkpoint_steps
+    if not incomplete:
+        checkpoints = [path for path in checkpoints if os.path.exists(os.path.join(folder, path, "COMPLETED"))]
+    if len(checkpoints) == 0:
+        return
+    return os.path.join(folder, max(checkpoints, key=lambda x: x.split("_")[-1]))
+
+
+def get_last_checkpoint_path(args, incomplete: bool = False) -> str:
+    # if output already exists and user does not allow overwriting, resume from there.
+    # otherwise, resume if the user specifies a checkpoint.
+    # else, start from scratch.
+    # if incomplete is true, include folders without "COMPLETE" in the folder.
+    last_checkpoint_path = None
+    if args.output_dir and os.path.isdir(args.output_dir) and not args.overwrite_output_dir:
+        last_checkpoint_path = get_last_checkpoint(args.output_dir, incomplete=incomplete)
+        if last_checkpoint_path is None:
+            logger.warning("Output directory exists but no checkpoint found. Starting from scratch.")
+    elif args.resume_from_checkpoint:
+        last_checkpoint_path = args.resume_from_checkpoint
+    return last_checkpoint_path
+
+
+def is_checkpoint_folder(dir: str, folder: str) -> bool:
+    return (folder.startswith("step_") or folder.startswith("epoch_")) and os.path.isdir(os.path.join(dir, folder))
+
+
+def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> None:
+    # remove the last checkpoint to save space
+    folders = [f for f in os.listdir(output_dir) if is_checkpoint_folder(output_dir, f)]
+    # find the checkpoint with the largest step
+    checkpoints = sorted(folders, key=lambda x: int(x.split("_")[-1]))
+    if len(checkpoints) > keep_last_n_checkpoints:
+        for checkpoint in checkpoints[: len(checkpoints) - keep_last_n_checkpoints]:
+            logger.info(f"Removing checkpoint {checkpoint}")
+            shutil.rmtree(os.path.join(output_dir, checkpoint))
+    logger.info("Remaining files:" + str(os.listdir(output_dir)))
+
+
+# ----------------------------------------------------------------------------
+# Ai2 user utilities
+@dataclass
+class BeakerRuntimeConfig:
+    beaker_workload_id: str
+    beaker_node_hostname: Optional[List[str]] = None
+    beaker_experiment_url: Optional[List[str]] = None
+    beaker_dataset_ids: Optional[List[str]] = None
+    beaker_dataset_id_urls: Optional[List[str]] = None
+
+
+def is_beaker_job() -> bool:
+    return "BEAKER_JOB_ID" in os.environ
+
+
+def get_beaker_experiment_info(experiment_id: str) -> Optional[dict]:
+    get_experiment_command = f"beaker experiment get {experiment_id} --format json"
+    process = subprocess.Popen(["bash", "-c", get_experiment_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    if process.returncode != 0:
+        print(f"Failed to get Beaker experiment: {stderr}")
+        return None
+    return json.loads(stdout)[0]
+
+
+def beaker_experiment_succeeded(experiment_id: str) -> bool:
+    experiment = get_beaker_experiment_info(experiment_id)
+    if not experiment:
+        return False
+    return all(["finalized" in job["status"] and job["status"]["exitCode"] == 0 for job in experiment["jobs"]])
+
+
+def get_beaker_dataset_ids(experiment_id: str) -> Optional[List[str]]:
+    experiment = get_beaker_experiment_info(experiment_id)
+    if not experiment:
+        return None
+    result_ids = [job["result"]["beaker"] for job in experiment["jobs"]]
+    dataset_ids = []
+    for result_id in result_ids:
+        get_dataset_command = f"beaker dataset get {result_id} --format json"
+        process = subprocess.Popen(["bash", "-c", get_dataset_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+        if process.returncode != 0:
+            print(f"Failed to get Beaker dataset: {stderr}")
+            return None
+        datasets = json.loads(stdout)
+        dataset_ids.extend([dataset["id"] for dataset in datasets])
+    return dataset_ids
+
+
+def get_beaker_whoami() -> Optional[str]:
+    get_beaker_whoami_command = "beaker account whoami --format json"
+    process = subprocess.Popen(
+        ["bash", "-c", get_beaker_whoami_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    stdout, stderr = process.communicate()
+    if process.returncode != 0:
+        print(f"Failed to get Beaker account: {stderr}")
+        return None
+    accounts = json.loads(stdout)
+    return accounts[0]["name"]
+
+
+def maybe_get_beaker_config():
+    beaker_dataset_ids = get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"])
+    # fix condition on basic interactive jobs
+    if beaker_dataset_ids is None:
+        beaker_dataset_id_urls = []
+    else:
+        beaker_dataset_id_urls = [f"https://beaker.org/ds/{dataset_id}" for dataset_id in beaker_dataset_ids]
+    return BeakerRuntimeConfig(
+        beaker_workload_id=os.environ["BEAKER_WORKLOAD_ID"],
+        beaker_node_hostname=os.environ["BEAKER_NODE_HOSTNAME"],
+        beaker_experiment_url=f"https://beaker.org/ex/{os.environ['BEAKER_WORKLOAD_ID']}/",
+        beaker_dataset_ids=get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"]),
+        beaker_dataset_id_urls=beaker_dataset_id_urls,
+    )
+
+
+def retry_on_exception(max_attempts=4, delay=1, backoff=2):
+    """
+    Retry a function on exception. Useful for HF API calls that may fail due to
+    network issues. E.g., https://beaker.org/ex/01J69P87HJQQ7X5DXE1CPWF974
+    `huggingface_hub.utils._errors.HfHubHTTPError: 429 Client Error`
+
+    We can test it with the following code.
+    @retry_on_exception(max_attempts=4, delay=1, backoff=2)
+    def test():
+        raise Exception("Test exception")
+
+    test()
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            attempts = 0
+            local_delay = delay
+            while attempts < max_attempts:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    attempts += 1
+                    if attempts == max_attempts:
+                        raise e
+                    print(f"Attempt {attempts} failed. Retrying in {local_delay} seconds...")
+                    time.sleep(local_delay)
+                    local_delay *= backoff
+            return None
+
+        return wrapper
+
+    return decorator
+
+
+@retry_on_exception()
+def maybe_use_ai2_wandb_entity() -> Optional[str]:
+    """Ai2 internal logic: try use the ai2-llm team if possible. Should not affect external users."""
+    import wandb
+
+    wandb.login()
+    api = wandb.Api()
+    current_user = api.viewer
+    teams = current_user.teams
+    if "ai2-llm" in teams:
+        return "ai2-llm"
+    else:
+        return None
+
+
+@retry_on_exception()
+def maybe_use_ai2_hf_entity() -> Optional[str]:
+    """Ai2 internal logic: try use the allenai entity if possible. Should not affect external users."""
+    orgs = HfApi().whoami()
+    orgs = [item["name"] for item in orgs["orgs"]]
+    if "allenai" in orgs:
+        return "allenai"
+    else:
+        return None
+
+
+def submit_beaker_eval_jobs(
+    model_name: str,
+    location: str,
+    hf_repo_revision: str = "",
+    workspace: str = "tulu-3-results",
+    beaker_image: str = "nathanl/open_instruct_auto",
+    upload_to_hf: str = "allenai/tulu-3-evals",
+    run_oe_eval_experiments: bool = False,
+    run_safety_evaluations: bool = False,
+    skip_oi_evals: bool = False,
+) -> None:
+    command = f"""
+    python scripts/submit_eval_jobs.py \
+        --model_name {model_name} \
+        --location {location} \
+        --is_tuned \
+        --workspace {workspace} \
+        --preemptible \
+        --use_hf_tokenizer_template \
+        --beaker_image {beaker_image} \
+    """
+    if len(hf_repo_revision) > 0:
+        command += f" --hf_revision {hf_repo_revision}"
+    if len(upload_to_hf) > 0:
+        command += f" --upload_to_hf {upload_to_hf}"
+    if run_oe_eval_experiments:
+        command += " --run_oe_eval_experiments"
+    if run_safety_evaluations:
+        command += " --run_safety_evaluations"
+    if skip_oi_evals:
+        command += " --skip_oi_evals"
+
+    process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+
+    print(f"Beaker evaluation jobs: Stdout:\n{stdout.decode()}")
+    print(f"Beaker evaluation jobs: Stderr:\n{stderr.decode()}")
+    print(f"Beaker evaluation jobs: process return code: {process.returncode}")
+
+
+@retry_on_exception()
+def upload_metadata_to_hf(
+    metadata_dict,
+    filename,
+    hf_dataset_name,
+    hf_dataset_save_dir,
+):
+    # upload a random dict to HF. Originally for uploading metadata to HF
+    # about a model for leaderboard displays.
+    with open("tmp.json", "w") as f:
+        json.dump(metadata_dict, f)
+    api = HfApi()
+    api.upload_file(
+        path_or_fileobj="tmp.json",
+        path_in_repo=f"{hf_dataset_save_dir}/{filename}",
+        repo_id=hf_dataset_name,
+        repo_type="dataset",
+    )
+    os.remove("tmp.json")

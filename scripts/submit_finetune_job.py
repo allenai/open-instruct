@@ -6,6 +6,8 @@ import argparse
 import re 
 import shlex
 
+from open_instruct.utils import get_beaker_whoami
+
 def load_yaml(file_path):
     with open(file_path, 'r') as f:
         return yaml.load(f, Loader=yaml.FullLoader)
@@ -16,11 +18,11 @@ def main():
                         help="Path to the default Beaker config file")
     parser.add_argument("--config", default=None, 
                         help="Path to an additional config file to override default settings")
-    # parser.add_argument("--wandb_api_key", required=False, help="Weights & Biases API key")
     parser.add_argument("--cluster", type=str, default="ai2/allennlp-cirrascale", help="Beaker cluster to use")
     parser.add_argument("--priority", type=str, default="high", help="Priority of the job")
     parser.add_argument("--preemptible", type=bool, default=True, help="Whether to use preemptible instances")
-    parser.add_argument("--num_gpus", type=int, default=4, help="Number of GPUs to use")
+    parser.add_argument("--num_gpus", type=int, default=8, help="Number of GPUs to use")
+    parser.add_argument("--num_nodes", type=int, default=1, help="Number of nodes to use")
     parser.add_argument("--image", type=str, default="nathanl/open_instruct_auto", help="Beaker image to use.")
     parser.add_argument("--workspace", type=str, default="ai2/tulu-2-improvements", help="Beaker workspace to use.")
     # allow unknown args from CLI, use this to modify loaded config in bash scripts for sweeping
@@ -59,7 +61,11 @@ def main():
         default_yaml = f.read()
     d1 = yaml.load(default_yaml, Loader=yaml.FullLoader)
 
-    d1["tasks"][0]["image"]["beaker"] = args.image
+    if args.num_nodes > 1:
+        assert args.num_gpus == 8, "`num_gpus` must be set to 8 when training with multiple nodes" 
+        d1['tasks'][0]['replicas'] = args.num_nodes
+
+    d1['tasks'][0]['image']['beaker'] = args.image
     d1['tasks'][0]['context']['cluster'] = args.cluster
     d1['tasks'][0]['context']['priority'] = args.priority
     d1['tasks'][0]['context']['preemptible'] = args.preemptible # True requried for Jupiter/Pluto
@@ -96,9 +102,12 @@ def main():
         # Find the index of open_instruct/finetune.py
         script_index = cmd_parts.index('open_instruct/finetune.py')
 
+        # Find the index of 'accelerate launch'
+        pre_index = cmd_parts.index('launch')
+
         # Separate the command into pre-script and post-script parts
-        pre_script = cmd_parts[:3]  # 'accelerate launch'
-        pre_script_args = cmd_parts[3:script_index]
+        pre_script = cmd_parts[:pre_index+1]  # 'accelerate launch'
+        pre_script_args = cmd_parts[pre_index+1:script_index]
         post_script_args = cmd_parts[script_index+1:]
 
         # Parse arguments
@@ -120,6 +129,9 @@ def main():
         # add python job + post args
         new_cmd_parts.append('open_instruct/finetune.py')
         for key, value in cmd_dict.items():
+            if key == "dataset_mixer":
+                key = "dataset_mixer_list"
+                value = parse_dataset_mixer(value)
             new_cmd_parts.append(f'--{key}')
             # if string in [], expand args
             if isinstance(value, list):
@@ -132,9 +144,13 @@ def main():
 
     new_arguments = override_and_reconstruct_command(d1['tasks'][0]['arguments'][0], train_config, unknown_args)
     
-    # place --num_processes with args.num_gpus
+    # place --num_processes with args.num_gpus * args.num_nodes
     # will be --num_processes {N} before
-    new_arguments = re.sub(r'--num_processes \d+', f'--num_processes {args.num_gpus}', new_arguments)
+    new_arguments = re.sub(r'--num_processes \d+', f'--num_processes {args.num_gpus * args.num_nodes}', new_arguments)
+
+    # place --num_machines with args.num_nodes
+    # will be --num_machines {N} before
+    new_arguments = re.sub(r'--num_machines \d+', f'--num_machines {args.num_nodes}', new_arguments)
 
     model_name = get_model_name(new_arguments)
     # if model name has /, replace with _
@@ -154,24 +170,59 @@ def main():
     d['description'] = exp_name
     d['tasks'][0]['name'] = exp_name
 
+    # add cluster-specific env vars
+    if args.cluster == "ai2/jupiter-cirrascale-2":
+        d['tasks'][0]['envVars'] += [
+            {
+                "name": "NCCL_SOCKET_IFNAME",
+                "value": "ib",
+            },
+            {
+                "name": "NCCL_IB_HCA",
+                "value": "^=mlx5_bond_0",
+            },
+            {
+                "name": "NCCL_DEBUG",
+                "value": "INFO",
+            },
+        ]
+    elif args.cluster == "ai2/pluto-cirrascale":
+        d['tasks'][0]['envVars'] += [
+            {
+                "name": "NCCL_IB_HCA",
+                "value": "^=mlx5_1,mlx5_2",
+            },
+            {
+                "name": "NCCL_DEBUG",
+                "value": "INFO",
+            },
+        ]
+
     # WANDB settings
     for env in d['tasks'][0]['envVars']:
         if env['name'] == "WANDB_DISABLED":
             env['value'] = False
         if env['name'] == "WANDB_PROJECT":
             env['value'] = wandb_project
-    # d['tasks'][0]['envVars'].append({
-    #     'name': 'WANDB_API_KEY', 'value': wandb_api_key
-    # })
+    beaker_whoami = get_beaker_whoami()
     d['tasks'][0]['envVars'].append({
         'name': 'WANDB_NAME', 'value': exp_name
     })
     d['tasks'][0]['envVars'].append({
         'name': 'WANDB_RUN_GROUP', 'value': experiment_group
     })
+    d['tasks'][0]['envVars'].append({
+        'name': 'BEAKER_TOKEN', 'secret': f"{beaker_whoami}_BEAKER_TOKEN"
+    })
+    d['tasks'][0]['envVars'].append({
+        'name': 'HF_TOKEN', 'secret': f"{beaker_whoami}_HF_TOKEN"
+    })
+    d['tasks'][0]['envVars'].append({
+        'name': 'WANDB_API_KEY', 'secret': f"{beaker_whoami}_WANDB_API_KEY"
+    })
 
     # optionally, print to debug config
-    # print(d)
+    print(d)
 
     fn = "configs/beaker_configs/auto_created/{}.yaml".format(exp_name)
     file = open(fn, "w")
@@ -190,8 +241,14 @@ def check_dataset_selection(command_string):
     for i, part in enumerate(parts):
         if part == '--dataset_name' and i + 1 < len(parts):
             dataset_name = parts[i + 1]
-        elif part == '--dataset_mixer' and i + 1 < len(parts):
+        elif part == '--dataset_mixer_list' and i + 1 < len(parts):
             dataset_mixer = parts[i + 1]
+            j = i + 2
+            while j < len(parts) - 1:
+                dataset_mixer += ' ' + parts[j]
+                if '--' in parts[j+1]:
+                    break
+                j += 1
         elif part == '--train_file' and i + 1 < len(parts):
             train_file = parts[i + 1]
 
@@ -201,6 +258,13 @@ def check_dataset_selection(command_string):
         raise ValueError("Cannot provide two dataset selection mechanisms.")
 
     return dataset_name, dataset_mixer, train_file
+
+def parse_dataset_mixer(mixer_dict):
+    elems = []
+    for k, v in mixer_dict.items():
+        elems.append(k)
+        elems.append(str(v))
+    return ' '.join(elems)
 
 def get_model_name(command_string):
     parts = shlex.split(command_string)

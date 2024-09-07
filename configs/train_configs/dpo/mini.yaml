@@ -1,0 +1,24 @@
+model_name_or_path: EleutherAI/pythia-14m
+model_revision: main
+use_flash_attn: true
+gradient_checkpointing: true
+tokenizer_name: EleutherAI/pythia-14m
+use_slow_tokenizer: true
+dataset_name: trl-internal-testing/tldr-preference-trl-style
+max_seq_length: 2048
+max_train_samples: 100
+preprocessing_num_workers: 16
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 4 # designed for 8 GPUs, so batch size 32
+learning_rate: 5.0e-7
+lr_scheduler_type: linear
+warmup_ratio: 0.1
+weight_decay: 0.0
+num_train_epochs: 3
+output_dir: output/dpo_pythia_14m/
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+checkpointing_steps: 1000
+keep_last_n_checkpoints: 3
