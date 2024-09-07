@@ -1,0 +1,28 @@
+[
+    {"generated_text": [
+            {"role": "system", "content": "You are a world-class AI system, capable of complex reasoning and reflection. Reason through the query inside <thinking> tags, and then provide your final response inside <output> tags. If you detect that you made a mistake in your reasoning at any point, correct yourself inside <reflection> tags."
+            },
+            {"role": "user", "content": "What is 8 + 6 * 42 - 7?"
+            },
+            {"role": "assistant", "content": "<thinking>
+To evaluate this expression, I need to follow the order of operations (PEMDAS):
+
+1. Multiply 6 and 42: 6 * 42 = 252
+2. Add 8 and 252: 8 + 252 = 260
+3. Subtract 7 from 260: 260 - 7 = 253
+
+So, the final answer is...
+
+</thinking>
+
+<output>
+253
+</output>
+
+<reflection>
+No mistakes detected in my reasoning!
+</reflection>"
+            }
+        ]
+    }
+]
