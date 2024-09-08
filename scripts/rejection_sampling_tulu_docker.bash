@@ -1,14 +1,11 @@
 #!/bin/bash
 
 # my variables
-# reward_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo-RM
-reward_model_path=L3.18B-RM
+reward_model_path=NCSOFT/Llama-3-OffsetBias-RM-8B
 generation_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo
 num_completions=16
-priority=normal
-image=nathanl/open_instruct_auto-f89d7e4-10726144311
-# image=nathanl/open_instruct_auto
-# image=costah/open_instruct_rs
+priority=high
+image=nathanl/open_instruct_auto
 
 mkdir -p output/shards
 num_prompts=296461
@@ -19,7 +16,8 @@ shared_generation_hf_repo_id=generation_$timestamp
 shared_rs_hf_repo_id=rejection_sampling_$timestamp
 shared_scores_hf_repo_id=scores_$timestamp
 generation_model=/generation_model
-reward_model=/reward_model
+# reward_model=/reward_model
+reward_model=$reward_model_path
 sft_dataset=ai2-adapt-dev/rs-base-mix-L3.1-8B-generations
 on_jupyter=true
 num_gpus=1
@@ -87,9 +85,9 @@ if [ "$on_jupyter" = true ]; then
         --preemptible \
         --no_mount_nfs --no_hf_cache_env \
         --budget ai2/oe-adapt \
-        --beaker_dataset /reward_model:jacobm/$reward_model_path \
-        /generation_model:jacobm/$generation_model_path \
+        --beaker_dataset /generation_model:jacobm/$generation_model_path \
         --gpus $num_gpus -- $command
+        #  /reward_model:jacobm/$reward_model_path \
 else
     echo "Running on Mason"
     python mason.py \
