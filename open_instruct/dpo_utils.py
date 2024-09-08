@@ -225,6 +225,7 @@ def concatenated_forward(
             input_ids=concatenated_batch["concatenated_input_ids"],
             attention_mask=concatenated_batch["concatenated_attention_mask"],
         )
+        logits = logits.logits.to(torch.float32)
         aux_loss = None
     all_logps = _get_batch_logps(logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob)
     chosen_logps = all_logps[: batch["chosen_input_ids"].shape[0]]
