@@ -518,7 +518,7 @@ for experiment_group in experiment_groups:
             "--chat_formatting_function eval.templates.create_prompt_with_olmo_chat_format")
         ]
 
-    if any([x in model_info[0] for x in ["opt", "pythia", "falcon"]]):
+    if any([x in model_info[0] for x in ["opt", "pythia", "falcon", "olmoe"]]):
         if "--use_vllm" in task_spec['arguments'][0]:
             print(f"Removing --use_vllm for {model_info[0]}")
             task_spec['arguments'] = [task_spec['arguments'][0].replace("--use_vllm", "")] 
@@ -624,3 +624,4 @@ PYTHONPATH=. python evaluation/run_all_generation_benchmarks.py \
 
     cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
     subprocess.Popen(cmd, shell=True)
+    
