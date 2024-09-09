@@ -5,43 +5,36 @@
 
 ## Get started
 
-Here is a command to train a simple reward model on the sentiment dataset taken from [https://arxiv.org/abs/1909.08593](https://arxiv.org/abs/1909.08593) using the `pythia-1b-deduped` model. The training should take 2-10 minutes on a single GPU.
+In the sections below, we will include some examples on how to train online DPO models and demonstrating different features. A couple of notes:
 
+* You should adjust your `per_device_train_batch_size` and `gradient_accumulation_steps` accordingly to maximize throughput
+* To launch jobs using docker and beaker, you should run the following, where `$NUM_GPUS` is the number of GPUs you want the job to use and $YOUR_COMMAND is the command to invoke training
 
 ```bash
-python open_instruct/online_dpo.py \
-    --dataset_name trl-internal-testing/sentiment-trl-style \
-    --dataset_train_split train \
-    --dataset_eval_split test \
-    --sft_messages_key chosen \
-    --model_name_or_path EleutherAI/pythia-1b-deduped \
-    --reward_model_path cleanrl/reward_modeling__EleutherAI_pythia-1b-deduped_sentiment \
-    --chat_template simple_concat_with_space \
-    --learning_rate 3e-6 \
-    --total_episodes 20000 \
-    --per_device_train_batch_size 32 \
-    --per_device_eval_batch_size 32 \
-    --gradient_accumulation_steps 1 \
-    --max_token_length 256 \
-    --max_prompt_token_lenth 256 \
-    --num_train_epochs 1 \
-    --stop_token period \
-    --beta 0.1 \
-    --output_dir models/rm/rm_sentiment_1b \
-    --with_tracking \
-    --push_to_hub \
-
-
 python mason.py \
-    --cluster ai2/allennlp-cirrascale ai2/aristo-cirrascale ai2/pluto-cirrascale ai2/general-cirrascale ai2/mosaic-cirrascale ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale  \
+    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
+    --pure_docker_mode --no_mount_nfs --no_hf_cache_env \
     --priority preemptible \
     --budget ai2/allennlp \
-    --workspace ai2/costah \
-    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+    --gpus $NUM_GPUS -- $YOUR_COMMAND
+```
+
+
+For example:
+
+```bash
+# single GPU
+python mason.py \
+    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
+    --pure_docker_mode --no_mount_nfs --no_hf_cache_env \
+    --priority preemptible \
+    --budget ai2/allennlp \
+    --gpus 1 -- python \
      open_instruct/online_dpo_vllm_thread.py \
-    --dataset_name trl-internal-testing/tldr-preference-sft-trl-style \
-    --dataset_train_split train \
-    --dataset_eval_split validation \
+    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_eval_splits validation \
     --learning_rate 3e-6 \
     --output_dir models/minimal/online_dpo_vllm_thread_tldr \
     --per_device_train_batch_size 16 \
@@ -59,24 +52,23 @@ python mason.py \
     --with_tracking \
     --push_to_hub \
     --vllm_device cuda:7 \
-
-
+# 8 GPU
 python mason.py \
-    --cluster ai2/allennlp-cirrascale ai2/aristo-cirrascale ai2/pluto-cirrascale ai2/general-cirrascale ai2/mosaic-cirrascale ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale  \
+    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
+    --pure_docker_mode --no_mount_nfs --no_hf_cache_env \
     --priority preemptible \
     --budget ai2/allennlp \
-    --workspace ai2/costah \
     --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
      open_instruct/online_dpo_vllm_thread.py \
-    --dataset_name trl-internal-testing/tldr-preference-sft-trl-style \
-    --dataset_train_split train \
-    --dataset_eval_split validation \
+    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_eval_splits validation \
     --learning_rate 3e-6 \
     --output_dir models/minimal/online_dpo_vllm_thread_tldr \
-    --per_device_train_batch_size 64 \
-    --per_device_eval_batch_size 64 \
-    --gradient_accumulation_steps 1 \
-    --local_rollout_forward_batch_size 64 \
+    --per_device_train_batch_size 16 \
+    --local_rollout_forward_batch_size 32 \
+    --gradient_accumulation_steps 4 \
     --num_epochs 1 \
     --num_mini_batches 1 \
     --total_episodes 1000000 \
@@ -85,269 +77,146 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --beta 0.1 \
-    --response_length 53 \
-    --with_tracking \
-    --push_to_hub \
-    --vllm_device cuda:7 \
-
-
-
-python mason.py \
-    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a100-80g-ib ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/mosaic-cirrascale \
-    --priority preemptible \
-    --budget ai2/allennlp \
-    --workspace ai2/costah \
-    --gpus 8 -- accelerate launch  --config_file configs/ds_configs/deepspeed_zero3.yaml \
-     open_instruct/online_dpo.py \
-    --dataset_name trl-internal-testing/tldr-preference-sft-trl-style \
-    --dataset_train_split train \
-    --dataset_eval_split validation \
-    --learning_rate 3e-6 \
-    --output_dir models/minimal/online_dpo_tldr \
-    --per_device_train_batch_size 4 \
-    --gradient_accumulation_steps 16 \
-    --local_rollout_forward_batch_size 8 \
-    --num_epochs 1 \
-    --num_mini_batches 1 \
-    --total_episodes 1000000 \
-    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr  \
-    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
-    --non_stop_penalty \
-    --stop_token eos \
-    --beta 0.1 \
-    --num_evals 10 \
-    --response_length 512 \
-    --with_tracking \
-    --push_to_hub \
-
-ai2/prior-cirrascale ai2/s2-cirrascale ai2/mosaic-cirrascale
-python mason.py \
-    --cluster ai2/pluto-cirrascale  \
-    --priority preemptible \
-    --budget ai2/allennlp \
-    --workspace ai2/costah \
-    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
-     open_instruct/online_dpo_vllm.py \
-    --dataset_name allenai/ultrafeedback_binarized_cleaned \
-    --dataset_train_split train_prefs \
-    --dataset_eval_split test_prefs \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
-    --sft_messages_key chosen \
-    --learning_rate 5e-7 \
-    --output_dir models/minimal/online_dpo_tulu2_llama3 \
-    --chat_template tulu \
-    --per_device_train_batch_size 2 \
-    --per_device_eval_batch_size 2 \
-    --gradient_accumulation_steps 32 \
-    --local_rollout_forward_batch_size 2 \
-    --vllm_device cuda:7 \
-    --num_epochs 1 \
-    --num_mini_batches 1 \
-    --total_episodes 400000 \
-    --model_name_or_path allenai/llama-3-tulu-2-8b  \
-    --reward_model_path allenai/reward_modeling__allenai_llama-3-tulu-2-8b_ultrafeedback \
-    --non_stop_penalty \
-    --stop_token eos \
-    --penalty_reward_value -10.0 \
-    --beta 0.07 \
-    --num_evals 10 \
-    --response_length 1024 \
-    --gradient_checkpointing \
-    --with_tracking \
-    --push_to_hub
-
-python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
-    --image costah/open_instruct_onlinedpo \
-    --pure_docker_mode \
-    --priority low \
-    --preemptible \
-    --no_mount_nfs --no_hf_cache_env \
-    --budget ai2/allennlp \
-    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
-     open_instruct/online_dpo_vllm.py \
-    --dataset_name allenai/ultrafeedback_binarized_cleaned \
-    --dataset_train_split train_prefs \
-    --dataset_eval_split test_prefs \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
-    --sft_messages_key chosen \
-    --learning_rate 5e-7 \
-    --output_dir models/minimal/online_dpo_tulu2_llama3 \
-    --chat_template tulu \
-    --per_device_train_batch_size 4 \
-    --per_device_eval_batch_size 4 \
-    --gradient_accumulation_steps 16 \
-    --local_rollout_forward_batch_size 4 \
-    --vllm_device cuda:7 \
-    --num_epochs 1 \
-    --num_mini_batches 1 \
-    --total_episodes 400000 \
-    --model_name_or_path allenai/llama-3-tulu-2-8b  \
-    --reward_model_path allenai/reward_modeling__allenai_llama-3-tulu-2-8b_ultrafeedback \
-    --non_stop_penalty \
-    --stop_token eos \
-    --penalty_reward_value -10.0 \
-    --beta 0.03 \
-    --num_evals 10 \
-    --response_length 1024 \
-    --gradient_checkpointing \
-    --with_tracking \
-    --push_to_hub
-
-
-python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
-    --image costah/open_instruct_onlinedpo \
-    --pure_docker_mode \
-    --priority low \
-    --preemptible \
-    --no_mount_nfs --no_hf_cache_env \
-    --budget ai2/allennlp \
-    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
-     open_instruct/ppo_vllm.py \
-    --dataset_name allenai/ultrafeedback_binarized_cleaned \
-    --dataset_train_split train_prefs \
-    --dataset_eval_split test_prefs \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
-    --sft_messages_key chosen \
-    --learning_rate 5e-7 \
-    --output_dir models/minimal/online_dpo_tulu2_llama3 \
-    --chat_template tulu \
-    --per_device_train_batch_size 2 \
-    --per_device_eval_batch_size 2 \
-    --gradient_accumulation_steps 32 \
-    --local_rollout_forward_batch_size 2 \
-    --vllm_device cuda:7 \
-    --num_epochs 1 \
-    --num_mini_batches 1 \
-    --total_episodes 400000 \
-    --model_name_or_path allenai/llama-3-tulu-2-8b  \
-    --reward_model_path allenai/reward_modeling__allenai_llama-3-tulu-2-8b_ultrafeedback \
-    --non_stop_penalty \
-    --stop_token eos \
-    --penalty_reward_value -10.0 \
-    --beta 0.03 \
-    --num_evals 1 \
-    --response_length 1024 \
-    --gradient_checkpointing \
-    --with_tracking \
-    --push_to_hub
-
-
-python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
-    --image costah/open_instruct_onlinedpo \
-    --pure_docker_mode \
-    --priority low \
-    --preemptible \
-    --no_mount_nfs --no_hf_cache_env \
-    --budget ai2/allennlp \
-    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
-     open_instruct/ppo_vllm.py \
-    --dataset_name allenai/ultrafeedback_binarized_cleaned \
-    --dataset_train_split train_prefs \
-    --dataset_eval_split test_prefs \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
-    --sft_messages_key chosen \
-    --learning_rate 5e-7 \
-    --output_dir models/minimal/online_dpo_tulu2_llama3 \
-    --chat_template tulu \
-    --per_device_train_batch_size 2 \
-    --per_device_eval_batch_size 2 \
-    --gradient_accumulation_steps 32 \
-    --local_rollout_forward_batch_size 2 \
-    --vllm_device cuda:7 \
-    --num_epochs 1 \
-    --num_mini_batches 1 \
-    --total_episodes 400000 \
-    --model_name_or_path allenai/llama-3-tulu-2-8b  \
-    --reward_model_path allenai/reward_modeling__allenai_llama-3-tulu-2-8b_ultrafeedback \
-    --non_stop_penalty \
-    --stop_token eos \
-    --penalty_reward_value -10.0 \
-    --beta 0.03 \
-    --num_evals 1 \
-    --response_length 1024 \
-    --gradient_checkpointing \
-    --with_tracking \
-    --push_to_hub
-
-
-python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
-    --image costah/open_instruct_onlinedpo \
-    --pure_docker_mode \
-    --priority low \
-    --preemptible \
-    --no_mount_nfs --no_hf_cache_env \
-    --budget ai2/allennlp \
-    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
-     open_instruct/ppo_vllm.py \
-    --dataset_name allenai/ultrafeedback_binarized_cleaned \
-    --dataset_train_split train_prefs \
-    --dataset_eval_split test_prefs \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
-    --sft_messages_key chosen \
-    --learning_rate 5e-7 \
-    --output_dir models/minimal/online_dpo_tulu2_llama3 \
-    --chat_template tulu \
-    --per_device_train_batch_size 2 \
-    --per_device_eval_batch_size 2 \
-    --gradient_accumulation_steps 32 \
-    --local_rollout_forward_batch_size 2 \
-    --vllm_device cuda:7 \
-    --num_epochs 1 \
-    --num_mini_batches 1 \
-    --total_episodes 400000 \
-    --model_name_or_path vwxyzjn/btulu  \
-    --reward_model_path allenai/llama-3.1-tulu-2-8b-uf-mean-rm \
-    --non_stop_penalty \
-    --stop_token eos \
-    --penalty_reward_value -10.0 \
-    --beta 0.05 \
-    --num_evals 1 \
-    --response_length 1024 \
-    --gradient_checkpointing \
-    --with_tracking \
-    --push_to_hub
-
-
-python mason.py \
-    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a100-80g-ib ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/mosaic-cirrascale \
-    --priority preemptible \
-    --budget ai2/allennlp \
-    --workspace ai2/costah \
-    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
-     open_instruct/online_dpo_vllm.py \
-    --dataset_name trl-internal-testing/tldr-preference-sft-trl-style \
-    --dataset_train_split train \
-    --dataset_eval_split validation \
-    --learning_rate 3e-6 \
-    --output_dir models/minimal/online_dpo_tldr \
-    --per_device_train_batch_size 4 \
-    --gradient_accumulation_steps 16 \
-    --local_rollout_forward_batch_size 8 \
-    --num_epochs 1 \
-    --num_mini_batches 1 \
-    --total_episodes 1000000 \
-    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr  \
-    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
-    --non_stop_penalty \
-    --stop_token eos \
-    --beta 0.1 \
-    --num_evals 10 \
     --response_length 53 \
     --with_tracking \
     --push_to_hub \
     --vllm_device cuda:7 \
 ```
 
-You would typically get a track run like https://wandb.ai/ai2-llm/open-instruct/runs/ztgnw64l
+
+
+### Level 0: single GPU; quick debug. Should take less than 10 minutes to finish
+
+```bash
+python open_instruct/online_dpo_vllm_thread.py \
+    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_eval_splits validation \
+    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr \
+    --reward_model_path cleanrl/reward_modeling__EleutherAI_pythia-1b-deduped_sentiment \
+    --chat_template simple_concat_with_space \
+    --learning_rate 3e-6 \
+    --total_episodes 4000 \
+    --per_device_train_batch_size 2 \
+    --per_device_eval_batch_size 2 \
+    --gradient_accumulation_steps 64 \
+    --max_token_length 2048 \
+    --max_prompt_token_lenth 512 \
+    --num_train_epochs 1 \
+    --stop_token period \
+    --beta 0.1 \
+    --output_dir models/rm/rm_sentiment_1b \
+    --vllm_device cuda:0 \
+    --vllm_gpu_memory_utilization 0.1 \
+    --with_tracking \
+    --push_to_hub \
+
+# LEVEL 0.1: two GPU; quick debug; using 1 GPU for training and 1 GPU for vllm generation via --vllm_device cuda:1
+python open_instruct/online_dpo_vllm_thread.py \
+    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_eval_splits validation \
+    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr \
+    --reward_model_path cleanrl/reward_modeling__EleutherAI_pythia-1b-deduped_sentiment \
+    --chat_template simple_concat_with_space \
+    --learning_rate 3e-6 \
+    --total_episodes 3000 \
+    --per_device_train_batch_size 2 \
+    --per_device_eval_batch_size 2 \
+    --gradient_accumulation_steps 64 \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --num_train_epochs 1 \
+    --stop_token period \
+    --beta 0.1 \
+    --output_dir models/rm/rm_sentiment_1b \
+    --vllm_device cuda:1 \
+    --with_tracking \
+    --push_to_hub \
+```
+
+
+
+
+### LEVEL 1: 8 GPU; TL;DR summarization
+
+Here we are using --vllm_device cuda:7 to say we want to launch the vllm generation engine on the 8th GPU (or GPU_7 using 0 index)
+```bash
+accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+     open_instruct/online_dpo_vllm_thread.py \
+    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_eval_splits validation \
+    --learning_rate 3e-6 \
+    --output_dir models/minimal/online_dpo_vllm_thread_tldr \
+    --per_device_train_batch_size 16 \
+    --local_rollout_forward_batch_size 32 \
+    --gradient_accumulation_steps 4 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 1000000 \
+    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr  \
+    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
+    --non_stop_penalty \
+    --stop_token eos \
+    --beta 0.1 \
+    --response_length 53 \
+    --with_tracking \
+    --push_to_hub \
+    --vllm_device cuda:7 \
+```
+
+### LEVEL 2: 8 GPU; Huggingface no robot
+
+```bash
+python mason.py \
+    --cluster  ai2/jupiter-cirrascale-2 \
+    --image costah/open_instruct_onlinedpo2 --pure_docker_mode --no_mount_nfs --no_hf_cache_env \
+    --workspace ai2/costah \
+    --priority low \
+    --preemptible \
+    --budget ai2/allennlp \
+    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+    open_instruct/online_dpo_vllm_thread.py \
+    --exp_name "online_dpo_vllm_thread_beta_0.03" \
+    --dataset_mixer '{"HuggingFaceH4/no_robots": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"HuggingFaceH4/no_robots": 1.0}' \
+    --dataset_eval_splits test \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --learning_rate 8e-7 \
+    --output_dir /output/ \
+    --chat_template tulu \
+    --per_device_train_batch_size 1 \
+    --per_device_eval_batch_size 1 \
+    --no_async_mode \
+    --gradient_accumulation_steps 32 \
+    --local_rollout_forward_batch_size 1 \
+    --vllm_device cuda:7 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 100000 \
+    --model_name_or_path allenai/open_instruct_dev  \
+    --model_revision costa_finetune_tulu3_8b_norobot__meta-llama_Meta-Llama-3.1-8B__42__1725559869 \
+    --reward_model_path vwxyzjn/reward_modeling__allenai_open_instruct_dev \
+    --reward_model_revision reward_modeling__1__1725760619 \
+    --non_stop_penalty \
+    --stop_token eos \
+    --penalty_reward_value -10.0 \
+    --beta 0.03 \
+    --num_evals 3 \
+    --seed 3 \
+    --response_length 1024 \
+    --gradient_checkpointing \
+    --with_tracking \
+    --push_to_hub
+```
+
+
 
 
 
@@ -370,327 +239,118 @@ Finally, we also include samples
 ![reward modeling preference sample texts](reward_modeling_preference_sample_texts.png)
 
 
-
-## To debug
-
-To debug you can run the command with `--sanity_check`, this way it will only deal with 100 samples from the dataset and cut down dataset processing time.
-
-```bash
-python -i open_instruct/reward_modeling.py \
-    --dataset_name trl-internal-testing/sentiment-trl-style \
-    --dataset_train_split train \
-    --dataset_eval_split test \
-    --model_name_or_path EleutherAI/pythia-14m \
-    --chat_template simple_concat_with_space \
-    --learning_rate 3e-6 \
-    --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 32 \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 1024 \
-    --num_train_epochs 1 \
-    --output_dir models/rm/rm \
-    --sanity_check \
-    --push_to_hub
-```
-
-
-## How does it work?
-
-
-The reward modeling process in this script roughly includes two main steps: 1) dataset preprocessing and tokenization and 2) model training / evaluation / model saving.
-
-Below are the dataset documentation to help understand how data is processed and tokenized.
-
-
-### Dataset specification
-
-
-Here we assume the preference dataset is an HF dataset with two columns: `chosen` and `rejected`. Each item in the columns should use [Hugging Face's chat template](https://huggingface.co/docs/transformers/main/en/chat_templating). For example, a chosen message would have the following format taken from [Anthropic's HH dataset](https://huggingface.co/datasets/trl-internal-testing/hh-rlhf-helpful-base-trl-style):
-
-
-```python
-[
-  {
-    "content": "How do I teach kids to meditate?",
-    "role": "user"
-  },
-  {
-    "content": "Great question! That's a really useful skill to cultivate, it can bring peace, calm, and happiness. I'm glad you want to teach your kids about it.",
-    "role": "assistant"
-  },
-  {
-    "content": "All right, so how do we start?",
-    "role": "user"
-  },
-  {
-    "content": "Well, we can get started with just being silent. You can tell the kids it's okay if they just sit there quietly for a few minutes without thinking of anything.",
-    "role": "assistant"
-  }
-]
-```
-
-Note that the message also don't have look like conversations or multi-turn. The dataset may use it for just any prompt and response pairs. For example, [trl-internal-testing/sentiment-trl-style](https://huggingface.co/datasets/trl-internal-testing/sentiment-trl-style) is about making the completion of a prompt sound more positive.
-
-```python
-[
-  {
-    "content": "He did not like things which reminded him that he had once been not only outside the progressive element but even outside the College. He did not always like Curry either. His pleasure in being with him was not that sort of pleasure.\n\n\"Yes,\" said Curry. \"Denniston was your chief rival.",
-    "role": "user"
-  },
-  {
-    "content": "He was the one who would not give up, who would have a great deal to say.",
-    "role": "assistant"
-  }
-]
-```
-
-
-Here are some more examples:
-
-* [trl-internal-testing/sentiment-trl-style](https://huggingface.co/datasets/trl-internal-testing/sentiment-trl-style)
-* [trl-internal-testing/descriptiveness-trl-style](https://huggingface.co/datasets/trl-internal-testing/descriptiveness-trl-style)
-* [trl-internal-testing/tldr-preference-trl-style](https://huggingface.co/datasets/trl-internal-testing/tldr-preference-trl-style)
-* [trl-internal-testing/hh-rlhf-trl-style](https://huggingface.co/datasets/trl-internal-testing/hh-rlhf-trl-style)
-* [HuggingFaceH4/ultrafeedback_binarized](https://huggingface.co/datasets/HuggingFaceH4/ultrafeedback_binarized)
-
-
-The dataset on HF roughly looks like the following:
-
-
-![reward modeling dataset screenshot](reward_modeling_ds.png)
-
-(Temporary) You can interact with these datasets as well. Currently the best way to visualize the dataset is through `costa_utils`
-
-```bash
-pip install costa_utils
-python -m costa_utils.hf_viz \
-    --preference trl-internal-testing/sentiment-trl-style \
-    --split train_prefs \
-    --preference_chosen_column_name chosen \
-    --preference_rejected_column_name rejected
-```
-![visualizing the dataset a bit easier](reward_modeling_hf_viz.png)
-
-
-
-### Dataset tokenization
-
-Ultimately, the reward modeling takes tokenized data as inputs, so we need to tokenize these texts. We do so via HF's chat_template. Here is a basic snippet on how they works. You can use different templates to add a new space, a new line, or "User:" and "Assistant" identification before the actual message contents.
-
-
-```python
-from transformers import AutoTokenizer
-from open_instruct.dataset_processor import CHAT_TEMPLATES
-chat = [
-  {
-    "content": "This is really an amazing thing.",
-    "role": "user"
-  },
-  {
-    "content": "I am glad you said that.",
-    "role": "assistant"
-  }
-]
-tokenizer = AutoTokenizer.from_pretrained("gpt2")
-tokenizer.chat_template = CHAT_TEMPLATES["simple_concat_with_space"]
-print(repr(tokenizer.chat_template))
-# "{% for message in messages %}{{' ' if not loop.first else ''}}{{message['content']}}{% endfor %}{{eos_token}}"
-print(tokenizer.apply_chat_template(chat, tokenize=False))
-# This is really an amazing thing. I am glad you said that.<|endoftext|>
-
-tokenizer.chat_template = CHAT_TEMPLATES["simple_chat"]
-print(repr(tokenizer.chat_template))
-# "{% for message in messages %}{{'\n\n' if not loop.first else ''}}{{message['role']|capitalize + ': ' +message['content']}}{% endfor %}{{eos_token}}"
-print(tokenizer.apply_chat_template(chat, tokenize=False))
-# User: This is really an amazing thing.
-#
-# Assistant: I am glad you said that.<|endoftext|>
-```
-
-Those `tokenizer.apply_chat_template(chat, tokenize=False)` strings are going to get tokenized and will be ultimately used to train the reward model.
-
-
-### Dataset processing
-
-
-To make sure the tokenization process is as transparent as possible. We provide a `DatasetProcessor` class that can be used to tokenize the dataset and visualize the tokenization process. Here is an example of how to use it:
-
-```python
-from transformers import AutoTokenizer
-from datasets import load_dataset
-from trl.dataset_processor import (
-    CHAT_TEMPLATES,
-    INPUT_IDS_CHOSEN_KEY,
-    DatasetConfig,
-    PreferenceDatasetProcessor,
-    visualize_token,
-)
-dataset_config = DatasetConfig(
-    dataset_name="trl-internal-testing/sentiment-trl-style",
-    chat_template="simple_chat",
-    max_token_length=1024,
-    max_prompt_token_lenth=1024,
-)
-tokenizer = AutoTokenizer.from_pretrained("gpt2")
-tokenizer.chat_template = CHAT_TEMPLATES["simple_chat"]
-dataset = load_dataset(dataset_config.dataset_name)
-dataset_processor = PreferenceDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
-dataset_processor.sanity_check_(dataset)
-dataset = dataset_processor.tokenize(dataset)
-dataset = dataset_processor.filter(dataset)
-dataset_processor.get_token_length_visualization(dataset, save_path="tmp.png")
-train_dataset = dataset[dataset_config.dataset_train_split]
-eval_dataset = dataset[dataset_config.dataset_eval_split]
-visualize_token(train_dataset[0][INPUT_IDS_CHOSEN_KEY], tokenizer)
-print(INPUT_IDS_CHOSEN_KEY) # input_ids_chosen
-```
-
-Here we produced the tokenized dataset, with columns 
-
--   `input_ids_chosen: List[int]`
--   `input_ids_rejected: List[int]`
-
-
-
-The `visualize_token` will output the following colored tokens:
-
-![colored tokenized inputs](reward_modeling_colored_tokens.png)
-
-
-
-The `dataset_processor.get_token_length_visualization` will output the visualization on the token length for the `chosen`, `rejected` and `prompt` in `tmp.png`.
-
-![token length visualization](reward_modeling_token.png)
-
-
-### Model training
-
-Then given the tokenized datasets, we train on those using the logsigmoid loss. Namely `loss = -F.logsigmoid(chosen_rewards - rejected_rewards).mean()`. 
-
-
 ## Explanation of the logged metrics
 
 
 * `episode`: the global episode number training has gone through (e.g., `3000` means we have trained on 3000 data points already)
+* `lr`: the current learning rate
 * `epoch`: the fraction or multiple of the epoch (e.g., `2.7` means we have trained on the dataset for 2 epochs and 70% of the third epoch)
-* `train/rm/accuracy`: the training accuracy of the training batch
-* `train/rm/loss`: the logsigmoid loss of the reward modeling of the training batch
-* `train/rm/chosen_reward`: the reward of the chosen responses of the training batch
-* `train/rm/rejected_reward`: the reward of the rejected responses of the training batch
-* `train/rm/reward_margin`: the reward margin (chosen_reward - rejected_reward) of the training batch
-* `train/rm/lr`: the training learning rate
+* `objective/kl`: the KL divergence between the current policy and the reference policy (sum of the KL divergence of each response token)
+* `objective/scores`: the scores of the current response, rated by a reward model
+* `objective/rlhf_reward`: the RLHF reward, which is `objective/scores` - `beta` * `objective/kl`
+* `objective/non_score_reward`: `beta` * `objective/kl`
+* `objective/entropy`: the entropy of the current policy
+* `objective/scores_margin`: the difference between the chosen response scores and the rejected response scores. We pick the chosen response to be the response with higher scores, and the rejected response to be the response with lower scores
+* `objective/loss`: the DPO loss
+* `logps/chosen`: the log probability of the chosen response
+* `logps/rejected`: the log probability of the rejected response
+* `reward/chosen`: the implicit DPO reward of the chosen response
+* `reward/rejected`: the implicit DPO reward of the rejected response
+* `reward_margin`: the difference between the implicit PDO chosen reward and the implicit rejected reward
+* `time/from_scratch`: the time taken to train the model from scratch
+* `time/training`: the time taken to do one training step
+* `val/sequence_lengths`: the length of the sequences in the generated responses
+* `val/num_stop_token_ids`: the number of stop tokens in the generated responses
 
 
-We also have `eval/rm/accuracy`, `eval/rm/loss`, `eval/rm/chosen_rewards`, `eval/rm/rejected_rewards`, `eval/rm/reward_margin` for the evalation dataset.
 
 
 ## Implementation details
 
 These are relevant implementation details on reward modeling:
 
-1. The tokenizer pads from the right: when the length of the data points differ, the tokenizer pads from the right
-1. Disable dropout in the model: this is actually an implementation detail in PPO training, but for consistency we also disable dropout in the reward model training (see p.3. in https://arxiv.org/pdf/1909.08593)
+1. The tokenizer pads from the left, so it's straightforward to do generations.
+1. Disable dropout in the model: this is an implementation detail in PPO training (see p.3. in https://arxiv.org/pdf/1909.08593).
 1. Layer initialization: we initialize the score's weight according to `std=1 / np.sqrt(model.config.hidden_size + 1)` (see p. 11 in https://arxiv.org/abs/2009.01325)
+1. Vocab size for RM and Policy: we use the same vocab size for the reward model and the policy model. This is to ensure that the reward model can score all the tokens in the policy model. We added a `ValueError` for situations when `policy.config.vocab_size != reward_model.config.vocab_size`.
+1. Retrain on the same prompts: say we only have 10k prompts but we specified `--episodes 100k`, we will shuffle the prompts at every 10k episodes and retrain on them.
+1. Truncate responses at the stop token: we truncate the responses at the `--stop_token eos` to ensure the generation is stopped at the stop token.
+1. Non-stop penalty: we use a non-stop penalty to the reward model to penalize the model for not stopping at the stop token. For example, if the model does not end at the stop token, we penalize the model by `-10.0` (see `--penalty_reward_value -10.0`).
+1. Async training and generation: we follow the architecture in https://arxiv.org/abs/2310.00036 to do rollout and training asynchronously. This is to ensure that the training is not bottlenecked by the generation.
+
+```python
+import queue
+import threading
+import time
+
+class Agent():
+    def __init__(self):
+        self.param = 1
+
+    def learn(self, data):
+        self.param += 1
+
+def query_generator_fn():
+    for i in range(1, 100):
+        yield i
 
 
-## Experiment results
+ITER = 7
+batch_size = 32
+agent = Agent()
+data_Q = queue.Queue(maxsize=1)
+param_and_query_Q = queue.Queue(maxsize=1)
+def actor():
+    for i in range(1, ITER + 1):
+        params, query = param_and_query_Q.get()
+        data = params
+        print(f"[actor] generating data π_{params} -> p_{query} D_π_{data}")
+        time.sleep(1) # simulate data generation
+        data_Q.put((query, data))
 
+actor_thread = threading.Thread(target=actor)
+actor_thread.start()
 
+# initial param put
+generator = query_generator_fn()
+next_queries = next(generator)
+param_and_query_Q.put((agent.param, next_queries))
 
-```bash
-# LEVEL 1: single GPU model training; adjust your `per_device_train_batch_size` and
-# `gradient_accumulation_steps` accordingly
-# you can also use the `trl-internal-testing/descriptiveness-trl-style` dataset
-python open_instruct/reward_modeling.py \
-    --dataset_name trl-internal-testing/sentiment-trl-style \
-    --dataset_train_split train \
-    --dataset_eval_split test \
-    --model_name_or_path EleutherAI/pythia-1b-deduped \
-    --chat_template simple_concat_with_space \
-    --learning_rate 3e-6 \
-    --per_device_train_batch_size 32 \
-    --per_device_eval_batch_size 32 \
-    --gradient_accumulation_steps 1 \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 1024 \
-    --num_train_epochs 1 \
-    --output_dir models/rm/rm_sentiment_1b \
-    --with_tracking \
-    --push_to_hub \
+# cleanba style stuff
+async_mode = True
+start_time = time.time()
+for g in range(1, ITER + 1):
+    queries = next_queries
+    if async_mode:
+        if g != 1:
+            next_queries = next(generator)
+        param_and_query_Q.put((agent.param, queries))
+    else:
+        if g != 1:
+            next_queries = next(generator)
+            param_and_query_Q.put((agent.param, next_queries)) # note the indent here is different
+    _, data = data_Q.get()
+    old_param = agent.param
+    agent.learn(data)
+    time.sleep(1) # simulate training
+    print(f"--[leaner] get π_{old_param} ->  p_{queries} D_π_{data} -> π_{agent.param}, time: {time.time() - start_time}")
+actor_thread.join()
+```
+```
+[actor] generating data π_1 -> p_1 D_π_1
+[actor] generating data π_1 -> p_1 D_π_1
+--[leaner] get π_1 ->  p_1 D_π_1 -> π_2, time: 2.0022709369659424
+[actor] generating data π_2 -> p_1 D_π_2
+--[leaner] get π_2 ->  p_1 D_π_1 -> π_3, time: 3.003502607345581
+[actor] generating data π_3 -> p_2 D_π_3
+--[leaner] get π_3 ->  p_2 D_π_2 -> π_4, time: 4.004725933074951
+[actor] generating data π_4 -> p_3 D_π_4
+--[leaner] get π_4 ->  p_3 D_π_3 -> π_5, time: 5.005916118621826
+[actor] generating data π_5 -> p_4 D_π_5
+--[leaner] get π_5 ->  p_4 D_π_4 -> π_6, time: 6.007085800170898
+[actor] generating data π_6 -> p_5 D_π_6
+--[leaner] get π_6 ->  p_5 D_π_5 -> π_7, time: 7.007669448852539
+--[leaner] get π_7 ->  p_6 D_π_6 -> π_8, time: 8.009439706802368
 ```
 
-* Tracked experiment: https://wandb.ai/ai2-llm/open-instruct/runs/ztgnw64l
-* Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1722961506
 
-
-
-```bash
-# LEVEL 2: multi-gpu training using DS2 with the TL;DR summarization dataset
-accelerate launch  --config_file configs/ds_configs/deepspeed_zero2.yaml \
-    open_instruct/reward_modeling.py \
-    --dataset_name trl-internal-testing/tldr-preference-trl-style \
-    --dataset_train_split train \
-    --dataset_eval_split validation \
-    --model_name_or_path EleutherAI/pythia-1b-deduped \
-    --chat_template simple_concat_with_space \
-    --learning_rate 3e-6 \
-    --per_device_train_batch_size 32 \
-    --per_device_eval_batch_size 32 \
-    --gradient_accumulation_steps 1 \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
-    --num_train_epochs 1 \
-    --output_dir models/rm/rm_tldr_1b \
-    --with_tracking \
-    --push_to_hub
-```
-
-* Tracked experiment: https://wandb.ai/ai2-llm/open-instruct/runs/etfpvan2
-* Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1722961863
-
-```bash
-# LEVEL 2: multi-gpu training using DS2 with the anthropic HH dataset
-accelerate launch --config_file configs/ds_configs/deepspeed_zero2.yaml \
-    open_instruct/reward_modeling.py \
-    --dataset_name trl-internal-testing/hh-rlhf-trl-style \
-    --dataset_train_split train \
-    --dataset_eval_split test \
-    --model_name_or_path EleutherAI/pythia-1b-deduped \
-    --chat_template simple_chat \
-    --learning_rate 3e-6 \
-    --per_device_train_batch_size 8 \
-    --per_device_eval_batch_size 8 \
-    --gradient_accumulation_steps 4 \
-    --max_token_length 2048 \
-    --max_prompt_token_lenth 1024 \
-    --num_train_epochs 1 \
-    --output_dir models/rm/rm_hh_1b \
-    --with_tracking \
-    --push_to_hub 
-```
-
-* Tracked experiment: https://wandb.ai/ai2-llm/open-instruct/runs/0uwj4pmt
-* Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1722962876
-
-
-
-```bash
-# TODO (Costa): to be tested
-# LEVEL 3: multi-gpu training using DS2 with the ultrafeedback dataset
-accelerate launch --config_file examples/accelerate_configs/deepspeed_zero2.yaml \
-    open_instruct/rm_zephyr.py \
-    --dataset_name HuggingFaceH4/ultrafeedback_binarized \
-    --dataset_train_split train_prefs \
-    --dataset_eval_split test_prefs \
-    --chat_template zephyr \
-    --learning_rate 3e-6 \
-    --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 32 \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 1024 \
-    --num_train_epochs 1 \
-    --bf16 \
-    --output_dir models/rm/rm_zephyr_7b \
-```
