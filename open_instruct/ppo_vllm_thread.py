@@ -1,11 +1,13 @@
 import gc
+import json
 import os
 import random
+import subprocess
 import threading
 import time
 from dataclasses import asdict, dataclass
-from typing import Literal, Optional
-from queue import Queue
+from queue import Queue, Empty
+from typing import List, Literal, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -16,20 +18,20 @@ import torch.utils
 import torch.utils.data
 from accelerate import Accelerator
 from accelerate.utils import broadcast, gather_object
-from datasets import load_dataset
+from datasets import DatasetDict
 from huggingface_hub import HfApi
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from transformers import (
+    AutoConfig,
     AutoModelForCausalLM,
     AutoModelForSequenceClassification,
-    AutoConfig,
     AutoTokenizer,
     PreTrainedModel,
     get_scheduler,
 )
-from vllm import SamplingParams, LLM
+from vllm import LLM, SamplingParams
 
 from open_instruct.dataset_processor import (
     CHAT_TEMPLATES,
@@ -48,14 +50,20 @@ from open_instruct.model_utils import (
     get_reward,
     prepare_deepspeed,
     print_rich_single_line_metrics,
+    print_rich_table,
+    push_folder_to_hub,
     save_with_accelerate,
     truncate_response,
     unwrap_model_for_generation,
 )
 from open_instruct.utils import (
     ArgumentParserPlus,
+    combine_dataset,
     get_wandb_tags,
+    is_beaker_job,
+    maybe_get_beaker_config,
     maybe_use_ai2_wandb_entity,
+    upload_metadata_to_hf,
 )
 from open_instruct.vllm_utils import vllm_single_gpu_patch
 
@@ -65,6 +73,20 @@ INVALID_LOGPROB = 1.0
 
 @dataclass
 class Args:
+    # required dataset args
+    dataset_mixer: str = None
+    """A dictionary of datasets (local or HF) to sample from."""
+    dataset_train_splits: List[str] = None
+    """The dataset splits to use for training"""
+    dataset_eval_mixer: Optional[str] = None
+    """A dictionary of datasets (local or HF) to sample from for evaluation"""
+    dataset_eval_splits: Optional[List[str]] = None
+    """The dataset splits to use for evaluation"""
+    dataset_mixer_dict: Optional[dict] = None
+    """The dataset mixer as a dictionary"""
+    dataset_eval_mixer_dict: Optional[dict] = None
+    """The dataset eval mixer as a dictionary"""
+
     # common args
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
@@ -104,8 +126,6 @@ class Args:
     """Which scheduler to use"""
     warm_up_steps: int = 0
     """Number of warm up steps for the scheduler"""
-    gradient_checkpointing: bool = True
-    """Whether to use gradient checkpointing"""
 
     # various batch sizes
     num_train_epochs: int = 1
@@ -148,6 +168,8 @@ class Args:
     """per rank no grad forward pass in the rollout phase"""
     reward_model_path: str = "EleutherAI/pythia-160m"
     """the path to the reward model"""
+    reward_model_revision: Optional[str] = None
+    """the revision of the reward model"""
 
     # generation config
     response_length: int = 53
@@ -192,6 +214,28 @@ class Args:
     # async setting
     async_mode: bool = True
     """Whether to run the generation in async mode which learns from the second latest policy like Cleanba (https://arxiv.org/abs/2310.00036)"""
+
+    # Ai2 specific settings
+    try_launch_beaker_eval_jobs: bool = True
+    """Whether to launch beaker evaluation jobs after training"""
+    hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
+    """What dataset to upload the metadata to. If unset, don't upload metadata"""
+
+    def __post_init__(self):
+        self.dataset_mixer_dict, self.dataset_mixer = process_dataset_mixer(self.dataset_mixer)
+        if self.dataset_eval_mixer is not None:
+            self.dataset_eval_mixer_dict, self.dataset_eval_mixer = process_dataset_mixer(self.dataset_eval_mixer)
+
+
+def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
+    # if passed through cli: convert the dataset mixers to dictionaries
+    if isinstance(value, str):
+        return json.loads(value), value
+    # if passed through yaml: convert the dataset mixers to strings
+    elif isinstance(value, dict):
+        return value, json.dumps(value)
+    else:
+        raise ValueError("Input must be either a string or a dictionary")
 
 
 def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig) -> Accelerator:
@@ -239,35 +283,48 @@ def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig
 
 def vllm_generate(
     model_name_or_path: str,
+    model_revision: Optional[str],
+    max_model_len: int,
     vllm_device: str,
     vllm_gpu_memory_utilization: float,
     generation_config: SamplingParams,
     response_ids_Q: Queue,
     param_prompt_Q: Queue,
     num_training_steps: int,
+    sample_evaluation_prompt_token_ids: Optional[List[int]],
+    evaluation_Q: Queue,
+    eval_freq: int,
 ):
     vllm_single_gpu_patch()
     llm = LLM(
         model=model_name_or_path,
-        revision="main",
-        tokenizer_revision="main",
+        revision=model_revision,
+        tokenizer_revision=model_revision,
         tensor_parallel_size=1,
         device=vllm_device,
         gpu_memory_utilization=vllm_gpu_memory_utilization,
+        max_model_len=max_model_len,
     )
     print("🔥🔥🔥 vllm loaded")
     llmp = llm.llm_engine.model_executor.driver_worker.model_runner.model
-    for _ in range(1, num_training_steps + 1):
+    for training_step in range(1, num_training_steps + 1):
         unwrapped_model, g_queries_list = param_prompt_Q.get()
         if unwrapped_model is not None:
             start_time = time.time()
             llmp.load_weights(unwrapped_model.named_parameters())
-            print(f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds")
+            print(
+                f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds"
+            )
         generation_start_time = time.time()
         outputs = llm.generate(prompt_token_ids=g_queries_list, sampling_params=generation_config)
         response_ids = [list(output.outputs[0].token_ids) for output in outputs]
         print(f"🔥🔥🔥 Generation time: {time.time() - generation_start_time:.2f} seconds")
         response_ids_Q.put(response_ids)
+        
+        if sample_evaluation_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
+            outputs = llm.generate(prompt_token_ids=sample_evaluation_prompt_token_ids, sampling_params=generation_config)
+            response_ids = [list(output.outputs[0].token_ids) for output in outputs]
+            evaluation_Q.put(response_ids)
 
 
 def send_queries(accelerator, unwrapped_model, tokenizer, param_prompt_Q, queries):
@@ -275,7 +332,7 @@ def send_queries(accelerator, unwrapped_model, tokenizer, param_prompt_Q, querie
     if accelerator.is_main_process:
         g_queries_list = [
             [inneritem for inneritem in item if inneritem != tokenizer.pad_token_id] for item in g_queries_list
-        ] # remove padding
+        ]  # remove padding
         param_prompt_Q.put((unwrapped_model, g_queries_list))
 
 
@@ -294,7 +351,7 @@ class PolicyAndValueWrapper(torch.nn.Module):
         )
         logits = self.value_model.score(output.hidden_states[-1])
         return self.policy(**kwargs), logits
-    
+
     def gradient_checkpointing_enable(self):
         self.policy.gradient_checkpointing_enable()
         self.value_model.gradient_checkpointing_enable()
@@ -342,6 +399,14 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # set up experiment tracking and seeds
     if accelerator.is_main_process:
+        all_configs = {**asdict(args), **asdict(dataset_config), **asdict(model_config)}
+        if is_beaker_job():
+            beaker_config = maybe_get_beaker_config()
+            # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
+            if len(beaker_config.beaker_dataset_id_urls) > 0:
+                args.output_dir = "/output"
+            all_configs.update(vars(beaker_config))
+
         if args.with_tracking:
             import wandb
 
@@ -349,7 +414,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 project=args.wandb_project_name,
                 entity=args.wandb_entity,
                 sync_tensorboard=True,
-                config={**asdict(args), **asdict(dataset_config), **asdict(model_config)},
+                config=all_configs,
                 name=args.run_name,
                 save_code=True,
                 tags=[args.exp_name] + get_wandb_tags(),
@@ -366,23 +431,42 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     torch.backends.cudnn.deterministic = True
 
     # create a tokenizer (pad from right)
-    config = AutoConfig.from_pretrained(model_config.model_name_or_path)
-    tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path, padding_side="right")
+    config = AutoConfig.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision)
+    tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision, padding_side="right")
     if config.architectures == "LlamaForCausalLM" and config.bos_token_id == 128000:
-        tokenizer.pad_token_id = 128002 # <|reserved_special_token_0|>
+        tokenizer.pad_token_id = 128002  # <|reserved_special_token_0|>
     else:
         tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
     tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
 
     # create the dataset
-    dataset = load_dataset(dataset_config.dataset_name)
+    dataset_dict = DatasetDict()
     dataset_processor = SFTDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
-    dataset_processor.sanity_check_(dataset)
+    train_dataset = combine_dataset(
+        args.dataset_mixer_dict,
+        splits=args.dataset_train_splits,
+        columns_to_keep=[dataset_config.sft_messages_key],
+    )
+    if dataset_config.sanity_check:
+        train_dataset = train_dataset.select(
+            range(0, min(len(train_dataset), dataset_config.sanity_check_max_samples))
+        )
     with accelerator.main_process_first():
-        dataset = dataset_processor.tokenize(dataset)
-        dataset = dataset_processor.filter(dataset)
-    train_dataset = dataset[dataset_config.dataset_train_split]
-    eval_dataset = dataset[dataset_config.dataset_eval_split]
+        train_dataset = dataset_processor.tokenize(train_dataset)
+        train_dataset = dataset_processor.filter(train_dataset)
+    dataset_dict["train"] = train_dataset
+    eval_dataset = None
+    if args.dataset_eval_mixer is not None:
+        eval_dataset = combine_dataset(
+            args.dataset_eval_mixer_dict,
+            splits=args.dataset_eval_splits,
+            columns_to_keep=[dataset_config.sft_messages_key],
+        )
+        eval_dataset = eval_dataset.select(range(0, min(len(eval_dataset), dataset_config.sanity_check_max_samples)))
+        with accelerator.main_process_first():
+            eval_dataset = dataset_processor.tokenize(eval_dataset)
+            eval_dataset = dataset_processor.filter(eval_dataset)
+        dataset_dict["eval"] = eval_dataset
 
     # some more runtime logging
     if accelerator.is_main_process:
@@ -391,25 +475,28 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         if args.with_tracking:
             # upload the visualized token length
             dataset_processor.get_token_length_visualization(
-                dataset, save_path=f"runs/{args.run_name}/token_length.png"
+                dataset_dict, save_path=f"runs/{args.run_name}/token_length.png"
             )
             wandb.log({"token_length": wandb.Image(f"runs/{args.run_name}/token_length.png")})
 
     # create the model and optimizer
     policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
         model_config.model_name_or_path,
+        revision=model_config.model_revision,
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
         use_cache=False,
     )
     ref_model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
         model_config.model_name_or_path,
+        revision=model_config.model_revision,
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
         use_cache=False,
     )
     value_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
         args.reward_model_path,
+        revision=args.reward_model_revision,
         num_labels=1,
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
@@ -417,13 +504,21 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     )
     reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
         args.reward_model_path,
+        revision=args.reward_model_revision,
         num_labels=1,
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
         use_cache=False,
     )
+    if policy.config.vocab_size != reward_model.config.vocab_size:
+        raise ValueError(
+            "Policy and reward model must have the same vocab size. "
+            f"Policy: {policy.config.vocab_size}, Reward: {reward_model.config.vocab_size}. "
+            "If they don't have the same vocab size, the policy could generate tokens which "
+            "is going to cause index out of bound error in the reward model."
+        )
     model = PolicyAndValueWrapper(policy, value_model)
-    if args.gradient_checkpointing:
+    if model_config.gradient_checkpointing:
         model.gradient_checkpointing_enable()
     for module in [model, ref_model, reward_model]:
         disable_dropout_in_model(module)
@@ -477,19 +572,31 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     )
     param_prompt_Q = None
     response_ids_Q = None
+    evaluation_Q = None
     if accelerator.is_main_process:
         response_ids_Q = Queue(maxsize=1)
         param_prompt_Q = Queue(maxsize=1)
+        evaluation_Q = Queue(maxsize=1)
+        LOCAL_NUM_EVAL_SAMPLES = 4
+        num_eval_samples = LOCAL_NUM_EVAL_SAMPLES * accelerator.num_processes
+        sample_evaluation_prompt_token_ids = None
+        if eval_dataset is not None:
+            sample_evaluation_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
         thread = threading.Thread(
             target=vllm_generate,
             args=(
                 model_config.model_name_or_path,
+                model_config.model_revision,
+                dataset_config.max_prompt_token_lenth + args.response_length,
                 args.vllm_device,
                 args.vllm_gpu_memory_utilization,
                 generation_config,
                 response_ids_Q,
                 param_prompt_Q,
                 args.num_training_steps,
+                sample_evaluation_prompt_token_ids,
+                evaluation_Q,
+                args.eval_freq,
             ),
         )
         thread.start()
@@ -506,6 +613,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     vf_clipfrac_stats = torch.zeros(stats_shape, device=device)
     entropy_stats = torch.zeros(stats_shape, device=device)
     ratio_stats = torch.zeros(stats_shape, device=device)
+    local_metrics = torch.zeros((15,), device=device)
     episode = 0
     model.train()
 
@@ -519,6 +627,25 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         episode += 1 * args.batch_size
         scheduler.step()
         queries = queries_next
+
+        if accelerator.is_main_process:
+            try:
+                evaluation_responses = evaluation_Q.get(timeout=0.01)
+                print("🔥🔥🔥 Evaluation responses received")
+                table = {}
+                table["prompt"] = tokenizer.batch_decode(sample_evaluation_prompt_token_ids)
+                table["response"] = tokenizer.batch_decode(evaluation_responses)
+                table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
+                df = pd.DataFrame(table)
+                print_rich_table(df)
+                if args.with_tracking:
+                    wandb.log({"sample_completions": wandb.Table(dataframe=df)})
+                else:
+                    print_rich_table(df)
+                del table
+            except Empty:
+                print("🙈 Evaluation responses not received")
+                pass
 
         with unwrap_model_for_generation(model, accelerator) as unwrapped_model:
             # (optionally) evaluate the model
@@ -548,7 +675,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 if accelerator.is_main_process:
                     g_response_token_ids = response_ids_Q.get()
                     DUMMY_PAD_TOKEN = 0  # we can't use tokenizer.pad_token_id because it's outside vocab and `torch.gather(all_logprob, 2, response.unsqueeze(-1))` will error out
-                    g_padded_response_ids = [response + [DUMMY_PAD_TOKEN] * (args.response_length - len(response)) for response in g_response_token_ids]
+                    g_padded_response_ids = [
+                        response + [DUMMY_PAD_TOKEN] * (args.response_length - len(response))
+                        for response in g_response_token_ids
+                    ]
                     for item in g_padded_response_ids:
                         assert len(item) == args.response_length
                         for inner_item in item:
@@ -557,7 +687,11 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     g_padded_response_ids = torch.tensor(g_padded_response_ids, device=device)
                     g_vllm_responses[:] = g_padded_response_ids
                 broadcast(g_vllm_responses, 0)
-                local_vllm_responses = g_vllm_responses[accelerator.local_process_index * queries.shape[0] : (accelerator.local_process_index + 1)* queries.shape[0]]
+                local_vllm_responses = g_vllm_responses[
+                    accelerator.local_process_index
+                    * queries.shape[0] : (accelerator.local_process_index + 1)
+                    * queries.shape[0]
+                ]
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
                     query = queries[i : i + args.local_rollout_forward_batch_size]
@@ -582,7 +716,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     # Response Processing 1. truncate response after the first occurrence of `stop_token_id`
                     postprocessed_response = response
                     if args.stop_token_id is not None:  # handle the edge case when stop_token_id exists but is 0
-                        postprocessed_response = truncate_response(args.stop_token_id, tokenizer.pad_token_id, response)
+                        postprocessed_response = truncate_response(
+                            args.stop_token_id, tokenizer.pad_token_id, response
+                        )
 
                     # Response Processing 2. run reward model on the truncated responses
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
@@ -609,6 +745,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 ref_logprobs = torch.cat(ref_logprobs, 0)
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
+                global_scores = accelerator.gather(scores)
+                accelerator.print(f"global_scores: {global_scores}, {global_scores.mean()}")
                 values = torch.cat(values, 0)
                 del (logprob, ref_logprob, full_value, value, score)
                 gc.collect()
@@ -622,7 +760,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 # otherwise the model could learn to generate the first token as the stop token
                 contain_stop_token = contain_stop_token & (sequence_lengths >= args.min_response_length)
                 if args.non_stop_penalty:
-                    scores = torch.where(contain_stop_token, scores, torch.full_like(scores, args.penalty_reward_value))
+                    scores = torch.where(
+                        contain_stop_token, scores, torch.full_like(scores, args.penalty_reward_value)
+                    )
 
                 # be very careful with `padding_mask_p1`; see https://excalidraw.com/#json=LWnzG4w2k5DjF_EOL_xPt,e2w3a-hFJ_gX5vOfeyXGTw
                 response_idxs = torch.arange(responses.shape[1], device=responses.device).repeat(responses.shape[0], 1)
@@ -687,9 +827,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         logits /= args.temperature + 1e-7
                         new_all_logprobs = F.log_softmax(logits, dim=-1)
                         new_logprobs = torch.gather(new_all_logprobs, 2, mb_responses.unsqueeze(-1)).squeeze(-1)
-                        new_logprobs = torch.masked_fill(
-                            new_logprobs, padding_mask[micro_batch_inds], INVALID_LOGPROB
-                        )
+                        new_logprobs = torch.masked_fill(new_logprobs, padding_mask[micro_batch_inds], INVALID_LOGPROB)
                         vpred = vpred_temp[:, context_length - 1 : -1].squeeze(-1)
                         vpred = torch.masked_fill(vpred, padding_mask_p1[micro_batch_inds], 0)
                         vpredclipped = torch.clamp(
@@ -723,14 +861,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                             entropy = torch.logsumexp(logits, dim=-1) - torch.sum(prob_dist * logits, dim=-1)
                             approxkl = 0.5 * (logprobs_diff**2).mean()
                             approxkl_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = approxkl
-                            pg_clipfrac_stats[
-                                epoch_idx, minibatch_idx, gradient_accumulation_idx
-                            ] = pg_clipfrac
+                            pg_clipfrac_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = pg_clipfrac
                             pg_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = pg_loss
                             vf_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = vf_loss
-                            vf_clipfrac_stats[
-                                epoch_idx, minibatch_idx, gradient_accumulation_idx
-                            ] = vf_clipfrac
+                            vf_clipfrac_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = vf_clipfrac
                             entropy_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = entropy.mean()
                             ratio_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = ratio.mean()
 
@@ -747,27 +881,43 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 # del everything and empty cache
                 torch.cuda.empty_cache()
         with torch.no_grad():
+            local_metrics[0] = sequence_lengths.float().mean()
+            local_metrics[1] = (responses == args.stop_token_id).sum().float().mean()
+            local_metrics[2] = kl.sum(1).mean()
+            local_metrics[3] = (-logprobs).sum(1).mean()
+            local_metrics[4] = non_score_reward_sum.mean()
+            local_metrics[5] = rlhf_reward.mean()
+            local_metrics[6] = scores.mean()
+            local_metrics[7] = approxkl_stats.mean()
+            local_metrics[8] = pg_clipfrac_stats.mean()
+            local_metrics[9] = pg_loss_stats.mean()
+            local_metrics[10] = vf_loss_stats.mean()
+            local_metrics[11] = vf_clipfrac_stats.mean()
+            local_metrics[12] = entropy_stats.mean()
+            local_metrics[13] = ratio_stats.mean()
+            local_metrics[14] = ratio_stats.var()
+            global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
             metrics = {
                 "episode": episode,
                 "lr": scheduler.get_last_lr()[0],
                 "epoch": episode / len(train_dataset),
                 "time/from_scratch": time.time() - start_time,
                 "time/training": time.time() - training_time_start,
-                "val/sequence_lengths": accelerator.gather(sequence_lengths.float()).mean().item(),
-                "val/num_stop_token_ids": (responses == args.stop_token_id).sum().item(),
-                "objective/kl": accelerator.gather(kl.sum(1).mean()).mean().item(),
-                "objective/entropy": accelerator.gather((-logprobs).sum(1).mean()).mean().item(),
-                "objective/non_score_reward": accelerator.gather(non_score_reward_sum).mean().item(),
-                "objective/rlhf_reward": accelerator.gather(rlhf_reward).mean().item(),
-                "objective/scores": accelerator.gather(scores.mean()).mean().item(),
-                "policy/approxkl_avg": accelerator.gather(approxkl_stats).mean().item(),
-                "policy/clipfrac_avg": accelerator.gather(pg_clipfrac_stats).mean().item(),
-                "loss/policy_avg": accelerator.gather(pg_loss_stats).mean().item(),
-                "loss/value_avg": accelerator.gather(vf_loss_stats).mean().item(),
-                "val/clipfrac_avg": accelerator.gather(vf_clipfrac_stats).mean().item(),
-                "policy/entropy_avg": accelerator.gather(entropy_stats).mean().item(),
-                "val/ratio": accelerator.gather(ratio_stats).mean().item(),
-                "val/ratio_var": accelerator.gather(ratio_stats).var().item(),
+                "val/sequence_lengths": global_metrics[0],
+                "val/num_stop_token_ids": global_metrics[1],
+                "objective/kl": global_metrics[2],
+                "objective/entropy": global_metrics[3],
+                "objective/non_score_reward": global_metrics[4],
+                "objective/rlhf_reward": global_metrics[5],
+                "objective/scores": global_metrics[6],
+                "policy/approxkl_avg": global_metrics[7],
+                "policy/clipfrac_avg": global_metrics[8],
+                "loss/policy_avg": global_metrics[9],
+                "loss/value_avg": global_metrics[10],
+                "val/clipfrac_avg": global_metrics[11],
+                "policy/entropy_avg": global_metrics[12],
+                "val/ratio": global_metrics[13],
+                "val/ratio_var": global_metrics[14],
             }
             if accelerator.is_main_process:
                 print_rich_single_line_metrics(metrics)
@@ -780,18 +930,64 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # save model
     os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
-    original_tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path)
+    original_tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision)
     save_with_accelerate(
         accelerator,
         model,
         original_tokenizer,
         args.output_dir,
-        False,
-        args.push_to_hub,
-        args.hf_repo_id,
-        args.hf_repo_revision,
         model_attribute_to_save="policy",
     )
+
+    # Ai2 specific logic
+    if is_beaker_job() and accelerator.is_main_process:
+        if args.hf_metadata_dataset:
+            dataset_list = args.dataset_mixer_dict.keys()
+            # mainly just focussing here on what would be useful for the leaderboard.
+            # wandb will have even more useful information.
+            metadata_blob = {
+                "model_name": args.exp_name,
+                "model_type": "sft",
+                "datasets": dataset_list,
+                "base_model": model_config.model_name_or_path,
+                "wandb_path": wandb.run.get_url(),
+                "beaker_experiment": beaker_config.beaker_experiment_url,
+                "beaker_datasets": beaker_config.beaker_dataset_id_urls,
+            }
+            upload_metadata_to_hf(
+                metadata_blob,
+                "metadata.json",
+                args.hf_metadata_dataset,
+                "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
+            )
+
+        if args.try_launch_beaker_eval_jobs and len(beaker_config.beaker_dataset_id_urls) > 0:
+            command = f"""\
+            python mason.py  \
+                --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/s2-cirrascale ai2/general-cirrascale \
+                --priority low \
+                --preemptible \
+                --budget ai2/allennlp \
+                --workspace ai2/tulu-2-improvements \
+                --image nathanl/open_instruct_auto \
+                --pure_docker_mode \
+                --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
+                --beaker_workload_id {beaker_config.beaker_workload_id} \
+                --model_name {args.hf_repo_revision}
+            """
+            process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = process.communicate()
+            print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
+            print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
+            print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+
+    if args.push_to_hub:
+        push_folder_to_hub(
+            accelerator,
+            args.output_dir,
+            args.hf_repo_id,
+            args.hf_repo_revision,
+        )
 
 
 if __name__ == "__main__":

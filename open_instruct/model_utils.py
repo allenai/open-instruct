@@ -14,13 +14,13 @@
 # limitations under the License.
 
 
-from collections import defaultdict
-from rich.panel import Panel
 import itertools
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple, Union
+
+from rich.panel import Panel
 
 from open_instruct.utils import retry_on_exception
 
@@ -33,8 +33,8 @@ import pandas as pd
 import torch
 import transformers
 from accelerate import Accelerator
-from accelerate.utils import broadcast, gather_object
 from accelerate.state import AcceleratorState
+from accelerate.utils import broadcast, gather_object
 from huggingface_hub import HfApi
 from rich import print as rprint
 from rich.console import Console
@@ -42,8 +42,9 @@ from rich.panel import Panel
 from rich.table import Table
 from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
+
 try:
-    from vllm import SamplingParams, LLM
+    from vllm import LLM, SamplingParams
 except ImportError:
     pass
 
@@ -52,7 +53,7 @@ except ImportError:
 class ModelConfig:
     model_name_or_path: Optional[str] = None
     """The model checkpoint for weights initialization."""
-    model_revision: str = "main"
+    model_revision: Optional[str] = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     trust_remote_code: bool = False
     """Trust remote code when loading a model."""
@@ -324,45 +325,6 @@ def batch_generation(
     return torch.cat(query_responses, 0), torch.cat(logitss, 0)
 
 
-def batch_generation_vllm(
-    llm: "LLM",
-    generation_config: "SamplingParams",
-    accelerator: Accelerator,
-    queries: torch.Tensor,
-    unwrapped_model: torch.nn.Module,
-    g_vllm_responses: torch.Tensor,
-    pad_token_id: int,
-    response_length: int,
-    device: torch.device,
-):
-    g_queries_list = gather_object(queries.tolist())
-    if accelerator.is_main_process:
-        llmp = llm.llm_engine.model_executor.driver_worker.model_runner.model
-        start_time = time.time()
-        llmp.load_weights(unwrapped_model.named_parameters())
-        print(f"🔥 Loading weights using shared memory: takes {time.time() - start_time:.2f} seconds")
-        g_queries_list = [
-            [inneritem for inneritem in item if inneritem != pad_token_id] for item in g_queries_list
-        ]
-        generation_start_time = time.time()
-        outputs = llm.generate(prompt_token_ids=g_queries_list, sampling_params=generation_config)
-        padded_response_token_ids = []
-        for output in outputs:
-            token_ids = list(output.outputs[0].token_ids)
-            DUMMY_PAD_TOKEN = 0  # we can't use tokenizer.pad_token_id because it's outside vocab and `torch.gather(all_logprob, 2, response.unsqueeze(-1))` will error out
-            padded_token_ids = token_ids + [DUMMY_PAD_TOKEN] * (response_length - len(token_ids))
-            padded_response_token_ids.append(padded_token_ids)
-        print(f"🔥🔥🔥 Generation time: {time.time() - generation_start_time:.2f} seconds")
-        padded_response_token_ids = torch.tensor(padded_response_token_ids, device=device)
-        g_vllm_responses[:] = padded_response_token_ids
-
-    broadcast(g_vllm_responses, 0)
-
-    return g_vllm_responses[
-        accelerator.local_process_index * queries.shape[0] : (accelerator.local_process_index + 1)
-        * queries.shape[0]
-    ]
-
 
 def save_with_accelerate(
     accelerator: Accelerator,
@@ -564,26 +526,26 @@ def print_rich_single_line_metrics(metrics):
     table = Table(show_header=False, box=None)
     table.add_column("Category", style="cyan")
     table.add_column("Values", style="magenta")
-    
+
     # Group metrics by their prefix
     grouped_metrics = defaultdict(list)
     for key, value in metrics.items():
-        category = key.split('/')[0] if '/' in key else 'other'
+        category = key.split("/")[0] if "/" in key else "other"
         grouped_metrics[category].append((key, value))
-    
+
     # Sort groups by category name
     for category in sorted(grouped_metrics.keys()):
         values = grouped_metrics[category]
         value_strings = []
         for key, value in values:
             # Use the last part of the key as the display name
-            display_name = key.split('/')[-1]
+            display_name = key.split("/")[-1]
             value_strings.append(f"{display_name}: {format_value(value)}")
-        
+
         # Join all values for this category into a single string
         values_str = " | ".join(value_strings)
         table.add_row(category, values_str)
-    
+
     # Create a panel with the table
     panel = Panel(
         table,

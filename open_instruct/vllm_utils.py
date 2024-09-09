@@ -50,18 +50,16 @@ for output in outputs:
 """
 
 
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import torch
-from vllm import LLM, EngineArgs
-from vllm.engine.llm_engine import LLMEngine
-from vllm.engine.metrics import StatLoggerBase
-from vllm.executor.gpu_executor import GPUExecutor
-from vllm.usage.usage_lib import UsageContext
-from vllm.utils import Counter
-from vllm.distributed.parallel_state import get_world_group, init_model_parallel_group, GroupCoordinator
 import vllm
-
+from vllm.distributed.parallel_state import (
+    GroupCoordinator,
+    get_world_group,
+    init_model_parallel_group,
+)
+from vllm.executor.gpu_executor import GPUExecutor
 
 
 def custom_initialize_model_parallel(
@@ -94,55 +92,47 @@ def custom_initialize_model_parallel(
     # Get world size and rank. Ensure some consistencies.
     assert torch.distributed.is_initialized()
     world_size: int = torch.distributed.get_world_size()
-    world_size: int = 1 # SingleGPULLM logic: only use a single GPU
-    backend = backend or torch.distributed.get_backend(
-        get_world_group().device_group)
+    world_size: int = 1  # SingleGPULLM logic: only use a single GPU
+    backend = backend or torch.distributed.get_backend(get_world_group().device_group)
 
-    if (world_size !=
-            tensor_model_parallel_size * pipeline_model_parallel_size):
+    if world_size != tensor_model_parallel_size * pipeline_model_parallel_size:
         raise RuntimeError(
             f"world_size ({world_size}) is not equal to "
             f"tensor_model_parallel_size ({tensor_model_parallel_size}) x "
-            f"pipeline_model_parallel_size ({pipeline_model_parallel_size})")
+            f"pipeline_model_parallel_size ({pipeline_model_parallel_size})"
+        )
 
     # Build the tensor model-parallel groups.
-    num_tensor_model_parallel_groups: int = (world_size //
-                                             tensor_model_parallel_size)
+    num_tensor_model_parallel_groups: int = world_size // tensor_model_parallel_size
     # global _TP
-    assert vllm.distributed.parallel_state._TP is None, ("tensor model parallel group is already initialized")
+    assert vllm.distributed.parallel_state._TP is None, "tensor model parallel group is already initialized"
     group_ranks = []
     for i in range(num_tensor_model_parallel_groups):
-        ranks = list(
-            range(i * tensor_model_parallel_size,
-                  (i + 1) * tensor_model_parallel_size))
+        ranks = list(range(i * tensor_model_parallel_size, (i + 1) * tensor_model_parallel_size))
         group_ranks.append(ranks)
 
     # message queue broadcaster is only used in tensor model parallel group
-    vllm.distributed.parallel_state._TP = init_model_parallel_group(group_ranks,
-                                    get_world_group().local_rank,
-                                    backend,
-                                    use_message_queue_broadcaster=True)
+    vllm.distributed.parallel_state._TP = init_model_parallel_group(
+        group_ranks, get_world_group().local_rank, backend, use_message_queue_broadcaster=True
+    )
 
     # Build the pipeline model-parallel groups.
-    num_pipeline_model_parallel_groups: int = (world_size //
-                                               pipeline_model_parallel_size)
+    num_pipeline_model_parallel_groups: int = world_size // pipeline_model_parallel_size
     # global _PP
-    assert vllm.distributed.parallel_state._PP is None, (
-        "pipeline model parallel group is already initialized")
+    assert vllm.distributed.parallel_state._PP is None, "pipeline model parallel group is already initialized"
     group_ranks = []
     for i in range(num_pipeline_model_parallel_groups):
         ranks = list(range(i, world_size, num_pipeline_model_parallel_groups))
         group_ranks.append(ranks)
     # pipeline parallel does not need custom allreduce
-    vllm.distributed.parallel_state._PP = init_model_parallel_group(group_ranks,
-                                    get_world_group().local_rank,
-                                    backend,
-                                    use_custom_allreduce=False)
+    vllm.distributed.parallel_state._PP = init_model_parallel_group(
+        group_ranks, get_world_group().local_rank, backend, use_custom_allreduce=False
+    )
 
-def init_world_group(ranks: List[int], local_rank: int,
-                     backend: str) -> GroupCoordinator:
+
+def init_world_group(ranks: List[int], local_rank: int, backend: str) -> GroupCoordinator:
     return GroupCoordinator(
-        group_ranks=[[0]], # SingleGPULLM logic: only use a single GPU
+        group_ranks=[[0]],  # SingleGPULLM logic: only use a single GPU
         local_rank=local_rank,
         torch_distributed_backend=backend,
         use_pynccl=False,
@@ -158,6 +148,7 @@ def _init_executor(self) -> None:
     self.driver_worker = self._create_worker(local_rank=self.device_config.device.index)
     self.driver_worker.init_device()
     self.driver_worker.load_model()
+
 
 # monkey patch the function
 def vllm_single_gpu_patch():
