@@ -67,7 +67,6 @@ jobs:
               --build-arg BUILDKIT_INLINE_CACHE=1 \
               --build-arg CUDA=12.1.0 --build-arg \
               TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 \
-              --build-arg REQUIRE=requirements.txt . \
               -t open_instruct
               
 

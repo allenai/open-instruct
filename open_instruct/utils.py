@@ -75,8 +75,6 @@ def check_hf_olmo_availability(return_version: bool = True) -> Union[dict, bool]
             except ImportError:
                 package_exists = False
 
-        logger.debug(f"Detected {pkg_name} version: {package_version}")
-
     if return_version:
         return {
             "available": package_exists,

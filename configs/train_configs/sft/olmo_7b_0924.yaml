@@ -1,6 +1,6 @@
 model_name_or_path: ai2-adapt-dev/OLMo-medium-peteish7-anneal-from-928646-50B-nowup-dclm07-flan
 model_revision: main
-use_flash_attn: true
+use_flash_attn: false
 tokenizer_name: ai2-adapt-dev/OLMo-medium-peteish7-anneal-from-928646-50B-nowup-dclm07-flan
 use_slow_tokenizer: false # olmo models only use fast tokenizers
 dataset_name: allenai/tulu-v2-sft-mixture-olmo-2048

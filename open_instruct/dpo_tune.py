@@ -504,6 +504,7 @@ def main(args: FlatArguments):
     if check_hf_olmo_availability():
         # allows AutoModel... to work with not in transformers olmo models
         import hf_olmo  # noqa
+        from hf_olmo import OLMoTokenizerFast
 
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
@@ -678,7 +679,7 @@ def main(args: FlatArguments):
             0,
             1,
         ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
-    elif isinstance(tokenizer, GPTNeoXTokenizerFast):
+    elif isinstance(tokenizer, GPTNeoXTokenizerFast) or isinstance(tokenizer, OLMoTokenizerFast):
         # OLMo newer models use this tokenizer
         if tokenizer.bos_token is None:
             tokenizer.bos_token = tokenizer.eos_token

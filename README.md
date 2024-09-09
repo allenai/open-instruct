@@ -54,7 +54,7 @@ pip install -r weight-diff-requirements.txt
 For a second installation strategy, if you'd like to *run experiments within a Docker environment*, you can create one using:
 
 ```bash
-docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 --build-arg REQUIRE=requirements.txt . -t open_instruct
+docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 . -t open_instruct
 
 # if you are interally at AI2, you can create an image like this:
 beaker image create open_instruct -n open_instruct -w ai2/$(whoami)
