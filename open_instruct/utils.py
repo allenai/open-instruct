@@ -54,7 +54,7 @@ Commented out Args not currently used
 
 # ----------------------------------------------------------------------------
 # Import utilities
-def check_hf_olmo_availability(return_version: bool = True) -> Union[dict, bool]:
+def check_hf_olmo_availability(return_version: bool = False) -> Union[dict, bool]:
     pkg_name = "hf_olmo"
 
     # Check if the package spec exists

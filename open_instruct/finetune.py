@@ -650,7 +650,7 @@ def main(args: FlatArguments):
             0,
             1,
         ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
-    elif isinstance(tokenizer, GPTNeoXTokenizerFast) or isinstance(tokenizer, OLMoTokenizerFast):  # noqa
+    elif isinstance(tokenizer, GPTNeoXTokenizerFast) or (check_hf_olmo_availability() and isinstance(tokenizer, OLMoTokenizerFast)):
         # OLMo newer models use this tokenizer
         if tokenizer.bos_token is None:
             tokenizer.bos_token = tokenizer.eos_token
@@ -1015,7 +1015,7 @@ def main(args: FlatArguments):
     if is_beaker_job() and accelerator.is_main_process:
         # dpo script only supports these two options right now for datasets
         if args.dataset_mixer:
-            dataset_list = args.dataset_mixer.keys()
+            dataset_list = list(args.dataset_mixer.keys())
         elif args.dataset_mixer_list:
             dataset_list = args.dataset_mixer_list[::2]  # even indices
         elif args.dataset_name:
