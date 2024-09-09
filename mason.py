@@ -208,7 +208,7 @@ def main():
     if args.workspace:
         beaker_client = beaker.Beaker.from_env(default_workspace=args.workspace, timeout=120)
     else:
-        beaker_client = beaker.Beaker.from_env()
+        beaker_client = beaker.Beaker.from_env(timeout=120)
 
     beaker_secrets = [secret.name for secret in beaker_client.workspace.secrets()]
     whoami = beaker_client.account.whoami().name

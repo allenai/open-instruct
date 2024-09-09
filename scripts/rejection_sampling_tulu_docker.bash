@@ -1,14 +1,15 @@
 #!/bin/bash
 
 # my variables
-reward_model_path=NCSOFT/Llama-3-OffsetBias-RM-8B
-generation_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo
-num_completions=16
-priority=high
+reward_model_path=Skywork/Skywork-Reward-Llama-3.1-8B
+# generation_model_path=L3.18B-base_rs_L3.18BI-static-valpy_dpo
+generation_model_path=01J72WSHMFW1JN3NNQKZFY5EF7
+num_completions=8
+priority=normal
 image=nathanl/open_instruct_auto
 
 mkdir -p output/shards
-num_prompts=296461
+num_prompts=803765
 num_shards=100
 prompts_per_shard=$((num_prompts / num_shards))
 timestamp=$RANDOM
@@ -18,7 +19,7 @@ shared_scores_hf_repo_id=scores_$timestamp
 generation_model=/generation_model
 # reward_model=/reward_model
 reward_model=$reward_model_path
-sft_dataset=ai2-adapt-dev/rs-base-mix-L3.1-8B-generations
+sft_dataset=ai2-adapt-dev/new_base_rs_mix
 on_jupyter=true
 num_gpus=1
 mkdir -p output/shards/$timestamp
@@ -78,14 +79,14 @@ echo "Submitting all shards in one command"
 
 if [ "$on_jupyter" = true ]; then
     python mason.py \
-        --cluster ai2/jupiter-cirrascale-2 \
+        --cluster ai2/jupiter-cirrascale-2 ai2/pluto-cirrascale \
         --image $image \
         --pure_docker_mode \
         --priority $priority \
         --preemptible \
         --no_mount_nfs --no_hf_cache_env \
         --budget ai2/oe-adapt \
-        --beaker_dataset /generation_model:jacobm/$generation_model_path \
+        --beaker_dataset /generation_model:$generation_model_path \
         --gpus $num_gpus -- $command
         #  /reward_model:jacobm/$reward_model_path \
 else
