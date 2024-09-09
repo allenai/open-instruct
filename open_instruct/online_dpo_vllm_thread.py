@@ -6,7 +6,7 @@ import subprocess
 import threading
 import time
 from dataclasses import asdict, dataclass
-from queue import Queue, Empty
+from queue import Empty, Queue
 from typing import List, Literal, Optional, Tuple
 
 import numpy as np
@@ -312,9 +312,11 @@ def vllm_generate(
         response_ids = [list(output.outputs[0].token_ids) for output in outputs]
         print(f"🔥🔥🔥 Generation time: {time.time() - generation_start_time:.2f} seconds")
         response_ids_Q.put(response_ids)
-        
+
         if sample_evaluation_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-            outputs = llm.generate(prompt_token_ids=sample_evaluation_prompt_token_ids, sampling_params=generation_config)
+            outputs = llm.generate(
+                prompt_token_ids=sample_evaluation_prompt_token_ids, sampling_params=generation_config
+            )
             response_ids = [list(output.outputs[0].token_ids) for output in outputs]
             evaluation_Q.put(response_ids)
 
@@ -367,7 +369,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # create a tokenizer (pad from right)
     config = AutoConfig.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision)
-    tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision, padding_side="right")
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_config.model_name_or_path, revision=model_config.model_revision, padding_side="right"
+    )
     if config.architectures == "LlamaForCausalLM" and config.bos_token_id == 128000:
         tokenizer.pad_token_id = 128002  # <|reserved_special_token_0|>
     else:
@@ -571,7 +575,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 del table
             except Empty:
                 print("🙈 Evaluation responses not received")
-                pass
 
         with unwrap_model_for_generation(model, accelerator) as unwrapped_model:
             # (optionally) evaluate the model
@@ -864,7 +867,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # save model
     os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
-    original_tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision)
+    original_tokenizer = AutoTokenizer.from_pretrained(
+        model_config.model_name_or_path, revision=model_config.model_revision
+    )
     save_with_accelerate(
         accelerator,
         model,

@@ -20,10 +20,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple, Union
 
-from rich.panel import Panel
-
-from open_instruct.utils import retry_on_exception
-
 try:
     import deepspeed
     from deepspeed.runtime.engine import DeepSpeedEngine
@@ -34,7 +30,6 @@ import torch
 import transformers
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
-from accelerate.utils import broadcast, gather_object
 from huggingface_hub import HfApi
 from rich import print as rprint
 from rich.console import Console
@@ -43,10 +38,7 @@ from rich.table import Table
 from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
-try:
-    from vllm import LLM, SamplingParams
-except ImportError:
-    pass
+from open_instruct.utils import retry_on_exception
 
 
 @dataclass
@@ -323,7 +315,6 @@ def batch_generation(
         query_responses.append(query_response)
         logitss.append(logits)
     return torch.cat(query_responses, 0), torch.cat(logitss, 0)
-
 
 
 def save_with_accelerate(
