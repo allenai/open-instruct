@@ -1,7 +1,5 @@
 # TODO When updating flash-attn or torch in the future, make sure to update the version in the Dockerfile 
 torch==2.4.0
-ai2-olmo-core==0.1.0
-ai2-olmo>=0.5.0
 scipy
 packaging
 sentencepiece
@@ -24,7 +22,7 @@ termcolor
 jsonlines
 unidic-lite
 einops
-flash-attn==2.5.8 # should really only be in dockerfile. Local env often doesn't have GPUs
+flash-attn==2.5.9.post1 # should really only be in dockerfile. Local env often doesn't have GPUs
 fire
 alpaca-eval==0.6.2
 # for human eval web app

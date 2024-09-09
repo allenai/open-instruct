@@ -84,16 +84,16 @@ WORKDIR /stage/
 
 # TODO When updating flash-attn or torch in the future, make sure to update the version in the requirements.txt file. 
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
-COPY requirements.txt .
+COPY requirements-olmo.txt .
 RUN pip install --upgrade pip "setuptools<70.0.0" wheel 
 # TODO, unpin setuptools when this issue in flash attention is resolved
 RUN pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
 RUN pip install packaging
-RUN pip install flash-attn==2.5.9 --no-build-isolation
+RUN pip install flash-attn==2.5.9.post1 --no-build-isolation
 # for newest olmo's, move to requirements when ai2-olmo supports torch 2.4
 # core is a dependency of ai2-olmo
-# RUN pip install ai2-olmo-core==0.1.0 omegaconf
-# RUN pip install ai2-olmo>=0.5.0 --no-deps
+RUN pip install ai2-olmo-core==0.1.0 omegaconf
+RUN pip install ai2-olmo>=0.5.0 --no-deps
 RUN pip install -r requirements-olmo.txt
 
 # NLTK download
