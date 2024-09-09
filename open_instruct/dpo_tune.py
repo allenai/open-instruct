@@ -679,7 +679,9 @@ def main(args: FlatArguments):
             0,
             1,
         ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
-    elif isinstance(tokenizer, GPTNeoXTokenizerFast) or isinstance(tokenizer, OLMoTokenizerFast):
+    elif isinstance(tokenizer, GPTNeoXTokenizerFast) or (
+        check_hf_olmo_availability() and isinstance(tokenizer, OLMoTokenizerFast)
+    ):
         # OLMo newer models use this tokenizer
         if tokenizer.bos_token is None:
             tokenizer.bos_token = tokenizer.eos_token
