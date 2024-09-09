@@ -217,7 +217,7 @@ If you have used automatic evaluation, you cacn also upload metadata via `python
 # from a wandb url
 python scripts/add_metadata_from_wandb.py --wandb_run_id ai2-llm/open_instruct_internal/runs/fjclmg47
 # or from a hf_revision (the name of the autoeval)
-# python scripts/add_metadata_from_wandb.py --hf_repo_revision valpy_dpo_mix_uf_wc_regen_da_sftmix_v4.23___model__42__1725581304
+python scripts/add_metadata_from_wandb.py --hf_repo_revision valpy_dpo_mix_uf_wc_regen_da_sftmix_v4.23___model__42__1725581304
 ```
 
 ### Human evaluation
