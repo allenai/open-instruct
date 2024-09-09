@@ -15,9 +15,12 @@
 
 
 import itertools
+from collections import defaultdict
 from contextlib import contextmanager
-from dataclasses import dataclass, field
-from typing import List, Optional, Tuple, Union
+from dataclasses import dataclass
+from typing import List, Literal, Optional, Tuple, Union
+
+from open_instruct.utils import retry_on_exception
 
 try:
     import deepspeed
@@ -32,83 +35,61 @@ from accelerate.state import AcceleratorState
 from huggingface_hub import HfApi
 from rich import print as rprint
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 
 @dataclass
 class ModelConfig:
-    """
-    Arguments which define the model and tokenizer to load.
-    """
+    model_name_or_path: Optional[str] = None
+    """The model checkpoint for weights initialization."""
+    model_revision: str = "main"
+    """The specific model version to use (can be a branch name, tag name or commit id)."""
+    trust_remote_code: bool = False
+    """Trust remote code when loading a model."""
+    torch_dtype: Optional[str] = None
+    """Override the default `torch.dtype` and load the model under this dtype."""
+    attn_implementation: Optional[Literal["flash_attention_2"]] = None
+    """Which attention implementation to use; you can run --attn_implementation=flash_attention_2, in which case
+    you must install this manually by running `pip install flash-attn --no-build-isolation`"""
+    use_cache: Optional[bool] = None
+    """Whether to use cache in the model."""
+    gradient_checkpointing: bool = False
+    """Whether to use gradient checkpointing in the model."""
 
-    model_name_or_path: Optional[str] = field(
-        default=None,
-        metadata={"help": ("The model checkpoint for weights initialization.")},
-    )
-    model_revision: str = field(
-        default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
-    )
-    torch_dtype: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": (
-                "Override the default `torch.dtype` and load the model under this dtype. If `auto` is passed, the "
-                "dtype will be automatically derived from the model's weights."
-            ),
-            "choices": ["auto", "bfloat16", "float16", "float32"],
-        },
-    )
-    trust_remote_code: bool = field(default=False, metadata={"help": "Trust remote code when loading a model."})
-    attn_implementation: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": (
-                "Which attention implementation to use; you can run --attn_implementation=flash_attention_2, in which case you must install this manually by running `pip install flash-attn --no-build-isolation`"
-            )
-        },
-    )
-    use_peft: bool = field(
-        default=False,
-        metadata={"help": ("Whether to use PEFT or not for training.")},
-    )
-    lora_r: Optional[int] = field(
-        default=16,
-        metadata={"help": ("LoRA R value.")},
-    )
-    lora_alpha: Optional[int] = field(
-        default=32,
-        metadata={"help": ("LoRA alpha.")},
-    )
-    lora_dropout: Optional[float] = field(
-        default=0.05,
-        metadata={"help": ("LoRA dropout.")},
-    )
-    lora_target_modules: Optional[List[str]] = field(
-        default=None,
-        metadata={"help": ("LoRA target modules.")},
-    )
-    lora_modules_to_save: Optional[List[str]] = field(
-        default=None,
-        metadata={"help": ("Model layers to unfreeze & train")},
-    )
-    lora_task_type: str = field(
-        default="CAUSAL_LM", metadata={"help": "The task_type to pass for LoRA (use SEQ_CLS for reward modeling)"}
-    )
-    load_in_8bit: bool = field(
-        default=False, metadata={"help": "use 8 bit precision for the base model - works only with LoRA"}
-    )
-    load_in_4bit: bool = field(
-        default=False, metadata={"help": "use 4 bit precision for the base model - works only with LoRA"}
-    )
+    # PEFT-related args
+    use_peft: bool = False
+    """Whether to use PEFT or not for training."""
+    lora_r: Optional[int] = 16
+    """LoRA R value."""
+    lora_alpha: Optional[int] = 32
+    """LoRA alpha."""
+    lora_dropout: Optional[float] = 0.05
+    """LoRA dropout."""
+    lora_target_modules: Optional[List[str]] = None
+    """LoRA target modules."""
+    lora_modules_to_save: Optional[List[str]] = None
+    """Model layers to unfreeze & train"""
+    lora_task_type: str = "CAUSAL_LM"
+    """The task_type to pass for LoRA (use SEQ_CLS for reward modeling)"""
 
-    bnb_4bit_quant_type: Optional[str] = field(
-        default="nf4", metadata={"help": "precise the quantization type (fp4 or nf4)"}
-    )
-    use_bnb_nested_quant: bool = field(default=False, metadata={"help": "use nested quantization"})
+    # quantization args
+    load_in_8bit: bool = False
+    """use 8 bit precision for the base model - works only with LoRA"""
+    load_in_4bit: bool = False
+    """use 4 bit precision for the base model - works only with LoRA"""
+    bnb_4bit_quant_type: Optional[str] = "nf4"
+    """precise the quantization type (fp4 or nf4)"""
+    use_bnb_nested_quant: bool = False
+    """use nested quantization"""
+
+    def __post_init__(self):
+        # `use_cache=True` is incompatible with gradient checkpointing.
+        # https://github.com/huggingface/transformers/blob/d6751d91c8f58cdeb35af6adae182d7dc90aa883/src/transformers/models/llama/modeling_llama.py#L945
+        if self.gradient_checkpointing:
+            self.use_cache = False
 
 
 # ----------------------------------------------------------------------------
@@ -342,11 +323,14 @@ def save_with_accelerate(
     tokenizer: PreTrainedTokenizer,
     output_dir: str,
     use_lora: bool = False,
-    push_to_hub: bool = False,
-    hf_repo_id: Optional[str] = None,
-    hf_repo_revision: Optional[str] = None,
-    private: bool = True,
 ) -> None:
+    # set the generation config to an empty setting to be safe.
+    # we usually do greedy decoding for generation, so this should be okay.
+    # otherwise, we get an error thrown at save time.
+    model.generation_config = transformers.GenerationConfig(
+        temperature=None, top_p=None, eos_token_id=tokenizer.eos_token_id, bos_token_id=tokenizer.bos_token_id
+    )
+
     unwrapped_model: PreTrainedModel = accelerator.unwrap_model(model)
     # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
     # Otherwise, sometimes the model will be saved with only part of the parameters.
@@ -367,26 +351,35 @@ def save_with_accelerate(
             state_dict=state_dict,
             safe_serialization=False,
         )
-    if accelerator.is_main_process and push_to_hub:
+
+    if accelerator.is_main_process:
+        tokenizer.save_pretrained(output_dir)
+    # customize model card (TODO (Costa): this can be prettier)
+
+
+@retry_on_exception()
+def push_folder_to_hub(
+    accelerator: Accelerator,
+    output_dir: str,
+    hf_repo_id: Optional[str] = None,
+    hf_repo_revision: Optional[str] = None,
+    private: bool = True,
+):
+    if accelerator.is_main_process:
         hf_repo_url = f"https://huggingface.co/{hf_repo_id}/tree/{hf_repo_revision}"
         api = HfApi()
-        api.create_repo(hf_repo_id, exist_ok=True, private=private)
+        if not api.repo_exists(hf_repo_id):
+            api.create_repo(hf_repo_id, exist_ok=True, private=private)
+        if hf_repo_revision is not None:
+            api.create_branch(repo_id=hf_repo_id, branch=hf_repo_revision, exist_ok=True)
         api.upload_folder(
             repo_id=hf_repo_id,
+            revision=hf_repo_revision,
             folder_path=output_dir,
             commit_message="upload checkpoint",
             run_as_future=False,
         )
         print(f"🔥 pushed to {hf_repo_url}")
-
-    if accelerator.is_main_process:
-        tokenizer.save_pretrained(output_dir)
-        if push_to_hub:
-            tokenizer.push_to_hub(
-                repo_id=hf_repo_id,
-                revision=hf_repo_revision,
-            )
-    # customize model card (TODO (Costa): this can be prettier)
 
 
 # ----------------------------------------------------------------------------
@@ -517,19 +510,40 @@ def format_value(value):
 
 
 def print_rich_single_line_metrics(metrics):
-    formatted_metrics = []
+    # Create main table
+    table = Table(show_header=False, box=None)
+    table.add_column("Category", style="cyan")
+    table.add_column("Values", style="magenta")
+
+    # Group metrics by their prefix
+    grouped_metrics = defaultdict(list)
     for key, value in metrics.items():
-        # Shortening the key names
-        short_key = key.split("/")[-1] if "/" in key else key
+        category = key.split("/")[0] if "/" in key else "other"
+        grouped_metrics[category].append((key, value))
 
-        # Create a colored text object
-        metric_text = Text()
-        metric_text.append(short_key + ": ", style="bold cyan")  # Keys in cyan
-        metric_text.append(format_value(value), style="yellow")  # Values in yellow
+    # Sort groups by category name
+    for category in sorted(grouped_metrics.keys()):
+        values = grouped_metrics[category]
+        value_strings = []
+        for key, value in values:
+            # Use the last part of the key as the display name
+            display_name = key.split("/")[-1]
+            value_strings.append(f"{display_name}: {format_value(value)}")
 
-        formatted_metrics.append(metric_text)
+        # Join all values for this category into a single string
+        values_str = " | ".join(value_strings)
+        table.add_row(category, values_str)
 
-    rprint(" | ".join(str(metric) for metric in formatted_metrics))
+    # Create a panel with the table
+    panel = Panel(
+        table,
+        title="Metrics",
+        expand=False,
+        border_style="bold green",
+    )
+
+    # Print the panel
+    rprint(panel)
 
 
 def exact_div(a, b, custom_error_message=""):

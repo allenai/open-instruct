@@ -17,19 +17,11 @@ import unittest
 
 import pytest
 
-from open_instruct.utils import FlatArguments, get_datasets
+from open_instruct.utils import get_datasets
 
 
 class GetDatasetsTest(unittest.TestCase):
     """Each of these test datasets has 100 examples"""
-
-    def assert_args_type(self):
-        dataset_mixer = {
-            "HuggingFaceH4/testing_alpaca_small": 0.5,
-            "HuggingFaceH4/testing_self_instruct_small": 0.3,
-            "HuggingFaceH4/testing_codealpaca_small": 0.2,
-        }
-        _ = FlatArguments(dataset_mixer, columns_to_keep=["prompt", "completion"])
 
     def test_loading_data_args(self):
         dataset_mixer = {
@@ -75,6 +67,14 @@ class GetDatasetsTest(unittest.TestCase):
         datasets = get_datasets(dataset_mixer, splits=["test"], columns_to_keep=["prompt", "completion"])
         self.assertEqual(len(datasets["test"]), 100)
         self.assertRaises(KeyError, lambda: datasets["train"])
+
+    def test_loading_preference_data(self):
+        dataset_mixer = {
+            "ai2-adapt-dev/ultrafeedback-small": 1000,
+            "ai2-adapt-dev/summarize_from_feedback_small": 1000,
+        }
+        pref_datasets = get_datasets(dataset_mixer, splits=["train"], columns_to_keep=["chosen", "rejected"])
+        self.assertEqual(len(pref_datasets["train"]), 2000)
 
 
 # useful for checking if public datasets are still available

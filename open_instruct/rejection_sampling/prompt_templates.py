@@ -5,6 +5,7 @@ DEFAULT_SKILL = "summarization"
 GENERATION_TEMPLATES = {
     "chat": """
 You are an expert assistant and your goal is to provide the most helpful and accurate response to the following chat. The chat maybe between two users User A and User B or it can be a single turn User A. Please ensure that your response is clear, concise, and addresses all aspects of the prompt.
+Don't answer by simply one word. Try to make your answer diverse and interesting.
 
 ### Prompt:
 {prompt}

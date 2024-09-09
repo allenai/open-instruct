@@ -13,6 +13,7 @@ from eval.utils import (
     dynamic_import_function,
     load_hf_tokenizer,
     upload_results_to_hf,
+    check_and_upload_model_metadata,
 )
 
 
@@ -103,6 +104,7 @@ def main(args):
         print("Loading model and tokenizer...")
         tokenizer = load_hf_tokenizer(
             model_name_or_path=args.model_name_or_path,
+            revision=args.hf_revision,
             tokenizer_name_or_path=args.tokenizer_name_or_path,
             use_fast_tokenizer=not args.use_slow_tokenizer,
         )
@@ -112,11 +114,14 @@ def main(args):
                 tokenizer=args.tokenizer_name_or_path if args.tokenizer_name_or_path else args.model_name_or_path,
                 tokenizer_mode="slow" if args.use_slow_tokenizer else "auto",
                 tensor_parallel_size=torch.cuda.device_count(),
+                tokenizer_revision=args.hf_revision,
+                revision=args.hf_revision,
             )
             
         else:
             model = load_hf_lm(
                 model_name_or_path=args.model_name_or_path, 
+                revision=args.hf_revision,
                 load_in_8bit=args.load_in_8bit, 
                 device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                 gptq_model=args.gptq,
@@ -274,6 +279,9 @@ def main(args):
             primary_score=primary_score,
             prepend_timestamp=True,
         )
+        check_and_upload_model_metadata(
+            args.model_name_or_path, args.upload_to_hf, args.hf_upload_name, hf_revision=args.hf_revision
+        )
 
 
 if __name__ == "__main__":
@@ -316,6 +324,12 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="if specified, we will load the model to generate the predictions."
+    )
+    parser.add_argument(
+        "--hf_revision",
+        type=str,
+        default=None,
+        help="if specified, we will load the model from a revision of the model in the hub"
     )
     parser.add_argument(
         "--tokenizer_name_or_path",

@@ -14,18 +14,20 @@
 
 import asyncio
 import json
-import multiprocessing
+import os
+import sys
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from pprint import pformat
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
 import torch.multiprocessing as mp
 from datasets import Dataset
-from generation import format_conversation, generate_with_openai
 from huggingface_hub import HfApi
+from huggingface_hub.repocard import RepoCard
 from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
@@ -35,8 +37,16 @@ from transformers import (
 )
 
 from open_instruct.model_utils import get_reward
+from open_instruct.rejection_sampling.generation import (
+    GenerationArgs,
+    format_conversation,
+    generate_with_openai,
+)
 
 api = HfApi()
+# we don't use `multiprocessing.cpu_count()` because typically we only have 12 CPUs
+# and that the shards might be small
+NUM_CPUS_FOR_DATASET_MAP = 4
 
 
 @dataclass
@@ -44,15 +54,30 @@ class Args:
     model_names_or_paths: List[str] = field(default_factory=lambda: ["gpt-4"])
     input_filename: str = "completions.jsonl"
     save_filename: str = "rejected_sampling_completions.jsonl"
-    n: int = 1
+    save_filename_scores: str = "completion_scores.jsonl"
+    num_completions: int = 1
     max_forward_batch_size: int = 64
     num_gpus: int = 1  # New argument for specifying the number of GPUs
-    push_to_hub: bool = False
-    hf_entity: Optional[str] = None
-    hf_repo_id: str = "rejection_sampling"
-    add_timestamp: bool = True
     mode: str = "judgement"
     skill: str = "chat"
+
+    # upload config
+    hf_repo_id: str = os.path.basename(__file__)[: -len(".py")]
+    hf_repo_id_scores: str = os.path.basename(__file__)[: -len(".py")] + "_scores"
+    push_to_hub: bool = False
+    hf_entity: Optional[str] = None
+    add_timestamp: bool = True
+
+
+def save_jsonl(save_filename: str, table: Dict[str, List]):
+    first_key = list(table.keys())[0]
+    dirname = os.path.dirname(save_filename)
+    if dirname:
+        os.makedirs(os.path.dirname(save_filename), exist_ok=True)
+    with open(save_filename, "w") as outfile:
+        for i in range(len(table[first_key])):
+            json.dump({key: table[key][i] for key in table}, outfile)
+            outfile.write("\n")
 
 
 def process_shard(
@@ -82,7 +107,9 @@ def process_shard(
 
     # Apply a tokenization function to each item in the dataset
     ds = raw_ds.map(
-        lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])}, remove_columns=raw_ds.column_names
+        lambda x: {"input_ids": tokenizer.apply_chat_template(x["messages"])},
+        remove_columns=raw_ds.column_names,
+        num_proc=NUM_CPUS_FOR_DATASET_MAP,
     )
     reference_completion_ds = raw_ds.map(
         lambda x: {
@@ -91,9 +118,10 @@ def process_shard(
             )
         },
         remove_columns=raw_ds.column_names,
+        num_proc=NUM_CPUS_FOR_DATASET_MAP,
     )
     reference_completion_ds = reference_completion_ds.select(
-        range(0, len(ds), args.n)
+        range(0, len(ds), args.num_completions)
     )  # remove duplicate reference completions
     # So this code handles only classification, I should also handle other models judges like Llama3
     model = AutoModelForSequenceClassification.from_pretrained(
@@ -133,26 +161,33 @@ def process_shard_api(model_name_or_path: str, args: Args, shard: List[str]) -> 
     # Convert the list of data items (shard) into a Hugging Face Dataset object
     raw_ds = Dataset.from_list(shard)
 
+    # for judgement mode, we need to only generate `num_completions=1`
+    gen_args = GenerationArgs(num_completions=1)
+
     ds = raw_ds.map(
         lambda x: {"prompt": format_conversation(x["messages"][:-1])},
-        num_proc=multiprocessing.cpu_count(),
+        num_proc=NUM_CPUS_FOR_DATASET_MAP,
     )
     prompts = ds["prompt"]
     model_responses = ds["model_completion"]
     reference_responses = ds["reference_completion"]
+    unique_prompts = [prompts[i] for i in range(0, len(ds), args.num_completions)]  # remove duplicate prompts
+    reference_responses = [
+        reference_responses[i] for i in range(0, len(ds), args.num_completions)
+    ]  # remove duplicate reference completions
 
     data_list_model_responses = [
         {"prompt": prompt, "response": response} for prompt, response in zip(prompts, model_responses)
     ]
     model_responses_scores = asyncio.run(
-        generate_with_openai(model_name_or_path, data_list_model_responses, args, args.n)
+        generate_with_openai(model_name_or_path, data_list_model_responses, args, gen_args)
     )
 
     data_list_reference_responses = [
-        {"prompt": prompt, "response": response} for prompt, response in zip(prompts, reference_responses)
+        {"prompt": prompt, "response": response} for prompt, response in zip(unique_prompts, reference_responses)
     ]
     reference_responses_scores = asyncio.run(
-        generate_with_openai(model_name_or_path, data_list_reference_responses, args, args.n)
+        generate_with_openai(model_name_or_path, data_list_reference_responses, args, gen_args)
     )
 
     return torch.Tensor(model_responses_scores), torch.Tensor(reference_responses_scores)
@@ -273,18 +308,27 @@ def main(args: Args):
         reference_completion_scores_per_model[model_name_or_path] = reference_completion_scores.tolist()
 
         # Rejection sampling
-        scores_per_prompt = scores.reshape(-1, args.n)  # (n_prompts, n_completions)
+        scores_per_prompt = scores.reshape(-1, args.num_completions)  # (n_prompts, n_completions)
         for i in range(len(completions)):
             if "score" not in completions[i]:
                 completions[i]["score"] = {}
             completions[i]["score"][model_name_or_path] = scores[i].item()
+            if "reference_completion_score" not in completions[i]:
+                completions[i]["reference_completion_score"] = {}
+            completions[i]["reference_completion_score"][model_name_or_path] = reference_completion_scores[
+                i // args.num_completions
+            ].item()
 
         best_indices = torch.argmax(scores_per_prompt, dim=1)  # (n_prompts, 1) --> (n_prompts, )
         worst_indices = torch.argmin(scores_per_prompt, dim=1)  # (n_prompts, 1) --> (n_prompts, )
-        best_indices_offset = torch.arange(0, len(best_indices) * args.n, args.n) + best_indices
+        best_indices_offset = (
+            torch.arange(0, len(best_indices) * args.num_completions, args.num_completions) + best_indices
+        )
         best_offsets_per_model[model_name_or_path] = best_indices_offset
 
-        worst_indices_offset = torch.arange(0, len(worst_indices) * args.n, args.n) + worst_indices
+        worst_indices_offset = (
+            torch.arange(0, len(worst_indices) * args.num_completions, args.num_completions) + worst_indices
+        )
         worst_offsets_per_model[model_name_or_path] = worst_indices_offset
 
     # Majority vote
@@ -306,18 +350,22 @@ def main(args: Args):
         assert worst_completions[i]["messages"][:-1] == best_completions[i]["messages"][:-1]
         table["chosen_score"].append(best_completions[i]["score"])
         table["rejected_score"].append(worst_completions[i]["score"])
-    first_key = list(table.keys())[0]
-    with open(args.save_filename, "w") as outfile:
-        for i in range(len(table[first_key])):
-            json.dump({key: table[key][i] for key in table}, outfile)
-            outfile.write("\n")
+    save_jsonl(args.save_filename, table)
+
+    table_scores = defaultdict(list)
+    keys = list(completions[0].keys())
+    for i in range(len(completions)):
+        for key in keys:
+            table_scores[key].append(completions[i][key])
+    save_jsonl(args.save_filename_scores, table_scores)
 
     if args.push_to_hub:
         if args.hf_entity is None:
             args.hf_entity = api.whoami()["name"]
         full_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
+        timestamp = f"_{int(time.time())}"
         if args.add_timestamp:
-            full_repo_id += f"_{int(time.time())}"
+            full_repo_id += timestamp
         api.create_repo(full_repo_id, repo_type="dataset", exist_ok=True)
         for f in [__file__, args.save_filename]:
             api.upload_file(
@@ -326,7 +374,49 @@ def main(args: Args):
                 repo_id=full_repo_id,
                 repo_type="dataset",
             )
-        print(f"Pushed to https://huggingface.co/datasets/{full_repo_id}/")
+        repo_full_url = f"https://huggingface.co/datasets/{full_repo_id}"
+        print(f"Pushed to {repo_full_url}")
+        run_command = " ".join(["python"] + sys.argv)
+        sft_card = RepoCard(
+            content=f"""\
+# allenai/open_instruct: Rejection Sampling Dataset
+
+See https://github.com/allenai/open-instruct/blob/main/docs/algorithms/rejection_sampling.md for more detail
+
+## Configs
+
+```
+args:
+{pformat(vars(args))}
+```
+
+## Additional Information
+
+1. Command used to run `{run_command}`
+"""
+        )
+        sft_card.push_to_hub(
+            full_repo_id,
+            repo_type="dataset",
+        )
+
+        full_repo_id_scores = f"{args.hf_entity}/{args.hf_repo_id_scores}"
+        if args.add_timestamp:
+            full_repo_id_scores += timestamp
+        api.create_repo(full_repo_id_scores, repo_type="dataset", exist_ok=True)
+        for f in [__file__, args.save_filename_scores]:
+            api.upload_file(
+                path_or_fileobj=f,
+                path_in_repo=f.split("/")[-1],
+                repo_id=full_repo_id_scores,
+                repo_type="dataset",
+            )
+        repo_full_url_scores = f"https://huggingface.co/datasets/{full_repo_id_scores}"
+        print(f"Pushed to {repo_full_url_scores}")
+        sft_card.push_to_hub(
+            full_repo_id_scores,
+            repo_type="dataset",
+        )
 
 
 if __name__ == "__main__":
