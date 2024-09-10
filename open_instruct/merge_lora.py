@@ -15,13 +15,19 @@
 import argparse
 import copy
 import os
+from typing import Optional
+import time
 
+import yaml
 import bitsandbytes as bnb
 import torch
 from bitsandbytes.functional import dequantize_4bit
 from peft import PeftConfig, PeftModel
 from peft.utils import _get_submodules
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from huggingface_hub import HfApi
+
+from utils import retry_on_exception, maybe_use_ai2_hf_entity
 
 
 def dequantize_model(model, dtype=torch.bfloat16, device="cuda"):
@@ -56,25 +62,65 @@ def dequantize_model(model, dtype=torch.bfloat16, device="cuda"):
 
         return model
 
+@retry_on_exception()
+def push_folder_to_hub(
+    output_dir: str,
+    hf_repo_id: Optional[str] = None,
+    hf_repo_revision: Optional[str] = None,
+    private: bool = True,
+):
+    hf_repo_url = f"https://huggingface.co/{hf_repo_id}/tree/{hf_repo_revision}"
+    api = HfApi()
+    if not api.repo_exists(hf_repo_id):
+        api.create_repo(hf_repo_id, exist_ok=True, private=private)
+    if hf_repo_revision is not None:
+        api.create_branch(repo_id=hf_repo_id, branch=hf_repo_revision, exist_ok=True)
+    api.upload_folder(
+        repo_id=hf_repo_id,
+        revision=hf_repo_revision,
+        folder_path=output_dir,
+        commit_message="upload checkpoint",
+        run_as_future=False,
+    )
+    print(f"🔥 pushed to {hf_repo_url}")
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--lora_model_name_or_path", type=str, required=True)
+    parser.add_argument("--lora_model_name_or_path", type=str, required=False)
     parser.add_argument("--base_model_name_or_path", type=str, required=False)
     parser.add_argument("--tokenizer_name_or_path", type=str, required=False)
+    parser.add_argument("--config_file", type=str, default=None)
     parser.add_argument("--output_dir", type=str, required=False)
     parser.add_argument("--qlora", action="store_true")  # qlora requires special treatment.
     parser.add_argument("--save_tokenizer", action="store_true")
     parser.add_argument("--use_fast_tokenizer", action="store_true")
     parser.add_argument("--pad_to_multiple_of", type=int, default=0)  # if you want to pad the token embeddings
+    parser.add_argument("--push_to_hub", action="store_true")
+    parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    peft_config = PeftConfig.from_pretrained(args.lora_model_name_or_path)
+    # To keep the consistency with the original script, we convert args to configs when no configs file provided.
+    if args.config_file is None:
+        configs = {
+            'model_name_or_path': args.base_model_name_or_path,
+            'output_dir': args.lora_model_name_or_path,
+            'tokenizer_name': args.tokenizer_name_or_path,
+            'use_slow_tokenizer': not args.use_fast_tokenizer,
+            'use_qlora': args.qlora,
+        }
+    else:
+        with open(args.config_file, "r") as f:
+            configs = yaml.safe_load(f)
+    base_model_name_or_path = configs['model_name_or_path']
+    lora_model_name_or_path = configs['output_dir']
+    tokenizer_name_or_path = configs['tokenizer_name'] if 'tokenizer_name' in configs else None
+    peft_config = PeftConfig.from_pretrained(lora_model_name_or_path)
     print("Loading the base model...")
-    if args.qlora:
+    if configs['use_qlora']:
         quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_compute_dtype=torch.bfloat16,
@@ -82,7 +128,7 @@ if __name__ == "__main__":
             bnb_4bit_quant_type="nf4",
         )
         base_model = AutoModelForCausalLM.from_pretrained(
-            args.base_model_name_or_path if args.base_model_name_or_path else peft_config.base_model_name_or_path,
+            base_model_name_or_path if base_model_name_or_path else peft_config.base_model_name_or_path,
             torch_dtype=torch.bfloat16,
             quantization_config=quantization_config,
             device_map={"": 0} if torch.cuda.is_available() else None,
@@ -91,23 +137,24 @@ if __name__ == "__main__":
         base_model = dequantize_model(base_model, device="cpu")
     else:
         base_model = AutoModelForCausalLM.from_pretrained(
-            args.base_model_name_or_path if args.base_model_name_or_path else peft_config.base_model_name_or_path,
+            base_model_name_or_path if base_model_name_or_path else peft_config.base_model_name_or_path,
+            torch_dtype=torch.bfloat16,
         )
 
     # If tokenizer is specified, use it.
     # Otherwise, use the tokenizer in the lora model folder or the base model folder.
-    if args.tokenizer_name_or_path:
-        print(f"Loading the tokenizer from {args.tokenizer_name_or_path}...")
-        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name_or_path, use_fast=args.use_fast_tokenizer)
+    if tokenizer_name_or_path:
+        print(f"Loading the tokenizer from {tokenizer_name_or_path}...")
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=(not configs['use_slow_tokenizer']))
     else:
         try:
             print("Trying to load the tokenizer in the lora model folder...")
-            tokenizer = AutoTokenizer.from_pretrained(args.lora_model_name_or_path, use_fast=args.use_fast_tokenizer)
+            tokenizer = AutoTokenizer.from_pretrained(lora_model_name_or_path, use_fast=(not configs['use_slow_tokenizer']))
         except Exception as e:
             print(
                 f"No tokenizer found in the lora model folder. Using the tokenizer in the base model folder... e:{e}"
             )
-            tokenizer = AutoTokenizer.from_pretrained(args.base_model_name_or_path, use_fast=args.use_fast_tokenizer)
+            tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path, use_fast=(not configs['use_slow_tokenizer']))
 
     embedding_size = base_model.get_input_embeddings().weight.shape[0]
     if len(tokenizer) > embedding_size:
@@ -121,11 +168,11 @@ if __name__ == "__main__":
             base_model.resize_token_embeddings(len(tokenizer))
 
     print("Loading the lora model...")
-    lora_model = PeftModel.from_pretrained(base_model, args.lora_model_name_or_path)
+    lora_model = PeftModel.from_pretrained(base_model, lora_model_name_or_path)
     print("Merging the lora modules...")
     merged_model = lora_model.merge_and_unload()
 
-    output_dir = args.output_dir if args.output_dir else args.lora_model_name_or_path
+    output_dir = args.output_dir if args.output_dir else (lora_model_name_or_path.rstrip("/") + "_merged/")
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"Saving merged model to {output_dir}...")
@@ -134,3 +181,24 @@ if __name__ == "__main__":
     if args.save_tokenizer:
         print(f"Saving the tokenizer to {output_dir}...")
         tokenizer.save_pretrained(output_dir)
+
+    if args.push_to_hub:
+        if "hf_repo_id" not in configs:  # auto-generate one
+            configs['hf_repo_id'] = "open_instruct_dev"
+        if "hf_entity" not in configs:  # first try to use AI2 entity
+            configs['hf_entity'] = maybe_use_ai2_hf_entity()
+        if configs['hf_entity'] is None:  # then try to use the user's entity
+            configs['hf_entity'] = HfApi().whoami()["name"]
+        configs['hf_repo_id'] = f"{configs['hf_entity']}/{configs['hf_repo_id']}"
+        if "hf_repo_revision" not in configs:  # auto-generate one
+            if "exp_name" not in configs:
+                peft = "qlora" if configs['use_qlora'] else "lora"
+                configs['exp_name'] = os.path.basename(__file__)[: -len(".py")]
+            configs['hf_repo_revision'] = (
+                f"{configs['exp_name']}__{configs['model_name_or_path'].replace('/', '_')}__{args.seed}__{int(time.time())}"
+            )
+        push_folder_to_hub(
+            output_dir,
+            configs["hf_repo_id"],
+            configs["hf_repo_revision"],
+        )
