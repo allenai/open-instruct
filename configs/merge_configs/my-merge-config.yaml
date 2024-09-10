@@ -1,9 +1,9 @@
 merge_method: linear
 normalize: true
 models:
-  - name: llama_3_8b-rs_2860_v3.2_ccn
+  - name: valpy_dpo_mix_uf_wc_regen_da_sftmix_v4.23_09052024165835
     location: beaker
-    path: jacobm/llama_3_8b-rs_2860_v3.2_ccn
+    path: 01J72A0A1VAT17049F6FHXS7AH
     weight: 0.6
   - name: llama_3_8b-rs_2860_numina_ccn
     location: beaker
