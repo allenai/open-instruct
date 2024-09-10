@@ -1,7 +1,7 @@
 # model_name_or_path: ai2-adapt-dev/OLMo-medium-peteish7-anneal-from-928646-50B-nowup-dclm07-flan
 model_name_or_path: /adapt-data/ai2-llm/checkpoints/OLMo-medium/peteish7-anneal-from-928646-50B-nowup-dclm07-fw3/step11931-hf
 model_revision: main
-use_flash_attn: false
+use_flash_attn: true
 # tokenizer_name: ai2-adapt-dev/OLMo-medium-peteish7-anneal-from-928646-50B-nowup-dclm07-flan
 tokenizer_name: /adapt-data/ai2-llm/checkpoints/OLMo-medium/peteish7-anneal-from-928646-50B-nowup-dclm07-fw3/step11931-hf
 use_slow_tokenizer: false # olmo models only use fast tokenizers

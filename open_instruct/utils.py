@@ -70,10 +70,9 @@ def check_hf_olmo_availability(return_version: bool = False) -> Union[dict, bool
             try:
                 package = importlib.import_module(pkg_name)
                 package_version = getattr(package, "__version__", "N/A")
-                if package_version == "N/A":
-                    package_exists = False
             except ImportError:
                 package_exists = False
+                package_version = "N/A"
 
     if return_version:
         return {

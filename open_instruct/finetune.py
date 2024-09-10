@@ -453,7 +453,7 @@ def main(args: FlatArguments):
     if check_hf_olmo_availability():
         # allows AutoModel... to work with not in transformers olmo models
         import hf_olmo  # noqa
-        from hf_olmo import OLMoTokenizerFast, OLMoConfig
+        from hf_olmo import OLMoConfig, OLMoTokenizerFast
 
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
@@ -620,7 +620,8 @@ def main(args: FlatArguments):
                 token=os.getenv("HF_TOKEN", None),
             )
         else:
-            if (check_hf_olmo_availability() and isinstance(config, OLMoConfig)):
+            if check_hf_olmo_availability() and isinstance(config, OLMoConfig):
+                logger.info("Temporary loading for recent OLMo Models")
                 # handles flash_attn in config. TODO remove on ai2-olmo > 0.5.0
                 config.flash_attention = args.use_flash_attn
                 model = AutoModelForCausalLM.from_pretrained(
@@ -664,7 +665,9 @@ def main(args: FlatArguments):
             0,
             1,
         ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
-    elif isinstance(tokenizer, GPTNeoXTokenizerFast) or (check_hf_olmo_availability() and isinstance(tokenizer, OLMoTokenizerFast)):
+    elif isinstance(tokenizer, GPTNeoXTokenizerFast) or (
+        check_hf_olmo_availability() and isinstance(tokenizer, OLMoTokenizerFast)
+    ):
         # OLMo newer models use this tokenizer
         if tokenizer.bos_token is None:
             tokenizer.bos_token = tokenizer.eos_token
