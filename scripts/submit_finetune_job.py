@@ -26,7 +26,7 @@ def main():
     parser.add_argument("--image", type=str, default="nathanl/open_instruct_auto", help="Beaker image to use.")
     parser.add_argument("--workspace", type=str, default="ai2/tulu-2-improvements", help="Beaker workspace to use.")
     parser.add_argument("--mount_on_weka", type=str, default=None, help="Mount a Weka directory to the job")
-    parser.add_argument("--weka_mount_path", type=str, default="/models", help="Path to mount the Weka directory")
+    parser.add_argument("--weka_mount_path", type=str, default="/adapt-data", help="Path to mount the Weka directory")
     # allow unknown args from CLI, use this to modify loaded config in bash scripts for sweeping
     # Note, can only override args in --config passed (not default FlatArguments class in open_instruct/utils.py)
     
@@ -173,7 +173,7 @@ def main():
     d['tasks'][0]['name'] = exp_name
 
     # add cluster-specific env vars
-    if args.cluster == "ai2/jupiter-cirrascale-2":
+    if args.cluster == "ai2/jupiter-cirrascale-2" and args.num_nodes > 1:
         d['tasks'][0]['envVars'] += [
             {
                 "name": "NCCL_SOCKET_IFNAME",
