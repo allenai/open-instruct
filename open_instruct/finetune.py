@@ -616,6 +616,7 @@ def main(args: FlatArguments):
                 trust_remote_code=args.trust_remote_code,
                 torch_dtype=torch.bfloat16,
                 attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                flash_attention=True if args.use_flash_attn else False, # TODO remove with ai2-olmo > 0.5.0
                 revision=args.model_revision,
                 token=os.getenv("HF_TOKEN", None),
             )
@@ -628,6 +629,7 @@ def main(args: FlatArguments):
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 torch_dtype=torch.bfloat16,
                 attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                flash_attention=True if args.use_flash_attn else False,  # TODO remove with ai2-olmo > 0.5.0
                 revision=args.model_revision,
                 token=os.getenv("HF_TOKEN", None),
             )
