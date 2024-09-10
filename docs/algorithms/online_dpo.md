@@ -29,11 +29,12 @@ python mason.py \
     --pure_docker_mode --no_mount_nfs --no_hf_cache_env \
     --priority preemptible \
     --budget ai2/allennlp \
-    --gpus 1 -- python \
-     open_instruct/online_dpo_vllm_thread.py \
+    --gpus 1 -- python open_instruct/online_dpo_vllm_thread.py \
     --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_train_splits train \
     --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
     --dataset_eval_splits validation \
     --learning_rate 3e-6 \
     --output_dir models/minimal/online_dpo_vllm_thread_tldr \
@@ -51,12 +52,13 @@ python mason.py \
     --response_length 53 \
     --with_tracking \
     --push_to_hub \
-    --vllm_device cuda:7 \
+    --vllm_device cuda:1 \
 # 8 GPU
 python mason.py \
-    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
+    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/general-cirrascale \
     --pure_docker_mode --no_mount_nfs --no_hf_cache_env \
-    --priority preemptible \
+    --priority normal \
+    --resumable \
     --budget ai2/allennlp \
     --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
      open_instruct/online_dpo_vllm_thread.py \
@@ -64,6 +66,8 @@ python mason.py \
     --dataset_train_splits train \
     --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_eval_splits validation \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
     --learning_rate 3e-6 \
     --output_dir models/minimal/online_dpo_vllm_thread_tldr \
     --per_device_train_batch_size 16 \
