@@ -20,6 +20,7 @@ import os
 import random
 import subprocess
 import time
+import json
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
@@ -313,6 +314,16 @@ class FlatArguments:
             "help": "Whether to use fused AdamW or not.",
         },
     )
+    load_balancing_loss: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to include a load balancing loss (for OLMoE) or not.",
+        },
+    )
+    load_balancing_weight: float = field(
+        default=0.5,
+        metadata={"help": "Weight for load balancing loss if applicable."},
+    )
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: Optional[str] = None
@@ -325,7 +336,7 @@ class FlatArguments:
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     try_launch_beaker_eval_jobs: bool = True
     """Whether to launch beaker evaluation jobs after training"""
-    hf_metadata_dataset: Optional[str] = None
+    hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
     def __post_init__(self):
@@ -900,6 +911,7 @@ def main(args: FlatArguments):
         model.train()
         train_dataloader.set_epoch(epoch)
         total_loss = 0
+        total_aux_loss = 0
         if last_checkpoint_path and resume_step is not None:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint
             active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_step)
@@ -907,7 +919,10 @@ def main(args: FlatArguments):
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
             with accelerator.accumulate(model):
-                outputs = model(**batch, use_cache=False)
+                if args.load_balancing_loss:
+                    outputs = model(**batch, use_cache=False, output_router_logits=True)
+                else:
+                    outputs = model(**batch, use_cache=False)
                 if args.reduce_loss == "mean":
                     loss = outputs.loss
                 else:
@@ -930,9 +945,14 @@ def main(args: FlatArguments):
                     # Enable model parallelism
                     shift_labels = shift_labels.to(shift_logits.device)
                     loss = loss_fct(shift_logits, shift_labels)
+                    if args.load_balancing_loss:
+                        aux_loss = args.load_balancing_weight * outputs.aux_loss
+                        loss += aux_loss
                 # We keep track of the loss at each logged step
                 total_loss += loss.detach().float()
                 accelerator.backward(loss)
+                if args.load_balancing_loss:
+                    total_aux_loss += aux_loss.detach().float()
                 # clip gradient norm. don't do this with deepspeed
                 if accelerator.sync_gradients and args.clip_grad_norm > 0:
                     accelerator.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
@@ -950,16 +970,31 @@ def main(args: FlatArguments):
                         / args.gradient_accumulation_steps
                         / args.logging_steps
                     )
-                    logger.info(f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}")
+                    metrics_to_log = {
+                        "learning_rate": lr_scheduler.get_last_lr()[0],
+                        "train_loss": avg_loss,
+                    }
+                    if args.load_balancing_loss:
+                        avg_aux_loss = (
+                            accelerator.gather(total_aux_loss).mean().item()
+                            / args.gradient_accumulation_steps
+                            / args.logging_steps
+                        )
+                        logger.info(
+                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, Aux Loss: {avg_aux_loss}"
+                        )
+                        metrics_to_log["aux_loss"] = avg_aux_loss
+                    else:
+                        logger.info(
+                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}"
+                        )
                     if args.with_tracking:
                         accelerator.log(
-                            {
-                                "learning_rate": lr_scheduler.get_last_lr()[0],
-                                "train_loss": avg_loss,
-                            },
+                            metrics_to_log,
                             step=completed_steps,
                         )
                     total_loss = 0
+                    total_aux_loss = 0
 
                 if isinstance(checkpointing_steps, int):
                     if completed_steps % checkpointing_steps == 0:
@@ -1005,27 +1040,32 @@ def main(args: FlatArguments):
         clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
 
     if is_beaker_job() and accelerator.is_main_process:
+        # dpo script only supports these two options right now for datasets
+        if args.dataset_mixer:
+            dataset_list = args.dataset_mixer.keys()
+        elif args.dataset_mixer_list:
+            dataset_list = args.dataset_mixer_list[::2]  # even indices
+        elif args.dataset_name:
+            dataset_list = [args.dataset_name]
+        else:
+            dataset_list = [args.train_file]
+        # mainly just focussing here on what would be useful for the leaderboard.
+        # wandb will have even more useful information.
+        metadata_blob = {
+            "model_name": args.exp_name,
+            "model_type": "sft",
+            "datasets": dataset_list,
+            "base_model": args.model_name_or_path,
+            "wandb_path": wandb_tracker.run.get_url(),
+            "beaker_experiment": beaker_config.beaker_experiment_url,
+            "beaker_datasets": beaker_config.beaker_dataset_id_urls,
+        }
+        # save metadata to the output directory. then it should also get pushed to HF.
+        with open(os.path.join(args.output_dir, "metadata.json"), "w") as f:
+            json.dump(metadata_blob, f)
+
+        # upload metadata to the dataset if set
         if args.hf_metadata_dataset:
-            # dpo script only supports these two options right now for datasets
-            if args.dataset_mixer:
-                dataset_list = args.dataset_mixer.keys()
-            elif args.dataset_mixer_list:
-                dataset_list = args.dataset_mixer_list[::2]  # even indices
-            elif args.dataset_name:
-                dataset_list = [args.dataset_name]
-            else:
-                dataset_list = [args.train_file]
-            # mainly just focussing here on what would be useful for the leaderboard.
-            # wandb will have even more useful information.
-            metadata_blob = {
-                "model_name": args.exp_name,
-                "model_type": "sft",
-                "datasets": dataset_list,
-                "base_model": args.model_name_or_path,
-                "wandb_path": wandb_tracker.run.get_url(),
-                "beaker_experiment": beaker_config.beaker_experiment_url,
-                "beaker_datasets": beaker_config.beaker_dataset_id_urls,
-            }
             upload_metadata_to_hf(
                 metadata_blob,
                 "metadata.json",

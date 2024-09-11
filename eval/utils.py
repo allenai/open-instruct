@@ -2,12 +2,51 @@ import torch
 import tqdm
 import json
 import time
+import functools
 import asyncio
 import os
 from importlib import import_module
 from transformers import StoppingCriteria
-from eval.dispatch_openai_requests import dispatch_openai_chat_requesets, dispatch_openai_prompt_requesets
 from huggingface_hub import HfApi
+
+from eval.dispatch_openai_requests import dispatch_openai_chat_requesets, dispatch_openai_prompt_requesets
+
+
+# from open_instruct.utils
+def retry_on_exception(max_attempts=4, delay=1, backoff=2):
+    """
+    Retry a function on exception. Useful for HF API calls that may fail due to
+    network issues. E.g., https://beaker.org/ex/01J69P87HJQQ7X5DXE1CPWF974
+    `huggingface_hub.utils._errors.HfHubHTTPError: 429 Client Error`
+
+    We can test it with the following code.
+    @retry_on_exception(max_attempts=4, delay=1, backoff=2)
+    def test():
+        raise Exception("Test exception")
+
+    test()
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            attempts = 0
+            local_delay = delay
+            while attempts < max_attempts:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    attempts += 1
+                    if attempts == max_attempts:
+                        raise e
+                    print(f"Attempt {attempts} failed. Retrying in {local_delay} seconds...")
+                    time.sleep(local_delay)
+                    local_delay *= backoff
+            return None
+
+        return wrapper
+
+    return decorator
 
 
 class KeyWordsCriteria(StoppingCriteria):
@@ -500,7 +539,7 @@ def upload_results_to_hf(
     # actual save and upload
     with open("results.json", "w") as f:
         json.dump(results_dict, f)
-    api = HfApi(token=os.getenv("HF_TOKEN", None))
+    api = HfApi()
     api.upload_file(
         path_or_fileobj="results.json",
         path_in_repo=hf_dataset_save_path,
@@ -508,3 +547,37 @@ def upload_results_to_hf(
         repo_type="dataset",
     )
     os.remove("results.json")
+
+
+@retry_on_exception
+def check_and_upload_model_metadata(model_name_or_path, hf_dataset_name, hf_dataset_save_dir, hf_revision=None):
+    # if metadata.json exists in the model directory, upload it to the dataset
+    api = HfApi()
+    if os.path.exists(f"{model_name_or_path}/metadata.json"):
+        api.upload_file(
+            path_or_fileobj=f"{model_name_or_path}/metadata.json",
+            path_in_repo=f"{hf_dataset_save_dir}/metadata.json",
+            repo_id=hf_dataset_name,
+            repo_type="dataset",
+        )
+    else:
+        # assume its a HF model and try to download the metadata
+        try:
+            from huggingface_hub import hf_hub_download
+            hf_hub_download(
+                model_name_or_path,
+                filename="metadata.json",
+                local_dir=".",
+                revision=hf_revision,
+            )
+        except Exception as e:
+            print(f"Failed to download metadata.json from {model_name_or_path}")
+            print(e)
+            return
+        api.upload_file(
+            path_or_fileobj=f"metadata.json",
+            path_in_repo=f"{hf_dataset_save_dir}/metadata.json",
+            repo_id=hf_dataset_name,
+            repo_type="dataset",
+        )
+    

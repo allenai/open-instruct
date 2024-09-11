@@ -15,6 +15,7 @@ from eval.utils import (
     score_completions,
     dynamic_import_function,
     upload_results_to_hf,
+    check_and_upload_model_metadata,
 )
 from eval.truthfulqa.utilities import (
     format_prompt,
@@ -333,6 +334,9 @@ def main(args):
             if "mc" in args.metrics:
                 raise ValueError("OpenAI Chat engines does not support MC metrics.")
 
+    del model
+    torch.cuda.empty_cache()
+
     # run metrics
     print("Running metrics!")
 
@@ -407,6 +411,9 @@ def main(args):
             task_name=task_name,
             primary_score=primary_score,
             prepend_timestamp=True,
+        )
+        check_and_upload_model_metadata(
+            args.model_name_or_path, args.upload_to_hf, args.hf_upload_name, hf_revision=args.hf_revision
         )
 
 

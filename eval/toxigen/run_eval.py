@@ -16,6 +16,7 @@ from eval.utils import (
     query_openai_chat_model,
     load_hf_tokenizer,
     upload_results_to_hf,
+    check_and_upload_model_metadata,
 )
 from eval.utils import dynamic_import_function 
 
@@ -197,6 +198,9 @@ def main(args):
             task_name=task_name,
             primary_score=primary_score,
             prepend_timestamp=True,
+        )
+        check_and_upload_model_metadata(
+            args.model_name_or_path, args.upload_to_hf, args.hf_upload_name, hf_revision=args.hf_revision
         )
 
 

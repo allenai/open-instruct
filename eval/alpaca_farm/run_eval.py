@@ -8,7 +8,7 @@ import torch
 import datasets
 import vllm
 from alpaca_eval import evaluate as alpaca_farm_evaluate
-from eval.utils import query_openai_chat_model, query_openai_model, generate_completions, dynamic_import_function, load_hf_lm, load_hf_tokenizer, upload_results_to_hf
+from eval.utils import query_openai_chat_model, query_openai_model, generate_completions, dynamic_import_function, load_hf_lm, load_hf_tokenizer, upload_results_to_hf, check_and_upload_model_metadata
 
 def main(args):
     random.seed(42)
@@ -158,6 +158,9 @@ def main(args):
             task_name=task_name,
             primary_score=primary_score,
             prepend_timestamp=True,
+        )
+        check_and_upload_model_metadata(
+            args.model_name_or_path, args.upload_to_hf, args.hf_upload_name, hf_revision=args.hf_revision
         )
         
 
