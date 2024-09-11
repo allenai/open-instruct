@@ -7,86 +7,19 @@
 
 In the sections below, we will include some examples on how to train online DPO models and demonstrating different features. A couple of notes:
 
-* You should adjust your `per_device_train_batch_size` and `gradient_accumulation_steps` accordingly to maximize throughput
-* To launch jobs using docker and beaker, you should run the following, where `$NUM_GPUS` is the number of GPUs you want the job to use and $YOUR_COMMAND is the command to invoke training
+* You should adjust your `per_device_train_batch_size` and `gradient_accumulation_steps` accordingly to maximize throughput on a particular GPU type.
+* For the examples below, we use `mason.py` to invoke experiment orchastration on Ai2's cluster. For external users, you can copy the command after the `--` and run it on your system or debug locally. For example: the documentation will have commands like the following, but you can just run $YOUR_COMMAND on your system.
+    * You can you `--image costah/open_instruct_onlinedpo2` to specify a custom image or if you don't specify any it's going to use the default image.
+    * If you installed your python on NFS you can run a debug mode by **not toggling** `--pure_docker_mode` and it will mount your python environment on the docker container.
 
 ```bash
 python mason.py \
     --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
-    --pure_docker_mode --no_mount_nfs --no_hf_cache_env \
+    --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
     --priority preemptible \
     --budget ai2/allennlp \
     --gpus $NUM_GPUS -- $YOUR_COMMAND
 ```
-
-
-For example:
-
-```bash
-# single GPU
-python mason.py \
-    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
-    --pure_docker_mode --no_mount_nfs --no_hf_cache_env \
-    --priority preemptible \
-    --budget ai2/allennlp \
-    --gpus 1 -- python open_instruct/online_dpo_vllm_thread.py \
-    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
-    --dataset_eval_splits validation \
-    --learning_rate 3e-6 \
-    --output_dir models/minimal/online_dpo_vllm_thread_tldr \
-    --per_device_train_batch_size 16 \
-    --local_rollout_forward_batch_size 32 \
-    --gradient_accumulation_steps 4 \
-    --num_epochs 1 \
-    --num_mini_batches 1 \
-    --total_episodes 1000000 \
-    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr  \
-    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
-    --non_stop_penalty \
-    --stop_token eos \
-    --beta 0.1 \
-    --response_length 53 \
-    --with_tracking \
-    --push_to_hub \
-    --vllm_device cuda:1 \
-# 8 GPU
-python mason.py \
-    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/general-cirrascale \
-    --pure_docker_mode --no_mount_nfs --no_hf_cache_env \
-    --priority normal \
-    --resumable \
-    --budget ai2/allennlp \
-    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
-     open_instruct/online_dpo_vllm_thread.py \
-    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
-    --dataset_eval_splits validation \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
-    --learning_rate 3e-6 \
-    --output_dir models/minimal/online_dpo_vllm_thread_tldr \
-    --per_device_train_batch_size 16 \
-    --local_rollout_forward_batch_size 32 \
-    --gradient_accumulation_steps 4 \
-    --num_epochs 1 \
-    --num_mini_batches 1 \
-    --total_episodes 1000000 \
-    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr  \
-    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
-    --non_stop_penalty \
-    --stop_token eos \
-    --beta 0.1 \
-    --response_length 53 \
-    --with_tracking \
-    --push_to_hub \
-    --vllm_device cuda:7 \
-```
-
 
 
 ### Level 0: single GPU; quick debug. Should take less than 10 minutes to finish
@@ -148,12 +81,22 @@ python open_instruct/online_dpo_vllm_thread.py \
 
 Here we are using --vllm_device cuda:7 to say we want to launch the vllm generation engine on the 8th GPU (or GPU_7 using 0 index)
 ```bash
-accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+# for running TL;DR you can likely use GPUs with less memory
+python mason.py \
+    --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
+    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/general-cirrascale \
+    --priority normal \
+    --resumable \
+    --preemptible \
+    --budget ai2/allennlp \
+    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
      open_instruct/online_dpo_vllm_thread.py \
     --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_train_splits train \
     --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_eval_splits validation \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
     --learning_rate 3e-6 \
     --output_dir models/minimal/online_dpo_vllm_thread_tldr \
     --per_device_train_batch_size 16 \
@@ -170,17 +113,20 @@ accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_z
     --response_length 53 \
     --with_tracking \
     --push_to_hub \
-    --vllm_device cuda:7 \
+    --hf_metadata_dataset '' \
+    --no_try_launch_beaker_eval_jobs \
+    --vllm_device cuda:7
 ```
 
 ### LEVEL 2: 8 GPU; Huggingface no robot
 
 ```bash
+# for running chat based models you should use an 8xH100 node.
 python mason.py \
-    --cluster  ai2/jupiter-cirrascale-2 \
-    --image costah/open_instruct_onlinedpo2 --pure_docker_mode --no_mount_nfs --no_hf_cache_env \
-    --workspace ai2/costah \
-    --priority low \
+    --cluster ai2/pluto-cirrascale \
+    --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
+    --workspace ai2/tulu-3-dev \
+    --priority high \
     --preemptible \
     --budget ai2/allennlp \
     --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
@@ -219,8 +165,6 @@ python mason.py \
     --with_tracking \
     --push_to_hub
 ```
-
-
 
 
 
