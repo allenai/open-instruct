@@ -90,10 +90,6 @@ RUN pip install --upgrade pip "setuptools<70.0.0" wheel
 RUN pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
 RUN pip install packaging
 RUN pip install flash-attn==2.6.3 --no-build-isolation
-# for newest olmo's, move to requirements when ai2-olmo supports torch 2.4
-# core is a dependency of ai2-olmo
-# RUN pip install ai2-olmo-core==0.1.0 omegaconf
-# RUN pip install ai2-olmo>=0.5.0 --no-deps
 RUN pip install -r requirements.txt
 
 # NLTK download
