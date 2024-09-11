@@ -17,13 +17,13 @@
 DPO tuning script. Adapted from our finetuning script.
 """
 
+import json
 import logging
 import math
 import os
 import random
 import subprocess
 import time
-import json
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -1076,7 +1076,7 @@ def main(args: FlatArguments):
     if is_beaker_job() and accelerator.is_main_process:
         # dpo script only supports these two options right now for datasets
         if args.dataset_mixer:
-            dataset_list = args.dataset_mixer.keys()
+            dataset_list = list(args.dataset_mixer.keys())
         elif args.dataset_mixer_list:
             dataset_list = args.dataset_mixer_list[::2]  # even indices
         elif args.dataset_name:

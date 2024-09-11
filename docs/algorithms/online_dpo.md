@@ -8,7 +8,7 @@
 In the sections below, we will include some examples on how to train online DPO models and demonstrating different features. A couple of notes:
 
 * You should adjust your `per_device_train_batch_size` and `gradient_accumulation_steps` accordingly to maximize throughput on a particular GPU type.
-* For the examples below, we use `mason.py` to invoke experiment orchastration on Ai2's cluster. For external users, you can copy the command after the `--` and run it on your system or debug locally. For example: the documentation will have commands like the following, but you can just run $YOUR_COMMAND on your system.
+* For the examples below, we use `mason.py` to invoke experiment orchastration on Ai2's cluster. For external users, you can copy the command after the `--` and run it on your system or debug locally. For example: the documentation will have commands like the following, but you can just run `$YOUR_COMMAND` on your system and make sure it matches `$NUM_GPUS`.
     * You can you `--image costah/open_instruct_onlinedpo2` to specify a custom image or if you don't specify any it's going to use the default image.
     * If you installed your python on NFS you can run a debug mode by **not toggling** `--pure_docker_mode` and it will mount your python environment on the docker container.
 
@@ -82,8 +82,8 @@ python open_instruct/online_dpo_vllm_thread.py \
 Here we are using --vllm_device cuda:7 to say we want to launch the vllm generation engine on the 8th GPU (or GPU_7 using 0 index)
 ```bash
 # for running TL;DR you can likely use GPUs with less memory
-python mason.py \
     --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
+python mason.py \
     --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/general-cirrascale \
     --priority normal \
     --resumable \
@@ -113,7 +113,7 @@ python mason.py \
     --response_length 53 \
     --with_tracking \
     --push_to_hub \
-    --hf_metadata_dataset '' \
+    --hf_metadata_dataset '""' \
     --no_try_launch_beaker_eval_jobs \
     --vllm_device cuda:7
 ```

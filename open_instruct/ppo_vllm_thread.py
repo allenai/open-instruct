@@ -97,28 +97,6 @@ class Args:
     run_name: Optional[str] = None
     """A unique name of this run"""
 
-    # wandb and HF tracking configs
-    with_tracking: bool = False
-    """If toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "open_instruct_internal"
-    """The wandb's project name"""
-    wandb_entity: Optional[str] = None
-    """The entity (team) of wandb's project"""
-    push_to_hub: bool = False
-    """Whether to upload the saved model to huggingface"""
-    hf_entity: Optional[str] = None
-    """The user or org name of the model repository from the Hugging Face Hub"""
-    hf_repo_id: Optional[str] = None
-    """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_revision: Optional[str] = None
-    """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
-    hf_repo_url: Optional[str] = None
-    """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    output_dir: Optional[str] = None
-    """Where to save the model"""
-    checkpoint_output_dir: Optional[str] = None
-    """Where to save the model checkpoints in case of preemption"""
-
     # optimizer args
     eps: float = 1e-5
     """The epsilon value for the optimizer"""
@@ -219,6 +197,28 @@ class Args:
     async_mode: bool = True
     """Whether to run the generation in async mode which learns from the second latest policy like Cleanba (https://arxiv.org/abs/2310.00036)"""
 
+    # wandb and HF tracking configs
+    with_tracking: bool = False
+    """If toggled, this experiment will be tracked with Weights and Biases"""
+    wandb_project_name: str = "open_instruct_internal"
+    """The wandb's project name"""
+    wandb_entity: Optional[str] = None
+    """The entity (team) of wandb's project"""
+    push_to_hub: bool = True
+    """Whether to upload the saved model to huggingface"""
+    hf_entity: Optional[str] = None
+    """The user or org name of the model repository from the Hugging Face Hub"""
+    hf_repo_id: Optional[str] = None
+    """The id of the saved model in the Hugging Face Hub (can be autoset if not given)"""
+    hf_repo_revision: Optional[str] = None
+    """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
+    hf_repo_url: Optional[str] = None
+    """The url of the saved model in the Hugging Face Hub (will be autoset)"""
+    output_dir: Optional[str] = None
+    """Where to save the model"""
+    checkpoint_output_dir: Optional[str] = None
+    """Where to save the model checkpoints in case of preemption"""
+
     # Ai2 specific settings
     try_launch_beaker_eval_jobs: bool = True
     """Whether to launch beaker evaluation jobs after training"""
@@ -244,17 +244,15 @@ def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
 
 def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig) -> Accelerator:
     """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
-    # set up accelerator and a unique run name with timestamp
     accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
-    time_tensor = torch.tensor(int(time.time()), device=accelerator.device)
-    time_int = broadcast(time_tensor, 0).item()
-    args.run_name = f"{args.exp_name}__{args.seed}__{time_int}"
-
-    # calculate runtime config
     args.world_size = accelerator.num_processes
     args.local_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps * args.num_mini_batches
     args.micro_batch_size = int(args.per_device_train_batch_size * args.world_size)
     args.batch_size = int(args.local_batch_size * args.world_size)
+    time_tensor = torch.tensor(int(time.time()), device=accelerator.device)
+    # set a unique run name with the current timestamp
+    time_int = broadcast(time_tensor, 0).item()
+    args.run_name = f"{args.exp_name}__{args.seed}__{time_int}"
     args.mini_batch_size = exact_div(
         args.batch_size, args.num_mini_batches, "`batch_size` must be a multiple of `num_mini_batches`"
     )
@@ -485,12 +483,12 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     if accelerator.is_main_process:
         pprint([args, dataset_config, model_config])
         visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
-        # if args.with_tracking:
-        #     # upload the visualized token length
-        #     dataset_processor.get_token_length_visualization(
-        #         dataset_dict, save_path=f"runs/{args.run_name}/token_length.png"
-        #     )
-        #     wandb.log({"token_length": wandb.Image(f"runs/{args.run_name}/token_length.png")})
+        if args.with_tracking:
+            # upload the visualized token length
+            dataset_processor.get_token_length_visualization(
+                dataset_dict, save_path=f"runs/{args.run_name}/token_length.png"
+            )
+            wandb.log({"token_length": wandb.Image(f"runs/{args.run_name}/token_length.png")})
 
     # create the model and optimizer
     policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
@@ -666,7 +664,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     entropy_stats = torch.zeros(stats_shape, device=device)
     ratio_stats = torch.zeros(stats_shape, device=device)
     local_metrics = torch.zeros((15,), device=device)
-    episode = 0
+    episode = args.batch_size * (resume_training_step - 1)
     model.train()
 
     # training loop
@@ -675,8 +673,11 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
     send_queries(accelerator, None, tokenizer, param_prompt_Q, queries_next)
 
-    for training_step in range(1, args.num_training_steps + 1):
-        episode += 1 * args.batch_size
+    for _ in range(1, resume_training_step): # we didn't store scheduler state
+        scheduler.step()
+
+    for training_step in range(resume_training_step, args.num_training_steps + 1):
+        episode += args.batch_size
         scheduler.step()
         queries = queries_next
         if ph.preemptied:
@@ -857,7 +858,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 advantages = torch.masked_fill(advantages, padding_mask, 0)
                 torch.cuda.empty_cache()
 
-        # Do multiple epochs of PPO training, with a fresh random shuffle in each epoch
+        # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         for epoch_idx in range(args.num_epochs):
             b_inds = np.random.permutation(args.local_batch_size)
             minibatch_idx = 0
