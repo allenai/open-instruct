@@ -82,8 +82,8 @@ python open_instruct/online_dpo_vllm_thread.py \
 Here we are using --vllm_device cuda:7 to say we want to launch the vllm generation engine on the 8th GPU (or GPU_7 using 0 index)
 ```bash
 # for running TL;DR you can likely use GPUs with less memory
-    --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
 python mason.py \
+    --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
     --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/general-cirrascale \
     --priority normal \
     --resumable \
