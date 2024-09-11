@@ -620,32 +620,32 @@ def main(args: FlatArguments):
                 token=os.getenv("HF_TOKEN", None),
             )
         else:
-            if check_hf_olmo_availability() and isinstance(config, OLMoConfig):
-                logger.info("Temporary loading for recent OLMo Models")
-                # handles flash_attn in config. TODO remove on ai2-olmo > 0.5.0
-                config.flash_attention = args.use_flash_attn
-                model = AutoModelForCausalLM.from_pretrained(
-                    args.model_name_or_path,
-                    from_tf=bool(".ckpt" in args.model_name_or_path),
-                    config=config,
-                    trust_remote_code=args.trust_remote_code,
-                    low_cpu_mem_usage=args.low_cpu_mem_usage,
-                    torch_dtype=torch.bfloat16,
-                    revision=args.model_revision,
-                    token=os.getenv("HF_TOKEN", None),
-                )
-            else:
-                model = AutoModelForCausalLM.from_pretrained(
-                    args.model_name_or_path,
-                    from_tf=bool(".ckpt" in args.model_name_or_path),
-                    config=config,
-                    trust_remote_code=args.trust_remote_code,
-                    low_cpu_mem_usage=args.low_cpu_mem_usage,
-                    torch_dtype=torch.bfloat16,
-                    attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
-                    revision=args.model_revision,
-                    token=os.getenv("HF_TOKEN", None),
-                )
+            # if check_hf_olmo_availability() and isinstance(config, OLMoConfig):
+            #     logger.info("Temporary loading for recent OLMo Models")
+            #     # handles flash_attn in config. TODO remove on ai2-olmo > 0.5.0
+            #     config.flash_attention = args.use_flash_attn
+            #     model = AutoModelForCausalLM.from_pretrained(
+            #         args.model_name_or_path,
+            #         from_tf=bool(".ckpt" in args.model_name_or_path),
+            #         config=config,
+            #         trust_remote_code=args.trust_remote_code,
+            #         low_cpu_mem_usage=args.low_cpu_mem_usage,
+            #         torch_dtype=torch.bfloat16,
+            #         revision=args.model_revision,
+            #         token=os.getenv("HF_TOKEN", None),
+            #     )
+            # else:
+            model = AutoModelForCausalLM.from_pretrained(
+                args.model_name_or_path,
+                from_tf=bool(".ckpt" in args.model_name_or_path),
+                config=config,
+                trust_remote_code=args.trust_remote_code,
+                low_cpu_mem_usage=args.low_cpu_mem_usage,
+                torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                revision=args.model_revision,
+                token=os.getenv("HF_TOKEN", None),
+            )
     else:
         logger.info("Training new model from scratch")
         model = AutoModelForCausalLM.from_config(config)
