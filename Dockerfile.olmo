@@ -94,6 +94,7 @@ RUN pip install flash-attn==2.5.9.post1 --no-build-isolation
 # core is a dependency of ai2-olmo
 RUN pip install ai2-olmo-core==0.1.0 omegaconf
 # RUN pip install ai2-olmo>=0.5.0 --no-deps
+# TODO Update Once this is merged https://github.com/allenai/OLMo/pull/719, then next release
 RUN pip install git+https://github.com/allenai/OLMo.git@shanea/hf-olmo-gradient-checkpointing --no-deps
 RUN pip install -r requirements-olmo.txt
 
