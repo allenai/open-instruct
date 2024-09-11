@@ -14,8 +14,8 @@ class Data:
 
 # Data
 results = {
-    "SFT on H4/no_robots": Data({8e9: [0.31, 121.41]}, "#FFB898", "o"),
-    "SFT + Online DPO just on H4/no_robots": Data({8e9: [0.348, 123.408]}, "#eb4034", "v"),
+    "SFT w/ H4/no_robots": Data({8e9: [0.31, 121.41]}, "#FFB898", "o"),
+    "SFT + Online DPO w/ H4/no_robots": Data({8e9: [0.348, 123.408]}, "#eb4034", "v"),
     "llama-3.1-tulu-2-dpo-8": Data({8e9: [0.504, 172.248]}, "#68D39F", "X"),
     "meta-llama/Meta-Llama-3.1-8B-Instruct": Data({8e9: [0.566, 151.506]}, "#8EC2FF", "s"),
 }
@@ -82,7 +82,7 @@ def create_winrate_vs_length_plot(filename):
     # Style the plot
     ax.set_xlabel("Model response length", fontsize=20)
     plt.axhline(y=0.5, color='black', linestyle='-.', label='reference response')
-    plt.axvline(x=179.726, color='black', linestyle='-.', label='reference response len')
+    plt.axvline(x=179.726, color='black', linestyle='-', label='reference response len')
     ax.set_ylabel("Win rate vs. human completions", fontsize=20)
     ax.tick_params(axis='both', which='major', labelsize=20)
 
