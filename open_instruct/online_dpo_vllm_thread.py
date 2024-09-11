@@ -499,11 +499,12 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 if accelerator.is_main_process:
                     shutil.rmtree(old_checkpoint_path)
                 break
-    resumed = resume_training_step > 1
+    resume_training_step > 1
 
     # handle preemption
     class PreemptionHandler:
         preemptied = False
+
         def __init__(self):
             signal.signal(signal.SIGTERM, self.exit_gracefully)
 
@@ -522,6 +523,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 except Exception as e:
                     print(e)
             self.preemptied = True
+
     ph = PreemptionHandler()
 
     # deepspeed setup
@@ -599,7 +601,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     queries_next = queries_next.repeat(args.num_generation_per_prompt, 1)
     send_queries(accelerator, None, tokenizer, param_prompt_Q, queries_next)
 
-    for _ in range(1, resume_training_step): # we didn't store scheduler state
+    for _ in range(1, resume_training_step):  # we didn't store scheduler state
         scheduler.step()
 
     for training_step in range(resume_training_step, args.num_training_steps + 1):
