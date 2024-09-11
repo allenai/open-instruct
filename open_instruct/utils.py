@@ -700,7 +700,12 @@ def beaker_experiment_succeeded(experiment_id: str) -> bool:
     if not experiment:
         return False
     print([job["status"] for job in experiment["jobs"]])
-    return any(["finalized" in job["status"] and "exitCode" in job["status"] and job["status"]["exitCode"] == 0 for job in experiment["jobs"]])
+    return any(
+        [
+            "finalized" in job["status"] and "exitCode" in job["status"] and job["status"]["exitCode"] == 0
+            for job in experiment["jobs"]
+        ]
+    )
 
 
 def get_beaker_dataset_ids(experiment_id: str) -> Optional[List[str]]:
