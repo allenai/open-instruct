@@ -3,6 +3,7 @@ import subprocess
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import Optional
 
 import pandas as pd
 from datasets import load_dataset
@@ -23,7 +24,7 @@ python -i winrate/generate_and_eval.py \
 class Args:
     output_path: str
     model_name_or_path: str
-    model_revision: str = "main"
+    model_revision: Optional[str] = "main"
     judge_model: str = "gpt-4o-2024-08-06"
     n: int = 1000
 
@@ -60,6 +61,8 @@ llm = LLM(
     revision=args.model_revision,
     tokenizer_revision=args.model_revision,
     tensor_parallel_size=1,
+    max_model_len=4096,
+    disable_async_output_proc=True,
 )
 outputs = llm.generate(prompts, sampling_params)
 table = defaultdict(list)
@@ -77,6 +80,7 @@ for output, reference_response in zip(outputs, reference_summaries):
     )  # prepend leading space
 
 df = pd.DataFrame(table)
+breakpoint()
 df.to_csv(args.output_path)
 
 #####
@@ -91,6 +95,7 @@ judged_df = llm_judge(
     ),
     df,
 )
+print(f"{df['model_response_len'].mean()=}")
 print(judged_df["preferred"].value_counts())
 # print percentage
 print(judged_df["preferred"].value_counts(normalize=True))

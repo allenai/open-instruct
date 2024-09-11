@@ -102,11 +102,12 @@ def llm_judge(ljc: LLMJudgeConfig, df: pd.DataFrame):
                             {"role": "system", "content": "You are a helpful assistant."},
                             {"role": "user", "content": text},
                         ],
+                        timeout=30,
                     )
                     r = response.choices[0].message.content
                 except Exception as e:
                     print(f"error in {i}: {e}")
-                    time.sleep(30)  # deal with rate limit
+                    time.sleep(5)  # deal with rate limit
                     continue
 
             try:
