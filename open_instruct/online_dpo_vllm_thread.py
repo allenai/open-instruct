@@ -2,6 +2,8 @@ import gc
 import json
 import os
 import random
+import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -114,6 +116,8 @@ class Args:
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     output_dir: Optional[str] = None
     """Where to save the model"""
+    checkpoint_output_dir: Optional[str] = None
+    """Where to save the model checkpoints in case of preemption"""
 
     # optimizer args
     eps: float = 1e-5
@@ -267,7 +271,7 @@ def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig
             args.hf_repo_revision = args.run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
 
-    if args.with_tracking:
+    if args.with_tracking and accelerator.is_main_process:
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
     return accelerator
@@ -286,6 +290,7 @@ def vllm_generate(
     sample_evaluation_prompt_token_ids: Optional[List[int]],
     evaluation_Q: Queue,
     eval_freq: int,
+    resume_training_step: int,
 ):
     vllm_single_gpu_patch()
     llm = LLM(
@@ -299,8 +304,11 @@ def vllm_generate(
     )
     print("🔥🔥🔥 vllm loaded")
     llmp = llm.llm_engine.model_executor.driver_worker.model_runner.model
-    for training_step in range(1, num_training_steps + 1):
-        unwrapped_model, g_queries_list = param_prompt_Q.get()
+    for training_step in range(resume_training_step, num_training_steps + 1):
+        items = param_prompt_Q.get()
+        if items is None:
+            break
+        unwrapped_model, g_queries_list = items
         if unwrapped_model is not None:
             start_time = time.time()
             llmp.load_weights(unwrapped_model.named_parameters())
@@ -335,15 +343,16 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     local_seed = args.seed + accelerator.process_index
 
     # set up experiment tracking and seeds
+    all_configs = {}
+    if is_beaker_job():
+        args.checkpoint_output_dir = os.environ.get("CHECKPOINT_OUTPUT_DIR", args.output_dir)
+        beaker_config = maybe_get_beaker_config()
+        # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
+        if len(beaker_config.beaker_dataset_id_urls) > 0:
+            args.output_dir = "/output"
+        all_configs.update(vars(beaker_config))
+    all_configs.update(**asdict(args), **asdict(dataset_config), **asdict(model_config))
     if accelerator.is_main_process:
-        all_configs = {**asdict(args), **asdict(dataset_config), **asdict(model_config)}
-        if is_beaker_job():
-            beaker_config = maybe_get_beaker_config()
-            # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
-            if len(beaker_config.beaker_dataset_id_urls) > 0:
-                args.output_dir = "/output"
-            all_configs.update(vars(beaker_config))
-
         if args.with_tracking:
             import wandb
 
@@ -411,12 +420,12 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     if accelerator.is_main_process:
         pprint([args, dataset_config, model_config])
         visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
-        if args.with_tracking:
-            # upload the visualized token length
-            dataset_processor.get_token_length_visualization(
-                dataset_dict, save_path=f"runs/{args.run_name}/token_length.png"
-            )
-            wandb.log({"token_length": wandb.Image(f"runs/{args.run_name}/token_length.png")})
+        # if args.with_tracking:
+        #     # upload the visualized token length
+        #     dataset_processor.get_token_length_visualization(
+        #         dataset_dict, save_path=f"runs/{args.run_name}/token_length.png"
+        #     )
+        #     wandb.log({"token_length": wandb.Image(f"runs/{args.run_name}/token_length.png")})
 
     # create the model and optimizer
     policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
@@ -479,6 +488,44 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     model, optimizer, dataloader = accelerator.prepare(model, optimizer, dataloader)
     torch.manual_seed(local_seed)
 
+    # resume from preemption
+    resume_training_step = 1
+    if os.path.exists(args.checkpoint_output_dir):
+        for item in os.listdir(args.checkpoint_output_dir):
+            print(item)
+            if "step_" in item:
+                old_checkpoint_path = os.path.join(args.checkpoint_output_dir, item)
+                accelerator.load_state(old_checkpoint_path)
+                resume_training_step = int(item.split("_")[-1])
+                print("Resuming training from step", resume_training_step)
+                if accelerator.is_main_process:
+                    shutil.rmtree(old_checkpoint_path)
+                break
+    resumed = resume_training_step > 1
+
+    # handle preemption
+    class PreemptionHandler:
+        preemptied = False
+        def __init__(self):
+            signal.signal(signal.SIGTERM, self.exit_gracefully)
+
+        def exit_gracefully(self, signum, frame):
+            output_dir = os.path.join(args.checkpoint_output_dir, f"step_{training_step - 1}")
+            print(f"SIGTERM received, saving to {output_dir} from {accelerator.local_process_index}")
+            accelerator.save_state(output_dir)
+            if accelerator.is_main_process and args.with_tracking:
+                wandb.log({"preempted": True}, commit=True)
+                wandb.mark_preempting()
+            if accelerator.is_main_process:
+                try:
+                    param_prompt_Q.put(None, timeout=20)
+                    response_ids_Q.get(timeout=20)
+                    print("vllm thread terminated")
+                except Exception as e:
+                    print(e)
+            self.preemptied = True
+    ph = PreemptionHandler()
+
     # deepspeed setup
     is_deepspeed_enabled = getattr(accelerator.state, "deepspeed_plugin", None) is not None
     mixed_precision = accelerator.state.mixed_precision
@@ -528,6 +575,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 sample_evaluation_prompt_token_ids,
                 evaluation_Q,
                 args.eval_freq,
+                resume_training_step,
             ),
         )
         thread.start()
@@ -543,7 +591,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     chosen_logprobs_stats = torch.zeros(stats_shape, device=device)
     rejected_logprobs_stats = torch.zeros(stats_shape, device=device)
     local_metrics = torch.zeros((15,), device=device)
-    episode = 0
+    episode = args.batch_size * (resume_training_step - 1)
     model.train()
 
     # training loop
@@ -553,10 +601,15 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     queries_next = queries_next.repeat(args.num_generation_per_prompt, 1)
     send_queries(accelerator, None, tokenizer, param_prompt_Q, queries_next)
 
-    for training_step in range(1, args.num_training_steps + 1):
-        episode += 1 * args.batch_size
+    for _ in range(1, resume_training_step): # we didn't store scheduler state
+        scheduler.step()
+
+    for training_step in range(resume_training_step, args.num_training_steps + 1):
+        episode += args.batch_size
         scheduler.step()
         queries = queries_next
+        if ph.preemptied:
+            break
 
         if accelerator.is_main_process:
             try:
@@ -695,6 +748,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
                 # 4. compute rewards
                 kl = logprobs - ref_logprobs
+                print(f"{accelerator.local_process_index=}, {kl.sum(1)=}")
                 non_score_reward = -args.beta * kl
                 non_score_reward_sum = non_score_reward.sum(1)
                 rlhf_reward = scores + non_score_reward_sum
@@ -817,7 +871,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 # del everything and empty cache
                 torch.cuda.empty_cache()
         with torch.no_grad():
-
             local_metrics[0] = sequence_lengths.float().mean()
             local_metrics[1] = (responses == args.stop_token_id).sum().float().mean()
             local_metrics[2] = kl.sum(1).mean()
@@ -836,6 +889,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
             metrics = {
                 "episode": episode,
+                "training_step": training_step,
                 "lr": scheduler.get_last_lr()[0],
                 "epoch": episode / len(train_dataset),
                 "time/from_scratch": time.time() - start_time,
@@ -865,67 +919,72 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         gc.collect()
         torch.cuda.empty_cache()
 
-    # save model
-    os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
-    original_tokenizer = AutoTokenizer.from_pretrained(
-        model_config.model_name_or_path, revision=model_config.model_revision
-    )
-    save_with_accelerate(
-        accelerator,
-        model,
-        original_tokenizer,
-        args.output_dir,
-    )
-
-    # Ai2 specific logic
-    if is_beaker_job() and accelerator.is_main_process:
-        if args.hf_metadata_dataset:
-            dataset_list = args.dataset_mixer_dict.keys()
-            # mainly just focussing here on what would be useful for the leaderboard.
-            # wandb will have even more useful information.
-            metadata_blob = {
-                "model_name": args.exp_name,
-                "model_type": "sft",
-                "datasets": dataset_list,
-                "base_model": model_config.model_name_or_path,
-                "wandb_path": wandb.run.get_url(),
-                "beaker_experiment": beaker_config.beaker_experiment_url,
-                "beaker_datasets": beaker_config.beaker_dataset_id_urls,
-            }
-            upload_metadata_to_hf(
-                metadata_blob,
-                "metadata.json",
-                args.hf_metadata_dataset,
-                "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
-            )
-
-        if args.try_launch_beaker_eval_jobs and len(beaker_config.beaker_dataset_id_urls) > 0:
-            command = f"""\
-            python mason.py  \
-                --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/s2-cirrascale ai2/general-cirrascale \
-                --priority low \
-                --preemptible \
-                --budget ai2/allennlp \
-                --workspace ai2/tulu-2-improvements \
-                --image nathanl/open_instruct_auto \
-                --pure_docker_mode \
-                --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
-                --beaker_workload_id {beaker_config.beaker_workload_id} \
-                --model_name {args.hf_repo_revision}
-            """
-            process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            stdout, stderr = process.communicate()
-            print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
-            print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
-            print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
-
-    if args.push_to_hub:
-        push_folder_to_hub(
-            accelerator,
-            args.output_dir,
-            args.hf_repo_id,
-            args.hf_repo_revision,
+    if not ph.preemptied:
+        # save model
+        os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
+        original_tokenizer = AutoTokenizer.from_pretrained(
+            model_config.model_name_or_path, revision=model_config.model_revision
         )
+        save_with_accelerate(
+            accelerator,
+            model,
+            original_tokenizer,
+            args.output_dir,
+        )
+
+        # Ai2 specific logic
+        if is_beaker_job() and accelerator.is_main_process:
+            if args.hf_metadata_dataset:
+                dataset_list = list(args.dataset_mixer_dict.keys())
+                # mainly just focussing here on what would be useful for the leaderboard.
+                # wandb will have even more useful information.
+                metadata_blob = {
+                    "model_name": args.exp_name,
+                    "model_type": "sft",
+                    "datasets": dataset_list,
+                    "base_model": model_config.model_name_or_path,
+                    "wandb_path": wandb.run.get_url(),
+                    "beaker_experiment": beaker_config.beaker_experiment_url,
+                    "beaker_datasets": beaker_config.beaker_dataset_id_urls,
+                }
+                upload_metadata_to_hf(
+                    metadata_blob,
+                    "metadata.json",
+                    args.hf_metadata_dataset,
+                    "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
+                )
+
+            if args.try_launch_beaker_eval_jobs and len(beaker_config.beaker_dataset_id_urls) > 0:
+                command = f"""\
+                python mason.py  \
+                    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/s2-cirrascale ai2/general-cirrascale \
+                    --priority low \
+                    --preemptible \
+                    --budget ai2/allennlp \
+                    --workspace ai2/tulu-2-improvements \
+                    --image nathanl/open_instruct_auto \
+                    --pure_docker_mode \
+                    --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
+                    --beaker_workload_id {beaker_config.beaker_workload_id} \
+                    --model_name {args.hf_repo_revision}
+                """
+                process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                stdout, stderr = process.communicate()
+                print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
+                print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
+                print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+
+        # remove args.checkpoint_output_dir
+        if os.path.exists(args.checkpoint_output_dir):
+            shutil.rmtree(args.checkpoint_output_dir)
+
+        if args.push_to_hub:
+            push_folder_to_hub(
+                accelerator,
+                args.output_dir,
+                args.hf_repo_id,
+                args.hf_repo_revision,
+            )
 
 
 if __name__ == "__main__":
