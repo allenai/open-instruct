@@ -68,10 +68,10 @@ def get_args():
         "--pure_docker_mode", action="store_true", help="If given, run in pure docker mode"
     )
     parser.add_argument(
-        "--no_hf_cache_env", action="store_true", help="If given, do not pass in `HF_DATASETS_CACHE`, `HF_HUB_CACHE`, and `HF_ASSETS_CACHE`"
+        "--no_hf_cache_env", action="store_true", help="Getting deprecated; it does nothing"
     )
     parser.add_argument(
-        "--no_mount_nfs", action="store_true", help="If given, do not mount NFS"
+        "--no_mount_nfs", action="store_true", help="Getting deprecated; it does nothing"
     )
     parser.add_argument(
         "--resumable", action="store_true", help="If given, make the job resumable"
