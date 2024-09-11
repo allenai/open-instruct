@@ -126,8 +126,9 @@ python mason.py \
 
 ```bash
 # for running chat based models you should use an 8xH100 node.
+# use ai2/jupiter-cirrascale-2 or ai2/pluto-cirrascale
 python mason.py \
-    --cluster ai2/pluto-cirrascale \
+    --cluster ai2/jupiter-cirrascale-2 \
     --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority high \
