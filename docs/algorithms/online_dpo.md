@@ -118,6 +118,10 @@ python mason.py \
     --vllm_device cuda:7
 ```
 
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/fub45jhm
+* Trained model: https://huggingface.co/vwxyzjn/online_dpo_vllm_thread__cleanrl_EleutherAI_pythia-1b-deduped__sft__tldr/tree/online_dpo_vllm_thread__1__1726080959
+
+
 ### LEVEL 2: 8 GPU; Huggingface no robot
 
 ```bash
@@ -165,6 +169,10 @@ python mason.py \
     --with_tracking \
     --push_to_hub
 ```
+
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/pinqvvt5
+* Trained model: https://huggingface.co/vwxyzjn/online_dpo_vllm_thread__cleanrl_EleutherAI_pythia-1b-deduped__sft__tldr/tree/online_dpo_vllm_thread__1__1726080959
+
 
 
 
