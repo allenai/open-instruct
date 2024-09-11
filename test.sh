@@ -553,3 +553,128 @@ accelerate launch --num_processes 8 --config_file configs/ds_configs/deepspeed_z
     --gradient_checkpointing \
     --with_tracking \
     --push_to_hub
+
+
+accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+        open_instruct/online_dpo_vllm_thread.py \
+        --exp_name "online_dpo_vllm_thread_beta_${beta}" \
+        --dataset_mixer '{"allenai/ultrafeedback_binarized_cleaned": 1.0}' \
+        --dataset_train_splits train_prefs \
+        --dataset_eval_mixer '{"allenai/ultrafeedback_binarized_cleaned": 1.0}' \
+        --dataset_eval_splits test_prefs \
+        --max_token_length 1024 \
+        --max_prompt_token_lenth 512 \
+        --sft_messages_key chosen \
+        --learning_rate 5e-7 \
+        --output_dir /output/ \
+        --chat_template tulu \
+        --per_device_train_batch_size 1 \
+        --per_device_eval_batch_size 1 \
+        --gradient_accumulation_steps 32 \
+        --local_rollout_forward_batch_size 1 \
+        --vllm_device cuda:7 \
+        --num_epochs 1 \
+        --num_mini_batches 1 \
+        --total_episodes 300000 \
+        --model_name_or_path allenai/llama-3-tulu-2-8b  \
+        --reward_model_path allenai/reward_modeling__allenai_llama-3-tulu-2-8b_ultrafeedback \
+        --non_stop_penalty \
+        --stop_token eos \
+        --penalty_reward_value -10.0 \
+        --beta $beta \
+        --num_evals 1 \
+        --response_length 1024 \
+        --gradient_checkpointing \
+        --with_tracking \
+        --push_to_hub
+
+
+python open_instruct/online_dpo_vllm_thread.py \
+    --exp_name "online_dpo_vllm_thread_beta" \
+    --dataset_mixer '{"HuggingFaceH4/no_robots": 1.0}' \
+    --dataset_train_splits train \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --learning_rate 5e-7 \
+    --output_dir /output/ \
+    --chat_template tulu \
+    --per_device_train_batch_size 1 \
+    --per_device_eval_batch_size 1 \
+    --no_async_mode \
+    --gradient_accumulation_steps 32 \
+    --local_rollout_forward_batch_size 1 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 300000 \
+    --model_name_or_path allenai/open_instruct_dev  \
+    --model_revision costa_finetune_tulu3_8b_norobot__meta-llama_Meta-Llama-3.1-8B__42__1725559869 \
+    --reward_model_path vwxyzjn/reward_modeling__allenai_llama-3-tulu-2-8b \
+    --reward_model_revision reward_modeling__1__1725631368 \
+    --non_stop_penalty \
+    --stop_token eos \
+    --penalty_reward_value -10.0 \
+    --beta 0.05 \
+    --num_evals 1 \
+    --response_length 1024 \
+    --gradient_checkpointing \
+    --vllm_device cuda:1 \
+    --with_tracking \
+
+
+python mason.py \
+    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/general-cirrascale \
+    --priority normal \
+    --resumable \
+    --budget ai2/allennlp \
+    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+     open_instruct/online_dpo_vllm_thread.py \
+    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_eval_splits validation \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --learning_rate 3e-6 \
+    --output_dir models/minimal/online_dpo_vllm_thread_tldr \
+    --per_device_train_batch_size 2 \
+    --local_rollout_forward_batch_size 2 \
+    --gradient_accumulation_steps 8 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 1000000 \
+    --model_name_or_path cleanrl/EleutherAI_pythia-6.9b-deduped__sft__tldr  \
+    --reward_model_path cleanrl/EleutherAI_pythia-6.9b-deduped__reward__tldr \
+    --non_stop_penalty \
+    --stop_token eos \
+    --beta 0.1 \
+    --response_length 53 \
+    --with_tracking \
+    --push_to_hub \
+    --vllm_device cuda:7 \
+
+
+accelerate launch --num_processes 3 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+     open_instruct/online_dpo_vllm_thread.py \
+    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_eval_splits validation \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --learning_rate 3e-6 \
+    --output_dir models/minimal/online_dpo_vllm_thread_tldr \
+    --per_device_train_batch_size 2 \
+    --local_rollout_forward_batch_size 4 \
+    --gradient_accumulation_steps 4 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 1000000 \
+    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr  \
+    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
+    --non_stop_penalty \
+    --stop_token eos \
+    --beta 0.1 \
+    --response_length 53 \
+    --with_tracking \
+    --push_to_hub \
+    --vllm_device cuda:3 \
