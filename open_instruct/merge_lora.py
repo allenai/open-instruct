@@ -61,7 +61,7 @@ def dequantize_model(model, dtype=torch.bfloat16, device="cuda"):
         model.is_loaded_in_4bit = False
 
         return model
-
+    
 @retry_on_exception()
 def push_folder_to_hub(
     output_dir: str,
@@ -95,7 +95,7 @@ def parse_args():
     parser.add_argument("--qlora", action="store_true")  # qlora requires special treatment.
     parser.add_argument("--save_tokenizer", action="store_true")
     parser.add_argument("--use_fast_tokenizer", action="store_true")
-    parser.add_argument("--pad_to_multiple_of", type=int, default=0)  # if you want to pad the token embeddings
+    parser.add_argument("--pad_to_multiple_of", type=int, default=8)  # if you want to pad the token embeddings
     parser.add_argument("--push_to_hub", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
@@ -103,24 +103,21 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    if args.config_file is None:
-        configs = {
-            'model_name_or_path': args.base_model_name_or_path,
-            'output_dir': args.lora_model_name_or_path,
-            'tokenizer_name': args.tokenizer_name_or_path,
-            'use_slow_tokenizer': not args.use_fast_tokenizer,
-            'use_qlora': args.qlora,
-        }
-    else:
+    configs = dict()
+    if args.config_file:
         with open(args.config_file, "r") as f:
             configs = yaml.safe_load(f)
-    # reuse the settings from training scripts
-    base_model_name_or_path = configs['model_name_or_path']
-    lora_model_name_or_path = configs['output_dir']
-    tokenizer_name_or_path = configs['tokenizer_name'] if 'tokenizer_name' in configs else None
-    peft_config = PeftConfig.from_pretrained(lora_model_name_or_path)
+        # If the config file is provided, reuse settings which are same in the training scripts
+        args.base_model_name_or_path = configs['model_name_or_path']
+        args.lora_model_name_or_path = configs['output_dir']
+        args.use_fast_tokenizer = not configs['use_slow_tokenizer']
+        args.qlora = configs.get('use_qlora', False)
+        args.seed = configs.get('seed', args.seed)
+    if args.lora_model_name_or_path is None:
+        raise ValueError("Please provide the path to the lora adapter model.")
+    peft_config = PeftConfig.from_pretrained(args.lora_model_name_or_path)
     print("Loading the base model...")
-    if "use_qlora" in configs and configs['use_qlora']:
+    if args.qlora:
         quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_compute_dtype=torch.bfloat16,
@@ -128,7 +125,7 @@ if __name__ == "__main__":
             bnb_4bit_quant_type="nf4",
         )
         base_model = AutoModelForCausalLM.from_pretrained(
-            base_model_name_or_path if base_model_name_or_path else peft_config.base_model_name_or_path,
+            args.base_model_name_or_path if args.base_model_name_or_path else peft_config.base_model_name_or_path,
             torch_dtype=torch.bfloat16,
             quantization_config=quantization_config,
             device_map={"": 0} if torch.cuda.is_available() else None,
@@ -137,24 +134,24 @@ if __name__ == "__main__":
         base_model = dequantize_model(base_model, device="cpu")
     else:
         base_model = AutoModelForCausalLM.from_pretrained(
-            base_model_name_or_path if base_model_name_or_path else peft_config.base_model_name_or_path,
+            args.base_model_name_or_path if args.base_model_name_or_path else peft_config.base_model_name_or_path,
             torch_dtype=torch.bfloat16,
         )
 
     # If tokenizer is specified, use it.
     # Otherwise, use the tokenizer in the lora model folder or the base model folder.
-    if tokenizer_name_or_path:
-        print(f"Loading the tokenizer from {tokenizer_name_or_path}...")
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=(not configs['use_slow_tokenizer']))
+    if args.tokenizer_name_or_path:
+        print(f"Loading the tokenizer from {args.tokenizer_name_or_path}...")
+        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name_or_path, use_fast=args.use_fast_tokenizer)
     else:
         try:
             print("Trying to load the tokenizer in the lora model folder...")
-            tokenizer = AutoTokenizer.from_pretrained(lora_model_name_or_path, use_fast=(not configs['use_slow_tokenizer']))
+            tokenizer = AutoTokenizer.from_pretrained(args.lora_model_name_or_path, use_fast=args.use_fast_tokenizer)
         except Exception as e:
             print(
                 f"No tokenizer found in the lora model folder. Using the tokenizer in the base model folder... e:{e}"
             )
-            tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path, use_fast=(not configs['use_slow_tokenizer']))
+            tokenizer = AutoTokenizer.from_pretrained(args.base_model_name_or_path, use_fast=args.use_fast_tokenizer)
 
     embedding_size = base_model.get_input_embeddings().weight.shape[0]
     if len(tokenizer) > embedding_size:
@@ -168,11 +165,11 @@ if __name__ == "__main__":
             base_model.resize_token_embeddings(len(tokenizer))
 
     print("Loading the lora model...")
-    lora_model = PeftModel.from_pretrained(base_model, lora_model_name_or_path)
+    lora_model = PeftModel.from_pretrained(base_model, args.lora_model_name_or_path)
     print("Merging the lora modules...")
     merged_model = lora_model.merge_and_unload()
 
-    output_dir = args.output_dir if args.output_dir else (lora_model_name_or_path.rstrip("/") + "_merged/")
+    output_dir = args.output_dir if args.output_dir else (args.lora_model_name_or_path.rstrip("/") + "_merged/")
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"Saving merged model to {output_dir}...")
@@ -194,7 +191,7 @@ if __name__ == "__main__":
             if "exp_name" not in configs:
                 configs['exp_name'] = os.path.basename(__file__)[: -len(".py")]
             configs['hf_repo_revision'] = (
-                f"{configs['exp_name']}__{configs['model_name_or_path'].replace('/', '_')}__{args.seed}__{int(time.time())}"
+                f"{configs['exp_name']}__{args.base_model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
             )
         push_folder_to_hub(
             output_dir,
