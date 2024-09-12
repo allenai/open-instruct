@@ -92,7 +92,7 @@ class FlatArguments:
         default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
     )
     tokenizer_revision: Optional[str] = field(
-        default="main",
+        default=None,
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
     use_flash_attn: bool = field(
@@ -103,8 +103,8 @@ class FlatArguments:
         default=True,
         metadata={"help": "Whether to use one of the slow tokenizer or not (which is then fast tokenizer)."},
     )
-    model_revision: str = field(
-        default="main",
+    model_revision: Optional[str] = field(
+        default=None,
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
     trust_remote_code: bool = field(
@@ -553,16 +553,14 @@ def main(args: FlatArguments):
     if args.config_name:
         config = AutoConfig.from_pretrained(
             args.config_name,
-            trust_remote_code=args.trust_remote_code,
             revision=args.model_revision,
-            token=os.getenv("HF_TOKEN", None),
+            trust_remote_code=args.trust_remote_code,
         )
     elif args.model_name_or_path:
         config = AutoConfig.from_pretrained(
             args.model_name_or_path,
-            trust_remote_code=args.trust_remote_code,
             revision=args.model_revision,
-            token=os.getenv("HF_TOKEN", None),
+            trust_remote_code=args.trust_remote_code,
         )
     else:
         raise ValueError(
@@ -570,29 +568,26 @@ def main(args: FlatArguments):
         )
 
     tokenizer_revision = args.model_revision if args.tokenizer_revision is None else args.tokenizer_revision
-
     if tokenizer_revision != args.model_revision:
         # Warn user if tokenizer and model use different revisions; this is an unusual
         # use case.
         warning = f"""Requested tokenizer revision `{tokenizer_revision}` is different
                    from the model revision `{args.model_revision}`."""
-        logger.warn(warning)
+        logger.warning(warning)
 
     if args.tokenizer_name:
         tokenizer = AutoTokenizer.from_pretrained(
             args.tokenizer_name,
+            revision=tokenizer_revision,
             trust_remote_code=args.trust_remote_code,
             use_fast=not args.use_slow_tokenizer,
-            revision=tokenizer_revision,
-            token=os.getenv("HF_TOKEN", None),
         )
     elif args.model_name_or_path:
         tokenizer = AutoTokenizer.from_pretrained(
             args.model_name_or_path,
+            revision=tokenizer_revision,
             trust_remote_code=args.trust_remote_code,
             use_fast=not args.use_slow_tokenizer,
-            revision=tokenizer_revision,
-            token=os.getenv("HF_TOKEN", None),
         )
     else:
         raise ValueError(
@@ -612,27 +607,25 @@ def main(args: FlatArguments):
             device_map = {"": device_index}  # force data-parallel training.
             model = AutoModelForCausalLM.from_pretrained(
                 args.model_name_or_path,
+                revision=args.model_revision,
                 from_tf=bool(".ckpt" in args.model_name_or_path),
                 config=config,
+                trust_remote_code=args.trust_remote_code,
                 quantization_config=bnb_config,
                 device_map=device_map,
-                trust_remote_code=args.trust_remote_code,
                 torch_dtype=torch.bfloat16,
                 attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
-                revision=args.model_revision,
-                token=os.getenv("HF_TOKEN", None),
             )
         else:
             model = AutoModelForCausalLM.from_pretrained(
                 args.model_name_or_path,
+                revision=args.model_revision,
                 from_tf=bool(".ckpt" in args.model_name_or_path),
                 config=config,
                 trust_remote_code=args.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 torch_dtype=torch.bfloat16,
                 attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
-                revision=args.model_revision,
-                token=os.getenv("HF_TOKEN", None),
             )
     else:
         logger.info("Training new model from scratch")
@@ -675,6 +668,7 @@ def main(args: FlatArguments):
         assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
+    # on a small vocab and want a smaller embedding size, remove this test.
     # gather deepspeed to get "real" embedding size
     embeddings = model.get_input_embeddings()
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
