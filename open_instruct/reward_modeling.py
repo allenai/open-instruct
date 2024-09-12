@@ -190,7 +190,6 @@ def layer_init(layer: nn.Module, std: float):
 def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     accelerator = calculate_runtime_args_and_accelerator(args, model_config)
     local_seed = args.seed + accelerator.process_index
-    breakpoint()
 
     # set up experiment tracking and seeds
     if accelerator.is_main_process:
