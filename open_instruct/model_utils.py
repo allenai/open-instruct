@@ -15,7 +15,7 @@
 
 
 import itertools
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple, Union
@@ -325,6 +325,7 @@ def save_with_accelerate(
     use_lora: bool = False,
     model_attribute_to_save: Optional[str] = None,
 ) -> None:
+    """`model_attribute_to_save` is for used to save PPO's policy instead of the full model"""
     # set the generation config to an empty setting to be safe.
     # we usually do greedy decoding for generation, so this should be okay.
     # otherwise, we get an error thrown at save time.
@@ -339,6 +340,12 @@ def save_with_accelerate(
     # Otherwise, sometimes the model will be saved with only part of the parameters.
     # Also, accelerator needs to use the wrapped model to get the state_dict.
     state_dict = accelerator.get_state_dict(model)
+    if model_attribute_to_save is not None:
+        if accelerator.is_main_process:
+            state_dict = OrderedDict(
+                {k[len(f"{model_attribute_to_save}.") :]: v for k, v in state_dict.items() if k.startswith(f"{model_attribute_to_save}.")}
+            )
+
     if use_lora:
         # When using lora, the unwrapped model is a PeftModel, which doesn't support the is_main_process
         # and has its own save_pretrained function for only saving lora modules.

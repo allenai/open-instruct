@@ -1,6 +1,6 @@
 # Reward model training
 
-`open_instruct/online_dpo.py` contains the script for training online DPO models.
+`open_instruct/ppo_vllm_thread.py` contains the script for training PPO models.
 
 
 ## Get started
@@ -25,7 +25,7 @@ python mason.py \
 ### Level 0: single GPU; quick debug. Should take less than 10 minutes to finish
 
 ```bash
-python open_instruct/online_dpo_vllm_thread.py \
+python open_instruct/ppo_vllm_thread.py \
     --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_train_splits train \
     --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
@@ -52,7 +52,7 @@ python open_instruct/online_dpo_vllm_thread.py \
     --push_to_hub \
 
 # LEVEL 0.1: two GPU; quick debug; using 1 GPU for training and 1 GPU for vllm generation via --vllm_device cuda:1
-python open_instruct/online_dpo_vllm_thread.py \
+python open_instruct/ppo_vllm_thread.py \
     --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_train_splits train \
     --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
@@ -76,6 +76,38 @@ python open_instruct/online_dpo_vllm_thread.py \
     --vllm_device cuda:1 \
     --with_tracking \
     --push_to_hub \
+
+# LEVEL 0.2: three GPU; quick debug; using 2 GPU for training and 1 GPU for vllm generation via --vllm_device cuda:2
+accelerate launch --num_processes 2 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+     open_instruct/ppo_vllm_thread.py \
+    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_eval_splits validation \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --learning_rate 3e-6 \
+    --output_dir models/minimal/ppo_vllm_thread_tldr \
+    --per_device_train_batch_size 2 \
+    --local_rollout_forward_batch_size 2 \
+    --gradient_accumulation_steps 2 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 10 \
+    --sanity_check_max_samples 10 \
+    --sanity_check \
+    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr  \
+    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
+    --non_stop_penalty \
+    --stop_token eos \
+    --beta 0.1 \
+    --response_length 53 \
+    --with_tracking \
+    --push_to_hub \
+    --hf_metadata_dataset "" \
+    --no_try_launch_beaker_eval_jobs \
+    --gradient_checkpointing \
+    --vllm_device cuda:2
 ```
 
 
@@ -102,7 +134,7 @@ python mason.py \
     --max_token_length 1024 \
     --max_prompt_token_lenth 512 \
     --learning_rate 3e-6 \
-    --output_dir models/minimal/online_dpo_vllm_thread_tldr \
+    --output_dir models/minimal/ppo_vllm_thread_tldr \
     --per_device_train_batch_size 16 \
     --local_rollout_forward_batch_size 32 \
     --gradient_accumulation_steps 4 \
@@ -122,8 +154,8 @@ python mason.py \
     --vllm_device cuda:7
 ```
 
-* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/fub45jhm
-* Trained model: https://huggingface.co/vwxyzjn/online_dpo_vllm_thread__cleanrl_EleutherAI_pythia-1b-deduped__sft__tldr/tree/online_dpo_vllm_thread__1__1726080959
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/by8j2ejp
+* Trained model: https://huggingface.co/vwxyzjn/ppo_vllm_thread__cleanrl_EleutherAI_pythia-1b-deduped__sft__tldr/tree/ppo_vllm_thread__1__1726110645
 
 
 ### LEVEL 2: 8 GPU; Huggingface no robot
@@ -175,8 +207,8 @@ python mason.py \
     --push_to_hub
 ```
 
-* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/pinqvvt5
-* Trained model: https://huggingface.co/vwxyzjn/online_dpo_vllm_thread__cleanrl_EleutherAI_pythia-1b-deduped__sft__tldr/tree/online_dpo_vllm_thread__1__1726080959
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/nmdf1z7z
+* Trained model: https://huggingface.co/vwxyzjn/online_dpo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/online_dpo_vllm_thread_beta_0.03__3__1726101734
 
 
 

@@ -184,6 +184,7 @@ class Args:
     """the discount factor"""
     lam: float = 0.95
     """the lambda value for GAE"""
+    kl_estimator: Literal["kl1", "kl2", "kl3"] = "kl1"
 
     # vLLM settings. NOTE: currently we need to place the vLLM model on a separate GPU
     # for generation to work properly because vLLM would pre-alocate the memory.
@@ -566,6 +567,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             print(item)
             if "step_" in item:
                 old_checkpoint_path = os.path.join(args.checkpoint_output_dir, item)
+                # check if the directory is empty
+                if len(os.listdir(old_checkpoint_path)) == 0:
+                    continue
                 accelerator.load_state(old_checkpoint_path)
                 resume_training_step = int(item.split("_")[-1])
                 print("Resuming training from step", resume_training_step)
@@ -665,7 +669,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     vf_clipfrac_stats = torch.zeros(stats_shape, device=device)
     entropy_stats = torch.zeros(stats_shape, device=device)
     ratio_stats = torch.zeros(stats_shape, device=device)
-    local_metrics = torch.zeros((15,), device=device)
+    local_metrics = torch.zeros((20,), device=device)
     episode = args.batch_size * (resume_training_step - 1)
     model.train()
 
@@ -830,7 +834,15 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 values = torch.masked_fill(values, padding_mask_p1, 0)
 
                 # 4. compute rewards
-                kl = logprobs - ref_logprobs
+                kl1 = logprobs - ref_logprobs
+                kl2 = ((kl1) ** 2 / 2)
+                kl3 = (-kl1).exp() - 1 + kl1
+                if args.kl_estimator == "kl1":
+                    kl = kl1
+                elif args.kl_estimator == "kl2":
+                    kl = kl2
+                elif args.kl_estimator == "kl3":
+                    kl = kl3
                 print(f"{accelerator.local_process_index=}, {kl.sum(1)=}")
                 non_score_reward = -args.beta * kl
                 non_score_reward_sum = non_score_reward.sum(1)
@@ -953,6 +965,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             local_metrics[12] = entropy_stats.mean()
             local_metrics[13] = ratio_stats.mean()
             local_metrics[14] = ratio_stats.var()
+            local_metrics[15] = ((kl) ** 2 / 2).sum(1).mean()
+            local_metrics[16] = ((-kl).exp() - 1 + kl).sum(1).mean()
             global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
             metrics = {
                 "episode": episode,
@@ -964,6 +978,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 "val/sequence_lengths": global_metrics[0],
                 "val/num_stop_token_ids": global_metrics[1],
                 "objective/kl": global_metrics[2],
+                "objective/kl2": global_metrics[15],
+                "ojbective/kl3": global_metrics[16],
                 "objective/entropy": global_metrics[3],
                 "objective/non_score_reward": global_metrics[4],
                 "objective/rlhf_reward": global_metrics[5],
@@ -1042,9 +1058,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
                 print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
 
-        # remove args.checkpoint_output_dir
-        if os.path.exists(args.checkpoint_output_dir):
-            shutil.rmtree(args.checkpoint_output_dir)
 
         if args.push_to_hub:
             push_folder_to_hub(
@@ -1054,6 +1067,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 args.hf_repo_revision,
             )
 
+        if accelerator.is_main_process:
+            # remove args.checkpoint_output_dir
+            if os.path.exists(args.checkpoint_output_dir):
+                shutil.rmtree(args.checkpoint_output_dir, ignore_errors=True)
 
 if __name__ == "__main__":
     parser = ArgumentParserPlus((Args, DatasetConfig, ModelConfig))
