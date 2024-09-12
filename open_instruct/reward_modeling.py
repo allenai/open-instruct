@@ -138,6 +138,9 @@ class Args:
     output_dir: Optional[str] = None
     """Where to save the model"""
 
+    resize_token_embeddings: bool = True
+    """Whether to resize the token embeddings to a factor of 8 for utilizing tensor cores better"""
+
     def __post_init__(self):
         self.dataset_mixer_dict, self.dataset_mixer = process_dataset_mixer(self.dataset_mixer)
         if self.dataset_eval_mixer is not None:
@@ -225,7 +228,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     torch.backends.cudnn.deterministic = True
 
     # create a tokenizer (pad from right)
-    tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path, padding_side="right")
+    tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision, padding_side="right")
     tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
     tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
 
@@ -275,8 +278,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # create the model and optimizer
     model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
-        model_config.model_name_or_path, num_labels=1
+        model_config.model_name_or_path, revision=model_config.model_revision, num_labels=1
     )
+    if args.resize_token_embeddings: # optimize for tensor core
+        model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
     if model_config.gradient_checkpointing:
         model.gradient_checkpointing_enable()
     disable_dropout_in_model(model)  # see p.3. in https://arxiv.org/pdf/1909.08593
@@ -387,7 +392,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # save model
     os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
-    original_tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path)
+    original_tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision)
     save_with_accelerate(
         accelerator,
         model,
