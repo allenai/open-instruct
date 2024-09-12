@@ -103,7 +103,6 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    # To keep the consistency with the original script, we convert args to configs when no configs file provided.
     if args.config_file is None:
         configs = {
             'model_name_or_path': args.base_model_name_or_path,
@@ -115,12 +114,13 @@ if __name__ == "__main__":
     else:
         with open(args.config_file, "r") as f:
             configs = yaml.safe_load(f)
+    # reuse the settings from training scripts
     base_model_name_or_path = configs['model_name_or_path']
     lora_model_name_or_path = configs['output_dir']
     tokenizer_name_or_path = configs['tokenizer_name'] if 'tokenizer_name' in configs else None
     peft_config = PeftConfig.from_pretrained(lora_model_name_or_path)
     print("Loading the base model...")
-    if configs['use_qlora']:
+    if "use_qlora" in configs and configs['use_qlora']:
         quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_compute_dtype=torch.bfloat16,
@@ -192,7 +192,6 @@ if __name__ == "__main__":
         configs['hf_repo_id'] = f"{configs['hf_entity']}/{configs['hf_repo_id']}"
         if "hf_repo_revision" not in configs:  # auto-generate one
             if "exp_name" not in configs:
-                peft = "qlora" if configs['use_qlora'] else "lora"
                 configs['exp_name'] = os.path.basename(__file__)[: -len(".py")]
             configs['hf_repo_revision'] = (
                 f"{configs['exp_name']}__{configs['model_name_or_path'].replace('/', '_')}__{args.seed}__{int(time.time())}"
