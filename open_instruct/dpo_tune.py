@@ -1087,7 +1087,7 @@ def main(args: FlatArguments):
         # wandb will have even more useful information.
         metadata_blob = {
             "model_name": args.exp_name,
-            "model_type": "sft",
+            "model_type": "dpo",
             "datasets": dataset_list,
             "base_model": args.model_name_or_path,
             "wandb_path": wandb_tracker.run.get_url(),
