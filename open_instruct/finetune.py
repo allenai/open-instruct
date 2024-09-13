@@ -1043,7 +1043,7 @@ def main(args: FlatArguments):
             json.dump(metadata_blob, f)
 
         # upload metadata to the dataset if set
-        if args.push_to_hub and args.hf_metadata_dataset:
+        if args.hf_metadata_dataset:
             upload_metadata_to_hf(
                 metadata_blob,
                 "metadata.json",
