@@ -471,10 +471,10 @@ class SimplePreferenceCollator:
 class SimpleGenerateCollator:
     """Simple collator for generation task (always pad from the LEFT)"""
 
-    def __init__(self, pad_token_id):
+    def __init__(self, pad_token_id: int):
         self.pad_token_id = pad_token_id
 
-    def __call__(self, batch):
+    def __call__(self, batch: list[dict]):
         """the input will have input_ids_prompt"""
         # Find max length in the batch
         max_length = -1
