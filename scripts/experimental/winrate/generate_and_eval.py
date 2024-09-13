@@ -80,7 +80,6 @@ for output, reference_response in zip(outputs, reference_summaries):
     )  # prepend leading space
 
 df = pd.DataFrame(table)
-breakpoint()
 df.to_csv(args.output_path)
 
 #####
@@ -95,9 +94,9 @@ judged_df = llm_judge(
     ),
     df,
 )
-print(f"{df['model_response_len'].mean()=}")
 print(judged_df["preferred"].value_counts())
 # print percentage
 print(judged_df["preferred"].value_counts(normalize=True))
+print(f"{df['model_response_len'].mean()=}")
 
 judged_df.to_csv(args.output_path.replace(".csv", "_judged.csv"))

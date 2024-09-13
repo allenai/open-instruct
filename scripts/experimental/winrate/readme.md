@@ -44,18 +44,31 @@ python -i generate_and_eval.py \
 # Name: proportion, dtype: float64
 # df['model_response_len'].mean()=151.506
 
-
+# https://wandb.ai/ai2-llm/open_instruct_internal/runs/do4nuqhh
 python -i generate_and_eval.py \
     --model_name_or_path vwxyzjn/online_dpo_vllm_thread_beta_0.03__allenai_open_instruct_dev \
-    --model_revision online_dpo_vllm_thread_beta_0.03__3__1726066140 \
+    --model_revision online_dpo_vllm_thread_beta_0.03__3__1726200312 \
     --output_path test.csv \
     --n 500
 
 # preferred
-# response1    0.652
-# response0    0.348
+# response1    0.53
+# response0    0.47
 # Name: proportion, dtype: float64
-# df['model_response_len'].mean()=123.408
+# df['model_response_len'].mean()=153.838
+
+# https://wandb.ai/ai2-llm/open_instruct_internal/runs/97i9hdk3/overview
+python -i generate_and_eval.py \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision costa_offline_dpo_norobot_3pair__allenai_open_instruct_dev__42__1726174531 \
+    --output_path test.csv \
+    --n 500
+
+# preferred
+# response1    0.576
+# response0    0.424
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=144.382
 
 python plot_winrate.py
 ```

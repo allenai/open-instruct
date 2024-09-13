@@ -11,15 +11,14 @@ class Data:
     color: str
     marker: str
 
-
 # Data
 results = {
     "SFT w/ H4/no_robots": Data({8e9: [0.31, 121.41]}, "#FFB898", "o"),
-    "SFT + Online DPO w/ H4/no_robots": Data({8e9: [0.348, 123.408]}, "#eb4034", "v"),
+    "SFT + Online DPO w/ H4/no_robots": Data({8e9: [0.47, 153.838]}, "#eb4034", "v"),
+    "SFT + Offline DPO w/ H4/no_robots": Data({8e9: [0.424, 144.382]}, "#00FFFF", "2"),
     "llama-3.1-tulu-2-dpo-8": Data({8e9: [0.504, 172.248]}, "#68D39F", "X"),
     "meta-llama/Meta-Llama-3.1-8B-Instruct": Data({8e9: [0.566, 151.506]}, "#8EC2FF", "s"),
 }
-
 first_key = list(results.keys())[0]
 
 # Function to create and save the original plot
