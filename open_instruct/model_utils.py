@@ -340,15 +340,17 @@ def save_with_accelerate(
     # Otherwise, sometimes the model will be saved with only part of the parameters.
     # Also, accelerator needs to use the wrapped model to get the state_dict.
     state_dict = accelerator.get_state_dict(model)
-    if model_attribute_to_save is not None:
-        if accelerator.is_main_process:
-            state_dict = OrderedDict(
-                {
-                    k[len(f"{model_attribute_to_save}.") :]: v
-                    for k, v in state_dict.items()
-                    if k.startswith(f"{model_attribute_to_save}.")
-                }
-            )
+
+    # if we are saving a specific attribute of the model, we need to filter the state_dict
+    # also the state_dict only lives in the main process; other processes just have state_dict = None
+    if model_attribute_to_save is not None and accelerator.is_main_process:
+        state_dict = OrderedDict(
+            {
+                k[len(f"{model_attribute_to_save}.") :]: v
+                for k, v in state_dict.items()
+                if k.startswith(f"{model_attribute_to_save}.")
+            }
+        )
 
     if use_lora:
         # When using lora, the unwrapped model is a PeftModel, which doesn't support the is_main_process
