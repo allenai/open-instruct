@@ -96,7 +96,7 @@ class FlatArguments:
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
     chat_template_file: Optional[str] = field(
-        default=None, 
+        default=None,
         metadata={"help": (
             "A file with its content as a jinja2 template for encoding chat messages. "
             "If not provided, we will use the default Tulu template."
@@ -401,7 +401,7 @@ def encode_example(example, tokenizer, max_seq_length):
                 message_start_idx = 0
             else:
                 message_start_idx = tokenizer.apply_chat_template(
-                    conversation=messages[:message_idx], # here marks the end of the previous messages
+                    conversation=messages[:message_idx],  # here marks the end of the previous messages
                     tokenize=True,
                     return_tensors="pt",
                     padding=False,
@@ -411,7 +411,7 @@ def encode_example(example, tokenizer, max_seq_length):
                 ).shape[1]
             # next, we calculate the end index of this non-assistant message
             if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
-                # for intermediate messages that follow with an assistant message, we need to 
+                # for intermediate messages that follow with an assistant message, we need to
                 # set `add_generation_prompt=True` to avoid the assistant generation prefix being included in the loss
                 # (e.g., `<|assistant|>`)
                 message_end_idx = tokenizer.apply_chat_template(
@@ -424,7 +424,7 @@ def encode_example(example, tokenizer, max_seq_length):
                     add_generation_prompt=True,
                 ).shape[1]
             else:
-                # for the last message or the message that doesn't follow with an assistant message, 
+                # for the last message or the message that doesn't follow with an assistant message,
                 # we don't need to add the assistant generation prefix
                 message_end_idx = tokenizer.apply_chat_template(
                     conversation=messages[: message_idx + 1],
@@ -677,7 +677,7 @@ def main(args: FlatArguments):
     embeddings = model.get_input_embeddings()
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
         embedding_size = embeddings.weight.shape[0]
-    
+
     if args.chat_template_file is not None:
         with open(args.chat_template_file, "r") as f:
             chat_template = f.read()
