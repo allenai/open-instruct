@@ -1,0 +1,179 @@
+model_name_or_path: meta-llama/Meta-Llama-3-8B
+model_revision: main
+use_flash_attn: true
+tokenizer_name: meta-llama/Meta-Llama-3-8B
+use_slow_tokenizer: true
+dataset_mixer:
+    # ------------------------------------------------------
+    # no_robot dataset, human written, for general chat. 
+    # Total: 9500
+    # Pro: created by surge ai with high cost, should be high quality.
+    # Con: small, not diverse enough, may not be in consistent style.
+    HuggingFaceH4/no_robots: 9500
+    # ------------------------------------------------------
+    # OpenAssistant dataset, human written, for general chat.
+    # Here, only the highest rated paths are extracted.
+    # Total: 7708
+    # Pro: created and reviewed by human volunteers, has multi-turn chat.
+    # Con: small, still has some noise, the writting quality may not be as good/careful as paid workers, style consistency.
+    # TODO: need to check if this version corresponds to the highest rated paths.
+    allenai/openassistant-guanaco-reformatted: 7708
+    # ------------------------------------------------------
+    # LIMA dataset, human written, for general chat.
+    # Some instances were filtered in building Tulu 2, probably due to some identity keywords.
+    # Total: 1018
+    # Pro: created by researchers at Meta, aiming for diversity and high quality.
+    # Con: small, they were created quite early so might not consider some of the latest answering styles of chatbot.
+    natolambert/tulu-v2-sft-mixture-lima: 1018
+    # ------------------------------------------------------
+    # Aya dataset, human written, for general chat (multilingual).
+    # Total: 202362
+    # Pro: created by ..., aiming for very diverse languages ().
+    # Con: answers may not be in the perfect style.
+    ai2-adapt-dev/aya_dataset-reformat: 50000
+    # ------------------------------------------------------
+    # Tulu hard-coded examples, human written, for identity-related questions.
+    # Total: 14
+    # Pro: necessary to make Tulu aware of itself and its builders.
+    # Con: small, low coverage of possible questions from users.
+    # TODO: we should later find ways to replicate this multiple times.
+    ai2-adapt-dev/tulu_hard_coded_examples: 14
+    # ------------------------------------------------------
+    # CoT subset in FLAN v2, human (researchers) converted from existing datasets, for reasoning.
+    # Here, we use the subset processed in Tulu v2.
+    # Total: 48747
+    # Pro: researchers converted from 9 chain-of-thought datasets about arithmetics, multi-hop reasoning, nli.
+    # Con: limited in the task type, written early, may have inconsistent styles compared to today's chatbot.
+    # natolambert/tulu-v2-sft-mixture-cot: 49747
+    # ------------------------------------------------------
+    # SciIFF dataset, human (researchers) converted from existing datasets, for scientific literature understanding.
+    # Here, we use the subset extracted by the author in building allenai/SciRIFF-train-mix.
+    # Total: 35357
+    # Pro: researchers converted from existing datasets for 54 scientific literature understanding tasks
+    # Con: limited in the task type, may have inconsistent styles compared to today's chatbot.
+    # TODO: need to ablate and compare with the one in tulu 2 mixture natolambert/tulu-v2-sft-mixture-science
+    # natolambert/tulu-v2-sft-mixture-science: 7468  # original data slightly different
+    ai2-adapt-dev/SciRIFF-train-mix-science: 10000
+    # ------------------------------------------------------
+    # SlimOrca dataset, gpt4 generated, for general chat.
+    # Total: 517982
+    # Pro: Paring FLAN v2 inputs with system prompts, and regenerating the outputs using GPT4, potentially in a better style.
+    # Con: GPT4 responses may contain errors, which may be mitagated by the filtering in SlimOrca
+    # TODO: need to need to ablate and compare with the 300K one Faeze created. may benefit from regeneration.
+    ai2-adapt-dev/slim-orca-300k: 100000
+    # ai2-adapt-dev/SlimOrca-reformat: 100000
+    # ------------------------------------------------------
+    # WizardLM eval instruct dataset, gpt4 generated, for general chat.
+    # Total: 196000
+    # Pro: the approach deepens the complexity of gpt4-generated data
+    # Con: GPT4 generations have eorrs, may also inheritate the biases/styles in GPT4
+    # TODO: need to ablate.
+    WizardLMTeam/WizardLM_evol_instruct_V2_196k: 30000
+    # ------------------------------------------------------
+    # WildChat dataset, real user queries + gpt4 responses, for general chat.
+    # Total: 254663 (1M if including those interacting with gpt 3.5)
+    # Pro: real user queries, may contain diverse challenging scenarios, as well as unsafe prompts. Mutli-turn.
+    # Con: user queries are usually not that well-formated, and contain a lot of noises.
+    ai2-adapt-dev/WildChat-1M-Full-GPT4-Only: 200000
+    # ------------------------------------------------------
+    # ShareGPT dataset, real user shared queries + gpt4 responses, for general chat.
+    # Total: 114046
+    # Pro: user shared queries usually contain interesting phenomena. Multi-turn.
+    # Con: unsure licensing, the responses were generated using earlier version of GPT4.
+    # TODO: need to ablate. May benefit from regeneration.
+    # Vtuber-plan/sharegpt-cleaned: 114046
+    # ------------------------------------------------------
+    # Daring-Anteater, a mix of existing datasets, for general chat.
+    # Total: 99532
+    # Pro: a good mix of precise_instruction_following / json_format_following / complex instructions.
+    # Con: the constraint following part is too small.
+    # TODO: need to ablate if exclusing the main chat subset is helpful.
+    # TODO: data needs to be reformatted to consider the system prompt.
+    ai2-adapt-dev/Daring-Anteater-reformat: 99532
+    # ------------------------------------------------------
+    # MetaMathQA dataset, augmented using gpt4, for math capability.
+    # Total: 395000
+    # Pro: augmented towards GSM/MATH, so good performance on these two benchmarks (probably similar questions too)
+    # Con: may be too targeted for the two benchmarks and fail to generalize to other math problems in different styles.
+    ai2-adapt-dev/metamath-qa-reformat: 100000
+    # ------------------------------------------------------
+    # WebInstruct dataset, extract&rewritten using gpt4, (mainly) for math/science related questions
+    # Here, we are using their released subset.
+    # Total: 2335220
+    # Pro: the generation benefits from GPT4 answering style & the correctness of grounding to web documents.
+    # Con: may be biased by the response styles in the three websites (MathStackExchange, ScienceStackExchange, Socratic);
+    #      the question answering style are also not diverse enough, with different instruction constraints;
+    #      the answer may still have some errors (10% based on the paper)
+    # TODO: need to ablate the effect.
+    ai2-adapt-dev/WebInstructSub-reformat: 100000
+    # ------------------------------------------------------
+    # Codefeedback Filtered Instruction, a mix of existing dataset, for coding
+    # The data mix includes:
+    #   Magicoder-OSS-Instruct
+    #   Python code subset of ShareGPT
+    #   Magicoder-Evol-Instruct
+    #   Evol-Instruct-Code
+    # Total: 156526
+    # Pro: a decent mix of existing coding prompts
+    # Con: curated mainly for the prompts in building the real CodeFeedback, so responses may be low quality (e.g., ShareGPT)
+    # TODO: change to individual dataset and ablate the effect. may benefit from regeneration.
+    m-a-p/CodeFeedback-Filtered-Instruction: 156526
+    # ------------------------------------------------------
+    # Codefeedback dataset, a mix of existing dataset + feedback interaction generation, for coding
+    # Total: 66383
+    # Pro: single-turn packing + interaction simulation seems to create good coding model that takes feedback in multi turn.
+    # Con: not sure how diverse the feedback is and how well it can generalize
+    # TODO: need to ablate. need to change code for downweight the intermediate responses with errors!!!
+    # m-a-p/Code-Feedback: 66383
+    # ------------------------------------------------------
+    # Table-GPT dataset, converted & synthesized, for table understanding and operations
+    # Total: 13222
+    # Pro: a special dataset that contains 14 table related tasks for enhancing table capabilities
+    # Con: task types are limited. The tables may not be big enough. Reponse styles may be inconsistent.
+    # TODO: need to ablate. 
+    # ai2-adapt-dev/Table-GPT-All-train: 13222
+    # ------------------------------------------------------
+    # Coconot dataset, generated by gpt4, for non-compliance
+    # Total: 11477
+    # Pro: a special dataset for the a comprehenvise list of non-compliance behaviors of models.
+    # Con: the generated queries may only reflect simple cases.
+    # TODO: need to ablate.
+    ai2-adapt-dev/coconot-sft-reformat: 11477
+    # ------------------------------------------------------
+    # NuminaMATH-TIR, extracted and generated by gpt4, for tool-integrated reasoning for math
+    # Total: 72441
+    # Pro: generally high-quality dataset with mined prompts from web corpus, verified tool-integrated reasoning trajatories.
+    # Con: mainly for solving math in a specific format, not in a consistent format with the general chat.
+    # TODO: need to ablate. need to rewrite!!!
+    AI-MO/NuminaMath-TIR: 72441
+    # AI-MO/NuminaMath-CoT: 859000
+    # ------------------------------------------------------
+    # Xlam function calling dataset, synthesized and verified, for tool use
+    # Total: 60000
+    # Pro: a special dataset for enhancing function calling capability, good performance on BFCL
+    # Con: responses only contain the function calling and arguments, not in a consistent style with the general chat.
+    # TODO: need to ablate. need to rewrite!!!
+    # Salesforce/xlam-function-calling-60k: 60000
+    # ------------------------------------------------------
+    # Lmsys chatbot arena data, human queries for challenging models, for general chat.
+    # Total: 1000000
+    # Pro: real human interaction with model, with reasonable challenges.
+    # Con: may not reflect the real challenges in actual use of AI models. The interactions include those with weak models.
+    # TODO: need to ablate. need to regenerate (the last step)!! the intermediate low-quality responese need to downweight.
+    # lmsys/lmsys-chat-1m: 1000000
+max_seq_length: 4096 # Note, reduced from 8192 to fit on one GPU with DeepSpeed Stage3
+preprocessing_num_workers: 128
+per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
+gradient_accumulation_steps: 4 # effective batch size 128 with 4 nodes
+learning_rate: 5.0e-06 # best LR so far
+lr_scheduler_type: linear
+warmup_ratio: 0.03
+weight_decay: 0.0
+num_train_epochs: 2
+output_dir: /output/
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+checkpointing_steps: epoch
+dataset_mix_dir: /output/
