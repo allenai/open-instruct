@@ -7,7 +7,7 @@ dataset_mixer:
     # ------------------------------------------------------
     # no_robot dataset, human written, for general chat. 
     # Total: 9500
-    # Pro: created by scale ai with high cost, should be high quality.
+    # Pro: created by surge ai with high cost, should be high quality.
     # Con: small, not diverse enough, may not be in consistent style.
     HuggingFaceH4/no_robots: 9500
     # ------------------------------------------------------
