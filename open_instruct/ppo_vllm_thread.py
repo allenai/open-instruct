@@ -835,7 +835,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
                 # 4. compute rewards
                 kl1 = logprobs - ref_logprobs
-                kl2 = ((kl1) ** 2 / 2)
+                kl2 = (kl1) ** 2 / 2
                 kl3 = (-kl1).exp() - 1 + kl1
                 if args.kl_estimator == "kl1":
                     kl = kl1
@@ -1058,7 +1058,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
                 print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
 
-
         if args.push_to_hub:
             push_folder_to_hub(
                 accelerator,
@@ -1071,6 +1070,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             # remove args.checkpoint_output_dir
             if os.path.exists(args.checkpoint_output_dir):
                 shutil.rmtree(args.checkpoint_output_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     parser = ArgumentParserPlus((Args, DatasetConfig, ModelConfig))

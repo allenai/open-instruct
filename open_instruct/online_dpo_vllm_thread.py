@@ -981,7 +981,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
                 print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
 
-
         if args.push_to_hub:
             push_folder_to_hub(
                 accelerator,

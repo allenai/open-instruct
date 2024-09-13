@@ -343,7 +343,11 @@ def save_with_accelerate(
     if model_attribute_to_save is not None:
         if accelerator.is_main_process:
             state_dict = OrderedDict(
-                {k[len(f"{model_attribute_to_save}.") :]: v for k, v in state_dict.items() if k.startswith(f"{model_attribute_to_save}.")}
+                {
+                    k[len(f"{model_attribute_to_save}.") :]: v
+                    for k, v in state_dict.items()
+                    if k.startswith(f"{model_attribute_to_save}.")
+                }
             )
 
     if use_lora:
