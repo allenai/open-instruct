@@ -443,7 +443,7 @@ def encode_example(example, tokenizer, max_seq_length):
                 ).shape[1]
             # set the label to -100 for the non-assistant part
             labels[:, message_start_idx:message_end_idx] = -100
-            if message_end_idx >= max_seq_length:
+            if max_seq_length and message_end_idx >= max_seq_length:
                 break
     attention_mask = torch.ones_like(input_ids)
     return {
