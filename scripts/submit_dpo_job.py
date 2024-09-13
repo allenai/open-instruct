@@ -25,7 +25,7 @@ def main():
     parser.add_argument("--preemptible", type=bool, default=True, help="Whether to use preemptible instances")
     parser.add_argument("--num_gpus", type=int, default=8, help="Number of GPUs to use")
     parser.add_argument("--num_nodes", type=int, default=1, help="Number of nodes to use")
-    parser.add_argument("--image", type=str, default="nathanl/open_instruct_auto-f89d7e4-10726144311", help="Beaker image to use.")
+    parser.add_argument("--image", type=str, default="nathanl/open_instruct_auto", help="Beaker image to use.")
     parser.add_argument("--workspace", type=str, default="ai2/tulu-2-improvements", help="Beaker workspace to use.")
     parser.add_argument("--datasets", nargs='+', help="List of datasets to mount in form <beaker_id>:<mount_path>")
     # allow unknown args from CLI, use this to modify loaded config in bash scripts for sweeping
