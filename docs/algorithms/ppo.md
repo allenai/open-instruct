@@ -184,7 +184,6 @@ python mason.py \
     --chat_template tulu \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
-    --no_async_mode \
     --gradient_accumulation_steps 32 \
     --local_rollout_forward_batch_size 1 \
     --vllm_device cuda:7 \
@@ -195,6 +194,59 @@ python mason.py \
     --model_revision costa_finetune_tulu3_8b_norobot__meta-llama_Meta-Llama-3.1-8B__42__1725559869 \
     --reward_model_path vwxyzjn/reward_modeling__allenai_open_instruct_dev \
     --reward_model_revision reward_modeling__1__1725760619 \
+    --non_stop_penalty \
+    --stop_token eos \
+    --penalty_reward_value -10.0 \
+    --beta 0.03 \
+    --num_evals 3 \
+    --seed 3 \
+    --response_length 1024 \
+    --gradient_checkpointing \
+    --with_tracking \
+    --push_to_hub
+```
+
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/nmdf1z7z
+* Trained model: https://huggingface.co/vwxyzjn/online_dpo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/online_dpo_vllm_thread_beta_0.03__3__1726101734
+
+
+### LEVEL 3: 8 GPU; Training on ultrafeedback RM
+
+```bash
+# for running chat based models you should use an 8xH100 node.
+# use ai2/jupiter-cirrascale-2 or ai2/pluto-cirrascale
+python mason.py \
+    --cluster ai2/pluto-cirrascale \
+    --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
+    --workspace ai2/tulu-3-dev \
+    --priority high \
+    --preemptible \
+    --budget ai2/allennlp \
+    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+    open_instruct/ppo_vllm_thread.py \
+    --exp_name "ppo_vllm_thread_beta_0.03" \
+    --dataset_mixer '{"allenai/ultrafeedback_binarized_cleaned": 1.0}' \
+    --sft_messages_key chosen \
+    --dataset_train_splits train_prefs \
+    --dataset_eval_mixer '{"allenai/ultrafeedback_binarized_cleaned": 1.0}' \
+    --dataset_eval_splits test_prefs \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --learning_rate 8e-7 \
+    --output_dir /output/ \
+    --chat_template tulu \
+    --per_device_train_batch_size 1 \
+    --per_device_eval_batch_size 1 \
+    --gradient_accumulation_steps 32 \
+    --local_rollout_forward_batch_size 1 \
+    --vllm_device cuda:7 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 300000 \
+    --model_name_or_path allenai/open_instruct_dev  \
+    --model_revision finetune__meta-llama_Meta-Llama-3.1-8B__42__1725751338 \
+    --reward_model_path vwxyzjn/reward_modeling__allenai_llama-3-tulu-2-8b \
+    --reward_model_revision reward_modeling__1__1726175049 \
     --non_stop_penalty \
     --stop_token eos \
     --penalty_reward_value -10.0 \
