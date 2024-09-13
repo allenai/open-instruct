@@ -125,7 +125,7 @@ class FlatArguments:
         default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
     )
     tokenizer_revision: Optional[str] = field(
-        default="main",
+        default=None,
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
     use_flash_attn: bool = field(
@@ -136,8 +136,8 @@ class FlatArguments:
         default=True,
         metadata={"help": "Whether to use one of the slow tokenizer or not (which is then fast tokenizer)."},
     )
-    model_revision: str = field(
-        default="main",
+    model_revision: Optional[str] = field(
+        default=None,
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
     trust_remote_code: bool = field(
@@ -602,21 +602,43 @@ def main(args: FlatArguments):
 
     # Load pretrained model and tokenizer
     if args.config_name:
-        config = AutoConfig.from_pretrained(args.config_name, trust_remote_code=args.trust_remote_code)
+        config = AutoConfig.from_pretrained(
+            args.config_name,
+            revision=args.model_revision,
+            trust_remote_code=args.trust_remote_code,
+        )
     elif args.model_name_or_path:
-        config = AutoConfig.from_pretrained(args.model_name_or_path, trust_remote_code=args.trust_remote_code)
+        config = AutoConfig.from_pretrained(
+            args.model_name_or_path,
+            revision=args.model_revision,
+            trust_remote_code=args.trust_remote_code,
+        )
     else:
         raise ValueError(
             "You are instantiating a new config instance from scratch. This is not supported by this script."
         )
 
+    tokenizer_revision = args.model_revision if args.tokenizer_revision is None else args.tokenizer_revision
+    if tokenizer_revision != args.model_revision:
+        # Warn user if tokenizer and model use different revisions; this is an unusual
+        # use case.
+        warning = f"""Requested tokenizer revision `{tokenizer_revision}` is different
+                   from the model revision `{args.model_revision}`."""
+        logger.warning(warning)
+
     if args.tokenizer_name:
         tokenizer = AutoTokenizer.from_pretrained(
-            args.tokenizer_name, use_fast=not args.use_slow_tokenizer, trust_remote_code=args.trust_remote_code
+            args.tokenizer_name,
+            revision=tokenizer_revision,
+            trust_remote_code=args.trust_remote_code,
+            use_fast=not args.use_slow_tokenizer,
         )
     elif args.model_name_or_path:
         tokenizer = AutoTokenizer.from_pretrained(
-            args.model_name_or_path, use_fast=not args.use_slow_tokenizer, trust_remote_code=args.trust_remote_code
+            args.model_name_or_path,
+            revision=tokenizer_revision,
+            trust_remote_code=args.trust_remote_code,
+            use_fast=not args.use_slow_tokenizer,
         )
     else:
         raise ValueError(
@@ -637,6 +659,7 @@ def main(args: FlatArguments):
                 device_map = {"": device_index}  # force data-parallel training.
                 model = AutoModelForCausalLM.from_pretrained(
                     args.model_name_or_path,
+                    revision=args.model_revision,
                     from_tf=bool(".ckpt" in args.model_name_or_path),
                     config=config,
                     trust_remote_code=args.trust_remote_code,
@@ -648,6 +671,7 @@ def main(args: FlatArguments):
             else:
                 model = AutoModelForCausalLM.from_pretrained(
                     args.model_name_or_path,
+                    revision=args.model_revision,
                     from_tf=bool(".ckpt" in args.model_name_or_path),
                     config=config,
                     trust_remote_code=args.trust_remote_code,
