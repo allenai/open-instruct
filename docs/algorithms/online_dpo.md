@@ -174,8 +174,8 @@ python mason.py \
     --push_to_hub
 ```
 
-* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/pinqvvt5
-* Trained model: https://huggingface.co/vwxyzjn/online_dpo_vllm_thread__cleanrl_EleutherAI_pythia-1b-deduped__sft__tldr/tree/online_dpo_vllm_thread__1__1726080959
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/do4nuqhh
+* Trained model: https://huggingface.co/vwxyzjn/online_dpo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/online_dpo_vllm_thread_beta_0.03__3__1726200312
 
 
 ### LEVEL 3: 8 GPU; Training on ultrafeedback RM
@@ -227,7 +227,7 @@ python mason.py \
     --push_to_hub
 ```
 
-
+TBD.
 
 
 ### Quality of life tools

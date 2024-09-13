@@ -206,9 +206,7 @@ python mason.py \
     --push_to_hub
 ```
 
-* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/nmdf1z7z
-* Trained model: https://huggingface.co/vwxyzjn/online_dpo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/online_dpo_vllm_thread_beta_0.03__3__1726101734
-
+TBD
 
 ### LEVEL 3: 8 GPU; Training on ultrafeedback RM
 
@@ -259,9 +257,7 @@ python mason.py \
     --push_to_hub
 ```
 
-* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/nmdf1z7z
-* Trained model: https://huggingface.co/vwxyzjn/online_dpo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/online_dpo_vllm_thread_beta_0.03__3__1726101734
-
+TBD
 
 
 
