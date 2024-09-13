@@ -95,6 +95,13 @@ class FlatArguments:
         default=None,
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
+    chat_template_file: Optional[str] = field(
+        default=None, 
+        metadata={"help": (
+            "A file with its content as a jinja2 template for encoding chat messages. "
+            "If not provided, we will use the default Tulu template."
+        )}
+    )
     use_flash_attn: bool = field(
         default=True,
         metadata={"help": "Whether to use flash attention in the model training"},
@@ -367,88 +374,71 @@ class FlatArguments:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
 
 
-def encode_with_prompt_completion_format(example, tokenizer, max_seq_length, add_bos=False):
+def encode_example(example, tokenizer, max_seq_length):
     """
-    Here we assume each example has 'prompt' and 'completion' fields.
-    We concatenate prompt and completion and tokenize them together because otherwise prompt will be padded/trancated
-    and it doesn't make sense to follow directly with the completion.
-    """
-    # if prompt doesn't end with space and completion doesn't start with space, add space
-    if not example["prompt"].endswith((" ", "\n", "\t")) and not example["completion"].startswith((" ", "\n", "\t")):
-        example_text = example["prompt"] + " " + example["completion"]
-    else:
-        example_text = example["prompt"] + example["completion"]
-    example_text = example_text + tokenizer.eos_token
-    if add_bos:
-        example_text = tokenizer.bos_token + example_text
-    tokenized_example = tokenizer(example_text, return_tensors="pt", max_length=max_seq_length, truncation=True)
-    input_ids = tokenized_example.input_ids
-    labels = input_ids.clone()
-    tokenized_prompt = tokenizer(example["prompt"], return_tensors="pt", max_length=max_seq_length, truncation=True)
-    # mask the prompt part for avoiding loss
-    labels[:, : tokenized_prompt.input_ids.shape[1]] = -100
-    attention_mask = torch.ones_like(input_ids)
-    return {
-        "input_ids": input_ids.flatten(),
-        "labels": labels.flatten(),
-        "attention_mask": attention_mask.flatten(),
-    }
-
-
-def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=False):
-    """
-    Here we assume each example has a 'messages' field Each message is a dict with 'role' and 'content' fields.
-    We concatenate all messages with the roles as delimiters and tokenize them together.
+    This function encodes a single example into a format that can be used for training.
+    Here, we assume each example has a 'messages' field. Each message in it is a dict with 'role' and 'content' fields.
+    We use the `apply_chat_template` function from the tokenizer to tokenize the messages and prepare the input and label tensors.
     """
     messages = example["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
-
-    def _concat_messages(messages):
-        message_text = ""
-        for message in messages:
-            if message["role"] == "system":
-                message_text += "<|system|>\n" + message["content"].strip() + "\n"
-            elif message["role"] == "user":
-                message_text += "<|user|>\n" + message["content"].strip() + "\n"
-            elif message["role"] == "assistant":
-                message_text += "<|assistant|>\n" + message["content"].strip() + tokenizer.eos_token + "\n"
-            else:
-                raise ValueError("Invalid role: {}".format(message["role"]))
-        return message_text
-
-    example_text = _concat_messages(messages).strip()
-    if add_bos:
-        example_text = tokenizer.bos_token + example_text
-    tokenized_example = tokenizer(example_text, return_tensors="pt", max_length=max_seq_length, truncation=True)
-    input_ids = tokenized_example.input_ids
+    input_ids = tokenizer.apply_chat_template(
+        conversation=messages,
+        tokenize=True,
+        return_tensors="pt",
+        padding=False,
+        truncation=True,
+        max_length=max_seq_length,
+        add_generation_prompt=False,
+    )
     labels = input_ids.clone()
-
     # mask the non-assistant part for avoiding loss
     for message_idx, message in enumerate(messages):
         if message["role"] != "assistant":
+            # we calculate the start index of this non-assistant message
             if message_idx == 0:
                 message_start_idx = 0
             else:
-                message_start_idx = tokenizer(
-                    _concat_messages(messages[:message_idx]),
+                message_start_idx = tokenizer.apply_chat_template(
+                    conversation=messages[:message_idx], # here marks the end of the previous messages
+                    tokenize=True,
                     return_tensors="pt",
-                    max_length=max_seq_length,
+                    padding=False,
                     truncation=True,
-                ).input_ids.shape[1]
+                    max_length=max_seq_length,
+                    add_generation_prompt=False,
+                ).shape[1]
+            # next, we calculate the end index of this non-assistant message
             if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
-                # here we also ignore the role of the assistant
-                messages_so_far = _concat_messages(messages[: message_idx + 1]) + "<|assistant|>\n"
+                # for intermediate messages that follow with an assistant message, we need to 
+                # set `add_generation_prompt=True` to avoid the assistant generation prefix being included in the loss
+                # (e.g., `<|assistant|>`)
+                message_end_idx = tokenizer.apply_chat_template(
+                    conversation=messages[:message_idx + 1],
+                    tokenize=True,
+                    return_tensors="pt",
+                    padding=False,
+                    truncation=True,
+                    max_length=max_seq_length,
+                    add_generation_prompt=True,
+                ).shape[1]
             else:
-                messages_so_far = _concat_messages(messages[: message_idx + 1])
-            message_end_idx = tokenizer(
-                messages_so_far, return_tensors="pt", max_length=max_seq_length, truncation=True
-            ).input_ids.shape[1]
+                # for the last message or the message that doesn't follow with an assistant message, 
+                # we don't need to add the assistant generation prefix
+                message_end_idx = tokenizer.apply_chat_template(
+                    conversation=messages[: message_idx + 1],
+                    tokenize=True,
+                    return_tensors="pt",
+                    padding=False,
+                    truncation=True,
+                    max_length=max_seq_length,
+                    add_generation_prompt=False,
+                ).shape[1]
+            # set the label to -100 for the non-assistant part
             labels[:, message_start_idx:message_end_idx] = -100
-
             if message_end_idx >= max_seq_length:
                 break
-
     attention_mask = torch.ones_like(input_ids)
     return {
         "input_ids": input_ids.flatten(),
@@ -681,22 +671,29 @@ def main(args: FlatArguments):
     embeddings = model.get_input_embeddings()
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
         embedding_size = embeddings.weight.shape[0]
-
-    # set the tokenizer chat template to the tulu format
-    # this makes evaluation/etc easier down the line.
-    chat_template = (
-        "{% for message in messages %}\n"
-        "{% if message['role'] == 'system' %}\n"
-        "{{ '<|system|>\n' + message['content'] }}\n"
-        "{% elif message['role'] == 'user' %}\n"
-        "{{ '<|user|>\n' + message['content'] }}\n"
-        "{% elif message['role'] == 'assistant' %}\n"
-        "{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n"
-        "{% endif %}\n"
-        "{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n"
-        "{% endif %}\n"
-        "{% endfor %}"
-    )
+    
+    if args.chat_template_file is not None:
+        with open(args.chat_template_file, "r") as f:
+            chat_template = f.read()
+    else:
+        chat_template = (
+            "{% for message in messages %}\n"
+            "{% if message['role'] == 'system' %}\n"
+            "{{ '<|system|>\n' + message['content'] }}\n"
+            "{% elif message['role'] == 'user' %}\n"
+            "{{ '<|user|>\n' + message['content'] }}\n"
+            "{% elif message['role'] == 'assistant' %}\n"
+            "{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n"
+            "{% endif %}\n"
+            "{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n"
+            "{% endif %}\n"
+            "{% endfor %}"
+            "{%- if add_generation_prompt %}"
+            "{{ '<|assistant|>\n' }}"
+            "{%- endif %}"
+        )
+    # set the tokenizer chat template to the training format
+    # this makes the encoding and downstream evaluation easier.
     tokenizer.chat_template = chat_template
     if args.add_bos:
         # also add bos in the chat template
@@ -720,26 +717,7 @@ def main(args: FlatArguments):
     elif args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
 
-    # Preprocessing the datasets.
-    if "prompt" in raw_datasets["train"].column_names and "completion" in raw_datasets["train"].column_names:
-        encode_function = partial(
-            encode_with_prompt_completion_format,
-            tokenizer=tokenizer,
-            max_seq_length=args.max_seq_length,
-            add_bos=args.add_bos,
-        )
-    elif "messages" in raw_datasets["train"].column_names:
-        encode_function = partial(
-            encode_with_messages_format,
-            tokenizer=tokenizer,
-            max_seq_length=args.max_seq_length,
-            add_bos=args.add_bos,
-        )
-    else:
-        raise ValueError("You need to have either 'prompt'&'completion' or 'messages' in your column names.")
-
     train_dataset = raw_datasets["train"]
-
     # debugging tool for fewer samples
     if args.max_train_samples is not None:
         max_train_samples = min(len(train_dataset), args.max_train_samples)
@@ -748,7 +726,7 @@ def main(args: FlatArguments):
 
     with accelerator.main_process_first():
         train_dataset = train_dataset.map(
-            encode_function,
+            partial(encode_example, tokenizer=tokenizer, max_seq_length=args.max_seq_length),
             batched=False,
             num_proc=args.preprocessing_num_workers,
             load_from_cache_file=not args.overwrite_cache,
