@@ -65,6 +65,7 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     upload_metadata_to_hf,
 )
+from open_instruct.dataset_processor import CHAT_TEMPLATES
 
 logger = get_logger(__name__)
 
@@ -95,12 +96,14 @@ class FlatArguments:
         default=None,
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
-    chat_template_file: Optional[str] = field(
-        default=None,
-        metadata={"help": (
-            "A file with its content as a jinja2 template for encoding chat messages. "
-            "If not provided, we will use the default Tulu template."
-        )}
+    chat_template_name: Optional[str] = field(
+        default="tulu",
+        metadata={
+            "help": (
+                "The name of the chat template to use. "
+                "Please find the available templates in open_instruct/dataset_processor.py"
+            )
+        },
     )
     use_flash_attn: bool = field(
         default=True,
@@ -369,6 +372,9 @@ class FlatArguments:
             or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
+        
+        if self.chat_template_name is None or self.chat_template_name not in CHAT_TEMPLATES:
+            raise ValueError(f"Invalid chat template name {self.chat_template_name}. Please choose from {CHAT_TEMPLATES.keys()}")
 
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
@@ -672,29 +678,10 @@ def main(args: FlatArguments):
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
         embedding_size = embeddings.weight.shape[0]
 
-    if args.chat_template_file is not None:
-        with open(args.chat_template_file, "r") as f:
-            chat_template = f.read()
-    else:
-        chat_template = (
-            "{% for message in messages %}\n"
-            "{% if message['role'] == 'system' %}\n"
-            "{{ '<|system|>\n' + message['content'] }}\n"
-            "{% elif message['role'] == 'user' %}\n"
-            "{{ '<|user|>\n' + message['content'] }}\n"
-            "{% elif message['role'] == 'assistant' %}\n"
-            "{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n"
-            "{% endif %}\n"
-            "{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n"
-            "{% endif %}\n"
-            "{% endfor %}"
-            "{%- if add_generation_prompt %}"
-            "{{ '<|assistant|>\n' }}"
-            "{%- endif %}"
-        )
     # set the tokenizer chat template to the training format
-    # this makes the encoding and downstream evaluation easier.
-    tokenizer.chat_template = chat_template
+    # this will be used for encoding the training examples
+    # and saved together with the tokenizer to be used later.
+    tokenizer.chat_template = CHAT_TEMPLATES[args.chat_template_name]
     if args.add_bos:
         # also add bos in the chat template
         tokenizer.chat_template = "{{ bos_token }}" + tokenizer.chat_template
