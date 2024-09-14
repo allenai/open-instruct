@@ -1,19 +1,21 @@
 #!/bin/bash
 
 mkdir -p output/shards
-num_prompts=1000
-num_shards=4
+num_prompts=156526
+num_shards=75
+sft_dataset=ai2-adapt-dev/codefeedback-single-turn-reformat
 prompts_per_shard=$((num_prompts / num_shards))
 timestamp=$RANDOM
 shared_generation_hf_repo_id=generation_$timestamp
 shared_rs_hf_repo_id=rejection_sampling_$timestamp
 shared_scores_hf_repo_id=scores_$timestamp
-num_completions=5
-generation_model=allenai/llama-3-tulu-2-8b
-reward_model=allenai/llama-3-tulu-2-8b-uf-mean-rm
-sft_dataset=allenai/tulu-v2-sft-mixture
+num_completions=8
+generation_model=valpy/L3-8B-v3.4-valpy_dpo_uf_da_wc_nectaranthro
+reward_model=Skywork/Skywork-Reward-Llama-3.1-8B
 on_jupyter=true
 num_gpus=1
+image=jacobm/rs-choose-reference-6
+priority=high
 mkdir -p output/shards/$timestamp
 
 # Prepare the command string
@@ -34,7 +36,7 @@ do
     # Build the command string for this shard
     shard_command="python open_instruct/rejection_sampling/generation.py \
     --dataset_name $sft_dataset \
-    --model_name_or_path $generation_model \
+    --model_name_or_path /model \
     --dataset_start_idx $start_idx \
     --dataset_end_idx $end_idx \
     --save_filename /output/shards/$timestamp/$i.jsonl \
@@ -71,21 +73,22 @@ echo "Submitting all shards in one command"
 
 if [ "$on_jupyter" = true ]; then
     python mason.py \
-        --cluster ai2/jupiter-cirrascale-2 \
-        --image costah/open_instruct_rs \
+        --cluster ai2/jupiter-cirrascale-2 ai2/pluto-cirrascale \
+        --image $image \
         --pure_docker_mode \
-        --priority low \
+        --priority $priority \
         --preemptible \
         --no_mount_nfs --no_hf_cache_env \
         --budget ai2/allennlp \
+        --beaker_datasets /model:$generation_model \
         --gpus $num_gpus -- $command
 else
     echo "Running on Mason"
     python mason.py \
     --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
-    --image costah/open_instruct_rs \
+    --image $image \
     --pure_docker_mode \
-    --priority low \
+    --priority $priority \
     --preemptible \
     --budget ai2/allennlp \
     --gpus $num_gpus -- $command
