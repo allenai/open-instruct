@@ -1,9 +1,9 @@
 #!/bin/bash
 
 mkdir -p output/shards
-num_prompts=156526
-num_shards=75
-sft_dataset=ai2-adapt-dev/codefeedback-single-turn-reformat
+num_prompts=30000
+num_shards=30
+sft_dataset=ai2-adapt-dev/WizardLM_evol_instruct_V2_196k_reformat
 prompts_per_shard=$((num_prompts / num_shards))
 timestamp=$RANDOM
 shared_generation_hf_repo_id=generation_$timestamp
@@ -73,7 +73,7 @@ echo "Submitting all shards in one command"
 
 if [ "$on_jupyter" = true ]; then
     python mason.py \
-        --cluster ai2/jupiter-cirrascale-2 ai2/pluto-cirrascale \
+        --cluster ai2/pluto-cirrascale \
         --image $image \
         --pure_docker_mode \
         --priority $priority \
