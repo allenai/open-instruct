@@ -55,6 +55,8 @@ def main():
     # Print unknown arguments
     print("Unknown arguments:", unknown_args)
 
+    if args.num_nodes > 1 and args.default_beaker_config == "configs/beaker_configs/default_finetune.yaml":
+        args.default_beaker_config = "configs/beaker_configs/default_finetune_multinode.yaml"
         
     now = datetime.now().strftime("%m%d%Y%H%M%S")
     with open(args.default_beaker_config, 'r') as f:
@@ -171,32 +173,33 @@ def main():
     d['tasks'][0]['name'] = exp_name
 
     # add cluster-specific env vars
-    if args.cluster == "ai2/jupiter-cirrascale-2":
-        d['tasks'][0]['envVars'] += [
-            {
-                "name": "NCCL_SOCKET_IFNAME",
-                "value": "ib",
-            },
-            {
-                "name": "NCCL_IB_HCA",
-                "value": "^=mlx5_bond_0",
-            },
-            {
-                "name": "NCCL_DEBUG",
-                "value": "INFO",
-            },
-        ]
-    elif args.cluster == "ai2/pluto-cirrascale":
-        d['tasks'][0]['envVars'] += [
-            {
-                "name": "NCCL_IB_HCA",
-                "value": "^=mlx5_1,mlx5_2",
-            },
-            {
-                "name": "NCCL_DEBUG",
-                "value": "INFO",
-            },
-        ]
+    if args.num_nodes > 1:
+        if args.cluster == "ai2/jupiter-cirrascale-2":
+            d['tasks'][0]['envVars'] += [
+                {
+                    "name": "NCCL_SOCKET_IFNAME",
+                    "value": "ib",
+                },
+                {
+                    "name": "NCCL_IB_HCA",
+                    "value": "^=mlx5_bond_0",
+                },
+                {
+                    "name": "NCCL_DEBUG",
+                    "value": "INFO",
+                },
+            ]
+        elif args.cluster == "ai2/pluto-cirrascale":
+            d['tasks'][0]['envVars'] += [
+                {
+                    "name": "NCCL_IB_HCA",
+                    "value": "^=mlx5_1,mlx5_2",
+                },
+                {
+                    "name": "NCCL_DEBUG",
+                    "value": "INFO",
+                },
+            ]
 
     # WANDB settings
     for env in d['tasks'][0]['envVars']:
