@@ -354,7 +354,7 @@ def main(args: Args):
         if table["chosen_score"][-1][rm_key] < table["reference_completion_score"][-1][rm_key]:
             print("reference was best")
             table["chosen_score"][-1][rm_key] = table["reference_completion_score"][-1][rm_key]
-            table["chosen"][-1][-1] = table["reference_completion"][-1]
+            table["chosen"][-1][-1]["content"] = table["reference_completion"][-1]
     save_jsonl(args.save_filename, table)
 
     table_scores = defaultdict(list)
