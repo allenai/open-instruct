@@ -25,7 +25,7 @@ class Args:
 
 def main(args: Args, beaker_runtime_config: BeakerRuntimeConfig):
     print(args)
-    beaker_dataset_ids = get_beaker_dataset_ids(beaker_runtime_config.beaker_workload_id)
+    beaker_dataset_ids = get_beaker_dataset_ids(beaker_runtime_config.beaker_workload_id, sort=True)
     print(beaker_experiment_succeeded(beaker_runtime_config.beaker_workload_id))
 
     start_time = time.time()
@@ -35,9 +35,10 @@ def main(args: Args, beaker_runtime_config: BeakerRuntimeConfig):
             # NOTE: we are assuming the first beaker dataset has the model
             # I have checked a couple of beaker jobs and found the first dataset is the model
             # but we should check this assumption
+            beaker_dataset_ids = get_beaker_dataset_ids(beaker_runtime_config.beaker_workload_id, sort=True)
             submit_beaker_eval_jobs(
                 model_name=args.model_name,
-                location=beaker_dataset_ids[0],
+                location=beaker_dataset_ids[-1],
                 run_oe_eval_experiments=True,
                 run_safety_evaluations=True,
                 skip_oi_evals=True,

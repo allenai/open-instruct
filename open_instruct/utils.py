@@ -22,6 +22,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, List, NewType, Optional, Tuple, Union
 
 import requests
@@ -708,12 +709,20 @@ def beaker_experiment_succeeded(experiment_id: str) -> bool:
     )
 
 
-def get_beaker_dataset_ids(experiment_id: str) -> Optional[List[str]]:
+@dataclass
+class DatasetInfo:
+    id: str
+    committed: Any
+    non_empty: bool
+
+
+def get_beaker_dataset_ids(experiment_id: str, sort=False) -> Optional[List[str]]:
+    """if sort is True, the non-empty latest dataset will be availble at the end of the list"""
     experiment = get_beaker_experiment_info(experiment_id)
     if not experiment:
         return None
     result_ids = [job["result"]["beaker"] for job in experiment["jobs"]]
-    dataset_ids = []
+    dataset_infos = []
     for result_id in result_ids:
         get_dataset_command = f"beaker dataset get {result_id} --format json"
         process = subprocess.Popen(["bash", "-c", get_dataset_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -722,8 +731,19 @@ def get_beaker_dataset_ids(experiment_id: str) -> Optional[List[str]]:
             print(f"Failed to get Beaker dataset: {stderr}")
             return None
         datasets = json.loads(stdout)
-        dataset_ids.extend([dataset["id"] for dataset in datasets])
-    return dataset_ids
+        dataset_infos.extend(
+            [
+                DatasetInfo(
+                    id=dataset["id"], committed=dataset["committed"], non_empty=dataset["storage"]["totalSize"] > 0
+                )
+                for dataset in datasets
+            ]
+        )
+    if sort:
+        # sort based on empty, then commited
+        dataset_infos.sort(key=lambda x: (x.non_empty, datetime.strptime(x.committed, "%Y-%m-%dT%H:%M:%S.%fZ")))
+    print(dataset_infos)
+    return [dataset.id for dataset in dataset_infos]
 
 
 def get_beaker_whoami() -> Optional[str]:
