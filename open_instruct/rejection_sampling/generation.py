@@ -148,12 +148,14 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
 
     ds = load_dataset(dataset_args.dataset_name)
     if dataset_args.sanity_check:
-        for key in ds:
-            ds[key] = ds[key].select(range(min(dataset_args.sanity_check_size, len(ds[key]))))
+        # for key in ds:
+            # ds[key] = ds[key].select(range(min(dataset_args.sanity_check_size, len(ds[key]))))
+        ds["train"] = ds["train"].select(range(min(dataset_args.sanity_check_size, len(ds["train"]))))
     if dataset_args.dataset_end_idx is None:
         dataset_args.dataset_end_idx = len(ds[dataset_args.dataset_train_split])
-    for key in ds:
-        ds[key] = ds[key].select(range(dataset_args.dataset_start_idx, dataset_args.dataset_end_idx))
+    # for key in ds:
+        # ds[key] = ds[key].select(range(dataset_args.dataset_start_idx, dataset_args.dataset_end_idx))
+    ds["train"] = ds["train"].select(range(dataset_args.dataset_start_idx, dataset_args.dataset_end_idx))
     pprint([dataset_args, args, gen_args])
 
     if "gpt-3.5" in args.model_name_or_path or "gpt-4" in args.model_name_or_path:
