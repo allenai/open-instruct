@@ -2,7 +2,7 @@ from datasets import load_dataset, Dataset
 
 new_list = []
 ds = load_dataset("WizardLMTeam/WizardLM_evol_instruct_V2_196k")
-for elem in ds:
+for elem in ds["train"]:
     new_messages = []
     for turn in elem["conversations"]:
         if turn["from"] == "human":
