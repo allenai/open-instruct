@@ -5,71 +5,22 @@
 
 ## Get started
 
-In the sections below, we will include some examples on how to train reward models and demonstrating different features. A couple of notes:
+In the sections below, we will include some examples on how to train online DPO models and demonstrating different features. A couple of notes:
 
-* You should adjust your `per_device_train_batch_size` and `gradient_accumulation_steps` accordingly to maximize throughput
-* To launch jobs using docker and beaker, you should run the following, where `$NUM_GPUS` is the number of GPUs you want the job to use and $YOUR_COMMAND is the command to invoke training
+* You should adjust your `per_device_train_batch_size` and `gradient_accumulation_steps` accordingly to maximize throughput on a particular GPU type.
+* For the examples below, we use `mason.py` to invoke experiment orchastration on Ai2's cluster. For external users, you can copy the command after the `--` and run it on your system or debug locally. For example: the documentation will have commands like the following, but you can just run `$YOUR_COMMAND` on your system and make sure it matches `$NUM_GPUS`.
+    * You can you `--image costah/open_instruct_onlinedpo2` to specify a custom image or if you don't specify any it's going to use the default image.
+    * If you installed your python on NFS you can run a debug mode by **not toggling** `--pure_docker_mode` and it will mount your python environment on the docker container.
 
 ```bash
 python mason.py \
     --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
-    --pure_docker_mode --no_mount_nfs --no_hf_cache_env \
-    --priority preemptible \
+    --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
+    --priority normal \
     --budget ai2/allennlp \
     --gpus $NUM_GPUS -- $YOUR_COMMAND
 ```
 
-
-For example:
-
-```bash
-# single GPU
-python mason.py \
-    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
-    --pure_docker_mode --no_mount_nfs --no_hf_cache_env \
-    --priority preemptible \
-    --budget ai2/allennlp \
-    --gpus 1 -- python open_instruct/reward_modeling.py \
-    --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_splits test \
-    --model_name_or_path EleutherAI/pythia-14m \
-    --chat_template simple_concat_with_space \
-    --learning_rate 3e-6 \
-    --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 32 \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 1024 \
-    --num_train_epochs 1 \
-    --output_dir models/rm/rm \
-    --sanity_check \
-    --push_to_hub
-# 8 GPU
-python mason.py \
-    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
-    --pure_docker_mode --no_mount_nfs --no_hf_cache_env \
-    --priority preemptible \
-    --budget ai2/allennlp \
-    --gpus 8 -- accelerate launch  --config_file configs/ds_configs/deepspeed_zero2.yaml \
-    open_instruct/reward_modeling.py \
-    --dataset_mixer '{"trl-internal-testing/tldr-preference-trl-style": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-trl-style": 1.0}' \
-    --dataset_eval_splits validation \
-    --model_name_or_path EleutherAI/pythia-1b-deduped \
-    --chat_template simple_concat_with_space \
-    --learning_rate 3e-6 \
-    --per_device_train_batch_size 32 \
-    --per_device_eval_batch_size 32 \
-    --gradient_accumulation_steps 1 \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
-    --num_train_epochs 1 \
-    --output_dir models/rm/rm_tldr_1b \
-    --with_tracking \
-    --push_to_hub
-```
 
 
 ### Level 0: Debug
@@ -103,7 +54,12 @@ Here is a command to train a simple reward model on the sentiment dataset taken 
 
 
 ```bash
-python open_instruct/reward_modeling.py \
+python mason.py \
+    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
+    --image costah/open_instruct_dev --pure_docker_mode \
+    --priority normal \
+    --budget ai2/allennlp \
+    --gpus 1 -- python open_instruct/reward_modeling.py \
     --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}' \
     --dataset_train_splits train \
     --dataset_eval_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}' \
@@ -111,15 +67,15 @@ python open_instruct/reward_modeling.py \
     --model_name_or_path EleutherAI/pythia-1b-deduped \
     --chat_template simple_concat_with_space \
     --learning_rate 3e-6 \
-    --per_device_train_batch_size 32 \
-    --per_device_eval_batch_size 32 \
-    --gradient_accumulation_steps 1 \
+    --per_device_train_batch_size 16 \
+    --per_device_eval_batch_size 16 \
+    --gradient_accumulation_steps 4 \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 1024 \
+    --max_prompt_token_lenth 512 \
     --num_train_epochs 1 \
     --output_dir models/rm/rm_sentiment_1b \
     --with_tracking \
-    --push_to_hub \
+    --push_to_hub 
 ```
 * Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/091a0tix
 * Trained model: https://huggingface.co/vwxyzjn/reward_modeling__EleutherAI_pythia-1b-deduped/tree/reward_modeling__1__1725461002
@@ -130,7 +86,12 @@ You can run the following commands to launch experiments. Note that you can mix 
 
 
 ```bash
-python open_instruct/reward_modeling.py \
+python mason.py \
+    --cluster ai2/allennlp-cirrascale  ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
+    --image costah/open_instruct_dev --pure_docker_mode \
+    --priority normal \
+    --budget ai2/allennlp \
+    --gpus 1 -- python open_instruct/reward_modeling.py \
     --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0, "ai2-adapt-dev/summarize_from_feedback_small": 1.0}' \
     --dataset_train_splits train train \
     --dataset_eval_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}' \
@@ -146,7 +107,7 @@ python open_instruct/reward_modeling.py \
     --num_train_epochs 1 \
     --output_dir models/rm/rm_sentiment_1b \
     --with_tracking \
-    --push_to_hub
+    --push_to_hub 
 ```
 
 * Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/hop8gzww
@@ -155,24 +116,29 @@ python open_instruct/reward_modeling.py \
 
 ### LEVEL 2: multi-gpu training using DS2 with the TL;DR summarization dataset
 ```bash
-accelerate launch  --config_file configs/ds_configs/deepspeed_zero2.yaml \
+python mason.py \
+    --cluster ai2/allennlp-cirrascale  ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
+    --image costah/open_instruct_dev --pure_docker_mode \
+    --priority normal \
+    --budget ai2/allennlp \
+    --gpus 8 -- accelerate launch --config_file configs/ds_configs/deepspeed_zero2.yaml \
     open_instruct/reward_modeling.py \
-    --dataset_mixer '{"trl-internal-testing/tldr-preference-trl-style": 1.0}' \
+    --dataset_mixer '{"trl-internal-testing/hh-rlhf-trl-style": 1.0}' \
     --dataset_train_splits train \
-    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-trl-style": 1.0}' \
-    --dataset_eval_splits validation \
+    --dataset_eval_mixer '{"trl-internal-testing/hh-rlhf-trl-style": 1.0}' \
+    --dataset_eval_splits test \
     --model_name_or_path EleutherAI/pythia-1b-deduped \
-    --chat_template simple_concat_with_space \
+    --chat_template simple_chat \
     --learning_rate 3e-6 \
-    --per_device_train_batch_size 32 \
-    --per_device_eval_batch_size 32 \
-    --gradient_accumulation_steps 1 \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --per_device_train_batch_size 8 \
+    --per_device_eval_batch_size 8 \
+    --gradient_accumulation_steps 4 \
+    --max_token_length 2048 \
+    --max_prompt_token_lenth 1024 \
     --num_train_epochs 1 \
-    --output_dir models/rm/rm_tldr_1b \
+    --output_dir models/rm/rm_hh_1b \
     --with_tracking \
-    --push_to_hub
+    --push_to_hub 
 ```
 
 * Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/mlycj9qb
@@ -181,7 +147,12 @@ accelerate launch  --config_file configs/ds_configs/deepspeed_zero2.yaml \
 
 ### LEVEL 2.1: multi-gpu training using DS2 with the anthropic HH dataset
 ```bash
-accelerate launch --config_file configs/ds_configs/deepspeed_zero2.yaml \
+python mason.py \
+    --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale \
+    --image costah/open_instruct_dev --pure_docker_mode \
+    --priority normal \
+    --budget ai2/allennlp \
+    --gpus 8 -- accelerate launch --config_file configs/ds_configs/deepspeed_zero3.yaml \
     open_instruct/reward_modeling.py \
     --dataset_mixer '{"trl-internal-testing/hh-rlhf-trl-style": 1.0}' \
     --dataset_train_splits train \
@@ -209,13 +180,19 @@ accelerate launch --config_file configs/ds_configs/deepspeed_zero2.yaml \
 
 ### LEVEL 3: multi-gpu training using DS2 with the ultrafeedback dataset
 ```bash
-accelerate launch --config_file examples/accelerate_configs/deepspeed_zero2.yaml \
-    open_instruct/rm_zephyr.py \
-    --dataset_mixer '{"HuggingFaceH4/ultrafeedback_binarized": 1.0}' \
+python mason.py \
+    --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale \
+    --image costah/open_instruct_dev --pure_docker_mode \
+    --priority normal \
+    --budget ai2/allennlp \
+    --gpus 8 -- accelerate launch --config_file configs/ds_configs/deepspeed_zero3.yaml \
+    open_instruct/reward_modeling.py \
+    --dataset_mixer '{"allenai/ultrafeedback_binarized_cleaned": 1.0}' \
     --dataset_train_splits train_prefs \
-    --dataset_eval_mixer '{"HuggingFaceH4/ultrafeedback_binarized": 1.0}' \
+    --dataset_eval_mixer '{"allenai/ultrafeedback_binarized_cleaned": 1.0}' \
     --dataset_eval_splits test_prefs \
-    --chat_template zephyr \
+    --model_name_or_path allenai/llama-3-tulu-2-8b \
+    --chat_template tulu \
     --learning_rate 3e-6 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
@@ -223,9 +200,12 @@ accelerate launch --config_file examples/accelerate_configs/deepspeed_zero2.yaml
     --max_token_length 1024 \
     --max_prompt_token_lenth 1024 \
     --num_train_epochs 1 \
-    --bf16 \
-    --output_dir models/rm/rm_zephyr_7b \
+    --output_dir models/rm/rm_tulu_8b \
+    --gradient_checkpointing \
+    --push_to_hub \
+    --with_tracking
 ```
+
 * Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/di1f6p0b
 * Trained model: https://huggingface.co/vwxyzjn/reward_modeling__allenai_llama-3-tulu-2-8b/tree/reward_modeling__1__1725459452
 

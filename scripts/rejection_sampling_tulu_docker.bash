@@ -78,7 +78,6 @@ if [ "$on_jupyter" = true ]; then
         --pure_docker_mode \
         --priority $priority \
         --preemptible \
-        --no_mount_nfs --no_hf_cache_env \
         --budget ai2/allennlp \
         --beaker_datasets /model:$generation_model \
         --gpus $num_gpus -- $command
