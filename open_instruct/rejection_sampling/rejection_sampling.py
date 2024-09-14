@@ -350,6 +350,11 @@ def main(args: Args):
         assert worst_completions[i]["messages"][:-1] == best_completions[i]["messages"][:-1]
         table["chosen_score"].append(best_completions[i]["score"])
         table["rejected_score"].append(worst_completions[i]["score"])
+        rm_key = table["reference_completion_score"][-1].keys()[0]
+        if table["chosen_score"][-1] < table["reference_completion_score"][rm_key]:
+            print("reference was best")
+            table["chosen_score"][-1] = table["reference_completion_score"][rm_key]
+            table["chosen"][-1][-1] = table["reference_completion"][-1]
     save_jsonl(args.save_filename, table)
 
     table_scores = defaultdict(list)
