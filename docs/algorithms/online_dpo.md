@@ -43,13 +43,17 @@ python open_instruct/online_dpo_vllm_thread.py \
     --max_token_length 2048 \
     --max_prompt_token_lenth 512 \
     --num_train_epochs 1 \
-    --stop_token period \
     --beta 0.1 \
     --output_dir models/rm/rm_sentiment_1b \
     --vllm_device cuda:0 \
     --vllm_gpu_memory_utilization 0.1 \
+    --sanity_check \
+    --sanity_check_max_samples 2048 \
+    --hf_metadata_dataset "" \
+    --no_try_launch_beaker_eval_jobs \
+    --gradient_checkpointing \
     --with_tracking \
-    --push_to_hub \
+    --push_to_hub
 
 # LEVEL 0.1: two GPU; quick debug; using 1 GPU for training and 1 GPU for vllm generation via --vllm_device cuda:1
 python open_instruct/online_dpo_vllm_thread.py \
@@ -70,12 +74,16 @@ python open_instruct/online_dpo_vllm_thread.py \
     --max_token_length 1024 \
     --max_prompt_token_lenth 512 \
     --num_train_epochs 1 \
-    --stop_token period \
     --beta 0.1 \
     --output_dir models/rm/rm_sentiment_1b \
     --vllm_device cuda:1 \
+    --sanity_check \
+    --sanity_check_max_samples 2048 \
+    --hf_metadata_dataset "" \
+    --no_try_launch_beaker_eval_jobs \
+    --gradient_checkpointing \
     --with_tracking \
-    --push_to_hub \
+    --push_to_hub
 ```
 
 
@@ -187,7 +195,7 @@ python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
     --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
-    --priority high \
+    --priority urgent \
     --preemptible \
     --budget ai2/allennlp \
     --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
@@ -212,15 +220,14 @@ python mason.py \
     --num_mini_batches 1 \
     --total_episodes 300000 \
     --model_name_or_path allenai/open_instruct_dev  \
-    --model_revision costa_finetune_tulu3_8b_norobot__meta-llama_Meta-Llama-3.1-8B__42__1725559869 \
-    --reward_model_path vwxyzjn/reward_modeling__allenai_open_instruct_dev \
-    --reward_model_revision reward_modeling__1__1725760619 \
+    --model_revision finetune__meta-llama_Meta-Llama-3.1-8B__42__1725751338 \
+    --reward_model_path vwxyzjn/reward_modeling__allenai_llama-3-tulu-2-8b \
+    --reward_model_revision reward_modeling__1__1726175049 \
     --non_stop_penalty \
     --stop_token eos \
     --penalty_reward_value -10.0 \
     --beta 0.03 \
-    --num_evals 1 \
-    --seed 3 \
+    --num_evals 3 \
     --response_length 1024 \
     --gradient_checkpointing \
     --with_tracking \
