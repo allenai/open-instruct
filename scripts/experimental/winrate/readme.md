@@ -57,7 +57,20 @@ python -i generate_and_eval.py \
 # Name: proportion, dtype: float64
 # df['model_response_len'].mean()=153.838
 
-# https://wandb.ai/ai2-llm/open_instruct_internal/runs/97i9hdk3/overview
+
+# https://wandb.ai/ai2-llm/open_instruct_internal/runs/jvjegpcq/
+python -i generate_and_eval.py \
+    --model_name_or_path vwxyzjn/ppo_vllm_thread_beta_0.03__allenai_open_instruct_dev \
+    --model_revision ppo_vllm_thread_beta_0.03__3__1726244716 \
+    --output_path test.csv \
+    --n 500
+# preferred
+# response1    0.554
+# response0    0.446
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=146.928
+
+# https://wandb.ai/ai2-llm/open_instruct_internal/runs/97i9hdk3
 python -i generate_and_eval.py \
     --model_name_or_path allenai/open_instruct_dev \
     --model_revision costa_offline_dpo_norobot_3pair__allenai_open_instruct_dev__42__1726174531 \
@@ -69,6 +82,19 @@ python -i generate_and_eval.py \
 # response0    0.424
 # Name: proportion, dtype: float64
 # df['model_response_len'].mean()=144.382
+
+# https://wandb.ai/ai2-llm/open_instruct_internal/runs/w21rugjl
+python -i generate_and_eval.py \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision costa_offline_dpo_norobot_3pair_2peoch__allenai_open_instruct_dev__42__1726241871 \
+    --output_path test.csv \
+    --n 500
+
+# preferred
+# response1    0.502
+# response0    0.498
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=140.248
 
 python plot_winrate.py
 ```
