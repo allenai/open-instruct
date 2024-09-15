@@ -372,7 +372,7 @@ class FlatArguments:
             or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
-        
+
         if self.chat_template_name is None or self.chat_template_name not in CHAT_TEMPLATES:
             raise ValueError(f"Invalid chat template name {self.chat_template_name}. Please choose from {CHAT_TEMPLATES.keys()}")
 
