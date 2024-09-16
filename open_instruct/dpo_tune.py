@@ -947,11 +947,11 @@ def main(args: FlatArguments):
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
 
+    local_metrics = torch.zeros((20), device=accelerator.device)
+    episode = 0
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
         train_dataloader.set_epoch(epoch)
-        total_loss = 0
-        total_aux_loss = 0
         if last_checkpoint_path and resume_step is not None:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint
             active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_step)
@@ -961,6 +961,7 @@ def main(args: FlatArguments):
         average_log_prob_loss_types = ["simpo", "dpo_norm"]
         average_log_prob = args.dpo_loss_type in average_log_prob_loss_types
         for step, batch in enumerate(active_dataloader):
+            episode += len(batch["chosen_input_ids"]) * accelerator.num_processes
             # dpo forward pass & loss
             with accelerator.accumulate(model):
                 policy_chosen_logps, policy_rejected_logps, aux_loss = concatenated_forward(
@@ -1011,9 +1012,6 @@ def main(args: FlatArguments):
                 if args.load_balancing_loss:
                     weighted_aux_loss = args.load_balancing_weight * aux_loss
                     loss += weighted_aux_loss
-                    total_aux_loss += weighted_aux_loss.detach().float()
-                # We keep track of the loss at each logged step
-                total_loss += loss.detach().float()
                 accelerator.backward(loss)
                 # clip gradient norm. don't do this with deepspeed
                 if accelerator.sync_gradients and args.clip_grad_norm > 0:
@@ -1022,37 +1020,60 @@ def main(args: FlatArguments):
                 optimizer.zero_grad()
                 lr_scheduler.step()
 
+                # We keep track of the loss at each logged step
+                with torch.no_grad():
+                    chosen_rewards = (args.dpo_beta * (policy_chosen_logps - reference_chosen_logps)).mean()
+                    rejected_rewards = (args.dpo_beta * (policy_rejected_logps - reference_rejected_logps)).mean()
+                    average_rewards = (chosen_rewards + rejected_rewards) / 2
+                    accuracy = (chosen_rewards > rejected_rewards).float().mean()
+                    margin = (chosen_rewards - rejected_rewards).mean()
+                    local_metrics[0] += loss
+                    local_metrics[1] += chosen_rewards
+                    local_metrics[2] += rejected_rewards
+                    local_metrics[3] += average_rewards
+                    local_metrics[4] += accuracy
+                    local_metrics[5] += margin
+                    local_metrics[6] += policy_chosen_logps.mean()
+                    local_metrics[7] += policy_rejected_logps.mean()
+                    if args.load_balancing_loss:
+                        local_metrics[19] += weighted_aux_loss
+
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
                 progress_bar.update(1)
                 completed_steps += 1
                 if args.logging_steps and completed_steps % args.logging_steps == 0:
-                    avg_loss = (
-                        accelerator.gather(total_loss).mean().item()
-                        / args.gradient_accumulation_steps
-                        / args.logging_steps
-                    )
+                    # single all reduce to save time, avoiding per metric all reduce
+                    global_metrics = accelerator.reduce(local_metrics, reduction="mean")
+                    global_metrics /= args.gradient_accumulation_steps * args.logging_steps
+                    global_metrics = global_metrics.tolist()
                     metrics_to_log = {
+                        "training_step": completed_steps,
                         "learning_rate": lr_scheduler.get_last_lr()[0],
-                        "train_loss": avg_loss,
+                        "epoch": episode / len(train_dataset),
+                        "train_loss": global_metrics[0],
+                        "rewards/chosen": global_metrics[1],
+                        "rewards/rejected": global_metrics[2],
+                        "rewards/average": global_metrics[3],
+                        "rewards/accuracy": global_metrics[4],
+                        "rewards/margin": global_metrics[5],
+                        "logps/chosen": global_metrics[6],
+                        "logps/rejected": global_metrics[7],
                     }
-                    logger_str = f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}"
+                    logger_str = (
+                        f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {global_metrics[0]}"
+                    )
                     if args.load_balancing_loss:
-                        avg_aux_loss = (
-                            accelerator.gather(total_aux_loss).mean().item()
-                            / args.gradient_accumulation_steps
-                            / args.logging_steps
-                        )
-                        logger_str += f" Aux Loss: {avg_aux_loss}"
-                        metrics_to_log["aux_loss"] = avg_aux_loss
+                        logger_str += f" Aux Loss: {global_metrics[19]}"
+                        metrics_to_log["aux_loss"] = global_metrics[19]
                     logger.info(logger_str)
                     if args.with_tracking:
                         accelerator.log(
                             metrics_to_log,
                             step=completed_steps,
                         )
-                    total_loss = 0
-                    total_aux_loss = 0
+                    # Reset the local metrics
+                    local_metrics.zero_()
 
                 if isinstance(checkpointing_steps, int):
                     if completed_steps % checkpointing_steps == 0:
