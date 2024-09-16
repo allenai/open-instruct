@@ -228,7 +228,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     torch.backends.cudnn.deterministic = True
 
     # create a tokenizer (pad from right)
-    tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision, padding_side="right")
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_config.model_name_or_path, revision=model_config.model_revision, padding_side="right"
+    )
     tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
     tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
 
@@ -280,7 +282,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
         model_config.model_name_or_path, revision=model_config.model_revision, num_labels=1
     )
-    if args.resize_token_embeddings: # optimize for tensor core
+    if args.resize_token_embeddings:  # optimize for tensor core
         model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
     if model_config.gradient_checkpointing:
         model.gradient_checkpointing_enable()
@@ -392,7 +394,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # save model
     os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
-    original_tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision)
+    original_tokenizer = AutoTokenizer.from_pretrained(
+        model_config.model_name_or_path, revision=model_config.model_revision
+    )
     save_with_accelerate(
         accelerator,
         model,
