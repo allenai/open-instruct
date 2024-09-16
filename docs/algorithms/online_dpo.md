@@ -33,7 +33,9 @@ python open_instruct/online_dpo_vllm_thread.py \
     --max_token_length 1024 \
     --max_prompt_token_lenth 512 \
     --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr \
-    --reward_model_path cleanrl/reward_modeling__EleutherAI_pythia-1b-deduped_sentiment \
+    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
+    --non_stop_penalty \
+    --stop_token eos \
     --chat_template simple_concat_with_space \
     --learning_rate 3e-6 \
     --total_episodes 4000 \
@@ -64,7 +66,9 @@ python open_instruct/online_dpo_vllm_thread.py \
     --max_token_length 1024 \
     --max_prompt_token_lenth 512 \
     --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr \
-    --reward_model_path cleanrl/reward_modeling__EleutherAI_pythia-1b-deduped_sentiment \
+    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
+    --non_stop_penalty \
+    --stop_token eos \
     --chat_template simple_concat_with_space \
     --learning_rate 3e-6 \
     --total_episodes 3000 \
@@ -234,8 +238,8 @@ python mason.py \
     --push_to_hub
 ```
 
-TBD.
-
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/6345u0us
+* Trained model: https://huggingface.co/vwxyzjn/online_dpo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/online_dpo_vllm_thread_beta_0.03__1__1726245978
 
 ### Quality of life tools
 

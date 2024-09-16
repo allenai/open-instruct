@@ -33,7 +33,9 @@ python open_instruct/ppo_vllm_thread.py \
     --max_token_length 1024 \
     --max_prompt_token_lenth 512 \
     --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr \
-    --reward_model_path cleanrl/reward_modeling__EleutherAI_pythia-1b-deduped_sentiment \
+    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
+    --non_stop_penalty \
+    --stop_token eos \
     --chat_template simple_concat_with_space \
     --learning_rate 3e-6 \
     --total_episodes 4000 \
@@ -64,7 +66,9 @@ python open_instruct/ppo_vllm_thread.py \
     --max_token_length 1024 \
     --max_prompt_token_lenth 512 \
     --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr \
-    --reward_model_path cleanrl/reward_modeling__EleutherAI_pythia-1b-deduped_sentiment \
+    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
+    --non_stop_penalty \
+    --stop_token eos \
     --chat_template simple_concat_with_space \
     --learning_rate 3e-6 \
     --total_episodes 3000 \
@@ -182,7 +186,9 @@ python mason.py \
     --push_to_hub
 ```
 
-TBD
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/jvjegpcq
+* Trained model: https://huggingface.co/vwxyzjn/ppo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/ppo_vllm_thread_beta_0.03__3__1726244716
+
 
 ### LEVEL 3: 8 GPU; Training on ultrafeedback RM
 
@@ -232,8 +238,8 @@ python mason.py \
     --push_to_hub
 ```
 
-TBD
-
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/z9035fv5/overview
+* Trained model: https://huggingface.co/vwxyzjn/ppo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/ppo_vllm_thread_beta_0.03__1__1726282755
 
 
 ### Quality of life tools
