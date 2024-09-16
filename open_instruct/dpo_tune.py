@@ -1060,7 +1060,9 @@ def main(args: FlatArguments):
                         "logps/chosen": global_metrics[6],
                         "logps/rejected": global_metrics[7],
                     }
-                    logger_str = f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {global_metrics[0]}"
+                    logger_str = (
+                        f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {global_metrics[0]}"
+                    )
                     if args.load_balancing_loss:
                         logger_str += f" Aux Loss: {global_metrics[19]}"
                         metrics_to_log["aux_loss"] = global_metrics[19]
