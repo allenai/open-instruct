@@ -96,7 +96,7 @@ class FlatArguments:
         default=None,
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
-    chat_template_name: Optional[str] = field(
+    chat_template_name: str = field(
         default="tulu",
         metadata={
             "help": (
@@ -373,7 +373,7 @@ class FlatArguments:
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
 
-        if self.chat_template_name is None or self.chat_template_name not in CHAT_TEMPLATES:
+        if self.chat_template_name not in CHAT_TEMPLATES:
             raise ValueError(f"Invalid chat template name {self.chat_template_name}. Please choose from {CHAT_TEMPLATES.keys()}")
 
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
