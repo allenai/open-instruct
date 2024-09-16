@@ -1044,7 +1044,7 @@ def main(args: FlatArguments):
             if accelerator.sync_gradients:
                 progress_bar.update(1)
                 completed_steps += 1
-                if args.logging_steps and completed_steps % (args.gradient_accumulation_steps * args.logging_steps) == 0:
+                if args.logging_steps and completed_steps % args.logging_steps == 0:
                     # single all reduce to save time, avoiding per metric all reduce
                     global_metrics = accelerator.reduce(local_metrics, reduction="mean")
                     global_metrics /= args.gradient_accumulation_steps * args.logging_steps
