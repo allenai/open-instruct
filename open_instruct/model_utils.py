@@ -15,12 +15,10 @@
 
 
 import itertools
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple, Union
-
-from open_instruct.utils import retry_on_exception
 
 try:
     import deepspeed
@@ -40,12 +38,14 @@ from rich.table import Table
 from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
+from open_instruct.utils import retry_on_exception
+
 
 @dataclass
 class ModelConfig:
     model_name_or_path: Optional[str] = None
     """The model checkpoint for weights initialization."""
-    model_revision: str = "main"
+    model_revision: Optional[str] = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
     trust_remote_code: bool = False
     """Trust remote code when loading a model."""
@@ -323,7 +323,9 @@ def save_with_accelerate(
     tokenizer: PreTrainedTokenizer,
     output_dir: str,
     use_lora: bool = False,
+    model_attribute_to_save: Optional[str] = None,
 ) -> None:
+    """`model_attribute_to_save` is for used to save PPO's policy instead of the full model"""
     # set the generation config to an empty setting to be safe.
     # we usually do greedy decoding for generation, so this should be okay.
     # otherwise, we get an error thrown at save time.
@@ -332,10 +334,24 @@ def save_with_accelerate(
     )
 
     unwrapped_model: PreTrainedModel = accelerator.unwrap_model(model)
+    if model_attribute_to_save is not None:
+        unwrapped_model = getattr(unwrapped_model, model_attribute_to_save)
     # When doing multi-gpu training, we need to use accelerator.get_state_dict(model) to get the state_dict.
     # Otherwise, sometimes the model will be saved with only part of the parameters.
     # Also, accelerator needs to use the wrapped model to get the state_dict.
     state_dict = accelerator.get_state_dict(model)
+
+    # if we are saving a specific attribute of the model, we need to filter the state_dict
+    # also the state_dict only lives in the main process; other processes just have state_dict = None
+    if model_attribute_to_save is not None and accelerator.is_main_process:
+        state_dict = OrderedDict(
+            {
+                k[len(f"{model_attribute_to_save}.") :]: v
+                for k, v in state_dict.items()
+                if k.startswith(f"{model_attribute_to_save}.")
+            }
+        )
+
     if use_lora:
         # When using lora, the unwrapped model is a PeftModel, which doesn't support the is_main_process
         # and has its own save_pretrained function for only saving lora modules.
