@@ -373,7 +373,6 @@ class FlatArguments:
             or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
-        
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
 
@@ -684,9 +683,9 @@ def main(args: FlatArguments):
     else:
         try:
             tokenizer.chat_template = AutoTokenizer.from_pretrained(args.chat_template_name).chat_template
-        except:
+        except Exception as e:
             raise ValueError(f"Could not find chat template for {args.chat_template_name}.")
-        
+
     if args.add_bos:
         # also add bos in the chat template
         tokenizer.chat_template = "{{ bos_token }}" + tokenizer.chat_template

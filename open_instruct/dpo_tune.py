@@ -75,6 +75,7 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     upload_metadata_to_hf,
 )
+from open_instruct.dataset_processor import CHAT_TEMPLATES
 from open_instruct.finetune import encode_sft_example
 
 logger = get_logger(__name__)
@@ -602,8 +603,7 @@ def main(args: FlatArguments):
             "You are instantiating a new tokenizer from scratch. This is not supported by this script."
             "You can do it from another script, save it, and load it from here, using --tokenizer_name."
         )
-        
-    
+
 
     def load_model():
         if args.model_name_or_path:
@@ -697,7 +697,7 @@ def main(args: FlatArguments):
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
         if len(tokenizer) > embeddings.weight.shape[0]:
             model.resize_token_embeddings(len(tokenizer))
-            
+
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
     # and saved together with the tokenizer to be used later.
@@ -706,9 +706,9 @@ def main(args: FlatArguments):
     else:
         try:
             tokenizer.chat_template = AutoTokenizer.from_pretrained(args.chat_template_name).chat_template
-        except:
+        except Exception as e:
             raise ValueError(f"Could not find chat template for {args.chat_template_name}.")
-        
+
     if args.add_bos:
         # also add bos in the chat template
         tokenizer.chat_template = "{{ bos_token }}" + tokenizer.chat_template
