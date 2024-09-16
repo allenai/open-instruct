@@ -646,11 +646,12 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
             else:
                 if training_step != 1:
+                    # NOTE: important: the indent here is different for sync mode
                     data = next(iter_dataloader)
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
                     queries_next = queries_next.repeat(args.num_generation_per_prompt, 1)
-                    # NOTE: important: the indent here is different for sync mode
                     send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
+                    queries = queries_next
 
             training_time_start = time.time()
             with torch.no_grad():
