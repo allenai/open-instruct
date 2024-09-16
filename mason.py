@@ -2,7 +2,8 @@ import argparse
 from typing import List
 import beaker
 import os
-
+import secrets
+import string
 
 def parse_beaker_dataset(dataset_str):
     splt = dataset_str.split(":")
@@ -67,10 +68,13 @@ def get_args():
         "--pure_docker_mode", action="store_true", help="If given, run in pure docker mode"
     )
     parser.add_argument(
-        "--no_hf_cache_env", action="store_true", help="If given, do not pass in `HF_DATASETS_CACHE`, `HF_HUB_CACHE`, and `HF_ASSETS_CACHE`"
+        "--no_hf_cache_env", action="store_true", help="Getting deprecated; it does nothing"
     )
     parser.add_argument(
-        "--no_mount_nfs", action="store_true", help="If given, do not mount NFS"
+        "--no_mount_nfs", action="store_true", help="Getting deprecated; it does nothing"
+    )
+    parser.add_argument(
+        "--resumable", action="store_true", help="If given, make the job resumable"
     )
 
 
@@ -78,6 +82,17 @@ def get_args():
     mason_args, command_args = parser.parse_known_args()
     commands = parse_commands(command_args)
     return mason_args, commands
+
+
+def generate_id(length: int = 8) -> str:
+    """Generate a random base-36 string of `length` digits."""
+    # There are ~2.8T base-36 8-digit strings. If we generate 210k ids,
+    # we'll have a ~1% chance of collision.
+    alphabet = string.ascii_lowercase + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+global_wandb_id = generate_id()
 
 
 def parse_commands(command_args: List[str]) -> List[List[str]]:
@@ -103,7 +118,7 @@ def parse_commands(command_args: List[str]) -> List[List[str]]:
     return commands
 
 
-def get_env_vars(pure_docker_mode, no_mount_hf_cache, beaker_secrets, whoami):
+def get_env_vars(pure_docker_mode, cluster: List[str], beaker_secrets, whoami, resumable):
     env_vars = []
     useful_secrets = [
         "HF_TOKEN",
@@ -134,33 +149,79 @@ def get_env_vars(pure_docker_mode, no_mount_hf_cache, beaker_secrets, whoami):
                 value=os.getenv("PATH"),
             ),
         ])
-    if not no_mount_hf_cache:
+    
+    # if we are not running on jupiter2, we try to mount the NFS
+    if "ai2/jupiter-cirrascale-2" not in cluster:
         env_vars.extend([
             beaker.EnvVar(
                 name="HF_DATASETS_CACHE",
-                value=os.getenv("HF_DATASETS_CACHE"),
+                value="/net/nfs.cirrascale/allennlp/.cache/huggingface",
             ),
             beaker.EnvVar(
                 name="HF_HUB_CACHE",
-                value=os.getenv("HF_HUB_CACHE"),
+                value="/net/nfs.cirrascale/allennlp/.cache/hub",
             ),
             beaker.EnvVar(
                 name="HF_ASSETS_CACHE",
-                value=os.getenv("HF_ASSETS_CACHE"),
+                value="/net/nfs.cirrascale/allennlp/.cache/assets",
+            ),
+            beaker.EnvVar(
+                name="CHECKPOINT_OUTPUT_DIR",
+                value=f"/net/nfs.cirrascale/allennlp/deletable_checkpoint_states/{global_wandb_id}",
+            ),
+        ])
+    # if we only run on jupiter 2, we try to mount weka
+    elif len(cluster) == 1 and "ai2/jupiter-cirrascale-2" in cluster:
+        env_vars.extend([
+            beaker.EnvVar(
+                name="HF_DATASETS_CACHE",
+                value="/weka/allennlp/.cache/huggingface",
+            ),
+            beaker.EnvVar(
+                name="HF_HUB_CACHE",
+                value="/weka/allennlp/.cache/hub",
+            ),
+            beaker.EnvVar(
+                name="CHECKPOINT_OUTPUT_DIR",
+                value=f"/weka/allennlp/deletable_checkpoint_states/{global_wandb_id}",
+            ),
+        ])
+    # don't mount anything; assume no cache
+    else:
+        pass
+
+    if resumable:
+        env_vars.extend([
+            beaker.EnvVar(
+                name="WANDB_RUN_ID",
+                value=global_wandb_id,
+            ),
+            beaker.EnvVar(
+                name="WANDB_RESUME",
+                value="allow",
             ),
         ])
 
     return env_vars
 
 
-def get_datasets(beaker_datasets, no_mount_nfs):
+def get_datasets(beaker_datasets, cluster: List[str]):
     """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
     res = []
-    if not no_mount_nfs:
+    # if we are not running on jupiter2, we try to mount the NFS
+    if "ai2/jupiter-cirrascale-2" not in cluster:
         res = [
             beaker.DataMount(
                 source=beaker.DataSource(host_path="/net/nfs.cirrascale"),
                 mount_path="/net/nfs.cirrascale",
+            ),
+        ]
+    # if we only run on jupiter 2, we try to mount weka
+    elif len(cluster) == 1 and "ai2/jupiter-cirrascale-2" in cluster:
+        res = [
+            beaker.DataMount(
+                source=beaker.DataSource(weka="oe-adapt-default"),
+                mount_path="/weka",
             ),
         ]
     for beaker_dataset in beaker_datasets:
@@ -173,7 +234,7 @@ def get_datasets(beaker_datasets, no_mount_nfs):
     return res
 
 
-def make_task_spec(args, command, i, beaker_secrets, whoami):
+def make_task_spec(args, command, i, beaker_secrets, whoami, resumable: bool):
     # special logic to deal with escape like
     # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
     # we need to wrap the json string with single quote
@@ -198,11 +259,11 @@ def make_task_spec(args, command, i, beaker_secrets, whoami):
         command=command,
         arguments=[fully_command],
         result=beaker.ResultSpec(path="/output"),
-        datasets=get_datasets(args.beaker_datasets, args.no_mount_nfs),
+        datasets=get_datasets(args.beaker_datasets, args.cluster),
         context=beaker.TaskContext(priority=beaker.Priority(args.priority),
                                    preemptible=args.preemptible),
         constraints=beaker.Constraints(cluster=args.cluster),
-        env_vars=get_env_vars(args.pure_docker_mode, args.no_hf_cache_env, beaker_secrets, whoami),
+        env_vars=get_env_vars(args.pure_docker_mode, args.cluster, beaker_secrets, whoami, resumable),
         resources=beaker.TaskResources(gpu_count=args.gpus),
     )
 
@@ -220,7 +281,7 @@ def main():
     whoami = beaker_client.account.whoami().name
     experiment_spec = beaker.ExperimentSpec(
         description=args.description,
-        tasks=[make_task_spec(args, command, i, beaker_secrets, whoami) for i, command in enumerate(commands)],
+        tasks=[make_task_spec(args, command, i, beaker_secrets, whoami, args.resumable) for i, command in enumerate(commands)],
         budget=args.budget,
     )
 
