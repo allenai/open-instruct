@@ -3,7 +3,7 @@ model_revision: main
 use_flash_attn: true
 gradient_checkpointing: true
 tokenizer_name: EleutherAI/pythia-14m
-use_slow_tokenizer: true
+use_slow_tokenizer: null
 dataset_name: trl-internal-testing/tldr-preference-trl-style
 max_seq_length: 2048
 max_train_samples: 100
@@ -22,3 +22,5 @@ report_to:
 logging_steps: 1
 checkpointing_steps: 1000
 keep_last_n_checkpoints: 3
+try_launch_beaker_eval_jobs: false
+hf_metadata_dataset: ''
