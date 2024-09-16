@@ -19,6 +19,7 @@ from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from transformers import (
+    AutoConfig,
     AutoModelForSequenceClassification,
     AutoTokenizer,
     PreTrainedModel,
@@ -138,9 +139,6 @@ class Args:
     output_dir: Optional[str] = None
     """Where to save the model"""
 
-    resize_token_embeddings: bool = True
-    """Whether to resize the token embeddings to a factor of 8 for utilizing tensor cores better"""
-
     def __post_init__(self):
         self.dataset_mixer_dict, self.dataset_mixer = process_dataset_mixer(self.dataset_mixer)
         if self.dataset_eval_mixer is not None:
@@ -179,7 +177,7 @@ def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig
             args.hf_repo_revision = args.run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
 
-    if args.with_tracking:
+    if args.with_tracking and accelerator.is_main_process:
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
     return accelerator
@@ -195,15 +193,16 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     local_seed = args.seed + accelerator.process_index
 
     # set up experiment tracking and seeds
+    all_configs = {}
+    if is_beaker_job():
+        args.checkpoint_output_dir = os.environ.get("CHECKPOINT_OUTPUT_DIR", args.output_dir)
+        beaker_config = maybe_get_beaker_config()
+        # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
+        if len(beaker_config.beaker_dataset_id_urls) > 0:
+            args.output_dir = "/output"
+        all_configs.update(vars(beaker_config))
+    all_configs.update(**asdict(args), **asdict(dataset_config), **asdict(model_config))
     if accelerator.is_main_process:
-        all_configs = {**asdict(args), **asdict(dataset_config), **asdict(model_config)}
-        if is_beaker_job():
-            beaker_config = maybe_get_beaker_config()
-            # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
-            if len(beaker_config.beaker_dataset_id_urls) > 0:
-                args.output_dir = "/output"
-            all_configs.update(vars(beaker_config))
-
         if args.with_tracking:
             import wandb
 
@@ -228,10 +227,14 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     torch.backends.cudnn.deterministic = True
 
     # create a tokenizer (pad from right)
+    config = AutoConfig.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision)
     tokenizer = AutoTokenizer.from_pretrained(
         model_config.model_name_or_path, revision=model_config.model_revision, padding_side="right"
     )
-    tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
+    if config.architectures == "LlamaForCausalLM" and config.bos_token_id == 128000:
+        tokenizer.pad_token_id = 128002  # <|reserved_special_token_0|>
+    else:
+        tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
     tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
 
     # create the dataset
@@ -240,7 +243,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     train_dataset = combine_dataset(
         args.dataset_mixer_dict,
         splits=args.dataset_train_splits,
-        columns_to_keep=["chosen", "rejected"],
+        columns_to_keep=[dataset_config.preference_chosen_key, dataset_config.preference_rejected_key],
     )
     if dataset_config.sanity_check:
         train_dataset = train_dataset.select(
@@ -255,7 +258,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         eval_dataset = combine_dataset(
             args.dataset_eval_mixer_dict,
             splits=args.dataset_eval_splits,
-            columns_to_keep=["chosen", "rejected"],
+            columns_to_keep=[dataset_config.preference_chosen_key, dataset_config.preference_rejected_key],
         )
         eval_dataset = eval_dataset.select(range(0, min(len(eval_dataset), dataset_config.sanity_check_max_samples)))
         with accelerator.main_process_first():
@@ -280,10 +283,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # create the model and optimizer
     model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
-        model_config.model_name_or_path, revision=model_config.model_revision, num_labels=1
+        model_config.model_name_or_path, num_labels=1
     )
-    if args.resize_token_embeddings:  # optimize for tensor core
-        model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
     if model_config.gradient_checkpointing:
         model.gradient_checkpointing_enable()
     disable_dropout_in_model(model)  # see p.3. in https://arxiv.org/pdf/1909.08593
@@ -304,7 +305,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         shuffle=True,
         collate_fn=data_collator,
     )
-
     eval_dataloader = DataLoader(
         eval_dataset,
         batch_size=args.per_device_eval_batch_size,
@@ -394,9 +394,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # save model
     os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
-    original_tokenizer = AutoTokenizer.from_pretrained(
-        model_config.model_name_or_path, revision=model_config.model_revision
-    )
+    original_tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path)
     save_with_accelerate(
         accelerator,
         model,
