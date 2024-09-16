@@ -647,6 +647,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             else:
                 if training_step != 1:
                     # NOTE: important: the indent here is different for sync mode
+                    # we also set to use `queries = queries_next` immediately
                     data = next(iter_dataloader)
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
                     queries_next = queries_next.repeat(args.num_generation_per_prompt, 1)
