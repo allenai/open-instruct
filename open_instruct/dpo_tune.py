@@ -1027,7 +1027,6 @@ def main(args: FlatArguments):
                     average_rewards = (chosen_rewards + rejected_rewards) / 2
                     accuracy = (chosen_rewards > rejected_rewards).float().mean()
                     margin = (chosen_rewards - rejected_rewards).mean()
-                    kl = average_rewards / args.dpo_beta
                     local_metrics[0] += loss
                     local_metrics[1] += chosen_rewards
                     local_metrics[2] += rejected_rewards
@@ -1036,7 +1035,6 @@ def main(args: FlatArguments):
                     local_metrics[5] += margin
                     local_metrics[6] += policy_chosen_logps.mean()
                     local_metrics[7] += policy_rejected_logps.mean()
-                    local_metrics[8] += kl
                     if args.load_balancing_loss:
                         local_metrics[19] += weighted_aux_loss
 
@@ -1061,7 +1059,6 @@ def main(args: FlatArguments):
                         "rewards/margin": global_metrics[5],
                         "logps/chosen": global_metrics[6],
                         "logps/rejected": global_metrics[7],
-                        "kl": global_metrics[8],
                     }
                     logger_str = f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {global_metrics[0]}"
                     if args.load_balancing_loss:
