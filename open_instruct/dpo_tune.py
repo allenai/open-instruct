@@ -738,6 +738,11 @@ def main(args: FlatArguments):
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
         if len(tokenizer) > embeddings.weight.shape[0]:
             model.resize_token_embeddings(len(tokenizer))
+    if reference_model is not None:
+        reference_embeddings = reference_model.get_input_embeddings()
+        with deepspeed.zero.GatheredParameters(reference_embeddings.weight, modifier_rank=None):
+            if len(tokenizer) > reference_embeddings.weight.shape[0]:
+                reference_model.resize_token_embeddings(len(tokenizer))
 
     if args.use_lora:
         if args.use_qlora:
