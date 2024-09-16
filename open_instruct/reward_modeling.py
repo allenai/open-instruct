@@ -288,7 +288,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
         model_config.model_name_or_path, revision=model_config.model_revision, num_labels=1
     )
-    if args.resize_token_embeddings: # optimize for tensor core
+    if args.resize_token_embeddings:  # optimize for tensor core
         model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
     if model_config.gradient_checkpointing:
         model.gradient_checkpointing_enable()
@@ -399,7 +399,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # save model
     os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
-    original_tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision)
+    original_tokenizer = AutoTokenizer.from_pretrained(
+        model_config.model_name_or_path, revision=model_config.model_revision
+    )
     save_with_accelerate(
         accelerator,
         model,
