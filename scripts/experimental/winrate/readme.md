@@ -76,7 +76,6 @@ python -i generate_and_eval.py \
     --model_revision costa_offline_dpo_norobot_3pair__allenai_open_instruct_dev__42__1726174531 \
     --output_path test.csv \
     --n 500
-
 # preferred
 # response1    0.576
 # response0    0.424
@@ -89,12 +88,31 @@ python -i generate_and_eval.py \
     --model_revision costa_offline_dpo_norobot_3pair_2peoch__allenai_open_instruct_dev__42__1726241871 \
     --output_path test.csv \
     --n 500
-
 # preferred
 # response1    0.502
 # response0    0.498
 # Name: proportion, dtype: float64
 # df['model_response_len'].mean()=140.248
+
+# https://wandb.ai/ai2-llm/open_instruct_internal/runs/g70g1coa/overview
+python -i generate_and_eval.py \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision costa_offline_dpo_norobot_3pair_3peoch__allenai_open_instruct_dev__42__1726354080 \
+    --output_path test.csv \
+    --n 500
+# preferred
+# response0    0.536
+# response1    0.464
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=136.864
+
+# https://wandb.ai/ai2-llm/open_instruct_internal/runs/z5wfidhb
+python -i generate_and_eval.py \
+    --model_name_or_path vwxyzjn/online_dpo_vllm_thread_beta_0.5__allenai_open_instruct_dev \
+    --model_revision online_dpo_vllm_thread_beta_0.5__3__1726368079 \
+    --output_path test.csv \
+    --n 500
+
 
 python plot_winrate.py
 ```
