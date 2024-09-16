@@ -238,8 +238,8 @@ python mason.py \
     --push_to_hub
 ```
 
-* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/6345u0us
-* Trained model: https://huggingface.co/vwxyzjn/online_dpo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/online_dpo_vllm_thread_beta_0.03__1__1726245978
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/le8luk2u
+* Trained model: https://huggingface.co/vwxyzjn/online_dpo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/online_dpo_vllm_thread_beta_0.03__1__1726282895
 
 ### Quality of life tools
 
