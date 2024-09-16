@@ -378,9 +378,9 @@ class FlatArguments:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
 
 
-def encode_example(example, tokenizer, max_seq_length):
+def encode_sft_example(example, tokenizer, max_seq_length):
     """
-    This function encodes a single example into a format that can be used for training.
+    This function encodes a single example into a format that can be used for sft training.
     Here, we assume each example has a 'messages' field. Each message in it is a dict with 'role' and 'content' fields.
     We use the `apply_chat_template` function from the tokenizer to tokenize the messages and prepare the input and label tensors.
     """
@@ -718,7 +718,7 @@ def main(args: FlatArguments):
 
     with accelerator.main_process_first():
         train_dataset = train_dataset.map(
-            partial(encode_example, tokenizer=tokenizer, max_seq_length=args.max_seq_length),
+            partial(encode_sft_example, tokenizer=tokenizer, max_seq_length=args.max_seq_length),
             batched=False,
             num_proc=args.preprocessing_num_workers,
             load_from_cache_file=not args.overwrite_cache,
