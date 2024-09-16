@@ -199,7 +199,7 @@ python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
     --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
-    --priority urgent \
+    --priority high \
     --preemptible \
     --budget ai2/allennlp \
     --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
