@@ -13,14 +13,18 @@ class Data:
 
 # Data
 results = {
-    "SFT w/ H4/no_robots": Data({8e9: [0.31, 121.41]}, "#FFB898", "o"),
-    "SFT + Online DPO w/ H4/no_robots": Data({8e9: [0.47, 153.838]}, "#eb4034", "v"),
-    "SFT + PPO w/ H4/no_robots": Data({8e9: [0.446, 146.928]}, "#eb4034", "v"),
-    "SFT + Offline DPO w/ H4/no_robots": Data({8e9: [0.424, 144.382]}, "#00FFFF", "2"),
-    "SFT + Offline DPO w/ H4/no_robots two epochs": Data({8e9: [0.498, 140.248]}, "#9F2B68", "3"),
-    "SFT + Offline DPO w/ H4/no_robots three epochs": Data({8e9: [0.536, 136.864]}, "#9F2B68", "3"),
-    "llama-3.1-tulu-2-dpo-8": Data({8e9: [0.504, 172.248]}, "#68D39F", "X"),
-    "meta-llama/Meta-Llama-3.1-8B-Instruct": Data({8e9: [0.566, 151.506]}, "#8EC2FF", "s"),
+    "SFT w/ H4/no_robots": Data({8e9: [0.318, 198.402]}, "#FFB898", "o"),
+    "SFT + Online DPO w/ H4/no_robots (42k episodes)": Data({8e9: [0.446, 238.528]}, "#E8352C", "."),
+    "SFT + Online DPO w/ H4/no_robots (100k episodes)": Data({8e9: [0.606, 303.176]}, "#147277", "."),
+    "SFT + Online DPO w/ H4/no_robots (120k episodes)": Data({8e9: [0.64, 314.074]}, "#96ceb4", "."),
+    "SFT + PPO w/ H4/no_robots (42k episodes)": Data({8e9: [0.476, 222.886]}, "#E8352C", "v"),
+    "SFT + PPO w/ H4/no_robots (100k episodes)": Data({8e9: [0.548, 233.058]}, "#147277", "v"),
+    "SFT + PPO w/ H4/no_robots (120k episodes)": Data({8e9: [0.562, 226.956]}, "#96ceb4", "v"),
+    "SFT + Offline DPO w/ H4/no_robots (42k episodes)": Data({8e9: [0.578, 273.732]}, "#E8352C", "3"),
+    "SFT + Offline DPO w/ H4/no_robots (84k episodes)": Data({8e9: [0.668, 215.136]}, "#147277", "3"),
+    "SFT + Offline DPO w/ H4/no_robots (126k episodes)": Data({8e9: [0.688, 186.848]}, "#96ceb4", "3"),
+    "llama-3.1-tulu-2-dpo-8": Data({8e9: [0.71, 320.09]}, "#68D39F", "X"),
+    "meta-llama/Meta-Llama-3.1-8B-Instruct": Data({8e9: [0.816, 309.322]}, "#8EC2FF", "s"),
 }
 first_key = list(results.keys())[0]
 
@@ -52,7 +56,7 @@ def create_original_plot(filename):
     ax.set_xlabel("Model size (parameters)", fontsize=20)
     ax.tick_params(axis='y', labelsize=20)
     ax.set_ylabel("Win rate vs. human completions", fontsize=20)
-    ax.set_ylim(0, 0.7)
+    ax.set_ylim(0, 0.9)
 
     # Ensure only the specified ticks are shown
     ax.get_xaxis().set_major_locator(plt.FixedLocator([8e9]))
@@ -89,12 +93,12 @@ def create_winrate_vs_length_plot(filename):
     ax.tick_params(axis='both', which='major', labelsize=20)
 
     # Set reasonable axis limits
-    ax.set_xlim(100, 200)
-    ax.set_ylim(0.2, 0.7)
+    ax.set_xlim(100, 500)
+    ax.set_ylim(0.2, 0.9)
 
     # Adjust legend
     # ax.legend(title="", loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=1, fontsize=20)
-    fig.legend(loc="upper center", ncol=1, bbox_transform=fig.transFigure, fontsize=10)
+    fig.legend(loc="upper right", ncol=1, bbox_transform=fig.transFigure, fontsize=10)
 
     # Grid and spines
     # ax.grid(True, linestyle=':', color='grey')
