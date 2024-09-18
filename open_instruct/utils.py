@@ -734,7 +734,7 @@ def get_beaker_dataset_ids(experiment_id: str, sort=False) -> Optional[List[str]
         dataset_infos.extend(
             [
                 DatasetInfo(
-                    id=dataset["id"], committed=dataset["committed"], non_empty=dataset["storage"]["totalSize"] > 0
+                    id=dataset["id"], committed=dataset["committed"], non_empty=False if dataset["storage"]["totalSize"] is None else dataset["storage"]["totalSize"] > 0
                 )
                 for dataset in datasets
             ]
