@@ -211,6 +211,15 @@ You can additionally run other evaluations in this repository through varied arg
 
 You can also upload metadata via the `scripts/add_metadata.py` script. Just run `python scripts/add_metadata.py` and follow the prompts.
 
+If you have used automatic evaluation, you cacn also upload metadata via `python add_metadata_from_wandb.py`. Example usage:
+
+```bash
+# from a wandb url
+python scripts/add_metadata_from_wandb.py --wandb_run_id ai2-llm/open_instruct_internal/runs/fjclmg47
+# or from a hf_revision (the name of the autoeval)
+python scripts/add_metadata_from_wandb.py --hf_repo_revision valpy_dpo_mix_uf_wc_regen_da_sftmix_v4.23___model__42__1725581304
+```
+
 ### Human evaluation
 
 We release our human evaluation interface and collected annotations in the `./human_eval` folder. Please see the corresponding [README](./human_eval/README.md) for more details.
