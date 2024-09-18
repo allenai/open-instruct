@@ -33,7 +33,9 @@ python open_instruct/online_dpo_vllm_thread.py \
     --max_token_length 1024 \
     --max_prompt_token_lenth 512 \
     --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr \
-    --reward_model_path cleanrl/reward_modeling__EleutherAI_pythia-1b-deduped_sentiment \
+    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
+    --non_stop_penalty \
+    --stop_token eos \
     --chat_template simple_concat_with_space \
     --learning_rate 3e-6 \
     --total_episodes 4000 \
@@ -43,13 +45,17 @@ python open_instruct/online_dpo_vllm_thread.py \
     --max_token_length 2048 \
     --max_prompt_token_lenth 512 \
     --num_train_epochs 1 \
-    --stop_token period \
     --beta 0.1 \
     --output_dir models/rm/rm_sentiment_1b \
     --vllm_device cuda:0 \
     --vllm_gpu_memory_utilization 0.1 \
+    --sanity_check \
+    --sanity_check_max_samples 2048 \
+    --hf_metadata_dataset "" \
+    --no_try_launch_beaker_eval_jobs \
+    --gradient_checkpointing \
     --with_tracking \
-    --push_to_hub \
+    --push_to_hub
 
 # LEVEL 0.1: two GPU; quick debug; using 1 GPU for training and 1 GPU for vllm generation via --vllm_device cuda:1
 python open_instruct/online_dpo_vllm_thread.py \
@@ -60,7 +66,9 @@ python open_instruct/online_dpo_vllm_thread.py \
     --max_token_length 1024 \
     --max_prompt_token_lenth 512 \
     --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr \
-    --reward_model_path cleanrl/reward_modeling__EleutherAI_pythia-1b-deduped_sentiment \
+    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
+    --non_stop_penalty \
+    --stop_token eos \
     --chat_template simple_concat_with_space \
     --learning_rate 3e-6 \
     --total_episodes 3000 \
@@ -70,12 +78,16 @@ python open_instruct/online_dpo_vllm_thread.py \
     --max_token_length 1024 \
     --max_prompt_token_lenth 512 \
     --num_train_epochs 1 \
-    --stop_token period \
     --beta 0.1 \
     --output_dir models/rm/rm_sentiment_1b \
     --vllm_device cuda:1 \
+    --sanity_check \
+    --sanity_check_max_samples 2048 \
+    --hf_metadata_dataset "" \
+    --no_try_launch_beaker_eval_jobs \
+    --gradient_checkpointing \
     --with_tracking \
-    --push_to_hub \
+    --push_to_hub
 ```
 
 
@@ -87,7 +99,7 @@ Here we are using --vllm_device cuda:7 to say we want to launch the vllm generat
 ```bash
 # for running TL;DR you can likely use GPUs with less memory
 python mason.py \
-    --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
+    --pure_docker_mode \
     --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/general-cirrascale \
     --priority normal \
     --resumable \
@@ -133,7 +145,7 @@ python mason.py \
 # use ai2/jupiter-cirrascale-2 or ai2/pluto-cirrascale
 python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
-    --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
+    --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
@@ -185,7 +197,7 @@ python mason.py \
 # use ai2/jupiter-cirrascale-2 or ai2/pluto-cirrascale
 python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
-    --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
+    --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
@@ -212,23 +224,22 @@ python mason.py \
     --num_mini_batches 1 \
     --total_episodes 300000 \
     --model_name_or_path allenai/open_instruct_dev  \
-    --model_revision costa_finetune_tulu3_8b_norobot__meta-llama_Meta-Llama-3.1-8B__42__1725559869 \
-    --reward_model_path vwxyzjn/reward_modeling__allenai_open_instruct_dev \
-    --reward_model_revision reward_modeling__1__1725760619 \
+    --model_revision finetune__meta-llama_Meta-Llama-3.1-8B__42__1725751338 \
+    --reward_model_path vwxyzjn/reward_modeling__allenai_llama-3-tulu-2-8b \
+    --reward_model_revision reward_modeling__1__1726175049 \
     --non_stop_penalty \
     --stop_token eos \
     --penalty_reward_value -10.0 \
     --beta 0.03 \
-    --num_evals 1 \
-    --seed 3 \
+    --num_evals 3 \
     --response_length 1024 \
     --gradient_checkpointing \
     --with_tracking \
     --push_to_hub
 ```
 
-TBD.
-
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/le8luk2u
+* Trained model: https://huggingface.co/vwxyzjn/online_dpo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/online_dpo_vllm_thread_beta_0.03__1__1726282895
 
 ### Quality of life tools
 

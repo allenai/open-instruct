@@ -64,6 +64,7 @@ from open_instruct.utils import (
     get_wandb_tags,
     is_beaker_job,
     maybe_get_beaker_config,
+    maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     upload_metadata_to_hf,
 )
@@ -270,9 +271,11 @@ def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig
     args.local_dataloader_batch_size = args.local_batch_size
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
-            args.hf_repo_id = f"{args.exp_name}__{model_config.model_name_or_path.replace('/', '_')}"
-        if args.hf_entity is None:
-            args.hf_entity = api.whoami()["name"]
+            args.hf_repo_id = "open_instruct_dev"
+        if args.hf_entity is None:  # first try to use AI2 entity
+            args.hf_entity = maybe_use_ai2_hf_entity()
+        if args.hf_entity is None:  # then try to use the user's entity
+            args.hf_entity = HfApi().whoami()["name"]
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
         if args.hf_repo_revision is None:  # auto-generate one
             args.hf_repo_revision = args.run_name
@@ -717,10 +720,12 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
             else:
                 if training_step != 1:
+                    # NOTE: important: the indent here is different for sync mode
+                    # we also set to use `queries = queries_next` immediately
                     data = next(iter_dataloader)
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
-                    # NOTE: important: the indent here is different for sync mode
                     send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
+                    queries = queries_next
 
             training_time_start = time.time()
             with torch.no_grad():

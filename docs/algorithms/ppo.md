@@ -33,7 +33,9 @@ python open_instruct/ppo_vllm_thread.py \
     --max_token_length 1024 \
     --max_prompt_token_lenth 512 \
     --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr \
-    --reward_model_path cleanrl/reward_modeling__EleutherAI_pythia-1b-deduped_sentiment \
+    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
+    --non_stop_penalty \
+    --stop_token eos \
     --chat_template simple_concat_with_space \
     --learning_rate 3e-6 \
     --total_episodes 4000 \
@@ -43,13 +45,17 @@ python open_instruct/ppo_vllm_thread.py \
     --max_token_length 2048 \
     --max_prompt_token_lenth 512 \
     --num_train_epochs 1 \
-    --stop_token period \
     --beta 0.1 \
     --output_dir models/rm/rm_sentiment_1b \
     --vllm_device cuda:0 \
     --vllm_gpu_memory_utilization 0.1 \
+    --sanity_check \
+    --sanity_check_max_samples 2048 \
+    --hf_metadata_dataset "" \
+    --no_try_launch_beaker_eval_jobs \
+    --gradient_checkpointing \
     --with_tracking \
-    --push_to_hub \
+    --push_to_hub
 
 # LEVEL 0.1: two GPU; quick debug; using 1 GPU for training and 1 GPU for vllm generation via --vllm_device cuda:1
 python open_instruct/ppo_vllm_thread.py \
@@ -60,7 +66,9 @@ python open_instruct/ppo_vllm_thread.py \
     --max_token_length 1024 \
     --max_prompt_token_lenth 512 \
     --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr \
-    --reward_model_path cleanrl/reward_modeling__EleutherAI_pythia-1b-deduped_sentiment \
+    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
+    --non_stop_penalty \
+    --stop_token eos \
     --chat_template simple_concat_with_space \
     --learning_rate 3e-6 \
     --total_episodes 3000 \
@@ -70,44 +78,16 @@ python open_instruct/ppo_vllm_thread.py \
     --max_token_length 1024 \
     --max_prompt_token_lenth 512 \
     --num_train_epochs 1 \
-    --stop_token period \
     --beta 0.1 \
     --output_dir models/rm/rm_sentiment_1b \
     --vllm_device cuda:1 \
-    --with_tracking \
-    --push_to_hub \
-
-# LEVEL 0.2: three GPU; quick debug; using 2 GPU for training and 1 GPU for vllm generation via --vllm_device cuda:2
-accelerate launch --num_processes 2 --config_file configs/ds_configs/deepspeed_zero3.yaml \
-     open_instruct/ppo_vllm_thread.py \
-    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
-    --dataset_eval_splits validation \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
-    --learning_rate 3e-6 \
-    --output_dir models/minimal/ppo_vllm_thread_tldr \
-    --per_device_train_batch_size 2 \
-    --local_rollout_forward_batch_size 2 \
-    --gradient_accumulation_steps 2 \
-    --num_epochs 1 \
-    --num_mini_batches 1 \
-    --total_episodes 10 \
-    --sanity_check_max_samples 10 \
     --sanity_check \
-    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr  \
-    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
-    --non_stop_penalty \
-    --stop_token eos \
-    --beta 0.1 \
-    --response_length 53 \
-    --with_tracking \
-    --push_to_hub \
+    --sanity_check_max_samples 2048 \
     --hf_metadata_dataset "" \
     --no_try_launch_beaker_eval_jobs \
     --gradient_checkpointing \
-    --vllm_device cuda:2
+    --with_tracking \
+    --push_to_hub
 ```
 
 
@@ -119,7 +99,7 @@ Here we are using --vllm_device cuda:7 to say we want to launch the vllm generat
 ```bash
 # for running TL;DR you can likely use GPUs with less memory
 python mason.py \
-    --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
+    --pure_docker_mode \
     --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/general-cirrascale \
     --priority normal \
     --resumable \
@@ -165,7 +145,7 @@ python mason.py \
 # use ai2/jupiter-cirrascale-2 or ai2/pluto-cirrascale
 python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
-    --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
+    --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
@@ -206,7 +186,9 @@ python mason.py \
     --push_to_hub
 ```
 
-TBD
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/jvjegpcq
+* Trained model: https://huggingface.co/vwxyzjn/ppo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/ppo_vllm_thread_beta_0.03__3__1726244716
+
 
 ### LEVEL 3: 8 GPU; Training on ultrafeedback RM
 
@@ -215,7 +197,7 @@ TBD
 # use ai2/jupiter-cirrascale-2 or ai2/pluto-cirrascale
 python mason.py \
     --cluster ai2/pluto-cirrascale \
-    --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
+    --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
@@ -235,7 +217,7 @@ python mason.py \
     --chat_template tulu \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 32 \
+    --gradient_accumulation_steps 64 \
     --local_rollout_forward_batch_size 1 \
     --vllm_device cuda:7 \
     --num_epochs 1 \
@@ -248,17 +230,16 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --penalty_reward_value -10.0 \
-    --beta 0.03 \
+    --beta 0.02 \
     --num_evals 3 \
-    --seed 3 \
     --response_length 1024 \
     --gradient_checkpointing \
     --with_tracking \
     --push_to_hub
 ```
 
-TBD
-
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/z9035fv5/overview
+* Trained model: https://huggingface.co/vwxyzjn/ppo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/ppo_vllm_thread_beta_0.03__1__1726282755
 
 
 ### Quality of life tools
