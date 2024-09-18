@@ -642,10 +642,14 @@ def main(args: FlatArguments):
                 "pad_token": "<pad>",
             }
         )
-        assert num_added_tokens in [
-            0,
-            1,
-        ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
+        if "deepseek" in args.model_name_or_path:
+            assert num_added_tokens == 2, f"LlamaTokenizer for deepseek should only add two special token - the pad_token, or no tokens if pad token present. added {num_added_tokens}"
+
+        else:
+            assert num_added_tokens in [
+                0,
+                1,
+            ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
     elif isinstance(tokenizer, GPTNeoXTokenizerFast):
         # OLMo newer models use this tokenizer
         if tokenizer.bos_token is None:

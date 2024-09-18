@@ -1,7 +1,7 @@
-model_name_or_path: meta-llama/Meta-Llama-3.1-8B
+model_name_or_path: deepseek-ai/deepseek-math-7b-base
 model_revision: main
 use_flash_attn: true
-tokenizer_name: meta-llama/Meta-Llama-3.1-8B
+tokenizer_name: deepseek-ai/deepseek-math-7b-base
 use_slow_tokenizer: true
 dataset_mixer:
     # This final 3.4 mix is based on the ablations in the `tulu3_8b_preview_mix_v3.4.x` folder

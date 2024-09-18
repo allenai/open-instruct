@@ -92,10 +92,10 @@ TASKS=(
     "alpaca_eval_v2::tulu"
     "truthfulqa::tulu"
 )
-MODEL_TYPE="--model-type vllm"
+MODEL_TYPE_VLLM="--model-type vllm"
 BATCH_SIZE_VLLM=10000
 BATCH_SIZE_OTHER=1
-GPU_COUNT=1
+GPU_COUNT_VLLM=1
 GPU_COUNT_OTHER=2
 MODEL_TYPE_OTHER=""
 
@@ -107,8 +107,8 @@ for TASK in "${TASKS[@]}"; do
         MODEL_TYPE=$MODEL_TYPE_OTHER
     else
         BATCH_SIZE=$BATCH_SIZE_VLLM
-        MODEL_TYPE="--model-type vllm"
-        GPU_COUNT=1
+        MODEL_TYPE=$MODEL_TYPE_VLLM
+        GPU_COUNT=$GPU_COUNT_VLLM
     fi
     
     python oe-eval-internal/oe_eval/launch.py --model "$MODEL_NAME" --beaker-workspace "ai2/tulu-3-results" --beaker-budget ai2/oe-adapt --task "$TASK" $MODEL_TYPE --batch-size "$BATCH_SIZE" --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" ${HF_UPLOAD_ARG} --gpus "$GPU_COUNT" --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key"}' ${REVISION_ARG}
