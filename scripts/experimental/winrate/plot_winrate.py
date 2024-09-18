@@ -13,16 +13,25 @@ class Data:
 
 # Data
 results = {
-    "SFT w/ H4/no_robots": Data({8e9: [0.318, 198.402]}, "#FFB898", "o"),
-    "SFT + Online DPO w/ H4/no_robots (42k episodes)": Data({8e9: [0.446, 238.528]}, "#E8352C", "."),
-    "SFT + Online DPO w/ H4/no_robots (100k episodes)": Data({8e9: [0.606, 303.176]}, "#147277", "."),
-    "SFT + Online DPO w/ H4/no_robots (120k episodes)": Data({8e9: [0.64, 314.074]}, "#96ceb4", "."),
-    "SFT + PPO w/ H4/no_robots (42k episodes)": Data({8e9: [0.476, 222.886]}, "#E8352C", "v"),
-    "SFT + PPO w/ H4/no_robots (100k episodes)": Data({8e9: [0.548, 233.058]}, "#147277", "v"),
-    "SFT + PPO w/ H4/no_robots (120k episodes)": Data({8e9: [0.562, 226.956]}, "#96ceb4", "v"),
-    "SFT + Offline DPO w/ H4/no_robots (42k episodes)": Data({8e9: [0.578, 273.732]}, "#E8352C", "3"),
-    "SFT + Offline DPO w/ H4/no_robots (84k episodes)": Data({8e9: [0.668, 215.136]}, "#147277", "3"),
-    "SFT + Offline DPO w/ H4/no_robots (126k episodes)": Data({8e9: [0.688, 186.848]}, "#96ceb4", "3"),
+    "SFT": Data({8e9: [0.318, 198.402]}, "#FFB898", "o"),
+    "SFT + Online DPO (42k episodes; β 0.03)": Data({8e9: [0.446, 238.528]}, "#FF6B6B", "."),
+    "SFT + Online DPO (100k episodes; β 0.03)": Data({8e9: [0.606, 303.176]}, "#007500", "."),
+    "SFT + Online DPO (126k episodes; β 0.03)": Data({8e9: [0.64, 314.074]}, "#45B7D1", "."),
+    "SFT + PPO (42k episodes; β 0.03)": Data({8e9: [0.476, 222.886]}, "#FF6B6B", "v"),
+    "SFT + PPO (100k episodes; β 0.03)": Data({8e9: [0.548, 233.058]}, "#007500", "v"),
+    "SFT + PPO (126k episodes; β 0.03)": Data({8e9: [0.562, 226.956]}, "#45B7D1", "v"),
+    "SFT + Offline DPO (length-normalized; β 5.0) (42k episodes)": Data({8e9: [0.578, 273.732]}, "#FF6B6B", "3"),
+    "SFT + Offline DPO (length-normalized; β 5.0) (84k episodes)": Data({8e9: [0.668, 215.136]}, "#007500", "3"),
+    "SFT + Offline DPO (length-normalized; β 5.0) (126k episodes)": Data({8e9: [0.688, 186.848]}, "#45B7D1", "3"),
+    "SFT + Offline DPO (42k episodes, β 5.0)": Data({8e9: [0.346, 209.43]}, "#FF6B6B", "D"),
+    "SFT + Offline DPO (84k episodes, β 5.0)": Data({8e9: [0.378, 208.1]}, "#007500", "D"),
+    "SFT + Offline DPO (126k episodes, β 5.0)": Data({8e9: [0.374, 223.876]}, "#45B7D1", "D"),
+    "SFT + Offline DPO (42k episodes, β 0.1)": Data({8e9: [0.528, 227.462]}, "#FF6B6B", "P"),
+    "SFT + Offline DPO (84k episodes, β 0.1)": Data({8e9: [0.558, 205.354]}, "#007500", "P"),
+    "SFT + Offline DPO (126k episodes, β 0.1)": Data({8e9: [0.574, 205.498]}, "#45B7D1", "P"),
+    "SFT + Offline DPO (42k episodes, β 0.03)": Data({8e9: [0.58, 206.512]}, "#FF6B6B", "+"),
+    "SFT + Offline DPO (84k episodes, β 0.03)": Data({8e9: [0.578, 207.07]}, "#007500", "+"),
+    "SFT + Offline DPO (126k episodes, β 0.03)": Data({8e9: [0.612, 204.078]}, "#45B7D1", "+"),
     "llama-3.1-tulu-2-dpo-8": Data({8e9: [0.71, 320.09]}, "#68D39F", "X"),
     "meta-llama/Meta-Llama-3.1-8B-Instruct": Data({8e9: [0.816, 309.322]}, "#8EC2FF", "s"),
 }
@@ -89,11 +98,11 @@ def create_winrate_vs_length_plot(filename):
     ax.set_xlabel("Model response length", fontsize=20)
     plt.axhline(y=0.5, color='black', linestyle='-.', label='reference response')
     plt.axvline(x=179.726, color='black', linestyle='-', label='reference response len')
-    ax.set_ylabel("Win rate vs. human completions", fontsize=20)
+    ax.set_ylabel("Win rate vs. human completions\nH4/no_robots test split\nGPT4 as a judge", fontsize=20)
     ax.tick_params(axis='both', which='major', labelsize=20)
 
     # Set reasonable axis limits
-    ax.set_xlim(100, 500)
+    ax.set_xlim(170, 500)
     ax.set_ylim(0.2, 0.9)
 
     # Adjust legend

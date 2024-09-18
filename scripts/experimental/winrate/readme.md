@@ -145,6 +145,107 @@ python -i generate_and_eval.py \
 # df['model_response_len'].mean()=186.848
 
 
+# https://wandb.ai/ai2-llm/open_instruct_internal/runs/9boxjt9g
+python -i generate_and_eval.py \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision costa_offline_dpo_norobot_3pair_1peoch_dpo__allenai_open_instruct_dev__42__1726598473 \
+    --n 500
+# preferred
+# response1    0.654
+# response0    0.346
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=209.43
+
+# https://wandb.ai/ai2-llm/open_instruct_internal/runs/l3sx2vy3
+python -i generate_and_eval.py \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision costa_offline_dpo_norobot_3pair_2peoch_dpo__allenai_open_instruct_dev__42__1726598454 \
+    --n 500
+# preferred
+# response1    0.622
+# response0    0.378
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=208.1
+
+# https://wandb.ai/ai2-llm/open_instruct_internal/runs/scc7ic9o
+python -i generate_and_eval.py \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision costa_offline_dpo_norobot_3pair_3peoch_dpo__allenai_open_instruct_dev__42__1726598454 \
+    --n 500
+# preferred
+# response1    0.626
+# response0    0.374
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=223.876
+
+## beta 0.1
+# https://wandb.ai/ai2-llm/open_instruct_internal/runs/5ro3trre
+python generate_and_eval.py \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision costa_offline_dpo_norobot_3pair_1peoch_dpo_beta_0.1__allenai_open_instruct_dev__42__1726616746 \
+    --n 500
+# preferred
+# response0    0.528
+# response1    0.472
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=227.462
+
+# https://wandb.ai/ai2-llm/open_instruct_internal/runs/jjudzmie
+python generate_and_eval.py \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision costa_offline_dpo_norobot_3pair_2peoch_dpo_beta_0.1__allenai_open_instruct_dev__42__1726624662 \
+    --n 500
+# preferred
+# response0    0.558
+# response1    0.442
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=205.354
+
+# https://wandb.ai/ai2-llm/open_instruct_internal/runs/p1g5p9f1
+python generate_and_eval.py \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision costa_offline_dpo_norobot_3pair_3peoch_dpo_beta_0.1__allenai_open_instruct_dev__42__1726616662 \
+    --n 500
+# preferred
+# response0    0.574
+# response1    0.426
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=205.498
+
+## beta 0.03
+# https://wandb.ai/ai2-llm/open_instruct_internal/runs/8hmgusle
+python generate_and_eval.py \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision costa_offline_dpo_norobot_3pair_1peoch_dpo_beta_0.03__allenai_open_instruct_dev__42__1726616748 \
+    --n 500
+# preferred
+# response0    0.58
+# response1    0.42
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=206.512
+
+# https://wandb.ai/ai2-llm/open_instruct_internal/runs/i3a3oodn
+python generate_and_eval.py \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision costa_offline_dpo_norobot_3pair_2peoch_dpo_beta_0.03__allenai_open_instruct_dev__42__1726616747 \
+    --n 500
+# preferred
+# response0    0.578
+# response1    0.422
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=207.07
+
+# https://wandb.ai/ai2-llm/open_instruct_internal/runs/r50e84fb
+python generate_and_eval.py \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision costa_offline_dpo_norobot_3pair_3peoch_dpo_beta_0.03__allenai_open_instruct_dev__42__1726624622 \
+    --n 500
+# preferred
+# response0    0.612
+# response1    0.388
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=204.078
+
 python plot_winrate.py
 
 
@@ -202,4 +303,16 @@ python measure_agreement_rate.py \
     --input_path csvs/allenai/open_instruct_dev_costa_offline_dpo_norobot_3pair_3peoch__allenai_open_instruct_dev__42__1726354080_judged.csv \
     --n -1
 # count: 500, agreement_rate: 61.20%
+
+python measure_agreement_rate.py \
+    --reward_model_path allenai/llama-3-tulu-2-8b-uf-mean-rm \
+    --input_path csvs/vwxyzjn/online_dpo_vllm_thread_beta_0.03_episode_126000__allenai_open_instruct_dev_online_dpo_vllm_thread_beta_0.03_episode_126000__3__1726559254_judged.csv \
+    --n -1
+# count: 500, agreement_rate: 64.00%
+
+python measure_agreement_rate.py \
+    --reward_model_path allenai/llama-3-tulu-2-8b-uf-mean-rm \
+    --input_path csvs/vwxyzjn/ppo_vllm_thread_beta_0.03_episode_126000__allenai_open_instruct_dev_ppo_vllm_thread_beta_0.03_episode_126000__3__1726543993_judged.csv \
+    --n -1
+# count: 500, agreement_rate: 63.40%
 ```
