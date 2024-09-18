@@ -22,13 +22,13 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, List, NewType, Optional, Tuple, Union
 
 import requests
 from accelerate.logging import get_logger
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
+from dateutil import parser
 from huggingface_hub import HfApi
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
@@ -734,14 +734,18 @@ def get_beaker_dataset_ids(experiment_id: str, sort=False) -> Optional[List[str]
         dataset_infos.extend(
             [
                 DatasetInfo(
-                    id=dataset["id"], committed=dataset["committed"], non_empty=False if dataset["storage"]["totalSize"] is None else dataset["storage"]["totalSize"] > 0
+                    id=dataset["id"],
+                    committed=dataset["committed"],
+                    non_empty=(
+                        False if dataset["storage"]["totalSize"] is None else dataset["storage"]["totalSize"] > 0
+                    ),
                 )
                 for dataset in datasets
             ]
         )
     if sort:
         # sort based on empty, then commited
-        dataset_infos.sort(key=lambda x: (x.non_empty, datetime.strptime(x.committed, "%Y-%m-%dT%H:%M:%S.%fZ")))
+        dataset_infos.sort(key=lambda x: (x.non_empty, parser.parse(x.committed)))
     print(dataset_infos)
     return [dataset.id for dataset in dataset_infos]
 

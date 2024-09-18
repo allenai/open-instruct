@@ -25,8 +25,6 @@ class Args:
 
 def main(args: Args, beaker_runtime_config: BeakerRuntimeConfig):
     print(args)
-    beaker_dataset_ids = get_beaker_dataset_ids(beaker_runtime_config.beaker_workload_id, sort=True)
-    print(beaker_experiment_succeeded(beaker_runtime_config.beaker_workload_id))
 
     start_time = time.time()
     while time.time() - start_time < args.max_wait_time_for_beaker_dataset_upload_seconds:
