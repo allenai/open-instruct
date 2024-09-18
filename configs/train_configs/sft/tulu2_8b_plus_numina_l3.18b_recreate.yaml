@@ -1,22 +1,22 @@
-model_name_or_path: meta-llama/Meta-Llama-3.1-8B
+model_name_or_path: deepseek-ai/deepseek-math-7b-base
 model_revision: main
 use_flash_attn: true
-tokenizer_name: meta-llama/Meta-Llama-3.1-8B
+tokenizer_name: deepseek-ai/deepseek-math-7b-base
 use_slow_tokenizer: true
 dataset_mixer:
     # Tulu 2 datasets (removed):
     natolambert/tulu-v2-sft-mixture-flan: 50000
     natolambert/tulu-v2-sft-mixture-cot: 49747
-    # Vtuber-plan/sharegpt-cleaned: 114046  # original https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered
-    # vicgalle/alpaca-gpt4: 20000
-    # HuggingFaceH4/CodeAlpaca_20K: 18000  # original uses https://github.com/sahil280114/codealpaca
-    # natolambert/tulu-v2-sft-mixture-lima: 1018  # original has 1030
-    # natolambert/tulu-v2-sft-mixture-science: 7468  # original data slightly different
+    Vtuber-plan/sharegpt-cleaned: 114046  # original https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered
+    vicgalle/alpaca-gpt4: 20000
+    HuggingFaceH4/CodeAlpaca_20K: 18000  # original uses https://github.com/sahil280114/codealpaca
+    natolambert/tulu-v2-sft-mixture-lima: 1018  # original has 1030
+    natolambert/tulu-v2-sft-mixture-science: 7468  # original data slightly different
 
     # Tulu 2 datasets (kept):
-    # allenai/openassistant-guanaco-reformatted: 7708  # not exact subset
-    # WizardLMTeam/WizardLM_evol_instruct_V2_196k: 30000
-    # Open-Orca/OpenOrca: 30000
+    allenai/openassistant-guanaco-reformatted: 7708  # not exact subset
+    WizardLMTeam/WizardLM_evol_instruct_V2_196k: 30000
+    Open-Orca/OpenOrca: 30000
 
     # Numina:
     AI-MO/NuminaMath-TIR: 72441
@@ -27,7 +27,7 @@ dataset_mixer:
 max_seq_length: 4096 # Note, reduced from 8192 to fit on one GPU with DeepSpeed Stage3
 preprocessing_num_workers: 128
 per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
-gradient_accumulation_steps: 8 # effective batch size 128 with 4 nodes
+gradient_accumulation_steps: 4 # effective batch size 128 with 4 nodes
 learning_rate: 5.0e-06 # best LR so far
 lr_scheduler_type: linear
 warmup_ratio: 0.03                                    

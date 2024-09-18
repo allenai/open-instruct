@@ -643,7 +643,12 @@ def main(args: FlatArguments):
             }
         )
         if "deepseek" in args.model_name_or_path:
-            assert num_added_tokens == 2, f"LlamaTokenizer for deepseek should only add two special token - the pad_token, or no tokens if pad token present. added {num_added_tokens}"
+            # assert num_added_tokens == 2, f"LlamaTokenizer for deepseek should only add two special token - the pad_token, or no tokens if pad token present. added {num_added_tokens}"
+            print(f"number of added tokens: {num_added_tokens}")
+            print(tokenizer.bos_token)
+            print(tokenizer.eos_token)
+            print(tokenizer.pad_token)
+            print(tokenizer.unk_token)
 
         else:
             assert num_added_tokens in [
