@@ -16,6 +16,7 @@
 import unittest
 
 import pytest
+from dateutil import parser
 
 from open_instruct.utils import get_datasets
 
@@ -75,6 +76,11 @@ class GetDatasetsTest(unittest.TestCase):
         }
         pref_datasets = get_datasets(dataset_mixer, splits=["train"], columns_to_keep=["chosen", "rejected"])
         self.assertEqual(len(pref_datasets["train"]), 2000)
+
+    def test_time_parser_used_in_get_beaker_dataset_ids(self):
+        # two special cases which beaker uses
+        self.assertTrue(parser.parse("2024-09-16T19:03:02.31502Z"))
+        self.assertTrue(parser.parse("0001-01-01T00:00:00Z"))
 
 
 # useful for checking if public datasets are still available
