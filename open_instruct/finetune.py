@@ -634,15 +634,13 @@ def main(args: FlatArguments):
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
     if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
-        num_added_tokens = tokenizer.add_special_tokens(
-            {
-                "bos_token": "<s>",
-                "eos_token": "</s>",
-                "unk_token": "<unk>",
-                "pad_token": "<pad>",
-            }
-        )
         if "deepseek" in args.model_name_or_path:
+            num_added_tokens = tokenizer.add_special_tokens(
+                {
+                    "unk_token": "<unk>",
+                    "pad_token": "<pad>",
+                }
+            )
             # assert num_added_tokens == 2, f"LlamaTokenizer for deepseek should only add two special token - the pad_token, or no tokens if pad token present. added {num_added_tokens}"
             print(f"number of added tokens: {num_added_tokens}")
             print(tokenizer.bos_token)
@@ -651,6 +649,14 @@ def main(args: FlatArguments):
             print(tokenizer.unk_token)
 
         else:
+            num_added_tokens = tokenizer.add_special_tokens(
+                {
+                    "bos_token": "<s>",
+                    "eos_token": "</s>",
+                    "unk_token": "<unk>",
+                    "pad_token": "<pad>",
+                }
+            )
             assert num_added_tokens in [
                 0,
                 1,
