@@ -7,21 +7,27 @@ methods = [
     'SFT + Online DPO (126k episodes)',
     'SFT + PPO (126k episodes)',
 ]
-rm1_rates = [45.20, 56.20, 59.60]  # vwxyzjn/reward_modeling__allenai_open_instruct_dev
-rm2_rates = [61.20, 64.00, 63.40]  # allenai/llama-3-tulu-2-8b-uf-mean-rm
+
+rm_rates = {
+    'vwxyzjn/reward_modeling__allenai_open_instruct_dev': [45.20, 56.20, 59.60],
+    'allenai/llama-3-tulu-2-8b-uf-mean-rm': [61.20, 64.00, 63.40],
+    "reward_modeling__1__1726175049": [63.00, 63.00, 58.40],
+}
 
 x = np.arange(len(methods))  # the label locations
-width = 0.35  # the width of the bars
+width = 0.25  # the width of the bars
 
 fig, ax = plt.subplots(figsize=(12, 6))
-rects1 = ax.bar(x - width/2, rm1_rates, width, label='vwxyzjn/reward_modeling__allenai_open_instruct_dev', color='skyblue')
-rects2 = ax.bar(x + width/2, rm2_rates, width, label='allenai/llama-3-tulu-2-8b-uf-mean-rm', color='lightgreen')
+axes = []
+for i, (rm, rates) in enumerate(rm_rates.items()):
+    rects = ax.bar(x + i * width, rates, width, label=rm)
+    axes.append(rects)
 
 # Add some text for labels, title and custom x-axis tick labels, etc.
 ax.set_ylabel('Agreement Rate (%)', fontsize=12)
 ax.set_title('Agreement Rates w/ GPT 4 judgement for Different Reward Models and Training Methods', fontsize=14)
-ax.set_xticks(x)
-ax.set_xticklabels(methods)
+ax.set_xticks(x + width)
+ax.set_xticklabels(methods, rotation=45, ha='right')
 ax.legend()
 
 ax.set_ylim(0, 100)  # Set y-axis limit from 0 to 100%
@@ -36,8 +42,8 @@ def autolabel(rects):
                     textcoords="offset points",
                     ha='center', va='bottom')
 
-autolabel(rects1)
-autolabel(rects2)
+for rects in axes:
+    autolabel(rects)
 
 fig.tight_layout()
 

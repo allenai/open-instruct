@@ -19,6 +19,13 @@ from open_instruct.model_utils import get_reward
 
 
 """
+# synthetic online RM
+python -i measure_agreement_rate.py \
+    --reward_model_path vwxyzjn/reward_modeling__allenai_open_instruct_dev \
+    --reward_model_revision reward_modeling__1__1725760619 \
+    --input_path csvs/allenai/open_instruct_dev_costa_offline_dpo_norobot_3pair_3peoch__allenai_open_instruct_dev__42__1726354080_judged.csv \
+    --n -1
+#   
 python -i measure_agreement_rate.py \
     --reward_model_path vwxyzjn/reward_modeling__allenai_open_instruct_dev \
     --reward_model_revision reward_modeling__1__1725760619 \

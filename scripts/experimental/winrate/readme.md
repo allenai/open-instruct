@@ -246,6 +246,40 @@ python generate_and_eval.py \
 # Name: proportion, dtype: float64
 # df['model_response_len'].mean()=204.078
 
+# https://wandb.ai/ai2-llm/open_instruct_internal/runs/qzxfu3bi
+python generate_and_eval.py \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision ppo_vllm_thread_beta_0.01_episode_42000__3__1726693093 \
+    --n 500
+# preferred
+# response1    0.522
+# response0    0.478
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=264.274
+
+https://wandb.ai/ai2-llm/open_instruct_internal/runs/l0tjy2w7
+python generate_and_eval.py \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision ppo_vllm_thread_beta_0.01_episode_84000__3__1726693099 \
+    --n 500
+# preferred
+# response0    0.578
+# response1    0.422
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=262.338
+
+https://wandb.ai/ai2-llm/open_instruct_internal/runs/kmy7xdjv
+python generate_and_eval.py \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision ppo_vllm_thread_beta_0.01_episode_126000__3__1726693097 \
+    --n 500
+# preferred
+# response0    0.592
+# response1    0.408
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=264.802
+
+
 python plot_winrate.py
 
 
@@ -315,4 +349,27 @@ python measure_agreement_rate.py \
     --input_path csvs/vwxyzjn/ppo_vllm_thread_beta_0.03_episode_126000__allenai_open_instruct_dev_ppo_vllm_thread_beta_0.03_episode_126000__3__1726543993_judged.csv \
     --n -1
 # count: 500, agreement_rate: 63.40%
+
+
+https://huggingface.co/vwxyzjn/reward_modeling__allenai_llama-3-tulu-2-8b/tree/reward_modeling__1__1726175049
+python measure_agreement_rate.py \
+    --reward_model_path vwxyzjn/reward_modeling__allenai_llama-3-tulu-2-8b \
+    --reward_model_revision reward_modeling__1__1726175049 \
+    --input_path csvs/allenai/open_instruct_dev_costa_offline_dpo_norobot_3pair_3peoch__allenai_open_instruct_dev__42__1726354080_judged.csv \
+    --n -1
+# count: 500, agreement_rate: 63.00%
+
+python measure_agreement_rate.py \
+    --reward_model_path vwxyzjn/reward_modeling__allenai_llama-3-tulu-2-8b \
+    --reward_model_revision reward_modeling__1__1726175049 \
+    --input_path csvs/vwxyzjn/online_dpo_vllm_thread_beta_0.03_episode_126000__allenai_open_instruct_dev_online_dpo_vllm_thread_beta_0.03_episode_126000__3__1726559254_judged.csv \
+    --n -1
+# count: 500, agreement_rate: 63.00%
+
+python measure_agreement_rate.py \
+    --reward_model_path vwxyzjn/reward_modeling__allenai_llama-3-tulu-2-8b \
+    --reward_model_revision reward_modeling__1__1726175049 \
+    --input_path csvs/vwxyzjn/ppo_vllm_thread_beta_0.03_episode_126000__allenai_open_instruct_dev_ppo_vllm_thread_beta_0.03_episode_126000__3__1726543993_judged.csv \
+    --n -1
+# count: 500, agreement_rate: 58.40%
 ```
