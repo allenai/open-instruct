@@ -51,6 +51,7 @@ from open_instruct.utils import (
     get_wandb_tags,
     is_beaker_job,
     maybe_get_beaker_config,
+    maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
 )
 
@@ -172,9 +173,11 @@ def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig
     args.run_name = f"{args.exp_name}__{args.seed}__{time_int}"
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
-            args.hf_repo_id = f"{args.exp_name}__{model_config.model_name_or_path.replace('/', '_')}"
-        if args.hf_entity is None:
-            args.hf_entity = api.whoami()["name"]
+            args.hf_repo_id = "open_instruct_dev"
+        if args.hf_entity is None:  # first try to use AI2 entity
+            args.hf_entity = maybe_use_ai2_hf_entity()
+        if args.hf_entity is None:  # then try to use the user's entity
+            args.hf_entity = HfApi().whoami()["name"]
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
         if args.hf_repo_revision is None:  # auto-generate one
             args.hf_repo_revision = args.run_name
