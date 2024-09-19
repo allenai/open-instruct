@@ -99,7 +99,7 @@ Here we are using --vllm_device cuda:7 to say we want to launch the vllm generat
 ```bash
 # for running TL;DR you can likely use GPUs with less memory
 python mason.py \
-    --pure_docker_mode \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
     --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/general-cirrascale \
     --priority normal \
     --resumable \
@@ -145,7 +145,7 @@ python mason.py \
 # use ai2/jupiter-cirrascale-2 or ai2/pluto-cirrascale
 python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
-    --pure_docker_mode \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
@@ -197,7 +197,7 @@ python mason.py \
 # use ai2/jupiter-cirrascale-2 or ai2/pluto-cirrascale
 python mason.py \
     --cluster ai2/pluto-cirrascale \
-    --pure_docker_mode \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
