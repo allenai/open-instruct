@@ -99,6 +99,7 @@ RUN pip install ai2-olmo-core==0.1.0 omegaconf
 # RUN pip install git+https://github.com/allenai/OLMo.git@liujch1998/wolf --no-deps
 RUN git clone -b liujch1998/wolf https://github.com/allenai/OLMo.git
 RUN cd OLMo
+RUN ls
 RUN pip install -e .
 RUN cd ..
 RUN pip install -r requirements-olmo.txt
