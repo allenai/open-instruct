@@ -13,7 +13,7 @@ def main():
     parser.add_argument("--beaker_image", type=str, default="nathanl/open_instruct_auto", help="If given, use this Beaker image.")
     parser.add_argument("--beaker_config", type=str, default="configs/beaker_configs/default_merge.yaml")
     parser.add_argument("--merge_config", type=str, default="configs/merge_configs/example_linear_merge_config.yaml")
-    parser.add_argument("--cluster", nargs='+', default=["ai2/allennlp-cirrascale", "ai2/general-cirrascale", "ai2/general-cirrascale-a100-80g-ib", "ai2/mosaic-cirrascale-a100", "ai2/s2-cirrascale-l40"])
+    parser.add_argument("--cluster", nargs='+', default=["ai2/allennlp-cirrascale", "ai2/general-cirrascale", "ai2/pluto-cirrascale", "ai2/s2-cirrascale-l40"])
     parser.add_argument("--priority", type=str, default="low")
     parser.add_argument("--preemptible", action="store_true", default=False, help="for using preemtipble jobs (required on some instances)")
     args = parser.parse_args()
