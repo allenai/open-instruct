@@ -97,12 +97,7 @@ RUN pip install ai2-olmo-core==0.1.0 omegaconf
 # TODO Update Once this is merged https://github.com/allenai/OLMo/pull/719, then next release
 # RUN pip install git+https://github.com/allenai/OLMo.git@47f8f5abb40eb100c6623be12e1648c841b2ab99 --no-deps
 # RUN pip install git+https://github.com/allenai/OLMo.git@liujch1998/wolf --no-deps
-RUN git clone -b liujch1998/wolf https://github.com/allenai/OLMo.git
-COPY OLMo/ .
-RUN cd OLMo
-RUN ls
-RUN pip install -e .
-RUN cd ..
+RUN git clone -b liujch1998/wolf https://github.com/allenai/OLMo.git && cd OLMo && pip install -e . && cd ..
 RUN pip install -r requirements-olmo.txt
 
 # NLTK download
