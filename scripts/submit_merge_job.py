@@ -58,7 +58,7 @@ def main():
             # mount datasets
         elif elem["location"] in ["huggingface", "nfs"]:
             model_data = {
-                "model": elem['location'],
+                "model": elem['path'],
                 "parameters": {"weight": float(elem["weight"])}
             }
         elif elem["location"] == "weka": # verify the only available cluster(s) have weka
