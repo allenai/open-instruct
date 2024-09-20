@@ -7,7 +7,7 @@ ARG DEBIAN_FRONTEND="noninteractive"
 ENV TZ="America/Los_Angeles"
 
 # Install base tools.
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y && apt-get install gcc -y \
     build-essential \
     curl \
     git \
