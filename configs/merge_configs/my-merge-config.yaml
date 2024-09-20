@@ -1,11 +1,11 @@
 merge_method: linear
 normalize: true
 models:
-  - name: valpy_dpo_mix_uf_wc_regen_da_sftmix_v4.23_09052024165835
+  - name: deepseek-math-7b-math-attempt-3
     location: beaker
-    path: 01J72A0A1VAT17049F6FHXS7AH
-    weight: 0.6
-  - name: llama_3_8b-rs_2860_numina_ccn
+    path: jacobm/deepseek-math-7b-math-attempt-3
+    weight: 0.5
+  - name: deepseek-coder-7b-math-attempt-3
     location: beaker
-    path: jacobm/llama_3_8b-rs_2860_numina_ccn
-    weight: 0.4
+    path: jacobm/deepseek-coder-7b-math-attempt-3
+    weight: 0.5
