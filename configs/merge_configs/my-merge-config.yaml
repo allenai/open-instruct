@@ -1,11 +1,11 @@
 merge_method: linear
 normalize: true
 models:
-  - name: deepseek-math-7b-math-attempt-3
-    location: beaker
-    path: jacobm/deepseek-math-7b-math-attempt-3
+  - name: deepseek-coder-7b-base-v1.5
+    location: huggingface
+    path: deepseek-ai/deepseek-coder-7b-base-v1.5
     weight: 0.5
-  - name: deepseek-coder-7b-math-attempt-3
-    location: beaker
-    path: jacobm/deepseek-coder-7b-math-attempt-3
+  - name: deepseek-math-7b-base
+    location: huggingface
+    path: deepseek-ai/deepseek-math-7b-base
     weight: 0.5

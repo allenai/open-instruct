@@ -56,8 +56,12 @@ def main():
                 "source": {"beaker": elem["path"]}
             })
             # mount datasets
-        elif elem["location"] in ["huggingface", "nfs"]: # todo: support weka
+        elif elem["location"] in ["huggingface", "nfs"]:
+            pass # don't need to do anything
+        elif elem["location"] == "weka": # verify the only available cluster(s) have weka
             pass
+        else:
+            print(f"Unsupported location: {elem['location']}")
         baseConfig["models"].append(model_data)
 
     with open(args.beaker_config, 'r') as f:
