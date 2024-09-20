@@ -1,7 +1,7 @@
-model_name_or_path: deepseek-ai/deepseek-math-7b-base
+model_name_or_path: deepseek-ai/deepseek-coder-7b-base-v1.5
 model_revision: main
 use_flash_attn: true
-tokenizer_name: deepseek-ai/deepseek-math-7b-base
+tokenizer_name: deepseek-ai/deepseek-coder-7b-base-v1.5
 use_slow_tokenizer: true
 dataset_mixer:
     # Tulu 2 datasets (removed):
