@@ -1,11 +1,11 @@
 merge_method: linear
 normalize: true
 models:
-  - name: deepseek-coder-7b-base-v1.5
+  - name: deepseek-math-7b-instruct
     location: huggingface
-    path: deepseek-ai/deepseek-coder-7b-base-v1.5
+    path: deepseek-ai/deepseek-math-7b-instruct
     weight: 0.5
-  - name: deepseek-math-7b-base
+  - name: deepseek-coder-7b-instruct-v1.5
     location: huggingface
-    path: deepseek-ai/deepseek-math-7b-base
+    path: deepseek-ai/deepseek-coder-7b-instruct-v1.5
     weight: 0.5
