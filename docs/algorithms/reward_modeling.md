@@ -56,7 +56,7 @@ Here is a command to train a simple reward model on the sentiment dataset taken 
 ```bash
 python mason.py \
     --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
-    --image costah/open_instruct_dev --pure_docker_mode \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
     --priority normal \
     --budget ai2/allennlp \
     --gpus 1 -- python open_instruct/reward_modeling.py \
@@ -88,7 +88,7 @@ You can run the following commands to launch experiments. Note that you can mix 
 ```bash
 python mason.py \
     --cluster ai2/allennlp-cirrascale  ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
-    --image costah/open_instruct_dev --pure_docker_mode \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
     --priority normal \
     --budget ai2/allennlp \
     --gpus 1 -- python open_instruct/reward_modeling.py \
@@ -118,7 +118,7 @@ python mason.py \
 ```bash
 python mason.py \
     --cluster ai2/allennlp-cirrascale  ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
-    --image costah/open_instruct_dev --pure_docker_mode \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
     --priority normal \
     --budget ai2/allennlp \
     --gpus 8 -- accelerate launch --config_file configs/ds_configs/deepspeed_zero2.yaml \
@@ -149,7 +149,7 @@ python mason.py \
 ```bash
 python mason.py \
     --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale \
-    --image costah/open_instruct_dev --pure_docker_mode \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
     --priority normal \
     --budget ai2/allennlp \
     --gpus 8 -- accelerate launch --config_file configs/ds_configs/deepspeed_zero3.yaml \
@@ -182,7 +182,7 @@ python mason.py \
 ```bash
 python mason.py \
     --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale \
-    --image costah/open_instruct_dev --pure_docker_mode \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
     --priority normal \
     --budget ai2/allennlp \
     --gpus 8 -- accelerate launch --config_file configs/ds_configs/deepspeed_zero3.yaml \

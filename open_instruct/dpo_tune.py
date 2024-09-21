@@ -584,7 +584,7 @@ def main(args: FlatArguments):
             args.dataset_mixer,
             configs=args.dataset_config_name,
             splits=["train"],
-            save_data_dir=args.dataset_mix_dir,
+            save_data_dir=args.dataset_mix_dir if accelerator.is_main_process else None,
             columns_to_keep=["chosen", "rejected"],
         )
     elif args.dataset_mixer_list is not None:
@@ -593,7 +593,7 @@ def main(args: FlatArguments):
             args.dataset_mixer_list,
             configs=args.dataset_config_name,
             splits=["train"],
-            save_data_dir=args.dataset_mix_dir,
+            save_data_dir=args.dataset_mix_dir if accelerator.is_main_process else None,
             columns_to_keep=["chosen", "rejected"],
         )
     else:
@@ -747,6 +747,11 @@ def main(args: FlatArguments):
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
         if len(tokenizer) > embeddings.weight.shape[0]:
             model.resize_token_embeddings(len(tokenizer))
+    if reference_model is not None:
+        reference_embeddings = reference_model.get_input_embeddings()
+        with deepspeed.zero.GatheredParameters(reference_embeddings.weight, modifier_rank=None):
+            if len(tokenizer) > reference_embeddings.weight.shape[0]:
+                reference_model.resize_token_embeddings(len(tokenizer))
 
     if args.use_lora:
         if args.use_qlora:

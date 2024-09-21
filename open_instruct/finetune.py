@@ -533,7 +533,7 @@ def main(args: FlatArguments):
             args.dataset_mixer,
             configs=args.dataset_config_name,
             splits=["train"],
-            save_data_dir=args.dataset_mix_dir,
+            save_data_dir=args.dataset_mix_dir if accelerator.is_main_process else None,
             columns_to_keep=["messages"],
         )
     elif args.dataset_mixer_list is not None:
@@ -542,7 +542,7 @@ def main(args: FlatArguments):
             args.dataset_mixer_list,
             configs=args.dataset_config_name,
             splits=["train"],
-            save_data_dir=args.dataset_mix_dir,
+            save_data_dir=args.dataset_mix_dir if accelerator.is_main_process else None,
             columns_to_keep=["messages"],
         )
     else:
