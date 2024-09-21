@@ -137,7 +137,7 @@ def first_true_indices(bools: torch.Tensor, dtype=torch.long) -> torch.Tensor:
 
 
 def get_reward(
-    model: torch.nn.Module, query_responses: torch.Tensor, pad_token_id: int, context_length: int
+    model: torch.nn.Module, query_responses: torch.Tensor, pad_token_id: int, end_step_token_id: int ,context_length: int
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     This function computes reward scores for a batch of query responses based on a pre-trained reward model.
@@ -185,10 +185,27 @@ def get_reward(
 
     # Calculate the length of each sequence by finding the first occurrence of a padding token after the context
     # sequence_lengths shape: (batch_size,)
+    
     sequence_lengths = first_true_indices(query_responses[:, context_length:] == pad_token_id) - 1 + context_length
-    assert (
-        reward_logits.shape[-1] == 1
-    ), "Reward model should output a single scalar per token. Check if you added `num_labels=1` when doing `AutoModelForSequenceClassification.from_pretrained(...)`."
+
+    # breakpoint()
+    all_sequence_lengths = (query_responses[:, context_length:] == end_step_token_id).nonzero(as_tuple=False) 
+    row = all_sequence_lengths.shape[0]
+    # subtract one (no need for prm case whe we need logit on the label token)
+    # all_sequence_lengths = all_sequence_lengths - torch.cat([torch.zeros(row,1), torch.ones(row,1)], dim=-1).to(query_responses.device) #+ context_length
+    all_sequence_lengths = all_sequence_lengths.to(query_responses.device).type(torch.long)
+    step_reward_logits = reward_logits[all_sequence_lengths[:,0], all_sequence_lengths[:,1]].squeeze(-1)
+
+#[0, 3]
+#[0, 5]
+#[0, 10]
+#[1, 10]
+#[1, 20]
+
+    ## no needed for num_label==2
+    # assert (
+    #     reward_logits.shape[-1] == 1
+    # ), "Reward model should output a single scalar per token. Check if you added `num_labels=1` when doing `AutoModelForSequenceClassification.from_pretrained(...)`."
     # https://github.com/huggingface/transformers/blob/dc68a39c8111217683bf49a4912d0c9018bab33d/src/transformers/models/gpt2/modeling_gpt2.py#L1454
 
     # Return the reward logits for all tokens, the final reward scores for each sequence, and the sequence lengths
@@ -203,6 +220,8 @@ def get_reward(
             -1
         ),  # Shape: (batch_size,)
         sequence_lengths,
+        step_reward_logits, # Shape (batshc_size*#special_tokens across btches,)
+        all_sequence_lengths
     )
 
 
