@@ -135,8 +135,77 @@ def first_true_indices(bools: torch.Tensor, dtype=torch.long) -> torch.Tensor:
     # The returned tensor has shape (batch_size,)
     return torch.min(zero_or_index, dim=-1).values
 
-
 def get_reward(
+    model: torch.nn.Module, query_responses: torch.Tensor, pad_token_id: int, context_length: int
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    This function computes reward scores for a batch of query responses based on a pre-trained reward model.
+
+    Args:
+        model (torch.nn.Module): The pre-trained reward model.
+        query_responses (torch.Tensor): Tensor containing the tokenized responses for which to compute rewards.
+            Shape: (batch_size, sequence_length)
+        pad_token_id (int): The ID used for padding tokens in the tokenized sequences.
+        context_length (int): The length of the prompt or context preceding the completions.
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: A tuple containing:
+            - reward_logits: The logits output from the model for all tokens in the sequences.
+              Shape: (batch_size, sequence_length)
+            - final_scores: The final reward scores, one for each sequence, after adjusting for sequence lengths.
+              Shape: (batch_size,)
+            - sequence_lengths: The lengths of each sequence (excluding padding).
+              Shape: (batch_size,)
+    """
+
+    # Create an attention mask where tokens that are not padding have a value of 1, and padding tokens have a value of 0
+    # Shape: (batch_size, sequence_length)
+    attention_mask = query_responses != pad_token_id
+
+    # Calculate position IDs for each token, considering the cumulative sum of the attention mask (to exclude padding)
+    # Shape: (batch_size, sequence_length)
+    position_ids = attention_mask.cumsum(1) - attention_mask.long()  # exclusive cumsum
+
+    # Access the LM backbone from the reward model using its base model prefix
+    lm_backbone = getattr(model, model.base_model_prefix)
+
+    # Replace padding tokens with zeros in the input IDs (so padding tokens won't affect the model's processing)
+    # Shape: (batch_size, sequence_length)
+    input_ids = torch.masked_fill(query_responses, ~attention_mask, 0)
+    output = lm_backbone(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        position_ids=position_ids,
+        return_dict=True,
+        output_hidden_states=True,
+        use_cache=False,  # otherwise mistral-based RM would error out
+    )
+    reward_logits = model.score(output.hidden_states[-1])  # (batch_size, sequence_length)
+
+    # Calculate the length of each sequence by finding the first occurrence of a padding token after the context
+    # sequence_lengths shape: (batch_size,)
+    sequence_lengths = first_true_indices(query_responses[:, context_length:] == pad_token_id) - 1 + context_length
+    assert (
+        reward_logits.shape[-1] == 1
+    ), "Reward model should output a single scalar per token. Check if you added `num_labels=1` when doing `AutoModelForSequenceClassification.from_pretrained(...)`."
+    # https://github.com/huggingface/transformers/blob/dc68a39c8111217683bf49a4912d0c9018bab33d/src/transformers/models/gpt2/modeling_gpt2.py#L1454
+
+    # Return the reward logits for all tokens, the final reward scores for each sequence, and the sequence lengths
+    return (
+        # reward_logits shape: (batch_size, sequence_length)
+        reward_logits,
+        # final_scores shape: (batch_size,)
+        reward_logits[
+            torch.arange(reward_logits.size(0), device=reward_logits.device),
+            sequence_lengths,
+        ].squeeze(
+            -1
+        ),  # Shape: (batch_size,)
+        sequence_lengths,
+    )
+
+
+def get_prm_reward(
     model: torch.nn.Module, query_responses: torch.Tensor, pad_token_id: int, end_step_token_id: int ,context_length: int
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
