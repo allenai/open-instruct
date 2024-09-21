@@ -815,10 +815,7 @@ def main(args: FlatArguments):
             desc="Tokenizing and reformatting instruction data",
         )
         train_dataset.set_format(type="pt")
-        print(len(train_dataset))
-        import pdb; pdb.set_trace()
         train_dataset = train_dataset.filter(lambda example: (example["labels"] != -100).any())
-        print(len(train_dataset))
 
     # Log a few random samples from the training set:
     for index in random.sample(range(len(train_dataset)), 3):
