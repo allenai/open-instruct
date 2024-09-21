@@ -338,6 +338,8 @@ class FlatArguments:
     """Whether to launch beaker evaluation jobs after training"""
     hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
+    prm_prepro: bool = False
+    """PRM preprocessing, following math-shephard"""
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -457,6 +459,51 @@ def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=Fals
     }
 
 
+# encoding the data how we use it for PRM training.
+# In finetune since PRM training is closer to language modelling than rm training.
+def encode_prm_with_messages_format(example, tokenizer, max_seq_length, prm_predict_token_id, add_bos=False):
+    messages = example["messages_input"]
+    messages_labels = example["messages_label"]
+    if len(messages) == 0:
+        raise ValueError("messages input field is empty.")
+    if len(messages_labels) == 0:
+        raise ValueError("messages labels field is empty.")
+    assert len(messages) == len(messages_labels), "Messages input and labels should match in length!"
+
+    def _concat_messages(messages):
+        message_text = ""
+        for message in messages:
+            if message["role"] == "system":
+                message_text += "<|system|>\n" + message["content"].strip() + "\n"
+            elif message["role"] == "user":
+                message_text += "<|user|>\n" + message["content"].strip() + "\n"
+            elif message["role"] == "assistant":
+                message_text += "<|assistant|>\n" + message["content"].strip() + tokenizer.eos_token + "\n"
+            else:
+                raise ValueError("Invalid role: {}".format(message["role"]))
+        return message_text
+
+    example_text = _concat_messages(messages).strip()
+    example_label_text = _concat_messages(messages_labels).strip()
+    if add_bos:
+        example_text = tokenizer.bos_token + example_text
+        example_label_text = tokenizer.bos_token + example_label_text
+    tokenized_example = tokenizer(example_text, return_tensors="pt", max_length=max_seq_length, truncation=True)
+    tokenized_label = tokenizer(example_label_text, return_tensors="pt", max_length=max_seq_length, truncation=True)
+    input_ids = tokenized_example.input_ids
+    labels = tokenized_label.input_ids
+    # all labels apart from prm_predict_token_id input matches are -100
+    if input_ids.shape[1] != labels.shape[1]:
+        raise ValueError("Input and label shapes do not match.")
+    labels = torch.where(input_ids == prm_predict_token_id, labels, -100)
+    attention_mask = torch.ones_like(input_ids)
+    return {
+        "input_ids": input_ids.flatten(),
+        "labels": labels.flatten(),
+        "attention_mask": attention_mask.flatten(),
+    }
+
+
 def main(args: FlatArguments):
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
@@ -519,6 +566,7 @@ def main(args: FlatArguments):
         raw_datasets = load_dataset(
             args.dataset_name,
             args.dataset_config_name,
+            download_mode="force_redownload",
         )
     elif args.dataset_mixer is not None:
         # mixing datasets via config
@@ -721,6 +769,7 @@ def main(args: FlatArguments):
         model.gradient_checkpointing_enable()
 
     # Preprocessing the datasets.
+    print(raw_datasets["train"].column_names)
     if "prompt" in raw_datasets["train"].column_names and "completion" in raw_datasets["train"].column_names:
         encode_function = partial(
             encode_with_prompt_completion_format,
@@ -734,6 +783,14 @@ def main(args: FlatArguments):
             tokenizer=tokenizer,
             max_seq_length=args.max_seq_length,
             add_bos=args.add_bos,
+        )
+    elif "messages_input" in raw_datasets["train"].column_names and "messages_label" in raw_datasets["train"].column_names and args.prm_prepro:
+        encode_function = partial(
+            encode_prm_with_messages_format,
+            tokenizer=tokenizer,
+            max_seq_length=args.max_seq_length,
+            add_bos=args.add_bos,
+            prm_predict_token_id=tokenizer.encode("<|reserved_special_token_102|>")[-1],
         )
     else:
         raise ValueError("You need to have either 'prompt'&'completion' or 'messages' in your column names.")
@@ -758,7 +815,10 @@ def main(args: FlatArguments):
             desc="Tokenizing and reformatting instruction data",
         )
         train_dataset.set_format(type="pt")
+        print(len(train_dataset))
+        import pdb; pdb.set_trace()
         train_dataset = train_dataset.filter(lambda example: (example["labels"] != -100).any())
+        print(len(train_dataset))
 
     # Log a few random samples from the training set:
     for index in random.sample(range(len(train_dataset)), 3):
