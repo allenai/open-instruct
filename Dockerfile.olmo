@@ -7,7 +7,7 @@ ARG DEBIAN_FRONTEND="noninteractive"
 ENV TZ="America/Los_Angeles"
 
 # Install base tools.
-RUN apt-get update && apt-get install -y && apt-get install -y gcc-13 g++-13 \
+RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
     git \
@@ -61,6 +61,8 @@ RUN /opt/miniconda3/bin/pip install --no-cache-dir \
 
 # Ensure users can modify their container environment.
 RUN echo '%users ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+RUN conda install gxx -c conda-forge
 
 # Make the base image friendlier for interactive workloads. This makes things like the man command
 # work.
