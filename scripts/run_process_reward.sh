@@ -43,7 +43,7 @@ python mason.py \
     --budget ai2/allennlp \
     --workspace ai2/tulu-2-improvements \
     --description $DESC \
-    --gpus $NUM_GPU -- accelerate launch --num_machines 1 --num_processes $NUM_GPU --config_file configs/ds_configs/deepspeed_zero3.yaml open_instruct/reward_modeling_v2.py \
+    --gpus $NUM_GPU -- accelerate launch --num_machines 1 --num_processes $NUM_GPU --config_file configs/ds_configs/deepspeed_zero3.yaml open_instruct/process_reward_modeling.py \
     --dataset_mixer '{"ai2-adapt-dev/Math-Shepherd-PRM-chat-reformatted": 1.0}' \
     --dataset_train_splits train \
     --dataset_eval_mixer '{"ai2-adapt-dev/Math-Shepherd-PRM-chat-reformatted": 1.0}' \
