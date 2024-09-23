@@ -1,7 +1,8 @@
 import asyncio
 import random
 import json
-from typing import List, Dict
+import re
+from typing import List, Dict, Optional
 from collections import defaultdict
 from dataclasses import dataclass
 from datasets import load_dataset, Dataset
@@ -55,7 +56,7 @@ A: [Option A]
 B: [Option B]
 C: [Option C]
 D: [Option D]
-Correct answer: [It must be the letter of correct option and not the correct answer itself]
+Correct answer: [Letter of correct option]
 """
 
         try:
@@ -98,22 +99,37 @@ def get_mmlu_samples_by_subject(num_samples_per_subject: int = 10) -> Dict[str, 
     return dict(samples_by_subject)
 
 
-def parse_generated_question(text: str, subject: str) -> dict:
-    lines = text.strip().split('\n')
-    question = lines[0].replace('Question: ', '').strip()
-    breakpoint()
-    choices = [line.split(': ', 1)[1].strip() for line in lines[1:5]]
-    answer = lines[5].replace('Correct answer: ', '').strip()
-    if isinstance(answer, str) and len(answer) == 1:
-        answer = ord(answer) - ord('A')
-    else:
-        print("It's not a single character.")
-        breakpoint()
+def parse_generated_question(text: str, subject: str) -> Optional[dict]:
+    # Define regex patterns
+    question_pattern = re.compile(r'Question:\s*(.+)')
+    choice_pattern = re.compile(r'([A-D]):\s*(.+)')
+    answer_pattern = re.compile(r'Correct answer:\s*([A-D])')
+
+    # Extract question
+    question_match = question_pattern.search(text)
+    if not question_match:
+        return None
+    question = question_match.group(1).strip()
+
+    # Extract choices
+    choices = {}
+    for match in choice_pattern.finditer(text):
+        choices[match.group(1)] = match.group(2).strip()
+
+    # Check if we have exactly 4 choices
+    if len(choices) != 4 or set(choices.keys()) != set('ABCD'):
+        return None
+
+    # Extract answer
+    answer_match = answer_pattern.search(text)
+    if not answer_match or answer_match.group(1) not in 'ABCD':
+        return None
+    answer = ord(answer_match.group(1)) - ord('A')
 
     return {
         "question": question,
         "subject": subject,
-        "choices": choices,
+        "choices": [choices[letter] for letter in 'ABCD'],
         "answer": answer
     }
 
@@ -142,9 +158,10 @@ async def main():
     for subject, samples in samples_by_subject.items():
         raw_synthetic_data = await processor.process_subject(subject, samples, gen_args)
         synthetic_data = [
-            parse_generated_question(data, subject)
+            parsed_question
             for data in raw_synthetic_data
             if data is not None
+            if (parsed_question := parse_generated_question(data, subject)) is not None
         ]
         all_synthetic_data.extend(synthetic_data)
 
@@ -152,7 +169,7 @@ async def main():
         json.dump(all_synthetic_data, f, indent=2)
 
     print(
-        f"Generated {len(all_synthetic_data)} synthetic MMLU questions across {len(samples_by_subject)} subjects, saved to 'synthetic_mmlu_data.json'")
+        f"Generated {len(all_synthetic_data)} valid synthetic MMLU questions across {len(samples_by_subject)} subjects, saved to 'synthetic_mmlu_data.json'")
 
     # Upload to Hugging Face
     upload_to_huggingface(all_synthetic_data, "your-username/synthetic-mmlu-dataset")
