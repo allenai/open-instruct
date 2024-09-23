@@ -155,8 +155,10 @@ async def main():
     samples_by_subject = get_mmlu_samples_by_subject(gen_args.few_shot_examples + gen_args.examples_per_subject)
 
     all_synthetic_data = []
-
+    k=0
     for subject, samples in samples_by_subject.items():
+        if k == 1:
+            break
         raw_synthetic_data = await processor.process_subject(subject, samples, gen_args)
         synthetic_data = [
             parsed_question
@@ -165,6 +167,7 @@ async def main():
             if (parsed_question := parse_generated_question(data, subject)) is not None
         ]
         all_synthetic_data.extend(synthetic_data)
+        k += 1
 
     with open(f"synthetic_mmlu_data_{config.model}.json", 'w') as f:
         json.dump(all_synthetic_data, f, indent=2)
