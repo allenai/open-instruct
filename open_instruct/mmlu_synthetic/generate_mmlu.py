@@ -143,6 +143,7 @@ def upload_to_huggingface(data: List[dict], dataset_name: str):
         "answer": [item["answer"] for item in data]
     })
 
+    dataset_name = "ai2-adapt-dev/synth-mmlu-mini-sample-new"
     dataset.push_to_hub(dataset_name)
     print(f"Dataset uploaded to Hugging Face: https://huggingface.co/datasets/{dataset_name}")
 
@@ -176,7 +177,7 @@ async def main():
         f"Generated {len(all_synthetic_data)} valid synthetic MMLU questions across {len(samples_by_subject)} subjects, saved to 'synthetic_mmlu_data_{config.model}.json'")
 
     # Upload to Hugging Face
-    upload_to_huggingface(all_synthetic_data, "your-username/synthetic-mmlu-dataset")
+    upload_to_huggingface(all_synthetic_data, "ai2-adapt-dev/synthetic-mmlu-dataset")
 
 
 if __name__ == "__main__":
