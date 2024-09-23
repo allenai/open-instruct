@@ -102,8 +102,13 @@ def parse_generated_question(text: str, subject: str) -> dict:
     lines = text.strip().split('\n')
     question = lines[0].replace('Question: ', '').strip()
     choices = [line.split(': ', 1)[1].strip() for line in lines[1:5]]
-    breakpoint()
-    answer = ord(lines[5].replace('Correct answer: ', '').strip()) - ord('A')
+    answer = lines[5].replace('Correct answer: ', '').strip()
+    if isinstance(answer, str) and len(answer) == 1:
+        answer = ord(answer) - ord('A')
+    else:
+        print("It's not a single character.")
+        breakpoint()
+
     return {
         "question": question,
         "subject": subject,
