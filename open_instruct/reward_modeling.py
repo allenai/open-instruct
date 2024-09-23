@@ -354,7 +354,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 accelerator.backward(loss)
                 optimizer.step()
                 optimizer.zero_grad()
-            
+
             with torch.no_grad():
                 losses[gradient_accumulation_idx] = loss
                 accuracies[gradient_accumulation_idx] = accuracy
