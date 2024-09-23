@@ -55,7 +55,7 @@ A: [Option A]
 B: [Option B]
 C: [Option C]
 D: [Option D]
-Correct answer: [Letter of correct option]
+Correct answer: [It must be the letter of correct option and not the correct answer itself]
 """
 
         try:
