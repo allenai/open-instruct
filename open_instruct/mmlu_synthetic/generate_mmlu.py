@@ -101,6 +101,7 @@ def get_mmlu_samples_by_subject(num_samples_per_subject: int = 10) -> Dict[str, 
 def parse_generated_question(text: str, subject: str) -> dict:
     lines = text.strip().split('\n')
     question = lines[0].replace('Question: ', '').strip()
+    breakpoint()
     choices = [line.split(': ', 1)[1].strip() for line in lines[1:5]]
     answer = lines[5].replace('Correct answer: ', '').strip()
     if isinstance(answer, str) and len(answer) == 1:
