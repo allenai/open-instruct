@@ -101,6 +101,7 @@ def parse_generated_question(text):
     subject = lines[0].replace('Subject: ', '').strip()
     question = lines[1].replace('Question: ', '').strip()
     choices = [line.split(': ', 1)[1].strip() for line in lines[2:6]]
+    breakpoint()
     answer = ord(lines[6].replace('Correct answer: ', '').strip()) - ord('A')
     return {
         "question": question,
