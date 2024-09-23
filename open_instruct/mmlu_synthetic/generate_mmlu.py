@@ -14,14 +14,15 @@ from huggingface_hub import HfApi
 @dataclass
 class LLMGenerationConfig:
     num_completions: int = 100
-    model: str = "gpt-3.5-turbo-0125"
+    # model: str = "gpt-3.5-turbo-0125"
+    model: str = "gpt-4"
     max_parallel_requests: int = 50  # Adjust based on your API rate limits
 
 
 @dataclass
 class GenerationArgs:
     temperature: float = 0.7
-    max_tokens: int = 300
+    max_tokens: int = 500
     top_p: float = 0.95
     examples_per_subject: int = 5
     few_shot_examples: int = 3
@@ -165,11 +166,11 @@ async def main():
         ]
         all_synthetic_data.extend(synthetic_data)
 
-    with open('synthetic_mmlu_data.json', 'w') as f:
+    with open(f"synthetic_mmlu_data_{config.model}.json", 'w') as f:
         json.dump(all_synthetic_data, f, indent=2)
 
     print(
-        f"Generated {len(all_synthetic_data)} valid synthetic MMLU questions across {len(samples_by_subject)} subjects, saved to 'synthetic_mmlu_data.json'")
+        f"Generated {len(all_synthetic_data)} valid synthetic MMLU questions across {len(samples_by_subject)} subjects, saved to 'synthetic_mmlu_data_{config.model}.json'")
 
     # Upload to Hugging Face
     upload_to_huggingface(all_synthetic_data, "your-username/synthetic-mmlu-dataset")
