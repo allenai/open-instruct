@@ -1,7 +1,8 @@
 import asyncio
 import random
 import json
-from typing import List
+from typing import List, Dict
+from collections import defaultdict
 from dataclasses import dataclass
 from datasets import load_dataset, Dataset
 from openai import AsyncOpenAI
@@ -11,16 +12,18 @@ from huggingface_hub import HfApi
 
 @dataclass
 class LLMGenerationConfig:
-    num_completions: int = 1
+    num_completions: int = 100
     model: str = "gpt-3.5-turbo-0125"
     max_parallel_requests: int = 50  # Adjust based on your API rate limits
 
 
 @dataclass
 class GenerationArgs:
-    temperature: float = 0.8
-    max_tokens: int = 500
+    temperature: float = 0.7
+    max_tokens: int = 300
     top_p: float = 0.95
+    examples_per_subject: int = 5
+    few_shot_examples: int = 3
 
 
 class LLMProcessor:
@@ -30,7 +33,6 @@ class LLMProcessor:
 
     def format_example(self, sample: dict) -> str:
         return f"""
-Subject: {sample['subject']}
 Question: {sample['question']}
 A: {sample['choices'][0]}
 B: {sample['choices'][1]}
@@ -39,17 +41,15 @@ D: {sample['choices'][3]}
 Correct answer: {sample['choices'][sample['answer']]}
 """
 
-    async def generate_synthetic_question(self, samples: List[dict], gen_args: GenerationArgs):
-        examples = [self.format_example(sample) for sample in samples[:3]]
-        examples_str = "\n".join(examples)
+    async def generate_synthetic_question(self, subject: str, examples: List[dict], gen_args: GenerationArgs):
+        examples_str = "\n".join([self.format_example(example) for example in examples[:gen_args.few_shot_examples]])
 
         prompt = f"""
-Generate a new multiple-choice question similar to the following MMLU (Massive Multitask Language Understanding) questions:
+Generate a new multiple-choice question similar to the following MMLU (Massive Multitask Language Understanding) questions on the subject of {subject}:
 
 {examples_str}
 
-Create a new question that's different from the examples you've seen on one of the subjects shown above with four options and indicate the correct answer. Format your response as follows:
-Subject: [Subject of your new question]
+Create a new question on {subject} with four options and indicate the correct answer. Format your response as follows:
 Question: [Your new question]
 A: [Option A]
 B: [Option B]
@@ -73,36 +73,36 @@ Correct answer: [Letter of correct option]
             )
             return response.choices[0].message.content
         except Exception as e:
-            print(f"Error generating question: {e}")
+            print(f"Error generating question for {subject}: {e}")
             return None
 
-    async def process_batch(self, samples: List[dict], gen_args: GenerationArgs):
+    async def process_subject(self, subject: str, samples: List[dict], gen_args: GenerationArgs):
         semaphore = asyncio.Semaphore(self.config.max_parallel_requests)
 
-        async def process_with_semaphore(sample_group):
+        async def process_with_semaphore():
             async with semaphore:
-                return await self.generate_synthetic_question(sample_group, gen_args)
+                return await self.generate_synthetic_question(subject, samples, gen_args)
 
-        # Group samples into sets of 3 for few-shot learning
-        sample_groups = [samples[i:i + 3] for i in range(0, len(samples), 3)]
-        # breakpoint()
-        tasks = [process_with_semaphore(group) for group in sample_groups]
-        return await tqdm.gather(*tasks)
+        tasks = [process_with_semaphore() for _ in range(gen_args.examples_per_subject)]
+        return await tqdm.gather(*tasks, desc=f"Generating {subject}")
 
 
-def get_mmlu_sample(num_samples=300):  # Increased to 300 to have 100 groups of 3
+def get_mmlu_samples_by_subject(num_samples_per_subject: int = 10) -> Dict[str, List[dict]]:
     dataset = load_dataset("cais/mmlu", "all")
-    samples = random.sample(list(dataset['test']), num_samples)
-    return samples
+    samples_by_subject = defaultdict(list)
+
+    for sample in dataset['test']:
+        if len(samples_by_subject[sample['subject']]) < num_samples_per_subject:
+            samples_by_subject[sample['subject']].append(sample)
+
+    return dict(samples_by_subject)
 
 
-def parse_generated_question(text):
+def parse_generated_question(text: str, subject: str) -> dict:
     lines = text.strip().split('\n')
-    subject = lines[0].replace('Subject: ', '').strip()
-    question = lines[1].replace('Question: ', '').strip()
-    choices = [line.split(': ', 1)[1].strip() for line in lines[2:6]]
-    breakpoint()
-    answer = ord(lines[6].replace('Correct answer: ', '').strip()) - ord('A')
+    question = lines[0].replace('Question: ', '').strip()
+    choices = [line.split(': ', 1)[1].strip() for line in lines[1:5]]
+    answer = ord(lines[5].replace('Correct answer: ', '').strip()) - ord('A')
     return {
         "question": question,
         "subject": subject,
@@ -111,7 +111,7 @@ def parse_generated_question(text):
     }
 
 
-def upload_to_huggingface(data, dataset_name):
+def upload_to_huggingface(data: List[dict], dataset_name: str):
     dataset = Dataset.from_dict({
         "question": [item["question"] for item in data],
         "subject": [item["subject"] for item in data],
@@ -126,23 +126,30 @@ def upload_to_huggingface(data, dataset_name):
 async def main():
     config = LLMGenerationConfig()
     processor = LLMProcessor(config)
-    samples = get_mmlu_sample(300)  # Generate 300 samples for 100 groups of 3
     gen_args = GenerationArgs()
 
-    raw_synthetic_data = await processor.process_batch(samples, gen_args)
-    synthetic_data = [
-        parse_generated_question(data)
-        for data in raw_synthetic_data
-        if data is not None
-    ]
+    samples_by_subject = get_mmlu_samples_by_subject(gen_args.few_shot_examples + gen_args.examples_per_subject)
+    breakpoint()
+
+    all_synthetic_data = []
+
+    for subject, samples in samples_by_subject.items():
+        raw_synthetic_data = await processor.process_subject(subject, samples, gen_args)
+        synthetic_data = [
+            parse_generated_question(data, subject)
+            for data in raw_synthetic_data
+            if data is not None
+        ]
+        all_synthetic_data.extend(synthetic_data)
 
     with open('synthetic_mmlu_data.json', 'w') as f:
-        json.dump(synthetic_data, f, indent=2)
+        json.dump(all_synthetic_data, f, indent=2)
 
-    print(f"Generated {len(synthetic_data)} synthetic MMLU questions saved to 'synthetic_mmlu_data.json'")
+    print(
+        f"Generated {len(all_synthetic_data)} synthetic MMLU questions across {len(samples_by_subject)} subjects, saved to 'synthetic_mmlu_data.json'")
 
     # Upload to Hugging Face
-    upload_to_huggingface(synthetic_data, "your-username/synthetic-mmlu-dataset")
+    upload_to_huggingface(all_synthetic_data, "your-username/synthetic-mmlu-dataset")
 
 
 if __name__ == "__main__":
