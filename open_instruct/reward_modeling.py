@@ -354,36 +354,37 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 accelerator.backward(loss)
                 optimizer.step()
                 optimizer.zero_grad()
-            losses[gradient_accumulation_idx] = loss
-            accuracies[gradient_accumulation_idx] = accuracy
-            chosen_rewards[gradient_accumulation_idx] = chosen_reward.mean()
-            rejected_rewards[gradient_accumulation_idx] = rejected_reward.mean()
-            reward_margin[gradient_accumulation_idx] = (chosen_reward - rejected_reward).mean()
-            gradient_accumulation_idx = (gradient_accumulation_idx + 1) % args.gradient_accumulation_steps
 
-            if training_step % args.gradient_accumulation_steps == 0:
-                scheduler.step()
-                local_metrics[0] = accuracies.mean()
-                local_metrics[1] = losses.mean()
-                local_metrics[2] = chosen_rewards.mean()
-                local_metrics[3] = rejected_rewards.mean()
-                local_metrics[4] = reward_margin.mean()
-                global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
+            with torch.no_grad():
+                losses[gradient_accumulation_idx] = loss
+                accuracies[gradient_accumulation_idx] = accuracy
+                chosen_rewards[gradient_accumulation_idx] = chosen_reward.mean()
+                rejected_rewards[gradient_accumulation_idx] = rejected_reward.mean()
+                reward_margin[gradient_accumulation_idx] = (chosen_reward - rejected_reward).mean()
+                gradient_accumulation_idx = (gradient_accumulation_idx + 1) % args.gradient_accumulation_steps
+                if training_step % args.gradient_accumulation_steps == 0:
+                    scheduler.step()
+                    local_metrics[0] = accuracies.mean()
+                    local_metrics[1] = losses.mean()
+                    local_metrics[2] = chosen_rewards.mean()
+                    local_metrics[3] = rejected_rewards.mean()
+                    local_metrics[4] = reward_margin.mean()
+                    global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
 
-                metrics = {
-                    "episode": episode,
-                    "epoch": episode / len(train_dataset),
-                    "train/rm/accuracy": global_metrics[0],
-                    "train/rm/loss": global_metrics[1],
-                    "train/rm/chosen_rewards": global_metrics[2],
-                    "train/rm/rejected_rewards": global_metrics[3],
-                    "train/rm/reward_margin": global_metrics[4],
-                    "train/rm/lr": scheduler.get_last_lr()[0],
-                }
-                if accelerator.is_main_process:
-                    print_rich_single_line_metrics(metrics)
-                    for key, value in metrics.items():
-                        writer.add_scalar(key, value, episode)
+                    metrics = {
+                        "episode": episode,
+                        "epoch": episode / len(train_dataset),
+                        "train/rm/accuracy": global_metrics[0],
+                        "train/rm/loss": global_metrics[1],
+                        "train/rm/chosen_rewards": global_metrics[2],
+                        "train/rm/rejected_rewards": global_metrics[3],
+                        "train/rm/reward_margin": global_metrics[4],
+                        "train/rm/lr": scheduler.get_last_lr()[0],
+                    }
+                    if accelerator.is_main_process:
+                        print_rich_single_line_metrics(metrics)
+                        for key, value in metrics.items():
+                            writer.add_scalar(key, value, episode)
 
             # (optionally) evaluate the model
             if args.num_evals > 0 and training_step > 1 and training_step % args.eval_freq == 0:
