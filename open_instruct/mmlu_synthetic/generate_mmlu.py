@@ -129,7 +129,6 @@ async def main():
     gen_args = GenerationArgs()
 
     samples_by_subject = get_mmlu_samples_by_subject(gen_args.few_shot_examples + gen_args.examples_per_subject)
-    breakpoint()
 
     all_synthetic_data = []
 
