@@ -18,8 +18,8 @@ class LLMGenerationConfig:
 
 @dataclass
 class GenerationArgs:
-    temperature: float = 0.7
-    max_tokens: int = 300
+    temperature: float = 0.8
+    max_tokens: int = 500
     top_p: float = 0.95
 
 
@@ -48,7 +48,7 @@ Generate a new multiple-choice question similar to the following MMLU (Massive M
 
 {examples_str}
 
-Create a new question on one of the subjects shown above with four options and indicate the correct answer. Format your response as follows:
+Create a new question that's different from the examples you've seen on one of the subjects shown above with four options and indicate the correct answer. Format your response as follows:
 Subject: [Subject of your new question]
 Question: [Your new question]
 A: [Option A]
@@ -85,6 +85,7 @@ Correct answer: [Letter of correct option]
 
         # Group samples into sets of 3 for few-shot learning
         sample_groups = [samples[i:i + 3] for i in range(0, len(samples), 3)]
+        breakpoint()
         tasks = [process_with_semaphore(group) for group in sample_groups]
         return await tqdm.gather(*tasks)
 
