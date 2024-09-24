@@ -1,5 +1,4 @@
 import asyncio
-import random
 import json
 import re
 from typing import List, Dict, Optional
@@ -8,7 +7,6 @@ from dataclasses import dataclass
 from datasets import load_dataset, Dataset
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm
-from huggingface_hub import HfApi
 
 
 @dataclass
@@ -44,7 +42,7 @@ Correct answer: {sample['choices'][sample['answer']]}
 """
 
     async def generate_synthetic_question(self, subject: str, examples: List[dict], gen_args: GenerationArgs):
-        examples_str = "\n".join([self.format_example(example) for example in examples[:gen_args.few_shot_examples]])
+        examples_str = "\n".join([self.format_example(example) for example in examples[: gen_args.few_shot_examples]])
 
         prompt = f"""
 Generate a new multiple-choice question similar to the following MMLU (Massive Multitask Language Understanding) questions on the subject of {subject}:
@@ -64,14 +62,16 @@ Correct answer: [Letter of correct option]
             response = await self.async_client.chat.completions.create(
                 model=self.config.model,
                 messages=[
-                    {"role": "system",
-                     "content": "You are an AI assistant tasked with generating synthetic data for the MMLU dataset."},
-                    {"role": "user", "content": prompt}
+                    {
+                        "role": "system",
+                        "content": "You are an AI assistant tasked with generating synthetic data for the MMLU dataset.",
+                    },
+                    {"role": "user", "content": prompt},
                 ],
                 temperature=gen_args.temperature,
                 max_tokens=gen_args.max_tokens,
                 top_p=gen_args.top_p,
-                n=self.config.num_completions
+                n=self.config.num_completions,
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -93,18 +93,18 @@ def get_mmlu_samples_by_subject(num_samples_per_subject: int = 10) -> Dict[str, 
     dataset = load_dataset("cais/mmlu", "all")
     samples_by_subject = defaultdict(list)
 
-    for sample in dataset['test']:
-        if len(samples_by_subject[sample['subject']]) < num_samples_per_subject:
-            samples_by_subject[sample['subject']].append(sample)
+    for sample in dataset["test"]:
+        if len(samples_by_subject[sample["subject"]]) < num_samples_per_subject:
+            samples_by_subject[sample["subject"]].append(sample)
 
     return dict(samples_by_subject)
 
 
 def parse_generated_question(text: str, subject: str) -> Optional[dict]:
     # Define regex patterns
-    question_pattern = re.compile(r'Question:\s*(.+)')
-    choice_pattern = re.compile(r'([A-D]):\s*(.+)')
-    answer_pattern = re.compile(r'Correct answer:\s*([A-D])')
+    question_pattern = re.compile(r"Question:\s*(.+)")
+    choice_pattern = re.compile(r"([A-D]):\s*(.+)")
+    answer_pattern = re.compile(r"Correct answer:\s*([A-D])")
 
     # Extract question
     question_match = question_pattern.search(text)
@@ -118,30 +118,32 @@ def parse_generated_question(text: str, subject: str) -> Optional[dict]:
         choices[match.group(1)] = match.group(2).strip()
 
     # Check if we have exactly 4 choices
-    if len(choices) != 4 or set(choices.keys()) != set('ABCD'):
+    if len(choices) != 4 or set(choices.keys()) != set("ABCD"):
         return None
 
     # Extract answer
     answer_match = answer_pattern.search(text)
-    if not answer_match or answer_match.group(1) not in 'ABCD':
+    if not answer_match or answer_match.group(1) not in "ABCD":
         return None
-    answer = ord(answer_match.group(1)) - ord('A')
+    answer = ord(answer_match.group(1)) - ord("A")
 
     return {
         "question": question,
         "subject": subject,
-        "choices": [choices[letter] for letter in 'ABCD'],
-        "answer": answer
+        "choices": [choices[letter] for letter in "ABCD"],
+        "answer": answer,
     }
 
 
 def upload_to_huggingface(data: List[dict], dataset_name: str):
-    dataset = Dataset.from_dict({
-        "question": [item["question"] for item in data],
-        "subject": [item["subject"] for item in data],
-        "choices": [item["choices"] for item in data],
-        "answer": [item["answer"] for item in data]
-    })
+    dataset = Dataset.from_dict(
+        {
+            "question": [item["question"] for item in data],
+            "subject": [item["subject"] for item in data],
+            "choices": [item["choices"] for item in data],
+            "answer": [item["answer"] for item in data],
+        }
+    )
 
     dataset_name = "ai2-adapt-dev/synth-mmlu-mini-sample-new"
     dataset.push_to_hub(dataset_name)
@@ -166,11 +168,12 @@ async def main():
         ]
         all_synthetic_data.extend(synthetic_data)
 
-    with open(f"synthetic_mmlu_data_{config.model}.json", 'w') as f:
+    with open(f"synthetic_mmlu_data_{config.model}.json", "w") as f:
         json.dump(all_synthetic_data, f, indent=2)
 
     print(
-        f"Generated {len(all_synthetic_data)} valid synthetic MMLU questions across {len(samples_by_subject)} subjects, saved to 'synthetic_mmlu_data_{config.model}.json'")
+        f"Generated {len(all_synthetic_data)} valid synthetic MMLU questions across {len(samples_by_subject)} subjects, saved to 'synthetic_mmlu_data_{config.model}.json'"
+    )
 
     # Upload to Hugging Face
     upload_to_huggingface(all_synthetic_data, "ai2-adapt-dev/synthetic-mmlu-dataset")
