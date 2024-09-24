@@ -11,7 +11,6 @@ def process_pku_saferlhf(output_file):
         for split in dataset.keys():
             for item in tqdm(dataset[split], desc=f"Processing {split}"):
                 if item["safer_response_id"] == 0:
-                    breakpoint()
                     chosen = item["response_0"]
                     rejected = item["response_1"]
                 else:
