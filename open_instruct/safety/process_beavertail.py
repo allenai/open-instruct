@@ -30,5 +30,5 @@ def process_pku_saferlhf(output_file):
 
 
 if __name__ == "__main__":
-    output_file = "/net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/open-instruct/safety"
+    output_file = "/net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/open-instruct/safety/pku_saferlhf_preferences.jsonl"
     process_pku_saferlhf(output_file)
