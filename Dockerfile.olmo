@@ -98,6 +98,10 @@ RUN pip install ai2-olmo-core==0.1.0 omegaconf
 RUN pip install git+https://github.com/allenai/OLMo.git@47f8f5abb40eb100c6623be12e1648c841b2ab99 --no-deps
 RUN pip install -r requirements-olmo.txt
 
+RUN pip install git+https://github.com/AkshitaB/vllm.git
+RUN pip install vllm-flash-attn
+
+
 # NLTK download
 RUN python -m nltk.downloader punkt
 COPY open_instruct open_instruct
