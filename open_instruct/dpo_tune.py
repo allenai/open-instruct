@@ -713,8 +713,10 @@ def main(args: FlatArguments):
         except Exception as e:
             raise ValueError(f"Could not find chat template for {args.chat_template_name}.")
 
-    if args.add_bos:
-        # also add bos in the chat template
+    if args.add_bos and \
+        not tokenizer.chat_template.startswith("{{ bos_token }}") and \
+        not (tokenizer.bos_token is not None and tokenizer.chat_template.startswith(tokenizer.bos_token)):
+        # also add bos in the chat template if not already there
         tokenizer.chat_template = "{{ bos_token }}" + tokenizer.chat_template
 
     if args.use_lora:
