@@ -30,5 +30,5 @@ def process_pku_saferlhf(output_file):
 
 
 if __name__ == "__main__":
-    output_file = ""
+    output_file = "/net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/open-instruct/safety"
     process_pku_saferlhf(output_file)
