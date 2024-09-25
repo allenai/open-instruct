@@ -387,9 +387,20 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     else:
         tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
     tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
+    reward_model_config = AutoConfig.from_pretrained(
+        args.reward_model_path, revision=args.reward_model_revision, num_labels=1
+    )
     reward_model_tokenizer = AutoTokenizer.from_pretrained(
         args.reward_model_path, revision=args.reward_model_revision, padding_side="right"
     )
+    if reward_model_config.architectures == "LlamaForCausalLM" and reward_model_config.bos_token_id == 128000:
+        reward_model_tokenizer.pad_token_id = 128002
+    else:
+        reward_model_tokenizer.add_special_tokens({"pad_token": "[PAD]"})
+    
+    # if reward model does not have a chat template, use the same as the policy model
+    if reward_model_tokenizer.chat_template is None:
+        reward_model_tokenizer.chat_template = tokenizer.chat_template
 
     # create the dataset
     dataset_dict = DatasetDict()
@@ -609,7 +620,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     queries_next = queries_next.repeat(args.num_generation_per_prompt, 1)
     send_queries(accelerator, None, tokenizer, param_prompt_Q, queries_next)
     if different_rm_vocab:
-        data["messages"]
+        next_messages = data["messages"]
 
     for _ in range(1, resume_training_step):  # we didn't store scheduler state
         scheduler.step()
@@ -619,7 +630,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         scheduler.step()
         queries = queries_next
         if different_rm_vocab:
-            pass
+            messages = next_messages
+            messages = messages + messages
         if ph.preemptied:
             break
 
@@ -650,7 +662,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
                     queries_next = queries_next.repeat(args.num_generation_per_prompt, 1)
                     if different_rm_vocab:
-                        data["messages"]
+                        next_messages = data["messages"]
                 send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
             else:
                 if training_step != 1:
@@ -662,7 +674,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
                     queries = queries_next
                     if different_rm_vocab:
-                        data["messages"]
+                        messages = data["messages"]
+                        messages = messages + messages
 
             training_time_start = time.time()
             with torch.no_grad():
@@ -716,9 +729,30 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     # Response Processing 2. run reward model on the truncated responses
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
-                    _, score, _ = get_reward(
-                        reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
-                    )
+
+                    if different_rm_vocab:
+                        # we need to 
+                        # otherwise we get `<|endoftext|>[PAD][PAD][PAD][PAD]<|endoftext|>`
+                        response_txts = tokenizer.batch_decode(postprocessed_response, skip_special_tokens=True)
+                        reward_model_tokens = []
+                        for j in range(i, i + args.local_rollout_forward_batch_size):
+                            messages[j][-1]["content"] = response_txts[j - i]
+                            reward_model_tokens.append(reward_model_tokenizer.apply_chat_template(messages[j]))
+
+                        # right pad the reward model tokens
+                        max_reward_model_len = max(len(item) for item in reward_model_tokens)
+                        reward_model_tokens = [
+                            item + [reward_model_tokenizer.pad_token_id] * (max_reward_model_len - len(item))
+                            for item in reward_model_tokens
+                        ]
+                        reward_model_tokens = torch.tensor(reward_model_tokens, device=device)
+                        _, score, _ = get_reward(
+                            reward_model, reward_model_tokens, reward_model_tokenizer.pad_token_id, 0
+                        )
+                    else:
+                        _, score, _ = get_reward(
+                            reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
+                        )
 
                     responses.append(response)
                     postprocessed_responses.append(postprocessed_response)
@@ -795,7 +829,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         rejected_responses = responses[rejected_mb_inds]
 
                         concat_mb_inds = torch.cat((chosen_mb_inds, rejected_mb_inds), dim=0)
-                        concat_indices.append(concat_mb_inds)
                         concat_query_responses = query_responses[concat_mb_inds]
                         concat_output = forward(model, concat_query_responses, tokenizer.pad_token_id)
                         num_examples = chosen_mb_inds.shape[0]
@@ -848,6 +881,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         optimizer.zero_grad()
                         with torch.no_grad():
                             if epoch_idx == 0:
+                                concat_indices.append(concat_mb_inds)
                                 response = concat_query_responses[:, context_length:]
                                 logits = concat_output.logits[:, context_length - 1 : -1]
                                 logits /= args.temperature + 1e-7
@@ -888,7 +922,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             restore_logprobs = torch.zeros_like(logprobs)
             restore_logprobs[concat_indices] = logprobs
             kl = restore_logprobs - ref_logprobs
-            print(f"{accelerator.local_process_index=}, {kl.sum(1)=}")
             non_score_reward = -args.beta * kl
             non_score_reward_sum = non_score_reward.sum(1)
             rlhf_reward = scores + non_score_reward_sum
