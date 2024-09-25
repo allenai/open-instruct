@@ -475,7 +475,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         num_warmup_steps=args.warm_up_steps,
         num_training_steps=args.num_training_steps * args.num_train_epochs,
     )
-    data_collator = SimpleGenerateCollator(pad_token_id=tokenizer.pad_token_id, keep_messages=different_rm_vocab)
+    data_collator = SimpleGenerateCollator(pad_token_id=tokenizer.pad_token_id)
     dataloader = DataLoader(
         train_dataset,
         batch_size=args.local_dataloader_batch_size,
@@ -720,7 +720,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 ref_logprobs = torch.cat(ref_logprobs, 0)
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
-                global_scores = accelerator.gather(scores)
+                accelerator.gather(scores)
                 del (ref_logprob, score)
                 gc.collect()
                 torch.cuda.empty_cache()
