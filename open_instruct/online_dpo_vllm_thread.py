@@ -387,9 +387,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     else:
         tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
     tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
-    reward_model_tokenizer = AutoTokenizer.from_pretrained(
-        args.reward_model_path, revision=args.reward_model_revision, padding_side="right"
-    )
 
     # create the dataset
     dataset_dict = DatasetDict()
@@ -454,11 +451,12 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         attn_implementation="flash_attention_2",
         use_cache=False,
     )
-    different_rm_vocab = reward_model_tokenizer.vocab_size != tokenizer.vocab_size
     if policy.config.vocab_size != reward_model.config.vocab_size:
-        print(
-            "Policy and reward model have different vocab size. "
+        raise ValueError(
+            "Policy and reward model must have the same vocab size. "
             f"Policy: {policy.config.vocab_size}, Reward: {reward_model.config.vocab_size}. "
+            "If they don't have the same vocab size, the policy could generate tokens which "
+            "is going to cause index out of bound error in the reward model."
         )
     model = policy
     if model_config.gradient_checkpointing:
@@ -608,8 +606,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
     queries_next = queries_next.repeat(args.num_generation_per_prompt, 1)
     send_queries(accelerator, None, tokenizer, param_prompt_Q, queries_next)
-    if different_rm_vocab:
-        data["messages"]
 
     for _ in range(1, resume_training_step):  # we didn't store scheduler state
         scheduler.step()
@@ -618,8 +614,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         episode += args.batch_size
         scheduler.step()
         queries = queries_next
-        if different_rm_vocab:
-            pass
         if ph.preemptied:
             break
 
@@ -649,8 +643,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     data = next(iter_dataloader)
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
                     queries_next = queries_next.repeat(args.num_generation_per_prompt, 1)
-                    if different_rm_vocab:
-                        data["messages"]
                 send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
             else:
                 if training_step != 1:
@@ -661,8 +653,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     queries_next = queries_next.repeat(args.num_generation_per_prompt, 1)
                     send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
                     queries = queries_next
-                    if different_rm_vocab:
-                        data["messages"]
 
             training_time_start = time.time()
             with torch.no_grad():
@@ -731,7 +721,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
                 global_scores = accelerator.gather(scores)
-                accelerator.print(f"global_scores: {global_scores}, {global_scores.mean()}")
                 del (ref_logprob, score)
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -795,7 +784,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         rejected_responses = responses[rejected_mb_inds]
 
                         concat_mb_inds = torch.cat((chosen_mb_inds, rejected_mb_inds), dim=0)
-                        concat_indices.append(concat_mb_inds)
                         concat_query_responses = query_responses[concat_mb_inds]
                         concat_output = forward(model, concat_query_responses, tokenizer.pad_token_id)
                         num_examples = chosen_mb_inds.shape[0]
@@ -848,6 +836,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         optimizer.zero_grad()
                         with torch.no_grad():
                             if epoch_idx == 0:
+                                concat_indices.append(concat_mb_inds)
                                 response = concat_query_responses[:, context_length:]
                                 logits = concat_output.logits[:, context_length - 1 : -1]
                                 logits /= args.temperature + 1e-7
@@ -888,7 +877,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             restore_logprobs = torch.zeros_like(logprobs)
             restore_logprobs[concat_indices] = logprobs
             kl = restore_logprobs - ref_logprobs
-            print(f"{accelerator.local_process_index=}, {kl.sum(1)=}")
             non_score_reward = -args.beta * kl
             non_score_reward_sum = non_score_reward.sum(1)
             rlhf_reward = scores + non_score_reward_sum
