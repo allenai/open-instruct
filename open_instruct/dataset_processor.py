@@ -471,8 +471,9 @@ class SimplePreferenceCollator:
 class SimpleGenerateCollator:
     """Simple collator for generation task (always pad from the LEFT)"""
 
-    def __init__(self, pad_token_id: int):
+    def __init__(self, pad_token_id: int, keep_messages: bool = False):
         self.pad_token_id = pad_token_id
+        self.keep_messages = keep_messages
 
     def __call__(self, batch: list[dict]):
         """the input will have input_ids_prompt"""
@@ -484,7 +485,8 @@ class SimpleGenerateCollator:
 
         # Initialize lists to store padded sequences and attention masks
         padded_sequences = []
-
+        if self.keep_messages:
+            messages = []
         for i in range(len(batch)):
             # Calculate padding length
             pad_length = max_length - len(batch[i][INPUT_IDS_PROMPT_KEY])
@@ -493,13 +495,15 @@ class SimpleGenerateCollator:
             padding = [self.pad_token_id] * pad_length
             padded_sequence = padding + batch[i][INPUT_IDS_PROMPT_KEY]
             padded_sequences.append(padded_sequence)
+            if self.keep_messages:
+                messages.append(batch[i]["messages"])
 
         # Convert to tensors
         padded_sequences = torch.tensor(padded_sequences)
-
-        return {
-            INPUT_IDS_PROMPT_KEY: padded_sequences,
-        }
+        res = {INPUT_IDS_PROMPT_KEY: padded_sequences}
+        if self.keep_messages:
+            res["messages"] = messages
+        return res
 
 
 if __name__ == "__main__":
@@ -511,3 +515,16 @@ if __name__ == "__main__":
 
     # too much data; it should use all available CPUs
     assert get_num_proc(1000000, 120, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU) == 120
+
+    collator = SimpleGenerateCollator(pad_token_id=0)
+    batch = [
+        {
+            INPUT_IDS_PROMPT_KEY: [1, 2, 3],
+            "messages": ["hello", "world", "ixxi"],
+        },
+        {
+            INPUT_IDS_PROMPT_KEY: [1, 2, 3, 4],
+            "messages": ["hello", "world2"],
+        },
+    ]
+    collated_batch = collator(batch)
