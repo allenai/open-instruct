@@ -250,6 +250,19 @@ def make_task_spec(args, command, i, beaker_secrets, whoami, resumable: bool):
     if not args.pure_docker_mode:
         setup_commands += f"cd {os.getcwd()} && "
     fully_command = setup_commands + " ".join(full_command)
+    # conda_command = [
+    #     os.getenv("CONDA_EXE"),
+    #     "run",
+    #     "--cwd",
+    #     os.getcwd(),
+    #     "--no-capture-output",
+    #     "--name",
+    #     os.getenv("CONDA_DEFAULT_ENV"),
+    # ]
+    # if not args.pure_docker_mode:
+    #     setup_commands += f"cd {os.getcwd()} && "
+    # # fully_command = setup_commands + " ".join(full_command)
+    # fully_command = " ".join(conda_command) + " "+ " ".join(full_command)
     print(f"{full_command=}")
 
 

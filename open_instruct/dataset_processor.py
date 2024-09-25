@@ -81,6 +81,13 @@ BINARY_DATASET_KEYS = [
     BINARY_LABEL_KEY,
 ]
 
+# prm dataset
+INPUT_IDS_KEY = "input_ids"
+# ATTENTION_MASK_KEY = "attention_mask"
+# PRM_INPUT_KEY = "messages"
+PRM_LABEL_KEY = "step_labels"
+# LABELS_KEY = "labels"
+
 # Chat templates
 # flake8: noqa
 # note we added `{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}`
@@ -105,6 +112,13 @@ CHAT_TEMPLATES = {
         "{{'\n\n' if not loop.first else ''}}"
         "{{message['role']|capitalize + ': ' +message['content']}}"
         "{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}"
+        "{% endfor %}"
+    ),
+    "simple_prm": (
+        "{% for message in messages %}"
+        "{{'\n\n' if not loop.first else ''}}"
+        "{{message['content']}}"
+        "{% if loop.last and not add_generation_prompt %}{% endif %}"
         "{% endfor %}"
     ),
     "zephyr": (
@@ -152,6 +166,10 @@ class DatasetConfig:
 
     # columns names for SFT dataset
     sft_messages_key: str = SFT_MESSAGE_KEY
+
+    # columns names for PRM dataset
+    # prm_input_key: str = PRM_INPUT_KEY
+    prm_label_key: str = PRM_LABEL_KEY
 
     # columns names for binary dataset
     binary_messages_key: str = SFT_MESSAGE_KEY
@@ -404,6 +422,60 @@ class SFTDatasetProcessor(DatasetProcessor):
         )
 
 
+class PRMDatasetProcessor(DatasetProcessor):
+    def tokenize(self, dataset: Dataset):
+        def tokenize_fn(row):
+            # row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(
+            #     row[self.config.prm_input_key],
+            #     add_generation_prompt=False,
+            # )
+            row[INPUT_IDS_KEY] = self.tokenizer.apply_chat_template(row[self.config.sft_messages_key])
+            row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
+            labels = copy.deepcopy(row[PRM_LABEL_KEY])
+            # if self.config.train_only_on_prompt:
+            #     labels[: len(row[INPUT_IDS_PROMPT_KEY])] = [-100] * len(row[INPUT_IDS_PROMPT_KEY])
+            row[LABELS_KEY] = labels
+            return row
+
+        return dataset.map(
+            tokenize_fn,
+            num_proc=get_num_proc(len(dataset), self.config.num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
+            load_from_cache_file=self.config.load_from_cache_file,
+            desc="Tokenizing and reformatting PRM data",
+        )
+
+    def filter(self, dataset: Dataset):
+        def filter_fn(row):
+            max_prompt_token_length_ok = True
+            # if self.config.max_prompt_token_lenth is not None:
+            #     max_prompt_token_length_ok = len(row[INPUT_IDS_PROMPT_KEY]) <= self.config.max_prompt_token_lenth
+
+            max_token_length_ok = True
+            if self.config.max_token_length is not None:
+                max_token_length_ok = len(row[INPUT_IDS_KEY]) <= self.config.max_token_length
+
+            contain_some_labels = any(x != -100 for x in row[LABELS_KEY])
+            return max_prompt_token_length_ok and max_token_length_ok and contain_some_labels
+
+        return dataset.filter(
+            filter_fn,
+            num_proc=get_num_proc(len(dataset), self.config.num_proc, FILTER_EXAMPLE_PER_SECOND_PER_CPU),
+            load_from_cache_file=self.config.load_from_cache_file,
+            desc="Filtering PRM data",
+        )
+
+    def get_token_length_stats(self, dataset: Union[Dataset, DatasetDict]):
+        return super().get_token_length_stats(features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY], dataset=dataset)
+
+    def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):
+        return super().get_token_length_visualization(
+            features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY],
+            dataset=dataset,
+            save_path=save_path,
+            bins=bins,
+        )
+
+
 def convert_preference_dataset_to_binary_dataset(ds: Dataset):
     binary_ds = defaultdict(list)
     for i in tqdm(range(len(ds))):
@@ -467,6 +539,71 @@ class SimplePreferenceCollator:
             INPUT_IDS_REJECTED_KEY: padded_sequences_rejected,
         }
 
+
+class SimplePRMCollator:
+    def __init__(self, pad_token_id: int):
+        """Simple collator for preference dataset (always pad from the RIGHT)"""
+        self.pad_token_id = pad_token_id
+
+    def __call__(self, batch: List[Dict[str, int]]):
+        """the input will have input_ids_chosen, input_ids_rejected"""
+        # Find max length in the batch
+        max_length_chosen = -1
+        max_length_rejected = -1
+        for i in range(len(batch)):
+            max_length_chosen = max(max_length_chosen, len(batch[i]["input_ids"]))
+            # max_length_rejected = max(max_length_rejected, len(batch[i]["input_ids_rejected"]))
+        max_length = max_length_chosen #max(max_length_chosen, max_length_rejected)
+        assert max_length > 0, "the dataset is empty"
+
+        max_label_length = self.find_max_label_length(batch)
+        # print(max_label_length)
+
+        # Initialize lists to store padded sequences and attention masks
+        padded_sequences_chosen = []
+        labels = []
+        # padded_sequences_rejected = []
+        for i in range(len(batch)):
+            # Calculate padding length
+            pad_length_chosen = max_length - len(batch[i][INPUT_IDS_KEY])
+            # pad_length_rejected = max_length - len(batch[i][INPUT_IDS_REJECTED_KEY])
+
+            # Pad from the right
+            padding_chosen = [self.pad_token_id] * pad_length_chosen
+            # padding_rejected = [self.pad_token_id] * pad_length_rejected
+            padded_sequence_chosen = batch[i][INPUT_IDS_KEY] + padding_chosen
+            # padded_sequence_rejected = batch[i][INPUT_IDS_REJECTED_KEY] + padding_rejected
+            padded_sequences_chosen.append(padded_sequence_chosen)
+
+            # pad labels
+            pad_length_label = max_label_length - len(batch[i][LABELS_KEY])
+            # print(pad_length_label)
+            padding_label = [self.pad_token_id] * pad_length_label
+            # print(padding_label)
+            padded_sequence_label = batch[i][LABELS_KEY] + padding_label
+            labels.append(padded_sequence_label)
+            # print(padded_sequence_label, "------")
+            # padded_sequences_rejected.append(padded_sequence_rejected)
+
+        # Convert to tensors
+        padded_sequences_chosen = torch.tensor(padded_sequences_chosen)
+        labels = torch.tensor(labels)
+        # padded_sequences_rejected = torch.tensor(padded_sequences_rejected)
+
+        return {
+            INPUT_IDS_KEY: padded_sequences_chosen,
+            LABELS_KEY: labels
+            # INPUT_IDS_REJECTED_KEY: padded_sequences_rejected,
+        }
+
+    def find_max_label_length(self, batch):
+        max_length= -1
+        for i in range(len(batch)):
+            max_length = max(max_length, len(batch[i]["labels"]))
+            # max_length_rejected = max(max_length_rejected, len(batch[i]["input_ids_rejected"]))
+        max_length_label = max_length #max(max_length_chosen, max_length_rejected)
+        assert max_length_label > 0, "the label list is empty"
+        return max_length_label
 
 class SimpleGenerateCollator:
     """Simple collator for generation task (always pad from the LEFT)"""
