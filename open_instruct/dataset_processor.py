@@ -88,23 +88,30 @@ BINARY_DATASET_KEYS = [
 CHAT_TEMPLATES = {
     "simple_concat_with_space": (
         "{% for message in messages %}"
-        "{{' ' if not loop.first else ''}}"
-        "{{message['content']}}"
+        "{{ ' ' if not loop.first else '' }}"
+        "{{ message['content'] }}"
         "{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}"
         "{% endfor %}"
     ),
     "simple_concat_with_new_line": (
         "{% for message in messages %}"
-        "{{'\n' if not loop.first else ''}}"
-        "{{message['content']}}"
+        "{{ '\n' if not loop.first else '' }}"
+        "{{ message['content'] }}"
         "{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}"
         "{% endfor %}"
     ),
     "simple_chat": (
         "{% for message in messages %}"
-        "{{'\n\n' if not loop.first else ''}}"
-        "{{message['role']|capitalize + ': ' +message['content']}}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['role'].capitalize() + ': ' + message['content'] }}"
         "{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}"
+        "{% endfor %}"
+    ),
+    "assistant_message_only": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'assistant' %}"
+        "{{ message['content'] }}"
+        "{% endif %}"
         "{% endfor %}"
     ),
     "zephyr": (
