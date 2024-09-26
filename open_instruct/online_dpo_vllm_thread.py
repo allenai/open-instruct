@@ -261,7 +261,7 @@ def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig
     # if take_top_bottom_generation only 2 repeats are used for training
     # otherwise, all num_generation_per_prompt are used for training
     args.num_training_samples_per_prompt = 2 if args.take_top_bottom_generation else args.num_generation_per_prompt
-    if args.num_generations_per_prompt > 2 and not args.take_top_bottom_generation:
+    if args.num_generation_per_prompt > 2 and not args.take_top_bottom_generation:
         raise NotImplementedError("Currently only supports take_top_bottom_generation for generating n > 2 completions")
 
     args.local_dataloader_batch_size = exact_div(
@@ -269,6 +269,7 @@ def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig
         args.num_training_samples_per_prompt,
         "`local_batch_size` must be a multiple of `num_generation_per_prompt`",
     )
+    args.generated_batch_size = args.local_dataloader_batch_size * args.num_generation_per_prompt * args.world_size
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -596,7 +597,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         thread.start()
     torch.cuda.set_device(device)
 
-    g_vllm_responses = torch.zeros((args.batch_size, args.response_length), device=device, dtype=torch.long)
+    g_vllm_responses = torch.zeros((args.generated_batch_size, args.response_length), device=device, dtype=torch.long)
 
     # set up the metrics and initial states
     stats_shape = (args.num_epochs, args.num_mini_batches, args.gradient_accumulation_steps)
@@ -733,7 +734,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 num_examples = scores.size(0) // args.num_generation_per_prompt
                 scores_reshaped = scores.reshape(args.num_generation_per_prompt, num_examples).t()
 
-                num_examples_range = torch.arange(num_examples).to(scores.device)
                 # Get the max scores and their local indices
                 chosen_scores, chosen_local_indices = torch.max(scores_reshaped, dim=1)
 
@@ -743,10 +743,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 scores_margin = chosen_scores - rejected_scores
 
                 # Calculate the global indices
-                chosen_indices = chosen_local_indices * num_examples + torch.arange(num_examples, device=scores.device)
-                rejected_indices = rejected_local_indices * num_examples + torch.arange(
-                    num_examples, device=scores.device
-                )
+                num_examples_range = torch.arange(num_examples).to(scores.device)
+                chosen_indices = chosen_local_indices * num_examples + num_examples_range
+                rejected_indices = rejected_local_indices * num_examples + num_examples_range
 
                 if args.take_top_bottom_generation:
                     # reduce query_responses from (num_examples * num_generation_per_prompt) to (num_examples * 2)
@@ -780,7 +779,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
                 ref_logprobs = torch.cat(ref_logprobs, 0)
                 responses = torch.cat(responses, 0)
-                del (ref_logprob, score)
+                del ref_logprob
                 gc.collect()
                 torch.cuda.empty_cache()
 
