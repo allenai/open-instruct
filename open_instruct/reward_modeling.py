@@ -251,7 +251,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         splits=args.dataset_train_splits,
         columns_to_keep=[dataset_config.preference_chosen_key, dataset_config.preference_rejected_key],
     )
-    breakpoint()
     if dataset_config.sanity_check:
         train_dataset = train_dataset.select(
             range(0, min(len(train_dataset), dataset_config.sanity_check_max_samples))
