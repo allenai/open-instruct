@@ -4,6 +4,7 @@ export type KeyboardShortcutParams = {
   nextInstanceIfSaved: () => void;
   previousInstance: () => void;
   nextQuestion: () => void;
+  openShortcuts: () => void;
   previousQuestion: () => void;
   rank: (rank: string) => void;
   approve: (q: number) => void;
@@ -49,6 +50,10 @@ export function HandleKeyboardShortcut(params: KeyboardShortcutParams): Keyboard
       handler: () => { params.nextQuestion(); params.reject(2) }
     },
     {
+      condition: (key, isModified) => key === '?',
+      handler: () => { params.openShortcuts(); }
+    },
+    {
       condition: (key, _) => ['1', '2', '3', '4', '5'].includes(key),
       handler: (e) => {
         [
@@ -77,7 +82,7 @@ export function HandleKeyboardShortcut(params: KeyboardShortcutParams): Keyboard
 
   return (e: KeyboardEvent) => {
 
-    const allowedKeys = ['j', 'k', '1', '2', '3', '4', '5', 's', 'i', 'u', 'k', 'j', ' ']
+    const allowedKeys = ['j', 'k', '1', '2', '3', '4', '5', 's', 'i', 'u', 'k', 'j', ' ', '?']
 
     if (!allowedKeys.includes(e.key)) {
       return
@@ -91,6 +96,5 @@ export function HandleKeyboardShortcut(params: KeyboardShortcutParams): Keyboard
     keyListeners
       .filter((l) => l.condition(e.key, isModified))
       .forEach((l) => l.handler(e));
-
   }
 }

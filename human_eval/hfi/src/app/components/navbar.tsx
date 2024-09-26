@@ -1,30 +1,37 @@
 "use client";
-import React, { useState } from 'react';
+import React, { FC, useState } from 'react';
 import Modal from './modal';
 import { useRouter } from 'next/navigation';
+import useFlaskService from '../services/flask.service';
+import { lastValueFrom } from 'rxjs';
 
-export default function Navbar() {
+type NavBarProps = {
+  openShortcutsModal(): void,
+  closeShortcutsModal(): void,
+  isShortcutsModalOpen: boolean,
+}
+
+const Navbar : FC<NavBarProps> = ({ openShortcutsModal, closeShortcutsModal, isShortcutsModalOpen }) => {
 
   const [isFeedbackModalOpen, setFeedbackModalOpen] = useState(false);
 
   const openFeedbackModal = () => setFeedbackModalOpen(true);
   const closeFeedbackModal = () => setFeedbackModalOpen(false);
-
-  const [isShortcutsModalOpen, setShortcutsModalOpen] = useState(false);
-
-  const openShortcutsModal = () => setShortcutsModalOpen(true);
-  const closeShortcutsModal = () => setShortcutsModalOpen(false);
+  const flask = useFlaskService()
 
   const router = useRouter()
 
   const logout = async () => {
     try {
-        const response = await fetch('/api/logout', {
-            credentials: 'include',
-            method: 'POST',
-        });
-        await response.text();
-        console.log('logged out', response.ok);
+        await lastValueFrom(flask.getLogout());
+    } catch (error) {
+      const errorMessage = (error as any).message as string;
+      if (!errorMessage.includes('login 404 (Not Found)')) {
+        console.error('Failed to log out', error);
+      }
+    } finally {
+        // Clear cookies after logout
+        console.log('logged out!');
         
         const cookiesToClear = [
           'auth_verification',
@@ -43,8 +50,6 @@ export default function Navbar() {
       
         
         router.push('/')
-    } catch (error) {
-        console.error('Failed to log out', error);
     }
 };
 
@@ -232,3 +237,5 @@ export default function Navbar() {
     </nav>
   );
 };
+
+export default Navbar;

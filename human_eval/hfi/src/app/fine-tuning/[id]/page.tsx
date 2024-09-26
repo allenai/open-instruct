@@ -1,7 +1,7 @@
-import { useRouter } from "next/router";
+"use client"
 import Navbar from "../../components/navbar";
 import Workspace from "./workspace";
-import { FC } from 'react';
+import { FC, useState } from 'react';
 
 type HomeParams = {
   params: {
@@ -10,11 +10,18 @@ type HomeParams = {
 }
 
 const Home : FC<HomeParams> = ({ params }) => {
+
+  const [isShortcutsModalOpen, setShortcutsModalOpen] = useState(false);
+
+  const openShortcutsModal = () => setShortcutsModalOpen(true);
+  const closeShortcutsModal = () => setShortcutsModalOpen(false);
+
+
   return (
     <>
-    <Navbar />
+    <Navbar closeShortcutsModal={closeShortcutsModal} openShortcutsModal={openShortcutsModal} isShortcutsModalOpen={isShortcutsModalOpen} />
     <div className="flex flex-row w-full">
-        <Workspace instanceId={Number(params.id)} />
+        <Workspace openShortcutsModal={openShortcutsModal} instanceId={Number(params.id)} />
     </div>
     </>
   );

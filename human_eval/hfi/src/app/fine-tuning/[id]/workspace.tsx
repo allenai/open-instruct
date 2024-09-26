@@ -9,9 +9,10 @@ import { useRouter } from "next/navigation";
 
 export type WorkspaceParams = {
   instanceId: number
+  openShortcutsModal: () => void
 }
 
-export default function Workspace({ instanceId }: WorkspaceParams) {
+export default function Workspace({ instanceId, openShortcutsModal }: WorkspaceParams) {
 
   const [currentInstanceId, setCurrentInstanceId ] = useState(instanceId)
   const [modelOutput, setModelOutput] = useState<ModelOutputType|null>(null)
@@ -35,11 +36,17 @@ export default function Workspace({ instanceId }: WorkspaceParams) {
     const init = async () => {
       if (!instanceId) return;
       if (!flask) return;
-  
-      let modelOutput = await firstValueFrom(flask.getModelOutputs(instanceId));
-      setModelOutput(modelOutput);
-      let authdUser = await firstValueFrom(flask.getAuthenticatedUser())
-      setUsername(authdUser)
+      
+      try {
+        let modelOutput = await firstValueFrom(flask.getModelOutputs(instanceId));
+        setModelOutput(modelOutput);
+        let authdUser = await firstValueFrom(flask.getAuthenticatedUser())
+        setUsername(authdUser)
+      } catch (error) {
+        if ((error as any).message.includes('Unauthorized')) {
+          router.replace('/?unauthorized=true');
+        }
+      }
     }
 
     init();
@@ -74,7 +81,7 @@ export default function Workspace({ instanceId }: WorkspaceParams) {
         <ModelOutput modelOutput={modelOutput} />
       </div>
       <div className="flex flex-col lg:w-2/6 p-4">
-      <Evaluation flask={flask} instanceId={currentInstanceId} save={save} nextInstance={next} previousInstance={prev}  />
+        <Evaluation username={username} openShortcutsModal={openShortcutsModal} flask={flask} instanceId={currentInstanceId} save={save} nextInstance={next} previousInstance={prev}  />
       </div>
   </div>
   )

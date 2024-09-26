@@ -11,13 +11,15 @@ type FormState = {
 
 type EvaluationParams = {
   instanceId: number
+  username: string
   nextInstance: () => void
   previousInstance: () => void
+  openShortcutsModal: () => void
   save: (input: Partial<EvaluationInput>) => Promise<boolean>
   flask: FlaskService
 }
 
-export default function Evaluation({ instanceId, save, nextInstance, previousInstance, flask } : EvaluationParams) {
+export default function Evaluation({ username, instanceId, save, nextInstance, previousInstance, flask, openShortcutsModal } : EvaluationParams) {
 
   const [currentQuestion, setCurrentQuestion] = useState(1)
   const [isSaved, setIsSaved] = useState(false)
@@ -91,6 +93,7 @@ export default function Evaluation({ instanceId, save, nextInstance, previousIns
       save: beginSave,
       approve: (q) => { setEvalForQuestion(q, 'yes') },
       reject: (q) => { setEvalForQuestion(q, 'no') },
+      openShortcuts: openShortcutsModal,
       rank: (r) => { set('rank', r) }
     } as KeyboardShortcutParams);
     window.addEventListener('keydown', onKeyDown);
@@ -99,7 +102,7 @@ export default function Evaluation({ instanceId, save, nextInstance, previousIns
       window.removeEventListener('keydown', onKeyDown);
     };
       
-  }, [currentQuestion, formState, nextInstance, previousInstance, setIsSaved, isSaved, save]);
+  }, [currentQuestion, formState, nextInstance, previousInstance, setIsSaved, isSaved, save, openShortcutsModal]);
 
   const Form = () => {
 
@@ -151,7 +154,7 @@ export default function Evaluation({ instanceId, save, nextInstance, previousIns
   return (
     <div id="evaluation-region" className="flex flex-col m-4 p-4 rounded w-full">
       <h2>Evaluation</h2>
-      <p className="text-sm text-gray">Now please evaluate the two outputs based on your knowledge, preference, and any external tools (e.g., Google Search or Translate)</p>
+      <p className="text-sm text-gray">Welcome, {username}! Please evaluate the two outputs based on your knowledge, preference, and any external tools (e.g., Google Search or Translate)</p>
       <div className="row mt-3">
           <div className="col icon-col">
           </div>
