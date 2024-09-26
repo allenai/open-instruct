@@ -26,8 +26,23 @@ export class FlaskService {
     })));
 
     return get$.pipe(
-      concatMap(r => r.json() as Promise<{username: string}>),
+      concatMap(r => {
+        if (r.status == 401) {
+          throw new Error('Unauthorized');
+        }
+        return from(r.json() as Promise<{username: string}>)
+      }),
       map(r => r.username),
+    )
+  }
+
+  getLogout(): Observable<any> {
+    const get$ = defer(() => from(fetch('/flask/logout', {
+      credentials: 'include',
+    })));
+
+    return get$.pipe(
+      concatMap(r => r.json() as Promise<any>)
     )
   }
 
