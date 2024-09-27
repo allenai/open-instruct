@@ -1,4 +1,5 @@
 import argparse
+import re
 from typing import List
 import beaker
 import os
@@ -24,6 +25,7 @@ def get_args():
     )
     parser.add_argument("--budget", type=str, help="Budget to use.", required=True)
     parser.add_argument("--gpus", type=int, help="Number of gpus", default=0)
+    parser.add_argument("--num_nodes", type=int, help="Number of nodes", default=1)
     parser.add_argument(
         "--image",
         type=str,
@@ -118,7 +120,7 @@ def parse_commands(command_args: List[str]) -> List[List[str]]:
     return commands
 
 
-def get_env_vars(pure_docker_mode, cluster: List[str], beaker_secrets, whoami, resumable):
+def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: List[str], whoami: str, resumable: bool, num_nodes: int):
     env_vars = []
     useful_secrets = [
         "HF_TOKEN",
@@ -149,8 +151,7 @@ def get_env_vars(pure_docker_mode, cluster: List[str], beaker_secrets, whoami, r
                 value=os.getenv("PATH"),
             ),
         ])
-    
-    # if we are not running on jupiter2, we try to mount the NFS
+
     if "ai2/jupiter-cirrascale-2" not in cluster:
         env_vars.extend([
             beaker.EnvVar(
@@ -170,6 +171,17 @@ def get_env_vars(pure_docker_mode, cluster: List[str], beaker_secrets, whoami, r
                 value=f"/net/nfs.cirrascale/allennlp/deletable_checkpoint_states/{global_wandb_id}",
             ),
         ])
+        if len(cluster) == 1 and "ai2/pluto-cirrascale" in cluster:
+            env_vars.extend([
+                beaker.EnvVar(
+                    name="NCCL_IB_HCA",
+                    value="^=mlx5_1,mlx5_2",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_DEBUG",
+                    value="INFO",
+                ),
+            ])
     # if we only run on jupiter 2, we try to mount weka
     elif len(cluster) == 1 and "ai2/jupiter-cirrascale-2" in cluster:
         env_vars.extend([
@@ -186,6 +198,21 @@ def get_env_vars(pure_docker_mode, cluster: List[str], beaker_secrets, whoami, r
                 value=f"/weka/allennlp/deletable_checkpoint_states/{global_wandb_id}",
             ),
         ])
+        if num_nodes > 1:
+            env_vars.extend([
+                beaker.EnvVar(
+                    name="NCCL_SOCKET_IFNAME",
+                    value="ib",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_IB_HCA",
+                    value="^=mlx5_bond_0",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_DEBUG",
+                    value="INFO",
+                ),
+            ])
     # don't mount anything; assume no cache
     else:
         pass
@@ -244,12 +271,29 @@ def make_task_spec(args, command, i, beaker_secrets, whoami, resumable: bool):
     full_command = command
     command = ['/bin/bash', '-c']
     setup_commands = (
+        "echo 'Running on host: $BEAKER_REPLICA_RANK' && "
+        "echo 'Running on host: $BEAKER_LEADER_REPLICA_HOSTNAME' && "
         "git config --global safe.directory '*' && " # fix the permission issue with git
         "umask 000 && " # fix the permission issue with the cache folder
     )
     if not args.pure_docker_mode:
         setup_commands += f"cd {os.getcwd()} && "
-    fully_command = setup_commands + " ".join(full_command)
+
+    join_full_command = " ".join(full_command)
+    # override accelerate call
+    if args.num_nodes > 1:
+        join_full_command = re.sub(
+            r'--num_processes (\d+)',
+            lambda m: (
+                f'--num_processes {int(m.group(1)) * args.num_nodes} '
+                f'--num_machines {args.num_nodes} '
+                '--machine_rank $BEAKER_REPLICA_RANK '
+                '--main_process_ip $BEAKER_LEADER_REPLICA_HOSTNAME '
+                '--main_process_port 29400 '
+            ),
+            join_full_command
+        )
+    full_command = setup_commands + join_full_command
     print(f"{full_command=}")
 
 
@@ -257,15 +301,21 @@ def make_task_spec(args, command, i, beaker_secrets, whoami, resumable: bool):
         name=f"{args.task_name}__{i}",
         image=beaker.ImageSource(beaker=args.image),
         command=command,
-        arguments=[fully_command],
+        arguments=[full_command],
         result=beaker.ResultSpec(path="/output"),
         datasets=get_datasets(args.beaker_datasets, args.cluster),
         context=beaker.TaskContext(priority=beaker.Priority(args.priority),
                                    preemptible=args.preemptible),
         constraints=beaker.Constraints(cluster=args.cluster),
-        env_vars=get_env_vars(args.pure_docker_mode, args.cluster, beaker_secrets, whoami, resumable),
+        env_vars=get_env_vars(args.pure_docker_mode, args.cluster, beaker_secrets, whoami, resumable, args.num_nodes),
         resources=beaker.TaskResources(gpu_count=args.gpus),
+        replicas=args.num_nodes,
     )
+    if args.num_nodes > 1:
+        spec.leader_selection = True
+        spec.host_networking = True
+        spec.propagate_failure = True
+        spec.propagate_preemption = True
 
     return spec
 

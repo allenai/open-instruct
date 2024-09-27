@@ -679,8 +679,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     g_vllm_responses[:] = g_padded_response_ids
                 broadcast(g_vllm_responses, 0)
                 local_vllm_responses = g_vllm_responses[
-                    accelerator.local_process_index
-                    * queries.shape[0] : (accelerator.local_process_index + 1)
+                    accelerator.process_index
+                    * queries.shape[0] : (accelerator.process_index + 1)
                     * queries.shape[0]
                 ]
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
@@ -756,7 +756,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
                 # 4. compute rewards
                 kl = logprobs - ref_logprobs
-                print(f"{accelerator.local_process_index=}, {kl.sum(1)=}")
                 non_score_reward = -args.beta * kl
                 non_score_reward_sum = non_score_reward.sum(1)
                 rlhf_reward = scores + non_score_reward_sum
