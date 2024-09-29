@@ -13,6 +13,12 @@ def parse_beaker_dataset(dataset_str):
 
     return {"mount_path": splt[0], "beaker": splt[1]}
 
+WEKA_CLUSTERS = [
+    "ai2/jupiter-cirrascale-2",
+    "ai2/saturn-cirrascale",
+    "ai2/neptune-cirrascale",
+]
+
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -151,8 +157,9 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
                 value=os.getenv("PATH"),
             ),
         ])
-
-    if "ai2/jupiter-cirrascale-2" not in cluster:
+    
+    # if none of the cluster is in weka, we mount the NFS
+    if all(c not in WEKA_CLUSTERS for c in cluster):
         env_vars.extend([
             beaker.EnvVar(
                 name="HF_DATASETS_CACHE",
@@ -182,8 +189,8 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
                     value="INFO",
                 ),
             ])
-    # if we only run on jupiter 2, we try to mount weka
-    elif len(cluster) == 1 and "ai2/jupiter-cirrascale-2" in cluster:
+    # if all cluster is in weka, we mount the weka
+    elif all(c in WEKA_CLUSTERS for c in cluster):
         env_vars.extend([
             beaker.EnvVar(
                 name="HF_DATASETS_CACHE",
@@ -235,16 +242,16 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
 def get_datasets(beaker_datasets, cluster: List[str]):
     """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
     res = []
-    # if we are not running on jupiter2, we try to mount the NFS
-    if "ai2/jupiter-cirrascale-2" not in cluster:
+    # if none of the cluster is in weka, we mount the NFS
+    if all(c not in WEKA_CLUSTERS for c in cluster):
         res = [
             beaker.DataMount(
                 source=beaker.DataSource(host_path="/net/nfs.cirrascale"),
                 mount_path="/net/nfs.cirrascale",
             ),
         ]
-    # if we only run on jupiter 2, we try to mount weka
-    elif len(cluster) == 1 and "ai2/jupiter-cirrascale-2" in cluster:
+    # if all cluster is in weka, we mount the weka
+    elif all(c in WEKA_CLUSTERS for c in cluster):
         res = [
             beaker.DataMount(
                 source=beaker.DataSource(weka="oe-adapt-default"),
