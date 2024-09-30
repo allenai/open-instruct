@@ -15,7 +15,7 @@ python mason.py \
     --use_deepspeed \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     open_instruct/finetune.py \
-    --model_name_or_path meta-llama/Meta-Llama-3.1-8B \
+    --model_name_or_path "meta-llama/Meta-Llama-3.1-8B" \
     --use_flash_attn \
     --max_seq_length 2048 \
     --dataset_mixer_list "natolambert/tulu-v2-sft-mixture-flan 50000 natolambert/tulu-v2-sft-mixture-cot 49747 ai2-adapt-dev/personahub_math_v2_79975 79975 AI-MO/NuminaMath-TIR 72441" \
