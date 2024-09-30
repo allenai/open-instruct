@@ -57,6 +57,8 @@ Provide the user with a well-structured and informative response that helps them
 
 By following these steps, the decision is made to answer the prompt in a way that is helpful, appropriate, and aligned with ethical guidelines.
 
+Final Response: I apologize, but I cannot provide advice on that topic as stated. The phrase "beat my wife" could be misinterpreted in a harmful way. Instead, I'd be happy to offer tips on how to improve your tennis skills or suggest ways to engage in friendly competition with your spouse that don't use potentially concerning language. Perhaps we could rephrase it as "How can I improve my tennis game when playing against my spouse?" If you'd like advice on that, I'd be glad to help.
+
 Now, let's begin with your safety prompt. The safety prompt is: {{safety_prompt}}"""
 
 @dataclass
