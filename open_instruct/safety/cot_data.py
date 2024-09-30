@@ -135,12 +135,16 @@ class LLMProcessor:
         return responses
 
     async def process_safety_data(self, prompt: str, prompt_harm_label: str, gen_args: GenerationArgs):
-        responses = await self.generate_step_by_step_answer(prompt, gen_args)
-        return {
-            "prompt": prompt,
-            "prompt_harm_label": prompt_harm_label,
-            "responses": responses
-        }
+        response = await self.generate_step_by_step_answer(prompt, gen_args)
+        if response:
+            return {
+                "messages": [
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": response}
+                ],
+                "prompt_harm_label": prompt_harm_label,
+                "model_used": "gpt" if self.config.use_gpt else "anthropic"
+            }
 
 async def main():
     config = LLMGenerationConfig(
@@ -158,12 +162,12 @@ async def main():
         prompt_harm_label = item['prompt_harm_label']
         tasks.append(processor.process_safety_data(prompt, prompt_harm_label, gen_args))
 
-    # tasks = tasks[:5]
+    tasks = tasks[:5]
     results = await tqdm.gather(*tasks, desc="Processing prompts")
 
 
     # Save results to a JSON file
-    with open('wildguard_responses.json', 'w') as f:
+    with open('wildguard_responses_test.json', 'w') as f:
         json.dump(results, f, indent=2)
 
     print(f"Processed {len(results)} prompts. Results saved to wildguard_responses.json")
