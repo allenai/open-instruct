@@ -1,6 +1,6 @@
 #!/bin/bash
 
-python mason.py \
+python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/mason.py \
     --cluster ai2/allennlp-cirrascale \
     --image nathanl/open_instruct_auto \
     --pure_docker_mode \
