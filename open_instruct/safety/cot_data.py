@@ -162,7 +162,6 @@ async def main():
         prompt_harm_label = item['prompt_harm_label']
         tasks.append(processor.process_safety_data(prompt, prompt_harm_label, gen_args))
 
-    tasks = tasks[:5]
     results = await tqdm.gather(*tasks, desc="Processing prompts")
 
 
