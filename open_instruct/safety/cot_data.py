@@ -1,10 +1,7 @@
 import asyncio
 import json
-import re
-from typing import List, Dict, Optional
-from collections import defaultdict
 from dataclasses import dataclass
-from datasets import load_dataset, Dataset
+from datasets import load_dataset
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm
 import anthropic
@@ -16,7 +13,7 @@ TEMPLATE = """You're a helpful assistant. I want you to analyze a safety prompt 
 3. For each component, provide a step in the reasoning process, explaining how an AI might interpret and analyze it.
 4. Consider potential risks, ethical concerns, or safety implications at each step.
 5. If applicable, suggest alternative interpretations or approaches an AI could take.
-6. Conclude with a summary of the overall reasoning chain and provide a response. 
+6. Conclude with a summary of the overall reasoning chain and provide a response.
 
 Please use this format for each step:
 Step X: [Brief description]
@@ -56,11 +53,9 @@ Conclude that it is appropriate and beneficial to answer the prompt.
    - **Alignment with Purpose**: Offering assistance aligns with the role of a helpful and informative language model.
    - **Policy Compliance**: The response adheres to content policies and ethical standards.
 
-
 7. Plan the Response:
 - **Include Checkers Strategies**: Prepare to offer tips on tactics, board control, and common strategies in checkers.
 - **Maintain Clarity and Respect**: Ensure the language used is clear, respectful, and promotes good sportsmanship.
-
 
 8. Deliver the Answer:
 Provide the user with a well-structured and informative response that helps them improve their checkers skills.
@@ -120,7 +115,7 @@ class LLMProcessor:
                 responses["gpt_response"] = gpt_response.choices[0].message.content
 
             if self.config.use_anthropic:
-                anthropic_response = self.anthropic_client.messages.create(
+                anthropic_response = await self.anthropic_client.messages.create(
                     model=self.config.anthropic_model,
                     max_tokens=gen_args.max_tokens,
                     temperature=gen_args.temperature,
@@ -129,6 +124,7 @@ class LLMProcessor:
                     ]
                 )
                 responses["anthropic_response"] = anthropic_response.content[0].text
+
             return responses
 
         except Exception as e:
@@ -136,19 +132,13 @@ class LLMProcessor:
             return None
 
     async def process_safety_data(self, prompt: str, gen_args: GenerationArgs):
-        semaphore = asyncio.Semaphore(self.config.max_parallel_requests)
-
-        # async def process_with_semaphore():
-        async with semaphore:
+        async with asyncio.Semaphore(self.config.max_parallel_requests):
             return await self.generate_step_by_step_answer(prompt, gen_args)
-
-        # tasks = [process_with_semaphore() for _ in range(gen_args.safety_examples)]
-        # return await tqdm.gather(*tasks, desc=f"Generating responses")
 
 
 async def main():
     config = LLMGenerationConfig(
-        use_gpt=True,  # Set to False if you don't want to use GPT
+        use_gpt=False,  # Set to False if you don't want to use GPT
         use_anthropic=True  # Set to False if you don't want to use Anthropic
     )
     processor = LLMProcessor(config)
@@ -156,19 +146,13 @@ async def main():
 
     train_data = load_dataset("allenai/wildguardmix", "wildguardtest", split="test")
 
-    results = []
+    tasks = []
     for item in tqdm(train_data, desc="Processing prompts"):
         prompt = item['prompt']
         prompt_harm_label = item['prompt_harm_label']
+        tasks.append(processor.process_safety_data(prompt, gen_args))
 
-        responses = await processor.process_safety_data(prompt, gen_args)
-
-        result = {
-            "prompt": prompt,
-            "prompt_harm_label": prompt_harm_label,
-            "responses": responses
-        }
-        results.append(result)
+    results = await asyncio.gather(*tasks)
 
     # Save results to a JSON file
     with open('wildguard_responses.json', 'w') as f:
