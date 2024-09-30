@@ -76,7 +76,7 @@ class LLMGenerationConfig:
     gpt_model: str = "gpt-4"
     anthropic_model: str = "claude-3-opus-20240229"
     max_parallel_requests: int = 50  # Adjust based on your API rate limits
-    use_gpt: bool = True
+    use_gpt: bool = False
     use_anthropic: bool = True
 
 
