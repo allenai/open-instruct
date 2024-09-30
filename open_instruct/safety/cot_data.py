@@ -72,7 +72,7 @@ class LLMGenerationConfig:
 @dataclass
 class GenerationArgs:
     temperature: float = 0.7
-    max_tokens: int = 500
+    max_tokens: int = 1048
     top_p: float = 0.95
 
 class LLMProcessor:
