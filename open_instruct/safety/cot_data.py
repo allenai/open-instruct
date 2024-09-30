@@ -161,6 +161,7 @@ async def main():
     # tasks = tasks[:5]
     results = await tqdm.gather(*tasks, desc="Processing prompts")
 
+
     # Save results to a JSON file
     with open('wildguard_responses.json', 'w') as f:
         json.dump(results, f, indent=2)
