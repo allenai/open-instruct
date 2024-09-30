@@ -153,7 +153,7 @@ async def main():
     processor = LLMProcessor(config)
     gen_args = GenerationArgs()
 
-    train_data = load_dataset("allenai/wildguardmix", split="train")
+    train_data = load_dataset("allenai/wildguardmix", split="wildguardtest")
 
     results = []
     for item in tqdm(train_data, desc="Processing prompts"):
