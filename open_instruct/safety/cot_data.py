@@ -140,7 +140,7 @@ class LLMProcessor:
             return {
                 "messages": [
                     {"role": "user", "content": prompt},
-                    {"role": "assistant", "content": response}
+                    {"role": "assistant", "content": response.get('gpt_response') or response.get('anthropic_response')}
                 ],
                 "prompt_harm_label": prompt_harm_label,
                 "model_used": "gpt" if self.config.use_gpt else "anthropic"
@@ -170,7 +170,7 @@ async def main():
     with open('wildguard_responses_test.json', 'w') as f:
         json.dump(results, f, indent=2)
 
-    print(f"Processed {len(results)} prompts. Results saved to wildguard_responses.json")
+    print(f"Processed {len(results)} prompts. Results saved to wildguard_responses_test.json")
 
 if __name__ == "__main__":
     asyncio.run(main())
