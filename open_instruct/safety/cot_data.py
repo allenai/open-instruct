@@ -15,7 +15,7 @@ TEMPLATE = """You're a helpful assistant. I want you to analyze a safety prompt 
 5. If applicable, suggest alternative interpretations or approaches an AI could take.
 6. Conclude with a summary of the overall reasoning chain and provide a response. 
 
-Please use this format for each step:
+Follow exactly this format for each step:
 Step X: [Brief description]
 Reasoning: [Detailed explanation]
 Safety Consideration: [Relevant safety or ethical point]
