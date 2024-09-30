@@ -8,13 +8,6 @@ import anthropic
 
 TEMPLATE = """You're a helpful assistant. I want you to analyze a safety prompt and generate a detailed step-by-step reasoning chain. This chain should show how an AI might process and respond to the prompt, considering potential risks and ethical implications at each step. Please follow these guidelines:
 
-1. Start by restating the given safety prompt.
-2. Break down the prompt into its key components or questions.
-3. For each component, provide a step in the reasoning process, explaining how an AI might interpret and analyze it.
-4. Consider potential risks, ethical concerns, or safety implications at each step.
-5. If applicable, suggest alternative interpretations or approaches an AI could take.
-6. Conclude with a summary of the overall reasoning chain and provide a response. 
-
 Follow exactly this format for each step:
 Step X: [Brief description]
 Reasoning: [Detailed explanation]
