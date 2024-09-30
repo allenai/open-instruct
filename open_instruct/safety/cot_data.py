@@ -120,14 +120,15 @@ class LLMProcessor:
                 responses["gpt_response"] = gpt_response.choices[0].message.content
 
             if self.config.use_anthropic:
-                anthropic_response = self.anthropic_client.completions.create(
+                anthropic_response = self.anthropic_client.messages.create(
                     model=self.config.anthropic_model,
-                    prompt=f"Human: {formatted_prompt}\n\nAssistant:",
-                    max_tokens_to_sample=gen_args.max_tokens,
+                    max_tokens=gen_args.max_tokens,
                     temperature=gen_args.temperature,
+                    messages=[
+                        {"role": "user", "content": formatted_prompt}
+                    ]
                 )
-                responses["anthropic_response"] = anthropic_response.completion
-
+                responses["anthropic_response"] = anthropic_response.content[0].text
             return responses
 
         except Exception as e:
