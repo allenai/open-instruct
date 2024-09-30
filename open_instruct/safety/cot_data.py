@@ -74,7 +74,7 @@ Now, let's begin with your safety prompt. The safety prompt is: {{safety_prompt}
 class LLMGenerationConfig:
     num_completions: int = 100
     gpt_model: str = "gpt-4"
-    anthropic_model: str = "claude-3-opus-20240229"
+    anthropic_model: str = "claude-3-sonnet-20240229"
     max_parallel_requests: int = 50  # Adjust based on your API rate limits
     use_gpt: bool = False
     use_anthropic: bool = True
