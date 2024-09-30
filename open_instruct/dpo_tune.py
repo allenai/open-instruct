@@ -75,6 +75,8 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     upload_metadata_to_hf,
 )
+from open_instruct.dataset_processor import CHAT_TEMPLATES
+from open_instruct.finetune import encode_sft_example
 
 logger = get_logger(__name__)
 
@@ -127,6 +129,16 @@ class FlatArguments:
     tokenizer_revision: Optional[str] = field(
         default=None,
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+    )
+    chat_template_name: str = field(
+        default="tulu",
+        metadata={
+            "help": (
+                f"The name of the chat template to use. "
+                f"You can choose one of our pre-defined templates: {', '.join(CHAT_TEMPLATES.keys())}."
+                f"Or, you can provide a tokenizer name or path here and we will apply its chat template."
+            )
+        },
     )
     use_flash_attn: bool = field(
         default=True,
@@ -394,11 +406,10 @@ class FlatArguments:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
 
 
-def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=False):
+def encode_dpo_example(example, tokenizer, max_seq_length):
     """
     Here we assume each example has a rejected and chosen field, both of which are a list of messages.
     Each message is a dict with 'role' and 'content' fields.
-    We concatenate all messages with the roles as delimiters and tokenize them together.
     We assume only the last message is different, and the prompt is contained in the list of messages.
     """
     chosen_messages = example["chosen"]
@@ -408,62 +419,9 @@ def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=Fals
     if len(rejected_messages) == 0:
         raise ValueError("rejected messages field is empty.")
 
-    def _concat_messages(messages):
-        message_text = ""
-        for message in messages:
-            if message["role"] == "system":
-                message_text += "<|system|>\n" + message["content"].strip() + "\n"
-            elif message["role"] == "user":
-                message_text += "<|user|>\n" + message["content"].strip() + "\n"
-            elif message["role"] == "assistant":
-                message_text += "<|assistant|>\n" + message["content"].strip() + tokenizer.eos_token + "\n"
-            else:
-                raise ValueError("Invalid role: {}".format(message["role"]))
-        return message_text
+    chosen_encoded = encode_sft_example({"messages": chosen_messages}, tokenizer, max_seq_length)
+    rejected_encoded = encode_sft_example({"messages": rejected_messages}, tokenizer, max_seq_length)
 
-    def encode_messages(messages):
-        example_text = _concat_messages(messages).strip()
-        if add_bos:
-            example_text = tokenizer.bos_token + example_text
-        tokenized_example = tokenizer(example_text, return_tensors="pt", max_length=max_seq_length, truncation=True)
-        input_ids = tokenized_example.input_ids
-        labels = input_ids.clone()
-
-        # mask the non-assistant part for avoiding loss
-        for message_idx, message in enumerate(messages):
-            if message["role"] != "assistant":
-                if message_idx == 0:
-                    message_start_idx = 0
-                else:
-                    message_start_idx = tokenizer(
-                        _concat_messages(messages[:message_idx]),
-                        return_tensors="pt",
-                        max_length=max_seq_length,
-                        truncation=True,
-                    ).input_ids.shape[1]
-                if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
-                    # here we also ignore the role of the assistant
-                    messages_so_far = _concat_messages(messages[: message_idx + 1]) + "<|assistant|>\n"
-                else:
-                    messages_so_far = _concat_messages(messages[: message_idx + 1])
-                message_end_idx = tokenizer(
-                    messages_so_far, return_tensors="pt", max_length=max_seq_length, truncation=True
-                ).input_ids.shape[1]
-                labels[:, message_start_idx:message_end_idx] = -100
-
-                if message_end_idx >= max_seq_length:
-                    break
-
-        attention_mask = torch.ones_like(input_ids)
-        return {
-            "input_ids": input_ids.flatten(),
-            "labels": labels.flatten(),
-            "attention_mask": attention_mask.flatten(),
-        }
-
-    chosen_encoded = encode_messages(chosen_messages)
-    rejected_encoded = encode_messages(rejected_messages)
-    # labels are useful for working out where the loss is valid.
     return {
         "chosen_input_ids": chosen_encoded["input_ids"],
         "chosen_labels": chosen_encoded["labels"],
@@ -744,6 +702,24 @@ def main(args: FlatArguments):
             if len(tokenizer) > reference_embeddings.weight.shape[0]:
                 reference_model.resize_token_embeddings(len(tokenizer))
 
+    # set the tokenizer chat template to the training format
+    # this will be used for encoding the training examples
+    # and saved together with the tokenizer to be used later.
+    if args.chat_template_name in CHAT_TEMPLATES:
+        tokenizer.chat_template = CHAT_TEMPLATES[args.chat_template_name]
+    else:
+        try:
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(args.chat_template_name).chat_template
+        except Exception as e:
+            raise ValueError(f"Could not find chat template for {args.chat_template_name}.")
+
+    if args.add_bos and \
+        if tokenizer.chat_template.startswith("{{ bos_token }}") \
+            or (tokenizer.bos_token is not None and tokenizer.chat_template.startswith(tokenizer.bos_token)):
+            raise ValueError("You specified add_bos=True, but the chat template already has a bos_token at the beginning.")
+        # add bos in the chat template if not already there
+        tokenizer.chat_template = "{{ bos_token }}" + tokenizer.chat_template
+
     if args.use_lora:
         if args.use_qlora:
             model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
@@ -767,10 +743,9 @@ def main(args: FlatArguments):
         raise ValueError("Sorry, prompt-completion format is not supported for DPO training.")
     elif "chosen" in raw_datasets["train"].column_names and "rejected" in raw_datasets["train"].column_names:
         encode_function = partial(
-            encode_with_messages_format,
+            encode_dpo_example,
             tokenizer=tokenizer,
             max_seq_length=args.max_seq_length,
-            add_bos=args.add_bos,
         )
     else:
         raise ValueError("You need to have 'chosen' and 'rejected in your column names.")
