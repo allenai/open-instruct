@@ -1,3 +1,5 @@
+#!/bin/bash
+
 python mason.py \
     --cluster ai2/allennlp-cirrascale \
     --image nathanl/open_instruct_auto \
