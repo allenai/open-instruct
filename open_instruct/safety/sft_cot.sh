@@ -16,7 +16,7 @@ python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/mason.py \
     --num_processes 4 \
     --use_deepspeed \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
-    --  python open_instruct/finetune.py \
+    --  python finetune.py \
     --model_name_or_path "meta-llama/Meta-Llama-3.1-8B" \
     --use_flash_attn \
     --max_seq_length 2048 \
