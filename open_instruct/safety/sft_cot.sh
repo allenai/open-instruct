@@ -10,12 +10,13 @@ python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/mason.py \
     --budget ai2/allennlp \
     --preemptible \
     --gpus 4 \
-    -- accelerate launch \
+    --accelerate launch \
     --mixed_precision bf16 \
     --num_machines 1 \
     --num_processes 4 \
     --use_deepspeed \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
+    -- \
     open_instruct/finetune.py \
     --model_name_or_path "meta-llama/Meta-Llama-3.1-8B" \
     --use_flash_attn \
