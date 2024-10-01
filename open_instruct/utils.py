@@ -208,7 +208,6 @@ def get_datasets(
             Used primarily in mix_data.py for saving, or the saved dataset has IDs already.
     """
     if isinstance(dataset_mixer, list):
-        breakpoint()
         assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
         mixer_dict = {}
         i = 0
@@ -243,6 +242,7 @@ def get_datasets(
             # if dataset ends with .json or .jsonl, load from file
             if ds.endswith(".json") or ds.endswith(".jsonl"):
                 dataset = load_dataset("json", data_files=ds, split=split)
+                breakpoint()
             else:
                 try:
                     # Try first if dataset on a Hub repo
