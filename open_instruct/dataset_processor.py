@@ -549,7 +549,6 @@ class SimplePRMCollator:
         """the input will have input_ids_chosen, input_ids_rejected"""
         # Find max length in the batch
         max_length_chosen = -1
-        max_length_rejected = -1
         for i in range(len(batch)):
             max_length_chosen = max(max_length_chosen, len(batch[i]["input_ids"]))
             # max_length_rejected = max(max_length_rejected, len(batch[i]["input_ids_rejected"]))

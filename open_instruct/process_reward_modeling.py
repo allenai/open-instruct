@@ -49,7 +49,7 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
     save_with_accelerate,
 )
-from open_instruct.reward_modeling_eval import evaluate
+from open_instruct.reward_modeling_eval import evaluate, evaluate_prm
 from open_instruct.utils import (
     ArgumentParserPlus,
     combine_dataset,
@@ -401,20 +401,22 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         writer.add_scalar(key, value, episode)
 
             # (optionally) evaluate the model
-            # TODO: add support for evaluating process RM (not implemented yet, disabled now)
-            # if args.num_evals > 0 and training_step > 1 and training_step % args.eval_freq == 0:
-            #     eval_metrics, table = evaluate(model, eval_dataloader, tokenizer, max_sampled_texts=10)
-            #     for key in table:
-            #         table[key] = gather_object(table[key])
-            #     df = pd.DataFrame(table)
-            #     if accelerator.is_main_process:
-            #         print_rich_single_line_metrics(eval_metrics)
-            #         for key, value in eval_metrics.items():
-            #             writer.add_scalar(key, value, episode)
-            #         if args.with_tracking:
-            #             wandb.log({"preference_sample_texts": wandb.Table(dataframe=df)})
-            #         else:
-            #             print_rich_table(df)
+            if args.num_evals > 0 and training_step > 1 and training_step % args.eval_freq == 0:
+                eval_metrics, table = evaluate_prm(model, eval_dataloader, tokenizer, max_sampled_texts=10)
+                for key in table:
+                    table[key] = gather_object(table[key])
+                # if accelerator.is_main_process:
+                #     breakpoint()
+                df = pd.DataFrame(table)
+                if accelerator.is_main_process:
+                    print_rich_single_line_metrics(eval_metrics)
+                    for key, value in eval_metrics.items():
+                        writer.add_scalar(key, value, episode)
+                    if args.with_tracking:
+                        wandb.log({"preference_sample_texts": wandb.Table(dataframe=df)})
+                    else:
+                        print_rich_table(df)
+                    print_rich_table(df)
 
     # save model
     os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
