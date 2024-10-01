@@ -9,7 +9,7 @@ python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/mason.py \
     --priority high \
     --budget ai2/allennlp \
     --preemptible \
-    --gpus 4 \
+    --gpus 6 \
     --accelerate launch \
     --mixed_precision bf16 \
     --num_machines 1 \
@@ -21,7 +21,7 @@ python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/mason.py \
     --model_name_or_path "meta-llama/Meta-Llama-3.1-8B" \
     --use_flash_attn \
     --max_seq_length 2048 \
-    --dataset_mixer_list "natolambert/tulu-v2-sft-mixture-flan 50000 natolambert/tulu-v2-sft-mixture-cot 49747 ai2-adapt-dev/personahub_math_v2_79975 79975 AI-MO/NuminaMath-TIR 72441" \
+    --dataset_mixer_list "open_instruct/wildguard_responses_test.json 1699 allenai/tulu-v2-sft-mixture 2000" \
     --preprocessing_num_workers 16 \
     --per_device_train_batch_size 2 \
     --gradient_accumulation_steps 16 \
