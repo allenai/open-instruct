@@ -205,6 +205,33 @@ def get_reward(
         sequence_lengths,
     )
 
+import re
+
+def apply_verifiable_reward(
+    query_responses: torch.Tensor, tokenizer, ground_truth: str
+):
+    # decode the responses
+    decoded_responses = tokenizer.batch_decode(query_responses, skip_special_tokens=True)
+    # compare with ground truth.
+    # use same logic as in gsm8k evaluation
+    predictions = []
+    rewards = []
+    for response in decoded_responses:
+        # replace numbers like `x,xxx` with `xxxx`
+        response = re.sub(r"(\d),(\d)", r"\1\2", response)
+        numbers = re.findall(r"[-+]?\d*\.\d+|\d+", response)
+        if numbers:
+            predictions.append(numbers[-1])
+        else:
+            predictions.append(response)
+    for prediction, gt in zip(predictions, ground_truth):
+        if prediction == gt:
+            print("Ground truth matched with prediction, giving a bonus reward 🤗")
+            rewards.append(10)
+        else:
+            rewards.append(0)
+    return torch.tensor(rewards, device=query_responses.device)
+
 
 def forward(
     model: torch.nn.Module,

@@ -51,6 +51,7 @@ INPUT_IDS_REJECTED_KEY = "input_ids_rejected"
 ATTENTION_MASK_REJECTED_KEY = "attention_mask_rejected"
 INPUT_IDS_PROMPT_KEY = "input_ids_prompt"
 ATTENTION_MASK_PROMPT_KEY = "attention_mask_prompt"
+GROUND_TRUTHS_KEY = "ground_truth"
 
 # NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
 # also we don't really need `ATTENTION_MASK_CHOSEN_KEY` and `ATTENTION_MASK_REJECTED_KEY`
@@ -161,6 +162,9 @@ class DatasetConfig:
 
     # columns names for SFT dataset
     sft_messages_key: str = SFT_MESSAGE_KEY
+
+    # columns name for the ground truth
+    ground_truths_key: str = GROUND_TRUTHS_KEY
 
     # columns names for binary dataset
     binary_messages_key: str = SFT_MESSAGE_KEY
@@ -372,6 +376,7 @@ class SFTDatasetProcessor(DatasetProcessor):
             if self.config.train_only_on_prompt:
                 labels[: len(row[INPUT_IDS_PROMPT_KEY])] = [-100] * len(row[INPUT_IDS_PROMPT_KEY])
             row[LABELS_KEY] = labels
+            row[GROUND_TRUTHS_KEY] = row[self.config.ground_truths_key]
             return row
 
         return dataset.map(

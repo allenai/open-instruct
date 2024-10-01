@@ -38,6 +38,7 @@ from vllm import LLM, SamplingParams
 from open_instruct.dataset_processor import (
     CHAT_TEMPLATES,
     INPUT_IDS_PROMPT_KEY,
+    GROUND_TRUTHS_KEY,
     DatasetConfig,
     SFTDatasetProcessor,
     SimpleGenerateCollator,
@@ -50,6 +51,7 @@ from open_instruct.model_utils import (
     first_true_indices,
     forward,
     get_reward,
+    get_verifiable_reward,
     prepare_deepspeed,
     print_rich_single_line_metrics,
     print_rich_table,
@@ -680,6 +682,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     start_time = time.time()
     data = next(iter_dataloader)
     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
+    ground_truths_next = data[GROUND_TRUTHS_KEY].to(device)
     send_queries(accelerator, None, tokenizer, param_prompt_Q, queries_next)
 
     for _ in range(1, resume_training_step):  # we didn't store scheduler state
@@ -689,6 +692,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         episode += args.batch_size
         scheduler.step()
         queries = queries_next
+        ground_truths = ground_truths_next
         if ph.preemptied:
             break
 
@@ -717,6 +721,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 if training_step != 1:
                     data = next(iter_dataloader)
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
+                    ground_truths_next = data[GROUND_TRUTHS_KEY].to(device)
                 send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
             else:
                 if training_step != 1:
@@ -724,8 +729,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     # we also set to use `queries = queries_next` immediately
                     data = next(iter_dataloader)
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
+                    ground_truths_next = data[GROUND_TRUTHS_KEY].to(device)
                     send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
                     queries = queries_next
+                    ground_truths_next = ground_truths_next
 
             training_time_start = time.time()
             with torch.no_grad():
@@ -791,6 +798,11 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     _, score, _ = get_reward(
                         reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
+                    # also apply verifiable reward 
+                    verifiable_reward = get_verifiable_reward(
+                        postprocessed_query_response, tokenizer, ground_truths
+                    )
+                    score += verifiable_reward
                     unwrapped_value_model = accelerator.unwrap_model(model).value_model
                     full_value, _, _ = get_reward(
                         unwrapped_value_model, query_response, tokenizer.pad_token_id, context_length
