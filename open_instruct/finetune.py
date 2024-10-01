@@ -873,6 +873,8 @@ def main(args: FlatArguments):
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
 
+    total_tokens = 0
+    start_time = time.time()
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
         train_dataloader.set_epoch(epoch)
@@ -884,6 +886,7 @@ def main(args: FlatArguments):
         else:
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
+            total_tokens += batch["attention_mask"].numel() * accelerator.num_processes
             with accelerator.accumulate(model):
                 if args.load_balancing_loss:
                     outputs = model(**batch, use_cache=False, output_router_logits=True)
@@ -939,6 +942,8 @@ def main(args: FlatArguments):
                     metrics_to_log = {
                         "learning_rate": lr_scheduler.get_last_lr()[0],
                         "train_loss": avg_loss,
+                        "total_tokens": total_tokens,
+                        "TPS": total_tokens / (time.time() - start_time),
                     }
                     if args.load_balancing_loss:
                         avg_aux_loss = (
@@ -947,12 +952,12 @@ def main(args: FlatArguments):
                             / args.logging_steps
                         )
                         logger.info(
-                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, Aux Loss: {avg_aux_loss}"
+                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, Aux Loss: {avg_aux_loss}, TPS: {total_tokens / (time.time() - start_time)}"
                         )
                         metrics_to_log["aux_loss"] = avg_aux_loss
                     else:
                         logger.info(
-                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}"
+                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, TPS: {total_tokens / (time.time() - start_time)}"
                         )
                     if args.with_tracking:
                         accelerator.log(
