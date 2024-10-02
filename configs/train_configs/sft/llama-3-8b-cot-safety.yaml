@@ -4,7 +4,7 @@ use_flash_attn: true
 tokenizer_name: meta-llama/Meta-Llama-3-8B
 use_slow_tokenizer: true
 dataset_mixer:
-    ai2-adapt-dev/synthetic-cot-safety allenai/tulu-v2-sft-mixture # all
+    ai2-adapt-dev/synthetic-cot-safety 1725 allenai/tulu-v2-sft-mixture 326154 # all
 max_seq_length: 4096 # Note, reduced from 8192 to fit on one GPU with DeepSpeed Stage3
 preprocessing_num_workers: 128
 per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
