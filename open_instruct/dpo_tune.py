@@ -55,6 +55,7 @@ from transformers import (
     get_scheduler,
 )
 
+from open_instruct.dataset_processor import CHAT_TEMPLATES
 from open_instruct.dpo_utils import (
     DataCollatorForSeq2SeqDPO,
     concatenated_forward,
@@ -62,6 +63,7 @@ from open_instruct.dpo_utils import (
     simpo_loss,
     wpo_loss,
 )
+from open_instruct.finetune import encode_sft_example
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -75,8 +77,6 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     upload_metadata_to_hf,
 )
-from open_instruct.dataset_processor import CHAT_TEMPLATES
-from open_instruct.finetune import encode_sft_example
 
 logger = get_logger(__name__)
 
@@ -710,13 +710,16 @@ def main(args: FlatArguments):
     else:
         try:
             tokenizer.chat_template = AutoTokenizer.from_pretrained(args.chat_template_name).chat_template
-        except Exception as e:
+        except Exception:
             raise ValueError(f"Could not find chat template for {args.chat_template_name}.")
 
-    if args.add_bos and \
-        if tokenizer.chat_template.startswith("{{ bos_token }}") \
-            or (tokenizer.bos_token is not None and tokenizer.chat_template.startswith(tokenizer.bos_token)):
-            raise ValueError("You specified add_bos=True, but the chat template already has a bos_token at the beginning.")
+    if args.add_bos:
+        if tokenizer.chat_template.startswith("{{ bos_token }}") or (
+            tokenizer.bos_token is not None and tokenizer.chat_template.startswith(tokenizer.bos_token)
+        ):
+            raise ValueError(
+                "You specified add_bos=True, but the chat template already has a bos_token at the beginning."
+            )
         # add bos in the chat template if not already there
         tokenizer.chat_template = "{{ bos_token }}" + tokenizer.chat_template
 
