@@ -173,7 +173,9 @@ async def main():
     train_data = load_dataset("allenai/wildguardmix", "wildguardtest", split="test")
 
     tasks = []
-    for item in train_data[:2]:
+    for i, item in enumerate(train_data):
+        if i == 2:
+            break
         prompt = item['prompt']
         prompt_harm_label = item['prompt_harm_label']
         tasks.append(processor.process_safety_data(prompt, prompt_harm_label, gen_args))
