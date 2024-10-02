@@ -183,7 +183,7 @@ async def main():
     with open('wildguard_responses_test.json', 'w') as f:
         json.dump(results, f, indent=2)
 
-    print(f"Processed {len(results)} prompts. Results saved to wildguard_responses_test.json")
+    print(f"Processed {len(results)} prompts. Results saved to wildguard_responses_train.json")
 
     upload_to_huggingface(results, "ai2-adapt-dev/synthetic-cot-wildguarmixtrain")
 
