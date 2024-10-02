@@ -11,23 +11,25 @@ This code supports HF models, local models and also API-based models (e.g., `gpt
 
 ```bash
 # 1. first sample a bunch of completions given prompts
-# Here is an example created dataset: https://huggingface.co/datasets/vwxyzjn/generation_1724272894
+# Here is an example created dataset: https://huggingface.co/datasets/vwxyzjn/generation_1727879425
 python open_instruct/rejection_sampling/generation.py \
-    --dataset_name allenai/tulu-v2-sft-mixture \
+    --dataset_mixer_list allenai/tulu-v2-sft-mixture 100 \
+    --dataset_splits train \
     --model_name_or_path allenai/llama-3-tulu-2-8b \
     --num_completions 3 \
     --save_filename output/completions.jsonl \
-    --sanity_check \
-    --push_to_hub 
+    --push_to_hub
 ```
 
 ### Scoring completions
 You can use either a single RM to score responses or a list of RMs. In the latter case, we will take the majority vote to compute the final score. The RMs can be models explicitly trained as RMs, HF LMs, or API-based models.
 
+Note that by default we include the reference completion in the list of completions to perform rejection sampling. This can be disabled by setting `--no_include_reference_completion_for_rejection_sampling`
+
 ```bash
 # 2.1 tokenize them and run a reward model to filter them
-# Here is an example created dataset: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_1724273165
-# Here is an example created dataset for raw scores: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_scores_1724273165
+# Here is an example created dataset: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_1727887719
+# Here is an example created dataset for raw scores: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_scores_1727887719/
 python open_instruct/rejection_sampling/rejection_sampling.py \
     --input_filename output/completions.jsonl \
     --model_names_or_paths allenai/llama-3-tulu-2-8b-uf-mean-rm \
@@ -37,11 +39,24 @@ python open_instruct/rejection_sampling/rejection_sampling.py \
     --push_to_hub \
     --num_gpus 1 \
 
+# 2.1.2 without reference completion in rejection sampling
+# Here is an example created dataset: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_1727887719
+# Here is an example created dataset for raw scores: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_scores_1727887719/
+python open_instruct/rejection_sampling/rejection_sampling.py \
+    --input_filename output/completions.jsonl \
+    --model_names_or_paths allenai/llama-3-tulu-2-8b-uf-mean-rm \
+    --save_filename_scores output/completions_scores.jsonl \
+    --save_filename output/rejection_sampled_completions.jsonl \
+    --no_include_reference_completion_for_rejection_sampling \
+    --num_completions 3 \
+    --push_to_hub \
+    --num_gpus 1 \
+
 # 2.2 tokenize them and run llm as a judge
 # Note then when using LLM as a judge, it's possible that llm api failed to produce a score in our expected
 # format, so score extraction failed and we simply mark the score -1.
-# Here is an example created dataset: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_1724273303
-# Here is an example created dataset for raw scores: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_scores_1724273303
+# Here is an example created dataset: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_1727889563
+# Here is an example created dataset for raw scores: https://huggingface.co/datasets/vwxyzjn/rejection_sampling_scores_1727889563
 python open_instruct/rejection_sampling/rejection_sampling.py \
     --input_filename output/completions.jsonl \
     --model_names_or_paths gpt-4o-mini  \
