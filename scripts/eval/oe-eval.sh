@@ -92,7 +92,10 @@ TASKS=(
     "alpaca_eval_v2::tulu"
     "truthfulqa::tulu"
 )
-MODEL_TYPE="--model-type vllm"
+# For models without VLLM (experimental architectures)
+# comment out the VLLM arg and set GPU_COUNT_OTHER to 1
+# also consider lowering the batch size (VLLM arg), maybe to 5, VLLM handles it differently
+# MODEL_TYPE="--model-type vllm"
 BATCH_SIZE_VLLM=10000
 BATCH_SIZE_OTHER=1
 GPU_COUNT=1
