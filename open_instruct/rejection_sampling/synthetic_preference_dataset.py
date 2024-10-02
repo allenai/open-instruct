@@ -20,35 +20,18 @@ import os
 import random
 import sys
 import time
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pprint import pformat
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
-import numpy as np
-import torch
-from tqdm.asyncio import tqdm_asyncio
-
-import torch.multiprocessing as mp
-from datasets import Dataset
 from huggingface_hub import HfApi
 from huggingface_hub.repocard import RepoCard
-from transformers import (
-    AutoModelForSequenceClassification,
-    AutoTokenizer,
-    DataCollatorWithPadding,
-    HfArgumentParser,
-    PreTrainedTokenizer,
-)
-
-from open_instruct.model_utils import get_reward
-from open_instruct.rejection_sampling.generation import (
-    GenerationArgs,
-    format_conversation,
-    generate_with_openai,
-)
 from litellm import acompletion
-import asyncio
+from tqdm.asyncio import tqdm_asyncio
+from transformers import (
+    HfArgumentParser,
+)
 
 
 api = HfApi()
@@ -74,6 +57,7 @@ class Args:
     # judgement config
     model: str = "gpt-4o-2024-08-06"
     max_parallel_requests: Optional[int] = None
+
     def __post_init__(self):
         if "gpt-3.5" in self.model:
             # gpt-3.5 generates so fast that it will exceeds the
@@ -130,6 +114,7 @@ Comparison: <one-sentence comparison and explanation>
 Preferred: <"0" or "1">
 """
 
+
 def main(args: Args):
     # Load the completions from a file
     with open(args.input_filename, "r") as infile:
@@ -155,9 +140,11 @@ def main(args: Args):
         shuffled_index = random.randint(0, 1)
         response0 = comparison_pair[shuffled_index]["messages"][-1]
         response1 = comparison_pair[1 - shuffled_index]["messages"][-1]
-        template = TEMPLATE.replace("{{task}}", str(task))\
-            .replace("{{response0}}", str(response0))\
+        template = (
+            TEMPLATE.replace("{{task}}", str(task))
+            .replace("{{response0}}", str(response0))
             .replace("{{response1}}", str(response1))
+        )
         messages = [{"content": template, "role": "user"}]
         MAX_TRIES = 3
         async with limiter:
@@ -182,8 +169,8 @@ def main(args: Args):
                     if i == MAX_TRIES - 1:
                         return None
 
-
     print(f"{len(all_comparison_pairs)=}")
+
     async def get_judgement_all(model: str, all_comparison_pairs: List[List[Dict[str, str]]]):
         limiter = asyncio.Semaphore(args.max_parallel_requests)
         tasks = []
@@ -193,9 +180,8 @@ def main(args: Args):
 
         return await tqdm_asyncio.gather(*tasks)
 
-
     items = asyncio.run(get_judgement_all(args.model, all_comparison_pairs))
-    
+
     # Save results
     table = defaultdict(list)
     for i in range(len(items)):

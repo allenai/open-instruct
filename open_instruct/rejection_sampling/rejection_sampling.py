@@ -254,7 +254,7 @@ def main(args: Args):
             new_completions.append(reference_completion)
         new_completions.append(completions[i])
     completions = new_completions
-    actual_num_completions = args.num_completions + 1 # we have added the reference completion
+    actual_num_completions = args.num_completions + 1  # we have added the reference completion
 
     # Split the data into shards
     shard_size = len(completions) // args.num_gpus
@@ -286,11 +286,11 @@ def main(args: Args):
         # Combine scores from all GPUs
         scores = torch.cat(scores)
         scores_per_prompt = scores.reshape(-1, actual_num_completions)  # (n_prompts, n_completions)
-        reference_completion_scores = scores_per_prompt[:,0]
+        reference_completion_scores = scores_per_prompt[:, 0]
         reference_completion_scores_per_model[model_name_or_path] = reference_completion_scores.tolist()
 
         if not args.include_reference_completion_for_rejection_sampling:
-            scores_per_prompt = scores_per_prompt[:,1:]
+            scores_per_prompt = scores_per_prompt[:, 1:]
             scores = scores_per_prompt.flatten()
             completions = [completions[i] for i in range(len(completions)) if i % actual_num_completions != 0]
             actual_num_completions -= 1

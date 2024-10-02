@@ -24,14 +24,17 @@ from dataclasses import asdict, dataclass
 from pprint import pformat
 from typing import Dict, List, Optional
 
-from datasets import load_dataset
 from huggingface_hub import HfApi
 from huggingface_hub.repocard import RepoCard
 from rich.pretty import pprint
-from transformers import AutoTokenizer, HfArgumentParser
+from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
-from open_instruct.dataset_processor import INPUT_IDS_PROMPT_KEY, DatasetConfig, SFTDatasetProcessor
+from open_instruct.dataset_processor import (
+    INPUT_IDS_PROMPT_KEY,
+    DatasetConfig,
+    SFTDatasetProcessor,
+)
 from open_instruct.rejection_sampling.api_generate import (  # Import your classes
     LLMGenerationConfig,
     LLMProcessor,
@@ -71,7 +74,6 @@ class GenerationArgs:
     response_length: int = 2048
     top_p: float = 0.9
     tensor_parallel_size: int = 1
-
 
 
 def save_jsonl(save_filename: str, table: Dict[str, List]):
