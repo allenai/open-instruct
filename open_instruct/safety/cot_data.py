@@ -173,6 +173,7 @@ async def main():
     train_data = load_dataset("allenai/wildguardmix", "wildguardtest", split="test")
 
     tasks = []
+    breakpoint()
     for item in train_data:
         prompt = item['prompt']
         prompt_harm_label = item['prompt_harm_label']
