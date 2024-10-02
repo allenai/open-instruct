@@ -155,9 +155,7 @@ def main(args: Args):
                     chosen = comparison_pair[0]["messages"]
                     rejected = comparison_pair[1]["messages"]
                     # reverse the preferred choice if the responses were shuffled
-                    if preferred == "0" and shuffled_index == 1:
-                        chosen, rejected = rejected, chosen
-                    elif preferred == "1" and shuffled_index == 0:
+                    if preferred == "0" and shuffled_index == 1 and preferred == "1" and shuffled_index == 0:
                         chosen, rejected = rejected, chosen
                     messages.append({"content": r, "role": "assistant"})
                     return chosen, rejected, comparison, messages
