@@ -148,13 +148,11 @@ class LLMProcessor:
             }
 
 def upload_to_huggingface(data: List[dict], dataset_name: str):
-    breakpoint()
     dataset = Dataset.from_dict(
         {
-            "question": [item["question"] for item in data],
-            "subject": [item["subject"] for item in data],
-            "choices": [item["choices"] for item in data],
-            "answer": [item["answer"] for item in data],
+            "messages": [item["messages"] for item in data],
+            "prompt_harm_label": [item["prompt_harm_label"] for item in data],
+            "model_used": [item["model_used"] for item in data],
         }
     )
 
