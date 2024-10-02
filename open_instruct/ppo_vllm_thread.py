@@ -41,7 +41,7 @@ from open_instruct.dataset_processor import (
     GROUND_TRUTHS_KEY,
     DatasetConfig,
     SFTDatasetProcessor,
-    SimpleGenerateCollator,
+    SimpleGenerateCollatorWithGroundTruth,
     visualize_token,
 )
 from open_instruct.model_utils import (
@@ -51,7 +51,7 @@ from open_instruct.model_utils import (
     first_true_indices,
     forward,
     get_reward,
-    get_verifiable_reward,
+    apply_verifiable_reward,
     prepare_deepspeed,
     print_rich_single_line_metrics,
     print_rich_table,
@@ -171,6 +171,8 @@ class Args:
     """the reward value for responses that do not contain `stop_token_id`"""
     non_stop_penalty: bool = False
     """whether to penalize responses that do not contain `stop_token_id`"""
+    number_samples_per_prompt: int = 1
+    """the number of samples to generate per prompt, useful for easy-star"""
 
     # online PPO specific args
     beta: float = 0.05
@@ -329,7 +331,7 @@ def vllm_generate(
             )
         generation_start_time = time.time()
         outputs = llm.generate(prompt_token_ids=g_queries_list, sampling_params=generation_config)
-        response_ids = [list(output.outputs[0].token_ids) for output in outputs]
+        response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
         print(f"🔥🔥🔥 Generation time: {time.time() - generation_start_time:.2f} seconds")
         response_ids_Q.put(response_ids)
 
@@ -337,6 +339,7 @@ def vllm_generate(
             outputs = llm.generate(
                 prompt_token_ids=sample_evaluation_prompt_token_ids, sampling_params=generation_config
             )
+            # for evaluation, even if we have multiple outputs, we only look at one of them for simplicity
             response_ids = [list(output.outputs[0].token_ids) for output in outputs]
             evaluation_Q.put(response_ids)
 
@@ -462,7 +465,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     train_dataset = combine_dataset(
         args.dataset_mixer_dict,
         splits=args.dataset_train_splits,
-        columns_to_keep=[dataset_config.sft_messages_key],
+        columns_to_keep=[dataset_config.sft_messages_key, dataset_config.ground_truths_key],
     )
     if dataset_config.sanity_check:
         train_dataset = train_dataset.select(
@@ -470,19 +473,19 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         )
     with accelerator.main_process_first():
         train_dataset = dataset_processor.tokenize(train_dataset)
-        train_dataset = dataset_processor.filter(train_dataset)
+        train_dataset = dataset_processor.filter(train_dataset, need_contain_labels=False)
     dataset_dict["train"] = train_dataset
     eval_dataset = None
     if args.dataset_eval_mixer is not None:
         eval_dataset = combine_dataset(
             args.dataset_eval_mixer_dict,
             splits=args.dataset_eval_splits,
-            columns_to_keep=[dataset_config.sft_messages_key],
+            columns_to_keep=[dataset_config.sft_messages_key, dataset_config.ground_truths_key],
         )
         eval_dataset = eval_dataset.select(range(0, min(len(eval_dataset), dataset_config.sanity_check_max_samples)))
         with accelerator.main_process_first():
             eval_dataset = dataset_processor.tokenize(eval_dataset)
-            eval_dataset = dataset_processor.filter(eval_dataset)
+            eval_dataset = dataset_processor.filter(eval_dataset, need_contain_labels=False)
         dataset_dict["eval"] = eval_dataset
 
     # some more runtime logging
@@ -551,7 +554,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         num_warmup_steps=args.warm_up_steps,
         num_training_steps=args.num_training_steps * args.num_train_epochs,
     )
-    data_collator = SimpleGenerateCollator(pad_token_id=tokenizer.pad_token_id)
+    data_collator = SimpleGenerateCollatorWithGroundTruth(pad_token_id=tokenizer.pad_token_id)
     dataloader = DataLoader(
         train_dataset,
         batch_size=args.local_dataloader_batch_size,
@@ -585,7 +588,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # handle preemption
     class PreemptionHandler:
-        preemptied = False
+        preempted = False
 
         def __init__(self):
             signal.signal(signal.SIGTERM, self.exit_gracefully)
@@ -604,7 +607,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     print("vllm thread terminated")
                 except Exception as e:
                     print(e)
-            self.preemptied = True
+            self.preempted = True
 
     ph = PreemptionHandler()
 
@@ -629,6 +632,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         top_p=1.0,
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
+        n=args.number_samples_per_prompt,
     )
     param_prompt_Q = None
     response_ids_Q = None
@@ -647,7 +651,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             args=(
                 model_config.model_name_or_path,
                 model_config.model_revision,
-                dataset_config.max_prompt_token_lenth + args.response_length,
+                dataset_config.max_prompt_token_length + args.response_length,
                 args.vllm_device,
                 args.vllm_gpu_memory_utilization,
                 generation_config,
@@ -663,7 +667,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         thread.start()
     torch.cuda.set_device(device)
 
-    g_vllm_responses = torch.zeros((args.batch_size, args.response_length), device=device, dtype=torch.long)
+    g_vllm_responses = torch.zeros((args.batch_size * args.number_samples_per_prompt, args.response_length), device=device, dtype=torch.long)
 
     # set up the metrics and initial states
     stats_shape = (args.num_epochs, args.num_mini_batches, args.gradient_accumulation_steps)
@@ -682,18 +686,18 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     start_time = time.time()
     data = next(iter_dataloader)
     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
-    ground_truths_next = data[GROUND_TRUTHS_KEY].to(device)
+    ground_truths_next = data[GROUND_TRUTHS_KEY]
     send_queries(accelerator, None, tokenizer, param_prompt_Q, queries_next)
 
     for _ in range(1, resume_training_step):  # we didn't store scheduler state
         scheduler.step()
 
     for training_step in range(resume_training_step, args.num_training_steps + 1):
-        episode += args.batch_size
+        episode += args.batch_size * args.number_samples_per_prompt  # each sample is an episode
         scheduler.step()
         queries = queries_next
         ground_truths = ground_truths_next
-        if ph.preemptied:
+        if ph.preempted:
             break
 
         if accelerator.is_main_process:
@@ -721,7 +725,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 if training_step != 1:
                     data = next(iter_dataloader)
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
-                    ground_truths_next = data[GROUND_TRUTHS_KEY].to(device)
+                    ground_truths_next = data[GROUND_TRUTHS_KEY]
                 send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
             else:
                 if training_step != 1:
@@ -729,10 +733,16 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     # we also set to use `queries = queries_next` immediately
                     data = next(iter_dataloader)
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
-                    ground_truths_next = data[GROUND_TRUTHS_KEY].to(device)
+                    ground_truths_next = data[GROUND_TRUTHS_KEY]
                     send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
                     queries = queries_next
                     ground_truths_next = ground_truths_next
+
+            # if we generate multiple samples per prompt, we need to repeat the queries and ground truths
+            # to match the vllm outputs.
+            if args.number_samples_per_prompt > 1:
+                queries = queries.repeat_interleave(args.number_samples_per_prompt, dim=0)
+                ground_truths = [gt for gt in ground_truths for _ in range(args.number_samples_per_prompt)]
 
             training_time_start = time.time()
             with torch.no_grad():
@@ -799,7 +809,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
                     # also apply verifiable reward 
-                    verifiable_reward = get_verifiable_reward(
+                    verifiable_reward = apply_verifiable_reward(
                         postprocessed_query_response, tokenizer, ground_truths
                     )
                     score += verifiable_reward
@@ -1019,7 +1029,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         gc.collect()
         torch.cuda.empty_cache()
 
-    if not ph.preemptied:
+    if not ph.preempted:
         # save model
         os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
         original_tokenizer = AutoTokenizer.from_pretrained(
