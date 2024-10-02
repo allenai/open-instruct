@@ -168,7 +168,7 @@ async def main():
     processor = LLMProcessor(config)
     gen_args = GenerationArgs()
 
-    train_data = load_dataset("allenai/wildguardmix", "wildguardtest", split="test")
+    train_data = load_dataset("allenai/wildguardmix", "wildguardtrain", split="train")
 
     tasks = []
     for i, item in enumerate(train_data):
@@ -185,7 +185,7 @@ async def main():
 
     print(f"Processed {len(results)} prompts. Results saved to wildguard_responses_test.json")
 
-    upload_to_huggingface(results, "ai2-adapt-dev/synthetic-cot-safety")
+    upload_to_huggingface(results, "ai2-adapt-dev/synthetic-cot-wildguarmixtrain")
 
 if __name__ == "__main__":
     asyncio.run(main())
