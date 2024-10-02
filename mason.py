@@ -124,6 +124,7 @@ def get_env_vars(pure_docker_mode, cluster: List[str], beaker_secrets, whoami, r
         "HF_TOKEN",
         "WANDB_API_KEY",
         "BEAKER_TOKEN",
+        "OPENAI_API_KEY",
     ]
     for useful_secret in useful_secrets:
         if f"{whoami}_{useful_secret}" in beaker_secrets:
