@@ -873,7 +873,8 @@ def main(args: FlatArguments):
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
 
-    total_tokens = 0
+    local_total_tokens = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
+    total_token_including_padding = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
     start_time = time.time()
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
@@ -886,7 +887,8 @@ def main(args: FlatArguments):
         else:
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
-            total_tokens += batch["attention_mask"].numel() * accelerator.num_processes
+            local_total_tokens += batch["attention_mask"].sum()
+            total_token_including_padding += batch["attention_mask"].numel()
             with accelerator.accumulate(model):
                 if args.load_balancing_loss:
                     outputs = model(**batch, use_cache=False, output_router_logits=True)
@@ -939,11 +941,15 @@ def main(args: FlatArguments):
                         / args.gradient_accumulation_steps
                         / args.logging_steps
                     )
+                    total_tokens = accelerator.gather(local_total_tokens).sum().item()
+                    total_tokens_including_padding = accelerator.gather(total_token_including_padding).sum().item()
                     metrics_to_log = {
                         "learning_rate": lr_scheduler.get_last_lr()[0],
                         "train_loss": avg_loss,
                         "total_tokens": total_tokens,
-                        "TPS": total_tokens / (time.time() - start_time),
+                        "per_device_tps": total_tokens / accelerator.num_processes / (time.time() - start_time),
+                        "total_tokens_including_padding": total_tokens_including_padding,
+                        "per_device_tps_including_padding": total_tokens_including_padding / accelerator.num_processes / (time.time() - start_time),
                     }
                     if args.load_balancing_loss:
                         avg_aux_loss = (
