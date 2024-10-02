@@ -1006,7 +1006,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 "val/num_stop_token_ids": global_metrics[1],
                 "objective/kl": global_metrics[2],
                 "objective/kl2": global_metrics[15],
-                "ojbective/kl3": global_metrics[16],
+                "objective/kl3": global_metrics[16],
                 "objective/entropy": global_metrics[3],
                 "objective/non_score_reward": global_metrics[4],
                 "objective/rlhf_reward": global_metrics[5],
