@@ -173,8 +173,7 @@ async def main():
     train_data = load_dataset("allenai/wildguardmix", "wildguardtest", split="test")
 
     tasks = []
-    breakpoint()
-    for item in train_data:
+    for item in train_data[:2]:
         prompt = item['prompt']
         prompt_harm_label = item['prompt_harm_label']
         tasks.append(processor.process_safety_data(prompt, prompt_harm_label, gen_args))
