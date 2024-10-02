@@ -135,7 +135,7 @@ class LLMProcessor:
 
         return responses
 
-    async def process_safety_data(self, prompt: str, prompt_harm_label: str, gen_args: GenerationArgs):
+    async def process_safety_data(self, prompt: str, prompt_harm_label: str, gen_args: GenerationArgs, ):
         response = await self.generate_step_by_step_answer(prompt, gen_args)
         if response:
             return {
@@ -144,7 +144,7 @@ class LLMProcessor:
                     {"role": "assistant", "content": response.get('gpt_response') or response.get('anthropic_response')}
                 ],
                 "prompt_harm_label": prompt_harm_label,
-                "model_used": "gpt" if self.config.use_gpt else "anthropic"
+                "model_used": self.config.gpt_model if self.config.use_gpt else "anthropic"
             }
 
 def upload_to_huggingface(data: List[dict], dataset_name: str):
