@@ -29,10 +29,7 @@ from huggingface_hub import HfApi
 from huggingface_hub.repocard import RepoCard
 from litellm import acompletion
 from tqdm.asyncio import tqdm_asyncio
-from transformers import (
-    HfArgumentParser,
-)
-
+from transformers import HfArgumentParser
 
 api = HfApi()
 # we don't use `multiprocessing.cpu_count()` because typically we only have 12 CPUs
@@ -59,10 +56,9 @@ class Args:
     max_parallel_requests: Optional[int] = None
 
     def __post_init__(self):
+        # these are just experience numbers to avoid rate limits, but feel free to adjust
         if "gpt-3.5" in self.model:
-            # gpt-3.5 generates so fast that it will exceeds the
-            # token limit per minute
-            self.max_parallel_requests = 50
+            self.max_parallel_requests = 100
         elif "gpt-4o" in self.model:
             self.max_parallel_requests = 100
         elif "gpt-4" in self.model:
