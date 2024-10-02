@@ -76,7 +76,6 @@ if [ "$on_jupyter" = true ]; then
         --pure_docker_mode \
         --priority low \
         --preemptible \
-        --no_mount_nfs --no_hf_cache_env \
         --budget ai2/allennlp \
         --gpus $num_gpus -- $command
 else

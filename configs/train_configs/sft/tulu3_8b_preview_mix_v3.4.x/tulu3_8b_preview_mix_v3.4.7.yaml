@@ -1,0 +1,43 @@
+model_name_or_path: meta-llama/Meta-Llama-3-8B
+model_revision: main
+use_flash_attn: true
+tokenizer_name: meta-llama/Meta-Llama-3-8B
+use_slow_tokenizer: true
+dataset_mixer:
+    # Approximate Tulu V2 datasets
+    natolambert/tulu-v2-sft-mixture-flan: 50000
+    natolambert/tulu-v2-sft-mixture-cot: 49747
+    allenai/openassistant-guanaco-reformatted: 7708  # not exact subset
+    Vtuber-plan/sharegpt-cleaned: 114046  # original https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered
+    # vicgalle/alpaca-gpt4: 20000
+    # HuggingFaceH4/CodeAlpaca_20K: 18000  # original uses https://github.com/sahil280114/codealpaca
+    # natolambert/tulu-v2-sft-mixture-lima: 1018  # original has 1030
+    WizardLMTeam/WizardLM_evol_instruct_V2_196k: 30000
+    # Open-Orca/OpenOrca: 30000
+    natolambert/tulu-v2-sft-mixture-science: 7468  # original data slightly different
+    ai2-adapt-dev/tulu_hard_coded_examples: 14  # the original data replicates this for multiple times
+    # Tulu V3.2 preview added by Jacob
+    HuggingFaceH4/no_robots: 9500 # all
+    ai2-adapt-dev/metamath-qa-reformat: 100000
+    ai2-adapt-dev/codefeedback-single-turn-reformat: 156526 # all
+    nvidia/Daring-Anteater: 99532 # all
+    # Mix in some new datasets
+    ai2-adapt-dev/slim-orca-300k: 100000
+    AI-MO/NuminaMath-TIR: 72441
+    ai2-adapt-dev/WildChat-1M-Full-GPT4-Only: 200000
+max_seq_length: 4096 # Note, reduced from 8192 to fit on one GPU with DeepSpeed Stage3
+preprocessing_num_workers: 128
+per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
+gradient_accumulation_steps: 4 # effective batch size 128 with 4 nodes
+learning_rate: 5.0e-06 # best LR so far
+lr_scheduler_type: linear
+warmup_ratio: 0.03
+weight_decay: 0.0
+num_train_epochs: 2
+output_dir: /output/
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+checkpointing_steps: epoch
+dataset_mix_dir: /output/
