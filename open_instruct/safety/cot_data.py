@@ -1,7 +1,8 @@
 import asyncio
 import json
 from dataclasses import dataclass
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
+from typing import List, Dict, Optional
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm
 import anthropic
@@ -146,6 +147,21 @@ class LLMProcessor:
                 "model_used": "gpt" if self.config.use_gpt else "anthropic"
             }
 
+def upload_to_huggingface(data: List[dict], dataset_name: str):
+    breakpoint()
+    dataset = Dataset.from_dict(
+        {
+            "question": [item["question"] for item in data],
+            "subject": [item["subject"] for item in data],
+            "choices": [item["choices"] for item in data],
+            "answer": [item["answer"] for item in data],
+        }
+    )
+
+    dataset.push_to_hub(dataset_name)
+    print(f"Dataset uploaded to Hugging Face: https://huggingface.co/datasets/{dataset_name}")
+
+
 async def main():
     config = LLMGenerationConfig(
         use_gpt=True,  # Set to False if you don't want to use GPT
@@ -170,6 +186,8 @@ async def main():
         json.dump(results, f, indent=2)
 
     print(f"Processed {len(results)} prompts. Results saved to wildguard_responses_test.json")
+
+    upload_to_huggingface(results, "ai2-adapt-dev/synthetic-cot-safety")
 
 if __name__ == "__main__":
     asyncio.run(main())
