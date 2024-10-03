@@ -1040,13 +1040,15 @@ def main(args: FlatArguments):
                         "logps/rejected": global_metrics[7],
                     }
                     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-                        metrics_to_log.update({
-                            "rewards/chosen": global_metrics[1],
-                            "rewards/rejected": global_metrics[2],
-                            "rewards/average": global_metrics[3],
-                            "rewards/accuracy": global_metrics[4],
-                            "rewards/margin": global_metrics[5],
-                        })
+                        metrics_to_log.update(
+                            {
+                                "rewards/chosen": global_metrics[1],
+                                "rewards/rejected": global_metrics[2],
+                                "rewards/average": global_metrics[3],
+                                "rewards/accuracy": global_metrics[4],
+                                "rewards/margin": global_metrics[5],
+                            }
+                        )
                     logger_str = (
                         f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {global_metrics[0]}"
                     )
