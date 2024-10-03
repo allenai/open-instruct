@@ -208,7 +208,9 @@ def get_datasets(
             Used primarily in mix_data.py for saving, or the saved dataset has IDs already.
     """
     if isinstance(dataset_mixer, list):
+
         assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
+        breakpoint()
         mixer_dict = {}
         i = 0
         while i < len(dataset_mixer) - 1:
