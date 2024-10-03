@@ -21,6 +21,6 @@ report_to:
   - wandb
 logging_steps: 1
 use_lora: false
-dpo_loss_type: simpo
+dpo_loss_type: dpo_norm
 dpo_gamma_beta_ratio: 0.3
 dpo_beta: 10
