@@ -5,7 +5,6 @@ gradient_checkpointing: true
 tokenizer_name: meta-llama/Llama-3.1-8B
 use_slow_tokenizer: true
 dataset_mixer:
-  dataset_mixer:
     allenai/ultrafeedback_binarized_cleaned_train: 1.0
     ai2-adapt-dev/DaringAnteater-prefs-RM-filter: 1.0
     ai2-adapt-dev/only_wildchat_aug28_regenerated_llama: 1.0
