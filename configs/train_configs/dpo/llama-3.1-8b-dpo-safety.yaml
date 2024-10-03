@@ -1,10 +1,42 @@
-model_name_or_path: /model
+model_name_or_path: meta-llama/Meta-Llama-3-8B
 model_revision: main
 use_flash_attn: true
 gradient_checkpointing: true
-tokenizer_name: /model
+tokenizer_name: meta-llama/Llama-3.1-8B
 use_slow_tokenizer: true
-dataset_name: princeton-nlp/llama3-ultrafeedback-armorm
+dataset_mixer:
+  #valpy/dpo_rewritten_prompts: 1.0
+  #valpy/taxonomy_tulu: 1.0
+  allenai/ultrafeedback_binarized_cleaned_train: 1.0
+  ai2-adapt-dev/DaringAnteater-prefs-RM-filter: 1.0
+  ai2-adapt-dev/only_wildchat_aug28_regenerated_llama: 1.0
+ # ai2-adapt-dev/ultrafeedback-replication-p0: 1.0
+  #ai2-adapt-dev/ultrafeedback-replication-p1: 1.0
+  #ai2-adapt-dev/ultrafeedback-replication-p2: 1.0
+  #ai2-adapt-dev/ultrafeedback-replication-p3: 1.0
+  #ai2-adapt-dev/ultrafeedback-replication-p4: 1.0
+  #ai2-adapt-dev/ultrafeedback-replication-p5: 1.0
+  #ai2-adapt-dev/ultrafeedback-replication-p6: 1.0
+#  ai2-adapt-dev/hh-rlhf-helpful: 20000
+  #ai2-adapt-dev/webgpt-binarized: 1.0
+  #ai2-adapt-dev/WildChat-prefs-280824: 1.0
+  #ai2-adapt-dev/helpsteer2-binarized-mean-aspects: 1.0
+  #ai2-adapt-dev/tulu-2/5-prefs-helpsteer: 1.0
+  #ai2-adapt-dev/helpsteer2-binarized-nvidia-spec: 1.0
+  #ai2-adapt-dev/helpsteer-2-binarized-above-2.0-margin-0.5-ignore-verbosity: 1.0
+  #ai2-adapt-dev/helpsteer-2-binarized-above-2.5-ignore-verbosity: 1.0
+  #  ai2-adapt-dev/UltraInteract_pair_randomlen_Logic: 1.0
+#  ai2-adapt-dev/UltraInteract_pair_randomlen_Math_PoT: 1.0
+#  ai2-adapt-dev/UltraInteract_pair_randomlen_Math_CoT: 1.0
+#  ai2-adapt-dev/UltraInteract_pair_randomlen_Coding: 1.0
+#  ai2-adapt-dev/UltraInteract_pair_maxlen_Logic: 1.0
+  #ai2-adapt-dev/UltraInteract_pair_maxlen_Math_PoT: 1.0
+#  ai2-adapt-dev/UltraInteract_pair_maxlen_Math_CoT: 1.0
+#  ai2-adapt-dev/UltraInteract_pair_maxlen_Coding: 1.0
+ # ai2-adapt-dev/Skywork-Magpie: 1.0
+  #ai2-adapt-dev/nectar_binarized-dedup-ultrafeedback: 1.0
+  #ai2-adapt-dev/nectar_binarized-lmsys-chat-1m: 1.0
+  #ai2-adapt-dev/nectar_binarized-anthropic-hh: 1.0
 max_seq_length: 2048
 preprocessing_num_workers: 16
 per_device_train_batch_size: 1
