@@ -30,6 +30,7 @@ from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
 from huggingface_hub import HfApi
+from rich.pretty import pprint
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
@@ -712,15 +713,16 @@ def get_beaker_experiment_info(experiment_id: str) -> Optional[dict]:
 
 def beaker_experiment_succeeded(experiment_id: str) -> bool:
     experiment = get_beaker_experiment_info(experiment_id)
+    num_replicas = experiment["jobs"][0]["execution"]["spec"]["replicas"]
     if not experiment:
         return False
-    print([job["status"] for job in experiment["jobs"]])
-    return any(
-        [
-            "finalized" in job["status"] and "exitCode" in job["status"] and job["status"]["exitCode"] == 0
-            for job in experiment["jobs"]
-        ]
-    )
+    pprint(experiment)
+    finalizeds = [
+        "finalized" in job["status"] and "exitCode" in job["status"] and job["status"]["exitCode"] == 0
+        for job in experiment["jobs"]
+    ]
+    pprint(finalizeds)
+    return sum(finalizeds) == num_replicas
 
 
 @dataclass
@@ -760,7 +762,7 @@ def get_beaker_dataset_ids(experiment_id: str, sort=False) -> Optional[List[str]
     if sort:
         # sort based on empty, then commited
         dataset_infos.sort(key=lambda x: (x.non_empty, parser.parse(x.committed)))
-    print(dataset_infos)
+    pprint(dataset_infos)
     return [dataset.id for dataset in dataset_infos]
 
 
