@@ -7,7 +7,7 @@ export default function ChatMessage({ icon, message, children }: { icon: string,
 
     return (
       <>
-        <div className="flex mt-2 w-full">
+        <div className="flex mt-2">
             {children}
         </div>
       </>
@@ -20,7 +20,7 @@ export default function ChatMessage({ icon, message, children }: { icon: string,
         <div className="h-12 w-12 m-auto">
           <button className="role-icon h-12 w-12 aspect-square">{icon}</button>
         </div>
-        <p className="message-text m-4 sm:m-4 w-full">
+        <p className="message-text m-4 sm:m-4">
             {message}
         </p>
       </div>

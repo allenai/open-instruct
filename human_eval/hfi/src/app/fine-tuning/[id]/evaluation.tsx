@@ -152,7 +152,7 @@ export default function Evaluation({ username, instanceId, save, nextInstance, p
 
 
   return (
-    <div id="evaluation-region" className="flex flex-col m-4 p-4 rounded w-full">
+    <div id="evaluation-region" className="flex flex-col m-4 p-4 rounded">
       <h2>Evaluation</h2>
       <p className="text-sm text-gray">Welcome, {username}! Please evaluate the two outputs based on your knowledge, preference, and any external tools (e.g., Google Search or Translate)</p>
       <div className="row mt-3">

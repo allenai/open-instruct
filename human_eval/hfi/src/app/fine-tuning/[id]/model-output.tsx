@@ -8,7 +8,7 @@ export type ModelOutputParams = {
 
 export default function ModelOutput({ modelOutput, size = 'xs' }: ModelOutputParams) {
   return (
-    <div id="model-outputs-region" className="flex flex-col m-4 p-4 rounded w-full">
+    <div id="model-outputs-region" className="flex flex-col m-4 p-4 rounded">
        <ChatMessage icon="🤖" message="Here are some responses from two AI models." />
       <div className="flex flex-col lg:flex-row my-4">
           <div className="flex flex-col lg:w-1/2">
