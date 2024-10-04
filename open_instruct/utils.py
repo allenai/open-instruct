@@ -713,7 +713,10 @@ def get_beaker_experiment_info(experiment_id: str) -> Optional[dict]:
 
 def beaker_experiment_succeeded(experiment_id: str) -> bool:
     experiment = get_beaker_experiment_info(experiment_id)
-    num_replicas = experiment["jobs"][0]["execution"]["spec"]["replicas"]
+    if "replicas" in experiment["jobs"][0]["execution"]["spec"]:
+        num_replicas = experiment["jobs"][0]["execution"]["spec"]["replicas"]
+    else:
+        num_replicas = 1
     if not experiment:
         return False
     pprint(experiment)
