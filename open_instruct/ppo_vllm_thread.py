@@ -139,6 +139,8 @@ class Args:
     """The frequency of evaluation steps"""
     local_dataloader_batch_size: Optional[int] = None
     """The batch size per GPU for the dataloader"""
+    save_freq: int = -1
+    """How many train steps to save the model"""
 
     # online settings
     num_epochs: int = 4
@@ -190,6 +192,11 @@ class Args:
     lam: float = 0.95
     """the lambda value for GAE"""
     kl_estimator: Literal["kl1", "kl2", "kl3"] = "kl1"
+    """the KL estimator to use"""
+    apply_verifiable_reward: bool = False
+    """whether to apply verifiable reward"""
+    reward_model_multiplier: float = 1.0
+    """the reward model multiplier, for down/upscaling the reward model output"""
 
     # vLLM settings. NOTE: currently we need to place the vLLM model on a separate GPU
     # for generation to work properly because vLLM would pre-alocate the memory.
@@ -752,6 +759,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 logprobs = []
                 ref_logprobs = []
                 scores = []
+                verifiable_counts = []
                 sequence_lengths = []
                 values = []
                 if accelerator.is_main_process:
@@ -808,11 +816,16 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     _, score, _ = get_reward(
                         reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
+                    if args.reward_model_multiplier != 1.0:
+                        score *= args.reward_model_multiplier
                     # also apply verifiable reward 
-                    verifiable_reward = apply_verifiable_reward(
-                        postprocessed_query_response, tokenizer, ground_truths
-                    )
-                    score += verifiable_reward
+                    if args.apply_verifiable_reward:
+                        verifiable_reward, verifiable_count = apply_verifiable_reward(
+                            postprocessed_query_response, tokenizer, ground_truths
+                        )
+                        score += verifiable_reward
+                    else:
+                        verifiable_count = torch.tensor([0.0], device=device).float()
                     unwrapped_value_model = accelerator.unwrap_model(model).value_model
                     full_value, _, _ = get_reward(
                         unwrapped_value_model, query_response, tokenizer.pad_token_id, context_length
@@ -826,6 +839,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
                     values.append(value)
+                    verifiable_counts.append(verifiable_count)
                 responses = torch.cat(responses, 0)
                 postprocessed_responses = torch.cat(postprocessed_responses, 0)
                 logprobs = torch.cat(logprobs, 0)
@@ -833,6 +847,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
                 global_scores = accelerator.gather(scores)
+                verifiable_counts = torch.cat(verifiable_counts, 0)
                 accelerator.print(f"global_scores: {global_scores}, {global_scores.mean()}")
                 values = torch.cat(values, 0)
                 del (logprob, ref_logprob, full_value, value, score)
@@ -994,6 +1009,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             local_metrics[14] = ratio_stats.var()
             local_metrics[15] = ((kl) ** 2 / 2).sum(1).mean()
             local_metrics[16] = ((-kl).exp() - 1 + kl).sum(1).mean()
+            local_metrics[17] = verifiable_counts.sum()
             global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
             metrics = {
                 "episode": episode,
@@ -1019,6 +1035,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 "policy/entropy_avg": global_metrics[12],
                 "val/ratio": global_metrics[13],
                 "val/ratio_var": global_metrics[14],
+                "objective/verifiable_counts": global_metrics[17]
             }
             if accelerator.is_main_process:
                 print_rich_single_line_metrics(metrics)
@@ -1028,6 +1045,21 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         del (metrics, kl, non_score_reward, rlhf_reward)
         gc.collect()
         torch.cuda.empty_cache()
+
+        # save steps
+        if arg.save_freq > 0 and training_step % args.save_freq == 0:
+            os.makedirs(os.path.join(os.path.dirname(args.output_dir), f"step_{training_step}"), exist_ok=True)
+            original_tokenizer = AutoTokenizer.from_pretrained(
+                model_config.model_name_or_path, revision=model_config.model_revision
+            )
+            save_with_accelerate(
+                accelerator,
+                model,
+                original_tokenizer,
+                args.output_dir,
+                model_attribute_to_save="policy",
+            )
+            del original_tokenizer
 
     if not ph.preempted:
         # save model

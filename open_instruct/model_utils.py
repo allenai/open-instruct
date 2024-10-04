@@ -230,7 +230,9 @@ def apply_verifiable_reward(
             rewards.append(10)
         else:
             rewards.append(0)
-    return torch.tensor(rewards, device=query_responses.device)
+    rewards_tensors = torch.tensor(rewards, device=query_responses.device)
+    # return rewards and count of times we applied reward
+    return rewards_tensors, (rewards_tensors > 0).sum().float().view(-1)
 
 
 def forward(
