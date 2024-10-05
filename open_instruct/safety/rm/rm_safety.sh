@@ -1,7 +1,8 @@
-python mason.py \
+python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
     --image nathanl/open_instruct_auto \
     --pure_docker_mode \
+    --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
     --budget ai2/allennlp \
