@@ -6,7 +6,7 @@ python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/mason.py \
     --priority high \
     --preemptible \
     --budget ai2/allennlp \
-    --beaker_datasets /model:01J7S9H21G341DQSPAAMMT2WYS /reward_model:01J8N1PPD30F9TC992BJXRRY15 \
+    --beaker_datasets /model:01J7S9H21G341DQSPAAMMT2WYS  \
     --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
     open_instruct/online_dpo_vllm_thread.py \
     --exp_name "safety_online_dpo_vllm_thread_beta_0.03_rm_pkh_sft_v3.4" \
@@ -28,7 +28,7 @@ python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/mason.py \
     --num_mini_batches 1 \
     --total_episodes 300000 \
     --model_name_or_path /model \
-    --reward_model_path /reward_model \
+    --reward_model_path PKU-Alignment/beaver-7b-v3.0-reward \
     --non_stop_penalty \
     --stop_token eos \
     --penalty_reward_value -10.0 \
