@@ -210,7 +210,6 @@ def get_datasets(
     if isinstance(dataset_mixer, list):
 
         assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
-        breakpoint()
         mixer_dict = {}
         i = 0
         while i < len(dataset_mixer) - 1:
@@ -438,6 +437,7 @@ def combine_dataset(
     for (ds, frac_or_samples), ds_config, split in zip(dataset_mixer.items(), configs, splits):
         # if dataset ends with .json or .jsonl, load from file
         if ds.endswith(".json") or ds.endswith(".jsonl"):
+            breakpoint()
             dataset = load_dataset("json", data_files=ds, split=split)
         else:
             try:
