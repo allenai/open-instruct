@@ -14,7 +14,7 @@ python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/mason.py \
     --sft_messages_key chosen \
     --dataset_train_splits train_prefs \
     --dataset_eval_mixer '{"allenai/ultrafeedback_binarized_cleaned": 1.0}' \
-    --dataset_eval_splits test_prefs \
+    --dataset_eval_splits train \
     --max_token_length 1024 \
     --max_prompt_token_lenth 512 \
     --learning_rate 8e-7 \
