@@ -225,8 +225,8 @@ class Args:
 
 
 def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
-    # if passed through cli: convert the dataset mixers to dictionaries
     breakpoint()
+    # if passed through cli: convert the dataset mixers to dictionaries
     if isinstance(value, str):
         return json.loads(value), value
     # if passed through yaml: convert the dataset mixers to strings
