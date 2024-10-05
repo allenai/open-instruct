@@ -28,7 +28,8 @@ python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/mason.py \
     --num_mini_batches 1 \
     --total_episodes 300000 \
     --model_name_or_path /model \
-    --reward_model_path PKU-Alignment/beaver-7b-v3.0-reward \
+    --reward_model_path vwxyzjn/reward_modeling__allenai_llama-3-tulu-2-8b \
+    --reward_model_revision reward_modeling__1__1726175049 \
     --non_stop_penalty \
     --stop_token eos \
     --penalty_reward_value -10.0 \
