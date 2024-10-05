@@ -6,7 +6,7 @@ python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/mason.py \
     --priority high \
     --preemptible \
     --budget ai2/allennlp \
-    --beaker_datasets /model:01J7S9H21G341DQSPAAMMT2WYS /reward_model:01J8N1PPBMRRGH65RV1KR2SYBF \
+    --beaker_datasets /model:01J7S9H21G341DQSPAAMMT2WYS /reward_model:01J8N1PPD30F9TC992BJXRRY15 \
     --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
     open_instruct/online_dpo_vllm_thread.py \
     --exp_name "safety_online_dpo_vllm_thread_beta_0.03_rm_pkh_sft_v3.4" \
