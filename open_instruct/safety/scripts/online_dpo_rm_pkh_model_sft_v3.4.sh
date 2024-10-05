@@ -13,7 +13,6 @@ python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/mason.py \
     --dataset_mixer '{"allenai/ultrafeedback_binarized_cleaned_train": 1.0, "ai2-adapt-dev/DaringAnteater-prefs-RM-filter": 1.0, "ai2-adapt-dev/only_wildchat_aug28_regenerated_llama": 1.0, "ai2-adapt-dev/PKU-SafeRLHF-processed": 1.0}' \
     --sft_messages_key chosen \
     --dataset_train_splits train \
-#    --dataset_eval_mixer '{"allenai/ultrafeedback_binarized_cleaned": 1.0}' \
     --dataset_eval_splits train \
     --max_token_length 1024 \
     --max_prompt_token_lenth 512 \
