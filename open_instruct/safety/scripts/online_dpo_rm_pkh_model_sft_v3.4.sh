@@ -1,4 +1,4 @@
-python mason.py \
+python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
     --image nathanl/open_instruct_auto \
     --pure_docker_mode \
