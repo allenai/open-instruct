@@ -11,7 +11,7 @@ python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/mason.py \
     open_instruct/reward_modeling.py \
     --dataset_mixer '{"ai2-adapt-dev/PKU-SafeRLHF-processed": 1.0, "allenai/ultrafeedback_binarized_cleaned_train": 1.0, "ai2-adapt-dev/DaringAnteater-prefs-RM-filter": 1.0, "ai2-adapt-dev/only_wildchat_aug28_regenerated_llama": 1.0}' \
     --dataset_train_splits train \
-    --dataset_eval_mixer '{"allenai/ultrafeedback_binarized_cleaned": 1.0}' \
+    --dataset_eval_mixer '{"allenai/ultrafeedback_binarized_cleaned_train": 1.0}' \
     --dataset_eval_splits train \
     --model_name_or_path /model \
     --chat_template tulu \
