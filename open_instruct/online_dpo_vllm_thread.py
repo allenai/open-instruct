@@ -391,7 +391,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     # create the dataset
     dataset_dict = DatasetDict()
     dataset_processor = SFTDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
-    # breakpoint()
+    breakpoint()
     train_dataset = combine_dataset(
         args.dataset_mixer_dict,
         splits=args.dataset_train_splits,
