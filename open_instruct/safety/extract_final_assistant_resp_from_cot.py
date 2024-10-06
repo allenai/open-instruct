@@ -13,7 +13,8 @@ def extract_final_response(content: str) -> str:
 
 def process_item(item: dict) -> dict:
     # Each item represents a separate conversation
-    messages = json.loads(item['messages'])
+    messages = json.load(item['messages'])
+    breakpoint()
     user_message = next(msg for msg in messages if msg['role'] == 'user')
     assistant_message = next(msg for msg in messages if msg['role'] == 'assistant')
 
