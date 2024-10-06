@@ -48,6 +48,7 @@ def main():
     # Load the dataset
     dataset = load_dataset("ai2-adapt-dev/synthetic-cot-wildguarmixtrain")
 
+    breakpoint()
     # Process the data
     processed_data = [process_item(item) for item in dataset['train']]
 
