@@ -13,16 +13,22 @@ def extract_final_response(content: str) -> str:
 
 def process_item(item: dict) -> dict:
     # Each item represents a separate conversation
-    messages = json.load(item['messages'])
-    breakpoint()
-    user_message = next(msg for msg in messages if msg['role'] == 'user')
-    assistant_message = next(msg for msg in messages if msg['role'] == 'assistant')
+    messages = item['messages']
+    user_message, final_response = None, None
+    for msg in messages:
+        if msg['role'] == 'user':
+            user_message = msg["content"]
+        if msg['role'] == 'assistant':
+            final_response = extract_final_response(msg["content"])
 
-    final_response = extract_final_response(assistant_message['content'])
+    if user_message is None or final_response is None:
+        print(
+            f"Warning: Skipping item. User message: {'Present' if user_message else 'Missing'}, Final response: {'Present' if final_response else 'Missing'}")
+        return None  # Skip this item if we don't have both user and assistant messages
 
     return {
-        "messages": [  # Renamed from "messages" to "conversation" for clarity
-            {"role": "user", "content": user_message['content']},
+        "messages": [
+            {"role": "user", "content": user_message},
             {"role": "assistant", "content": final_response}
         ],
         "prompt_harm_label": item["prompt_harm_label"],
@@ -33,7 +39,7 @@ def process_item(item: dict) -> dict:
 def upload_to_huggingface(data: List[dict], dataset_name: str):
     dataset = Dataset.from_dict(
         {
-            "conversation": [item["conversation"] for item in data],  # Each item is a separate conversation
+            "messages": [item["messages"] for item in data],
             "prompt_harm_label": [item["prompt_harm_label"] for item in data],
             "model_used": [item["model_used"] for item in data],
         }
@@ -48,9 +54,10 @@ def main():
     # Load the dataset
     dataset = load_dataset("ai2-adapt-dev/synthetic-cot-wildguarmixtrain")
 
-    breakpoint()
     # Process the data
-    processed_data = [process_item(item) for item in dataset['train']]
+    processed_data = [item for item in (process_item(item) for item in dataset['train']) if item is not None]
+
+    print(f"Processed {len(processed_data)} items out of {len(dataset['train'])} total items.")
 
     # Upload to Hugging Face
     upload_to_huggingface(processed_data, "ai2-adapt-dev/synthetic-finalresp-wildguarmixtrain")
