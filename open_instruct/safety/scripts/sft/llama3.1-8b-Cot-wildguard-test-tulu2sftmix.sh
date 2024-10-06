@@ -1,23 +1,16 @@
 #!/bin/bash
 
 python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/mason.py \
-    --cluster ai2/allennlp-cirrascale \
+    --cluster ai2/jupiter-cirrascale-2  \
     --image nathanl/open_instruct_auto \
     --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
-    --num_nodes 4 \
     --priority high \
     --budget ai2/allennlp \
     --preemptible \
-    --gpus 6 \
-    --accelerate launch \
-    --mixed_precision bf16 \
-    --num_machines 1 \
-    --num_processes 4 \
-    --use_deepspeed \
-    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
-    -- \
-    python finetune.py \
+    --gpus 8 \
+    --gpus 8 -- accelerate launch --config_file configs/ds_configs/deepspeed_zero3.yaml \
+ open_instruct/finetune.py \
     --model_name_or_path "meta-llama/Meta-Llama-3.1-8B" \
     --use_flash_attn \
     --max_seq_length 2048 \
@@ -29,8 +22,10 @@ python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/mason.py \
     --lr_scheduler_type linear \
     --warmup_ratio 0.03 \
     --weight_decay 0. \
-    --num_train_epochs 2 \
-    --output_dir /output/ \
+    --num_train_epochs 1   \
+    --output_dir models/sft_safety_gc/ \
     --with_tracking \
     --report_to tensorboard \
+    --gradient_checkpointing \
+    --push_to_hub \
     --logging_steps 1
