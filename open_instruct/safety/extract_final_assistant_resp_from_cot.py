@@ -5,14 +5,13 @@ from datasets import load_dataset, Dataset
 
 
 def extract_final_response(content: str) -> str:
-    match = re.search(r'Final Response:\s*(.*?)(?:\n\n|$)', content, re.DOTALL)
+    match = re.search(r'Final Response:(.*?)(?=\n\n|$)', content, re.DOTALL)
     if match:
         return match.group(1).strip()
-    return ""
+    return content  # Return the entire content if "Final Response:" is not found
 
 
 def process_item(item: dict) -> dict:
-    # Each item represents a separate conversation
     messages = item['messages']
     user_message, final_response = None, None
     for msg in messages:
@@ -21,10 +20,10 @@ def process_item(item: dict) -> dict:
         if msg['role'] == 'assistant':
             final_response = extract_final_response(msg["content"])
 
-    if user_message is None or final_response is None:
+    if user_message is None or not final_response:
         print(
             f"Warning: Skipping item. User message: {'Present' if user_message else 'Missing'}, Final response: {'Present' if final_response else 'Missing'}")
-        return None  # Skip this item if we don't have both user and assistant messages
+        return None
 
     return {
         "messages": [
@@ -51,15 +50,9 @@ def upload_to_huggingface(data: List[dict], dataset_name: str):
 
 
 def main():
-    # Load the dataset
     dataset = load_dataset("ai2-adapt-dev/synthetic-cot-wildguarmixtrain")
-
-    # Process the data
     processed_data = [item for item in (process_item(item) for item in dataset['train']) if item is not None]
-
     print(f"Processed {len(processed_data)} items out of {len(dataset['train'])} total items.")
-
-    # Upload to Hugging Face
     upload_to_huggingface(processed_data, "ai2-adapt-dev/synthetic-finalresp-wildguarmixtrain")
 
 
