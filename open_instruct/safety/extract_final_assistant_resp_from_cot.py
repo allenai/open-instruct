@@ -5,7 +5,7 @@ from datasets import load_dataset, Dataset
 
 
 def extract_final_response(content: str) -> str:
-    match = re.search(r'Final Response:\s*(.*?)(?:\n\n|$)', content, re.DOTALL)
+    match = re.search(r'Final Response:\s*(.*)', content, re.DOTALL)
     if match:
         return match.group(1).strip()
     return ""
