@@ -35,7 +35,7 @@ def upload_to_huggingface(data: List[Dict], dataset_name: str):
 
 def main():
     # Load the dataset
-    dataset = load_dataset("allenai/wildjailbreak")
+    dataset = load_dataset("allenai/wildjailbreak",  'train')
 
     # Process the data
     processed_data = [
