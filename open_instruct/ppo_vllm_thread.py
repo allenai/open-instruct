@@ -1047,8 +1047,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         torch.cuda.empty_cache()
 
         # save steps
-        if arg.save_freq > 0 and training_step % args.save_freq == 0:
-            os.makedirs(os.path.join(os.path.dirname(args.output_dir), f"step_{training_step}"), exist_ok=True)
+        if args.save_freq > 0 and training_step % args.save_freq == 0:
+            step_dir = os.path.join(args.output_dir, f"step_{training_step}")
+            os.makedirs(step_dir, exist_ok=True)
             original_tokenizer = AutoTokenizer.from_pretrained(
                 model_config.model_name_or_path, revision=model_config.model_revision
             )
@@ -1056,7 +1057,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 accelerator,
                 model,
                 original_tokenizer,
-                args.output_dir,
+                step_dir,
                 model_attribute_to_save="policy",
             )
             del original_tokenizer
