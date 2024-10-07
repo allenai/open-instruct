@@ -7,7 +7,7 @@ dataset_mixer:
   allenai/ultrafeedback_binarized_cleaned_train: 1.0
   # Custom conversion of daring anteater synthetic data into preferences
   ai2-adapt-dev/DaringAnteater-prefs-RM-filter: 1.0
-  # 
+  # Modifications of WildChat data to preferences with
   ai2-adapt-dev/WildChat-prefs-280824: 1.0
   # Custom IF Eval data with Llama 3.1 405B for chosen and Tulu 2 as rejected
   ai2-adapt-dev/Llama-3.1-if_taxonomy_tulu: 1.0
