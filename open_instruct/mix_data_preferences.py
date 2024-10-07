@@ -14,9 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from open_instruct.dpo_tune import FlatArguments
+
 # script for mixing and saving data
 from open_instruct.utils import ArgumentParserPlus, get_datasets
-from open_instruct.dpo_tune import FlatArguments
 
 # Run as module for local imports, e.g.:
 # python open_instruct/mix_data_preferences.py configs/train_configs/sft/tulu3_8b_preview_mix_v3.4.yaml --dataset_mix_dir=output/tmp/
