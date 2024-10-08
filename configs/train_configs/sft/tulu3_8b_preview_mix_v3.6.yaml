@@ -163,7 +163,6 @@ dataset_mixer:
     # Con: may not reflect the real challenges in actual use of AI models. The interactions include those with weak models.
     # TODO: need to ablate. need to regenerate (the last step)!! the intermediate low-quality responese need to downweight.
     # lmsys/lmsys-chat-1m: 1000000
-<<<<<<< HEAD
     # ------------------------------------------------------
     # Persona augmented generated Instruction Following data for SFT (following ifeval taxonomy)
     # Total: 29980
@@ -177,9 +176,6 @@ dataset_mixer:
     # Pro: significanly improved MATH when used alone
     # Con: Including this subset into mix does not have the same gain
     # TODO: need to ablate. (Jacob is doing the ablation to include each subbet in sft mix with this data)
-=======
-    ai2-adapt-dev/personahub_ifdata_v1_29980: 29980
->>>>>>> f0b3def26c86e1fb146e78bddbd90bf313997d15
     # ai2-adapt-dev/personahub_math_v4_149975: 149975
 max_seq_length: 4096 # Note, reduced from 8192 to fit on one GPU with DeepSpeed Stage3
 preprocessing_num_workers: 128
