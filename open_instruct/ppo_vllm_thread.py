@@ -1009,7 +1009,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             local_metrics[14] = ratio_stats.var()
             local_metrics[15] = ((kl) ** 2 / 2).sum(1).mean()
             local_metrics[16] = ((-kl).exp() - 1 + kl).sum(1).mean()
-            local_metrics[17] = verifiable_counts.sum()
+            local_metrics[17] = verifiable_counts.mean()  # verifiable count = % of time we trigger the verifiable reward
             global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
             metrics = {
                 "episode": episode,
