@@ -49,7 +49,7 @@ Correct answer: {sample['choices'][sample['answer']]}
         total_generated = 0
 
         # Define a maximum limit for generated questions
-        max_questions_to_generate = 1000
+        max_questions_to_generate = 200
 
         while total_generated < max_questions_to_generate:
             # Shuffle and randomly select few-shot examples each time
