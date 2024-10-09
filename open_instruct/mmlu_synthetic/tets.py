@@ -11,8 +11,20 @@ from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm
 from difflib import SequenceMatcher
 
+
+# Custom logger to filter out unwanted messages
+class CustomFilter(logging.Filter):
+    def filter(self, record):
+        return "HTTP Request:" not in record.getMessage()
+
+
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger()
+logger.addFilter(CustomFilter())
+
+# Suppress OpenAI's HTTP request logging
+logging.getLogger("openai").setLevel(logging.WARNING)
 
 
 @dataclass
@@ -100,7 +112,6 @@ Correct answer: {sample['choices'][sample['answer']]}
                 unique_filtered_questions = [q for q in filtered_questions if q not in self.generated_questions]
                 self.generated_questions.update(unique_filtered_questions)
 
-                logging.info(f"Generated {len(unique_filtered_questions)} new questions for {subject}")
                 return unique_filtered_questions
 
             except Exception as e:
@@ -152,7 +163,6 @@ Correct answer: {sample['choices'][sample['answer']]}
                     logging.warning(f"No new questions generated for {subject}. Breaking loop.")
                     break
 
-        logging.info(f"Generated {len(results)} questions for {subject}")
         return results[:max_questions]
 
 
@@ -220,7 +230,7 @@ async def main():
 
     all_synthetic_data = []
     for subject, samples in samples_by_subject.items():
-        logging.info(f"Starting generation for subject: {subject}")
+        print(f"Starting generation for subject: {subject}")
         raw_synthetic_data = await processor.process_subject(subject, samples, gen_args)
         synthetic_data = [
             parsed_question
@@ -229,7 +239,7 @@ async def main():
             if (parsed_question := parse_generated_question(data, subject)) is not None
         ]
         all_synthetic_data.extend(synthetic_data)
-        logging.info(f"Completed generation for subject: {subject}. Generated {len(synthetic_data)} valid questions.")
+        print(f"Completed generation for subject: {subject}. Generated {len(synthetic_data)} valid questions.")
 
         # Save progress after each subject
         with open(f"synthetic_mmlu_data_{config.model}_progress.json", "w") as f:
