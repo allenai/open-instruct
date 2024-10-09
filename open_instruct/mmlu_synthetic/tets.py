@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datasets import load_dataset, Dataset
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm
-from difflib import SequenceMatcher  # For similarity comparison
+from difflib import SequenceMatcher
 
 
 @dataclass
@@ -20,7 +20,7 @@ class LLMGenerationConfig:
 
 @dataclass
 class GenerationArgs:
-    temperature: float = 0.9
+    temperature: float = 0.7
     max_tokens: int = 500
     top_p: float = 0.95
     examples_per_subject: int = 1000
@@ -44,86 +44,77 @@ D: {sample['choices'][3]}
 Correct answer: {sample['choices'][sample['answer']]}
 """
 
-    async def generate_synthetic_question(self, subject: str, examples: List[dict], gen_args: GenerationArgs):
-        total_generated = 0  # Count of unique questions generated
-        max_questions_to_generate = 200  # Set the limit for this demo
+    async def generate_question_batch(self, subject: str, examples: List[dict], gen_args: GenerationArgs,
+                                      batch_size: int):
+        # Shuffle and randomly select few-shot examples
+        few_shot_examples = random.sample(examples, k=gen_args.few_shot_examples)
+        examples_str = "\n".join([self.format_example(example) for example in few_shot_examples])
 
-        while total_generated < max_questions_to_generate:
-            # Shuffle and randomly select few-shot examples each time
-            few_shot_examples = random.sample(examples, k=gen_args.few_shot_examples)
-            examples_str = "\n".join([self.format_example(example) for example in few_shot_examples])
+        # Add some random variation to the prompt to encourage diversity
+        prompt_variations = [
+            f"Generate a new multiple-choice question related to {subject}.",
+            f"Create a challenging new question on {subject}.",
+            f"Produce a unique question about {subject}.",
+            f"Design a new MMLU question related to {subject}.",
+        ]
+        selected_prompt = random.choice(prompt_variations)
 
-            # Add some random variation to the prompt to encourage diversity
-            prompt_variations = [
-                f"Generate a new multiple-choice question related to {subject}.",
-                f"Create a challenging new question on {subject}.",
-                f"Produce a unique question about {subject}.",
-                f"Design a new MMLU question related to {subject}.",
-            ]
-            selected_prompt = random.choice(prompt_variations)  # Randomly pick a prompt for each batch
+        prompt = f"""
+        {selected_prompt}
+        Here are examples of MMLU questions on the subject of {subject}:
 
-            prompt = f"""
-            {selected_prompt}
-            Here are examples of MMLU questions on the subject of {subject}:
+        {examples_str}
 
-            {examples_str}
+        Create a new question on {subject} with four options and indicate the correct answer. Format your response as follows:
+        Question: [Your new question]
+        A: [Option A]
+        B: [Option B]
+        C: [Option C]
+        D: [Option D]
+        Correct answer: [Letter of correct option]
+        """
 
-            Create a new question on {subject} with four options and indicate the correct answer. Format your response as follows:
-            Question: [Your new question]
-            A: [Option A]
-            B: [Option B]
-            C: [Option C]
-            D: [Option D]
-            Correct answer: [Letter of correct option]
-            """
+        try:
+            # Vary temperature slightly to increase diversity
+            temp = gen_args.temperature + random.uniform(-0.1, 0.1)
 
-            try:
-                # Vary temperature slightly across batches to increase diversity
-                temp = gen_args.temperature + random.uniform(-0.1, 0.1)
+            response = await self.async_client.chat.completions.create(
+                model=self.config.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an AI assistant tasked with generating synthetic data for the MMLU dataset.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=temp,
+                max_tokens=gen_args.max_tokens,
+                top_p=gen_args.top_p,
+                n=batch_size,
+            )
 
-                response = await self.async_client.chat.completions.create(
-                    model=self.config.model,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "You are an AI assistant tasked with generating synthetic data for the MMLU dataset.",
-                        },
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=temp,
-                    max_tokens=gen_args.max_tokens,
-                    top_p=gen_args.top_p,
-                    n=min(self.config.num_completions, max_questions_to_generate - total_generated),
-                )
+            new_questions = [choice.message.content for choice in response.choices]
 
-                new_questions = [choice.message.content for choice in response.choices]
+            # Filter new questions based on similarity threshold
+            filtered_questions = self.filter_similar_questions(new_questions, gen_args.similarity_threshold)
 
-                # Filter new questions based on similarity threshold
-                filtered_questions = self.filter_similar_questions(new_questions, gen_args.similarity_threshold)
+            # Add only unique questions that have not been generated before
+            unique_filtered_questions = [q for q in filtered_questions if q not in self.generated_questions]
+            self.generated_questions.update(unique_filtered_questions)
 
-                # Add only unique questions that have not been generated before
-                unique_filtered_questions = [q for q in filtered_questions if q not in self.generated_questions]
-                self.generated_questions.update(unique_filtered_questions)
+            return unique_filtered_questions
 
-                total_generated += len(unique_filtered_questions)
-                print(f"Generated {total_generated} unique questions for {subject}")
-
-                # Break if we reach the desired number of questions
-                if total_generated >= max_questions_to_generate:
-                    break
-
-            except Exception as e:
-                print(f"Error generating question for {subject}: {e}")
-                break  # Exit loop on error
-
-        return list(self.generated_questions)  # Return unique questions as a list
+        except Exception as e:
+            print(f"Error generating questions for {subject}: {e}")
+            return []
 
     def filter_similar_questions(self, new_questions: List[str], threshold: float) -> List[str]:
         """Filter out questions that are too similar to the previously generated questions."""
         filtered_questions = []
 
         for question in new_questions:
-            if all(self.calculate_similarity(question, existing_question) < threshold for existing_question in self.generated_questions):
+            if all(self.calculate_similarity(question, existing_question) < threshold for existing_question in
+                   self.generated_questions):
                 filtered_questions.append(question)
 
         return filtered_questions
@@ -135,13 +126,32 @@ Correct answer: {sample['choices'][sample['answer']]}
 
     async def process_subject(self, subject: str, samples: List[dict], gen_args: GenerationArgs):
         semaphore = asyncio.Semaphore(self.config.max_parallel_requests)
+        total_questions = 0
+        max_questions = gen_args.examples_per_subject
+        batch_size = self.config.num_completions
 
-        async def process_with_semaphore():
+        async def process_batch():
+            nonlocal total_questions
             async with semaphore:
-                return await self.generate_synthetic_question(subject, samples, gen_args)
+                batch = await self.generate_question_batch(subject, samples, gen_args, batch_size)
+                total_questions += len(batch)
+                return batch
 
-        tasks = [process_with_semaphore() for _ in range(gen_args.examples_per_subject // self.config.num_completions)]
-        return await tqdm.gather(*tasks, desc=f"Generating {subject}")
+        results = []
+        with tqdm(total=max_questions, desc=f"Generating {subject}") as pbar:
+            while total_questions < max_questions:
+                remaining = max_questions - total_questions
+                num_batches = min(self.config.max_parallel_requests, (remaining + batch_size - 1) // batch_size)
+                batch_tasks = [process_batch() for _ in range(num_batches)]
+                batch_results = await asyncio.gather(*batch_tasks)
+                new_questions = [item for sublist in batch_results for item in sublist]
+                results.extend(new_questions)
+                pbar.update(len(new_questions))
+
+                if not any(batch_results):  # If all batches returned empty, break to avoid infinite loop
+                    break
+
+        return results[:max_questions]  # Ensure we don't exceed the maximum number of questions
 
 
 def get_mmlu_samples_by_subject(num_samples_per_subject: int = 10) -> Dict[str, List[dict]]:
@@ -200,7 +210,6 @@ def upload_to_huggingface(data: List[dict], dataset_name: str):
         }
     )
 
-    dataset_name = "ai2-adapt-dev/synth-mmlu-mini-sample-new"
     dataset.push_to_hub(dataset_name)
     print(f"Dataset uploaded to Hugging Face: https://huggingface.co/datasets/{dataset_name}")
 
@@ -232,6 +241,7 @@ async def main():
 
     # Upload to Hugging Face
     upload_to_huggingface(all_synthetic_data, "ai2-adapt-dev/synthetic-mmlu-dataset")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
