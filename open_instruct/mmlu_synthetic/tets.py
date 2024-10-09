@@ -177,6 +177,7 @@ async def main():
     all_synthetic_data = []
     for subject, samples in samples_by_subject.items():
         raw_synthetic_data = await processor.process_subject(subject, samples, gen_args)
+        breakpoint()
         for batch in raw_synthetic_data:
             if batch is not None:
                 synthetic_data = parse_generated_questions(batch, subject)
