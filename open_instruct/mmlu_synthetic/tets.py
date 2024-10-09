@@ -45,36 +45,38 @@ Correct answer: {sample['choices'][sample['answer']]}
 """
 
     async def generate_synthetic_question(self, subject: str, examples: List[dict], gen_args: GenerationArgs):
-        examples_str = "\n".join([self.format_example(example) for example in examples[: gen_args.few_shot_examples]])
-
-        # Add some random variation to the prompt to encourage diversity
-        prompt_variations = [
-            f"Generate a new multiple-choice question related to {subject}.",
-            f"Create a challenging new question on {subject}.",
-            f"Produce a unique question about {subject}.",
-            f"Design a new MMLU question related to {subject}.",
-        ]
-        selected_prompt = random.choice(prompt_variations)  # Randomly pick a prompt for each batch
-
-        prompt = f"""
-{selected_prompt}
-Here are examples of MMLU questions on the subject of {subject}:
-
-{examples_str}
-
-Create a new question on {subject} with four options and indicate the correct answer. Format your response as follows:
-Question: [Your new question]
-A: [Option A]
-B: [Option B]
-C: [Option C]
-D: [Option D]
-Correct answer: [Letter of correct option]
-"""
-
         all_responses = []
         total_generated = 0
 
         while total_generated < gen_args.examples_per_subject:
+            # Shuffle and randomly select few-shot examples each time
+            few_shot_examples = random.sample(examples, k=gen_args.few_shot_examples)
+            examples_str = "\n".join([self.format_example(example) for example in few_shot_examples])
+
+            # Add some random variation to the prompt to encourage diversity
+            prompt_variations = [
+                f"Generate a new multiple-choice question related to {subject}.",
+                f"Create a challenging new question on {subject}.",
+                f"Produce a unique question about {subject}.",
+                f"Design a new MMLU question related to {subject}.",
+            ]
+            selected_prompt = random.choice(prompt_variations)  # Randomly pick a prompt for each batch
+
+            prompt = f"""
+            {selected_prompt}
+            Here are examples of MMLU questions on the subject of {subject}:
+
+            {examples_str}
+
+            Create a new question on {subject} with four options and indicate the correct answer. Format your response as follows:
+            Question: [Your new question]
+            A: [Option A]
+            B: [Option B]
+            C: [Option C]
+            D: [Option D]
+            Correct answer: [Letter of correct option]
+            """
+
             try:
                 # Vary temperature slightly across batches to increase diversity
                 temp = gen_args.temperature + random.uniform(-0.1, 0.1)
