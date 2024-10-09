@@ -60,7 +60,7 @@ Correct answer: [Letter of correct option]
 
 ---
 
-Repeat this format for all {self.config.num_completions_per_batch} questions. This is batch number {batch_number}, so make sure to generate different questions from previous batches.
+Repeat this format for all {self.config.num_completions_per_batch} questions. This is batch number {batch_number}, so make sure to generate different questions from previous batches. Don't say "Please let me know if you would like me to continue generating more questions in this format".
 """
 
         try:
@@ -177,11 +177,13 @@ async def main():
     all_synthetic_data = []
     for subject, samples in samples_by_subject.items():
         raw_synthetic_data = await processor.process_subject(subject, samples, gen_args)
-        breakpoint()
+
         for batch in raw_synthetic_data:
             if batch is not None:
                 synthetic_data = parse_generated_questions(batch, subject)
                 all_synthetic_data.extend(synthetic_data)
+
+        breakpoint()
 
         # Limit to max_examples_per_subject
         all_synthetic_data = all_synthetic_data[:config.max_examples_per_subject]
