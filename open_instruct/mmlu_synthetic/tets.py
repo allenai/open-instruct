@@ -25,7 +25,7 @@ class GenerationArgs:
     top_p: float = 0.95
     examples_per_subject: int = 1000
     few_shot_examples: int = 3
-    similarity_threshold: float = 0.8  # Set a threshold to filter similar questions
+    similarity_threshold: float = 0.9  # Set a threshold to filter similar questions
 
 
 class LLMProcessor:
