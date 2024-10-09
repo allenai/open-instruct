@@ -45,11 +45,8 @@ Correct answer: {sample['choices'][sample['answer']]}
 """
 
     async def generate_synthetic_question(self, subject: str, examples: List[dict], gen_args: GenerationArgs):
-        all_responses = []
-        total_generated = 0
-
-        # Define a maximum limit for generated questions
-        max_questions_to_generate = 200
+        total_generated = 0  # Count of unique questions generated
+        max_questions_to_generate = 200  # Set the limit for this demo
 
         while total_generated < max_questions_to_generate:
             # Shuffle and randomly select few-shot examples each time
@@ -96,8 +93,7 @@ Correct answer: {sample['choices'][sample['answer']]}
                     temperature=temp,
                     max_tokens=gen_args.max_tokens,
                     top_p=gen_args.top_p,
-                    n=min(self.config.num_completions, gen_args.examples_per_subject - total_generated),
-
+                    n=min(self.config.num_completions, max_questions_to_generate - total_generated),
                 )
 
                 new_questions = [choice.message.content for choice in response.choices]
@@ -106,21 +102,21 @@ Correct answer: {sample['choices'][sample['answer']]}
                 filtered_questions = self.filter_similar_questions(new_questions, gen_args.similarity_threshold)
 
                 # Add only unique questions that have not been generated before
-                all_responses.extend(filtered_questions)
-                total_generated += len(filtered_questions)
+                unique_filtered_questions = [q for q in filtered_questions if q not in self.generated_questions]
+                self.generated_questions.update(unique_filtered_questions)
+
+                total_generated += len(unique_filtered_questions)
                 print(f"Generated {total_generated} unique questions for {subject}")
 
                 # Break if we reach the desired number of questions
                 if total_generated >= max_questions_to_generate:
-                    print(f"Generated {total_generated} unique questions for {subject}")
-                    breakpoint()
                     break
 
             except Exception as e:
                 print(f"Error generating question for {subject}: {e}")
                 break  # Exit loop on error
 
-        return all_responses
+        return list(self.generated_questions)  # Return unique questions as a list
 
     def filter_similar_questions(self, new_questions: List[str], threshold: float) -> List[str]:
         """Filter out questions that are too similar to the previously generated questions."""
@@ -129,7 +125,6 @@ Correct answer: {sample['choices'][sample['answer']]}
         for question in new_questions:
             if all(self.calculate_similarity(question, existing_question) < threshold for existing_question in self.generated_questions):
                 filtered_questions.append(question)
-                self.generated_questions.add(question)
 
         return filtered_questions
 
@@ -237,7 +232,6 @@ async def main():
 
     # Upload to Hugging Face
     upload_to_huggingface(all_synthetic_data, "ai2-adapt-dev/synthetic-mmlu-dataset")
-
 
 if __name__ == "__main__":
     asyncio.run(main())
