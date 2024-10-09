@@ -9,6 +9,7 @@ from datasets import load_dataset, Dataset
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm
 from difflib import SequenceMatcher
+import logging
 
 
 @dataclass
@@ -46,67 +47,73 @@ Correct answer: {sample['choices'][sample['answer']]}
 
     async def generate_question_batch(self, subject: str, examples: List[dict], gen_args: GenerationArgs,
                                       batch_size: int):
-        # Shuffle and randomly select few-shot examples
-        few_shot_examples = random.sample(examples, k=gen_args.few_shot_examples)
-        examples_str = "\n".join([self.format_example(example) for example in few_shot_examples])
+        for attempt in range(self.config.max_retries):
+            try:
+                # Shuffle and randomly select few-shot examples
+                few_shot_examples = random.sample(examples, k=gen_args.few_shot_examples)
+                examples_str = "\n".join([self.format_example(example) for example in few_shot_examples])
 
-        # Add some random variation to the prompt to encourage diversity
-        prompt_variations = [
-            f"Generate a new multiple-choice question related to {subject}.",
-            f"Create a challenging new question on {subject}.",
-            f"Produce a unique question about {subject}.",
-            f"Design a new MMLU question related to {subject}.",
-        ]
-        selected_prompt = random.choice(prompt_variations)
+                # Add some random variation to the prompt to encourage diversity
+                prompt_variations = [
+                    f"Generate a new multiple-choice question related to {subject}.",
+                    f"Create a challenging new question on {subject}.",
+                    f"Produce a unique question about {subject}.",
+                    f"Design a new MMLU question related to {subject}.",
+                ]
+                selected_prompt = random.choice(prompt_variations)
 
-        prompt = f"""
-        {selected_prompt}
-        Here are examples of MMLU questions on the subject of {subject}:
+                prompt = f"""
+                {selected_prompt}
+                Here are examples of MMLU questions on the subject of {subject}:
+        
+                {examples_str}
+        
+                Create a new question on {subject} with four options and indicate the correct answer. Format your response as follows:
+                Question: [Your new question]
+                A: [Option A]
+                B: [Option B]
+                C: [Option C]
+                D: [Option D]
+                Correct answer: [Letter of correct option]
+                """
 
-        {examples_str}
+                # Vary temperature slightly to increase diversity
+                temp = gen_args.temperature + random.uniform(-0.1, 0.1)
 
-        Create a new question on {subject} with four options and indicate the correct answer. Format your response as follows:
-        Question: [Your new question]
-        A: [Option A]
-        B: [Option B]
-        C: [Option C]
-        D: [Option D]
-        Correct answer: [Letter of correct option]
-        """
+                response = await self.async_client.chat.completions.create(
+                    model=self.config.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are an AI assistant tasked with generating synthetic data for the MMLU dataset.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=temp,
+                    max_tokens=gen_args.max_tokens,
+                    top_p=gen_args.top_p,
+                    n=batch_size,
+                )
 
-        try:
-            # Vary temperature slightly to increase diversity
-            temp = gen_args.temperature + random.uniform(-0.1, 0.1)
+                new_questions = [choice.message.content for choice in response.choices]
 
-            response = await self.async_client.chat.completions.create(
-                model=self.config.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are an AI assistant tasked with generating synthetic data for the MMLU dataset.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=temp,
-                max_tokens=gen_args.max_tokens,
-                top_p=gen_args.top_p,
-                n=batch_size,
-            )
+                # Filter new questions based on similarity threshold
+                filtered_questions = self.filter_similar_questions(new_questions, gen_args.similarity_threshold)
 
-            new_questions = [choice.message.content for choice in response.choices]
+                # Add only unique questions that have not been generated before
+                unique_filtered_questions = [q for q in filtered_questions if q not in self.generated_questions]
+                self.generated_questions.update(unique_filtered_questions)
 
-            # Filter new questions based on similarity threshold
-            filtered_questions = self.filter_similar_questions(new_questions, gen_args.similarity_threshold)
+                return unique_filtered_questions
 
-            # Add only unique questions that have not been generated before
-            unique_filtered_questions = [q for q in filtered_questions if q not in self.generated_questions]
-            self.generated_questions.update(unique_filtered_questions)
-
-            return unique_filtered_questions
-
-        except Exception as e:
-            print(f"Error generating questions for {subject}: {e}")
-            return []
+            except Exception as e:
+                logging.error(f"Error generating questions for {subject} (attempt {attempt + 1}): {e}")
+                if attempt < self.config.max_retries - 1:
+                    await asyncio.sleep(self.config.retry_delay)
+                else:
+                    logging.error(
+                        f"Failed to generate questions for {subject} after {self.config.max_retries} attempts")
+                    return []
 
     def filter_similar_questions(self, new_questions: List[str], threshold: float) -> List[str]:
         """Filter out questions that are too similar to the previously generated questions."""
