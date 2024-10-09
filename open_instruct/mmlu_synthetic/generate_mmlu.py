@@ -99,7 +99,8 @@ Correct answer: {sample['choices'][sample['answer']]}
                 new_questions = [choice.message.content for choice in response.choices]
 
                 # Filter new questions based on similarity threshold
-                filtered_questions = self.filter_similar_questions(new_questions, gen_args.similarity_threshold)
+                # filtered_questions = self.filter_similar_questions(new_questions, gen_args.similarity_threshold)
+                filtered_questions = new_questions
 
                 # Add only unique questions that have not been generated before
                 unique_filtered_questions = [q for q in filtered_questions if q not in self.generated_questions]
