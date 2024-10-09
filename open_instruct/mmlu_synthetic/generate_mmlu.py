@@ -11,7 +11,7 @@ from tqdm.asyncio import tqdm
 
 @dataclass
 class LLMGenerationConfig:
-    num_completions: int = 100
+    num_completions: int = 500
     # model: str = "gpt-3.5-turbo-0125"
     model: str = "gpt-4"
     max_parallel_requests: int = 50  # Adjust based on your API rate limits
