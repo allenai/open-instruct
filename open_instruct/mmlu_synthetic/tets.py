@@ -25,7 +25,7 @@ class GenerationArgs:
     top_p: float = 0.95
     examples_per_subject: int = 1000
     few_shot_examples: int = 3
-    similarity_threshold: float = 0.9  # Set a threshold to filter similar questions
+    similarity_threshold: float = 0.8  # Set a threshold to filter similar questions
 
 
 class LLMProcessor:
@@ -96,7 +96,6 @@ Correct answer: [Letter of correct option]
 
                 new_questions = [choice.message.content for choice in response.choices]
                 filtered_questions = self.filter_similar_questions(new_questions, gen_args.similarity_threshold)
-                breakpoint()
                 all_responses.extend(filtered_questions)
                 total_generated += len(filtered_questions)
                 print(f"Generated {total_generated} unique questions for {subject}")
@@ -120,7 +119,6 @@ Correct answer: [Letter of correct option]
     @staticmethod
     def calculate_similarity(text1: str, text2: str) -> float:
         """Calculate similarity between two texts using SequenceMatcher."""
-        breakpoint()
         return SequenceMatcher(None, text1, text2).ratio()
 
     async def process_subject(self, subject: str, samples: List[dict], gen_args: GenerationArgs):
