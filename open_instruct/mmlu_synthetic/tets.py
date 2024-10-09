@@ -48,7 +48,10 @@ Correct answer: {sample['choices'][sample['answer']]}
         all_responses = []
         total_generated = 0
 
-        while total_generated < gen_args.examples_per_subject:
+        # Define a maximum limit for generated questions
+        max_questions_to_generate = 1000
+
+        while total_generated < max_questions_to_generate:
             # Shuffle and randomly select few-shot examples each time
             few_shot_examples = random.sample(examples, k=gen_args.few_shot_examples)
             examples_str = "\n".join([self.format_example(example) for example in few_shot_examples])
@@ -93,14 +96,26 @@ Correct answer: {sample['choices'][sample['answer']]}
                     temperature=temp,
                     max_tokens=gen_args.max_tokens,
                     top_p=gen_args.top_p,
-                    n=min(self.config.num_completions, gen_args.examples_per_subject - total_generated),
+                    n=1,  # Generate one question at a time
                 )
 
                 new_questions = [choice.message.content for choice in response.choices]
+
+                # Filter new questions based on similarity threshold
                 filtered_questions = self.filter_similar_questions(new_questions, gen_args.similarity_threshold)
-                all_responses.extend(filtered_questions)
-                total_generated += len(filtered_questions)
+
+                # Add only unique questions that have not been generated before
+                for question in filtered_questions:
+                    if question not in all_responses:
+                        all_responses.append(question)
+                        total_generated += 1
+
                 print(f"Generated {total_generated} unique questions for {subject}")
+
+                # Break if we reach the desired number of questions
+                if total_generated >= max_questions_to_generate:
+                    break
+
             except Exception as e:
                 print(f"Error generating question for {subject}: {e}")
                 break  # Exit loop on error
