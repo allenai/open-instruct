@@ -31,7 +31,7 @@ class GenerationArgs:
     temperature: float = 0.7
     max_tokens: int = 500
     top_p: float = 0.95
-    examples_per_subject: int = 10
+    examples_per_subject: int = 1000
     few_shot_examples: int = 10
 
 
