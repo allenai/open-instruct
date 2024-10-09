@@ -110,10 +110,10 @@ Correct answer: {sample['choices'][sample['answer']]}
                         all_responses.append(question)
                         total_generated += 1
 
-                print(f"Generated {total_generated} unique questions for {subject}")
-
                 # Break if we reach the desired number of questions
                 if total_generated >= max_questions_to_generate:
+                    print(f"Generated {total_generated} unique questions for {subject}")
+                    breakpoint()
                     break
 
             except Exception as e:
