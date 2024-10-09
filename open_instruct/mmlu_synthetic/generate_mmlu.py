@@ -2,39 +2,44 @@ import asyncio
 import json
 import re
 import random
+import logging
 from typing import List, Dict, Optional
 from collections import defaultdict
 from dataclasses import dataclass
 from datasets import load_dataset, Dataset
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm
-from difflib import SequenceMatcher
-import logging
+
+# Set up logging
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Suppress OpenAI's HTTP request logging
+logging.getLogger("openai").setLevel(logging.WARNING)
 
 
 @dataclass
 class LLMGenerationConfig:
-    num_completions: int = 50  # Number of completions per API request
+    num_completions: int = 50
     model: str = "gpt-4"
-    max_parallel_requests: int = 50  # Adjust based on your API rate limits
+    max_parallel_requests: int = 50
     max_retries: int = 3
     retry_delay: float = 5.0
 
+
 @dataclass
 class GenerationArgs:
-    temperature: float = 0.9
+    temperature: float = 0.7
     max_tokens: int = 500
     top_p: float = 0.95
     examples_per_subject: int = 1000
     few_shot_examples: int = 10
-    similarity_threshold: float = 0.8  # Set a threshold to filter similar questions
 
 
 class LLMProcessor:
     def __init__(self, config: LLMGenerationConfig):
         self.config = config
         self.async_client = AsyncOpenAI()
-        self.generated_questions = defaultdict(set)  # Change to defaultdict of sets
+        self.generated_questions = defaultdict(list)
 
     def format_example(self, sample: dict) -> str:
         return f"""
@@ -54,26 +59,40 @@ Correct answer: {sample['choices'][sample['answer']]}
                 examples_str = "\n".join([self.format_example(example) for example in few_shot_examples])
 
                 prompt_variations = [
-                    f"Generate a new multiple-choice question related to {subject}.",
-                    f"Create a challenging new question on {subject}.",
-                    f"Produce a unique question about {subject}.",
-                    f"Design a new MMLU question related to {subject}.",
+                    f"Create a real-world multiple-choice question on {subject} that could appear in an actual exam or professional assessment.",
+                    f"Devise a practical, application-based question about {subject} that tests real-world knowledge.",
+                    f"Generate a question on {subject} that reflects current industry standards or academic research.",
+                    f"Design a question on {subject} that addresses a concrete scenario professionals in this field might encounter.",
                 ]
                 selected_prompt = random.choice(prompt_variations)
 
                 prompt = f"""
+                You are an expert in creating authentic, real-world multiple-choice questions for the Massive Multitask Language Understanding (MMLU) dataset. Your task is to generate new questions on the subject of {subject} that reflect genuine knowledge and applications in this field.
+
+                Essential guidelines:
+                1. Create questions that could realistically appear in professional exams, academic tests, or real-world scenarios related to {subject}.
+                2. Draw from current, factual information about {subject}. Avoid hypothetical or overly simplified scenarios.
+                3. Ensure questions test practical knowledge or skills that would be valuable in real-world applications of {subject}.
+                4. Frame questions in contexts that professionals or students in this field would recognize and find relevant.
+                5. Make sure the question and all answer options are factually correct and up-to-date with current understanding in the field.
+                6. Aim for a level of complexity similar to what would be found in professional certification exams or upper-level university courses.
+                7. Ensure each question is unique and not too similar to previously generated questions.
+
                 {selected_prompt}
-                Here are examples of MMLU questions on the subject of {subject}:
+
+                Here are some example MMLU questions on {subject} for reference. Your task is to create new questions in a similar style but with different, real-world content:
 
                 {examples_str}
 
-                Create a new question on {subject} with four options and indicate the correct answer. Format your response as follows:
-                Question: [Your new question]
+                Now, create a new, authentic question on {subject} following this format:
+                Question: [Your new, real-world question]
                 A: [Option A]
                 B: [Option B]
                 C: [Option C]
                 D: [Option D]
                 Correct answer: [Letter of correct option]
+
+                Ensure your question reflects real-world knowledge or applications in {subject}, distinct from the examples provided.
                 """
 
                 temp = gen_args.temperature + random.uniform(-0.1, 0.1)
@@ -82,7 +101,7 @@ Correct answer: {sample['choices'][sample['answer']]}
                     model=self.config.model,
                     messages=[
                         {"role": "system",
-                         "content": "You are an AI assistant tasked with generating synthetic data for the MMLU dataset."},
+                         "content": "You are an AI assistant specialized in creating authentic, real-world questions for professional and academic assessments."},
                         {"role": "user", "content": prompt},
                     ],
                     temperature=temp,
@@ -92,11 +111,9 @@ Correct answer: {sample['choices'][sample['answer']]}
                 )
 
                 new_questions = [choice.message.content for choice in response.choices]
-                filtered_questions = self.filter_similar_questions(new_questions, gen_args.similarity_threshold,
-                                                                   subject)
-                self.generated_questions[subject].update(filtered_questions)
+                self.generated_questions[subject].extend(new_questions)
 
-                return filtered_questions
+                return new_questions
 
             except Exception as e:
                 logging.error(f"Error generating questions for {subject} (attempt {attempt + 1}): {e}")
@@ -106,18 +123,6 @@ Correct answer: {sample['choices'][sample['answer']]}
                     logging.error(
                         f"Failed to generate questions for {subject} after {self.config.max_retries} attempts")
                     return []
-
-    def filter_similar_questions(self, new_questions: List[str], threshold: float, subject: str) -> List[str]:
-        filtered_questions = []
-        for question in new_questions:
-            if all(self.calculate_similarity(question, existing_question) < threshold
-                   for existing_question in self.generated_questions[subject]):
-                filtered_questions.append(question)
-        return filtered_questions
-
-    @staticmethod
-    def calculate_similarity(text1: str, text2: str) -> float:
-        return SequenceMatcher(None, text1, text2).ratio()
 
     async def process_subject(self, subject: str, samples: List[dict], gen_args: GenerationArgs):
         semaphore = asyncio.Semaphore(self.config.max_parallel_requests)
@@ -162,27 +167,22 @@ def get_mmlu_samples_by_subject(num_samples_per_subject: int = 10) -> Dict[str, 
 
 
 def parse_generated_question(text: str, subject: str) -> Optional[dict]:
-    # Define regex patterns
     question_pattern = re.compile(r"Question:\s*(.+)")
     choice_pattern = re.compile(r"([A-D]):\s*(.+)")
     answer_pattern = re.compile(r"Correct answer:\s*([A-D])")
 
-    # Extract question
     question_match = question_pattern.search(text)
     if not question_match:
         return None
     question = question_match.group(1).strip()
 
-    # Extract choices
     choices = {}
     for match in choice_pattern.finditer(text):
         choices[match.group(1)] = match.group(2).strip()
 
-    # Check if we have exactly 4 choices
     if len(choices) != 4 or set(choices.keys()) != set("ABCD"):
         return None
 
-    # Extract answer
     answer_match = answer_pattern.search(text)
     if not answer_match or answer_match.group(1) not in "ABCD":
         return None
@@ -219,6 +219,7 @@ async def main():
 
     all_synthetic_data = []
     for subject, samples in samples_by_subject.items():
+        print(f"Starting generation for subject: {subject}")
         raw_synthetic_data = await processor.process_subject(subject, samples, gen_args)
         synthetic_data = [
             parsed_question
@@ -227,12 +228,17 @@ async def main():
             if (parsed_question := parse_generated_question(data, subject)) is not None
         ]
         all_synthetic_data.extend(synthetic_data)
+        print(f"Completed generation for subject: {subject}. Generated {len(synthetic_data)} valid questions.")
 
-    with open(f"synthetic_mmlu_data_{config.model}.json", "w") as f:
+        # Save progress after each subject
+        with open(f"synthetic_mmlu_data_{config.model}_progress.json", "w") as f:
+            json.dump(all_synthetic_data, f, indent=2)
+
+    with open(f"synthetic_mmlu_data_{config.model}_final.json", "w") as f:
         json.dump(all_synthetic_data, f, indent=2)
 
     print(
-        f"Generated {len(all_synthetic_data)} valid synthetic MMLU questions across {len(samples_by_subject)} subjects, saved to 'synthetic_mmlu_data_{config.model}.json'"
+        f"Generated {len(all_synthetic_data)} valid synthetic MMLU questions across {len(samples_by_subject)} subjects, saved to 'synthetic_mmlu_data_{config.model}_final.json'"
     )
 
     # Upload to Hugging Face
