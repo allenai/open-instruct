@@ -121,6 +121,7 @@ Correct answer: {sample['choices'][sample['answer']]}
     @staticmethod
     def calculate_similarity(text1: str, text2: str) -> float:
         """Calculate similarity between two texts using SequenceMatcher."""
+        breakpoint()
         return SequenceMatcher(None, text1, text2).ratio()
 
     async def process_subject(self, subject: str, samples: List[dict], gen_args: GenerationArgs):
