@@ -96,7 +96,8 @@ Correct answer: {sample['choices'][sample['answer']]}
                     temperature=temp,
                     max_tokens=gen_args.max_tokens,
                     top_p=gen_args.top_p,
-                    n=self.config.num_completions,
+                    n=min(self.config.num_completions, gen_args.examples_per_subject - total_generated),
+
                 )
 
                 new_questions = [choice.message.content for choice in response.choices]
@@ -105,10 +106,9 @@ Correct answer: {sample['choices'][sample['answer']]}
                 filtered_questions = self.filter_similar_questions(new_questions, gen_args.similarity_threshold)
 
                 # Add only unique questions that have not been generated before
-                for question in filtered_questions:
-                    if question not in all_responses:
-                        all_responses.append(question)
-                        total_generated += 1
+                all_responses.extend(filtered_questions)
+                total_generated += len(filtered_questions)
+                print(f"Generated {total_generated} unique questions for {subject}")
 
                 # Break if we reach the desired number of questions
                 if total_generated >= max_questions_to_generate:
