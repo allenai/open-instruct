@@ -174,6 +174,7 @@ async def main():
 
     samples_by_subject = get_mmlu_samples_by_subject(gen_args.few_shot_examples + 5)  # We need fewer examples now
 
+    breakpoint()
     all_synthetic_data = []
     for subject, samples in samples_by_subject.items():
         raw_synthetic_data = await processor.process_subject(subject, samples, gen_args)
