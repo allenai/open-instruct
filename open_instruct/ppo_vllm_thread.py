@@ -743,7 +743,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     ground_truths_next = data[GROUND_TRUTHS_KEY]
                     send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
                     queries = queries_next
-                    ground_truths_next = ground_truths_next
+                    ground_truths = ground_truths_next
 
             # if we generate multiple samples per prompt, we need to repeat the queries and ground truths
             # to match the vllm outputs.
@@ -820,8 +820,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         score *= args.reward_model_multiplier
                     # also apply verifiable reward 
                     if args.apply_verifiable_reward:
+                        # we need to batch the gt to match query.
+                        ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         verifiable_reward, verifiable_count = apply_verifiable_reward(
-                            postprocessed_query_response, tokenizer, ground_truths
+                            postprocessed_query_response, tokenizer, ground_truth
                         )
                         score += verifiable_reward
                     else:
