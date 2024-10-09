@@ -93,6 +93,7 @@ Correct answer: {sample['choices'][sample['answer']]}
                 Correct answer: [Letter of correct option]
 
                 Ensure your question reflects real-world knowledge or applications in {subject}, distinct from the examples provided.
+                Also when generating the question and the correct answer, follow exactly the format that I gave you. Thanks.
                 """
 
                 temp = gen_args.temperature + random.uniform(-0.1, 0.1)
