@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 import random
+import logging
 from typing import List, Dict, Optional
 from collections import defaultdict
 from dataclasses import dataclass
@@ -10,29 +11,34 @@ from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm
 from difflib import SequenceMatcher
 
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 @dataclass
 class LLMGenerationConfig:
-    num_completions: int = 50  # Number of completions per API request
+    num_completions: int = 50
     model: str = "gpt-4"
-    max_parallel_requests: int = 50  # Adjust based on your API rate limits
+    max_parallel_requests: int = 50
+    max_retries: int = 3
+    retry_delay: float = 5.0
 
 
 @dataclass
 class GenerationArgs:
-    temperature: float = 0.9
+    temperature: float = 0.7
     max_tokens: int = 500
     top_p: float = 0.95
     examples_per_subject: int = 1000
     few_shot_examples: int = 10
-    similarity_threshold: float = 0.8  # Set a threshold to filter similar questions
+    similarity_threshold: float = 0.8
 
 
 class LLMProcessor:
     def __init__(self, config: LLMGenerationConfig):
         self.config = config
         self.async_client = AsyncOpenAI()
-        self.generated_questions = set()  # Track generated questions to avoid duplicates
+        self.generated_questions = set()
 
     def format_example(self, sample: dict) -> str:
         return f"""
@@ -46,82 +52,76 @@ Correct answer: {sample['choices'][sample['answer']]}
 
     async def generate_question_batch(self, subject: str, examples: List[dict], gen_args: GenerationArgs,
                                       batch_size: int):
-        # Shuffle and randomly select few-shot examples
-        few_shot_examples = random.sample(examples, k=gen_args.few_shot_examples)
-        examples_str = "\n".join([self.format_example(example) for example in few_shot_examples])
+        for attempt in range(self.config.max_retries):
+            try:
+                few_shot_examples = random.sample(examples, k=gen_args.few_shot_examples)
+                examples_str = "\n".join([self.format_example(example) for example in few_shot_examples])
 
-        # Add some random variation to the prompt to encourage diversity
-        prompt_variations = [
-            f"Generate a new multiple-choice question related to {subject}.",
-            f"Create a challenging new question on {subject}.",
-            f"Produce a unique question about {subject}.",
-            f"Design a new MMLU question related to {subject}.",
-        ]
-        selected_prompt = random.choice(prompt_variations)
+                prompt_variations = [
+                    f"Generate a new multiple-choice question related to {subject}.",
+                    f"Create a challenging new question on {subject}.",
+                    f"Produce a unique question about {subject}.",
+                    f"Design a new MMLU question related to {subject}.",
+                ]
+                selected_prompt = random.choice(prompt_variations)
 
-        prompt = f"""
-        {selected_prompt}
-        Here are examples of MMLU questions on the subject of {subject}:
+                prompt = f"""
+                {selected_prompt}
+                Here are examples of MMLU questions on the subject of {subject}:
 
-        {examples_str}
+                {examples_str}
 
-        Create a new question on {subject} with four options and indicate the correct answer. Format your response as follows:
-        Question: [Your new question]
-        A: [Option A]
-        B: [Option B]
-        C: [Option C]
-        D: [Option D]
-        Correct answer: [Letter of correct option]
-        """
+                Create a new question on {subject} with four options and indicate the correct answer. Format your response as follows:
+                Question: [Your new question]
+                A: [Option A]
+                B: [Option B]
+                C: [Option C]
+                D: [Option D]
+                Correct answer: [Letter of correct option]
+                """
 
-        try:
-            # Vary temperature slightly to increase diversity
-            temp = gen_args.temperature + random.uniform(-0.1, 0.1)
+                temp = gen_args.temperature + random.uniform(-0.1, 0.1)
 
-            response = await self.async_client.chat.completions.create(
-                model=self.config.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are an AI assistant tasked with generating synthetic data for the MMLU dataset.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=temp,
-                max_tokens=gen_args.max_tokens,
-                top_p=gen_args.top_p,
-                n=batch_size,
-            )
+                response = await self.async_client.chat.completions.create(
+                    model=self.config.model,
+                    messages=[
+                        {"role": "system",
+                         "content": "You are an AI assistant tasked with generating synthetic data for the MMLU dataset."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=temp,
+                    max_tokens=gen_args.max_tokens,
+                    top_p=gen_args.top_p,
+                    n=batch_size,
+                )
 
-            new_questions = [choice.message.content for choice in response.choices]
+                new_questions = [choice.message.content for choice in response.choices]
+                filtered_questions = self.filter_similar_questions(new_questions, gen_args.similarity_threshold)
+                unique_filtered_questions = [q for q in filtered_questions if q not in self.generated_questions]
+                self.generated_questions.update(unique_filtered_questions)
 
-            # Filter new questions based on similarity threshold
-            filtered_questions = self.filter_similar_questions(new_questions, gen_args.similarity_threshold)
+                logging.info(f"Generated {len(unique_filtered_questions)} new questions for {subject}")
+                return unique_filtered_questions
 
-            # Add only unique questions that have not been generated before
-            unique_filtered_questions = [q for q in filtered_questions if q not in self.generated_questions]
-            self.generated_questions.update(unique_filtered_questions)
-
-            return unique_filtered_questions
-
-        except Exception as e:
-            print(f"Error generating questions for {subject}: {e}")
-            return []
+            except Exception as e:
+                logging.error(f"Error generating questions for {subject} (attempt {attempt + 1}): {e}")
+                if attempt < self.config.max_retries - 1:
+                    await asyncio.sleep(self.config.retry_delay)
+                else:
+                    logging.error(
+                        f"Failed to generate questions for {subject} after {self.config.max_retries} attempts")
+                    return []
 
     def filter_similar_questions(self, new_questions: List[str], threshold: float) -> List[str]:
-        """Filter out questions that are too similar to the previously generated questions."""
         filtered_questions = []
-
         for question in new_questions:
             if all(self.calculate_similarity(question, existing_question) < threshold for existing_question in
                    self.generated_questions):
                 filtered_questions.append(question)
-
         return filtered_questions
 
     @staticmethod
     def calculate_similarity(text1: str, text2: str) -> float:
-        """Calculate similarity between two texts using SequenceMatcher."""
         return SequenceMatcher(None, text1, text2).ratio()
 
     async def process_subject(self, subject: str, samples: List[dict], gen_args: GenerationArgs):
@@ -148,10 +148,12 @@ Correct answer: {sample['choices'][sample['answer']]}
                 results.extend(new_questions)
                 pbar.update(len(new_questions))
 
-                if not any(batch_results):  # If all batches returned empty, break to avoid infinite loop
+                if not any(batch_results):
+                    logging.warning(f"No new questions generated for {subject}. Breaking loop.")
                     break
 
-        return results[:max_questions]  # Ensure we don't exceed the maximum number of questions
+        logging.info(f"Generated {len(results)} questions for {subject}")
+        return results[:max_questions]
 
 
 def get_mmlu_samples_by_subject(num_samples_per_subject: int = 10) -> Dict[str, List[dict]]:
@@ -166,27 +168,22 @@ def get_mmlu_samples_by_subject(num_samples_per_subject: int = 10) -> Dict[str, 
 
 
 def parse_generated_question(text: str, subject: str) -> Optional[dict]:
-    # Define regex patterns
     question_pattern = re.compile(r"Question:\s*(.+)")
     choice_pattern = re.compile(r"([A-D]):\s*(.+)")
     answer_pattern = re.compile(r"Correct answer:\s*([A-D])")
 
-    # Extract question
     question_match = question_pattern.search(text)
     if not question_match:
         return None
     question = question_match.group(1).strip()
 
-    # Extract choices
     choices = {}
     for match in choice_pattern.finditer(text):
         choices[match.group(1)] = match.group(2).strip()
 
-    # Check if we have exactly 4 choices
     if len(choices) != 4 or set(choices.keys()) != set("ABCD"):
         return None
 
-    # Extract answer
     answer_match = answer_pattern.search(text)
     if not answer_match or answer_match.group(1) not in "ABCD":
         return None
@@ -223,6 +220,7 @@ async def main():
 
     all_synthetic_data = []
     for subject, samples in samples_by_subject.items():
+        logging.info(f"Starting generation for subject: {subject}")
         raw_synthetic_data = await processor.process_subject(subject, samples, gen_args)
         synthetic_data = [
             parsed_question
@@ -231,12 +229,17 @@ async def main():
             if (parsed_question := parse_generated_question(data, subject)) is not None
         ]
         all_synthetic_data.extend(synthetic_data)
+        logging.info(f"Completed generation for subject: {subject}. Generated {len(synthetic_data)} valid questions.")
 
-    with open(f"synthetic_mmlu_data_{config.model}.json", "w") as f:
+        # Save progress after each subject
+        with open(f"synthetic_mmlu_data_{config.model}_progress.json", "w") as f:
+            json.dump(all_synthetic_data, f, indent=2)
+
+    with open(f"synthetic_mmlu_data_{config.model}_final.json", "w") as f:
         json.dump(all_synthetic_data, f, indent=2)
 
     print(
-        f"Generated {len(all_synthetic_data)} valid synthetic MMLU questions across {len(samples_by_subject)} subjects, saved to 'synthetic_mmlu_data_{config.model}.json'"
+        f"Generated {len(all_synthetic_data)} valid synthetic MMLU questions across {len(samples_by_subject)} subjects, saved to 'synthetic_mmlu_data_{config.model}_final.json'"
     )
 
     # Upload to Hugging Face
