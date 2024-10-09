@@ -96,7 +96,7 @@ Correct answer: {sample['choices'][sample['answer']]}
                     temperature=temp,
                     max_tokens=gen_args.max_tokens,
                     top_p=gen_args.top_p,
-                    n=1,  # Generate one question at a time
+                    n=self.config.num_completions,
                 )
 
                 new_questions = [choice.message.content for choice in response.choices]
