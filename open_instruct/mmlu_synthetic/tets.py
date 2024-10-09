@@ -14,7 +14,7 @@ class LLMGenerationConfig:
     num_completions_per_batch: int = 128
     model: str = "gpt-4"
     max_parallel_requests: int = 50
-    max_examples_per_subject: int = 128
+    max_examples_per_subject: int = 1000
 
 
 @dataclass
