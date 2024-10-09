@@ -17,7 +17,8 @@ class LLMGenerationConfig:
     num_completions: int = 50  # Number of completions per API request
     model: str = "gpt-4"
     max_parallel_requests: int = 50  # Adjust based on your API rate limits
-
+    max_retries: int = 3
+    retry_delay: float = 5.0
 
 @dataclass
 class GenerationArgs:
