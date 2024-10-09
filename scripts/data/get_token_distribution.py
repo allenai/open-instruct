@@ -4,7 +4,7 @@ import numpy as np
 from datasets import load_dataset
 from transformers import AutoTokenizer
 
-def plot_token_length_histogram(dataset_name, column_name='messages', tokenizer_name="baseten/Meta-Llama-3-tokenizer", num_proc=16, automatic_binning=False):
+def plot_token_length_histogram(dataset_name, column_name='messages', tokenizer_name="baseten/Meta-Llama-3-tokenizer", num_proc=16, automatic_binning=False, log_x=False):
     # Load the dataset
     dataset = load_dataset(dataset_name)
     
@@ -54,11 +54,15 @@ def plot_token_length_histogram(dataset_name, column_name='messages', tokenizer_
     
     # Plot histogram
     if automatic_binning:
-        n, bins, patches = ax.hist(token_lengths, bins=25, color='blue', 
-                                 edgecolor='black')
+        if log_x:
+            # Create logarithmically spaced bins
+            bins = np.logspace(np.log10(min(token_lengths)), np.log10(max(token_lengths)), 25)
+            n, bins, patches = ax.hist(token_lengths, bins=bins, color='blue', edgecolor='black')
+        else:
+            n, bins, patches = ax.hist(token_lengths, bins=25, color='blue', 
+                                    edgecolor='black')
     else:
         bins = [0, 2000, 4000, 6000, 8000, 10000, 12000]
-        # bins = [0, 1000, 3000, 5000, 7000, 9000, 11000, 13000]
         n, bins, patches = ax.hist(token_lengths, bins=bins, color='blue',
                                  alpha=0.7, edgecolor='black')
         
@@ -72,6 +76,12 @@ def plot_token_length_histogram(dataset_name, column_name='messages', tokenizer_
     
     # Set scale and labels
     ax.set_yscale('log')
+
+    if log_x:
+        ax.set_xscale('log')
+        ax.set_xlabel('Number of tokens in sample (log scale)')
+    else:
+        ax.set_xlabel('Number of tokens in sample')
     
     # Set major and minor ticks for y-axis
     max_count = max(n)
@@ -97,7 +107,6 @@ def plot_token_length_histogram(dataset_name, column_name='messages', tokenizer_
     ax.tick_params(axis='y', which='major', length=8)
     
     # Labels
-    ax.set_xlabel('Number of tokens in sample')
     ax.set_ylabel('Count (log scale)')
 
     # Print statistics
@@ -126,12 +135,13 @@ def main():
     parser.add_argument('--tokenizer', type=str, default='baseten/Meta-Llama-3-tokenizer', help="Tokenizer to use (default: Meta-Llama-3)")
     parser.add_argument('--num_proc', type=int, default=16, help="Number of processes to use for parallel processing (default: 16)")
     parser.add_argument('--automatic_binning', action='store_true', help="Use automatic binning for the histogram")
+    parser.add_argument('--log_x', action='store_true', help="Use log scale for x-axis")
 
     # Parse the arguments
     args = parser.parse_args()
     
     # Call the function with provided arguments
-    fig, ax = plot_token_length_histogram(args.dataset, args.column_name, args.tokenizer, args.num_proc, args.automatic_binning)
+    fig, ax = plot_token_length_histogram(args.dataset, args.column_name, args.tokenizer, args.num_proc, args.automatic_binning, args.log_x)
 
 if __name__ == "__main__":
     main()
