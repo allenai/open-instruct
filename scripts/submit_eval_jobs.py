@@ -588,7 +588,7 @@ if args.run_safety_evaluations:
     d["tasks"] = [d["tasks"][0]]
     task_spec = d["tasks"][0]
     task_spec["name"] = experiment_name
-    breakpoint()
+    # breakpoint()
     print("***** Safety Eval is run successfully!! ******")
     task_spec["arguments"][0] = f'''
 PYTHONPATH=. python evaluation/run_all_generation_benchmarks.py \

@@ -23,7 +23,7 @@ def upload_to_huggingface(data: List[Dict], dataset_name: str):
     dataset = Dataset.from_dict(
         {
             "messages": [item["messages"] for item in data],
-            "prompt_harm_label": [item["prompt_harm_label"] for item in data],
+            "prompt_harm_label": [item["prompt_harm_label"] for litem in data],
             "model_used": [item["model_used"] for item in data],
         }
     )
