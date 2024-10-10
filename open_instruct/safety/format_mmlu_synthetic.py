@@ -17,7 +17,7 @@ def load_and_format_data(dataset_name, split="train"):
         prompt = f"{question}\n\nChoices:\n{choices_text}"
 
         try:
-            response = int(choices[answer_index])
+            response = choices[int(answer_index)]
         except ValueError:
             print(f"Warning: Could not convert answer to integer for question: {question}")
             response = choices[answer_index]
