@@ -6,3 +6,4 @@ python scripts/submit_finetune_job.py \
   --priority high \
   --exp_name nd-SFT-llama3-8b-finalresp-wildgaurdmixtrain-mixv3.4 \
   --num_gpus 8
+
