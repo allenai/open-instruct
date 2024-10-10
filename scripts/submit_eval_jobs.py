@@ -581,7 +581,7 @@ if args.run_oe_eval_experiments:
 # create an experiment that runs the safety eval tasks
 if args.run_safety_evaluations:
     # just take the original spec we had, modify it for safety eval.
-    experiment_name = f"open_instruct_safety_eval_{model_name}_{today}"
+    experiment_name = f"oi_safety_{model_name}"
     d["description"] = experiment_name
     # specific image for safety eval
     d["tasks"][0]["image"]["beaker"] = "hamishivi/open-safety"
