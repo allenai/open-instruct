@@ -43,8 +43,8 @@ def upload_to_huggingface(data: List[dict], dataset_name: str):
     dataset = Dataset.from_dict(
         {
             "subject": [item["subject"] for item in data],
-            "user_message": [item["messages"][0]["content"] for item in data],
-            "assistant_message": [item["messages"][1]["content"] for item in data],
+            "messages": [item["messages"] for item in data],
+            "model used": "gpt-4",
         }
     )
 
