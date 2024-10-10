@@ -89,6 +89,8 @@ class FlatArguments:
 
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
+    run_name: Optional[str] = None
+    """A unique name of this run"""
     model_name_or_path: Optional[str] = field(
         default=None,
         metadata={
@@ -470,6 +472,7 @@ def main(args: FlatArguments):
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
+    args.run_name = f"{args.exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -478,11 +481,15 @@ def main(args: FlatArguments):
         if args.hf_entity is None:  # then try to use the user's entity
             args.hf_entity = HfApi().whoami()["name"]
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
-        if args.hf_repo_revision is None:  # auto-generate one
-            args.hf_repo_revision = (
-                f"{args.exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
-            )
+        if args.hf_repo_revision is None:
+            args.hf_repo_revision = args.run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+
+    if is_beaker_job():
+        beaker_config = maybe_get_beaker_config()
+        # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
+        if len(beaker_config.beaker_dataset_id_urls) > 0:
+            args.output_dir = "/output"
 
     accelerator_log_kwargs = {}
 
@@ -873,8 +880,6 @@ def main(args: FlatArguments):
 
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
-    if is_beaker_job():
-        beaker_config = maybe_get_beaker_config()
     if args.with_tracking:
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
@@ -883,11 +888,18 @@ def main(args: FlatArguments):
         # (Optional) Ai2 internal tracking
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
+        if is_beaker_job():
             experiment_config.update(vars(beaker_config))
         accelerator.init_trackers(
             "open_instruct_internal",
             experiment_config,
-            init_kwargs={"wandb": {"entity": args.wandb_entity, "tags": [args.exp_name] + get_wandb_tags()}},
+            init_kwargs={
+                "wandb": {
+                    "name": args.run_name,
+                    "entity": args.wandb_entity,
+                    "tags": [args.exp_name] + get_wandb_tags(),
+                }
+            },
         )
         wandb_tracker = accelerator.get_tracker("wandb")
 
@@ -1128,16 +1140,17 @@ def main(args: FlatArguments):
             "beaker_experiment": beaker_config.beaker_experiment_url,
             "beaker_datasets": beaker_config.beaker_dataset_id_urls,
         }
-        # save in the output directory
+        # save metadata to the output directory. then it should also get pushed to HF.
         with open(os.path.join(args.output_dir, "metadata.json"), "w") as f:
             json.dump(metadata_blob, f)
 
+        # upload metadata to the dataset if set
         if args.hf_metadata_dataset:
             upload_metadata_to_hf(
                 metadata_blob,
                 "metadata.json",
                 args.hf_metadata_dataset,
-                "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
+                "results/" + args.run_name,  # to match what the auto-evals name as.
             )
 
         if args.try_launch_beaker_eval_jobs:
@@ -1152,7 +1165,7 @@ def main(args: FlatArguments):
                 --pure_docker_mode \
                 --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
                 --beaker_workload_id {beaker_config.beaker_workload_id} \
-                --model_name {args.hf_repo_revision}
+                --model_name {args.run_name}
             """
             process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = process.communicate()
