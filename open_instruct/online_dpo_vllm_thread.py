@@ -509,7 +509,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # handle preemption
     class PreemptionHandler:
-        preemptied = False
+        preempted = False
 
         def __init__(self):
             signal.signal(signal.SIGTERM, self.exit_gracefully)
@@ -528,7 +528,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     print("vllm thread terminated")
                 except Exception as e:
                     print(e)
-            self.preemptied = True
+            self.preempted = True
 
     ph = PreemptionHandler()
 
@@ -571,7 +571,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             args=(
                 model_config.model_name_or_path,
                 model_config.model_revision,
-                dataset_config.max_prompt_token_lenth + args.response_length,
+                dataset_config.max_prompt_token_length + args.response_length,
                 args.vllm_device,
                 args.vllm_gpu_memory_utilization,
                 generation_config,
@@ -614,7 +614,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         episode += args.batch_size
         scheduler.step()
         queries = queries_next
-        if ph.preemptied:
+        if ph.preempted:
             break
 
         if accelerator.is_main_process:
@@ -909,7 +909,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 "val/num_stop_token_ids": global_metrics[1],
                 "objective/kl": global_metrics[2],
                 "objective/kl2": global_metrics[15],
-                "ojbective/kl3": global_metrics[16],
+                "objective/kl3": global_metrics[16],
                 "objective/entropy": global_metrics[3],
                 "objective/non_score_reward": global_metrics[4],
                 "objective/rlhf_reward": global_metrics[5],
@@ -932,7 +932,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         gc.collect()
         torch.cuda.empty_cache()
 
-    if not ph.preemptied:
+    if not ph.preempted:
         # save model
         os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
         original_tokenizer = AutoTokenizer.from_pretrained(
