@@ -12,11 +12,25 @@ def plot_token_length_histogram(dataset_name,
                                 num_proc=16, automatic_binning=False, 
                                 log_x=False,
                                 not_log_y=False,
-                                hide_legend=False):
+                                hide_legend=False,
+                                plot_num_turns=False):
     
     print("Running analytics...")
     # Load the dataset
     dataset = load_dataset(dataset_name)
+
+    # to "role" and "content" not in the first dict of the first sample, convert to "messages"
+    def convert_to_messages(sample, column_name=column_name):
+        new_messages = []
+        for message in sample[column_name]:
+            content = message["value"]
+            role = message["from"]
+            new_messages.append({"role": role, "content": content})
+        sample[column_name] = new_messages
+        return sample
+
+    if "from" in dataset['train'][0][column_name][0].keys():
+        dataset = dataset.map(convert_to_messages, num_proc=num_proc)
 
     # If allenai/tulu in name, turn on categories
     TRACK_CATEGORIES = "allenai/tulu" in dataset_name
@@ -53,8 +67,16 @@ def plot_token_length_histogram(dataset_name,
         # split from last _, note some may have multiple _
         categories = [category.rsplit('_', 1)[0] for category in categories]
 
-        # if "/" is not in category, replace it with "Other"
-        categories = [category if "/" in category else "/Other" for category in categories]
+        # repeated categories, these have ids that are not just numbers and need to be merged again
+        repeated_ids = ["sharegpt"]
+        for repeated_id in repeated_ids:
+            # merge all ids with repeated_id to repeated_id
+            categories = [repeated_id if repeated_id in category else category for category in categories]
+        
+        # if "/" is in any of the categories, shorten them
+        if any("/" in category for category in categories):
+            # if "/" is in category, take text after /, else replace it with "Other"
+            categories = [category.split("/")[1] if "/" in category else "Other" for category in categories]
 
         # Get unique categories
         unique_categories = np.unique(categories)
@@ -115,7 +137,12 @@ def plot_token_length_histogram(dataset_name,
         ax.set_xticklabels([f'{int(center)}' for center in bins[1:]])
     else:
         if log_x:
-            pass
+            ax.set_xscale('log')
+            # set the ticks
+            ticks = [16, 128, 512, 2048, 8192, 16384*2]
+            ax.set_xticks(ticks)
+            # set tick labels to not be 10^ notation
+            ax.set_xticklabels([f'{tick}' for tick in ticks])
         else:
             # set number of ticks to all the powers of 2 that fit in max(token_lengths)
             max_power = int(np.ceil(np.log2(max_length)))
@@ -128,7 +155,6 @@ def plot_token_length_histogram(dataset_name,
             ax.set_xticks(major_ticks)
     
     if log_x:
-        ax.set_xscale('log')
         ax.set_xlabel('Number of tokens in sample (log scale)')
     else:
         ax.set_xlabel('Number of tokens in sample')
@@ -156,7 +182,7 @@ def plot_token_length_histogram(dataset_name,
     # Add legend
     if TRACK_CATEGORIES:
         if not hide_legend:
-            legend_handles = [Patch(color=color, label=category.split("/")[1]) for category, color in category_colors.items()]
+            legend_handles = [Patch(color=color, label=category) for category, color in category_colors.items()] # .split("/")[1]
             ax.legend(handles=legend_handles, fontsize=6)
     else:
         plt.margins(x=0.01)
@@ -186,12 +212,21 @@ def main():
     parser.add_argument('--log_x', action='store_true', help="Use log scale for x-axis")
     parser.add_argument('--not_log_y', action='store_true', help="Use log scale for y-axis")
     parser.add_argument('--hide_legend', action='store_true', help="Hide the legend")
+    parser.add_argument('--num_turns', action='store_true', help="Use number of turns as the x-axis")
 
     # Parse the arguments
     args = parser.parse_args()
     
     # Call the function with provided arguments
-    fig, ax = plot_token_length_histogram(args.dataset, args.column_name, args.tokenizer, args.num_proc, args.automatic_binning, args.log_x, args.not_log_y, args.hide_legend)
+    fig, ax = plot_token_length_histogram(args.dataset, 
+                                          args.column_name, 
+                                          args.tokenizer, 
+                                          args.num_proc, 
+                                          args.automatic_binning, 
+                                          args.log_x, 
+                                          args.not_log_y, 
+                                          args.hide_legend,
+                                          args.num_turns)
 
 if __name__ == "__main__":
     main()
