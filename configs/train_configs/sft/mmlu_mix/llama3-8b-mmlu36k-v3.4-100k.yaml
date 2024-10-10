@@ -4,7 +4,7 @@ use_flash_attn: true
 tokenizer_name: meta-llama/Llama-3.1-8B
 use_slow_tokenizer: true
 dataset_mixer:
-  ai2-adapt-dev/synthetic-mmlu-dataset: 36855
+  ai2-adapt-dev/formatted_synthetic_mmlu_data: 36855
   allenai/tulu-v3.4-mix-preview: 100000 # all
 max_seq_length: 4096 # Note, reduced from 8192 to fit on one GPU with DeepSpeed Stage3
 preprocessing_num_workers: 128
