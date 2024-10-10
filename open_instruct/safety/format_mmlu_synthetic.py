@@ -60,23 +60,23 @@ with open('formatted_synthetic_mmlu_data.json', 'w') as f:
     json.dump(formatted_data, f, indent=2)
 
 print(f"Formatted data saved to 'formatted_synthetic_mmlu_data.json'")
-
-# Print a sample conversation block
-print("\nSample conversation block:")
-print(json.dumps(formatted_data[0], indent=2))
-
-# Print some statistics
-print(f"\nTotal number of questions: {len(formatted_data)}")
-subjects = set(item['subject'] for item in formatted_data)
-print(f"Number of unique subjects: {len(subjects)}")
-print("Subjects:", ", ".join(sorted(subjects)))
-
-# Check for any non-integer answers
-non_integer_answers = [item for item in formatted_data if not isinstance(eval(item['messages'][1]['content'].split(': ')[1]), int)]
-print(f"\nNumber of non-integer answers: {len(non_integer_answers)}")
-if non_integer_answers:
-    print("Sample non-integer answer:")
-    print(json.dumps(non_integer_answers[0], indent=2))
+#
+# # Print a sample conversation block
+# print("\nSample conversation block:")
+# print(json.dumps(formatted_data[0], indent=2))
+#
+# # Print some statistics
+# print(f"\nTotal number of questions: {len(formatted_data)}")
+# subjects = set(item['subject'] for item in formatted_data)
+# print(f"Number of unique subjects: {len(subjects)}")
+# print("Subjects:", ", ".join(sorted(subjects)))
+#
+# # Check for any non-integer answers
+# non_integer_answers = [item for item in formatted_data if not isinstance(eval(item['messages'][1]['content'].split(': ')[1]), int)]
+# print(f"\nNumber of non-integer answers: {len(non_integer_answers)}")
+# if non_integer_answers:
+#     print("Sample non-integer answer:")
+#     print(json.dumps(non_integer_answers[0], indent=2))
 
 # Upload the formatted data to Hugging Face
 upload_to_huggingface(formatted_data, "ai2-adapt-dev/formatted_synthetic_mmlu_data")
