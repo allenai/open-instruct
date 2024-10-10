@@ -11,6 +11,7 @@ def load_and_format_data(dataset_name, split="train"):
         question = item['question']
         choices = item['choices']
         answer_index = item['answer']
+        subject = item['subject']  # Reading subject from the data item
 
         choices_text = "\n".join([f"{chr(65+i)}. {choice}" for i, choice in enumerate(choices)])
         prompt = f"{question}\n\nChoices:\n{choices_text}"
@@ -22,6 +23,7 @@ def load_and_format_data(dataset_name, split="train"):
             response = choices[answer_index]
 
         conversation_block = {
+            "subject": subject,  # Adding subject to the conversation block
             "messages": [
                 {
                     "role": "user",
@@ -40,9 +42,9 @@ def load_and_format_data(dataset_name, split="train"):
 def upload_to_huggingface(data: List[dict], dataset_name: str):
     dataset = Dataset.from_dict(
         {
+            "subject": [item["subject"] for item in data],
             "user_message": [item["messages"][0]["content"] for item in data],
             "assistant_message": [item["messages"][1]["content"] for item in data],
-            "subject": [item["messages"][0]["content"].split('\n')[0] for item in data],
         }
     )
 
@@ -65,7 +67,7 @@ print(json.dumps(formatted_data[0], indent=2))
 
 # Print some statistics
 print(f"\nTotal number of questions: {len(formatted_data)}")
-subjects = set(item['messages'][0]['content'].split('\n')[0] for item in formatted_data)
+subjects = set(item['subject'] for item in formatted_data)
 print(f"Number of unique subjects: {len(subjects)}")
 print("Subjects:", ", ".join(sorted(subjects)))
 
