@@ -19,7 +19,7 @@ def load_and_format_data(dataset_name, split="train"):
         try:
             response = choices[int(answer_index)]
         except ValueError:
-            print(f"Warning: Could not convert answer to integer for question: {question}")
+            print(f"Warning: Could not convert answer index to integer for question: {question}")
             response = choices[answer_index]
 
         conversation_block = {
@@ -44,7 +44,7 @@ def upload_to_huggingface(data: List[dict], dataset_name: str):
         {
             "subject": [item["subject"] for item in data],
             "messages": [item["messages"] for item in data],
-            "model used": "gpt-4",
+            "model_used": ["gpt-4" for _ in data],  # Adding "model used" column
         }
     )
 
@@ -60,23 +60,6 @@ with open('formatted_synthetic_mmlu_data.json', 'w') as f:
     json.dump(formatted_data, f, indent=2)
 
 print(f"Formatted data saved to 'formatted_synthetic_mmlu_data.json'")
-#
-# # Print a sample conversation block
-# print("\nSample conversation block:")
-# print(json.dumps(formatted_data[0], indent=2))
-#
-# # Print some statistics
-# print(f"\nTotal number of questions: {len(formatted_data)}")
-# subjects = set(item['subject'] for item in formatted_data)
-# print(f"Number of unique subjects: {len(subjects)}")
-# print("Subjects:", ", ".join(sorted(subjects)))
-#
-# # Check for any non-integer answers
-# non_integer_answers = [item for item in formatted_data if not isinstance(eval(item['messages'][1]['content'].split(': ')[1]), int)]
-# print(f"\nNumber of non-integer answers: {len(non_integer_answers)}")
-# if non_integer_answers:
-#     print("Sample non-integer answer:")
-#     print(json.dumps(non_integer_answers[0], indent=2))
 
 # Upload the formatted data to Hugging Face
 upload_to_huggingface(formatted_data, "ai2-adapt-dev/formatted_synthetic_mmlu_data")
