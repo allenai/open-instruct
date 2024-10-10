@@ -18,6 +18,7 @@ def load_and_format_data(dataset_name, split="train"):
 
         try:
             response = choices[int(answer_index)]
+            breakpoint()
         except ValueError:
             print(f"Warning: Could not convert answer index to integer for question: {question}")
             response = choices[answer_index]
