@@ -55,6 +55,7 @@ from transformers import (
     get_scheduler,
 )
 
+from open_instruct.dataset_processor import CHAT_TEMPLATES
 from open_instruct.dpo_utils import (
     DataCollatorForSeq2SeqDPO,
     concatenated_forward,
@@ -62,6 +63,7 @@ from open_instruct.dpo_utils import (
     simpo_loss,
     wpo_loss,
 )
+from open_instruct.finetune import encode_sft_example
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -87,6 +89,8 @@ class FlatArguments:
 
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
+    run_name: Optional[str] = None
+    """A unique name of this run"""
     model_name_or_path: Optional[str] = field(
         default=None,
         metadata={
@@ -127,6 +131,16 @@ class FlatArguments:
     tokenizer_revision: Optional[str] = field(
         default=None,
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+    )
+    chat_template_name: str = field(
+        default="tulu",
+        metadata={
+            "help": (
+                f"The name of the chat template to use. "
+                f"You can choose one of our pre-defined templates: {', '.join(CHAT_TEMPLATES.keys())}."
+                f"Or, you can provide a tokenizer name or path here and we will apply its chat template."
+            )
+        },
     )
     use_flash_attn: bool = field(
         default=True,
@@ -394,11 +408,10 @@ class FlatArguments:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
 
 
-def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=False):
+def encode_dpo_example(example, tokenizer, max_seq_length):
     """
     Here we assume each example has a rejected and chosen field, both of which are a list of messages.
     Each message is a dict with 'role' and 'content' fields.
-    We concatenate all messages with the roles as delimiters and tokenize them together.
     We assume only the last message is different, and the prompt is contained in the list of messages.
     """
     chosen_messages = example["chosen"]
@@ -408,62 +421,9 @@ def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=Fals
     if len(rejected_messages) == 0:
         raise ValueError("rejected messages field is empty.")
 
-    def _concat_messages(messages):
-        message_text = ""
-        for message in messages:
-            if message["role"] == "system":
-                message_text += "<|system|>\n" + message["content"].strip() + "\n"
-            elif message["role"] == "user":
-                message_text += "<|user|>\n" + message["content"].strip() + "\n"
-            elif message["role"] == "assistant":
-                message_text += "<|assistant|>\n" + message["content"].strip() + tokenizer.eos_token + "\n"
-            else:
-                raise ValueError("Invalid role: {}".format(message["role"]))
-        return message_text
+    chosen_encoded = encode_sft_example({"messages": chosen_messages}, tokenizer, max_seq_length)
+    rejected_encoded = encode_sft_example({"messages": rejected_messages}, tokenizer, max_seq_length)
 
-    def encode_messages(messages):
-        example_text = _concat_messages(messages).strip()
-        if add_bos:
-            example_text = tokenizer.bos_token + example_text
-        tokenized_example = tokenizer(example_text, return_tensors="pt", max_length=max_seq_length, truncation=True)
-        input_ids = tokenized_example.input_ids
-        labels = input_ids.clone()
-
-        # mask the non-assistant part for avoiding loss
-        for message_idx, message in enumerate(messages):
-            if message["role"] != "assistant":
-                if message_idx == 0:
-                    message_start_idx = 0
-                else:
-                    message_start_idx = tokenizer(
-                        _concat_messages(messages[:message_idx]),
-                        return_tensors="pt",
-                        max_length=max_seq_length,
-                        truncation=True,
-                    ).input_ids.shape[1]
-                if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
-                    # here we also ignore the role of the assistant
-                    messages_so_far = _concat_messages(messages[: message_idx + 1]) + "<|assistant|>\n"
-                else:
-                    messages_so_far = _concat_messages(messages[: message_idx + 1])
-                message_end_idx = tokenizer(
-                    messages_so_far, return_tensors="pt", max_length=max_seq_length, truncation=True
-                ).input_ids.shape[1]
-                labels[:, message_start_idx:message_end_idx] = -100
-
-                if message_end_idx >= max_seq_length:
-                    break
-
-        attention_mask = torch.ones_like(input_ids)
-        return {
-            "input_ids": input_ids.flatten(),
-            "labels": labels.flatten(),
-            "attention_mask": attention_mask.flatten(),
-        }
-
-    chosen_encoded = encode_messages(chosen_messages)
-    rejected_encoded = encode_messages(rejected_messages)
-    # labels are useful for working out where the loss is valid.
     return {
         "chosen_input_ids": chosen_encoded["input_ids"],
         "chosen_labels": chosen_encoded["labels"],
@@ -512,6 +472,7 @@ def main(args: FlatArguments):
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
+    args.run_name = f"{args.exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -520,11 +481,15 @@ def main(args: FlatArguments):
         if args.hf_entity is None:  # then try to use the user's entity
             args.hf_entity = HfApi().whoami()["name"]
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
-        if args.hf_repo_revision is None:  # auto-generate one
-            args.hf_repo_revision = (
-                f"{args.exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
-            )
+        if args.hf_repo_revision is None:
+            args.hf_repo_revision = args.run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+
+    if is_beaker_job():
+        beaker_config = maybe_get_beaker_config()
+        # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
+        if len(beaker_config.beaker_dataset_id_urls) > 0:
+            args.output_dir = "/output"
 
     accelerator_log_kwargs = {}
 
@@ -744,6 +709,27 @@ def main(args: FlatArguments):
             if len(tokenizer) > reference_embeddings.weight.shape[0]:
                 reference_model.resize_token_embeddings(len(tokenizer))
 
+    # set the tokenizer chat template to the training format
+    # this will be used for encoding the training examples
+    # and saved together with the tokenizer to be used later.
+    if args.chat_template_name in CHAT_TEMPLATES:
+        tokenizer.chat_template = CHAT_TEMPLATES[args.chat_template_name]
+    else:
+        try:
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(args.chat_template_name).chat_template
+        except Exception:
+            raise ValueError(f"Could not find chat template for {args.chat_template_name}.")
+
+    if args.add_bos:
+        if tokenizer.chat_template.startswith("{{ bos_token }}") or (
+            tokenizer.bos_token is not None and tokenizer.chat_template.startswith(tokenizer.bos_token)
+        ):
+            raise ValueError(
+                "You specified add_bos=True, but the chat template already has a bos_token at the beginning."
+            )
+        # add bos in the chat template if not already there
+        tokenizer.chat_template = "{{ bos_token }}" + tokenizer.chat_template
+
     if args.use_lora:
         if args.use_qlora:
             model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
@@ -767,10 +753,9 @@ def main(args: FlatArguments):
         raise ValueError("Sorry, prompt-completion format is not supported for DPO training.")
     elif "chosen" in raw_datasets["train"].column_names and "rejected" in raw_datasets["train"].column_names:
         encode_function = partial(
-            encode_with_messages_format,
+            encode_dpo_example,
             tokenizer=tokenizer,
             max_seq_length=args.max_seq_length,
-            add_bos=args.add_bos,
         )
     else:
         raise ValueError("You need to have 'chosen' and 'rejected in your column names.")
@@ -895,8 +880,6 @@ def main(args: FlatArguments):
 
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
-    if is_beaker_job():
-        beaker_config = maybe_get_beaker_config()
     if args.with_tracking:
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
@@ -905,11 +888,18 @@ def main(args: FlatArguments):
         # (Optional) Ai2 internal tracking
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
+        if is_beaker_job():
             experiment_config.update(vars(beaker_config))
         accelerator.init_trackers(
             "open_instruct_internal",
             experiment_config,
-            init_kwargs={"wandb": {"entity": args.wandb_entity, "tags": [args.exp_name] + get_wandb_tags()}},
+            init_kwargs={
+                "wandb": {
+                    "name": args.run_name,
+                    "entity": args.wandb_entity,
+                    "tags": [args.exp_name] + get_wandb_tags(),
+                }
+            },
         )
         wandb_tracker = accelerator.get_tracker("wandb")
 
@@ -1027,17 +1017,18 @@ def main(args: FlatArguments):
 
                 # We keep track of the loss at each logged step
                 with torch.no_grad():
-                    chosen_rewards = (args.dpo_beta * (policy_chosen_logps - reference_chosen_logps)).mean()
-                    rejected_rewards = (args.dpo_beta * (policy_rejected_logps - reference_rejected_logps)).mean()
-                    average_rewards = (chosen_rewards + rejected_rewards) / 2
-                    accuracy = (chosen_rewards > rejected_rewards).float().mean()
-                    margin = (chosen_rewards - rejected_rewards).mean()
                     local_metrics[0] += loss
-                    local_metrics[1] += chosen_rewards
-                    local_metrics[2] += rejected_rewards
-                    local_metrics[3] += average_rewards
-                    local_metrics[4] += accuracy
-                    local_metrics[5] += margin
+                    if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
+                        chosen_rewards = (args.dpo_beta * (policy_chosen_logps - reference_chosen_logps)).mean()
+                        rejected_rewards = (args.dpo_beta * (policy_rejected_logps - reference_rejected_logps)).mean()
+                        average_rewards = (chosen_rewards + rejected_rewards) / 2
+                        accuracy = (chosen_rewards > rejected_rewards).float().mean()
+                        margin = (chosen_rewards - rejected_rewards).mean()
+                        local_metrics[1] += chosen_rewards
+                        local_metrics[2] += rejected_rewards
+                        local_metrics[3] += average_rewards
+                        local_metrics[4] += accuracy
+                        local_metrics[5] += margin
                     local_metrics[6] += policy_chosen_logps.mean()
                     local_metrics[7] += policy_rejected_logps.mean()
                     if args.load_balancing_loss:
@@ -1057,14 +1048,19 @@ def main(args: FlatArguments):
                         "learning_rate": lr_scheduler.get_last_lr()[0],
                         "epoch": episode / len(train_dataset),
                         "train_loss": global_metrics[0],
-                        "rewards/chosen": global_metrics[1],
-                        "rewards/rejected": global_metrics[2],
-                        "rewards/average": global_metrics[3],
-                        "rewards/accuracy": global_metrics[4],
-                        "rewards/margin": global_metrics[5],
                         "logps/chosen": global_metrics[6],
                         "logps/rejected": global_metrics[7],
                     }
+                    if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
+                        metrics_to_log.update(
+                            {
+                                "rewards/chosen": global_metrics[1],
+                                "rewards/rejected": global_metrics[2],
+                                "rewards/average": global_metrics[3],
+                                "rewards/accuracy": global_metrics[4],
+                                "rewards/margin": global_metrics[5],
+                            }
+                        )
                     logger_str = (
                         f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {global_metrics[0]}"
                     )
@@ -1144,16 +1140,17 @@ def main(args: FlatArguments):
             "beaker_experiment": beaker_config.beaker_experiment_url,
             "beaker_datasets": beaker_config.beaker_dataset_id_urls,
         }
-        # save in the output directory
+        # save metadata to the output directory. then it should also get pushed to HF.
         with open(os.path.join(args.output_dir, "metadata.json"), "w") as f:
             json.dump(metadata_blob, f)
 
+        # upload metadata to the dataset if set
         if args.hf_metadata_dataset:
             upload_metadata_to_hf(
                 metadata_blob,
                 "metadata.json",
                 args.hf_metadata_dataset,
-                "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
+                "results/" + args.run_name,  # to match what the auto-evals name as.
             )
 
         if args.try_launch_beaker_eval_jobs:
@@ -1168,7 +1165,7 @@ def main(args: FlatArguments):
                 --pure_docker_mode \
                 --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
                 --beaker_workload_id {beaker_config.beaker_workload_id} \
-                --model_name {args.hf_repo_revision}
+                --model_name {args.run_name}
             """
             process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = process.communicate()

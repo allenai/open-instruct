@@ -1,0 +1,43 @@
+model_name_or_path: meta-llama/Meta-Llama-3.1-8B
+model_revision: main
+use_flash_attn: true
+tokenizer_name: meta-llama/Meta-Llama-3.1-8B
+use_slow_tokenizer: true
+# model_name_or_path: Qwen/Qwen2-7B
+# model_revision: main
+# use_flash_attn: true
+# tokenizer_name: Qwen/Qwen2-7B
+# use_slow_tokenizer: true
+dataset_mixer:
+    natolambert/tulu-v2-sft-mixture-flan: 50000
+    natolambert/tulu-v2-sft-mixture-cot: 49747
+    # ai2-adapt-dev/personahub_math_v1: 49990
+    # ai2-adapt-dev/personahub_math_v2_79975: 79975
+    # ai2-adapt-dev/personahub_math_v3_119975: 119975
+    ai2-adapt-dev/personahub_math_v4_149975: 149975
+    # Vtuber-plan/sharegpt-cleaned: 114046
+    # vicgalle/alpaca-gpt4: 20000 
+    # HuggingFaceH4/CodeAlpaca_20K: 18000 
+    # natolambert/tulu-v2-sft-mixture-lima: 1018 
+    # natolambert/tulu-v2-sft-mixture-science: 7468
+    AI-MO/NuminaMath-TIR: 72441
+    # ai2-adapt-dev/numina_math_gsm8k_sampled_sft_llama3_405_regen: 8937
+    # ai2-adapt-dev/numina_math_gsm8k_sampled_sft_gold: 8937
+    # ai2-adapt-dev/numina_math_gsm8k_prefs_balance_minerva_format_v2_messages_format: 22841 
+    # ai2-adapt-dev/math_numina_balanced_none_mc_prefs_minerva_format_messages_format: 41603
+max_seq_length: 4096
+preprocessing_num_workers: 128
+per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
+gradient_accumulation_steps: 8 # effective batch size 128 with 4 nodes
+learning_rate: 5.0e-06 # best LR so far
+lr_scheduler_type: linear
+warmup_ratio: 0.03
+weight_decay: 0.0
+num_train_epochs: 2
+output_dir: /output/
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+checkpointing_steps: epoch
+dataset_mix_dir: /output/
