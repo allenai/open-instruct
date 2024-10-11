@@ -55,6 +55,8 @@ def main():
     # Print unknown arguments
     print("Unknown arguments:", unknown_args)
 
+    if args.num_nodes > 1 and args.default_beaker_config == "configs/beaker_configs/default_finetune.yaml":
+        args.default_beaker_config = "configs/beaker_configs/default_finetune_multinode.yaml"
         
     now = datetime.now().strftime("%m%d%Y%H%M%S")
     with open(args.default_beaker_config, 'r') as f:
