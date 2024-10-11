@@ -9,10 +9,8 @@ import json
 
 import tqdm.autonotebook
 from datasets import load_dataset
-import torch
 from elasticsearch import Elasticsearch, helpers
 
-from transformers import AutoModel, AutoTokenizer
 
 
 parser = argparse.ArgumentParser()
@@ -101,6 +99,8 @@ if index_size < len(data_to_index):
 
     else:
         # Embedding model setup
+        import torch
+        from transformers import AutoModel, AutoTokenizer
         # Prompt based on the usage example at https://huggingface.co/nvidia/NV-Embed-v2
         query_prefix = "Instruct: Given a user request to a chatbot, retrieve requests that are semantically equivalent to the given request\nQuery: "
 
