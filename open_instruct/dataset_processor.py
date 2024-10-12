@@ -52,6 +52,7 @@ ATTENTION_MASK_REJECTED_KEY = "attention_mask_rejected"
 INPUT_IDS_PROMPT_KEY = "input_ids_prompt"
 ATTENTION_MASK_PROMPT_KEY = "attention_mask_prompt"
 GROUND_TRUTHS_KEY = "ground_truth"
+DATASET_SOURCE_KEY = "dataset"
 
 # NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
 # also we don't really need `ATTENTION_MASK_CHOSEN_KEY` and `ATTENTION_MASK_REJECTED_KEY`
@@ -165,6 +166,9 @@ class DatasetConfig:
 
     # columns name for the ground truth
     ground_truths_key: str = GROUND_TRUTHS_KEY
+
+    # columns name for dataset source
+    dataset_source_key: str = DATASET_SOURCE_KEY
 
     # columns names for binary dataset
     binary_messages_key: str = SFT_MESSAGE_KEY
@@ -381,6 +385,7 @@ class SFTDatasetProcessor(DatasetProcessor):
                 labels[: len(row[INPUT_IDS_PROMPT_KEY])] = [-100] * len(row[INPUT_IDS_PROMPT_KEY])
             row[LABELS_KEY] = labels
             row[GROUND_TRUTHS_KEY] = row[self.config.ground_truths_key]
+            row[DATASET_SOURCE_KEY] = row[self.config.dataset_source_key]
             return row
 
         return dataset.map(
@@ -551,9 +556,13 @@ class SimpleGenerateCollatorWithGroundTruth:
         # ground truths
         ground_truths = [x[GROUND_TRUTHS_KEY] for x in batch]
 
+        # datasets
+        datasets = [x[DATASET_SOURCE_KEY] for x in batch]
+
         return {
             INPUT_IDS_PROMPT_KEY: padded_sequences,
             GROUND_TRUTHS_KEY: ground_truths,
+            DATASET_SOURCE_KEY: datasets,
         }
 
 

@@ -39,6 +39,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from open_instruct.utils import retry_on_exception
+from open_instruct.ground_truth_utils import verify_gsm8k_sample, verify_math_sample
 
 
 @dataclass
@@ -205,29 +206,25 @@ def get_reward(
         sequence_lengths,
     )
 
-import re
 
 def apply_verifiable_reward(
-    query_responses: torch.Tensor, tokenizer, ground_truth: str
+    query_responses: torch.Tensor, tokenizer, ground_truths: List[str], datasets: List[str], verify_reward : int = 10
 ):
     # decode the responses
     decoded_responses = tokenizer.batch_decode(query_responses, skip_special_tokens=True)
     # compare with ground truth.
     # use same logic as in gsm8k evaluation
-    predictions = []
     rewards = []
-    for response in decoded_responses:
-        # replace numbers like `x,xxx` with `xxxx`
-        response = re.sub(r"(\d),(\d)", r"\1\2", response)
-        numbers = re.findall(r"[-+]?\d*\.\d+|\d+", response)
-        if numbers:
-            predictions.append(numbers[-1])
-        else:
-            predictions.append(response)
-    for prediction, gt in zip(predictions, ground_truth):
-        if prediction == gt:
-            print("Ground truth matched with prediction, giving a bonus reward 🤗")
-            rewards.append(10)
+    for prediction, ground_truth, dataset in zip(decoded_responses, ground_truths, datasets):
+        verified = False
+        if dataset.lower() == 'gsm8k':
+            verified = verify_gsm8k_sample(prediction, ground_truth)
+        elif dataset.lower() == 'math':
+            verified = verify_math_sample(prediction, ground_truth)
+        # if verified, give reward
+        if verified:
+            print("Applying ground truth reward 🤗")
+            rewards.append(verify_reward)
         else:
             rewards.append(0)
     rewards_tensors = torch.tensor(rewards, device=query_responses.device)

@@ -39,6 +39,7 @@ from open_instruct.dataset_processor import (
     CHAT_TEMPLATES,
     INPUT_IDS_PROMPT_KEY,
     GROUND_TRUTHS_KEY,
+    DATASET_SOURCE_KEY,
     DatasetConfig,
     SFTDatasetProcessor,
     SimpleGenerateCollatorWithGroundTruth,
@@ -472,7 +473,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     train_dataset = combine_dataset(
         args.dataset_mixer_dict,
         splits=args.dataset_train_splits,
-        columns_to_keep=[dataset_config.sft_messages_key, dataset_config.ground_truths_key],
+        columns_to_keep=[dataset_config.sft_messages_key, dataset_config.ground_truths_key, dataset_config.dataset_source_key],
     )
     if dataset_config.sanity_check:
         train_dataset = train_dataset.select(
@@ -487,7 +488,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         eval_dataset = combine_dataset(
             args.dataset_eval_mixer_dict,
             splits=args.dataset_eval_splits,
-            columns_to_keep=[dataset_config.sft_messages_key, dataset_config.ground_truths_key],
+            columns_to_keep=[dataset_config.sft_messages_key, dataset_config.ground_truths_key, dataset_config.dataset_source_key],
         )
         eval_dataset = eval_dataset.select(range(0, min(len(eval_dataset), dataset_config.sanity_check_max_samples)))
         with accelerator.main_process_first():
@@ -694,6 +695,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     data = next(iter_dataloader)
     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
     ground_truths_next = data[GROUND_TRUTHS_KEY]
+    datsets_next = data[DATASET_SOURCE_KEY]
     send_queries(accelerator, None, tokenizer, param_prompt_Q, queries_next)
 
     for _ in range(1, resume_training_step):  # we didn't store scheduler state
@@ -704,6 +706,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         scheduler.step()
         queries = queries_next
         ground_truths = ground_truths_next
+        datasets = datsets_next
         if ph.preempted:
             break
 
@@ -733,6 +736,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     data = next(iter_dataloader)
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
                     ground_truths_next = data[GROUND_TRUTHS_KEY]
+                    datasets_next = data[DATASET_SOURCE_KEY]
                 send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
             else:
                 if training_step != 1:
@@ -741,15 +745,18 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     data = next(iter_dataloader)
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
                     ground_truths_next = data[GROUND_TRUTHS_KEY]
+                    datasets_next = data[DATASET_SOURCE_KEY]
                     send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
                     queries = queries_next
                     ground_truths = ground_truths_next
+                    datasets = datasets_next
 
             # if we generate multiple samples per prompt, we need to repeat the queries and ground truths
             # to match the vllm outputs.
             if args.number_samples_per_prompt > 1:
                 queries = queries.repeat_interleave(args.number_samples_per_prompt, dim=0)
                 ground_truths = [gt for gt in ground_truths for _ in range(args.number_samples_per_prompt)]
+                datasets = [ds for ds in datasets for _ in range(args.number_samples_per_prompt)]
 
             training_time_start = time.time()
             with torch.no_grad():
@@ -822,8 +829,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     if args.apply_verifiable_reward:
                         # we need to batch the gt to match query.
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
+                        dataset = datasets[i : i + args.local_rollout_forward_batch_size]
                         verifiable_reward, verifiable_count = apply_verifiable_reward(
-                            postprocessed_query_response, tokenizer, ground_truth
+                            postprocessed_query_response, tokenizer, ground_truth, dataset
                         )
                         score += verifiable_reward
                     else:
