@@ -1,0 +1,23 @@
+python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/mason.py \
+    --cluster ai2/jupiter-cirrascale-2 \
+    --image nathanl/open_instruct_auto \
+    --pure_docker_mode \
+    --workspace ai2/tulu-3-dev \
+    --priority high \
+    --preemptible \
+    --budget ai2/allennlp \
+    --beaker_datasets /model:01J9VR2PAE6V3Z4P7NPM3CSDFA   \
+    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
+    open_instruct/dpo_tune.py \
+    --exp_name "nd-safety_dpo_vllm_thread_beta_0.03_rm_pkh_sft_v3.4" \
+    --dataset_mixer '{"allenai/ultrafeedback_binarized_cleaned_train": 1.0, "ai2-adapt-dev/DaringAnteater-prefs-RM-filter": 1.0, "ai2-adapt-dev/only_wildchat_aug28_regenerated_llama": 1.0, "ai2-adapt-dev/PKU-SafeRLHF-processed": 1.0}' \
+    --learning_rate 8e-7 \
+    --output_dir /output/ \
+    --chat_template tulu \
+    --per_device_train_batch_size 2 \
+    --gradient_accumulation_steps 32 \
+    --model_name_or_path /model \
+    --beta 0.03 \
+    --gradient_checkpointing \
+    --with_tracking \
+    --push_to_hub
