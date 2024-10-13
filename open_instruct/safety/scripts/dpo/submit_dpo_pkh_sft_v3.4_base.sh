@@ -4,5 +4,6 @@ python scripts/submit_dpo_job.py \
   --cluster ai2/jupiter-cirrascale-2 \
   --priority high \
   --exp_name nd-DPO-tulu3-sft-wildgaurdmixtrain-mixv3.4-valmix-pkh \
-  --num_gpus 8
+  --num_gpus 8 \
+  --datasets 01J9VR2PAE6V3Z4P7NPM3CSDFA:/model
 
