@@ -33,3 +33,23 @@ for dataset in "${datasets[@]}"; do
         echo "Statistics for $dataset already exist. Skipping..."
     fi
 done
+
+# list of preference datasets
+datasets_pref=(
+    allenai/ultrafeedback_binarized_cleaned_train
+    ai2-adapt-dev/DaringAnteater-prefs-RM-filter
+    ai2-adapt-dev/WildChat-prefs-280824
+    ai2-adapt-dev/Llama-3.1-if_taxonomy_tulu
+)
+
+# For every dataset, get the statistics if the output directory doesn't exist
+for dataset in "${datasets_pref[@]}"; do
+    output_file="data/processed/${dataset}_statistics.json"
+    
+    if [ ! -f "$output_file" ]; then
+        echo "Getting statistics for $dataset..."
+        python open_instruct/get_statistics.py --data_path ${dataset} --save_path ${output_file} --messages_key chosen
+    else
+        echo "Statistics for $dataset already exist. Skipping..."
+    fi
+done
