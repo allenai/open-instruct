@@ -4,9 +4,7 @@ import json
 import argparse
 from tqdm import tqdm
 from datasets import load_dataset
-import torch
 from elasticsearch import Elasticsearch
-from transformers import AutoModel, AutoTokenizer
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--es_url", type=str, default="http://localhost:9200")
@@ -52,6 +50,8 @@ es = Elasticsearch(
     basic_auth=("elastic", os.environ["ELASTIC_PASSWORD"]),
 )
 if args.index_type == "vector":
+    import torch
+    from transformers import AutoModel, AutoTokenizer
     model = AutoModel.from_pretrained(args.model, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     model.eval()
