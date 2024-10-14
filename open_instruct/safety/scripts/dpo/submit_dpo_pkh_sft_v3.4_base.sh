@@ -5,5 +5,5 @@ python scripts/submit_dpo_job.py \
   --priority high \
   --exp_name nd-DPO-tulu3-sft-wildgaurdmixtrain-mixv3.4-valmix-pkh \
   --num_gpus 8 \
-#  --datasets 01J9VR2PAE6V3Z4P7NPM3CSDFA:/model
+  --datasets 01J9VR2PAE6V3Z4P7NPM3CSDFA:/model
 
