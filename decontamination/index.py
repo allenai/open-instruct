@@ -66,7 +66,10 @@ dataset = load_dataset(args.dataset, split=args.split)
 data_to_index = []
 
 query_filter_key, query_filter_value = args.query_filter.split(":")
-for i, datum in enumerate(dataset):
+
+print(f"Reading {args.messages_field} from {args.dataset}")
+
+for i, datum in tqdm(enumerate(dataset)):
     for message in datum[args.messages_field]:
         if message[query_filter_key] == query_filter_value:
             data_to_index.append(
