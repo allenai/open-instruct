@@ -82,8 +82,12 @@ for dataset, subset, split, fields in eval_sets:
     if args.index_type == "text":
         for i, datum in tqdm(enumerate(query_dataset)):
             query_strings = [datum[field] for field in fields]
+            if any([s is None for s in query_strings]):
+                continue
             search_output = es.search(
                 index=args.index_name,
+                search_type="query_then_fetch",
+                rest_total_hits_as_int=True,
                 query={
                     "bool": {
                         "filter": [
