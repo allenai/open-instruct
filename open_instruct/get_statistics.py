@@ -44,7 +44,7 @@ def get_statistics_for_messages_data(
         example[messages_key] = [message for message in example[messages_key] if message["role"] != "system"]
         return example
 
-    dataset = dataset.map(remove_system_messages)
+    dataset = dataset.map(remove_system_messages, num_proc=16)
 
     num_of_turns = [len(instance[messages_key]) for instance in dataset[split]]
     user_prompt_lengths = []

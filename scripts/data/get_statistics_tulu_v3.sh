@@ -15,14 +15,21 @@ datasets=(
     ai2-adapt-dev/personahub_ifdata_v1_29980
     ai2-adapt-dev/coconot-sft-reformat
     ai2-adapt-dev/openmath-2-gsm8k
-    m-a-p/CodeFeedback-Filtered-Instruction
+    # m-a-p/CodeFeedback-Filtered-Instruction
+    ai2-adapt-dev/codefeedback-single-turn-reformat
     ai2-adapt-dev/WildChat-1M-Full-GPT4-Only
     ai2-adapt-dev/synthetic-finalresp-wildguarmixtrain
     ai2-adapt-dev/processed-wildjailbreak
 )
 
-# For every dataset, get the statistics
+# For every dataset, get the statistics if the output directory doesn't exist
 for dataset in "${datasets[@]}"; do
-    echo "Getting statistics for $dataset..."
-    python open_instruct/get_statistics.py --data_path ${dataset} --save_path data/processed/${dataset}_statistics.json
+    output_file="data/processed/${dataset}_statistics.json"
+    
+    if [ ! -f "$output_file" ]; then
+        echo "Getting statistics for $dataset..."
+        python open_instruct/get_statistics.py --data_path ${dataset} --save_path ${output_file}
+    else
+        echo "Statistics for $dataset already exist. Skipping..."
+    fi
 done
