@@ -156,5 +156,8 @@ for dataset, subset, split, fields in eval_sets:
         for datum in output_data:
             print(json.dumps(datum), file=outfile)
 
-print("Summary of mean match scores:\n")
-print(json.dumps(mean_match_scores, indent=2))
+output_file = os.path.join(args.output_dir, "contamination_results.tsv")
+print(f"TSV file with all results: {output_file}")
+with open(output_file, "w") as outfile:
+    print("\t" + "\t".join(ev[0] for ev in eval_sets), file=outfile)
+    print(args.index_name + "\t" + "\t".join([f"{mean_match_scores[ev[0]]:.4f}" for ev in eval_sets]), file=outfile)
