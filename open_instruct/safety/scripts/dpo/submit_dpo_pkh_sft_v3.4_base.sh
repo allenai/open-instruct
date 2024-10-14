@@ -1,4 +1,4 @@
-python scripts/submit_dpo_job.py \
+python /net/nfs.cirrascale/mosaic/nouhad/projects/open-instruct/open_instruct/scripts/submit_dpo_job.py \
   --default_beaker_config configs/beaker_configs/default_finetune.yaml \
   --config configs/train_configs/dpo/llama-3.1-8b-dpo-pku.yaml\
   --cluster ai2/jupiter-cirrascale-2 \
