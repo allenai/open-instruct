@@ -72,7 +72,7 @@ if __name__ == "__main__":
     convert_sft_dataset(
         ds=sciriff_data,
         hf_dataset_id=None,
-        convert_fn=conversion_func,
+        convert_fn=None,
         apply_keyword_filters=args.apply_keyword_filters,
         apply_empty_message_filters=args.apply_empty_message_filters,
         push_to_hub=args.push_to_hub,

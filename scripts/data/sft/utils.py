@@ -94,12 +94,11 @@ def convert_sft_dataset(
     if ds is None:
         ds = load_dataset(hf_dataset_id)
 
-    print("Converting dataset to messages format...")
     if convert_fn:
+        print("Converting dataset to messages format...")
         ds = ds.map(convert_fn, num_proc=num_proc)
     else:
-        assert "messages" in ds.column_names, \
-            "The dataset must contain a 'messages' column. Otherwise, please provide a convert_fn."
+        print("No convert_fn provided, skipping the conversion step.")        
     
     if apply_keyword_filters:
         print("Filtering dataset by keywords...")

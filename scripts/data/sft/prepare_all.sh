@@ -13,7 +13,6 @@ python -m scripts.data.sft.coconot \
     --push_to_hub \
     --hf_entity ai2-adapt-dev \
     --apply_keyword_filters \
-    --apply_empty_message_filters \
     --local_save_dir ./data/sft/coconot
 
 echo "Converting CodeFeedback Filtered Instructions dataset..."
@@ -77,7 +76,6 @@ echo "Converting No Robots dataset..."
 python -m scripts.data.sft.no_robots \
     --push_to_hub \
     --hf_entity ai2-adapt-dev \
-    --apply_empty_message_filters \
     --local_save_dir ./data/sft/no_robots
 
 echo "Converting NuminaMath dataset..."

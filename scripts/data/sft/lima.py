@@ -2,6 +2,7 @@ import argparse
 import os
 from collections import defaultdict
 from typing import List, Optional
+from datasets import load_dataset
 
 from scripts.data.sft.utils import convert_sft_dataset
 
@@ -75,9 +76,10 @@ if __name__ == "__main__":
         "for more information about this dataset and the license."
     )
     
+    ds = load_dataset("GAIR/lima")["train"]
     convert_sft_dataset(
-        ds=None,
-        hf_dataset_id="GAIR/lima",
+        ds=ds,
+        hf_dataset_id=None,
         convert_fn=conversion_func,
         apply_keyword_filters=args.apply_keyword_filters,
         apply_empty_message_filters=args.apply_empty_message_filters,
