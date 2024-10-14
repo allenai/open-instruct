@@ -1,0 +1,32 @@
+model_name_or_path: meta-llama/Llama-3.1-8B
+model_revision: main
+use_flash_attn: true
+tokenizer_name: meta-llama/Llama-3.1-8B
+use_slow_tokenizer: true
+dataset_mixer:
+    # Remove all mis-licensed data or non commercial
+    ai2-adapt-dev/metamath-qa-reformat: 1.0 # MIT License
+    natolambert/tulu-v2-sft-mixture-flan: 1.0 # FLAN Apache 2.0
+    natolambert/tulu-v2-sft-mixture-cot: 1.0 # FLAN Apache 2.0
+    allenai/openassistant-guanaco-reformatted: 1.0 # Apache 2.0
+    ai2-adapt-dev/codefeedback-single-turn-reformat-magicoder: 1.0 # MIT MagiCoder section of CodeFeedback
+    ai2-adapt-dev/aya_dataset-reformat: 1.0 # Apache 2.0
+    ai2-adapt-dev/SlimOrca-reformat: 0.25 # MIT License
+    ai2-adapt-dev/Daring-Anteater-reformat: 1.0 # CC BY 4.0
+    ai2-adapt-dev/WebInstructSub-reformat-apache: 0.1 # Apache 2.0
+    ai2-adapt-dev/Table-GPT-All-train: 0.5 # MITmax_seq_length: 4096 # Note, reduced from 8192 to fit on one GPU with DeepSpeed Stage3
+preprocessing_num_workers: 128
+per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
+gradient_accumulation_steps: 2 # effective batch size 128 with 1 node
+learning_rate: 5.0e-06 # best LR so far
+lr_scheduler_type: linear
+warmup_ratio: 0.03
+weight_decay: 0.0
+num_train_epochs: 2
+output_dir: /output/
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+checkpointing_steps: epoch
+dataset_mix_dir: /output/
