@@ -69,7 +69,7 @@ query_filter_key, query_filter_value = args.query_filter.split(":")
 
 print(f"Reading {args.messages_field} from {args.dataset}")
 
-for i, datum in tqdm(enumerate(dataset)):
+for i, datum in tqdm.tqdm(enumerate(dataset)):
     for message in datum[args.messages_field]:
         if message[query_filter_key] == query_filter_value:
             data_to_index.append(
