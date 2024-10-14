@@ -11,7 +11,8 @@ parser.add_argument("--es_url", type=str, default="http://localhost:9200")
 parser.add_argument("--dataset", type=str)
 parser.add_argument("--subset", type=str)
 parser.add_argument("--split", type=str, default="test")
-parser.add_argument("--field", type=str)
+parser.add_argument("--field", type=str, nargs="+")
+parser.add_argument("--limit", type=int, help="Limit the number of eval instances")
 parser.add_argument("--index_name", type=str, required=True)
 parser.add_argument("--index_type", type=str, choices=["text", "vector"], default="text")
 parser.add_argument("--model", type=str, default="nvidia/NV-Embed-v2")
@@ -20,26 +21,26 @@ parser.add_argument("--output_dir", type=str, required=True)
 args = parser.parse_args()
 
 eval_sets = [
-    # (dataset, subset, split, fields)
+    # (dataset, subset, split, fields, limit)
     # Dev evals
-    ("cais/mmlu", "all", "test", ["question"]),
-    ("openai/openai_humaneval", None, "test", ["prompt"]),
-    ("openai/gsm8k", "main", "test", ["question"]),
-    ("ucinlp/drop", None, "validation", ["passage", "question"]),
-    ("lighteval/MATH", "all", "test", ["problem"]),
-    ("google/IFEval", None, "train", ["prompt"]),
-    ("akariasai/PopQA", None, "test", ["subj", "prop", "obj"]),
-    ("tatsu-lab/alpaca_eval", None, "eval", ["instruction"]),
-    ("lukaemon/bbh", None, "test", ["input"]),
-    ("truthfulqa/truthful_qa", "generation", "validation", ["question"]),
+    ("cais/mmlu", "all", "test", ["question"], None),
+    ("openai/openai_humaneval", None, "test", ["prompt"], None),
+    ("openai/gsm8k", "main", "test", ["question"], None),
+    ("ucinlp/drop", None, "validation", ["passage", "question"], None),
+    ("lighteval/MATH", "all", "test", ["problem"], None),
+    ("google/IFEval", None, "train", ["prompt"], None),
+    ("akariasai/PopQA", None, "test", ["subj", "prop", "obj"], None),
+    ("tatsu-lab/alpaca_eval", None, "eval", ["instruction"], None),
+    ("lukaemon/bbh", None, "test", ["input"], None),
+    ("truthfulqa/truthful_qa", "generation", "validation", ["question"], None),
     # Test evals
-    ("TIGER-Lab/MMLU-Pro", None, "test", ["question"]),
-    ("Idavidrein/gpqa", "gpqa_extended", "train", ["Question"]),
-    ("lighteval/agi_eval_en", None, "train", ["passage", "question"]),
-    ("bigcode/bigcodebench", None, "v0.1.2", ["instruct_prompt"]),
-    ("deepmind/math_dataset", None, "test", ["question"]),
+    ("TIGER-Lab/MMLU-Pro", None, "test", ["question"], None),
+    ("Idavidrein/gpqa", "gpqa_extended", "train", ["Question"], None),
+    ("lighteval/agi_eval_en", None, "train", ["passage", "question"], None),
+    ("bigcode/bigcodebench", None, "v0.1.2", ["instruct_prompt"], None),
+    ("deepmind/math_dataset", None, "test", ["question"], 50),
 ] if args.dataset is None else [
-    (args.dataset, args.subset, args.split, args.field)
+    (args.dataset, args.subset, args.split, args.field, args.limit)
 ]
 
 if not os.path.exists(args.output_dir):
@@ -63,17 +64,17 @@ if args.index_type == "vector":
             model._modules[module_key] = torch.nn.DataParallel(module)
 
 mean_match_scores = {}
-for dataset, subset, split, fields in eval_sets:
+for dataset, subset, split, fields, limit in eval_sets:
     print(f"Querying {args.index_name} for {dataset}.")
     try:
-        query_dataset = load_dataset(dataset, subset, split=split)
+        query_dataset = list(load_dataset(dataset, subset, split=split))[:limit]
     except ValueError:
         query_dataset = []
         if args.subset is None:
             # Dataset has multiple subsets. We want to concatenate all of them.
             from datasets import get_dataset_config_names
             for subset in get_dataset_config_names(dataset):
-                query_dataset.extend(list(load_dataset(dataset, subset, split=split)))
+                query_dataset.extend(list(load_dataset(dataset, subset, split=split))[:limit])
         else:
             raise
 
