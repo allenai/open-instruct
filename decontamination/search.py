@@ -63,7 +63,7 @@ if args.index_type == "vector":
             model._modules[module_key] = torch.nn.DataParallel(module)
 
 mean_match_scores = {}
-for dataset, subset, split, field in eval_sets:
+for dataset, subset, split, fields in eval_sets:
     print(f"Querying {args.index_name} for {dataset}.")
     try:
         query_dataset = load_dataset(dataset, subset, split=split)
@@ -81,16 +81,19 @@ for dataset, subset, split, field in eval_sets:
     output_data = []
     if args.index_type == "text":
         for i, datum in tqdm(enumerate(query_dataset)):
-            query_str = datum[field]
+            query_strings = [datum[field] for field in fields]
             search_output = es.search(
                 index=args.index_name,
                 query={
                     "bool": {
-                        "filter": {
-                            "match_phrase": {
-                                "text": query_str
+                        "filter": [
+                            {
+                                "match_phrase": {
+                                    "text": query_str
+                                }
                             }
-                        }
+                            for query_str in query_strings
+                        ] 
                     }
                 }
             )
@@ -98,7 +101,7 @@ for dataset, subset, split, field in eval_sets:
             match_scores.append(1 if num_hits > 0 else 0)
             output_data.append(
                 {
-                    "query": query_str,
+                    "query": query_strings,
                     "num_hits": num_hits,
                 }
             )
@@ -108,7 +111,7 @@ for dataset, subset, split, field in eval_sets:
         batch_size = 0
         max_seq_tokens = 0
         for i, datum in tqdm(enumerate(query_dataset)):
-            batch_inputs.append(datum[field])
+            batch_inputs.append(" ".join([datum[field] for field in fields]))
             max_seq_tokens = max(max_seq_tokens, len(tokenizer.tokenize(batch_inputs[-1])))
             batch_size += 1
             if (max_seq_tokens * batch_size >= args.max_batch_tokens) or (i == len(query_dataset) - 1):
