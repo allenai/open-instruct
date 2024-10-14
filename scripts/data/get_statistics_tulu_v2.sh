@@ -1,6 +1,6 @@
 #!/bin/bash
 # ["super_ni", "cot", "flan_v2", "self_instruct", "unnatural_instructions", "stanford_alpaca", "dolly", "sharegpt", "code_alpaca", "gpt4_alpaca", "baize", "oasst1"]
-# Tun with scripts/data/get_statistics_tulu_v2.sh
+# Run with scripts/data/get_statistics_tulu_v2.sh
 # for every dataset, get the statistics
 for dataset in super_ni cot flan_v2 self_instruct unnatural_instructions stanford_alpaca dolly sharegpt code_alpaca gpt4_alpaca baize oasst1 lima wizardlm open_orca; do
     echo "Getting statistics for $dataset..."
