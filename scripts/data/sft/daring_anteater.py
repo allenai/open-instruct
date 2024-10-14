@@ -2,6 +2,7 @@ import argparse
 import os
 from collections import defaultdict
 from typing import List, Optional
+from datasets import load_dataset
 
 from scripts.data.sft.utils import convert_sft_dataset
 
@@ -46,6 +47,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Apply empty message filters to the dataset.",
     )
+    parser.add_argument(
+        "--remove_subsets",
+        type=str,
+        nargs="+",
+        help="List of subset names to remove from the original dataset (e.g., 'open_platypus_commercial').",
+    )
     args = parser.parse_args()
 
     def conversion_func(example):
@@ -68,6 +75,7 @@ if __name__ == "__main__":
         "The conversion took the following parameters:\n"
         f"- apply_keyword_filters: {args.apply_keyword_filters}\n"
         f"- apply_empty_message_filters: {args.apply_empty_message_filters}\n"
+        f"- remove_subsets: {args.remove_subsets}\n"
         f"- push_to_hub: {args.push_to_hub}\n"
         f"- hf_entity: {args.hf_entity}\n"
         f"- converted_dataset_name: {args.converted_dataset_name}\n"
@@ -76,9 +84,13 @@ if __name__ == "__main__":
         "for more information about this dataset and the license."
     )
     
+    ds = load_dataset("nvidia/Daring-Anteater")
+    if args.remove_subsets:
+        ds = ds.filter(lambda x: x["dataset"] not in args.remove_subsets)
+    
     convert_sft_dataset(
-        ds=None,
-        hf_dataset_id="nvidia/Daring-Anteater",
+        ds=ds,
+        hf_dataset_id=None,
         convert_fn=conversion_func,
         apply_keyword_filters=args.apply_keyword_filters,
         apply_empty_message_filters=args.apply_empty_message_filters,
