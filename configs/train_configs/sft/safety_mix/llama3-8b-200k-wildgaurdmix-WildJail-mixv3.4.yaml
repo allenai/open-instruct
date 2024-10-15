@@ -4,8 +4,8 @@ use_flash_attn: true
 tokenizer_name: meta-llama/Llama-3.1-8B
 use_slow_tokenizer: true
 dataset_mixer:
-  ai2-adapt-dev/processed-wildjailbreak: 86759
-  ai2-adapt-dev/synthetic-finalresp-wildguarmixtrain: 113241
+  ai2-adapt-dev/processed-wildjailbreak: 113241
+  ai2-adapt-dev/synthetic-finalresp-wildguarmixtrain: 86759
   # This final 3.4 mix is based on the ablations in the `tulu3_8b_preview_mix_v3.4.x` folder
   # In the end, we selected v3.4.23 that performs the best after applying DPO.
   # ------------------------------------------------------
