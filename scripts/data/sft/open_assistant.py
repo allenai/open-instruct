@@ -147,12 +147,15 @@ if __name__ == "__main__":
     v1_sequences = convert_oasst_dataset(v1_ds, top_k=args.top_k)
     v1_instances = []
     for i, sequence in enumerate(v1_sequences):
+        quality_scores = [m["quality_score"] for m in sequence]
+        avg_quality_score = sum(quality_scores) / len(quality_scores)
+        sequence = [{"role": m["role"], "content": m["content"]} for m in sequence]
         v1_instances.append({
             "dataset": "oasst1",
             "id": f"oasst1_{i}",
             "messages": sequence,
-            "quality_scores": [m["quality_score"] for m in sequence],
-            "avg_quality_score": sum([m["quality_score"] for m in sequence]) / len(sequence),
+            "quality_scores": quality_scores,
+            "avg_quality_score": avg_quality_score,
         })
     v1_ds = Dataset.from_list(v1_instances)
     convert_sft_dataset(
@@ -189,12 +192,15 @@ if __name__ == "__main__":
     v2_sequences = convert_oasst_dataset(v2_ds, top_k=args.top_k)
     v2_instances = []
     for i, sequence in enumerate(v2_sequences):
+        quality_scores = [m["quality_score"] for m in sequence]
+        avg_quality_score = sum(quality_scores) / len(quality_scores)
+        sequence = [{"role": m["role"], "content": m["content"]} for m in sequence]
         v2_instances.append({
             "dataset": "oasst2",
             "id": f"oasst2_{i}",
             "messages": sequence,
-            "quality_scores": [m["quality_score"] for m in sequence],
-            "avg_quality_score": sum([m["quality_score"] for m in sequence]) / len(sequence),
+            "quality_scores": quality_scores,
+            "avg_quality_score": avg_quality_score,
         })
     v2_ds = Dataset.from_list(v2_instances)
     convert_sft_dataset(
