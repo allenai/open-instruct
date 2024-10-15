@@ -1,7 +1,6 @@
 python scripts/submit_finetune_job.py \
   --cluster ai2/jupiter-cirrascale-2 \
   --priority urgent \
-  --workspace ai2/tulu-3-dev \
   --num_nodes 8 \
   --image nathanl/open_instruct_auto-f0b3def-11239828100 \
   --reduce_loss sum \
