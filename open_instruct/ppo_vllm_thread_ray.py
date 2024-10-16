@@ -12,7 +12,7 @@ import threading
 import time
 from dataclasses import asdict, dataclass
 from queue import Empty, Queue
-from typing import List, Literal, Optional, Tuple
+from typing import Iterator, List, Literal, Optional, Tuple
 from datetime import timedelta
 
 from ray.util.placement_group import PlacementGroup, placement_group
@@ -20,6 +20,8 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 import deepspeed
 import numpy as np
 import pandas as pd
+import torch.distributed as dist
+
 import ray
 import torch
 import torch.nn.functional as F
@@ -386,6 +388,7 @@ def calculate_runtime_args(args: Args, model_config: ModelConfig) -> Accelerator
     """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
     # accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
     # args.world_size = accelerator.num_processes
+    args.world_size = args.actor_num_gpus_per_node * args.actor_num_nodes
     args.local_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps * args.num_mini_batches
     args.micro_batch_size = int(args.per_device_train_batch_size * args.world_size)
     args.batch_size = int(args.local_batch_size * args.world_size)
@@ -403,7 +406,7 @@ def calculate_runtime_args(args: Args, model_config: ModelConfig) -> Accelerator
         assert (
             args.local_mini_batch_size >= 8
         ), f"Per-rank minibatch size {args.local_mini_batch_size} is insufficient for whitening"
-    args.local_dataloader_batch_size = args.local_batch_size
+    args.local_dataloader_batch_size = args.batch_size
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -461,6 +464,31 @@ def masked_whiten(values: torch.Tensor, mask: torch.Tensor, shift_mean: bool = T
 def remove_padding(sequences, pad_token_id):
     return [[inneritem for inneritem in item if inneritem != pad_token_id] for item in sequences]
 
+
+class ShufflingIterator:
+    def __init__(self, data: np.ndarray, batch_size: int, seed: Optional[int] = None):
+        self.data = data.copy()
+        self.batch_size = batch_size
+        self.index = 0
+        self.rng = np.random.default_rng(seed)
+        self.rng.shuffle(self.data)
+        
+        # Ensure the effective dataset size is divisible by batch_size
+        self.effective_size = len(self.data) - (len(self.data) % batch_size)
+
+    def __iter__(self) -> Iterator[List[int]]:
+        return self
+
+    def __next__(self) -> List[int]:
+        if self.index >= self.effective_size:
+            self.index = 0
+            self.rng.shuffle(self.data)
+
+        end_index = self.index + self.batch_size
+        batch = self.data[self.index:end_index].tolist()
+        self.index = end_index
+
+        return batch
 
 class RayProcess:
     def __init__(self, world_size, rank, local_rank, master_addr, master_port):
@@ -641,33 +669,24 @@ class PolicyTrainerRayProcess(RayProcess):
 
         broadcast_to_vllm()
         print('broadcasted to vllm finished')
-        print("xixi")
         if args.stop_token:
             if args.stop_token == "eos":
                 args.stop_token_id = tokenizer.eos_token_id
             if args.stop_token == "period":
                 args.stop_token_id = tokenizer.encode(".")[0]
-        print("xixi2")
-        # optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, eps=args.eps)
-        # scheduler = get_scheduler(
-        #     args.lr_scheduler_type,
-        #     optimizer=optimizer,
-        #     num_warmup_steps=args.warm_up_steps,
-        #     num_training_steps=args.num_training_steps * args.num_train_epochs,
-        # )
         data_collator = SimpleGenerateCollator(pad_token_id=tokenizer.pad_token_id)
-        dataloader = DataLoader(
-            train_dataset,
-            batch_size=args.local_dataloader_batch_size,
-            shuffle=True,
-            collate_fn=data_collator,
-            drop_last=True,  # needed; otherwise the last batch will be of ragged shape
-        )
-        print("xixi3")
+        train_dataset_idxs = np.arange(len(train_dataset))
+        shuffling_iter = ShufflingIterator(train_dataset_idxs, args.batch_size, seed=args.seed)
 
+        # hack to left pad
         def repeat_generator():
             while True:
-                yield from dataloader
+                batch_idxs = next(shuffling_iter)
+                yield train_dataset[batch_idxs]
+
+        def left_pad(batch):
+            max_len = max(len(item) for item in batch)
+            return torch.tensor([[tokenizer.pad_token_id] * (max_len - len(item)) + item for item in batch])
 
         iter_dataloader = iter(repeat_generator())
         generation_config = SamplingParams(
@@ -738,7 +757,7 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         thread.start()
 
-        # # set up the metrics and initial states
+        # set up the metrics and initial states
         accelerator = Namespace()
         accelerator.process_index = self.rank
         accelerator.num_processes = self.world_size
@@ -759,9 +778,10 @@ class PolicyTrainerRayProcess(RayProcess):
         # training loop
         start_time = time.time()
         data = next(iter_dataloader)
-        queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
+        global_queries = data[INPUT_IDS_PROMPT_KEY]
+        queries_next = left_pad(global_queries[self.rank * args.local_batch_size: (self.rank + 1) * args.local_batch_size]).to(device)
         if accelerator.is_main_process:
-            param_prompt_Q.put((None, remove_padding(queries_next.tolist(), tokenizer.pad_token_id)))
+            param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
 
         # for _ in range(1, resume_training_step):  # we didn't store scheduler state
         #     scheduler.step()
@@ -791,17 +811,19 @@ class PolicyTrainerRayProcess(RayProcess):
             if args.async_mode:
                 if training_step != 1:
                     data = next(iter_dataloader)
-                    queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
+                    global_queries = data[INPUT_IDS_PROMPT_KEY]
+                    queries_next = left_pad(global_queries[self.rank * args.local_batch_size: (self.rank + 1) * args.local_batch_size]).to(device)
                 if accelerator.is_main_process:
-                    param_prompt_Q.put((None, remove_padding(queries_next.tolist(), tokenizer.pad_token_id)))
+                    param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
             else:
                 if training_step != 1:
                     # NOTE: important: the indent here is different for sync mode
                     # we also set to use `queries = queries_next` immediately
                     data = next(iter_dataloader)
-                    queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
+                    global_queries = data[INPUT_IDS_PROMPT_KEY]
+                    queries_next = left_pad(global_queries[self.rank * args.local_batch_size: (self.rank + 1) * args.local_batch_size]).to(device)
                     if accelerator.is_main_process:
-                        param_prompt_Q.put((None, remove_padding(queries_next.tolist(), tokenizer.pad_token_id)))
+                        param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
                     queries = queries_next
 
             training_time_start = time.time()
@@ -911,7 +933,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 elif args.kl_estimator == "kl3":
                     kl = kl3
                 # print(f"{accelerator.local_process_index=}, {kl.sum(1)=}")
-                print(f"{kl[0][:40]}, {kl.sum(1)=}")
+                # print(f"{kl[0][:40]}, {kl.sum(1)=}")
                 non_score_reward = -args.beta * kl
                 non_score_reward_sum = non_score_reward.sum(1)
                 rlhf_reward = scores + non_score_reward_sum
@@ -1017,6 +1039,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics[15] = ((kl) ** 2 / 2).sum(1).mean()
                 local_metrics[16] = ((-kl).exp() - 1 + kl).sum(1).mean()
                 # global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
+                local_metrics /= dist.get_world_size()
+                dist.all_reduce(local_metrics, op=dist.ReduceOp.SUM)
                 global_metrics = local_metrics.tolist()
                 metrics = {
                     "episode": episode,
