@@ -93,7 +93,7 @@ for dataset, subset, split, fields, limit in eval_sets:
     match_scores = []
     output_data = []
     if args.index_type == "text":
-        for i, datum in tqdm(enumerate(query_dataset)):
+        for datum in tqdm(query_dataset):
             query_strings = [datum[field] for field in fields]
             if any([s is None for s in query_strings]):
                 continue
@@ -118,23 +118,26 @@ for dataset, subset, split, fields, limit in eval_sets:
                 )
                 num_hits = search_output["hits"]["total"]
                 match_scores.append(1 if num_hits > 0 else 0)
-                output_data.append(
-                    {
-                        "query": query_strings,
-                        "num_hits": num_hits,
-                    }
-                )
+                if num_hits > 0:
+                    output_data.append(
+                        {
+                            "query": query_strings,
+                            "num_hits": num_hits,
+                        }
+                    )
             else:
                 query_string_match_scores = []
+                query_string_match_tokens = defaultdict(list)
                 matching_doc_ids = set()
                 doc_id_text_mapping = {}
                 for query_string in query_strings:
                     # We compute the match score for each query string for ngram matches as follows:
                     # For each token in the query string, we retrieve the training documents that contain ngrams from the query string
                     # the token belongs to. Then we compute the match score as the ratio of the tokens in the query string that match that training document.
-                    query_string_length = len(SPACY_MODEL(query_string))
-                    ngram_mapping = get_ngram_mapping(query_string)
-                    train_doc_matches = defaultdict(list)
+                    query_string_tokens = [d.text for d in SPACY_MODEL(query_string)]
+                    query_string_length = len(query_string_tokens)
+                    ngram_mapping = get_ngram_mapping(query_string, args.ngram_size)
+                    train_doc_matches = defaultdict(set)
                     for ngram, tokens in ngram_mapping.items():
                         search_output = es.search(
                             index=args.index_name,
@@ -155,26 +158,32 @@ for dataset, subset, split, fields, limit in eval_sets:
                         train_doc_ids = [h["_id"] for h in search_output["hits"]["hits"]]
                         train_texts = [h["_source"]["text"] for h in search_output["hits"]["hits"]]
                         for doc_id, text in zip(train_doc_ids, train_texts):
-                            train_doc_matches[doc_id].extend(tokens)
+                            train_doc_matches[doc_id].update(tokens)
                             matching_doc_ids.add(doc_id)
                             doc_id_text_mapping[doc_id] = text
 
                     query_string_match_scores.append({doc_id: len(matching_tokens) / query_string_length for doc_id, matching_tokens in train_doc_matches.items()})
+                    for doc_id, matching_tokens in train_doc_matches.items():
+                        query_string_match_tokens[doc_id].append([query_string_tokens[t] for t in matching_tokens])
                 
-                # Averaging the match scores of training documents over all query strings.
-                aggregated_match_scores = {doc_id: sum([x.get(doc_id, 0.0) for x in query_string_match_scores]) / len(query_string_match_scores) for doc_id in matching_doc_ids}
-                largest_match_doc_id, match_score = sorted(aggregated_match_scores.items(), key=lambda x: x[1], reverse=True)[0]
-                match_scores.append(match_score)
-                output_data.append(
-                    {
-                        "query": query_strings,
-                        "largest_match": {
-                            "doc_id": largest_match_doc_id,
-                            "text": doc_id_text_mapping[largest_match_doc_id]
-                        },
-                        "score": match_score,
-                    }
-                )                
+                if matching_doc_ids:
+                    # Averaging the match scores of training documents over all query strings.
+                    aggregated_match_scores = {doc_id: sum([x.get(doc_id, 0.0) for x in query_string_match_scores]) / len(query_string_match_scores) for doc_id in matching_doc_ids}
+                    largest_match_doc_id, match_score = sorted(aggregated_match_scores.items(), key=lambda x: x[1], reverse=True)[0]
+                    match_scores.append(match_score)
+                    output_data.append(
+                        {
+                            "query": query_strings,
+                            "largest_match": {
+                                "doc_id": largest_match_doc_id,
+                                "text": doc_id_text_mapping[largest_match_doc_id],
+                                "matching_tokens": query_string_match_tokens[largest_match_doc_id]
+                            },
+                            "score": match_score,
+                        }
+                    )                
+                else:
+                    match_scores.append(0)
     else:
         batch_inputs = []
         batch_size = 0
