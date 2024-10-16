@@ -59,7 +59,7 @@ accelerate launch --num_processes 2 --config_file configs/ds_configs/deepspeed_z
     --dataset_train_split train_prefs \
     --dataset_eval_split test_prefs \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --sft_messages_key chosen \
     --learning_rate 3e-6 \
     --output_dir models/minimal/online_dpo_tulu3 \
@@ -89,7 +89,7 @@ accelerate launch --num_processes 1 --config_file configs/ds_configs/deepspeed_z
     --dataset_train_split train_prefs \
     --dataset_eval_split test_prefs \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --sft_messages_key chosen \
     --learning_rate 3e-6 \
     --output_dir models/minimal/online_dpo_tulu3 \
@@ -119,7 +119,7 @@ accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_z
     --dataset_train_split train_prefs \
     --dataset_eval_split test_prefs \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --sft_messages_key chosen \
     --learning_rate 3e-6 \
     --output_dir models/minimal/online_dpo_tulu3 \
@@ -310,7 +310,7 @@ accelerate launch --num_processes 2 --config_file configs/ds_configs/deepspeed_z
     --dataset_train_split train_prefs \
     --dataset_eval_split test_prefs \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --sft_messages_key chosen \
     --learning_rate 5e-7 \
     --output_dir models/minimal/online_dpo_tulu2_llama333 \
@@ -342,7 +342,7 @@ accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_z
     --dataset_train_split train_prefs \
     --dataset_eval_split test_prefs \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --sft_messages_key chosen \
     --learning_rate 5e-7 \
     --output_dir models/minimal/online_dpo_tulu2_llama333 \
@@ -373,7 +373,7 @@ accelerate launch --num_processes 2 --config_file configs/ds_configs/deepspeed_z
     --dataset_train_split train_prefs \
     --dataset_eval_split test_prefs \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --sft_messages_key chosen \
     --learning_rate 5e-7 \
     --output_dir models/minimal/online_dpo_tulu2_llama333 \
@@ -403,7 +403,7 @@ accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_z
     --dataset_train_split train \
     --dataset_eval_split validation \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --learning_rate 5e-7 \
     --output_dir models/minimal/online_dpo_tulu2_llama333 \
     --chat_template simple_concat_with_space \
@@ -432,7 +432,7 @@ accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_z
     --dataset_train_split train \
     --dataset_eval_split validation \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --learning_rate 5e-7 \
     --output_dir models/minimal/online_dpo_tulu2_llama333 \
     --chat_template simple_concat_with_space \
@@ -461,7 +461,7 @@ accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_z
     --dataset_train_split train_prefs \
     --dataset_eval_split test_prefs \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --sft_messages_key chosen \
     --learning_rate 5e-7 \
     --output_dir /output/ \
@@ -498,7 +498,7 @@ accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_z
     --dataset_train_split train_prefs \
     --dataset_eval_split test_prefs \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --sft_messages_key chosen \
     --learning_rate 5e-7 \
     --output_dir /output/ \
@@ -530,7 +530,7 @@ accelerate launch --num_processes 8 --config_file configs/ds_configs/deepspeed_z
     --dataset_train_split train_prefs \
     --dataset_eval_split test_prefs \
     --max_token_length 512 \
-    --max_prompt_token_lenth 256 \
+    --max_prompt_token_length 256 \
     --sft_messages_key chosen \
     --learning_rate 5e-7 \
     --output_dir /output/ \
@@ -563,7 +563,7 @@ accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_z
         --dataset_eval_mixer '{"allenai/ultrafeedback_binarized_cleaned": 1.0}' \
         --dataset_eval_splits test_prefs \
         --max_token_length 1024 \
-        --max_prompt_token_lenth 512 \
+        --max_prompt_token_length 512 \
         --sft_messages_key chosen \
         --learning_rate 5e-7 \
         --output_dir /output/ \
@@ -594,7 +594,7 @@ python open_instruct/online_dpo_vllm_thread.py \
     --dataset_mixer '{"HuggingFaceH4/no_robots": 1.0}' \
     --dataset_train_splits train \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --learning_rate 5e-7 \
     --output_dir /output/ \
     --chat_template tulu \
@@ -633,7 +633,7 @@ python mason.py \
     --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_eval_splits validation \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --learning_rate 3e-6 \
     --output_dir models/minimal/online_dpo_vllm_thread_tldr \
     --per_device_train_batch_size 2 \
@@ -660,7 +660,7 @@ accelerate launch --num_processes 3 --config_file configs/ds_configs/deepspeed_z
     --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_eval_splits validation \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --learning_rate 3e-6 \
     --output_dir models/minimal/online_dpo_vllm_thread_tldr \
     --per_device_train_batch_size 2 \

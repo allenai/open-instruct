@@ -39,6 +39,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from open_instruct.utils import retry_on_exception
+from open_instruct.ground_truth_utils import verify_gsm8k_sample, verify_math_sample
 
 
 @dataclass
@@ -204,6 +205,31 @@ def get_reward(
         ),  # Shape: (batch_size,)
         sequence_lengths,
     )
+
+
+def apply_verifiable_reward(
+    query_responses: torch.Tensor, tokenizer, ground_truths: List[str], datasets: List[str], verify_reward : int = 10
+):
+    # decode the responses
+    decoded_responses = tokenizer.batch_decode(query_responses, skip_special_tokens=True)
+    # compare with ground truth.
+    # use same logic as in gsm8k evaluation
+    rewards = []
+    for prediction, ground_truth, dataset in zip(decoded_responses, ground_truths, datasets):
+        verified = False
+        if dataset.lower() == 'gsm8k':
+            verified = verify_gsm8k_sample(prediction, ground_truth)
+        elif dataset.lower() == 'math':
+            verified = verify_math_sample(prediction, ground_truth)
+        # if verified, give reward
+        if verified:
+            print("Applying ground truth reward 🤗")
+            rewards.append(verify_reward)
+        else:
+            rewards.append(0)
+    rewards_tensors = torch.tensor(rewards, device=query_responses.device)
+    # return rewards and count of times we applied reward
+    return rewards_tensors, (rewards_tensors > 0).sum().float().view(-1)
 
 
 def forward(
