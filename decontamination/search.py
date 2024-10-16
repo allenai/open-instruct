@@ -2,7 +2,9 @@
 import os
 import json
 import argparse
+from collections import defaultdict
 from tqdm import tqdm
+import spacy
 from datasets import load_dataset
 from elasticsearch import Elasticsearch
 
@@ -15,6 +17,8 @@ parser.add_argument("--field", type=str, nargs="+")
 parser.add_argument("--limit", type=int, help="Limit the number of eval instances")
 parser.add_argument("--index_name", type=str, required=True)
 parser.add_argument("--index_type", type=str, choices=["text", "vector"], default="text")
+parser.add_argument("--ngram_size", type=int, help="If `index_type` is `text`, will use n-gram matches of this size if this field is set. Default is full match.")
+parser.add_argument("--match_threshold", type=float, help="For ngram and vector matching, transform match scores to 0/1 based on this threshold.")
 parser.add_argument("--model", type=str, default="nvidia/NV-Embed-v2")
 parser.add_argument("--max_batch_tokens", type=int, default=10000, help="Maximum number of tokens per batch if the `index_type` is `vector`.")
 parser.add_argument("--output_dir", type=str, required=True)
@@ -62,6 +66,14 @@ if args.index_type == "vector":
         print("Found multiple gpus. Will use data parallel.")
         for module_key, module in model._modules.items():
             model._modules[module_key] = torch.nn.DataParallel(module)
+elif args.ngram_size is not None:
+    SPACY_MODEL = spacy.load("en_core_web_lg")
+    def get_ngram_mapping(string: str, n: int):
+        doc = SPACY_MODEL(string)
+        ngram_docs = [doc[i:i+n] for i in range(len(doc) - n + 1)]
+        # Mapping from the ngram to the indices of tokens in the original string.
+        mapping = {ngram_doc.text: [token.i for token in ngram_doc] for ngram_doc in ngram_docs}
+        return mapping
 
 mean_match_scores = {}
 for dataset, subset, split, fields, limit in eval_sets:
@@ -85,32 +97,84 @@ for dataset, subset, split, fields, limit in eval_sets:
             query_strings = [datum[field] for field in fields]
             if any([s is None for s in query_strings]):
                 continue
-            search_output = es.search(
-                index=args.index_name,
-                search_type="query_then_fetch",
-                rest_total_hits_as_int=True,
-                query={
-                    "bool": {
-                        "filter": [
-                            {
-                                "match_phrase": {
-                                    "text": query_str
+            
+            if args.ngram_size is None:
+                search_output = es.search(
+                    index=args.index_name,
+                    search_type="query_then_fetch",
+                    rest_total_hits_as_int=True,
+                    query={
+                        "bool": {
+                            "filter": [
+                                {
+                                    "match_phrase": {
+                                        "text": query_str
+                                    }
+                                }
+                                for query_str in query_strings
+                            ] 
+                        }
+                    }
+                )
+                num_hits = search_output["hits"]["total"]
+                match_scores.append(1 if num_hits > 0 else 0)
+                output_data.append(
+                    {
+                        "query": query_strings,
+                        "num_hits": num_hits,
+                    }
+                )
+            else:
+                query_string_match_scores = []
+                matching_doc_ids = set()
+                doc_id_text_mapping = {}
+                for query_string in query_strings:
+                    # We compute the match score for each query string for ngram matches as follows:
+                    # For each token in the query string, we retrieve the training documents that contain ngrams from the query string
+                    # the token belongs to. Then we compute the match score as the ratio of the tokens in the query string that match that training document.
+                    query_string_length = len(SPACY_MODEL(query_string))
+                    ngram_mapping = get_ngram_mapping(query_string)
+                    train_doc_matches = defaultdict(list)
+                    for ngram, tokens in ngram_mapping.items():
+                        search_output = es.search(
+                            index=args.index_name,
+                            search_type="query_then_fetch",
+                            rest_total_hits_as_int=True,
+                            query={
+                                "bool": {
+                                    "filter": [
+                                        {
+                                            "match_phrase": {
+                                                "text": ngram
+                                            }
+                                        }
+                                    ] 
                                 }
                             }
-                            for query_str in query_strings
-                        ] 
-                    }
-                }
-            )
-            num_hits = search_output["hits"]["total"]
-            match_scores.append(1 if num_hits > 0 else 0)
-            output_data.append(
-                {
-                    "query": query_strings,
-                    "num_hits": num_hits,
-                }
-            )
+                        )
+                        train_doc_ids = [h["_id"] for h in search_output["hits"]["hits"]]
+                        train_texts = [h["_source"]["text"] for h in search_output["hits"]["hits"]]
+                        for doc_id, text in zip(train_doc_ids, train_texts):
+                            train_doc_matches[doc_id].extend(tokens)
+                            matching_doc_ids.add(doc_id)
+                            doc_id_text_mapping[doc_id] = text
 
+                    query_string_match_scores.append({doc_id: len(matching_tokens) / query_string_length for doc_id, matching_tokens in train_doc_matches.items()})
+                
+                # Averaging the match scores of training documents over all query strings.
+                aggregated_match_scores = {doc_id: sum([x.get(doc_id, 0.0) for x in query_string_match_scores]) / len(query_string_match_scores) for doc_id in matching_doc_ids}
+                largest_match_doc_id, match_score = sorted(aggregated_match_scores.items(), key=lambda x: x[1], reverse=True)[0]
+                match_scores.append(match_score)
+                output_data.append(
+                    {
+                        "query": query_strings,
+                        "largest_match": {
+                            "doc_id": largest_match_doc_id,
+                            "text": doc_id_text_mapping[largest_match_doc_id]
+                        },
+                        "score": match_score,
+                    }
+                )                
     else:
         batch_inputs = []
         batch_size = 0
@@ -149,6 +213,9 @@ for dataset, subset, split, fields, limit in eval_sets:
                 max_seq_tokens = 0
                 batch_size = 0
 
+    
+    if args.match_threshold is not None:
+        match_scores = [1 if score > args.match_threshold else 0 for score in match_scores]
     mean_match_score = sum(match_scores) / len(match_scores)
     print(f"\tMean match score: {mean_match_score}")
     mean_match_scores[dataset] = mean_match_score
