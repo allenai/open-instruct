@@ -198,6 +198,8 @@ class Args:
     """whether to apply verifiable reward"""
     reward_model_multiplier: float = 1.0
     """the reward model multiplier, for down/upscaling the reward model output"""
+    use_plo: bool = False
+    """Toggle PLO: https://arxiv.org/pdf/2010.03956 sec 3.2. Disable grads on 0 reward samples"""
 
     # vLLM settings. NOTE: currently we need to place the vLLM model on a separate GPU
     # for generation to work properly because vLLM would pre-alocate the memory.
@@ -924,6 +926,12 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 advantages = torch.masked_fill(advantages, padding_mask, 0)
                 torch.cuda.empty_cache()
 
+        # if we have plo, apply it here! basically will be augmenting the padding mask
+        if args.use_plo:
+            zero_scores = (scores == 0)[:, None]
+            padding_mask = padding_mask | zero_scores
+            padding_mask_p1 = padding_mask_p1 | zero_scores
+
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         for epoch_idx in range(args.num_epochs):
             b_inds = np.random.permutation(args.local_batch_size)
@@ -967,7 +975,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         pg_loss_max = torch.max(pg_losses, pg_losses2)
                         pg_loss = masked_mean(pg_loss_max, ~padding_mask[micro_batch_inds])
                         loss = pg_loss + args.vf_coef * vf_loss
-
+                        # can happen when no rewards in padding mask, so its 'all padding
+                        if torch.isnan(loss).any():
+                            # just continue to the next loop, skip this.
+                            continue
                         accelerator.backward(loss)
                         optimizer.step()
                         optimizer.zero_grad()
