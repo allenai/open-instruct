@@ -1,6 +1,7 @@
 
 import os
 import json
+import yaml
 import argparse
 from collections import defaultdict
 from tqdm import tqdm
@@ -190,7 +191,8 @@ def main():
     parser.add_argument("--split", type=str, default="test")
     parser.add_argument("--field", type=str, nargs="+")
     parser.add_argument("--limit", type=int, help="Limit the number of eval instances")
-    parser.add_argument("--index_names", type=str, nargs="+", required=True)
+    parser.add_argument("--index_names", type=str, nargs="+")
+    parser.add_argument("--dataset_mixer_config", type=str, help="Path to a train config file in yml format with a `dataset_mixer` field.")
     parser.add_argument("--index_type", type=str, choices=["text", "vector"], default="text")
     parser.add_argument("--ngram_size", type=int, help="If `index_type` is `text`, will use n-gram matches of this size if this field is set. Default is full match.")
     parser.add_argument("--match_threshold", type=float, help="For ngram and vector matching, transform match scores to 0/1 based on this threshold.")
@@ -230,8 +232,19 @@ def main():
         basic_auth=("elastic", os.environ["ELASTIC_PASSWORD"]),
     )
 
+    if args.dataset_mixer_config is not None:
+        print(f"Reading from dataset mixer info from train config: {args.dataset_mixer_config}")
+        train_config = yaml.safe_load(open(args.dataset_mixer_config))
+        dataset_names = list(train_config["dataset_mixer"].keys())
+        index_names = [d.replace("/", "_") + f"_{args.index_type}" for d in dataset_names]
+        print(f"Config has {len(dataset_names)} datasets. Looking for corresponding indexes: {index_names}")
+    elif args.index_names is not None:
+        index_names = args.index_names
+    else:
+        raise RuntimeError("Specify index_names or provide a train config file with dataset mixer info.")
+
     all_index_match_scores = []
-    for index_name in args.index_names:
+    for index_name in index_names:
         mean_match_scores = {}
         for dataset, subset, split, fields, limit in eval_sets:
             print(f"Querying {index_name} for {dataset}.")
@@ -274,3 +287,7 @@ def main():
         print("\t" + "\t".join(ev[0] for ev in eval_sets), file=outfile)
         for index_name, mean_match_scores in zip(args.index_names, all_index_match_scores):
             print(index_name + "\t" + "\t".join([f"{mean_match_scores[ev[0]]:.4f}" for ev in eval_sets]), file=outfile)
+
+
+if __name__ == "__main__":
+    main()
