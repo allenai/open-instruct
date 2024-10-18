@@ -126,6 +126,7 @@ def ngram_match(es, index_name, query_dataset, fields, ngram_size):
             # Averaging the match scores of training documents over all query strings.
             aggregated_match_scores = {doc_id: sum([x.get(doc_id, 0.0) for x in query_string_match_scores]) / len(query_string_match_scores) for doc_id in matching_doc_ids}
             largest_match_doc_id, match_score = sorted(aggregated_match_scores.items(), key=lambda x: x[1], reverse=True)[0]
+            match_scores.append(match_score)
             match_info = {
                 "query": query_strings,
                 "largest_match": {
@@ -285,7 +286,7 @@ def main():
     print(f"TSV file with all results: {output_file}")
     with open(output_file, "w") as outfile:
         print("\t" + "\t".join(ev[0] for ev in eval_sets), file=outfile)
-        for index_name, mean_match_scores in zip(args.index_names, all_index_match_scores):
+        for index_name, mean_match_scores in zip(index_names, all_index_match_scores):
             print(index_name + "\t" + "\t".join([f"{mean_match_scores[ev[0]]:.4f}" for ev in eval_sets]), file=outfile)
 
 

@@ -76,10 +76,10 @@ def read_dataset(dataset_name, split, messages_field, query_filter, query_field)
 def index_dataset_text(data_to_index, es, index_name, text_batch_size):
     stats = es.indices.stats(index=index_name)
     index_size = stats["indices"][index_name]["total"]["docs"]["count"]
-    print(f"Index size: {index_size}.")
+    if index_size > 0:
+        print(f"Index of size {index_size} exist. Adding data.")
 
     if index_size < len(data_to_index):
-        print(f"Adding data")
         idx = index_size
         with tqdm.tqdm(total=len(data_to_index) - idx) as pbar:
             while idx < len(data_to_index):
@@ -95,14 +95,16 @@ def index_dataset_text(data_to_index, es, index_name, text_batch_size):
                 helpers.bulk(es, bulk_data)
                 idx += len(bulk_data)
                 pbar.update(len(bulk_data))
+        print(f"Indexing into {index_name} complete!\n")
     else:
-        print("All data is already indexed. Nothing to do.")
+        print("All data is already indexed. Nothing to do.\n")
 
 
 def index_dataset_vectors(data_to_index, es, index_name, model_name, max_batch_tokens):
     stats = es.indices.stats(index=index_name)
     index_size = stats["indices"][index_name]["total"]["docs"]["count"]
-    print(f"Index size: {index_size}.")
+    if index_size > 0:
+        print(f"Index of size {index_size} exist. Adding data.")
 
     if index_size < len(data_to_index):
         # Embedding model setup
@@ -161,8 +163,10 @@ def index_dataset_vectors(data_to_index, es, index_name, model_name, max_batch_t
 
                 helpers.bulk(es, bulk_data)
                 pbar.update(len(batch_data))
+
+        print(f"Indexing into {index_name} complete!\n")
     else:
-        print("All data is already indexed. Nothing to do.")
+        print("All data is already indexed. Nothing to do.\n")
 
 
 def main():
@@ -184,7 +188,7 @@ def main():
         print(f"Reading from dataset mixer info from train config: {args.dataset_mixer_config}")
         train_config = yaml.safe_load(open(args.dataset_mixer_config))
         dataset_names = list(train_config["dataset_mixer"].keys())
-        print(f"Indexing {len(dataset_names)}: {dataset_names}")
+        print(f"Indexing {len(dataset_names)} datasets: {dataset_names}")
     elif args.dataset is not None:
         dataset_names = [args.dataset]
     else:
@@ -194,7 +198,8 @@ def main():
         args.es_url,
         basic_auth=("elastic", os.environ["ELASTIC_PASSWORD"]),
     )
-    for dataset_name in dataset_names:
+    for i, dataset_name in enumerate(dataset_names):
+        print(f"Processing dataset {i+1} / {len(dataset_names)}: {dataset_name}")
         data_to_index = read_dataset(
             dataset_name=dataset_name,
             split=args.split,
