@@ -237,7 +237,7 @@ def main():
         print(f"Reading from dataset mixer info from train config: {args.dataset_mixer_config}")
         train_config = yaml.safe_load(open(args.dataset_mixer_config))
         dataset_names = list(train_config["dataset_mixer"].keys())
-        index_names = [d.replace("/", "_") + f"_{args.index_type}" for d in dataset_names]
+        index_names = [d.replace("/", "_").lower() + f"_{args.index_type}" for d in dataset_names]
         print(f"Config has {len(dataset_names)} datasets. Looking for corresponding indexes: {index_names}")
     elif args.index_names is not None:
         index_names = args.index_names

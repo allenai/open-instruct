@@ -207,7 +207,7 @@ def main():
             query_filter=args.query_filter,
             query_field=args.query_field
         )
-        index_name = dataset_name.replace("/", "_") + f"_{args.index_type}"
+        index_name = dataset_name.replace("/", "_").lower() + f"_{args.index_type}"
         if args.index_type == "text":
             if not es.indices.exists(index=index_name):
                 create_text_index(es, index_name=index_name)
