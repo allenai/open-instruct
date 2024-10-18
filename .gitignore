@@ -143,3 +143,4 @@ dmypy.json
 .pyre/
 
 .idea/
+lj_run_script.sh
