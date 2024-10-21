@@ -4,6 +4,7 @@ My dumb script to create ground truth data for GTRL training.
 import os
 import re
 import random
+from tqdm import tqdm
 
 from datasets import load_dataset, Dataset, DatasetDict
 
@@ -76,6 +77,11 @@ MATH_EXAMPLARS = [
         "short_answer": "-\\frac{2}{3}"
     }
 ]
+math_messages = [
+    [{'role': 'user', 'content': sample['question']}, {'role': 'assistant', 'content': sample['cot_answer']}] for sample in MATH_EXAMPLARS
+]
+# flatten
+math_messages = [item for sublist in math_messages for item in sublist]
 
 # now, we construct gsm8k data
 gsm8k_prompt = ""
@@ -152,3 +158,76 @@ for sample in metamathqa_dataset:
 random.shuffle(new_data)
 dataset = Dataset.from_list(new_data)
 dataset.push_to_hub("ai2-adapt-dev/metamathqa_ground_truth")
+
+# alternate dataset: numina-tir
+metamathqa_dataset = load_dataset("AI-MO/NuminaMath-TIR", split="train")
+# let's re-use the MATH prompt.
+new_data = []
+def find_last_outermost_boxed(string):
+    idx = string.rfind("\\boxed")
+    if "\\boxed " in string:
+        return "\\boxed " + string.split("\\boxed ")[-1].split("$")[0]
+    if idx < 0:
+        idx = string.rfind("\\fbox")
+        if idx < 0:
+            return None
+
+    i = idx
+    right_brace_idx = None
+    num_left_braces_open = 0
+    while i < len(string):
+        if string[i] == "{":
+            num_left_braces_open += 1
+        if string[i] == "}":
+            num_left_braces_open -= 1
+            if num_left_braces_open == 0:
+                right_brace_idx = i
+                break
+        i += 1
+
+    if right_brace_idx is None:
+        retval = None
+    else:
+        retval = string[idx : right_brace_idx + 1]
+    if retval is not None:
+        retval = retval[7:-1]  # remove \boxed{}
+    return retval
+for sample in tqdm(metamathqa_dataset):
+    # same code used to extract answer for eval
+    answer = find_last_outermost_boxed(sample["solution"])
+    if answer is None:
+        print("skipping")
+        continue
+    # lets use multi-turn cot prompt instead
+    new_data.append({
+        "messages": math_messages + [{"role": "user", "content":  f"{sample['problem'].strip()}"}],
+        "ground_truth": answer,
+        "dataset": "MATH"  # lets use the math eval setup
+    })
+
+# combine into one dataset and push
+random.shuffle(new_data)
+dataset = Dataset.from_list(new_data)
+dataset.push_to_hub("ai2-adapt-dev/numinamath_tir_ground_truth")
+
+# alternate dataset: numina-cot (much, much larger)
+metamathqa_dataset = load_dataset("AI-MO/NuminaMath-CoT", split="train")
+# let's re-use the MATH prompt.
+new_data = []
+for sample in tqdm(metamathqa_dataset):
+    # same code used to extract answer for eval
+    answer = find_last_outermost_boxed(sample["solution"])
+    if answer is None:
+        print("skipping")
+        continue
+    # lets use multi-turn cot prompt instead
+    new_data.append({
+        "messages": math_messages + [{"role": "user", "content":  f"{sample['problem'].strip()}"}],
+        "ground_truth": answer,
+        "dataset": "MATH"  # lets use the math eval setup
+    })
+
+# combine into one dataset and push
+random.shuffle(new_data)
+dataset = Dataset.from_list(new_data)
+dataset.push_to_hub("ai2-adapt-dev/numinamath_cot_ground_truth")
