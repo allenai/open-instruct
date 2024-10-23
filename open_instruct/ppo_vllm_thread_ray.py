@@ -1,3 +1,32 @@
+# Copyright 2024 AllenAI. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Part of the code is adapted from https://github.com/OpenRLHF/OpenRLHF
+# which has the following license:
+# Copyright [yyyy] [name of copyright owner]
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 from argparse import Namespace
 import gc
 import json
@@ -12,7 +41,7 @@ import threading
 import time
 from dataclasses import asdict, dataclass
 from queue import Empty, Queue
-from typing import Iterator, List, Literal, Optional, Tuple
+from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
 from datetime import timedelta
 from transformers.deepspeed import HfDeepSpeedConfig
 
@@ -85,108 +114,6 @@ from open_instruct.utils import (
     upload_metadata_to_hf,
 )
 from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
-
-
-def get_train_ds_config(
-    offload,
-    adam_offload=False,
-    stage=0,
-    bf16=True,
-    max_norm=1.0,
-    zpg=8,
-    grad_accum_dtype=None,
-    disable_trace_cache=True,
-):
-    device = "cpu" if offload else "none"
-    zero_opt_dict = {
-        "stage": stage,
-        "offload_param": {"device": device},
-        "offload_optimizer": {
-            "device": "cpu" if adam_offload else "none",
-            "pin_memory": True,
-        },
-        "sub_group_size": "auto",
-        "stage3_max_live_parameters": "auto",
-        "stage3_max_reuse_distance": "auto",
-        "stage3_param_persistence_threshold": "auto",
-        "stage3_prefetch_bucket_size": "auto",
-        "reduce_bucket_size": "auto",
-        # # ZeRO++
-        # "zero_hpz_partition_size": zpg,
-        # "zero_quantized_weights": False,
-        # "zero_quantized_gradients": False,
-    }
-    if disable_trace_cache:
-        zero_opt_dict["stage3_prefetch_bucket_size"] = 0
-        zero_opt_dict["stage3_max_live_parameters"] = 0
-        zero_opt_dict["stage3_max_reuse_distance"] = 0
-
-    return {
-        "steps_per_print": 100,
-        "zero_optimization": zero_opt_dict,
-        "bf16": {
-            "enabled": bf16,
-        },
-        "gradient_clipping": max_norm,
-        "prescale_gradients": False,
-        "wall_clock_breakdown": False,
-        "data_types": {"grad_accum_dtype": grad_accum_dtype if grad_accum_dtype else "fp32"},
-    }
-
-
-def get_eval_ds_config(
-    offload,
-    stage=0,
-    bf16=True,
-):
-    zero_opt_dict = {
-        "stage": stage,
-        "stage3_param_persistence_threshold": "auto",
-        "offload_param": {
-            "device": "cpu" if offload else "none",
-            "pin_memory": True,
-        },
-    }
-    return {
-        "steps_per_print": 100,
-        "zero_optimization": zero_opt_dict,
-        "bf16": {
-            "enabled": bf16,
-        },
-        "prescale_gradients": False,
-        "wall_clock_breakdown": False,
-    }
-
-
-def get_optimizer_grouped_parameters(
-    model,
-    weight_decay,
-    no_decay_name_list=["bias", "layer_norm.weight", "layernorm.weight", "norm.weight", "ln_f.weight"],
-):
-    optimizer_grouped_parameters = [
-        {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if (not any(nd in n for nd in no_decay_name_list) and p.requires_grad)
-            ],
-            "weight_decay": weight_decay,
-        },
-        {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if (any(nd in n for nd in no_decay_name_list) and p.requires_grad)
-            ],
-            "weight_decay": 0.0,
-        },
-    ]
-    return optimizer_grouped_parameters
-
-
-def _z3_params_to_fetch(param_list):
-    return [p for p in param_list if hasattr(p, "ds_id") and p.ds_status == ZeroParamStatus.NOT_AVAILABLE]
-
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -421,6 +348,108 @@ def calculate_runtime_args(args: Args, model_config: ModelConfig):
     if args.with_tracking:
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
+
+
+
+def get_train_ds_config(
+    offload,
+    adam_offload=False,
+    stage=0,
+    bf16=True,
+    max_norm=1.0,
+    zpg=8,
+    grad_accum_dtype=None,
+    disable_trace_cache=True,
+):
+    device = "cpu" if offload else "none"
+    zero_opt_dict = {
+        "stage": stage,
+        "offload_param": {"device": device},
+        "offload_optimizer": {
+            "device": "cpu" if adam_offload else "none",
+            "pin_memory": True,
+        },
+        "sub_group_size": "auto",
+        "stage3_max_live_parameters": "auto",
+        "stage3_max_reuse_distance": "auto",
+        "stage3_param_persistence_threshold": "auto",
+        "stage3_prefetch_bucket_size": "auto",
+        "reduce_bucket_size": "auto",
+        # # ZeRO++
+        # "zero_hpz_partition_size": zpg,
+        # "zero_quantized_weights": False,
+        # "zero_quantized_gradients": False,
+    }
+    if disable_trace_cache:
+        zero_opt_dict["stage3_prefetch_bucket_size"] = 0
+        zero_opt_dict["stage3_max_live_parameters"] = 0
+        zero_opt_dict["stage3_max_reuse_distance"] = 0
+
+    return {
+        "steps_per_print": 100,
+        "zero_optimization": zero_opt_dict,
+        "bf16": {
+            "enabled": bf16,
+        },
+        "gradient_clipping": max_norm,
+        "prescale_gradients": False,
+        "wall_clock_breakdown": False,
+        "data_types": {"grad_accum_dtype": grad_accum_dtype if grad_accum_dtype else "fp32"},
+    }
+
+
+def get_eval_ds_config(
+    offload,
+    stage=0,
+    bf16=True,
+):
+    zero_opt_dict = {
+        "stage": stage,
+        "stage3_param_persistence_threshold": "auto",
+        "offload_param": {
+            "device": "cpu" if offload else "none",
+            "pin_memory": True,
+        },
+    }
+    return {
+        "steps_per_print": 100,
+        "zero_optimization": zero_opt_dict,
+        "bf16": {
+            "enabled": bf16,
+        },
+        "prescale_gradients": False,
+        "wall_clock_breakdown": False,
+    }
+
+
+def get_optimizer_grouped_parameters(
+    model,
+    weight_decay,
+    no_decay_name_list=["bias", "layer_norm.weight", "layernorm.weight", "norm.weight", "ln_f.weight"],
+):
+    optimizer_grouped_parameters = [
+        {
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if (not any(nd in n for nd in no_decay_name_list) and p.requires_grad)
+            ],
+            "weight_decay": weight_decay,
+        },
+        {
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if (any(nd in n for nd in no_decay_name_list) and p.requires_grad)
+            ],
+            "weight_decay": 0.0,
+        },
+    ]
+    return optimizer_grouped_parameters
+
+
+def _z3_params_to_fetch(param_list):
+    return [p for p in param_list if hasattr(p, "ds_id") and p.ds_status == ZeroParamStatus.NOT_AVAILABLE]
 
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[bool] = None) -> torch.Tensor:
@@ -1124,10 +1153,59 @@ class PolicyTrainerRayProcess(RayProcess):
             torch.cuda.empty_cache()
             print(f"finished training {training_step}")
         print("finished training")
-        print("finished training")
-        print("finished training")
-        print("finished training")
 
+    def save_model(self, tokenizer: PreTrainedTokenizer, output_dir: str) -> None:
+        if self.rank == 0:
+            os.makedirs(output_dir, exist_ok=True)
+
+        # save model weights for ZeRO2/3
+        model_to_save = self.model
+
+        # gather parameters
+        output_state_dict = {}
+        for k, v in model_to_save.named_parameters():
+            # only gather z3 params
+            params_to_fetch = _z3_params_to_fetch([v])
+            with deepspeed.zero.GatheredParameters(params_to_fetch, enabled=len(params_to_fetch) > 0):
+                vv = v.data.cpu()
+                if self.rank == 0:
+                    output_state_dict[k] = vv
+
+        if self.rank == 0:
+            state_dict = model_to_save.state_dict()
+
+            # copy named_buffers with `persistent=True`
+            for k, v in model_to_save.named_buffers():
+                if k not in state_dict:
+                    continue
+                vv = v.data.cpu()
+                output_state_dict[k] = vv
+
+            state_dict_keys = set(state_dict.keys())
+            output_state_dict_keys = set(output_state_dict.keys())
+
+            # corner case for tie_word_embeddings, such as Qwen2-0.5B
+            if getattr(model_to_save.config, "tie_word_embeddings", False) and "lm_head.weight" in state_dict_keys:
+                state_dict_keys.remove("lm_head.weight")
+
+            assert state_dict_keys.issubset(
+                output_state_dict_keys
+            ), f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
+
+            # # only save peft weights https://github.com/microsoft/DeepSpeed/issues/4295
+            # if isinstance(model_to_save, PeftModel):
+            #     model_to_save.save_pretrained(output_dir, **kwargs)
+            #     if self.stage == 3:
+            #         torch.save(
+            #             get_peft_model_state_dict(model_to_save, output_state_dict),
+            #             os.path.join(output_dir, "adapter_model.bin"),
+            #         )
+            # else:
+            # save model
+            model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
+
+            # save tokenizer
+            tokenizer.save_pretrained(output_dir)
 
 @ray.remote(num_gpus=1)
 class ReferenceModelRayProcess(RayProcess):
@@ -1307,8 +1385,10 @@ class RewardModelRayProcess(RayProcess):
         return self.reward_model.config.vocab_size
 
 
-def kill_ray_cluster_if_a_worker_dies(object_refs):
+def kill_ray_cluster_if_a_worker_dies(object_refs: List[Any], stop_event: threading.Event):
     while True:
+        if stop_event.is_set():
+            break
         for ref in object_refs:
             try:
                 ref_result = ray.get(ref, timeout=0.01)
@@ -1320,7 +1400,7 @@ def kill_ray_cluster_if_a_worker_dies(object_refs):
                 print(e)
                 os._exit(1)  # Force shutdown the process
 
-        time.sleep(100)  # Check every 10 seconds
+        time.sleep(30)
 
 
 class ModelGroup:
@@ -1541,9 +1621,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # somtimes a worker dies due to CUDA issues, but the rest of the cluster would just hang
     # so we need kill the ray cluster when this happens.
-    threading.Thread(target=kill_ray_cluster_if_a_worker_dies, args=(refs,)).start()
+    stop_event = threading.Event()
+    threading.Thread(target=kill_ray_cluster_if_a_worker_dies, args=(refs, stop_event)).start()
 
-    # gather metrics
+    # train and gather metrics
     resume_training_step = 1
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         result = metrics_queue.get()
@@ -1552,75 +1633,70 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             writer.add_scalar(key, value, episode)
     ray.get(refs)
 
+    # save model
+    original_tokenizer = AutoTokenizer.from_pretrained(
+        model_config.model_name_or_path, revision=model_config.model_revision
+    )
+    ray.get([policy_model.save_model.remote(original_tokenizer, args.output_dir) for policy_model in policy_group.models])
+    ray.shutdown()
+    stop_event.set()
 
-    # if not ph.preemptied:
-    #     # save model
-    #     os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
-    #     original_tokenizer = AutoTokenizer.from_pretrained(
-    #         model_config.model_name_or_path, revision=model_config.model_revision
-    #     )
-    #     save_with_accelerate(
-    #         accelerator,
-    #         model,
-    #         original_tokenizer,
-    #         args.output_dir,
-    #         model_attribute_to_save="policy",
-    #     )
+    # Ai2 specific logic
+    if is_beaker_job():
+        if args.hf_metadata_dataset:
+            dataset_list = list(args.dataset_mixer_dict.keys())
+            # mainly just focussing here on what would be useful for the leaderboard.
+            # wandb will have even more useful information.
+            metadata_blob = {
+                "model_name": args.exp_name,
+                "model_type": "sft",
+                "datasets": dataset_list,
+                "base_model": model_config.model_name_or_path,
+                "wandb_path": wandb.run.get_url(),
+                "beaker_experiment": beaker_config.beaker_experiment_url,
+                "beaker_datasets": beaker_config.beaker_dataset_id_urls,
+            }
+            upload_metadata_to_hf(
+                metadata_blob,
+                "metadata.json",
+                args.hf_metadata_dataset,
+                "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
+            )
 
-    #     # Ai2 specific logic
-    #     if is_beaker_job() and accelerator.is_main_process:
-    #         if args.hf_metadata_dataset:
-    #             dataset_list = list(args.dataset_mixer_dict.keys())
-    #             # mainly just focussing here on what would be useful for the leaderboard.
-    #             # wandb will have even more useful information.
-    #             metadata_blob = {
-    #                 "model_name": args.exp_name,
-    #                 "model_type": "sft",
-    #                 "datasets": dataset_list,
-    #                 "base_model": model_config.model_name_or_path,
-    #                 "wandb_path": wandb.run.get_url(),
-    #                 "beaker_experiment": beaker_config.beaker_experiment_url,
-    #                 "beaker_datasets": beaker_config.beaker_dataset_id_urls,
-    #             }
-    #             upload_metadata_to_hf(
-    #                 metadata_blob,
-    #                 "metadata.json",
-    #                 args.hf_metadata_dataset,
-    #                 "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
-    #             )
+        if args.try_launch_beaker_eval_jobs and len(beaker_config.beaker_dataset_id_urls) > 0:
+            command = f"""\
+            python mason.py  \
+                --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/s2-cirrascale ai2/general-cirrascale \
+                --priority low \
+                --preemptible \
+                --budget ai2/allennlp \
+                --workspace ai2/tulu-2-improvements \
+                --image nathanl/open_instruct_auto \
+                --pure_docker_mode \
+                --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
+                --beaker_workload_id {beaker_config.beaker_workload_id} \
+                --model_name {args.hf_repo_revision}
+            """
+            process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = process.communicate()
+            print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
+            print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
+            print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
 
-    #         if args.try_launch_beaker_eval_jobs and len(beaker_config.beaker_dataset_id_urls) > 0:
-    #             command = f"""\
-    #             python mason.py  \
-    #                 --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/s2-cirrascale ai2/general-cirrascale \
-    #                 --priority low \
-    #                 --preemptible \
-    #                 --budget ai2/allennlp \
-    #                 --workspace ai2/tulu-2-improvements \
-    #                 --image nathanl/open_instruct_auto \
-    #                 --pure_docker_mode \
-    #                 --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
-    #                 --beaker_workload_id {beaker_config.beaker_workload_id} \
-    #                 --model_name {args.hf_repo_revision}
-    #             """
-    #             process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    #             stdout, stderr = process.communicate()
-    #             print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
-    #             print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
-    #             print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+    accelerator = Namespace()
+    accelerator.is_main_process = True # hack
+    if args.push_to_hub:
+        push_folder_to_hub(
+            accelerator,
+            args.output_dir,
+            args.hf_repo_id,
+            args.hf_repo_revision,
+        )
 
-    #     if args.push_to_hub:
-    #         push_folder_to_hub(
-    #             accelerator,
-    #             args.output_dir,
-    #             args.hf_repo_id,
-    #             args.hf_repo_revision,
-    #         )
-
-    #     if accelerator.is_main_process:
-    #         # remove args.checkpoint_output_dir
-    #         if os.path.exists(args.checkpoint_output_dir):
-    #             shutil.rmtree(args.checkpoint_output_dir, ignore_errors=True)
+    if accelerator.is_main_process:
+        # remove args.checkpoint_output_dir
+        if os.path.exists(args.checkpoint_output_dir):
+            shutil.rmtree(args.checkpoint_output_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
