@@ -79,6 +79,7 @@ make quality
 |     ├── beaker_configs/       <- AI2 Beaker configs
 |     ├── ds_configs/           <- DeepSpeed configs
 |     └── train_configs/        <- Training configs
+├── decontamination/            <- Scripts for measuring train-eval overlap
 ├── eval/                       <- Evaluation suite for fine-tuned models
 ├── human_eval/                 <- Human evaluation interface (not maintained)
 ├── open_instruct/              <- Source code (flat)
@@ -223,6 +224,10 @@ python scripts/add_metadata_from_wandb.py --hf_repo_revision valpy_dpo_mix_uf_wc
 ### Human evaluation
 
 We release our human evaluation interface and collected annotations in the `./human_eval` folder. Please see the corresponding [README](./human_eval/README.md) for more details.
+
+## Contamination checks
+
+We release our scripts for measuring the overlap between instruction tuning datasets and evaluation datasets in `./decontamination`. See the [README](./decontamination/README.md) for more details.
 
 ## Licensing
 
