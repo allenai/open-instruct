@@ -1,14 +1,8 @@
-"""
-You need Elasticsearch up and running. You can run it locally as follows:
-https://www.elastic.co/guide/en/elasticsearch/reference/current/run-elasticsearch-locally.html
-"""
-
 import os
 import argparse
-import json
 import yaml
 
-import tqdm.autonotebook
+from tqdm import tqdm
 from datasets import load_dataset
 from elasticsearch import Elasticsearch, helpers
 
@@ -58,7 +52,7 @@ def read_dataset(dataset_name, split, messages_field, query_filter, query_field)
 
     print(f"Reading {messages_field} from {dataset_name}")
 
-    for i, datum in tqdm.tqdm(enumerate(dataset)):
+    for i, datum in tqdm(enumerate(dataset)):
         for message in datum[messages_field]:
             if message[query_filter_key] == query_filter_value:
                 data_to_index.append(
@@ -81,7 +75,7 @@ def index_dataset_text(data_to_index, es, index_name, text_batch_size):
 
     if index_size < len(data_to_index):
         idx = index_size
-        with tqdm.tqdm(total=len(data_to_index) - idx) as pbar:
+        with tqdm(total=len(data_to_index) - idx) as pbar:
             while idx < len(data_to_index):
                 bulk_data = []
                 for datum in data_to_index[idx: idx+text_batch_size]:
@@ -127,7 +121,7 @@ def index_dataset_vectors(data_to_index, es, index_name, model_name, max_batch_t
 
         # Indexing
         print("Indexing data (you can stop it by pressing Ctrl+C once):")
-        with tqdm.tqdm(total=len(data_to_index) - idx) as pbar:
+        with tqdm(total=len(data_to_index) - idx) as pbar:
             while idx < len(data_to_index):
                 batch_data = []
                 batch_inputs = []
