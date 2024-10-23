@@ -453,8 +453,8 @@ def get_cache_ref_logprobs(
             active_dataloader = accelerator.skip_first_batches(active_dataloader, resume_step)
         cached_reference_chosen_logps = []
         cached_reference_rejected_logps = []
-        for step, batch in tqdm(enumerate(active_dataloader), disable=not accelerator.is_local_main_process):
-            with torch.no_grad():
+        with torch.no_grad():
+            for step, batch in tqdm(enumerate(active_dataloader), disable=not accelerator.is_local_main_process):
                 if args.use_lora:
                     with accelerator.unwrap_model(model).disable_adapter():
                         reference_chosen_logps, reference_rejected_logps, _ = concatenated_forward(
@@ -464,8 +464,8 @@ def get_cache_ref_logprobs(
                     reference_chosen_logps, reference_rejected_logps, _ = concatenated_forward(
                         model, batch, average_log_prob=average_log_prob
                     )
-                    cached_reference_chosen_logps.append(reference_chosen_logps.cpu())
-                    cached_reference_rejected_logps.append(reference_rejected_logps.cpu())
+                cached_reference_chosen_logps.append(reference_chosen_logps.cpu())
+                cached_reference_rejected_logps.append(reference_rejected_logps.cpu())
         epoch_cached_reference_chosen_logps.append(cached_reference_chosen_logps)
         epoch_cached_reference_rejected_logps.append(cached_reference_rejected_logps)
     return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps
@@ -969,8 +969,6 @@ def main(args: FlatArguments):
                     p_device = policy_chosen_logps.device
                     reference_chosen_logps = epoch_cached_reference_chosen_logps[epoch][step].to(p_device)
                     reference_rejected_logps = epoch_cached_reference_rejected_logps[epoch][step].to(p_device)
-                    if step == 0:
-                        logger.info(f"{epoch=}, {reference_chosen_logps=}, {policy_chosen_logps=}")
                     losses, _, _ = dpo_loss(
                         policy_chosen_logps,
                         policy_rejected_logps,
