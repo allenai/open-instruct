@@ -88,7 +88,7 @@ from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
 
 def get_train_ds_config(
     offload,
-    adam_offload=True,
+    adam_offload=False,
     stage=0,
     bf16=True,
     max_norm=1.0,
@@ -110,10 +110,10 @@ def get_train_ds_config(
         "stage3_param_persistence_threshold": "auto",
         "stage3_prefetch_bucket_size": "auto",
         "reduce_bucket_size": "auto",
-        # # ZeRO++
-        # "zero_hpz_partition_size": zpg,
-        # "zero_quantized_weights": False,
-        # "zero_quantized_gradients": False,
+        # ZeRO++
+        "zero_hpz_partition_size": zpg,
+        "zero_quantized_weights": False,
+        "zero_quantized_gradients": False,
     }
     if disable_trace_cache:
         zero_opt_dict["stage3_prefetch_bucket_size"] = 0
@@ -317,7 +317,7 @@ class Args:
     """number of nodes for reference"""
     ref_num_gpus_per_node: int = 8
     """number of gpus per node for reference"""
-    colocate_actor_ref: bool = True
+    colocate_actor_ref: bool = False
     """whether to colocate reference and actor model, if true, they will share same gpus."""
     reward_num_nodes: int = 1
     """number of nodes for reward model"""
@@ -384,7 +384,7 @@ def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
         raise ValueError("Input must be either a string or a dictionary")
 
 
-def calculate_runtime_args(args: Args, model_config: ModelConfig) -> Accelerator:
+def calculate_runtime_args(args: Args, model_config: ModelConfig):
     """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
     # accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
     # args.world_size = accelerator.num_processes

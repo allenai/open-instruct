@@ -111,10 +111,10 @@ def get_train_ds_config(
         "stage3_param_persistence_threshold": "auto",
         "stage3_prefetch_bucket_size": "auto",
         "reduce_bucket_size": "auto",
-        # ZeRO++
-        "zero_hpz_partition_size": zpg,
-        "zero_quantized_weights": False,
-        "zero_quantized_gradients": False,
+        # # ZeRO++
+        # "zero_hpz_partition_size": zpg,
+        # "zero_quantized_weights": False,
+        # "zero_quantized_gradients": False,
     }
     if disable_trace_cache:
         zero_opt_dict["stage3_prefetch_bucket_size"] = 0
@@ -545,7 +545,7 @@ class PolicyTrainerRayProcess(RayProcess):
             stage=args.deepspeed_stage,
             bf16=True,
         )
-        ds_config["train_micro_batch_size_per_gpu"] = args.local_mini_batch_size
+        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["train_batch_size"] = args.mini_batch_size
         # Costa: MAGIC: it's actually needed to initialize this `dschf`, so 
         # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
@@ -845,7 +845,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
                     queries = queries_next
 
-            print('get reward stuff starts')
+            # print('get reward stuff starts')
             training_time_start = time.time()
             with torch.no_grad():
                 context_length = queries.shape[1]
@@ -869,7 +869,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_vllm_responses = g_vllm_responses[
                     accelerator.process_index * queries.shape[0] : (accelerator.process_index + 1) * queries.shape[0]
                 ]
-                print(f"{local_vllm_responses.shape=}")
+                # print(f"{local_vllm_responses.shape=}, {local_vllm_responses=}")
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
                     print(f"get reward stuff starts {i=}")
@@ -887,13 +887,13 @@ class PolicyTrainerRayProcess(RayProcess):
                         postprocessed_response = truncate_response(
                             args.stop_token_id, tokenizer.pad_token_id, response
                         )
-                    print("get reward stuff starts 2")
+                    # print("get reward stuff starts 2")
                     # Response Processing 2. run reward model on the truncated responses
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
                     reward_future = reward_model.forward.remote(postprocessed_query_response, tokenizer.pad_token_id, context_length)
                     
-                    print("get reward stuff starts 3")
+                    # print("get reward stuff starts 3")
                     # 3. launch value model future
                     value_future = value_model.forward.remote(query_response, tokenizer.pad_token_id, context_length)
 
@@ -901,14 +901,14 @@ class PolicyTrainerRayProcess(RayProcess):
                     logprob = self.forward(query_response, response, tokenizer.pad_token_id, context_length, args.temperature)
                     torch.cuda.empty_cache()
 
-                    print("get reward stuff starts 4")
+                    # print("get reward stuff starts 4")
                     # 5. get results from futures
                     _, score, _ = ray.get(reward_future)
-                    print(f"{score.shape=}")
+                    # print(f"{score.shape=}")
                     full_value, _, _ = ray.get(value_future)
-                    print(f"{full_value.shape=}")
+                    # print(f"{full_value.shape=}")
                     ref_logprob = ray.get(ref_logprob_future)
-                    print(f"{ref_logprob.shape=}")
+                    # print(f"{ref_logprob.shape=}")
                     if args.colocate_critic_reward:
                         ray.get([value_model.empty_cache.remote()])
                         ray.get([reward_model.empty_cache.remote()])
@@ -922,7 +922,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
                     values.append(value)
-                    print(f"get reward stuff starts 5")
+                    # print(f"get reward stuff starts 5")
                 responses = torch.cat(responses, 0)
                 postprocessed_responses = torch.cat(postprocessed_responses, 0)
                 logprobs = torch.cat(logprobs, 0)
@@ -930,7 +930,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
                 values = torch.cat(values, 0)
-                print(f"get reward stuff finished")
+                # print(f"get reward stuff finished")
                 del (logprob, ref_logprob, full_value, value, score)
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -955,7 +955,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 sequence_lengths_p1 = sequence_lengths + 1
                 padding_mask_p1 = response_idxs > (sequence_lengths_p1.unsqueeze(1))
                 values = torch.masked_fill(values, padding_mask_p1, 0)
-                print(f"get reward stuff finished 2")
+                # print(f"get reward stuff finished 2")
 
                 # 4. compute rewards
                 kl1 = logprobs - ref_logprobs
@@ -967,8 +967,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     kl = kl2
                 elif args.kl_estimator == "kl3":
                     kl = kl3
-                # print(f"{accelerator.local_process_index=}, {kl.sum(1)=}")
-                # print(f"{kl[0][:40]}, {kl.sum(1)=}")
+                # if self.rank==0:
+                #     print(f"{logprobs[0][:40]=}, {ref_logprobs[0][:40]=}, {kl.sum(1)=}")
                 non_score_reward = -args.beta * kl
                 non_score_reward_sum = non_score_reward.sum(1)
                 rlhf_reward = scores + non_score_reward_sum
@@ -976,14 +976,14 @@ class PolicyTrainerRayProcess(RayProcess):
                 actual_start = torch.arange(rewards.size(0), device=rewards.device)
                 actual_end = torch.where(sequence_lengths_p1 < rewards.size(1), sequence_lengths_p1, sequence_lengths)
                 rewards[[actual_start, actual_end]] += scores
-                print(f"get reward stuff finished 3")
+                # print(f"get reward stuff finished 3")
 
                 # 5. whiten rewards
                 if args.whiten_rewards:
                     rewards = masked_whiten(rewards, mask=~padding_mask_p1, shift_mean=False)
                     rewards = torch.masked_fill(rewards, padding_mask_p1, 0)
 
-                print('gae')
+                # print('gae')
                 # 6. compute advantages and returns
                 lastgaelam = 0
                 advantages_reversed = []
@@ -999,7 +999,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 advantages = torch.masked_fill(advantages, padding_mask, 0)
                 torch.cuda.empty_cache()
 
-            print('training starts')
+            # print('training starts')
             # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
             for epoch_idx in range(args.num_epochs):
                 b_inds = np.random.permutation(args.local_rollout_batch_size)
@@ -1020,8 +1020,10 @@ class PolicyTrainerRayProcess(RayProcess):
                         mb_values = values[micro_batch_inds]
                         mb_padding_mask_p1 = padding_mask_p1[micro_batch_inds]
 
-                        # value_model_step_future = value_model.step.remote(mb_query_responses, tokenizer.pad_token_id, context_length, mb_padding_mask_p1, mb_return, mb_values, args.cliprange_value, args.vf_coef)
+                        value_model_step_future = value_model.step.remote(mb_query_responses, tokenizer.pad_token_id, context_length, mb_padding_mask_p1, mb_return, mb_values, args.cliprange_value, args.vf_coef)
                         new_logprobs = self.forward(mb_query_responses, mb_responses, tokenizer.pad_token_id, context_length, args.temperature)
+                        # if self.rank==0:
+                        #     print(f"{new_logprobs[0][:40]=}, {mb_logprobs[0][:40]=}")
                         new_logprobs = torch.masked_fill(new_logprobs, padding_mask[micro_batch_inds], INVALID_LOGPROB)
                         logprobs_diff = new_logprobs - mb_logprobs
                         ratio = torch.exp(logprobs_diff)
@@ -1031,25 +1033,25 @@ class PolicyTrainerRayProcess(RayProcess):
                         pg_loss = masked_mean(pg_loss_max, ~padding_mask[micro_batch_inds])
                         loss = pg_loss
                         self.model.backward(loss)
-                        print("backward loss", self.rank, "micro batch start", micro_batch_start)
-                        print("trying to step", self.rank, "micro batch start", micro_batch_start)
+                        # print("backward loss", self.rank, "micro batch start", micro_batch_start)
+                        # print("trying to step", self.rank, "micro batch start", micro_batch_start)
                         self.model.step()
-                        print("step", self.rank, "micro batch start", micro_batch_start)
+                        # print("step", self.rank, "micro batch start", micro_batch_start)
                         with torch.no_grad():
-                            print("waiting for value model step", self.rank, "micro batch start", micro_batch_start)
-                            # vf_loss, vf_clipfrac = ray.get(value_model_step_future)
+                            # print("waiting for value model step", self.rank, "micro batch start", micro_batch_start)
+                            vf_loss, vf_clipfrac = ray.get(value_model_step_future)
                             pg_clipfrac = masked_mean(
                                 (pg_losses2 > pg_losses).float(), ~padding_mask[micro_batch_inds]
                             )
-                            print("value model stepped", self.rank, "micro batch start", micro_batch_start)
+                            # print("value model stepped", self.rank, "micro batch start", micro_batch_start)
                             # prob_dist = torch.nn.functional.softmax(logits, dim=-1)
                             # entropy = torch.logsumexp(logits, dim=-1) - torch.sum(prob_dist * logits, dim=-1)
                             approxkl = 0.5 * (logprobs_diff**2).mean()
                             approxkl_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = approxkl
                             pg_clipfrac_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = pg_clipfrac
                             pg_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = pg_loss
-                            # vf_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = vf_loss
-                            # vf_clipfrac_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = vf_clipfrac
+                            vf_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = vf_loss
+                            vf_clipfrac_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = vf_clipfrac
                             # entropy_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = entropy.mean()
                             ratio_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = ratio.mean()
                         gradient_accumulation_idx += 1
@@ -1062,12 +1064,11 @@ class PolicyTrainerRayProcess(RayProcess):
                     # del everything and empty cache
                     torch.cuda.empty_cache()
                 del b_inds, mini_batch_inds
-            print("start metrics")
+            # print("start metrics")
             with torch.no_grad():
                 local_metrics[0] = sequence_lengths.float().mean()
                 local_metrics[1] = (responses == args.stop_token_id).sum().float().mean()
                 local_metrics[2] = kl.sum(1).mean()
-                print(f"{kl.sum(1).mean()=}", self.rank)
                 local_metrics[3] = (-logprobs).sum(1).mean()
                 local_metrics[4] = non_score_reward_sum.mean()
                 local_metrics[5] = rlhf_reward.mean()
@@ -1113,7 +1114,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 }
                 if accelerator.is_main_process:
                     print_rich_single_line_metrics(metrics)
-                    # metrics_queue.put((metrics, episode))
+                    metrics_queue.put((metrics, episode))
             del (queries, responses, postprocessed_responses, logprobs, ref_logprobs, sequence_lengths, scores, values)
             del (global_metrics, metrics, kl, non_score_reward, non_score_reward_sum, rlhf_reward)
             gc.collect()
@@ -1138,7 +1139,7 @@ class ReferenceModelRayProcess(RayProcess):
             stage=args.deepspeed_stage,
             bf16=True,
         )
-        ds_config["train_micro_batch_size_per_gpu"] = args.local_mini_batch_size
+        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["train_batch_size"] = args.mini_batch_size
         # Costa: MAGIC: it's actually needed to initialize this `dschf`, so 
         # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
@@ -1193,7 +1194,7 @@ class ValueTrainerRayProcess(RayProcess):
             stage=args.deepspeed_stage,
             bf16=True,
         )
-        ds_config["train_micro_batch_size_per_gpu"] = args.local_mini_batch_size
+        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["train_batch_size"] = args.mini_batch_size
         # Costa: MAGIC: it's actually needed to initialize this `dschf`, so 
         # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
@@ -1287,7 +1288,7 @@ class RewardModelRayProcess(RayProcess):
             stage=args.deepspeed_stage,
             bf16=True,
         )
-        ds_config["train_micro_batch_size_per_gpu"] = args.local_mini_batch_size
+        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["train_batch_size"] = args.mini_batch_size
         self.model, *_ = deepspeed.initialize(model=self.reward_model, config=ds_config, dist_init_required=True)
         self.model.eval()
@@ -1507,12 +1508,12 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         )
 
     
-    # resume_training_step = 1
-    # for training_step in range(resume_training_step, args.num_training_steps + 1):
-    #     result = metrics_queue.get()
-    #     metrics, episode = result
-    #     for key, value in metrics.items():
-    #         writer.add_scalar(key, value, episode)
+    resume_training_step = 1
+    for training_step in range(resume_training_step, args.num_training_steps + 1):
+        result = metrics_queue.get()
+        metrics, episode = result
+        for key, value in metrics.items():
+            writer.add_scalar(key, value, episode)
 
 
     ray.get(refs)
