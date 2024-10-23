@@ -58,6 +58,10 @@ def main():
     # Print unknown arguments
     print("Unknown arguments:", unknown_args)
 
+    if args.num_nodes > 1 and args.default_beaker_config == "configs/beaker_configs/default_dpo.yaml":
+        print("using multinode dpo config")
+        args.default_beaker_config = "configs/beaker_configs/default_dpo_multinode.yaml"
+        print(args)
         
     now = datetime.now().strftime("%m%d%Y%H%M%S")
     with open(args.default_beaker_config, 'r') as f:
@@ -73,6 +77,35 @@ def main():
     d1['tasks'][0]['context']['priority'] = args.priority
     d1['tasks'][0]['context']['preemptible'] = args.preemptible # True requried for Jupiter/Pluto
     d1['tasks'][0]['resources']['gpuCount'] = args.num_gpus
+
+    # add cluster-specific env vars
+    if args.num_nodes > 1:
+        if args.cluster == "ai2/jupiter-cirrascale-2":
+            d1['tasks'][0]['envVars'] += [
+                {
+                    "name": "NCCL_SOCKET_IFNAME",
+                    "value": "ib",
+                },
+                {
+                    "name": "NCCL_IB_HCA",
+                    "value": "^=mlx5_bond_0",
+                },
+                {
+                    "name": "NCCL_DEBUG",
+                    "value": "INFO",
+                },
+            ]
+        elif args.cluster == "ai2/pluto-cirrascale":
+            d1['tasks'][0]['envVars'] += [
+                {
+                    "name": "NCCL_IB_HCA",
+                    "value": "^=mlx5_1,mlx5_2",
+                },
+                {
+                    "name": "NCCL_DEBUG",
+                    "value": "INFO",
+                },
+            ]
 
     # modify here for different set of experiments
     experiment_group = "dataset_comparison"
@@ -103,7 +136,7 @@ def main():
         cmd_parts = shlex.split(original_command)
 
         # Find the index of open_instruct/dpo_tune.py
-        script_index = cmd_parts.index('open_instruct/dpo_tune.py')
+        script_index = cmd_parts.index('open_instruct/dpo_tune_cache.py')
 
         # Find the index of 'accelerate launch'
         pre_index = cmd_parts.index('launch')
@@ -130,7 +163,7 @@ def main():
             if value is not True:
                 new_cmd_parts.append(str(value))
         # add python job + post args
-        new_cmd_parts.append('open_instruct/dpo_tune.py')
+        new_cmd_parts.append('open_instruct/dpo_tune_cache.py')
         for key, value in cmd_dict.items():
             if key == "dataset_mixer":
                 key = "dataset_mixer_list"

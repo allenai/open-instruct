@@ -1,0 +1,23 @@
+model_name_or_path: Qwen/Qwen2-1.5B
+model_revision: main
+use_flash_attn: true
+tokenizer_name: Qwen/Qwen2-1.5B
+use_slow_tokenizer: true
+train_file: /oe-adapt-default/jacobm/sciriff-data/tulu_none_science_1000_eval_no.jsonl
+max_seq_length: 4096
+preprocessing_num_workers: 128
+per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
+gradient_accumulation_steps: 16 # effective batch size 128 with 4 nodes
+learning_rate: 5.0e-06 # best LR so far
+lr_scheduler_type: linear
+warmup_ratio: 0.03
+weight_decay: 0.0
+num_train_epochs: 2
+output_dir: /output/
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+checkpointing_steps: epoch
+dataset_mix_dir: /output/
+gradient_checkpointing: true
