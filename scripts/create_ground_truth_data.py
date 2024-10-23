@@ -127,37 +127,37 @@ for sample in math_dataset:
     })
 
 # combine into one dataset and push
-random.shuffle(new_data)
-train_dataset = Dataset.from_list(new_data)
-test_dataset = Dataset.from_list(test_data)
-dataset = DatasetDict({"train": train_dataset, "test": test_dataset})
-dataset.push_to_hub("ai2-adapt-dev/gsm8k_math_ground_truth")
+# random.shuffle(new_data)
+# train_dataset = Dataset.from_list(new_data)
+# test_dataset = Dataset.from_list(test_data)
+# dataset = DatasetDict({"train": train_dataset, "test": test_dataset})
+# dataset.push_to_hub("ai2-adapt-dev/gsm8k_math_ground_truth")
 
-# alternate dataset: metamathqa!
-metamathqa_dataset = load_dataset("meta-math/MetaMathQA", "main", split="train")
-# let's re-use the MATH prompt.
-new_data = []
-def extract_answer(text):
-    # Regular expression to match content after "The answer is:" including numbers, LaTeX fractions, or other expressions
-    pattern = r'The answer is:\s*([^\s.]+)'
-    matches = re.findall(pattern, text)
-    return matches[-1] if matches else None
-for sample in metamathqa_dataset:
-    # same code used to extract answer for eval
-    answer = extract_answer(sample["response"])
-    if answer is None:
-        print("skipping")
-        continue
-    new_data.append({
-        "messages": [{"role": "user", "content": math_prompt + f"Question: {sample['query'].strip()}"}],
-        "ground_truth": answer,
-        "dataset": "MATH"  # lets use the math eval setup
-    })
+# # alternate dataset: metamathqa!
+# metamathqa_dataset = load_dataset("meta-math/MetaMathQA", "main", split="train")
+# # let's re-use the MATH prompt.
+# new_data = []
+# def extract_answer(text):
+#     # Regular expression to match content after "The answer is:" including numbers, LaTeX fractions, or other expressions
+#     pattern = r'The answer is:\s*([^\s.]+)'
+#     matches = re.findall(pattern, text)
+#     return matches[-1] if matches else None
+# for sample in metamathqa_dataset:
+#     # same code used to extract answer for eval
+#     answer = extract_answer(sample["response"])
+#     if answer is None:
+#         print("skipping")
+#         continue
+#     new_data.append({
+#         "messages": [{"role": "user", "content": math_prompt + f"Question: {sample['query'].strip()}"}],
+#         "ground_truth": answer,
+#         "dataset": "MATH"  # lets use the math eval setup
+#     })
 
-# combine into one dataset and push
-random.shuffle(new_data)
-dataset = Dataset.from_list(new_data)
-dataset.push_to_hub("ai2-adapt-dev/metamathqa_ground_truth")
+# # combine into one dataset and push
+# random.shuffle(new_data)
+# dataset = Dataset.from_list(new_data)
+# dataset.push_to_hub("ai2-adapt-dev/metamathqa_ground_truth")
 
 # alternate dataset: numina-tir
 metamathqa_dataset = load_dataset("AI-MO/NuminaMath-TIR", split="train")
@@ -200,7 +200,7 @@ for sample in tqdm(metamathqa_dataset):
         continue
     # lets use multi-turn cot prompt instead
     new_data.append({
-        "messages": math_messages + [{"role": "user", "content":  f"{sample['problem'].strip()}"}],
+        "messages": [{"role": "user", "content": math_prompt + f"Question: {sample['problem'].strip()}"}],
         "ground_truth": answer,
         "dataset": "MATH"  # lets use the math eval setup
     })
@@ -208,7 +208,7 @@ for sample in tqdm(metamathqa_dataset):
 # combine into one dataset and push
 random.shuffle(new_data)
 dataset = Dataset.from_list(new_data)
-dataset.push_to_hub("ai2-adapt-dev/numinamath_tir_ground_truth")
+dataset.push_to_hub("ai2-adapt-dev/numinamath_tir_ground_truth_one_turn")
 
 # alternate dataset: numina-cot (much, much larger)
 metamathqa_dataset = load_dataset("AI-MO/NuminaMath-CoT", split="train")
@@ -222,7 +222,7 @@ for sample in tqdm(metamathqa_dataset):
         continue
     # lets use multi-turn cot prompt instead
     new_data.append({
-        "messages": math_messages + [{"role": "user", "content":  f"{sample['problem'].strip()}"}],
+        "messages": [{"role": "user", "content":  math_prompt + f"Question: {sample['problem'].strip()}"}],
         "ground_truth": answer,
         "dataset": "MATH"  # lets use the math eval setup
     })
@@ -230,4 +230,4 @@ for sample in tqdm(metamathqa_dataset):
 # combine into one dataset and push
 random.shuffle(new_data)
 dataset = Dataset.from_list(new_data)
-dataset.push_to_hub("ai2-adapt-dev/numinamath_cot_ground_truth")
+dataset.push_to_hub("ai2-adapt-dev/numinamath_cot_ground_truth_one_turn")

@@ -158,6 +158,8 @@ class Args:
     """the path to the reward model"""
     reward_model_revision: Optional[str] = None
     """the revision of the reward model"""
+    init_value_from_scratch: bool = False
+    """whether to initialize the value model from scratch"""
 
     # generation config
     response_length: int = 53
@@ -198,8 +200,7 @@ class Args:
     """whether to apply verifiable reward"""
     reward_model_multiplier: float = 1.0
     """the reward model multiplier, for down/upscaling the reward model output"""
-    use_plo: bool = False
-    """Toggle PLO: https://arxiv.org/pdf/2010.03956 sec 3.2. Disable grads on 0 reward samples"""
+    answer_extraction_model: str = None
 
     # vLLM settings. NOTE: currently we need to place the vLLM model on a separate GPU
     # for generation to work properly because vLLM would pre-alocate the memory.
@@ -275,7 +276,7 @@ def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig
     args.local_mini_batch_size = exact_div(
         args.local_batch_size, args.num_mini_batches, "`local_batch_size` must be a multiple of `num_mini_batches`"
     )
-    args.num_training_steps = args.total_episodes // args.batch_size
+    args.num_training_steps = args.total_episodes // (args.batch_size * args.number_samples_per_prompt)
     args.eval_freq = max(1, args.num_training_steps // args.num_evals)
     # PPO logic: do checks and set up dataloader batch size
     if args.whiten_rewards:
@@ -532,6 +533,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         attn_implementation="flash_attention_2",
         use_cache=False,
     )
+    if args.init_value_from_scratch:
+        value_model.init_weights()  # re-initialize the value model from scratch
     reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
         args.reward_model_path,
         revision=args.reward_model_revision,
@@ -680,7 +683,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     g_vllm_responses = torch.zeros((args.batch_size * args.number_samples_per_prompt, args.response_length), device=device, dtype=torch.long)
 
     # set up the metrics and initial states
-    stats_shape = (args.num_epochs, args.num_mini_batches, args.gradient_accumulation_steps)
+    stats_shape = (args.num_epochs, args.num_mini_batches * args.number_samples_per_prompt, args.gradient_accumulation_steps)
     approxkl_stats = torch.zeros(stats_shape, device=device)
     pg_clipfrac_stats = torch.zeros(stats_shape, device=device)
     pg_loss_stats = torch.zeros(stats_shape, device=device)
@@ -691,6 +694,14 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     local_metrics = torch.zeros((20,), device=device)
     episode = args.batch_size * (resume_training_step - 1)
     model.train()
+
+    # setup extraction model. For now keep on CPU?
+    if args.answer_extraction_model:
+        answer_extraction_model = AutoModelForCausalLM.from_pretrained(args.answer_extraction_model)
+        answer_extraction_tokenizer = AutoTokenizer.from_pretrained(aargs.answer_extraction_model)
+    else:
+        answer_extraction_model = None
+        answer_extraction_tokenizer = None
 
     # training loop
     start_time = time.time()
@@ -833,7 +844,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
                         verifiable_reward, verifiable_count = apply_verifiable_reward(
-                            postprocessed_query_response, tokenizer, ground_truth, dataset
+                            postprocessed_query_response, tokenizer, ground_truth, dataset, verify_reward=10, answer_extraction_model=answer_extraction_model, answer_extraction_tokenizer=answer_extraction_tokenizer
                         )
                         score += verifiable_reward
                     else:
@@ -926,17 +937,11 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 advantages = torch.masked_fill(advantages, padding_mask, 0)
                 torch.cuda.empty_cache()
 
-        # if we have plo, apply it here! basically will be augmenting the padding mask
-        if args.use_plo:
-            zero_scores = (scores == 0)[:, None]
-            padding_mask = padding_mask | zero_scores
-            padding_mask_p1 = padding_mask_p1 | zero_scores
-
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         for epoch_idx in range(args.num_epochs):
-            b_inds = np.random.permutation(args.local_batch_size)
+            b_inds = np.random.permutation(args.local_batch_size * args.number_samples_per_prompt)
             minibatch_idx = 0
-            for mini_batch_start in range(0, args.local_batch_size, args.local_mini_batch_size):
+            for mini_batch_start in range(0, args.local_batch_size * args.number_samples_per_prompt, args.local_mini_batch_size):
                 mini_batch_end = mini_batch_start + args.local_mini_batch_size
                 mini_batch_inds = b_inds[mini_batch_start:mini_batch_end]
                 gradient_accumulation_idx = 0
@@ -975,10 +980,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         pg_loss_max = torch.max(pg_losses, pg_losses2)
                         pg_loss = masked_mean(pg_loss_max, ~padding_mask[micro_batch_inds])
                         loss = pg_loss + args.vf_coef * vf_loss
-                        # can happen when no rewards in padding mask, so its 'all padding
-                        if torch.isnan(loss).any():
-                            # just continue to the next loop, skip this.
-                            continue
                         accelerator.backward(loss)
                         optimizer.step()
                         optimizer.zero_grad()
