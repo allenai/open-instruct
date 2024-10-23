@@ -798,8 +798,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     g_vllm_responses[:] = g_padded_response_ids
                 broadcast(g_vllm_responses, 0)
                 local_vllm_responses = g_vllm_responses[
-                    accelerator.local_process_index
-                    * queries.shape[0] : (accelerator.local_process_index + 1)
+                    accelerator.process_index
+                    * queries.shape[0] : (accelerator.process_index + 1)
                     * queries.shape[0]
                 ]
                 query_responses = torch.cat((queries, local_vllm_responses), 1)

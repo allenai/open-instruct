@@ -1,0 +1,47 @@
+model_name_or_path: meta-llama/Llama-3.1-8B
+model_revision: main
+use_flash_attn: true
+tokenizer_name: meta-llama/Llama-3.1-8B
+use_slow_tokenizer: true
+dataset_mixer:
+    # base math datasets:
+    natolambert/tulu-v2-sft-mixture-flan: 50000
+    natolambert/tulu-v2-sft-mixture-cot: 49747
+    ai2-adapt-dev/personahub_math_v4_149975: 149975
+    AI-MO/NuminaMath-TIR: 72441
+
+    # v3.4 datasets keeping (for now):
+    HuggingFaceH4/no_robots: 9500
+    allenai/openassistant-guanaco-reformatted: 7708
+    ai2-adapt-dev/tulu_hard_coded_examples: 14
+    ai2-adapt-dev/SciRIFF-train-mix-science: 10000
+    ai2-adapt-dev/Table-GPT-All-train: 3000
+
+    # other datasets:
+    ai2-adapt-dev/personahub_ifdata_v1_29980: 29980
+    ai2-adapt-dev/coconot-sft-reformat: 11477
+    ai2-adapt-dev/openmath-2-gsm8k: 50000
+
+    # testing:
+    m-a-p/CodeFeedback-Filtered-Instruction: 50000
+    ai2-adapt-dev/WildChat-1M-Full-GPT4-Only: 100000
+
+    # safety data:
+    ai2-adapt-dev/synthetic-finalresp-wildguarmixtrain: 86759
+    ai2-adapt-dev/processed-wildjailbreak: 261559
+max_seq_length: 4096 # Note, reduced from 8192 to fit on one GPU with DeepSpeed Stage3
+preprocessing_num_workers: 128
+per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
+gradient_accumulation_steps: 2 # effective batch size 128 with 1 node
+learning_rate: 5.0e-06 # best LR so far
+lr_scheduler_type: linear
+warmup_ratio: 0.03
+weight_decay: 0.0
+num_train_epochs: 2
+output_dir: /output/
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+checkpointing_steps: epoch
+dataset_mix_dir: /output/

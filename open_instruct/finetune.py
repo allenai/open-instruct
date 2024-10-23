@@ -52,6 +52,7 @@ from transformers import (
     get_scheduler,
 )
 
+from open_instruct.dataset_processor import CHAT_TEMPLATES
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -65,7 +66,6 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     upload_metadata_to_hf,
 )
-from open_instruct.dataset_processor import CHAT_TEMPLATES
 
 logger = get_logger(__name__)
 
@@ -78,6 +78,8 @@ class FlatArguments:
 
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
+    run_name: Optional[str] = None
+    """A unique name of this run"""
     model_name_or_path: Optional[str] = field(
         default=None,
         metadata={
@@ -418,7 +420,7 @@ def encode_sft_example(example, tokenizer, max_seq_length):
                 # set `add_generation_prompt=True` to avoid the assistant generation prefix being included in the loss
                 # (e.g., `<|assistant|>`)
                 message_end_idx = tokenizer.apply_chat_template(
-                    conversation=messages[:message_idx + 1],
+                    conversation=messages[: message_idx + 1],
                     tokenize=True,
                     return_tensors="pt",
                     padding=False,
@@ -454,6 +456,7 @@ def main(args: FlatArguments):
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
+    args.run_name = f"{args.exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -462,11 +465,15 @@ def main(args: FlatArguments):
         if args.hf_entity is None:  # then try to use the user's entity
             args.hf_entity = HfApi().whoami()["name"]
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
-        if args.hf_repo_revision is None:  # auto-generate one
-            args.hf_repo_revision = (
-                f"{args.exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
-            )
+        if args.hf_repo_revision is None:
+            args.hf_repo_revision = args.run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+
+    if is_beaker_job():
+        beaker_config = maybe_get_beaker_config()
+        # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
+        if len(beaker_config.beaker_dataset_id_urls) > 0:
+            args.output_dir = "/output"
 
     accelerator_log_kwargs = {}
 
@@ -683,13 +690,16 @@ def main(args: FlatArguments):
     else:
         try:
             tokenizer.chat_template = AutoTokenizer.from_pretrained(args.chat_template_name).chat_template
-        except Exception as e:
+        except Exception:
             raise ValueError(f"Could not find chat template for {args.chat_template_name}.")
 
     if args.add_bos:
-        if tokenizer.chat_template.startswith("{{ bos_token }}") \
-            or (tokenizer.bos_token is not None and tokenizer.chat_template.startswith(tokenizer.bos_token)):
-            raise ValueError("You specified add_bos=True, but the chat template already has a bos_token at the beginning.")
+        if tokenizer.chat_template.startswith("{{ bos_token }}") or (
+            tokenizer.bos_token is not None and tokenizer.chat_template.startswith(tokenizer.bos_token)
+        ):
+            raise ValueError(
+                "You specified add_bos=True, but the chat template already has a bos_token at the beginning."
+            )
         # also add bos in the chat template if not already there
         tokenizer.chat_template = "{{ bos_token }}" + tokenizer.chat_template
 
@@ -816,8 +826,6 @@ def main(args: FlatArguments):
 
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
-    if is_beaker_job():
-        beaker_config = maybe_get_beaker_config()
     if args.with_tracking:
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
@@ -826,11 +834,18 @@ def main(args: FlatArguments):
         # (Optional) Ai2 internal tracking
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
+        if is_beaker_job():
             experiment_config.update(vars(beaker_config))
         accelerator.init_trackers(
             "open_instruct_internal",
             experiment_config,
-            init_kwargs={"wandb": {"entity": args.wandb_entity, "tags": [args.exp_name] + get_wandb_tags()}},
+            init_kwargs={
+                "wandb": {
+                    "name": args.run_name,
+                    "entity": args.wandb_entity,
+                    "tags": [args.exp_name] + get_wandb_tags(),
+                }
+            },
         )
         wandb_tracker = accelerator.get_tracker("wandb")
 
@@ -873,6 +888,9 @@ def main(args: FlatArguments):
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
 
+    local_total_tokens = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
+    total_token_including_padding = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
+    start_time = time.time()
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
         train_dataloader.set_epoch(epoch)
@@ -884,6 +902,8 @@ def main(args: FlatArguments):
         else:
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
+            local_total_tokens += batch["attention_mask"].sum()
+            total_token_including_padding += batch["attention_mask"].numel()
             with accelerator.accumulate(model):
                 if args.load_balancing_loss:
                     outputs = model(**batch, use_cache=False, output_router_logits=True)
@@ -936,9 +956,17 @@ def main(args: FlatArguments):
                         / args.gradient_accumulation_steps
                         / args.logging_steps
                     )
+                    total_tokens = accelerator.gather(local_total_tokens).sum().item()
+                    total_tokens_including_padding = accelerator.gather(total_token_including_padding).sum().item()
                     metrics_to_log = {
                         "learning_rate": lr_scheduler.get_last_lr()[0],
                         "train_loss": avg_loss,
+                        "total_tokens": total_tokens,
+                        "per_device_tps": total_tokens / accelerator.num_processes / (time.time() - start_time),
+                        "total_tokens_including_padding": total_tokens_including_padding,
+                        "per_device_tps_including_padding": total_tokens_including_padding
+                        / accelerator.num_processes
+                        / (time.time() - start_time),
                     }
                     if args.load_balancing_loss:
                         avg_aux_loss = (
@@ -947,12 +975,12 @@ def main(args: FlatArguments):
                             / args.logging_steps
                         )
                         logger.info(
-                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, Aux Loss: {avg_aux_loss}"
+                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, Aux Loss: {avg_aux_loss}, TPS: {total_tokens / (time.time() - start_time)}"
                         )
                         metrics_to_log["aux_loss"] = avg_aux_loss
                     else:
                         logger.info(
-                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}"
+                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, TPS: {total_tokens / (time.time() - start_time)}"
                         )
                     if args.with_tracking:
                         accelerator.log(
@@ -1036,7 +1064,7 @@ def main(args: FlatArguments):
                 metadata_blob,
                 "metadata.json",
                 args.hf_metadata_dataset,
-                "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
+                "results/" + args.run_name,  # to match what the auto-evals name as.
             )
 
         if args.try_launch_beaker_eval_jobs:
@@ -1051,7 +1079,7 @@ def main(args: FlatArguments):
                 --pure_docker_mode \
                 --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
                 --beaker_workload_id {beaker_config.beaker_workload_id} \
-                --model_name {args.hf_repo_revision}
+                --model_name {args.run_name}
             """
             process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = process.communicate()
