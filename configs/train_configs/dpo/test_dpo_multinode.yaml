@@ -9,7 +9,7 @@ dataset_mixer:
   ai2-adapt-dev/personahub_if_pref_data_manualseed_v2_19890: 1.0
 tokenizer_name: /oe-adapt-default/jacobm/models/L3.1-70B-v3.7-nc
 use_slow_tokenizer: true
-max_seq_length: 1024
+max_seq_length: 2048
 preprocessing_num_workers: 16
 per_device_train_batch_size: 1
 gradient_accumulation_steps: 1 # designed for 8 GPUs, so batch size 128
