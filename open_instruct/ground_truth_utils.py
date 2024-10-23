@@ -61,6 +61,30 @@ def verify_math_sample(model_output, ground_truth_answer):
     return matched
 
 
+def verify_strict_math_sample(model_output, ground_truth_answer):
+    raw_answer = model_output
+    # just trying minerva format.
+    all_answers = []
+    # Second, try to extract via minerva format.
+    minerva_answer = normalize_final_answer(get_unnormalized_answer(raw_answer))
+    if minerva_answer is not None and minerva_answer != "[invalidanswer]":
+        all_answers.append(minerva_answer)
+    # otherwise, just take the full output. Probably wont work, bit of a yolo.
+    if len(all_answers) == 0:
+        all_answers.append(normalize_final_answer(model_output))
+    # now, compare all answers to ground truth.
+    matched = False
+    for answer in all_answers:
+        if is_equiv(answer, ground_truth_answer):
+            matched = True
+            break
+        elif hendrycks_is_equiv(answer, ground_truth_answer):
+            matched = True
+            break
+    # if we got any match, we are good.
+    return matched
+
+
 def verify_ifeval_sample(model_output, constraint_list):
     # TODO: IFeval. probably have some constraint list we check against.
     pass
