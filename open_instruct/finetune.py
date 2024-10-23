@@ -52,6 +52,7 @@ from transformers import (
     get_scheduler,
 )
 
+from open_instruct.dataset_processor import CHAT_TEMPLATES
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -77,6 +78,8 @@ class FlatArguments:
 
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
+    run_name: Optional[str] = None
+    """A unique name of this run"""
     model_name_or_path: Optional[str] = field(
         default=None,
         metadata={
@@ -94,6 +97,16 @@ class FlatArguments:
     tokenizer_revision: Optional[str] = field(
         default=None,
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+    )
+    chat_template_name: str = field(
+        default="tulu",
+        metadata={
+            "help": (
+                f"The name of the chat template to use. "
+                f"You can choose one of our pre-defined templates: {', '.join(CHAT_TEMPLATES.keys())}."
+                f"Or, you can provide a tokenizer name or path here and we will apply its chat template."
+            )
+        },
     )
     use_flash_attn: bool = field(
         default=True,
@@ -362,93 +375,75 @@ class FlatArguments:
             or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
-
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
 
 
-def encode_with_prompt_completion_format(example, tokenizer, max_seq_length, add_bos=False):
+def encode_sft_example(example, tokenizer, max_seq_length):
     """
-    Here we assume each example has 'prompt' and 'completion' fields.
-    We concatenate prompt and completion and tokenize them together because otherwise prompt will be padded/trancated
-    and it doesn't make sense to follow directly with the completion.
-    """
-    # if prompt doesn't end with space and completion doesn't start with space, add space
-    if not example["prompt"].endswith((" ", "\n", "\t")) and not example["completion"].startswith((" ", "\n", "\t")):
-        example_text = example["prompt"] + " " + example["completion"]
-    else:
-        example_text = example["prompt"] + example["completion"]
-    example_text = example_text + tokenizer.eos_token
-    if add_bos:
-        example_text = tokenizer.bos_token + example_text
-    tokenized_example = tokenizer(example_text, return_tensors="pt", max_length=max_seq_length, truncation=True)
-    input_ids = tokenized_example.input_ids
-    labels = input_ids.clone()
-    tokenized_prompt = tokenizer(example["prompt"], return_tensors="pt", max_length=max_seq_length, truncation=True)
-    # mask the prompt part for avoiding loss
-    labels[:, : tokenized_prompt.input_ids.shape[1]] = -100
-    attention_mask = torch.ones_like(input_ids)
-    return {
-        "input_ids": input_ids.flatten(),
-        "labels": labels.flatten(),
-        "attention_mask": attention_mask.flatten(),
-    }
-
-
-def encode_with_messages_format(example, tokenizer, max_seq_length, add_bos=False):
-    """
-    Here we assume each example has a 'messages' field Each message is a dict with 'role' and 'content' fields.
-    We concatenate all messages with the roles as delimiters and tokenize them together.
+    This function encodes a single example into a format that can be used for sft training.
+    Here, we assume each example has a 'messages' field. Each message in it is a dict with 'role' and 'content' fields.
+    We use the `apply_chat_template` function from the tokenizer to tokenize the messages and prepare the input and label tensors.
     """
     messages = example["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
-
-    def _concat_messages(messages):
-        message_text = ""
-        for message in messages:
-            if message["role"] == "system":
-                message_text += "<|system|>\n" + message["content"].strip() + "\n"
-            elif message["role"] == "user":
-                message_text += "<|user|>\n" + message["content"].strip() + "\n"
-            elif message["role"] == "assistant":
-                message_text += "<|assistant|>\n" + message["content"].strip() + tokenizer.eos_token + "\n"
-            else:
-                raise ValueError("Invalid role: {}".format(message["role"]))
-        return message_text
-
-    example_text = _concat_messages(messages).strip()
-    if add_bos:
-        example_text = tokenizer.bos_token + example_text
-    tokenized_example = tokenizer(example_text, return_tensors="pt", max_length=max_seq_length, truncation=True)
-    input_ids = tokenized_example.input_ids
+    input_ids = tokenizer.apply_chat_template(
+        conversation=messages,
+        tokenize=True,
+        return_tensors="pt",
+        padding=False,
+        truncation=True,
+        max_length=max_seq_length,
+        add_generation_prompt=False,
+    )
     labels = input_ids.clone()
-
     # mask the non-assistant part for avoiding loss
     for message_idx, message in enumerate(messages):
         if message["role"] != "assistant":
+            # we calculate the start index of this non-assistant message
             if message_idx == 0:
                 message_start_idx = 0
             else:
-                message_start_idx = tokenizer(
-                    _concat_messages(messages[:message_idx]),
+                message_start_idx = tokenizer.apply_chat_template(
+                    conversation=messages[:message_idx],  # here marks the end of the previous messages
+                    tokenize=True,
                     return_tensors="pt",
-                    max_length=max_seq_length,
+                    padding=False,
                     truncation=True,
-                ).input_ids.shape[1]
+                    max_length=max_seq_length,
+                    add_generation_prompt=False,
+                ).shape[1]
+            # next, we calculate the end index of this non-assistant message
             if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
-                # here we also ignore the role of the assistant
-                messages_so_far = _concat_messages(messages[: message_idx + 1]) + "<|assistant|>\n"
+                # for intermediate messages that follow with an assistant message, we need to
+                # set `add_generation_prompt=True` to avoid the assistant generation prefix being included in the loss
+                # (e.g., `<|assistant|>`)
+                message_end_idx = tokenizer.apply_chat_template(
+                    conversation=messages[: message_idx + 1],
+                    tokenize=True,
+                    return_tensors="pt",
+                    padding=False,
+                    truncation=True,
+                    max_length=max_seq_length,
+                    add_generation_prompt=True,
+                ).shape[1]
             else:
-                messages_so_far = _concat_messages(messages[: message_idx + 1])
-            message_end_idx = tokenizer(
-                messages_so_far, return_tensors="pt", max_length=max_seq_length, truncation=True
-            ).input_ids.shape[1]
+                # for the last message or the message that doesn't follow with an assistant message,
+                # we don't need to add the assistant generation prefix
+                message_end_idx = tokenizer.apply_chat_template(
+                    conversation=messages[: message_idx + 1],
+                    tokenize=True,
+                    return_tensors="pt",
+                    padding=False,
+                    truncation=True,
+                    max_length=max_seq_length,
+                    add_generation_prompt=False,
+                ).shape[1]
+            # set the label to -100 for the non-assistant part
             labels[:, message_start_idx:message_end_idx] = -100
-
-            if message_end_idx >= max_seq_length:
+            if max_seq_length and message_end_idx >= max_seq_length:
                 break
-
     attention_mask = torch.ones_like(input_ids)
     return {
         "input_ids": input_ids.flatten(),
@@ -461,6 +456,7 @@ def main(args: FlatArguments):
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
+    args.run_name = f"{args.exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -469,11 +465,15 @@ def main(args: FlatArguments):
         if args.hf_entity is None:  # then try to use the user's entity
             args.hf_entity = HfApi().whoami()["name"]
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
-        if args.hf_repo_revision is None:  # auto-generate one
-            args.hf_repo_revision = (
-                f"{args.exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
-            )
+        if args.hf_repo_revision is None:
+            args.hf_repo_revision = args.run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+
+    if is_beaker_job():
+        beaker_config = maybe_get_beaker_config()
+        # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
+        if len(beaker_config.beaker_dataset_id_urls) > 0:
+            args.output_dir = "/output"
 
     accelerator_log_kwargs = {}
 
@@ -526,7 +526,7 @@ def main(args: FlatArguments):
             args.dataset_mixer,
             configs=args.dataset_config_name,
             splits=["train"],
-            save_data_dir=args.dataset_mix_dir,
+            save_data_dir=args.dataset_mix_dir if accelerator.is_main_process else None,
             columns_to_keep=["messages"],
         )
     elif args.dataset_mixer_list is not None:
@@ -535,7 +535,7 @@ def main(args: FlatArguments):
             args.dataset_mixer_list,
             configs=args.dataset_config_name,
             splits=["train"],
-            save_data_dir=args.dataset_mix_dir,
+            save_data_dir=args.dataset_mix_dir if accelerator.is_main_process else None,
             columns_to_keep=["messages"],
         )
     else:
@@ -682,24 +682,25 @@ def main(args: FlatArguments):
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
         embedding_size = embeddings.weight.shape[0]
 
-    # set the tokenizer chat template to the tulu format
-    # this makes evaluation/etc easier down the line.
-    chat_template = (
-        "{% for message in messages %}\n"
-        "{% if message['role'] == 'system' %}\n"
-        "{{ '<|system|>\n' + message['content'] }}\n"
-        "{% elif message['role'] == 'user' %}\n"
-        "{{ '<|user|>\n' + message['content'] }}\n"
-        "{% elif message['role'] == 'assistant' %}\n"
-        "{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n"
-        "{% endif %}\n"
-        "{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n"
-        "{% endif %}\n"
-        "{% endfor %}"
-    )
-    tokenizer.chat_template = chat_template
+    # set the tokenizer chat template to the training format
+    # this will be used for encoding the training examples
+    # and saved together with the tokenizer to be used later.
+    if args.chat_template_name in CHAT_TEMPLATES:
+        tokenizer.chat_template = CHAT_TEMPLATES[args.chat_template_name]
+    else:
+        try:
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(args.chat_template_name).chat_template
+        except Exception:
+            raise ValueError(f"Could not find chat template for {args.chat_template_name}.")
+
     if args.add_bos:
-        # also add bos in the chat template
+        if tokenizer.chat_template.startswith("{{ bos_token }}") or (
+            tokenizer.bos_token is not None and tokenizer.chat_template.startswith(tokenizer.bos_token)
+        ):
+            raise ValueError(
+                "You specified add_bos=True, but the chat template already has a bos_token at the beginning."
+            )
+        # also add bos in the chat template if not already there
         tokenizer.chat_template = "{{ bos_token }}" + tokenizer.chat_template
 
     if args.use_lora:
@@ -720,26 +721,7 @@ def main(args: FlatArguments):
     elif args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
 
-    # Preprocessing the datasets.
-    if "prompt" in raw_datasets["train"].column_names and "completion" in raw_datasets["train"].column_names:
-        encode_function = partial(
-            encode_with_prompt_completion_format,
-            tokenizer=tokenizer,
-            max_seq_length=args.max_seq_length,
-            add_bos=args.add_bos,
-        )
-    elif "messages" in raw_datasets["train"].column_names:
-        encode_function = partial(
-            encode_with_messages_format,
-            tokenizer=tokenizer,
-            max_seq_length=args.max_seq_length,
-            add_bos=args.add_bos,
-        )
-    else:
-        raise ValueError("You need to have either 'prompt'&'completion' or 'messages' in your column names.")
-
     train_dataset = raw_datasets["train"]
-
     # debugging tool for fewer samples
     if args.max_train_samples is not None:
         max_train_samples = min(len(train_dataset), args.max_train_samples)
@@ -748,7 +730,7 @@ def main(args: FlatArguments):
 
     with accelerator.main_process_first():
         train_dataset = train_dataset.map(
-            encode_function,
+            partial(encode_sft_example, tokenizer=tokenizer, max_seq_length=args.max_seq_length),
             batched=False,
             num_proc=args.preprocessing_num_workers,
             load_from_cache_file=not args.overwrite_cache,
@@ -844,8 +826,6 @@ def main(args: FlatArguments):
 
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
-    if is_beaker_job():
-        beaker_config = maybe_get_beaker_config()
     if args.with_tracking:
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
@@ -854,11 +834,18 @@ def main(args: FlatArguments):
         # (Optional) Ai2 internal tracking
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
+        if is_beaker_job():
             experiment_config.update(vars(beaker_config))
         accelerator.init_trackers(
             "open_instruct_internal",
             experiment_config,
-            init_kwargs={"wandb": {"entity": args.wandb_entity, "tags": [args.exp_name] + get_wandb_tags()}},
+            init_kwargs={
+                "wandb": {
+                    "name": args.run_name,
+                    "entity": args.wandb_entity,
+                    "tags": [args.exp_name] + get_wandb_tags(),
+                }
+            },
         )
         wandb_tracker = accelerator.get_tracker("wandb")
 
@@ -901,6 +888,9 @@ def main(args: FlatArguments):
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
 
+    local_total_tokens = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
+    total_token_including_padding = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
+    start_time = time.time()
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
         train_dataloader.set_epoch(epoch)
@@ -912,6 +902,8 @@ def main(args: FlatArguments):
         else:
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
+            local_total_tokens += batch["attention_mask"].sum()
+            total_token_including_padding += batch["attention_mask"].numel()
             with accelerator.accumulate(model):
                 if args.load_balancing_loss:
                     outputs = model(**batch, use_cache=False, output_router_logits=True)
@@ -964,9 +956,17 @@ def main(args: FlatArguments):
                         / args.gradient_accumulation_steps
                         / args.logging_steps
                     )
+                    total_tokens = accelerator.gather(local_total_tokens).sum().item()
+                    total_tokens_including_padding = accelerator.gather(total_token_including_padding).sum().item()
                     metrics_to_log = {
                         "learning_rate": lr_scheduler.get_last_lr()[0],
                         "train_loss": avg_loss,
+                        "total_tokens": total_tokens,
+                        "per_device_tps": total_tokens / accelerator.num_processes / (time.time() - start_time),
+                        "total_tokens_including_padding": total_tokens_including_padding,
+                        "per_device_tps_including_padding": total_tokens_including_padding
+                        / accelerator.num_processes
+                        / (time.time() - start_time),
                     }
                     if args.load_balancing_loss:
                         avg_aux_loss = (
@@ -975,12 +975,12 @@ def main(args: FlatArguments):
                             / args.logging_steps
                         )
                         logger.info(
-                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, Aux Loss: {avg_aux_loss}"
+                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, Aux Loss: {avg_aux_loss}, TPS: {total_tokens / (time.time() - start_time)}"
                         )
                         metrics_to_log["aux_loss"] = avg_aux_loss
                     else:
                         logger.info(
-                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}"
+                            f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}, TPS: {total_tokens / (time.time() - start_time)}"
                         )
                     if args.with_tracking:
                         accelerator.log(
@@ -1064,7 +1064,7 @@ def main(args: FlatArguments):
                 metadata_blob,
                 "metadata.json",
                 args.hf_metadata_dataset,
-                "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
+                "results/" + args.run_name,  # to match what the auto-evals name as.
             )
 
         if args.try_launch_beaker_eval_jobs:
@@ -1079,7 +1079,7 @@ def main(args: FlatArguments):
                 --pure_docker_mode \
                 --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
                 --beaker_workload_id {beaker_config.beaker_workload_id} \
-                --model_name {args.hf_repo_revision}
+                --model_name {args.run_name}
             """
             process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = process.communicate()

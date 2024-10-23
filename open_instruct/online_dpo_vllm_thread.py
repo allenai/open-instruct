@@ -64,6 +64,7 @@ from open_instruct.utils import (
     get_wandb_tags,
     is_beaker_job,
     maybe_get_beaker_config,
+    maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     upload_metadata_to_hf,
 )
@@ -261,9 +262,11 @@ def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig
     )
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
-            args.hf_repo_id = f"{args.exp_name}__{model_config.model_name_or_path.replace('/', '_')}"
-        if args.hf_entity is None:
-            args.hf_entity = api.whoami()["name"]
+            args.hf_repo_id = "open_instruct_dev"
+        if args.hf_entity is None:  # first try to use AI2 entity
+            args.hf_entity = maybe_use_ai2_hf_entity()
+        if args.hf_entity is None:  # then try to use the user's entity
+            args.hf_entity = HfApi().whoami()["name"]
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
         if args.hf_repo_revision is None:  # auto-generate one
             args.hf_repo_revision = args.run_name
@@ -643,18 +646,19 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
             else:
                 if training_step != 1:
+                    # NOTE: important: the indent here is different for sync mode
+                    # we also set to use `queries = queries_next` immediately
                     data = next(iter_dataloader)
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
                     queries_next = queries_next.repeat(args.num_generation_per_prompt, 1)
-                    # NOTE: important: the indent here is different for sync mode
                     send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
+                    queries = queries_next
 
             training_time_start = time.time()
             with torch.no_grad():
                 context_length = queries.shape[1]
                 responses = []
                 postprocessed_responses = []
-                logprobs = []
                 ref_logprobs = []
                 scores = []
                 sequence_lengths = []
@@ -674,8 +678,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     g_vllm_responses[:] = g_padded_response_ids
                 broadcast(g_vllm_responses, 0)
                 local_vllm_responses = g_vllm_responses[
-                    accelerator.local_process_index
-                    * queries.shape[0] : (accelerator.local_process_index + 1)
+                    accelerator.process_index
+                    * queries.shape[0] : (accelerator.process_index + 1)
                     * queries.shape[0]
                 ]
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
@@ -683,13 +687,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     query = queries[i : i + args.local_rollout_forward_batch_size]
                     query_response = query_responses[i : i + args.local_rollout_forward_batch_size]
                     response = query_response[:, context_length:]
-                    output = forward(generation_model, query_response, tokenizer.pad_token_id)
-                    logits = output.logits[:, context_length - 1 : -1]
-                    logits /= args.temperature + 1e-7
-                    all_logprob = F.log_softmax(logits, dim=-1)
-                    logprob = torch.gather(all_logprob, 2, response.unsqueeze(-1)).squeeze(-1)
-                    del output, logits, all_logprob
-                    torch.cuda.empty_cache()
 
                     ref_output = forward(ref_model, query_response, tokenizer.pad_token_id)
                     ref_logits = ref_output.logits[:, context_length - 1 : -1]
@@ -715,19 +712,16 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
                     responses.append(response)
                     postprocessed_responses.append(postprocessed_response)
-                    logprobs.append(logprob)
                     ref_logprobs.append(ref_logprob)
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
                 responses = torch.cat(responses, 0)
                 postprocessed_responses = torch.cat(postprocessed_responses, 0)
-                logprobs = torch.cat(logprobs, 0)
                 ref_logprobs = torch.cat(ref_logprobs, 0)
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
-                global_scores = accelerator.gather(scores)
-                accelerator.print(f"global_scores: {global_scores}, {global_scores.mean()}")
-                del (logprob, ref_logprob, score)
+                accelerator.gather(scores)
+                del (ref_logprob, score)
                 gc.collect()
                 torch.cuda.empty_cache()
 
@@ -746,15 +740,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 # be very careful with `padding_mask_p1`; see https://excalidraw.com/#json=LWnzG4w2k5DjF_EOL_xPt,e2w3a-hFJ_gX5vOfeyXGTw
                 response_idxs = torch.arange(responses.shape[1], device=responses.device).repeat(responses.shape[0], 1)
                 padding_mask = response_idxs > sequence_lengths.unsqueeze(1)
-                logprobs = torch.masked_fill(logprobs, padding_mask, INVALID_LOGPROB)
                 ref_logprobs = torch.masked_fill(ref_logprobs, padding_mask, INVALID_LOGPROB)
-
-                # 4. compute rewards
-                kl = logprobs - ref_logprobs
-                print(f"{accelerator.local_process_index=}, {kl.sum(1)=}")
-                non_score_reward = -args.beta * kl
-                non_score_reward_sum = non_score_reward.sum(1)
-                rlhf_reward = scores + non_score_reward_sum
 
                 # num_examples should be same as args.local_batch_size divided by 2
                 num_examples = scores.size(0) // 2
@@ -770,6 +756,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 )
                 scores_margin = scores[chosen_indices] - scores[rejected_indices]
 
+        logprobs = []
+        concat_indices = []
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         for epoch_idx in range(args.num_epochs):
             b_inds = np.random.permutation(args.local_batch_size // args.num_generation_per_prompt)
@@ -847,6 +835,16 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         optimizer.step()
                         optimizer.zero_grad()
                         with torch.no_grad():
+                            if epoch_idx == 0:
+                                concat_indices.append(concat_mb_inds)
+                                response = concat_query_responses[:, context_length:]
+                                logits = concat_output.logits[:, context_length - 1 : -1]
+                                logits /= args.temperature + 1e-7
+                                all_logprob = F.log_softmax(logits, dim=-1)
+                                logprob = torch.gather(all_logprob, 2, response.unsqueeze(-1)).squeeze(-1)
+                                logprob = torch.masked_fill(logprob, padding_mask[concat_mb_inds], INVALID_LOGPROB)
+                                logprobs.append(logprob)
+                                del all_logprob
                             chosen_rewards = args.beta * (chosen_logprobs_sum - chosen_ref_logprobs_sum)
                             rejected_rewards = args.beta * (rejected_logprobs_sum - rejected_ref_logprobs_sum)
                             loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = loss
@@ -874,6 +872,14 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 # del everything and empty cache
                 torch.cuda.empty_cache()
         with torch.no_grad():
+            logprobs = torch.cat(logprobs, 0)
+            concat_indices = torch.cat(concat_indices, 0)
+            restore_logprobs = torch.zeros_like(logprobs)
+            restore_logprobs[concat_indices] = logprobs
+            kl = restore_logprobs - ref_logprobs
+            non_score_reward = -args.beta * kl
+            non_score_reward_sum = non_score_reward.sum(1)
+            rlhf_reward = scores + non_score_reward_sum
             local_metrics[0] = sequence_lengths.float().mean()
             local_metrics[1] = (responses == args.stop_token_id).sum().float().mean()
             local_metrics[2] = kl.sum(1).mean()

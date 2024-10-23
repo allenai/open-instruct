@@ -14,6 +14,7 @@
 
 import argparse
 import json
+import os
 
 import numpy as np
 import pandas as pd
@@ -28,7 +29,7 @@ def get_statistics_for_messages_data(
     dataset=None,
     split="train",
     messages_key="messages",
-    tokenizer="/net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/7B/",
+    tokenizer="philschmid/meta-llama-3-tokenizer",
 ):
     if dataset is None:
         # load dataset
@@ -40,18 +41,18 @@ def get_statistics_for_messages_data(
 
     # remove any messages that have "role" == "system"
     def remove_system_messages(example):
-        example[args.messages_key] = [message for message in example[args.messages_key] if message["role"] != "system"]
+        example[messages_key] = [message for message in example[messages_key] if message["role"] != "system"]
         return example
 
-    dataset = dataset.map(remove_system_messages)
+    dataset = dataset.map(remove_system_messages, num_proc=16)
 
-    num_of_turns = [len(instance[args.messages_key]) for instance in dataset[split]]
+    num_of_turns = [len(instance[messages_key]) for instance in dataset[split]]
     user_prompt_lengths = []
     assistant_response_lengths = []
     instance_lengths = []
     for instance in tqdm.tqdm(dataset[split], desc="Processing instances"):
         instance_length = 0
-        for message in instance[args.messages_key]:
+        for message in instance[messages_key]:
             if message["role"] == "user":
                 user_prompt_lengths.append(
                     len(tokenizer(message["content"], truncation=False, add_special_tokens=False)["input_ids"])
@@ -102,7 +103,7 @@ def get_statistics_for_prompt_completion_data(
     dataset=None,
     split="train",
     response_key="completion",
-    tokenizer="/net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/7B/",
+    tokenizer="philschmid/meta-llama-3-tokenizer",
 ):
     if dataset is None:
         # load dataset
@@ -150,7 +151,7 @@ if __name__ == "__main__":
     parser.add_argument("--split", type=str, default="train")
     parser.add_argument("--response_key", type=str, default="completion")
     parser.add_argument("--messages_key", type=str, default="messages")
-    parser.add_argument("--tokenizer", type=str, default="/net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/7B/")
+    parser.add_argument("--tokenizer", type=str, default="philschmid/meta-llama-3-tokenizer")
     args = parser.parse_args()
 
     # Check if the data_path is a dataset id, only check if /
@@ -180,5 +181,9 @@ if __name__ == "__main__":
     print(json.dumps(statistics, indent=4))
 
     if args.save_path is not None:
+        # if save path doesn't exist, make it
+        if not os.path.exists(os.path.dirname(args.save_path)):
+            os.makedirs(os.path.dirname(args.save_path))
         with open(args.save_path, "w") as f:
             json.dump(statistics, f, indent=4)
+            print(f"Statistics saved to {args.save_path}")

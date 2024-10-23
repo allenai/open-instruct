@@ -28,7 +28,9 @@ import requests
 from accelerate.logging import get_logger
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
+from dateutil import parser
 from huggingface_hub import HfApi
+from rich.pretty import pprint
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
@@ -416,6 +418,20 @@ def combine_dataset(
             Whether to keep ids for training that are added during mixing.
             Used primarily in mix_data.py for saving, or the saved dataset has IDs already.
     """
+    if isinstance(dataset_mixer, list):
+        assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
+        mixer_dict = {}
+        i = 0
+        while i < len(dataset_mixer) - 1:
+            assert isinstance(dataset_mixer[i], str), f"Invalid type in data mixer: {dataset_mixer}"
+            if "." in dataset_mixer[i + 1]:
+                value = float(dataset_mixer[i + 1])
+            else:
+                value = int(dataset_mixer[i + 1])
+            mixer_dict[dataset_mixer[i]] = value
+            i += 2
+        dataset_mixer = mixer_dict
+
     if any(frac_or_samples < 0 for frac_or_samples in dataset_mixer.values()):
         raise ValueError("Dataset fractions / lengths cannot be negative.")
 
@@ -697,23 +713,35 @@ def get_beaker_experiment_info(experiment_id: str) -> Optional[dict]:
 
 def beaker_experiment_succeeded(experiment_id: str) -> bool:
     experiment = get_beaker_experiment_info(experiment_id)
+    if "replicas" in experiment["jobs"][0]["execution"]["spec"]:
+        num_replicas = experiment["jobs"][0]["execution"]["spec"]["replicas"]
+    else:
+        num_replicas = 1
     if not experiment:
         return False
-    print([job["status"] for job in experiment["jobs"]])
-    return any(
-        [
-            "finalized" in job["status"] and "exitCode" in job["status"] and job["status"]["exitCode"] == 0
-            for job in experiment["jobs"]
-        ]
-    )
+    pprint(experiment)
+    finalizeds = [
+        "finalized" in job["status"] and "exitCode" in job["status"] and job["status"]["exitCode"] == 0
+        for job in experiment["jobs"]
+    ]
+    pprint(finalizeds)
+    return sum(finalizeds) == num_replicas
 
 
-def get_beaker_dataset_ids(experiment_id: str) -> Optional[List[str]]:
+@dataclass
+class DatasetInfo:
+    id: str
+    committed: Any
+    non_empty: bool
+
+
+def get_beaker_dataset_ids(experiment_id: str, sort=False) -> Optional[List[str]]:
+    """if sort is True, the non-empty latest dataset will be availble at the end of the list"""
     experiment = get_beaker_experiment_info(experiment_id)
     if not experiment:
         return None
     result_ids = [job["result"]["beaker"] for job in experiment["jobs"]]
-    dataset_ids = []
+    dataset_infos = []
     for result_id in result_ids:
         get_dataset_command = f"beaker dataset get {result_id} --format json"
         process = subprocess.Popen(["bash", "-c", get_dataset_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -722,8 +750,23 @@ def get_beaker_dataset_ids(experiment_id: str) -> Optional[List[str]]:
             print(f"Failed to get Beaker dataset: {stderr}")
             return None
         datasets = json.loads(stdout)
-        dataset_ids.extend([dataset["id"] for dataset in datasets])
-    return dataset_ids
+        dataset_infos.extend(
+            [
+                DatasetInfo(
+                    id=dataset["id"],
+                    committed=dataset["committed"],
+                    non_empty=(
+                        False if dataset["storage"]["totalSize"] is None else dataset["storage"]["totalSize"] > 0
+                    ),
+                )
+                for dataset in datasets
+            ]
+        )
+    if sort:
+        # sort based on empty, then commited
+        dataset_infos.sort(key=lambda x: (x.non_empty, parser.parse(x.committed)))
+    pprint(dataset_infos)
+    return [dataset.id for dataset in dataset_infos]
 
 
 def get_beaker_whoami() -> Optional[str]:

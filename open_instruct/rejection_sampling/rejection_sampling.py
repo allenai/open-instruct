@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import asyncio
+import copy
 import json
 import os
 import sys
@@ -60,6 +61,7 @@ class Args:
     num_gpus: int = 1  # New argument for specifying the number of GPUs
     mode: str = "judgement"
     skill: str = "chat"
+    include_reference_completion_for_rejection_sampling: bool = True
 
     # upload config
     hf_repo_id: str = os.path.basename(__file__)[: -len(".py")]
@@ -96,7 +98,6 @@ def process_shard(
     Returns:
         torch.Tensor: A tensor containing the reward scores for each item in the shard.
                       Shape: (num_items_in_shard,)
-        torch.Tensor: A tensor containing the reward scores for each reference completion in the shard.
     """
     # Convert the list of data items (shard) into a Hugging Face Dataset object
     raw_ds = Dataset.from_list(shard)
@@ -111,18 +112,6 @@ def process_shard(
         remove_columns=raw_ds.column_names,
         num_proc=NUM_CPUS_FOR_DATASET_MAP,
     )
-    reference_completion_ds = raw_ds.map(
-        lambda x: {
-            "input_ids": tokenizer.apply_chat_template(
-                x["messages"][:-1] + [{"content": x["reference_completion"], "role": "assistant"}]
-            )
-        },
-        remove_columns=raw_ds.column_names,
-        num_proc=NUM_CPUS_FOR_DATASET_MAP,
-    )
-    reference_completion_ds = reference_completion_ds.select(
-        range(0, len(ds), args.num_completions)
-    )  # remove duplicate reference completions
     # So this code handles only classification, I should also handle other models judges like Llama3
     model = AutoModelForSequenceClassification.from_pretrained(
         model_name_or_path,
@@ -135,11 +124,8 @@ def process_shard(
     # Initialize a data collator to handle dynamic padding of input sequences
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
     scores = batch_processing_scores(args.max_forward_batch_size, device, tokenizer, ds, model, data_collator)
-    reference_completion_scores = batch_processing_scores(
-        args.max_forward_batch_size, device, tokenizer, reference_completion_ds, model, data_collator
-    )
 
-    return scores, reference_completion_scores
+    return scores
 
 
 def process_shard_api(model_name_or_path: str, args: Args, shard: List[str]) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -170,11 +156,6 @@ def process_shard_api(model_name_or_path: str, args: Args, shard: List[str]) -> 
     )
     prompts = ds["prompt"]
     model_responses = ds["model_completion"]
-    reference_responses = ds["reference_completion"]
-    unique_prompts = [prompts[i] for i in range(0, len(ds), args.num_completions)]  # remove duplicate prompts
-    reference_responses = [
-        reference_responses[i] for i in range(0, len(ds), args.num_completions)
-    ]  # remove duplicate reference completions
 
     data_list_model_responses = [
         {"prompt": prompt, "response": response} for prompt, response in zip(prompts, model_responses)
@@ -183,14 +164,7 @@ def process_shard_api(model_name_or_path: str, args: Args, shard: List[str]) -> 
         generate_with_openai(model_name_or_path, data_list_model_responses, args, gen_args)
     )
 
-    data_list_reference_responses = [
-        {"prompt": prompt, "response": response} for prompt, response in zip(unique_prompts, reference_responses)
-    ]
-    reference_responses_scores = asyncio.run(
-        generate_with_openai(model_name_or_path, data_list_reference_responses, args, gen_args)
-    )
-
-    return torch.Tensor(model_responses_scores), torch.Tensor(reference_responses_scores)
+    return torch.Tensor(model_responses_scores)
 
 
 def batch_processing_scores(
@@ -270,6 +244,18 @@ def main(args: Args):
     with open(args.input_filename, "r") as infile:
         completions = [json.loads(line) for line in infile]
 
+    # include the reference completion in the completions for efficient rejection sampling
+    new_completions = []
+    for i in range(len(completions)):
+        if i % args.num_completions == 0:
+            reference_completion = copy.deepcopy(completions[i])
+            reference_completion["messages"][-1]["content"] = reference_completion["reference_completion"]
+            reference_completion["model_completion"] = reference_completion["reference_completion"]
+            new_completions.append(reference_completion)
+        new_completions.append(completions[i])
+    completions = new_completions
+    actual_num_completions = args.num_completions + 1  # we have added the reference completion
+
     # Split the data into shards
     shard_size = len(completions) // args.num_gpus
     shards = [completions[i : i + shard_size] for i in range(0, len(completions), shard_size)]
@@ -286,48 +272,50 @@ def main(args: Args):
             for i in range(args.num_gpus):
                 results.append(process_shard_api(model_name_or_path, args, shards[i]))
             scores = []
-            reference_completion_scores = []
             for result in results:
-                scores.append(result[0])
-                reference_completion_scores.append(result[1])
+                scores.append(result)
         else:
             with mp.Pool(args.num_gpus) as pool:  # NOTE: the `result.get()` need to live in this `mp.Pool` context
                 for i in range(args.num_gpus):
                     results.append(pool.apply_async(process_shard, (i, model_name_or_path, args, shards[i])))
                 # Collect results
                 scores = []
-                reference_completion_scores = []
                 for result in results:
-                    item = result.get()
-                    scores.append(item[0])
-                    reference_completion_scores.append(item[1])
+                    scores.append(result.get())
 
         # Combine scores from all GPUs
         scores = torch.cat(scores)
-        reference_completion_scores = torch.cat(reference_completion_scores)
+        scores_per_prompt = scores.reshape(-1, actual_num_completions)  # (n_prompts, n_completions)
+        reference_completion_scores = scores_per_prompt[:, 0]
         reference_completion_scores_per_model[model_name_or_path] = reference_completion_scores.tolist()
 
+        if not args.include_reference_completion_for_rejection_sampling:
+            scores_per_prompt = scores_per_prompt[:, 1:]
+            scores = scores_per_prompt.flatten()
+            completions = [completions[i] for i in range(len(completions)) if i % actual_num_completions != 0]
+            actual_num_completions -= 1
+
+        assert len(completions) == len(scores)
         # Rejection sampling
-        scores_per_prompt = scores.reshape(-1, args.num_completions)  # (n_prompts, n_completions)
-        for i in range(len(completions)):
+        for i in range(len(scores)):
             if "score" not in completions[i]:
                 completions[i]["score"] = {}
             completions[i]["score"][model_name_or_path] = scores[i].item()
             if "reference_completion_score" not in completions[i]:
                 completions[i]["reference_completion_score"] = {}
             completions[i]["reference_completion_score"][model_name_or_path] = reference_completion_scores[
-                i // args.num_completions
+                i // actual_num_completions
             ].item()
 
         best_indices = torch.argmax(scores_per_prompt, dim=1)  # (n_prompts, 1) --> (n_prompts, )
         worst_indices = torch.argmin(scores_per_prompt, dim=1)  # (n_prompts, 1) --> (n_prompts, )
         best_indices_offset = (
-            torch.arange(0, len(best_indices) * args.num_completions, args.num_completions) + best_indices
+            torch.arange(0, len(best_indices) * actual_num_completions, actual_num_completions) + best_indices
         )
         best_offsets_per_model[model_name_or_path] = best_indices_offset
 
         worst_indices_offset = (
-            torch.arange(0, len(worst_indices) * args.num_completions, args.num_completions) + worst_indices
+            torch.arange(0, len(worst_indices) * actual_num_completions, actual_num_completions) + worst_indices
         )
         worst_offsets_per_model[model_name_or_path] = worst_indices_offset
 
