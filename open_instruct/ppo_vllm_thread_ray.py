@@ -14,6 +14,9 @@ from dataclasses import asdict, dataclass
 from queue import Empty, Queue
 from typing import Iterator, List, Literal, Optional, Tuple
 from datetime import timedelta
+from transformers.deepspeed import HfDeepSpeedConfig
+
+from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
 
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
@@ -28,8 +31,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torch.utils
 import torch.utils.data
-from accelerate import Accelerator
-from accelerate.utils import broadcast, gather_object
 from datasets import DatasetDict, Dataset
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from huggingface_hub import HfApi
@@ -110,10 +111,10 @@ def get_train_ds_config(
         "stage3_param_persistence_threshold": "auto",
         "stage3_prefetch_bucket_size": "auto",
         "reduce_bucket_size": "auto",
-        # ZeRO++
-        "zero_hpz_partition_size": zpg,
-        "zero_quantized_weights": False,
-        "zero_quantized_gradients": False,
+        # # ZeRO++
+        # "zero_hpz_partition_size": zpg,
+        # "zero_quantized_weights": False,
+        # "zero_quantized_gradients": False,
     }
     if disable_trace_cache:
         zero_opt_dict["stage3_prefetch_bucket_size"] = 0
@@ -230,7 +231,7 @@ class Args:
     # various batch sizes
     num_train_epochs: int = 1
     """Number of epochs to train"""
-    gradient_accumulation_steps: int = 8
+    gradient_accumulation_steps: Optional[int] = None
     """The number of gradient accumulation steps"""
     per_device_train_batch_size: Optional[int] = 1
     """The forward batch size per device (local_micro_batch_size)"""
@@ -242,10 +243,10 @@ class Args:
     """The number of processes (GPUs) to use"""
     micro_batch_size: Optional[int] = None
     """The micro batch size across devices (HF's `per_device_train_batch_size` * `world_size`)"""
-    local_batch_size: Optional[int] = None
-    """The batch size per GPU (HF's `per_device_train_batch_size` * `gradient_accumulation_steps`)"""
-    batch_size: Optional[int] = None
-    """The batch size across devices (HF's `per_device_train_batch_size` * `world_size` * `gradient_accumulation_steps`)"""
+    local_rollout_batch_size: int = 64
+    """The number of rollout episodes per iteration per device"""
+    rollout_batch_size: Optional[int] = None
+    """The number of rollout episodes per iteration"""
     num_training_steps: Optional[int] = None
     """The number of training_steps to train"""
     num_evals: int = 4
@@ -260,7 +261,7 @@ class Args:
     """the number of epochs to train"""
     num_mini_batches: int = 1
     """Number of minibatches to split a batch into"""
-    local_mini_batch_size: Optional[int] = None
+    local_mini_batch_size: int = 64
     """the mini batch size per GPU"""
     mini_batch_size: Optional[int] = None
     """the mini batch size across GPUs"""
@@ -337,6 +338,7 @@ class Args:
     """DeepSpeed -> vLLM weight sync backend"""
     enable_prefix_caching: bool = False
     """whether to enable prefix caching"""
+    deepspeed_stage: int = 0
 
     # wandb and HF tracking configs
     with_tracking: bool = False
@@ -388,25 +390,22 @@ def calculate_runtime_args(args: Args, model_config: ModelConfig):
     """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
     # accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
     # args.world_size = accelerator.num_processes
-    args.world_size = args.actor_num_gpus_per_node * args.actor_num_nodes
-    args.local_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps * args.num_mini_batches
-    args.micro_batch_size = int(args.per_device_train_batch_size * args.world_size)
-    args.batch_size = int(args.local_batch_size * args.world_size)
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
-    args.mini_batch_size = exact_div(
-        args.batch_size, args.num_mini_batches, "`batch_size` must be a multiple of `num_mini_batches`"
+    args.gradient_accumulation_steps = exact_div(
+        args.local_mini_batch_size, args.per_device_train_batch_size, "`local_mini_batch_size` must be a multiple of `per_device_train_batch_size`"
     )
-    args.local_mini_batch_size = exact_div(
-        args.local_batch_size, args.num_mini_batches, "`local_batch_size` must be a multiple of `num_mini_batches`"
-    )
-    args.num_training_steps = args.total_episodes // args.batch_size
+    args.world_size = args.actor_num_gpus_per_node * args.actor_num_nodes
+    args.micro_batch_size = int(args.per_device_train_batch_size * args.world_size)
+    args.rollout_batch_size = int(args.local_rollout_batch_size * args.world_size)
+    args.mini_batch_size = int(args.local_mini_batch_size * args.world_size)
+    args.num_training_steps = args.total_episodes // args.rollout_batch_size
     args.eval_freq = max(1, args.num_training_steps // args.num_evals)
     # PPO logic: do checks and set up dataloader batch size
     if args.whiten_rewards:
         assert (
             args.local_mini_batch_size >= 8
         ), f"Per-rank minibatch size {args.local_mini_batch_size} is insufficient for whitening"
-    args.local_dataloader_batch_size = args.batch_size
+    args.local_dataloader_batch_size = args.rollout_batch_size
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -422,7 +421,6 @@ def calculate_runtime_args(args: Args, model_config: ModelConfig):
     if args.with_tracking:
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
-
 
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[bool] = None) -> torch.Tensor:
@@ -534,9 +532,31 @@ class RayProcess:
 
 @ray.remote(num_gpus=1)
 class PolicyTrainerRayProcess(RayProcess):
-    def from_pretrained(self, args: Args, model_config: ModelConfig):
+    def from_pretrained(self, args: Args, model_config: ModelConfig, num_gpus_per_node: int, num_nodes: int):
         self.args = args
+        self.num_gpu_per_node = num_gpus_per_node
+        self.num_nodes = num_nodes
+        torch.cuda.set_device(self.local_rank)
         deepspeed.init_distributed()
+
+        ds_config = get_train_ds_config(
+            offload=False,
+            adam_offload=False,
+            stage=args.deepspeed_stage,
+            bf16=True,
+        )
+        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
+        ds_config["train_batch_size"] = args.mini_batch_size
+        # Costa: MAGIC: it's actually needed to initialize this `dschf`, so 
+        # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
+        # next line instructs transformers to partition the model directly over multiple gpus using
+        # deepspeed.zero.Init when model's `from_pretrained` method is called.
+        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
+            dschf = HfDeepSpeedConfig(ds_config)
+        else:
+            dschf = None
+        print(f"{dschf=}")
+
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
@@ -545,23 +565,20 @@ class PolicyTrainerRayProcess(RayProcess):
             use_cache=False,
         )
         disable_dropout_in_model(self.policy)
-        self.policy.gradient_checkpointing_enable()
-        ds_config = get_train_ds_config(
-            offload=False,
-            adam_offload=False,
-            stage=2,
-            bf16=True,
-        )
-
-        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-        ds_config["train_batch_size"] = args.per_device_train_batch_size * args.gradient_accumulation_steps
-        self.optimizer = torch.optim.AdamW(self.policy.parameters(), lr=args.learning_rate)
+        self.policy.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
+        AdamOptimizer = FusedAdam
+        weight_decay = 0.0
+        optim_params = get_optimizer_grouped_parameters(self.policy, weight_decay)
+        self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
+        # self.optimizer = torch.optim.AdamW(self.policy.parameters(), lr=args.learning_rate)
         scheduler = get_scheduler(
             args.lr_scheduler_type,
             optimizer=self.optimizer,
             num_warmup_steps=args.warm_up_steps,
             num_training_steps=args.num_training_steps * args.num_train_epochs,
         )
+        print(ds_config)
         self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
             model=self.policy,
             optimizer=self.optimizer,
@@ -570,6 +587,9 @@ class PolicyTrainerRayProcess(RayProcess):
             dist_init_required=True,
         )
         self.model.train()
+
+    def get_vocab_size(self):
+        return self.policy.config.vocab_size
 
     def forward(
         self,
@@ -586,8 +606,6 @@ class PolicyTrainerRayProcess(RayProcess):
         logprob = torch.gather(all_logprob, 2, response.unsqueeze(-1)).squeeze(-1)
         return logprob
 
-    def empty_cache(self) -> None:
-        torch.cuda.empty_cache()
 
     def train(
         self,
@@ -603,8 +621,12 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.set_printoptions(precision=4, sci_mode=False)
 
         args = self.args
+        
+        accelerator = Namespace()
+        accelerator.process_index = self.rank
+        accelerator.num_processes = self.world_size
+        accelerator.is_main_process = self.rank == 0
         torch.distributed.barrier()
-        zero_stage = 2
         if self.rank == 0:
             master_address = ray._private.services.get_node_ip_address()
             with socket.socket() as sock:
@@ -641,9 +663,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 group_name="openrlhf",
             )
             ray.get(refs)
-
         torch.distributed.barrier()
-
 
         def broadcast_to_vllm():
             # avoid OOM
@@ -655,20 +675,21 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 # Fire all vllm engines for broadcast
                 if torch.distributed.get_rank() == 0:
-                    shape = param.shape if zero_stage != 3 else param.ds_shape
+                    shape = param.shape if args.deepspeed_stage != 3 else param.ds_shape
+                    # print(f"broadcasting {name=} {shape=}")
                     refs = [
                         engine.update_weight.remote(name, dtype=param.dtype, shape=shape, empty_cache=count == num_params)
                         for engine in vllm_engines
                     ]
-
                 # For ZeRO-3, allgather sharded parameter and broadcast to all vllm engines by rank 0
-                with deepspeed.zero.GatheredParameters([param], enabled=zero_stage == 3):
+                with deepspeed.zero.GatheredParameters([param], enabled=args.deepspeed_stage == 3):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
                         ray.get(refs)
+                        # print(f"broadcasting {name=} {shape=} success")
 
-        broadcast_to_vllm()
-        print('broadcasted to vllm finished')
+        # broadcast_to_vllm()
+        print(f'broadcasted to vllm finished {self.rank=} {self.local_rank=}, {self.world_size=}')
         if args.stop_token:
             if args.stop_token == "eos":
                 args.stop_token_id = tokenizer.eos_token_id
@@ -676,7 +697,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 args.stop_token_id = tokenizer.encode(".")[0]
         data_collator = SimpleGenerateCollator(pad_token_id=tokenizer.pad_token_id)
         train_dataset_idxs = np.arange(len(train_dataset))
-        shuffling_iter = ShufflingIterator(train_dataset_idxs, args.batch_size, seed=args.seed)
+        shuffling_iter = ShufflingIterator(train_dataset_idxs, args.rollout_batch_size, seed=args.seed)
+        print(f'2broadcasted to vllm finished {self.rank=} {self.local_rank=}, {self.world_size=}')
 
         # hack to left pad
         def repeat_generator():
@@ -695,6 +717,7 @@ class PolicyTrainerRayProcess(RayProcess):
             max_tokens=args.response_length,
             include_stop_str_in_output=True,
         )
+        print('setup async queues')
         param_prompt_Q = None
         response_ids_Q = None
         evaluation_Q = None
@@ -723,7 +746,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 unwrapped_model, g_queries_list = items
                 # if unwrapped_model is not None:
                 start_time = time.time()
-                broadcast_to_vllm()
                 print(
                     f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds"
                 )
@@ -742,28 +764,26 @@ class PolicyTrainerRayProcess(RayProcess):
                     evaluation_Q.put(response_ids)
 
         resume_training_step = 1
-        thread = threading.Thread(
-            target=vllm_generate,
-            args=(
-                generation_config,
-                response_ids_Q,
-                param_prompt_Q,
-                args.num_training_steps,
-                sample_evaluation_prompt_token_ids,
-                evaluation_Q,
-                args.eval_freq,
-                resume_training_step,
-            ),
-        )
-        thread.start()
+        if accelerator.is_main_process:
+            thread = threading.Thread(
+                target=vllm_generate,
+                args=(
+                    generation_config,
+                    response_ids_Q,
+                    param_prompt_Q,
+                    args.num_training_steps,
+                    sample_evaluation_prompt_token_ids,
+                    evaluation_Q,
+                    args.eval_freq,
+                    resume_training_step,
+                ),
+            )
+            thread.start()
+            print('vllm generate thread starts')
 
         # set up the metrics and initial states
-        accelerator = Namespace()
-        accelerator.process_index = self.rank
-        accelerator.num_processes = self.world_size
-        accelerator.is_main_process = self.rank == 0
         device = torch.device(self.local_rank)
-        g_vllm_responses = torch.zeros((args.batch_size, args.response_length), device=device, dtype=torch.long)
+        g_vllm_responses = torch.zeros((args.rollout_batch_size, args.response_length), device=device, dtype=torch.long)
         stats_shape = (args.num_epochs, args.num_mini_batches, args.gradient_accumulation_steps)
         approxkl_stats = torch.zeros(stats_shape, device=device)
         pg_clipfrac_stats = torch.zeros(stats_shape, device=device)
@@ -773,13 +793,13 @@ class PolicyTrainerRayProcess(RayProcess):
         entropy_stats = torch.zeros(stats_shape, device=device)
         ratio_stats = torch.zeros(stats_shape, device=device)
         local_metrics = torch.zeros((20,), device=device)
-        episode = args.batch_size * (resume_training_step - 1)
+        episode = args.rollout_batch_size * (resume_training_step - 1)
 
         # training loop
         start_time = time.time()
         data = next(iter_dataloader)
         global_queries = data[INPUT_IDS_PROMPT_KEY]
-        queries_next = left_pad(global_queries[self.rank * args.local_batch_size: (self.rank + 1) * args.local_batch_size]).to(device)
+        queries_next = left_pad(global_queries[self.rank * args.local_rollout_batch_size: (self.rank + 1) * args.local_rollout_batch_size]).to(device)
         if accelerator.is_main_process:
             param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
 
@@ -787,7 +807,7 @@ class PolicyTrainerRayProcess(RayProcess):
         #     scheduler.step()
 
         for training_step in range(resume_training_step, args.num_training_steps + 1):
-            episode += args.batch_size
+            episode += args.rollout_batch_size
             queries = queries_next
 
             if accelerator.is_main_process:
@@ -812,7 +832,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 if training_step != 1:
                     data = next(iter_dataloader)
                     global_queries = data[INPUT_IDS_PROMPT_KEY]
-                    queries_next = left_pad(global_queries[self.rank * args.local_batch_size: (self.rank + 1) * args.local_batch_size]).to(device)
+                    queries_next = left_pad(global_queries[self.rank * args.local_rollout_batch_size: (self.rank + 1) * args.local_rollout_batch_size]).to(device)
+                broadcast_to_vllm()
                 if accelerator.is_main_process:
                     param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
             else:
@@ -821,11 +842,13 @@ class PolicyTrainerRayProcess(RayProcess):
                     # we also set to use `queries = queries_next` immediately
                     data = next(iter_dataloader)
                     global_queries = data[INPUT_IDS_PROMPT_KEY]
-                    queries_next = left_pad(global_queries[self.rank * args.local_batch_size: (self.rank + 1) * args.local_batch_size]).to(device)
+                    queries_next = left_pad(global_queries[self.rank * args.local_rollout_batch_size: (self.rank + 1) * args.local_rollout_batch_size]).to(device)
+                    broadcast_to_vllm()
                     if accelerator.is_main_process:
                         param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
                     queries = queries_next
 
+            # print('get reward stuff starts')
             training_time_start = time.time()
             with torch.no_grad():
                 context_length = queries.shape[1]
@@ -845,12 +868,14 @@ class PolicyTrainerRayProcess(RayProcess):
                     ]
                     g_padded_response_ids = torch.tensor(g_padded_response_ids, device=device)
                     g_vllm_responses[:] = g_padded_response_ids
-                broadcast(g_vllm_responses, 0)
+                dist.broadcast(g_vllm_responses, src=0)
                 local_vllm_responses = g_vllm_responses[
                     accelerator.process_index * queries.shape[0] : (accelerator.process_index + 1) * queries.shape[0]
                 ]
+                # print(f"{local_vllm_responses.shape=}, {local_vllm_responses=}")
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
+                    print(f"get reward stuff starts {i=}")
                     query = queries[i : i + args.local_rollout_forward_batch_size]
                     query_response = query_responses[i : i + args.local_rollout_forward_batch_size]
                     response = query_response[:, context_length:]
@@ -865,11 +890,13 @@ class PolicyTrainerRayProcess(RayProcess):
                         postprocessed_response = truncate_response(
                             args.stop_token_id, tokenizer.pad_token_id, response
                         )
+                    # print("get reward stuff starts 2")
                     # Response Processing 2. run reward model on the truncated responses
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
                     reward_future = reward_model.forward.remote(postprocessed_query_response, tokenizer.pad_token_id, context_length)
                     
+                    # print("get reward stuff starts 3")
                     # 3. launch value model future
                     value_future = value_model.forward.remote(query_response, tokenizer.pad_token_id, context_length)
 
@@ -877,11 +904,19 @@ class PolicyTrainerRayProcess(RayProcess):
                     logprob = self.forward(query_response, response, tokenizer.pad_token_id, context_length, args.temperature)
                     torch.cuda.empty_cache()
 
-
+                    # print("get reward stuff starts 4")
                     # 5. get results from futures
-                    ref_logprob = ray.get(ref_logprob_future)
                     _, score, _ = ray.get(reward_future)
+                    # print(f"{score.shape=}")
                     full_value, _, _ = ray.get(value_future)
+                    # print(f"{full_value.shape=}")
+                    ref_logprob = ray.get(ref_logprob_future)
+                    # print(f"{ref_logprob.shape=}")
+                    if args.colocate_critic_reward:
+                        ray.get([value_model.empty_cache.remote()])
+                        ray.get([reward_model.empty_cache.remote()])
+                    if args.colocate_actor_ref:
+                        ray.get([ref_model.empty_cache.remote()])
                     value = full_value[:, context_length - 1 : -1].squeeze(-1)
                     responses.append(response)
                     postprocessed_responses.append(postprocessed_response)
@@ -890,6 +925,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
                     values.append(value)
+                    # print(f"get reward stuff starts 5")
                 responses = torch.cat(responses, 0)
                 postprocessed_responses = torch.cat(postprocessed_responses, 0)
                 logprobs = torch.cat(logprobs, 0)
@@ -897,6 +933,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
                 values = torch.cat(values, 0)
+                # print(f"get reward stuff finished")
                 del (logprob, ref_logprob, full_value, value, score)
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -921,6 +958,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 sequence_lengths_p1 = sequence_lengths + 1
                 padding_mask_p1 = response_idxs > (sequence_lengths_p1.unsqueeze(1))
                 values = torch.masked_fill(values, padding_mask_p1, 0)
+                # print(f"get reward stuff finished 2")
 
                 # 4. compute rewards
                 kl1 = logprobs - ref_logprobs
@@ -932,8 +970,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     kl = kl2
                 elif args.kl_estimator == "kl3":
                     kl = kl3
-                # print(f"{accelerator.local_process_index=}, {kl.sum(1)=}")
-                # print(f"{kl[0][:40]}, {kl.sum(1)=}")
+                # if self.rank==0:
+                #     print(f"{logprobs[0][:40]=}, {ref_logprobs[0][:40]=}, {kl.sum(1)=}")
                 non_score_reward = -args.beta * kl
                 non_score_reward_sum = non_score_reward.sum(1)
                 rlhf_reward = scores + non_score_reward_sum
@@ -941,12 +979,14 @@ class PolicyTrainerRayProcess(RayProcess):
                 actual_start = torch.arange(rewards.size(0), device=rewards.device)
                 actual_end = torch.where(sequence_lengths_p1 < rewards.size(1), sequence_lengths_p1, sequence_lengths)
                 rewards[[actual_start, actual_end]] += scores
+                # print(f"get reward stuff finished 3")
 
                 # 5. whiten rewards
                 if args.whiten_rewards:
                     rewards = masked_whiten(rewards, mask=~padding_mask_p1, shift_mean=False)
                     rewards = torch.masked_fill(rewards, padding_mask_p1, 0)
 
+                # print('gae')
                 # 6. compute advantages and returns
                 lastgaelam = 0
                 advantages_reversed = []
@@ -962,15 +1002,17 @@ class PolicyTrainerRayProcess(RayProcess):
                 advantages = torch.masked_fill(advantages, padding_mask, 0)
                 torch.cuda.empty_cache()
 
+            # print('training starts')
             # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
             for epoch_idx in range(args.num_epochs):
-                b_inds = np.random.permutation(args.local_batch_size)
+                b_inds = np.random.permutation(args.local_rollout_batch_size)
                 minibatch_idx = 0
-                for mini_batch_start in range(0, args.local_batch_size, args.local_mini_batch_size):
+                for mini_batch_start in range(0, args.local_rollout_batch_size, args.local_mini_batch_size):
                     mini_batch_end = mini_batch_start + args.local_mini_batch_size
                     mini_batch_inds = b_inds[mini_batch_start:mini_batch_end]
                     gradient_accumulation_idx = 0
                     for micro_batch_start in range(0, args.local_mini_batch_size, args.per_device_train_batch_size):
+                        print("micro batch start", micro_batch_start, self.rank)
                         micro_batch_end = micro_batch_start + args.per_device_train_batch_size
                         micro_batch_inds = mini_batch_inds[micro_batch_start:micro_batch_end]
                         mb_advantage = advantages[micro_batch_inds]
@@ -983,6 +1025,8 @@ class PolicyTrainerRayProcess(RayProcess):
 
                         value_model_step_future = value_model.step.remote(mb_query_responses, tokenizer.pad_token_id, context_length, mb_padding_mask_p1, mb_return, mb_values, args.cliprange_value, args.vf_coef)
                         new_logprobs = self.forward(mb_query_responses, mb_responses, tokenizer.pad_token_id, context_length, args.temperature)
+                        # if self.rank==0:
+                        #     print(f"{new_logprobs[0][:40]=}, {mb_logprobs[0][:40]=}")
                         new_logprobs = torch.masked_fill(new_logprobs, padding_mask[micro_batch_inds], INVALID_LOGPROB)
                         logprobs_diff = new_logprobs - mb_logprobs
                         ratio = torch.exp(logprobs_diff)
@@ -992,12 +1036,17 @@ class PolicyTrainerRayProcess(RayProcess):
                         pg_loss = masked_mean(pg_loss_max, ~padding_mask[micro_batch_inds])
                         loss = pg_loss
                         self.model.backward(loss)
+                        # print("backward loss", self.rank, "micro batch start", micro_batch_start)
+                        # print("trying to step", self.rank, "micro batch start", micro_batch_start)
                         self.model.step()
+                        # print("step", self.rank, "micro batch start", micro_batch_start)
                         with torch.no_grad():
+                            # print("waiting for value model step", self.rank, "micro batch start", micro_batch_start)
                             vf_loss, vf_clipfrac = ray.get(value_model_step_future)
                             pg_clipfrac = masked_mean(
                                 (pg_losses2 > pg_losses).float(), ~padding_mask[micro_batch_inds]
                             )
+                            # print("value model stepped", self.rank, "micro batch start", micro_batch_start)
                             # prob_dist = torch.nn.functional.softmax(logits, dim=-1)
                             # entropy = torch.logsumexp(logits, dim=-1) - torch.sum(prob_dist * logits, dim=-1)
                             approxkl = 0.5 * (logprobs_diff**2).mean()
@@ -1011,15 +1060,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         gradient_accumulation_idx += 1
                     minibatch_idx += 1
                     # fmt: off
-                    del (
-                        # output, vpred_temp, logits, new_all_logprobs, new_logprobs, vpred, vpredclipped,
-                        # vf_losses1, vf_losses2, vf_loss, vf_clipfrac, logprobs_diff, ratio, pg_losses, pg_losses2, pg_loss_max,
-                        # pg_loss, loss, pg_clipfrac, prob_dist, entropy, approxkl, mb_return,
-                        mb_advantage, mb_values, mb_responses, mb_query_responses, mb_logprobs,
-                    )
+                    del mb_advantage, mb_responses, mb_query_responses, mb_logprobs, mb_return, mb_values, mb_padding_mask_p1
+                    del new_logprobs, logprobs_diff, ratio, pg_losses, pg_losses2, pg_loss_max, pg_loss, loss
+                    # del vf_loss, vf_clipfrac, pg_clipfrac, approxkl 
                     # fmt: on
                     # del everything and empty cache
                     torch.cuda.empty_cache()
+                del b_inds, mini_batch_inds
+            # print("start metrics")
             with torch.no_grad():
                 local_metrics[0] = sequence_lengths.float().mean()
                 local_metrics[1] = (responses == args.stop_token_id).sum().float().mean()
@@ -1069,22 +1117,43 @@ class PolicyTrainerRayProcess(RayProcess):
                 }
                 if accelerator.is_main_process:
                     print_rich_single_line_metrics(metrics)
-                    # yield (metrics, episode)
                     metrics_queue.put((metrics, episode))
-            del (queries, responses, postprocessed_responses, logprobs, ref_logprobs, sequence_lengths, scores)
-            del (metrics, kl, non_score_reward, rlhf_reward)
+            del (queries, responses, postprocessed_responses, logprobs, ref_logprobs, sequence_lengths, scores, values)
+            del (global_metrics, metrics, kl, non_score_reward, non_score_reward_sum, rlhf_reward)
             gc.collect()
             torch.cuda.empty_cache()
-
-
-
-
+            print(f"finished training {training_step}")
+        print("finished training")
+        print("finished training")
+        print("finished training")
+        print("finished training")
 
 
 @ray.remote(num_gpus=1)
 class ReferenceModelRayProcess(RayProcess):
-    def from_pretrained(self, args: Args, model_config: ModelConfig):
+    def from_pretrained(self, args: Args, model_config: ModelConfig, num_gpus_per_node: int, num_nodes: int):
+        self.args = args
+        self.num_gpu_per_node = num_gpus_per_node
+        self.num_nodes = num_nodes
+        torch.cuda.set_device(self.local_rank)
         deepspeed.init_distributed()
+        ds_config = get_eval_ds_config(
+            offload=False,
+            stage=args.deepspeed_stage,
+            bf16=True,
+        )
+        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
+        ds_config["train_batch_size"] = args.mini_batch_size
+        # Costa: MAGIC: it's actually needed to initialize this `dschf`, so 
+        # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
+        # next line instructs transformers to partition the model directly over multiple gpus using
+        # deepspeed.zero.Init when model's `from_pretrained` method is called.
+        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
+            dschf = HfDeepSpeedConfig(ds_config)
+        else:
+            dschf = None
+        print(f"{dschf=}")
+
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
@@ -1093,13 +1162,6 @@ class ReferenceModelRayProcess(RayProcess):
             use_cache=False,
         )
         disable_dropout_in_model(self.policy)
-        ds_config = get_eval_ds_config(
-            offload=False,
-            stage=0,
-            bf16=True,
-        )
-        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-        ds_config["train_batch_size"] = args.per_device_train_batch_size * args.gradient_accumulation_steps
         self.model, *_ = deepspeed.initialize(model=self.policy, config=ds_config, dist_init_required=True)
         self.model.eval()
 
@@ -1118,14 +1180,35 @@ class ReferenceModelRayProcess(RayProcess):
         logprob = torch.gather(all_logprob, 2, response.unsqueeze(-1)).squeeze(-1)
         return logprob
 
-    def empty_cache(self) -> None:
-        torch.cuda.empty_cache()
 
 
 @ray.remote(num_gpus=1)
 class ValueTrainerRayProcess(RayProcess):
-    def from_pretrained(self, args: Args, model_config: ModelConfig):
+    def from_pretrained(self, args: Args, model_config: ModelConfig, num_gpus_per_node: int, num_nodes: int):
+        self.args = args
+        self.num_gpu_per_node = num_gpus_per_node
+        self.num_nodes = num_nodes
+        torch.cuda.set_device(self.local_rank)
         deepspeed.init_distributed()
+
+        ds_config = get_train_ds_config(
+            offload=False,
+            adam_offload=False,
+            stage=args.deepspeed_stage,
+            bf16=True,
+        )
+        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
+        ds_config["train_batch_size"] = args.mini_batch_size
+        # Costa: MAGIC: it's actually needed to initialize this `dschf`, so 
+        # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
+        # next line instructs transformers to partition the model directly over multiple gpus using
+        # deepspeed.zero.Init when model's `from_pretrained` method is called.
+        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
+            dschf = HfDeepSpeedConfig(ds_config)
+        else:
+            dschf = None
+        print(f"{dschf=}")
+
         self.value_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
             args.reward_model_path,
             revision=args.reward_model_revision,
@@ -1135,22 +1218,20 @@ class ValueTrainerRayProcess(RayProcess):
             use_cache=False,
         )
         disable_dropout_in_model(self.value_model)
-        self.value_model.gradient_checkpointing_enable()
-        ds_config = get_train_ds_config(
-            offload=False,
-            adam_offload=False,
-            stage=2,
-            bf16=True,
-        )
-        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-        ds_config["train_batch_size"] = args.per_device_train_batch_size * args.gradient_accumulation_steps
-        self.optimizer = torch.optim.AdamW(self.value_model.parameters(), lr=args.learning_rate)
+        self.value_model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
+        AdamOptimizer = FusedAdam
+        weight_decay = 0.0
+        optim_params = get_optimizer_grouped_parameters(self.value_model, weight_decay)
+        self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
+        # self.optimizer = torch.optim.AdamW(self.value_model.parameters(), lr=args.learning_rate)
         scheduler = get_scheduler(
             args.lr_scheduler_type,
             optimizer=self.optimizer,
             num_warmup_steps=args.warm_up_steps,
             num_training_steps=args.num_training_steps * args.num_train_epochs,
         )
+        # print(ds_config)
         self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
             model=self.value_model,
             optimizer=self.optimizer,
@@ -1160,7 +1241,6 @@ class ValueTrainerRayProcess(RayProcess):
         )
         self.model.train()
 
-
     def forward(
         self, query_responses: torch.Tensor, pad_token_id: int, context_length: int
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -1169,6 +1249,7 @@ class ValueTrainerRayProcess(RayProcess):
         )
 
     def step(self, query_responses: torch.Tensor, pad_token_id: int, context_length: int, mb_padding_mask_p1: torch.Tensor, mb_return: torch.Tensor, mb_values: torch.Tensor, cliprange_value: float, vf_coef: float) -> None:
+        torch.cuda.empty_cache()
         vpred_temp = self.forward(query_responses, pad_token_id, context_length)
         vpred_temp = vpred_temp[0]
         vpred = vpred_temp[:, context_length - 1 : -1].squeeze(-1)
@@ -1184,16 +1265,18 @@ class ValueTrainerRayProcess(RayProcess):
         vf_loss = 0.5 * masked_mean(vf_loss_max, ~mb_padding_mask_p1)
         self.model.backward(vf_loss * vf_coef)
         self.model.step()
-        vf_clipfrac = masked_mean((vf_losses2 > vf_losses1).float(), ~mb_padding_mask_p1)
+        with torch.no_grad():
+            vf_clipfrac = masked_mean((vf_losses2 > vf_losses1).float(), ~mb_padding_mask_p1)
+        del (vpred_temp, vpred, vpredclipped, vf_losses1, vf_losses2, vf_loss_max)
         return vf_loss, vf_clipfrac
-
-
 
 
 @ray.remote(num_gpus=1)
 class RewardModelRayProcess(RayProcess):
-    def from_pretrained(self, args: Args, model_config: ModelConfig):
+    def from_pretrained(self, args: Args, model_config: ModelConfig, num_gpus_per_node: int, num_nodes: int):
         deepspeed.init_distributed()
+        self.num_gpu_per_node = num_gpus_per_node
+        self.num_nodes = num_nodes
         self.reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
             args.reward_model_path,
             revision=args.reward_model_revision,
@@ -1205,11 +1288,11 @@ class RewardModelRayProcess(RayProcess):
         disable_dropout_in_model(self.reward_model)
         ds_config = get_eval_ds_config(
             offload=False,
-            stage=0,
+            stage=args.deepspeed_stage,
             bf16=True,
         )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-        ds_config["train_batch_size"] = args.per_device_train_batch_size * args.gradient_accumulation_steps
+        ds_config["train_batch_size"] = args.mini_batch_size
         self.model, *_ = deepspeed.initialize(model=self.reward_model, config=ds_config, dist_init_required=True)
         self.model.eval()
 
@@ -1219,41 +1302,75 @@ class RewardModelRayProcess(RayProcess):
         return get_reward(
             self.reward_model, query_responses, pad_token_id, context_length
         )
+    
+    def get_vocab_size(self):
+        return self.reward_model.config.vocab_size
 
-    def empty_cache(self) -> None:
-        torch.cuda.empty_cache()
+
+def kill_ray_cluster_if_a_worker_dies(object_refs):
+    while True:
+        for ref in object_refs:
+            try:
+                ref_result = ray.get(ref, timeout=0.01)
+            except ray.exceptions.GetTimeoutError:
+                pass
+            except ray.exceptions.ActorDiedError as e:
+                ray.shutdown()
+                print(f"Actor {ref} died")
+                print(e)
+                os._exit(1)  # Force shutdown the process
+
+        time.sleep(100)  # Check every 10 seconds
 
 
 class ModelGroup:
-    def __init__(self, pg: PlacementGroup, ray_process_cls: RayProcess, num_gpus_per_actor: int, actor_num_gpus_per_node: int):
+    def __init__(self, pg: PlacementGroup, ray_process_cls: RayProcess, num_gpus_per_actor: int, num_gpus_per_node: int, num_nodes: int):
         self.pg = pg
         self.ray_process_cls = ray_process_cls
         self.num_gpus_per_actor = num_gpus_per_actor
-        self.actor_num_gpus_per_node = actor_num_gpus_per_node
+        self.num_gpus_per_node = num_gpus_per_node
+        self.num_nodes = num_nodes
         self.models = []
 
-        # Setup master policy
-        master_policy = ray_process_cls.options(
-            num_cpus=self.num_gpus_per_actor,
-            num_gpus=self.num_gpus_per_actor,
-            scheduling_strategy=PlacementGroupSchedulingStrategy(
-                placement_group=self.pg,
-                placement_group_bundle_index=0,
-            )
-        ).remote(self.actor_num_gpus_per_node, 0, 0, None, None)
+        world_size = num_gpus_per_node * num_nodes
+        if self.num_gpus_per_actor > 1 and self.pg is None:
+            bundles = [
+                {"GPU": self.num_gpus_per_actor, "CPU": self.num_gpus_per_actor} for _ in range(self.num_nodes)
+            ]
+
+            self.pg = placement_group(bundles, strategy="STRICT_SPREAD")
+            ray.get(self.pg.ready())
+        if self.pg:
+            master_policy = ray_process_cls.options(
+                num_cpus=num_gpus_per_actor,
+                num_gpus=num_gpus_per_actor,
+                scheduling_strategy=PlacementGroupSchedulingStrategy(
+                    placement_group=self.pg, placement_group_bundle_index=0
+                ),
+            ).remote(world_size, 0, 0, None, None)
+        else:
+            master_policy = ray_process_cls.options(
+                num_cpus=num_gpus_per_actor,
+                num_gpus=num_gpus_per_actor,
+            ).remote(world_size, 0, 0, None, None)
+
         self.models.append(master_policy)
         master_addr, master_port = ray.get(master_policy.get_master_addr_port.remote())
 
         # Setup worker models
-        for rank in range(1, self.actor_num_gpus_per_node):
+        for rank in range(1, world_size):
+            print(f"{rank=}, {world_size, rank, 0, master_addr, master_port=}")
+            scheduling_strategy = None
+            if pg is not None:
+                scheduling_strategy = PlacementGroupSchedulingStrategy(
+                    placement_group=self.pg,
+                    placement_group_bundle_index=rank // self.num_gpus_per_node,
+                )
             worker_policy = ray_process_cls.options(
                 num_cpus=self.num_gpus_per_actor,
                 num_gpus=self.num_gpus_per_actor,
-                scheduling_strategy=PlacementGroupSchedulingStrategy(
-                    placement_group=self.pg,
-                    placement_group_bundle_index=rank // self.actor_num_gpus_per_node,
-                )
-            ).remote(self.actor_num_gpus_per_node, rank, 0, master_addr, master_port)
+                scheduling_strategy=scheduling_strategy,
+            ).remote(world_size, rank, 0, master_addr, master_port)
             self.models.append(worker_policy)
 
 
@@ -1344,16 +1461,18 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         ), f"num_nodes and num_gpus_per_node must be the same when colocate actor and ref model."
 
         bundles = [
-            {"GPU": args.actor_num_gpus_per_node, "CPU": args.actor_num_gpus_per_node * 4}
+            {"GPU": args.actor_num_gpus_per_node, "CPU": args.actor_num_gpus_per_node}
             for _ in range(args.actor_num_nodes)
         ]
         pg = placement_group(bundles, strategy="STRICT_SPREAD")
         ray.get(pg.ready())
+    
+    # breakpoint()
     inits = []
-    policy_group = ModelGroup(pg, PolicyTrainerRayProcess, 0.75 if args.colocate_actor_ref else 1, args.actor_num_gpus_per_node)
-    inits.extend(model.from_pretrained.remote(args, model_config) for model in policy_group.models)
-    ref_model_group = ModelGroup(pg, ReferenceModelRayProcess, 0.25 if args.colocate_actor_ref else 1, args.ref_num_gpus_per_node)
-    inits.extend(model.from_pretrained.remote(args, model_config) for model in ref_model_group.models)
+    policy_group = ModelGroup(pg, PolicyTrainerRayProcess, 0.75 if args.colocate_actor_ref else 1, args.actor_num_gpus_per_node, args.actor_num_nodes)
+    inits.extend(model.from_pretrained.remote(args, model_config, args.actor_num_gpus_per_node, args.actor_num_nodes) for model in policy_group.models)
+    ref_model_group = ModelGroup(pg, ReferenceModelRayProcess, 0.25 if args.colocate_actor_ref else 1, args.ref_num_gpus_per_node, args.ref_num_nodes)
+    inits.extend(model.from_pretrained.remote(args, model_config, args.ref_num_gpus_per_node, args.ref_num_nodes) for model in ref_model_group.models)
 
     # if colocated, create placement group for critic and reward model explicitly.
     pg = None
@@ -1370,12 +1489,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         pg = placement_group(bundles, strategy="STRICT_SPREAD")
         ray.get(pg.ready())
 
-    value_model_group = ModelGroup(pg, ValueTrainerRayProcess, 0.75 if args.colocate_actor_ref else 1, args.reward_num_gpus_per_node)
-    inits.extend(model.from_pretrained.remote(args, model_config) for model in value_model_group.models)
-    reward_model_group = ModelGroup(pg, RewardModelRayProcess, 0.25 if args.colocate_actor_ref else 1, args.reward_num_gpus_per_node)
-    inits.extend(model.from_pretrained.remote(args, model_config) for model in reward_model_group.models)
-
-
+    value_model_group = ModelGroup(pg, ValueTrainerRayProcess, 0.75 if args.colocate_critic_reward else 1, args.critic_num_gpus_per_node, args.critic_num_nodes)
+    inits.extend(model.from_pretrained.remote(args, model_config, args.critic_num_gpus_per_node, args.critic_num_nodes) for model in value_model_group.models)
+    reward_model_group = ModelGroup(pg, RewardModelRayProcess, 0.25 if args.colocate_critic_reward else 1, args.reward_num_gpus_per_node, args.reward_num_nodes)
+    inits.extend(model.from_pretrained.remote(args, model_config, args.reward_num_gpus_per_node, args.reward_num_nodes) for model in reward_model_group.models)
 
     max_len = dataset_config.max_prompt_token_lenth + args.response_length
     vllm_engines = create_vllm_engines(
@@ -1390,12 +1507,25 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     metrics_queue = RayQueue()
     ray.get(inits)
+    print("======== all models initialized =========")
+    policy_vocab_size = ray.get(policy_group.models[0].get_vocab_size.remote())
+    reward_vocab_size = ray.get(reward_model_group.models[0].get_vocab_size.remote())
+    print(f"{policy_vocab_size=}, {reward_vocab_size=}")
+    if policy_vocab_size != reward_vocab_size:
+        ray.shutdown() # shutdown here so this error message is not buried in the logs
+        raise ValueError(
+            "Policy and reward model must have the same vocab size. "
+            f"Policy: {policy_vocab_size}, Reward: {reward_vocab_size}. "
+            "If they don't have the same vocab size, the policy could generate tokens which "
+            "is going to cause index out of bound error in the reward model."
+        )
+
     refs = []
     for i, policy_model in enumerate(policy_group.models):
         value_model = value_model_group.models[i % len(value_model_group.models)]
         ref_model = ref_model_group.models[i % len(ref_model_group.models)]
         reward_model = reward_model_group.models[i % len(reward_model_group.models)]
-
+        print(f"{value_model=}, {i=}, {len(value_model_group.models)=}")
         refs.append(
             policy_model.train.remote(
                 train_dataset=train_dataset,
@@ -1409,432 +1539,19 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             )
         )
 
+    # somtimes a worker dies due to CUDA issues, but the rest of the cluster would just hang
+    # so we need kill the ray cluster when this happens.
+    threading.Thread(target=kill_ray_cluster_if_a_worker_dies, args=(refs,)).start()
 
+    # gather metrics
     resume_training_step = 1
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         result = metrics_queue.get()
         metrics, episode = result
         for key, value in metrics.items():
             writer.add_scalar(key, value, episode)
-
-
     ray.get(refs)
-    breakpoint()
-    print("haha")
 
-    # if policy.config.vocab_size != reward_model.config.vocab_size:
-    #     raise ValueError(
-    #         "Policy and reward model must have the same vocab size. "
-    #         f"Policy: {policy.config.vocab_size}, Reward: {reward_model.config.vocab_size}. "
-    #         "If they don't have the same vocab size, the policy could generate tokens which "
-    #         "is going to cause index out of bound error in the reward model."
-    #     )
-    # model = PolicyAndValueWrapper(policy, value_model)
-    # if model_config.gradient_checkpointing:
-    #     model.gradient_checkpointing_enable()
-    # for module in [model, ref_model, reward_model]:
-    #     disable_dropout_in_model(module)
-    # if args.stop_token:
-    #     if args.stop_token == "eos":
-    #         args.stop_token_id = tokenizer.eos_token_id
-    #     if args.stop_token == "period":
-    #         args.stop_token_id = tokenizer.encode(".")[0]
-    # optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, eps=args.eps)
-    # scheduler = get_scheduler(
-    #     args.lr_scheduler_type,
-    #     optimizer=optimizer,
-    #     num_warmup_steps=args.warm_up_steps,
-    #     num_training_steps=args.num_training_steps * args.num_train_epochs,
-    # )
-    # data_collator = SimpleGenerateCollator(pad_token_id=tokenizer.pad_token_id)
-    # dataloader = DataLoader(
-    #     train_dataset,
-    #     batch_size=args.local_dataloader_batch_size,
-    #     shuffle=True,
-    #     collate_fn=data_collator,
-    #     drop_last=True,  # needed; otherwise the last batch will be of ragged shape
-    # )
-
-    # def repeat_generator():
-    #     while True:
-    #         yield from dataloader
-
-    # iter_dataloader = iter(repeat_generator())
-    # generation_config = SamplingParams(
-    #     temperature=args.temperature,
-    #     top_p=1.0,
-    #     max_tokens=args.response_length,
-    #     include_stop_str_in_output=True,
-    # )
-    # param_prompt_Q = None
-    # response_ids_Q = None
-    # evaluation_Q = None
-    # response_ids_Q = Queue(maxsize=1)
-    # param_prompt_Q = Queue(maxsize=1)
-    # evaluation_Q = Queue(maxsize=1)
-    # num_eval_samples = 32
-    # sample_evaluation_prompt_token_ids = None
-    # if eval_dataset is not None:
-    #     sample_evaluation_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
-    # thread = threading.Thread(
-    #     target=vllm_generate,
-    #     args=(
-    #         model_config.model_name_or_path,
-    #         model_config.model_revision,
-    #         dataset_config.max_prompt_token_lenth + args.response_length,
-    #         args.vllm_device,
-    #         args.vllm_gpu_memory_utilization,
-    #         generation_config,
-    #         response_ids_Q,
-    #         param_prompt_Q,
-    #         args.num_training_steps,
-    #         sample_evaluation_prompt_token_ids,
-    #         evaluation_Q,
-    #         args.eval_freq,
-    #         resume_training_step,
-    #     ),
-    # )
-    # thread.start()
-    # # g_vllm_responses = torch.zeros((args.batch_size, args.response_length), device=device, dtype=torch.long)
-
-    # # # set up the metrics and initial states
-    # # stats_shape = (args.num_epochs, args.num_mini_batches, args.gradient_accumulation_steps)
-    # # approxkl_stats = torch.zeros(stats_shape, device=device)
-    # # pg_clipfrac_stats = torch.zeros(stats_shape, device=device)
-    # # pg_loss_stats = torch.zeros(stats_shape, device=device)
-    # # vf_loss_stats = torch.zeros(stats_shape, device=device)
-    # # vf_clipfrac_stats = torch.zeros(stats_shape, device=device)
-    # # entropy_stats = torch.zeros(stats_shape, device=device)
-    # # ratio_stats = torch.zeros(stats_shape, device=device)
-    # # local_metrics = torch.zeros((20,), device=device)
-    # resume_training_step = 1
-    # episode = args.batch_size * (resume_training_step - 1)
-    # # model.train()
-
-    # # # training loop
-    # # start_time = time.time()
-    # # data = next(iter_dataloader)
-    # # queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
-    # # send_queries(accelerator, None, tokenizer, param_prompt_Q, queries_next)
-
-    # # for _ in range(1, resume_training_step):  # we didn't store scheduler state
-    # #     scheduler.step()
-
-    # for training_step in range(resume_training_step, args.num_training_steps + 1):
-    #     episode += args.batch_size
-
-    #     if accelerator.is_main_process:
-    #         try:
-    #             evaluation_responses = evaluation_Q.get(timeout=0.01)
-    #             print("🔥🔥🔥 Evaluation responses received")
-    #             table = {}
-    #             table["prompt"] = tokenizer.batch_decode(sample_evaluation_prompt_token_ids)
-    #             table["response"] = tokenizer.batch_decode(evaluation_responses)
-    #             table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
-    #             df = pd.DataFrame(table)
-    #             print_rich_table(df)
-    #             if args.with_tracking:
-    #                 wandb.log({"sample_completions": wandb.Table(dataframe=df)})
-    #             else:
-    #                 print_rich_table(df)
-    #             del table
-    #         except Empty:
-    #             print("🙈 Evaluation responses not received")
-
-    #     with unwrap_model_for_generation(model, accelerator) as unwrapped_model:
-    #         # (optionally) evaluate the model
-    #         generation_model = unwrapped_model.policy
-    #         if args.async_mode:
-    #             if training_step != 1:
-    #                 data = next(iter_dataloader)
-    #                 queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
-    #             send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
-    #         else:
-    #             if training_step != 1:
-    #                 # NOTE: important: the indent here is different for sync mode
-    #                 # we also set to use `queries = queries_next` immediately
-    #                 data = next(iter_dataloader)
-    #                 queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
-    #                 send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
-    #                 queries = queries_next
-
-    #         training_time_start = time.time()
-    #         with torch.no_grad():
-    #             context_length = queries.shape[1]
-    #             responses = []
-    #             postprocessed_responses = []
-    #             logprobs = []
-    #             ref_logprobs = []
-    #             scores = []
-    #             sequence_lengths = []
-    #             values = []
-    #             if accelerator.is_main_process:
-    #                 g_response_token_ids = response_ids_Q.get()
-    #                 DUMMY_PAD_TOKEN = 0  # we can't use tokenizer.pad_token_id because it's outside vocab and `torch.gather(all_logprob, 2, response.unsqueeze(-1))` will error out
-    #                 g_padded_response_ids = [
-    #                     response + [DUMMY_PAD_TOKEN] * (args.response_length - len(response))
-    #                     for response in g_response_token_ids
-    #                 ]
-    #                 for item in g_padded_response_ids:
-    #                     assert len(item) == args.response_length
-    #                     for inner_item in item:
-    #                         if not inner_item < config.vocab_size:
-    #                             assert inner_item < config.vocab_size, f"{inner_item=}, {tokenizer.vocab_size=}"
-    #                 g_padded_response_ids = torch.tensor(g_padded_response_ids, device=device)
-    #                 g_vllm_responses[:] = g_padded_response_ids
-    #             broadcast(g_vllm_responses, 0)
-    #             local_vllm_responses = g_vllm_responses[
-    #                 accelerator.process_index * queries.shape[0] : (accelerator.process_index + 1) * queries.shape[0]
-    #             ]
-    #             query_responses = torch.cat((queries, local_vllm_responses), 1)
-    #             for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
-    #                 query = queries[i : i + args.local_rollout_forward_batch_size]
-    #                 query_response = query_responses[i : i + args.local_rollout_forward_batch_size]
-    #                 response = query_response[:, context_length:]
-    #                 output = forward(generation_model, query_response, tokenizer.pad_token_id)
-    #                 logits = output.logits[:, context_length - 1 : -1]
-    #                 logits /= args.temperature + 1e-7
-    #                 all_logprob = F.log_softmax(logits, dim=-1)
-    #                 logprob = torch.gather(all_logprob, 2, response.unsqueeze(-1)).squeeze(-1)
-    #                 del output, logits, all_logprob
-    #                 torch.cuda.empty_cache()
-
-    #                 ref_output = forward(ref_model, query_response, tokenizer.pad_token_id)
-    #                 ref_logits = ref_output.logits[:, context_length - 1 : -1]
-    #                 ref_logits /= args.temperature + 1e-7
-    #                 ref_all_logprob = F.log_softmax(ref_logits, dim=-1)
-    #                 ref_logprob = torch.gather(ref_all_logprob, 2, response.unsqueeze(-1)).squeeze(-1)
-    #                 del ref_output, ref_logits, ref_all_logprob
-    #                 torch.cuda.empty_cache()
-
-    #                 # Response Processing 1. truncate response after the first occurrence of `stop_token_id`
-    #                 postprocessed_response = response
-    #                 if args.stop_token_id is not None:  # handle the edge case when stop_token_id exists but is 0
-    #                     postprocessed_response = truncate_response(
-    #                         args.stop_token_id, tokenizer.pad_token_id, response
-    #                     )
-
-    #                 # Response Processing 2. run reward model on the truncated responses
-    #                 postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
-    #                 sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
-    #                 _, score, _ = get_reward(
-    #                     reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
-    #                 )
-    #                 unwrapped_value_model = accelerator.unwrap_model(model).value_model
-    #                 full_value, _, _ = get_reward(
-    #                     unwrapped_value_model, query_response, tokenizer.pad_token_id, context_length
-    #                 )
-    #                 value = full_value[:, context_length - 1 : -1].squeeze(-1)
-
-    #                 responses.append(response)
-    #                 postprocessed_responses.append(postprocessed_response)
-    #                 logprobs.append(logprob)
-    #                 ref_logprobs.append(ref_logprob)
-    #                 sequence_lengths.append(sequence_length)
-    #                 scores.append(score)
-    #                 values.append(value)
-    #             responses = torch.cat(responses, 0)
-    #             postprocessed_responses = torch.cat(postprocessed_responses, 0)
-    #             logprobs = torch.cat(logprobs, 0)
-    #             ref_logprobs = torch.cat(ref_logprobs, 0)
-    #             sequence_lengths = torch.cat(sequence_lengths, 0)
-    #             scores = torch.cat(scores, 0)
-    #             global_scores = accelerator.gather(scores)
-    #             accelerator.print(f"global_scores: {global_scores}, {global_scores.mean()}")
-    #             values = torch.cat(values, 0)
-    #             del (logprob, ref_logprob, full_value, value, score)
-    #             gc.collect()
-    #             torch.cuda.empty_cache()
-
-    #             # Response Processing 3. filter response. Ensure that the sample contains stop_token_id
-    #             # responses not passing that filter will receive a low (fixed) score
-    #             # only query humans on responses that pass that filter
-    #             contain_stop_token = torch.any(postprocessed_responses == args.stop_token_id, dim=-1)
-    #             # NOTE: only apply the stop token filter if the response is long enough
-    #             # otherwise the model could learn to generate the first token as the stop token
-    #             contain_stop_token = contain_stop_token & (sequence_lengths >= args.min_response_length)
-    #             if args.non_stop_penalty:
-    #                 scores = torch.where(
-    #                     contain_stop_token, scores, torch.full_like(scores, args.penalty_reward_value)
-    #                 )
-
-    #             # be very careful with `padding_mask_p1`; see https://excalidraw.com/#json=LWnzG4w2k5DjF_EOL_xPt,e2w3a-hFJ_gX5vOfeyXGTw
-    #             response_idxs = torch.arange(responses.shape[1], device=responses.device).repeat(responses.shape[0], 1)
-    #             padding_mask = response_idxs > sequence_lengths.unsqueeze(1)
-    #             logprobs = torch.masked_fill(logprobs, padding_mask, INVALID_LOGPROB)
-    #             ref_logprobs = torch.masked_fill(ref_logprobs, padding_mask, INVALID_LOGPROB)
-    #             sequence_lengths_p1 = sequence_lengths + 1
-    #             padding_mask_p1 = response_idxs > (sequence_lengths_p1.unsqueeze(1))
-    #             values = torch.masked_fill(values, padding_mask_p1, 0)
-
-    #             # 4. compute rewards
-    #             kl1 = logprobs - ref_logprobs
-    #             kl2 = (kl1) ** 2 / 2
-    #             kl3 = (-kl1).exp() - 1 + kl1
-    #             if args.kl_estimator == "kl1":
-    #                 kl = kl1
-    #             elif args.kl_estimator == "kl2":
-    #                 kl = kl2
-    #             elif args.kl_estimator == "kl3":
-    #                 kl = kl3
-    #             print(f"{accelerator.local_process_index=}, {kl.sum(1)=}")
-    #             non_score_reward = -args.beta * kl
-    #             non_score_reward_sum = non_score_reward.sum(1)
-    #             rlhf_reward = scores + non_score_reward_sum
-    #             rewards = non_score_reward.clone()
-    #             actual_start = torch.arange(rewards.size(0), device=rewards.device)
-    #             actual_end = torch.where(sequence_lengths_p1 < rewards.size(1), sequence_lengths_p1, sequence_lengths)
-    #             rewards[[actual_start, actual_end]] += scores
-
-    #             # 5. whiten rewards
-    #             if args.whiten_rewards:
-    #                 rewards = masked_whiten(rewards, mask=~padding_mask_p1, shift_mean=False)
-    #                 rewards = torch.masked_fill(rewards, padding_mask_p1, 0)
-
-    #             # 6. compute advantages and returns
-    #             lastgaelam = 0
-    #             advantages_reversed = []
-    #             gen_length = responses.shape[1]
-    #             for t in reversed(range(gen_length)):
-    #                 nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
-    #                 delta = rewards[:, t] + args.gamma * nextvalues - values[:, t]
-    #                 lastgaelam = delta + args.gamma * args.lam * lastgaelam
-    #                 advantages_reversed.append(lastgaelam)
-    #             advantages = torch.stack(advantages_reversed[::-1], axis=1)
-    #             returns = advantages + values
-    #             advantages = masked_whiten(advantages, ~padding_mask)
-    #             advantages = torch.masked_fill(advantages, padding_mask, 0)
-    #             torch.cuda.empty_cache()
-
-    #     # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
-    #     for epoch_idx in range(args.num_epochs):
-    #         b_inds = np.random.permutation(args.local_batch_size)
-    #         minibatch_idx = 0
-    #         for mini_batch_start in range(0, args.local_batch_size, args.local_mini_batch_size):
-    #             mini_batch_end = mini_batch_start + args.local_mini_batch_size
-    #             mini_batch_inds = b_inds[mini_batch_start:mini_batch_end]
-    #             gradient_accumulation_idx = 0
-    #             for micro_batch_start in range(0, args.local_mini_batch_size, args.per_device_train_batch_size):
-    #                 with accelerator.accumulate(model):
-    #                     micro_batch_end = micro_batch_start + args.per_device_train_batch_size
-    #                     micro_batch_inds = mini_batch_inds[micro_batch_start:micro_batch_end]
-    #                     mb_advantage = advantages[micro_batch_inds]
-    #                     mb_responses = responses[micro_batch_inds]
-    #                     mb_query_responses = query_responses[micro_batch_inds]
-    #                     mb_logprobs = logprobs[micro_batch_inds]
-    #                     mb_return = returns[micro_batch_inds]
-    #                     mb_values = values[micro_batch_inds]
-
-    #                     output, vpred_temp = forward(model, mb_query_responses, tokenizer.pad_token_id)
-    #                     logits = output.logits[:, context_length - 1 : -1]
-    #                     logits /= args.temperature + 1e-7
-    #                     new_all_logprobs = F.log_softmax(logits, dim=-1)
-    #                     new_logprobs = torch.gather(new_all_logprobs, 2, mb_responses.unsqueeze(-1)).squeeze(-1)
-    #                     new_logprobs = torch.masked_fill(new_logprobs, padding_mask[micro_batch_inds], INVALID_LOGPROB)
-    #                     vpred = vpred_temp[:, context_length - 1 : -1].squeeze(-1)
-    #                     vpred = torch.masked_fill(vpred, padding_mask_p1[micro_batch_inds], 0)
-    #                     vpredclipped = torch.clamp(
-    #                         vpred,
-    #                         mb_values - args.cliprange_value,
-    #                         mb_values + args.cliprange_value,
-    #                     )
-    #                     vf_losses1 = torch.square(vpred - mb_return)
-    #                     vf_losses2 = torch.square(vpredclipped - mb_return)
-    #                     vf_loss_max = torch.max(vf_losses1, vf_losses2)
-    #                     vf_loss = 0.5 * masked_mean(vf_loss_max, ~padding_mask_p1[micro_batch_inds])
-    #                     logprobs_diff = new_logprobs - mb_logprobs
-    #                     ratio = torch.exp(logprobs_diff)
-    #                     pg_losses = -mb_advantage * ratio
-    #                     pg_losses2 = -mb_advantage * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
-    #                     pg_loss_max = torch.max(pg_losses, pg_losses2)
-    #                     pg_loss = masked_mean(pg_loss_max, ~padding_mask[micro_batch_inds])
-    #                     loss = pg_loss + args.vf_coef * vf_loss
-
-    #                     accelerator.backward(loss)
-    #                     optimizer.step()
-    #                     optimizer.zero_grad()
-    #                     with torch.no_grad():
-    #                         pg_clipfrac = masked_mean(
-    #                             (pg_losses2 > pg_losses).float(), ~padding_mask[micro_batch_inds]
-    #                         )
-    #                         vf_clipfrac = masked_mean(
-    #                             (vf_losses2 > vf_losses1).float(), ~padding_mask_p1[micro_batch_inds]
-    #                         )
-    #                         prob_dist = torch.nn.functional.softmax(logits, dim=-1)
-    #                         entropy = torch.logsumexp(logits, dim=-1) - torch.sum(prob_dist * logits, dim=-1)
-    #                         approxkl = 0.5 * (logprobs_diff**2).mean()
-    #                         approxkl_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = approxkl
-    #                         pg_clipfrac_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = pg_clipfrac
-    #                         pg_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = pg_loss
-    #                         vf_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = vf_loss
-    #                         vf_clipfrac_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = vf_clipfrac
-    #                         entropy_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = entropy.mean()
-    #                         ratio_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = ratio.mean()
-
-    #                 gradient_accumulation_idx += 1
-    #             minibatch_idx += 1
-    #             # fmt: off
-    #             del (
-    #                 output, vpred_temp, logits, new_all_logprobs, new_logprobs, vpred, vpredclipped,
-    #                 vf_losses1, vf_losses2, vf_loss, vf_clipfrac, logprobs_diff, ratio, pg_losses, pg_losses2, pg_loss_max,
-    #                 pg_loss, loss, pg_clipfrac, prob_dist, entropy, approxkl, mb_return,
-    #                 mb_advantage, mb_values, mb_responses, mb_query_responses, mb_logprobs,
-    #             )
-    #             # fmt: on
-    #             # del everything and empty cache
-    #             torch.cuda.empty_cache()
-    #     with torch.no_grad():
-    #         local_metrics[0] = sequence_lengths.float().mean()
-    #         local_metrics[1] = (responses == args.stop_token_id).sum().float().mean()
-    #         local_metrics[2] = kl.sum(1).mean()
-    #         local_metrics[3] = (-logprobs).sum(1).mean()
-    #         local_metrics[4] = non_score_reward_sum.mean()
-    #         local_metrics[5] = rlhf_reward.mean()
-    #         local_metrics[6] = scores.mean()
-    #         local_metrics[7] = approxkl_stats.mean()
-    #         local_metrics[8] = pg_clipfrac_stats.mean()
-    #         local_metrics[9] = pg_loss_stats.mean()
-    #         local_metrics[10] = vf_loss_stats.mean()
-    #         local_metrics[11] = vf_clipfrac_stats.mean()
-    #         local_metrics[12] = entropy_stats.mean()
-    #         local_metrics[13] = ratio_stats.mean()
-    #         local_metrics[14] = ratio_stats.var()
-    #         local_metrics[15] = ((kl) ** 2 / 2).sum(1).mean()
-    #         local_metrics[16] = ((-kl).exp() - 1 + kl).sum(1).mean()
-    #         global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
-    #         metrics = {
-    #             "episode": episode,
-    #             "training_step": training_step,
-    #             "lr": scheduler.get_last_lr()[0],
-    #             "epoch": episode / len(train_dataset),
-    #             "time/from_scratch": time.time() - start_time,
-    #             "time/training": time.time() - training_time_start,
-    #             "val/sequence_lengths": global_metrics[0],
-    #             "val/num_stop_token_ids": global_metrics[1],
-    #             "objective/kl": global_metrics[2],
-    #             "objective/kl2": global_metrics[15],
-    #             "ojbective/kl3": global_metrics[16],
-    #             "objective/entropy": global_metrics[3],
-    #             "objective/non_score_reward": global_metrics[4],
-    #             "objective/rlhf_reward": global_metrics[5],
-    #             "objective/scores": global_metrics[6],
-    #             "policy/approxkl_avg": global_metrics[7],
-    #             "policy/clipfrac_avg": global_metrics[8],
-    #             "loss/policy_avg": global_metrics[9],
-    #             "loss/value_avg": global_metrics[10],
-    #             "val/clipfrac_avg": global_metrics[11],
-    #             "policy/entropy_avg": global_metrics[12],
-    #             "val/ratio": global_metrics[13],
-    #             "val/ratio_var": global_metrics[14],
-    #         }
-    #         if accelerator.is_main_process:
-    #             print_rich_single_line_metrics(metrics)
-    #             for key, value in metrics.items():
-    #                 writer.add_scalar(key, value, episode)
-    #     del (queries, responses, postprocessed_responses, logprobs, ref_logprobs, sequence_lengths, scores)
-    #     del (metrics, kl, non_score_reward, rlhf_reward)
-    #     gc.collect()
-    #     torch.cuda.empty_cache()
 
     # if not ph.preemptied:
     #     # save model
