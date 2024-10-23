@@ -111,6 +111,7 @@ class WorkerWrap(Worker):
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
         """Broadcast weight to all vllm workers from source rank 0 (actor model)"""
+        # print(f"update_weight: {name}, dtype: {dtype}, shape: {shape}, rank: {torch.distributed.get_rank()}, world_size: {torch.distributed.get_world_size()}")
         # if torch.distributed.get_rank() == 0:
         #     print(f"update weight: {name}, dtype: {dtype}, shape: {shape}")
 
@@ -204,14 +205,14 @@ def create_vllm_engines(
         scheduling_strategy = None
 
         if tensor_parallel_size > 1:
-            bundles = [{"GPU": 1, "CPU": 10}] * tensor_parallel_size
+            bundles = [{"GPU": 1, "CPU": 1}] * tensor_parallel_size
             pg = placement_group(bundles)
             ray.get(pg.ready())
 
             scheduling_strategy = PlacementGroupSchedulingStrategy(
                 placement_group=pg, placement_group_capture_child_tasks=True, placement_group_bundle_index=0
             )
-
+        print(f"vllm: {num_gpus=}, {num_engines=}")
         vllm_engines.append(
             LLMRayActor.options(
                 num_cpus=1,
