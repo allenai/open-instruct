@@ -24,7 +24,7 @@ tasks:
         --main_process_port 29400
         --use_deepspeed
         --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf
-        open_instruct/dpo_tune.py
+        open_instruct/dpo_tune_cache.py
         --model_name_or_path /hf_llama_models
         --use_flash_attn
         --max_seq_length 4096
@@ -68,6 +68,10 @@ tasks:
     #   - mountPath: /hf_llama_models
     #     source:
     #       beaker: Yizhongw03/hf_llama_model_7B
+    datasets:
+      - mountPath: /oe-adapt-default
+        source:
+          weka: oe-adapt-default
     result:
       path: /output
     resources:
