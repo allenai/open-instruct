@@ -440,23 +440,35 @@ def get_cache_ref_logprobs(
     active_dataloader: torch.utils.data.DataLoader,
     accelerator: Accelerator,
     average_log_prob: bool,
+    last_checkpoint_path: Optional[str],
+    resume_step: int,
+    epoch_range: range,
 ):
-    cached_reference_chosen_logps = []
-    cached_reference_rejected_logps = []
-    for step, batch in tqdm(enumerate(active_dataloader), disable=not accelerator.is_local_main_process):
-        with torch.no_grad():
-            if args.use_lora:
-                with accelerator.unwrap_model(model).disable_adapter():
+    epoch_cached_reference_chosen_logps = []
+    epoch_cached_reference_rejected_logps = []
+    for epoch in epoch_range:
+        active_dataloader.set_epoch(epoch)
+        if last_checkpoint_path and resume_step is not None:
+            # We skip the first `n` batches in the dataloader when resuming from a checkpoint
+            active_dataloader = accelerator.skip_first_batches(active_dataloader, resume_step)
+        cached_reference_chosen_logps = []
+        cached_reference_rejected_logps = []
+        for step, batch in tqdm(enumerate(active_dataloader), disable=not accelerator.is_local_main_process):
+            with torch.no_grad():
+                if args.use_lora:
+                    with accelerator.unwrap_model(model).disable_adapter():
+                        reference_chosen_logps, reference_rejected_logps, _ = concatenated_forward(
+                            model, batch, average_log_prob=average_log_prob
+                        )
+                else:
                     reference_chosen_logps, reference_rejected_logps, _ = concatenated_forward(
                         model, batch, average_log_prob=average_log_prob
                     )
-            else:
-                reference_chosen_logps, reference_rejected_logps, _ = concatenated_forward(
-                    model, batch, average_log_prob=average_log_prob
-                )
-                cached_reference_chosen_logps.append(reference_chosen_logps.cpu())
-                cached_reference_rejected_logps.append(reference_rejected_logps.cpu())
-    return cached_reference_chosen_logps, cached_reference_rejected_logps
+                    cached_reference_chosen_logps.append(reference_chosen_logps.cpu())
+                    cached_reference_rejected_logps.append(reference_rejected_logps.cpu())
+        epoch_cached_reference_chosen_logps.append(cached_reference_chosen_logps)
+        epoch_cached_reference_rejected_logps.append(cached_reference_rejected_logps)
+    return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps
 
 
 def main(args: FlatArguments):
@@ -894,6 +906,7 @@ def main(args: FlatArguments):
 
     # Potentially load in the weights and states from a previous save
     last_checkpoint_path = get_last_checkpoint_path(args)
+    resume_step = None
     if last_checkpoint_path:
         accelerator.print(f"Resumed from checkpoint: {last_checkpoint_path}")
         accelerator.load_state(last_checkpoint_path)
@@ -918,8 +931,14 @@ def main(args: FlatArguments):
     average_log_prob_loss_types = ["simpo", "dpo_norm"]
     average_log_prob = args.dpo_loss_type in average_log_prob_loss_types
     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-        cached_reference_chosen_logps, cached_reference_rejected_logps = get_cache_ref_logprobs(
-            model, train_dataloader, accelerator, average_log_prob
+        epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = get_cache_ref_logprobs(
+            model,
+            train_dataloader,
+            accelerator,
+            average_log_prob,
+            last_checkpoint_path,
+            resume_step,
+            range(starting_epoch, args.num_train_epochs),
         )
         torch.cuda.empty_cache()  # clear cache
 
@@ -948,9 +967,10 @@ def main(args: FlatArguments):
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
                 if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                     p_device = policy_chosen_logps.device
-                    reference_chosen_logps, reference_rejected_logps = cached_reference_chosen_logps[step].to(
-                        p_device
-                    ), cached_reference_rejected_logps[step].to(p_device)
+                    reference_chosen_logps = epoch_cached_reference_chosen_logps[epoch][step].to(p_device)
+                    reference_rejected_logps = epoch_cached_reference_rejected_logps[epoch][step].to(p_device)
+                    if step == 0:
+                        logger.info(f"{epoch=}, {reference_chosen_logps=}, {policy_chosen_logps=}")
                     losses, _, _ = dpo_loss(
                         policy_chosen_logps,
                         policy_rejected_logps,
