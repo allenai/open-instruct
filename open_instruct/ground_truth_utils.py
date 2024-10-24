@@ -121,4 +121,5 @@ if __name__ == "__main__":
     ds = load_dataset("ai2-adapt-dev/prompts_with_constraints_for_ground_truth")
     test_model_output = "<|assistant|>\nThe answer is $\\boxed{3.14}$"
     for sample in ds['train']:
+        print(sample)
         verify_ifeval_sample(test_model_output, sample['ground_truth'])
