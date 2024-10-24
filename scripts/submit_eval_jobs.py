@@ -148,7 +148,7 @@ experiment_groups_default = [
     "mbpp_evalplus_temp_0.1",
     "mbpp_evalplus_temp_0.8",
     "ifeval",
-    "trutufulqa",
+    "truthfulqa",
     "toxigen",
     "xstest",
     "alpaca_eval",
@@ -391,7 +391,7 @@ for experiment_group in experiment_groups:
                 --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
                 --use_vllm \
         '''
-    elif experiment_group == "trutufulqa":
+    elif experiment_group == "truthfulqa":
         task_spec['arguments'][0] = '''
         python -m eval.truthfulqa.run_eval \
             --data_dir /data/truthfulqa \
@@ -534,7 +534,7 @@ for experiment_group in experiment_groups:
 
     # Add additional stop sequences if needed.
     # mainly for llama-3-instruct eot.
-    tasks_without_addition_stop = ["mmlu_0shot", "mmlu_5shot", "trutufulqa"]
+    tasks_without_addition_stop = ["mmlu_0shot", "mmlu_5shot", "truthfulqa"]
     if args.add_stop_sequence and experiment_group not in tasks_without_addition_stop:
         task_spec['arguments'] = [task_spec['arguments'][0] + " --additional_stop_sequence " + " ".join(args.add_stop_sequence)]
 
