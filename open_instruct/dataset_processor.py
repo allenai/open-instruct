@@ -51,6 +51,8 @@ INPUT_IDS_REJECTED_KEY = "input_ids_rejected"
 ATTENTION_MASK_REJECTED_KEY = "attention_mask_rejected"
 INPUT_IDS_PROMPT_KEY = "input_ids_prompt"
 ATTENTION_MASK_PROMPT_KEY = "attention_mask_prompt"
+GROUND_TRUTHS_KEY = "ground_truth"
+DATASET_SOURCE_KEY = "dataset"
 
 # NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
 # also we don't really need `ATTENTION_MASK_CHOSEN_KEY` and `ATTENTION_MASK_REJECTED_KEY`
@@ -166,6 +168,12 @@ class DatasetConfig:
     # columns names for SFT dataset
     sft_messages_key: str = SFT_MESSAGE_KEY
 
+    # columns name for the ground truth
+    ground_truths_key: str = GROUND_TRUTHS_KEY
+
+    # columns name for dataset source
+    dataset_source_key: str = DATASET_SOURCE_KEY
+
     # columns names for binary dataset
     binary_messages_key: str = SFT_MESSAGE_KEY
     label: str = BINARY_LABEL_KEY
@@ -174,7 +182,7 @@ class DatasetConfig:
 
     # filter config
     max_token_length: Optional[int] = None
-    max_prompt_token_lenth: Optional[int] = None
+    max_prompt_token_length: Optional[int] = None
 
     # dataset.map config
     sanity_check: bool = False
@@ -314,8 +322,8 @@ class PreferenceDatasetProcessor(DatasetProcessor):
     def filter(self, dataset: Union[Dataset, DatasetDict]):
         def filter_fn(row):
             return (
-                len(row[INPUT_IDS_PROMPT_KEY]) <= self.config.max_prompt_token_lenth
-                if self.config.max_prompt_token_lenth is not None
+                len(row[INPUT_IDS_PROMPT_KEY]) <= self.config.max_prompt_token_length
+                if self.config.max_prompt_token_length is not None
                 else (
                     True and len(row[INPUT_IDS_CHOSEN_KEY]) <= self.config.max_token_length
                     if self.config.max_token_length is not None
@@ -366,8 +374,12 @@ class PreferenceDatasetProcessor(DatasetProcessor):
 class SFTDatasetProcessor(DatasetProcessor):
     def tokenize(self, dataset: Dataset):
         def tokenize_fn(row):
+            if len(row[self.config.sft_messages_key]) == 1:
+                prompt = row[self.config.sft_messages_key]
+            else:
+                prompt = row[self.config.sft_messages_key][:-1]
             row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(
-                row[self.config.sft_messages_key][:-1],
+                prompt,
                 add_generation_prompt=True,
             )
             row[INPUT_IDS_KEY] = self.tokenizer.apply_chat_template(row[self.config.sft_messages_key])
@@ -376,6 +388,8 @@ class SFTDatasetProcessor(DatasetProcessor):
             if self.config.train_only_on_prompt:
                 labels[: len(row[INPUT_IDS_PROMPT_KEY])] = [-100] * len(row[INPUT_IDS_PROMPT_KEY])
             row[LABELS_KEY] = labels
+            row[GROUND_TRUTHS_KEY] = row[self.config.ground_truths_key]
+            row[DATASET_SOURCE_KEY] = row[self.config.dataset_source_key]
             return row
 
         return dataset.map(
@@ -385,18 +399,18 @@ class SFTDatasetProcessor(DatasetProcessor):
             desc="Tokenizing and reformatting SFT data",
         )
 
-    def filter(self, dataset: Dataset):
+    def filter(self, dataset: Dataset, need_contain_labels: bool = True):
         def filter_fn(row):
             max_prompt_token_length_ok = True
-            if self.config.max_prompt_token_lenth is not None:
-                max_prompt_token_length_ok = len(row[INPUT_IDS_PROMPT_KEY]) <= self.config.max_prompt_token_lenth
+            if self.config.max_prompt_token_length is not None:
+                max_prompt_token_length_ok = len(row[INPUT_IDS_PROMPT_KEY]) <= self.config.max_prompt_token_length
 
             max_token_length_ok = True
             if self.config.max_token_length is not None:
                 max_token_length_ok = len(row[INPUT_IDS_KEY]) <= self.config.max_token_length
 
             contain_some_labels = any(x != -100 for x in row[LABELS_KEY])
-            return max_prompt_token_length_ok and max_token_length_ok and contain_some_labels
+            return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
 
         return dataset.filter(
             filter_fn,
@@ -512,6 +526,47 @@ class SimpleGenerateCollator:
 
         return {
             INPUT_IDS_PROMPT_KEY: padded_sequences,
+        }
+
+class SimpleGenerateCollatorWithGroundTruth:
+    """Simple collator for generation task (always pad from the LEFT)"""
+
+    def __init__(self, pad_token_id: int):
+        self.pad_token_id = pad_token_id
+
+    def __call__(self, batch: list[dict]):
+        """the input will have input_ids_prompt"""
+        # Find max length in the batch
+        max_length = -1
+        for i in range(len(batch)):
+            max_length = max(max_length, len(batch[i][INPUT_IDS_PROMPT_KEY]))
+        assert max_length > 0, "the dataset is empty"
+
+        # Initialize lists to store padded sequences and attention masks
+        padded_sequences = []
+
+        for i in range(len(batch)):
+            # Calculate padding length
+            pad_length = max_length - len(batch[i][INPUT_IDS_PROMPT_KEY])
+
+            # Pad from the left
+            padding = [self.pad_token_id] * pad_length
+            padded_sequence = padding + batch[i][INPUT_IDS_PROMPT_KEY]
+            padded_sequences.append(padded_sequence)
+
+        # Convert to tensors
+        padded_sequences = torch.tensor(padded_sequences)
+
+        # ground truths
+        ground_truths = [x[GROUND_TRUTHS_KEY] for x in batch]
+
+        # datasets
+        datasets = [x[DATASET_SOURCE_KEY] for x in batch]
+
+        return {
+            INPUT_IDS_PROMPT_KEY: padded_sequences,
+            GROUND_TRUTHS_KEY: ground_truths,
+            DATASET_SOURCE_KEY: datasets,
         }
 
 

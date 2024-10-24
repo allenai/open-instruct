@@ -31,7 +31,7 @@ python open_instruct/online_dpo_vllm_thread.py \
     --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_eval_splits validation \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr \
     --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
     --non_stop_penalty \
@@ -43,7 +43,7 @@ python open_instruct/online_dpo_vllm_thread.py \
     --per_device_eval_batch_size 2 \
     --gradient_accumulation_steps 64 \
     --max_token_length 2048 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --num_train_epochs 1 \
     --beta 0.1 \
     --output_dir models/rm/rm_sentiment_1b \
@@ -64,7 +64,7 @@ python open_instruct/online_dpo_vllm_thread.py \
     --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_eval_splits validation \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr \
     --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
     --non_stop_penalty \
@@ -76,7 +76,7 @@ python open_instruct/online_dpo_vllm_thread.py \
     --per_device_eval_batch_size 2 \
     --gradient_accumulation_steps 64 \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --num_train_epochs 1 \
     --beta 0.1 \
     --output_dir models/rm/rm_sentiment_1b \
@@ -112,7 +112,7 @@ python mason.py \
     --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_eval_splits validation \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --learning_rate 3e-6 \
     --output_dir models/minimal/online_dpo_vllm_thread_tldr \
     --per_device_train_batch_size 16 \
@@ -158,7 +158,7 @@ python mason.py \
     --dataset_eval_mixer '{"HuggingFaceH4/no_robots": 1.0}' \
     --dataset_eval_splits test \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --learning_rate 8e-7 \
     --output_dir /output/ \
     --chat_template tulu \
@@ -211,7 +211,7 @@ python mason.py \
     --dataset_eval_mixer '{"allenai/ultrafeedback_binarized_cleaned": 1.0}' \
     --dataset_eval_splits test_prefs \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --learning_rate 8e-7 \
     --output_dir /output/ \
     --chat_template tulu \
@@ -265,7 +265,7 @@ python mason.py \
     --dataset_eval_mixer '{"allenai/ultrafeedback_binarized_cleaned": 1.0}' \
     --dataset_eval_splits test_prefs \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --learning_rate 8e-7 \
     --output_dir /output/ \
     --chat_template tulu \
