@@ -88,6 +88,42 @@ python open_instruct/ppo_vllm_thread.py \
     --gradient_checkpointing \
     --with_tracking \
     --push_to_hub
+
+# LEVEL 0.2: 3 GPUs; 1 GPU for actor and reference, 1 GPU for critic and reward model, and
+# 1 GPU for vLLM generation.
+python open_instruct/ppo_vllm_thread_ray.py \
+    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_eval_splits validation \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --learning_rate 3e-6 \
+    --output_dir models/minimal/ppo_ray \
+    --per_device_train_batch_size 8 \
+    --local_rollout_forward_batch_size 8 \
+    --local_mini_batch_size 128 \
+    --local_rollout_batch_size 128 \
+    --actor_num_gpus_per_node 1 \
+    --ref_num_gpus_per_node 1 \
+    --colocate_actor_ref \
+    --critic_num_gpus_per_node 1 \
+    --reward_num_gpus_per_node 1 \
+    --colocate_critic_reward \
+    --colocate_actor_ref \
+    --vllm_tensor_parallel_size 1 \
+    --deepspeed_stage 3 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 256 \
+    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr  \
+    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
+    --non_stop_penalty \
+    --stop_token eos \
+    --beta 0.05 \
+    --response_length 53 \
+    --with_tracking \
+    --push_to_hub
 ```
 
 
@@ -102,7 +138,6 @@ python mason.py \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/general-cirrascale \
     --priority normal \
-    --resumable \
     --preemptible \
     --budget ai2/allennlp \
     --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
@@ -132,11 +167,57 @@ python mason.py \
     --hf_metadata_dataset '""' \
     --no_try_launch_beaker_eval_jobs \
     --vllm_device cuda:7
+
+# or with ray
+python mason.py \
+    --cluster ai2/allennlp-elara-cirrascale ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale --image costah/open_instruct_ppo_ray --pure_docker_mode \
+    --priority normal \
+    --preemptible \
+    --budget ai2/allennlp \
+    --gpus 8 -- python open_instruct/ppo_vllm_thread_ray.py \
+    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_eval_splits validation \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --learning_rate 3e-6 \
+    --output_dir models/minimal/ppo_ray \
+    --per_device_train_batch_size 8 \
+    --local_rollout_forward_batch_size 8 \
+    --local_mini_batch_size 64 \
+    --local_rollout_batch_size 64 \
+    --actor_num_gpus_per_node 4 \
+    --ref_num_gpus_per_node 4 \
+    --colocate_actor_ref \
+    --critic_num_gpus_per_node 2 \
+    --reward_num_gpus_per_node 1 \
+    --vllm_tensor_parallel_size 1 \
+    --deepspeed_stage 3 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 1000000 \
+    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr  \
+    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
+    --non_stop_penalty \
+    --stop_token eos \
+    --beta 0.1 \
+    --response_length 53 \
+    --with_tracking \
+    --push_to_hub \
+    --hf_metadata_dataset '""' \
+    --no_try_launch_beaker_eval_jobs
 ```
 
 * Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/by8j2ejp
 * Trained model: https://huggingface.co/vwxyzjn/ppo_vllm_thread__cleanrl_EleutherAI_pythia-1b-deduped__sft__tldr/tree/ppo_vllm_thread__1__1726110645
 
+Ray's exps:
+
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/dixgu9lk
+* Trained model: https://huggingface.co/allenai/open_instruct_dev/tree/ppo_vllm_thread_ray__1__1729740264
+
+https://wandb.ai/ai2-llm/open_instruct_internal/runs/kzs3h76g?nw=nwusercostah
 
 ### LEVEL 2: 8 GPU; Huggingface no robot
 
@@ -184,10 +265,61 @@ python mason.py \
     --gradient_checkpointing \
     --with_tracking \
     --push_to_hub
+
+    # --cluster ai2/pluto-cirrascale \
+python mason.py \
+    --cluster ai2/jupiter-cirrascale-2 --image nathanl/open_instruct_auto --pure_docker_mode \
+    --workspace ai2/tulu-3-dev \
+    --priority high \
+    --preemptible \
+    --budget ai2/allennlp \
+    --gpus 8 -- python open_instruct/ppo_vllm_thread_ray.py \
+    --dataset_mixer '{"HuggingFaceH4/no_robots": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"HuggingFaceH4/no_robots": 1.0}' \
+    --dataset_eval_splits test \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 512 \
+    --learning_rate 8e-7 \
+    --output_dir models/minimal/ppo_ray \
+    --per_device_train_batch_size 1 \
+    --local_rollout_forward_batch_size 1 \
+    --local_mini_batch_size 128 \
+    --local_rollout_batch_size 128 \
+    --actor_num_gpus_per_node 4 \
+    --ref_num_gpus_per_node 4 \
+    --colocate_actor_ref \
+    --critic_num_gpus_per_node 2 \
+    --reward_num_gpus_per_node 1 \
+    --vllm_tensor_parallel_size 1 \
+    --deepspeed_stage 3 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 100000 \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision finetune__meta-llama_Meta-Llama-3.1-8B__42__1726352218 \
+    --reward_model_path allenai/open_instruct_dev \
+    --reward_model_revision reward_modeling__2__1727077902 \
+    --non_stop_penalty \
+    --stop_token eos \
+    --penalty_reward_value -10.0 \
+    --beta 0.03 \
+    --num_evals 3 \
+    --seed 3 \
+    --response_length 1024 \
+    --gradient_checkpointing \
+    --with_tracking \
+    --push_to_hub
 ```
 
 * Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/jvjegpcq
 * Trained model: https://huggingface.co/vwxyzjn/ppo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/ppo_vllm_thread_beta_0.03__3__1726244716
+
+Ray's exps:
+
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/kzs3h76g
+* Trained model: https://huggingface.co/allenai/open_instruct_dev/tree/ppo_vllm_thread_ray__3__1729717405
+
 
 
 ### LEVEL 3: 8 GPU; Training on ultrafeedback RM
@@ -238,8 +370,62 @@ python mason.py \
     --push_to_hub
 ```
 
-* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/z9035fv5/overview
-* Trained model: https://huggingface.co/vwxyzjn/ppo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/ppo_vllm_thread_beta_0.03__1__1726282755
+### LEVEL 4: 48 GPUs; 70B training
+
+```bash
+TULU3_RM_REPO=allenai/open_instruct_dev
+TULU3_RM1_REV=reward_modeling__2__1726890037
+python mason.py \
+    --cluster ai2/jupiter-cirrascale-2 --image nathanl/open_instruct_auto --pure_docker_mode \
+    --workspace ai2/tulu-3-dev \
+    --priority high \
+    --preemptible \
+    --num_nodes 6 \
+    --image costah/open_instruct_ppo_ray \
+    --budget ai2/allennlp \
+    --gpus 8 -- source configs/beaker_configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray.py \
+    --exp_name ppo_vllm_thread_ray_70B \
+    --dataset_mixer "{\"HuggingFaceH4/no_robots\": 9500}" \
+    --dataset_train_splits train \
+    --dataset_eval_mixer "{\"HuggingFaceH4/no_robots\": 1.0}" \
+    --dataset_eval_splits test \
+    --max_token_length 1024 \
+    --max_prompt_token_lenth 1024 \
+    --learning_rate 4e-7 \
+    --output_dir models/minimal/ppo_ray_tldr \
+    --per_device_train_batch_size 1 \
+    --local_rollout_forward_batch_size 1 \
+    --local_mini_batch_size 16 \
+    --local_rollout_batch_size 16 \
+    --actor_num_gpus_per_node 8 \
+    --actor_num_nodes 4 \
+    --ref_num_gpus_per_node 8 \
+    --critic_num_gpus_per_node 4 \
+    --reward_num_gpus_per_node 1 \
+    --vllm_num_engines 1 \
+    --vllm_tensor_parallel_size 2 \
+    --deepspeed_stage 3 \
+    --num_epochs 1 \
+    --num_mini_batches 1 \
+    --total_episodes 100000 \
+    --model_name_or_path /weka/oe-adapt-default/jacobm/models/L3.1-70B-v3.7-nc  \
+    --reward_model_path $TULU3_RM_REPO \
+    --reward_model_revision $TULU3_RM1_REV \
+    --non_stop_penalty \
+    --stop_token eos \
+    --penalty_reward_value -10.0 \
+    --beta 0.04 \
+    --num_evals 3 \
+    --seed 3 \
+    --response_length 512 \
+    --gradient_checkpointing \
+    --with_tracking \
+    --push_to_hub
+```
+
+* Beaker link: https://beaker.org/ex/01JAZENQBHGRQZ8MVAQGBX3GW3/tasks/01JAZENQBRYJN59GX6NDD8BK5J/job/01JAZENQGGYM59P5YK6X4XVSBQ
+* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/w944sr4x
+* Trained model: https://huggingface.co/allenai/open_instruct_dev/tree/ppo_vllm_thread_ray_70B__3__1729779947   
 
 
 ### Quality of life tools
