@@ -71,7 +71,7 @@ def index_dataset_text(data_to_index, es, index_name, text_batch_size):
     stats = es.indices.stats(index=index_name)
     index_size = stats["indices"][index_name]["total"]["docs"]["count"]
     if index_size > 0:
-        print(f"Index of size {index_size} exist. Adding data.")
+        print(f"Index of size {index_size} exists. Adding data.")
 
     if index_size < len(data_to_index):
         idx = index_size
@@ -98,7 +98,7 @@ def index_dataset_vectors(data_to_index, es, index_name, model_name, max_batch_t
     stats = es.indices.stats(index=index_name)
     index_size = stats["indices"][index_name]["total"]["docs"]["count"]
     if index_size > 0:
-        print(f"Index of size {index_size} exist. Adding data.")
+        print(f"Index of size {index_size} exists. Adding data.")
 
     if index_size < len(data_to_index):
         # Embedding model setup
