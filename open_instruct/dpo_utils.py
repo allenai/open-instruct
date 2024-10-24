@@ -169,18 +169,17 @@ def _get_batch_logps(
     else:
         return (per_token_logps * loss_mask).sum(-1)
 
+
 def process_batch(
-    batch: Dict[str, Union[List, torch.LongTensor]], 
-    prefix: str,
-    pad_value: int = 0
+    batch: Dict[str, Union[List, torch.LongTensor]], prefix: str, pad_value: int = 0
 ) -> Dict[str, torch.LongTensor]:
     """Process either chosen or rejected inputs separately.
-    
+
     Args:
         batch: Input batch dictionary
         prefix: Either 'chosen' or 'rejected'
         pad_value: Value to use for padding (0 for input_ids, -100 for labels)
-    
+
     Returns:
         Processed batch dictionary for the specified prefix
     """
@@ -261,72 +260,65 @@ def separate_forward(
     output_router_logits: bool = False,
 ) -> Tuple[torch.FloatTensor, torch.FloatTensor, Union[torch.FloatTensor, None]]:
     """Run the model on chosen and rejected inputs separately.
-    
+
     Args:
         model: The model to run
         batch: Dictionary containing chosen and rejected inputs
         average_log_prob: Whether to average the log probabilities
         output_router_logits: Whether to output router logits for MoE models
-        
+
     Returns:
         Tuple of (chosen_logps, rejected_logps, aux_loss)
     """
     # Process chosen inputs
     chosen_batch = process_batch(batch, "chosen")
-    
+
     if output_router_logits:
         chosen_outputs = model(
             input_ids=chosen_batch["input_ids"],
             attention_mask=chosen_batch["attention_mask"],
-            output_router_logits=True
+            output_router_logits=True,
         )
         chosen_logits = chosen_outputs.logits.to(torch.float32)
         aux_loss = chosen_outputs.aux_loss
     else:
         chosen_logits = model(
-            input_ids=chosen_batch["input_ids"],
-            attention_mask=chosen_batch["attention_mask"]
+            input_ids=chosen_batch["input_ids"], attention_mask=chosen_batch["attention_mask"]
         ).logits.to(torch.float32)
         aux_loss = None
-    
-    chosen_logps = _get_batch_logps(
-        chosen_logits, 
-        chosen_batch["labels"], 
-        average_log_prob=average_log_prob
-    )
-    del chosen_batch, chosen_logits, chosen_outputs
+
+    chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
+    del chosen_batch, chosen_logits
+    if output_router_logits:
+        del chosen_outputs
     torch.cuda.empty_cache()
 
     # Process rejected inputs
     rejected_batch = process_batch(batch, "rejected")
-    
+
     if output_router_logits:
         rejected_outputs = model(
             input_ids=rejected_batch["input_ids"],
             attention_mask=rejected_batch["attention_mask"],
-            output_router_logits=True
+            output_router_logits=True,
         )
         rejected_logits = rejected_outputs.logits.to(torch.float32)
         aux_loss = rejected_outputs.aux_loss
     else:
         rejected_logits = model(
-            input_ids=rejected_batch["input_ids"],
-            attention_mask=rejected_batch["attention_mask"]
+            input_ids=rejected_batch["input_ids"], attention_mask=rejected_batch["attention_mask"]
         ).logits.to(torch.float32)
         aux_loss = None
 
-    rejected_logps = _get_batch_logps(
-        rejected_logits, 
-        rejected_batch["labels"], 
-        average_log_prob=average_log_prob
-    )
-    del rejected_batch, rejected_logits, rejected_outputs
+    rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
+    del rejected_batch, rejected_logits
+    if output_router_logits:
+        del rejected_outputs
     torch.cuda.empty_cache()
     if output_router_logits:
         aux_loss = torch.cat([chosen_outputs.aux_loss, rejected_outputs.aux_loss], dim=0)
 
     return chosen_logps, rejected_logps, aux_loss
-
 
 
 def pad_to_length(tensor: torch.Tensor, length: int, pad_value: Union[int, float], dim: int = -1) -> torch.Tensor:

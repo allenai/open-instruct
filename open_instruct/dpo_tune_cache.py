@@ -60,8 +60,8 @@ from open_instruct.dataset_processor import CHAT_TEMPLATES
 from open_instruct.dpo_utils import (
     DataCollatorForSeq2SeqDPO,
     concatenated_forward,
-    separate_forward,
     dpo_loss,
+    separate_forward,
     simpo_loss,
     wpo_loss,
 )
@@ -104,7 +104,7 @@ class FlatArguments:
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
-    it : bool = field(
+    it: bool = field(
         default=False,
         metadata={
             "help": "Use paged optimizer from bitsandbytes."
@@ -821,7 +821,7 @@ def main(args: FlatArguments):
             "weight_decay": 0.0,
         },
     ]
-    if args.use_qlora or args.it :
+    if args.use_qlora or args.it:
         from bitsandbytes.optim import AdamW
 
         optimizer = AdamW(
@@ -1204,6 +1204,7 @@ def main(args: FlatArguments):
     accelerator.wait_for_everyone()
     if args.with_tracking:
         accelerator.end_training()
+
 
 def print_gpu_stats(init_gpu_memory):
     free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
