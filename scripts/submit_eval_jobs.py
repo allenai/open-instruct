@@ -75,7 +75,16 @@ parser.add_argument("--hf_revision", type=str, default=None)
 parser.add_argument("--location", type=str, default=None)
 parser.add_argument("--beaker_image", type=str, default="nathanl/open_instruct_auto", help="If given, use this Beaker image.")
 parser.add_argument("--beaker_subfolder", type=str, default=None)
-parser.add_argument("--cluster", nargs='+', default=["ai2/allennlp-cirrascale", "ai2/general-cirrascale", "ai2/mosaic-cirrascale-a100", "ai2/s2-cirrascale-l40", "ai2/jupiter-cirrascale-2"])
+parser.add_argument("--cluster", nargs='+', default=[
+    "ai2/allennlp-cirrascale",
+    "ai2/general-cirrascale",
+    "ai2/s2-cirrascale-l40",
+    "ai2/allennlp-elara-cirrascale",
+    "ai2/pluto-cirrascale",
+    "ai2/neptune-cirrascale",
+    "ai2/saturn-cirrascale",
+    "ai2/jupiter-cirrascale-2",
+])
 parser.add_argument("--is_tuned", action="store_true")
 parser.add_argument("--use_hf_tokenizer_template", action="store_true")
 parser.add_argument("--priority", type=str, default="low")
@@ -139,7 +148,7 @@ experiment_groups_default = [
     "mbpp_evalplus_temp_0.1",
     "mbpp_evalplus_temp_0.8",
     "ifeval",
-    "trutufulqa",
+    "truthfulqa",
     "toxigen",
     "xstest",
     "alpaca_eval",
@@ -382,7 +391,7 @@ for experiment_group in experiment_groups:
                 --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
                 --use_vllm \
         '''
-    elif experiment_group == "trutufulqa":
+    elif experiment_group == "truthfulqa":
         task_spec['arguments'][0] = '''
         python -m eval.truthfulqa.run_eval \
             --data_dir /data/truthfulqa \
@@ -525,7 +534,7 @@ for experiment_group in experiment_groups:
 
     # Add additional stop sequences if needed.
     # mainly for llama-3-instruct eot.
-    tasks_without_addition_stop = ["mmlu_0shot", "mmlu_5shot", "trutufulqa"]
+    tasks_without_addition_stop = ["mmlu_0shot", "mmlu_5shot", "truthfulqa"]
     if args.add_stop_sequence and experiment_group not in tasks_without_addition_stop:
         task_spec['arguments'] = [task_spec['arguments'][0] + " --additional_stop_sequence " + " ".join(args.add_stop_sequence)]
 
