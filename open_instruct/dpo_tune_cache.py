@@ -27,7 +27,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
-from typing import List, Optional, Union
+from typing import Callable, List, Optional, Union
 
 import datasets
 import deepspeed
@@ -60,6 +60,7 @@ from open_instruct.dataset_processor import CHAT_TEMPLATES
 from open_instruct.dpo_utils import (
     DataCollatorForSeq2SeqDPO,
     concatenated_forward,
+    separate_forward,
     dpo_loss,
     simpo_loss,
     wpo_loss,
@@ -366,6 +367,8 @@ class FlatArguments:
         default=0.001,
         metadata={"help": "Weight for load balancing loss if applicable."},
     )
+    concatenated_forward: bool = False
+    """Whether to concatenate chosen and rejected for DPO training; True is good but you can set to False for saving memory."""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: Optional[str] = None
@@ -443,6 +446,7 @@ def get_cache_ref_logprobs(
     last_checkpoint_path: Optional[str],
     resume_step: int,
     epoch_range: range,
+    forward_fn: Callable,
 ):
     epoch_cached_reference_chosen_logps = []
     epoch_cached_reference_rejected_logps = []
@@ -457,11 +461,11 @@ def get_cache_ref_logprobs(
             for step, batch in tqdm(enumerate(active_dataloader), disable=not accelerator.is_local_main_process):
                 if args.use_lora:
                     with accelerator.unwrap_model(model).disable_adapter():
-                        reference_chosen_logps, reference_rejected_logps, _ = concatenated_forward(
+                        reference_chosen_logps, reference_rejected_logps, _ = forward_fn(
                             model, batch, average_log_prob=average_log_prob
                         )
                 else:
-                    reference_chosen_logps, reference_rejected_logps, _ = concatenated_forward(
+                    reference_chosen_logps, reference_rejected_logps, _ = forward_fn(
                         model, batch, average_log_prob=average_log_prob
                     )
                 cached_reference_chosen_logps.append(reference_chosen_logps.cpu())
@@ -930,6 +934,7 @@ def main(args: FlatArguments):
     # Cache the logprobs
     average_log_prob_loss_types = ["simpo", "dpo_norm"]
     average_log_prob = args.dpo_loss_type in average_log_prob_loss_types
+    forward_fn = concatenated_forward if args.concatenated_forward else separate_forward
     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
         epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = get_cache_ref_logprobs(
             model,
@@ -939,6 +944,7 @@ def main(args: FlatArguments):
             last_checkpoint_path,
             resume_step,
             range(starting_epoch, args.num_train_epochs),
+            forward_fn,
         )
         torch.cuda.empty_cache()  # clear cache
 
@@ -962,7 +968,7 @@ def main(args: FlatArguments):
             episode += len(batch["chosen_input_ids"]) * accelerator.num_processes
             # dpo forward pass & loss
             with accelerator.accumulate(model):
-                policy_chosen_logps, policy_rejected_logps, aux_loss = concatenated_forward(
+                policy_chosen_logps, policy_rejected_logps, aux_loss = forward_fn(
                     model, batch, average_log_prob=average_log_prob, output_router_logits=args.load_balancing_loss
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
                 if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
