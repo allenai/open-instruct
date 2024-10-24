@@ -104,7 +104,7 @@ class FlatArguments:
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
-    dpo_use_paged_optimizer: bool = field(
+    it : bool = field(
         default=False,
         metadata={
             "help": "Use paged optimizer from bitsandbytes."
@@ -357,6 +357,12 @@ class FlatArguments:
         default=3,
         metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
     )
+    fused_optimizer: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to use fused AdamW or not.",
+        },
+    )
     load_balancing_loss: bool = field(
         default=False,
         metadata={
@@ -367,7 +373,7 @@ class FlatArguments:
         default=0.001,
         metadata={"help": "Weight for load balancing loss if applicable."},
     )
-    concatenated_forward: bool = False
+    concatenated_forward: bool = True
     """Whether to concatenate chosen and rejected for DPO training; True is good but you can set to False for saving memory."""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
@@ -476,6 +482,7 @@ def get_cache_ref_logprobs(
 
 
 def main(args: FlatArguments):
+    init_gpu_memory = torch.cuda.mem_get_info()[0]
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
@@ -656,7 +663,8 @@ def main(args: FlatArguments):
         return model
 
     model = load_model()
-
+    print("=============model loaded")
+    print_gpu_stats(init_gpu_memory)
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
     if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
@@ -798,7 +806,8 @@ def main(args: FlatArguments):
         collate_fn=DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest"),
         batch_size=args.per_device_train_batch_size,
     )
-
+    print("=============data loaded")
+    print_gpu_stats(init_gpu_memory)
     # Optimizer
     # Split weights in two groups, one with weight decay and the other not.
     no_decay = ["bias", "layer_norm.weight"]
@@ -812,7 +821,7 @@ def main(args: FlatArguments):
             "weight_decay": 0.0,
         },
     ]
-    if args.use_qlora or args.dpo_use_paged_optimizer:
+    if args.use_qlora or args.it :
         from bitsandbytes.optim import AdamW
 
         optimizer = AdamW(
@@ -822,8 +831,9 @@ def main(args: FlatArguments):
             is_paged=True,
         )
     else:
-        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
-
+        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
+    print("=============optimizer loaded")
+    print_gpu_stats(init_gpu_memory)
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
@@ -856,6 +866,8 @@ def main(args: FlatArguments):
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
+    print("=============accelerate prepared")
+    print_gpu_stats(init_gpu_memory)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
@@ -931,6 +943,9 @@ def main(args: FlatArguments):
 
     print(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
 
+    print("=============before cache logprobs")
+    print_gpu_stats(init_gpu_memory)
+
     # Cache the logprobs
     average_log_prob_loss_types = ["simpo", "dpo_norm"]
     average_log_prob = args.dpo_loss_type in average_log_prob_loss_types
@@ -946,8 +961,12 @@ def main(args: FlatArguments):
             range(starting_epoch, args.num_train_epochs),
             forward_fn,
         )
+        print("=============after cache logprobs")
+        print_gpu_stats(init_gpu_memory)
         torch.cuda.empty_cache()  # clear cache
 
+    print("=============after cache logprobs; clear cache")
+    print_gpu_stats(init_gpu_memory)
     # Only show the progress bar once on each machine.
     progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
     # update the progress_bar if load from checkpoint
@@ -1185,6 +1204,13 @@ def main(args: FlatArguments):
     accelerator.wait_for_everyone()
     if args.with_tracking:
         accelerator.end_training()
+
+def print_gpu_stats(init_gpu_memory):
+    free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
+    peak_memory = init_gpu_memory - free_gpu_memory
+    print(f"Peak memory usage: {peak_memory / 1024 ** 3:.2f} GB")
+    print(f"Total memory usage: {total_gpu_memory / 1024 ** 3:.2f} GB")
+    print(f"Free memory: {free_gpu_memory / 1024 ** 3:.2f} GB")
 
 
 if __name__ == "__main__":
