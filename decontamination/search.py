@@ -39,6 +39,7 @@ def get_ngram_mapping(string: str, n: int):
 def exact_match(es, index_name, query_dataset, fields):
     match_scores = []
     output_data = []
+    matching_train_indices = set()
     for datum in tqdm(query_dataset):
         query_strings = [datum[field] for field in fields]
         if any([s is None for s in query_strings]):
@@ -63,20 +64,27 @@ def exact_match(es, index_name, query_dataset, fields):
         num_hits = search_output["hits"]["total"]
         if num_hits > 0:
             match_scores.append(1)
+            train_docs = [d["_source"] for d in search_output["hits"]["hits"]]
+            for train_doc in train_docs:
+                matching_train_indices.add(train_doc["original_id"])
             output_data.append(
                 {
                     "query": query_strings,
-                    "num_hits": num_hits
-                    }
+                    "num_hits": num_hits,
+                    "train_docs": train_docs,
+                }
             )
         else:
             match_scores.append(0)
-    return match_scores, output_data
+    return match_scores, output_data, matching_train_indices
 
 
 def ngram_match(es, index_name, query_dataset, fields, ngram_size):
     match_scores = []
     output_data = []
+    # Maps ids in the HF dataset ("original_id") to the list of matching scores with test instances, so that we can compute the max score for
+    # decontamination.
+    all_train_id_scores = defaultdict(list)
     for datum in tqdm(query_dataset):
         query_strings = [datum[field] for field in fields]
         if any([s is None for s in query_strings]):
@@ -84,7 +92,7 @@ def ngram_match(es, index_name, query_dataset, fields, ngram_size):
         query_string_match_scores = []
         query_string_match_tokens = defaultdict(list)
         matching_doc_ids = set()
-        doc_id_text_mapping = {}
+        doc_id_source_mapping = {}
         match_info = None
         for query_string in query_strings:
             # We compute the match score for each query string for ngram matches as follows:
@@ -111,12 +119,12 @@ def ngram_match(es, index_name, query_dataset, fields, ngram_size):
                         }
                     }
                 )
-                train_doc_ids = [h["_id"] for h in search_output["hits"]["hits"]]
-                train_texts = [h["_source"]["text"] for h in search_output["hits"]["hits"]]
-                for doc_id, text in zip(train_doc_ids, train_texts):
+                for hit_info in search_output["hits"]["hits"]:
+                    doc_id = hit_info["_id"]
+                    doc = hit_info["_source"]
                     train_doc_matches[doc_id].update(tokens)
                     matching_doc_ids.add(doc_id)
-                    doc_id_text_mapping[doc_id] = text
+                    doc_id_source_mapping[doc_id] = doc
 
             query_string_match_scores.append({doc_id: len(matching_tokens) / query_string_length for doc_id, matching_tokens in train_doc_matches.items()})
             for doc_id, matching_tokens in train_doc_matches.items():
@@ -125,26 +133,39 @@ def ngram_match(es, index_name, query_dataset, fields, ngram_size):
         if matching_doc_ids:
             # Averaging the match scores of training documents over all query strings.
             aggregated_match_scores = {doc_id: sum([x.get(doc_id, 0.0) for x in query_string_match_scores]) / len(query_string_match_scores) for doc_id in matching_doc_ids}
-            largest_match_doc_id, match_score = sorted(aggregated_match_scores.items(), key=lambda x: x[1], reverse=True)[0]
+            sorted_matches = sorted(aggregated_match_scores.items(), key=lambda x: x[1], reverse=True)
+            match_info = []
+            for doc_id, score in sorted_matches:
+                match_info.append(
+                    {
+                        "doc_id": doc_id,
+                        "source": doc_id_source_mapping[doc_id],
+                        "matching_tokens": query_string_match_tokens[doc_id],
+                        "score": score,
+                    }
+                )
+                all_train_id_scores[doc_id_source_mapping[doc_id]["original_id"]].append(score)
+            match_score = sorted_matches[0][1]
             match_scores.append(match_score)
-            match_info = {
-                "query": query_strings,
-                "largest_match": {
-                    "doc_id": largest_match_doc_id,
-                    "text": doc_id_text_mapping[largest_match_doc_id],
-                    "matching_tokens": query_string_match_tokens[largest_match_doc_id]
-                },
-                "score": match_score,
-            }
-            output_data.append(match_info)
+            output_data.append(
+                {
+                    "query": query_strings,
+                    "matches": match_info,
+                    "score": match_score,
+                }
+            )
         else:
             match_scores.append(0)
-    return match_scores, output_data     
+    max_train_match_scores = {_id: max(scores) for _id, scores in all_train_id_scores.items()}
+    return match_scores, output_data, max_train_match_scores
 
 
 def vector_match(es, index_name, query_dataset, fields, model, tokenizer, max_batch_tokens):
     match_scores = []
     output_data = []
+    # Maps ids in the HF dataset ("original_id") to the list of matching scores with test instances, so that we can compute the max score for
+    # decontamination.
+    all_train_id_scores = defaultdict(list)
     batch_inputs = []
     batch_size = 0
     max_seq_tokens = 0
@@ -162,16 +183,18 @@ def vector_match(es, index_name, query_dataset, fields, model, tokenizer, max_ba
                 )
                 results = sem_search["hits"]["hits"][:5]
                 match_scores.append(results[0]["_score"])
-                output_results = [
-                    {
-                        "index": r["_index"],
-                        "score": r["_score"],
-                        "id": r["_id"],
-                        "text": r["_source"]["text"],
-                        "original_id": r["_source"]["original_id"],
-                    }
-                    for r in results
-                ]
+                output_results = []
+                for result in results:
+                    output_results.append(
+                        {
+                            "index": result["_index"],
+                            "score": result["_score"],
+                            "id": result["_id"],
+                            "text": result["_source"]["text"],
+                            "original_id": result["_source"]["original_id"],
+                        }
+                    )
+                    all_train_id_scores[result["_source"]["original_id"]].append(result["_score"])
                 output_data.append(
                     {
                         "query": query,
@@ -181,7 +204,8 @@ def vector_match(es, index_name, query_dataset, fields, model, tokenizer, max_ba
             batch_inputs = []
             max_seq_tokens = 0
             batch_size = 0
-    return match_scores, output_data
+    max_train_match_scores = {_id: max(scores) for _id, scores in all_train_id_scores.items()}
+    return match_scores, output_data, max_train_match_scores
 
 
 def main():
@@ -192,7 +216,7 @@ def main():
     parser.add_argument("--split", type=str, default="test")
     parser.add_argument("--field", type=str, nargs="+")
     parser.add_argument("--limit", type=int, help="Limit the number of eval instances")
-    parser.add_argument("--index_names", type=str, nargs="+")
+    parser.add_argument("--train_dataset_names", type=str, nargs="+")
     parser.add_argument("--dataset_mixer_config", type=str, help="Path to a train config file in yml format with a `dataset_mixer` field.")
     parser.add_argument("--index_type", type=str, choices=["text", "vector"], default="text")
     parser.add_argument("--ngram_size", type=int, help="If `index_type` is `text`, will use n-gram matches of this size if this field is set. Default is full match.")
@@ -200,6 +224,7 @@ def main():
     parser.add_argument("--model", type=str, default="nvidia/NV-Embed-v2")
     parser.add_argument("--max_batch_tokens", type=int, default=10000, help="Maximum number of tokens per batch if the `index_type` is `vector`.")
     parser.add_argument("--output_dir", type=str, required=True)
+    parser.add_argument("--decontaminate", action="store_true")
     args = parser.parse_args()
 
     eval_sets = [
@@ -239,14 +264,17 @@ def main():
         dataset_names = list(train_config["dataset_mixer"].keys())
         index_names = [d.replace("/", "_").lower() + f"_{args.index_type}" for d in dataset_names]
         print(f"Config has {len(dataset_names)} datasets. Looking for corresponding indexes: {index_names}")
-    elif args.index_names is not None:
-        index_names = args.index_names
+    elif args.train_dataset_names is not None:
+        dataset_names = args.train_dataset_names
+        index_names = [d.replace("/", "_").lower() + f"_{args.index_type}" for d in dataset_names]
     else:
-        raise RuntimeError("Specify index_names or provide a train config file with dataset mixer info.")
+        raise RuntimeError("Specify train_dataset_names or provide a train config file with dataset mixer info.")
 
     all_index_match_scores = []
+    all_index_contaminated_ids = []
     for index_name in index_names:
         mean_match_scores = {}
+        contaminated_ids = set()
         for dataset, subset, split, fields, limit in eval_sets:
             print(f"Querying {index_name} for {dataset}.")
             try:
@@ -263,16 +291,21 @@ def main():
 
             if args.index_type == "text": 
                 if args.ngram_size is None:
-                    match_scores, output_data = exact_match(es, index_name, query_dataset, fields)
+                    match_scores, output_data, train_indices = exact_match(es, index_name, query_dataset, fields)
+                    contaminated_ids.update(train_indices)
                 else:
-                    match_scores, output_data = ngram_match(es, index_name, query_dataset, fields, args.ngram_size)
+                    match_scores, output_data, train_indices_with_scores = ngram_match(es, index_name, query_dataset, fields, args.ngram_size)
+                    if args.match_threshold is not None:
+                        match_scores = [1 if score > args.match_threshold else 0 for score in match_scores]
+                        contaminated_ids.update([_id for _id, score in train_indices_with_scores.items() if score > args.match_threshold])
+
             else:
                 model, tokenizer = prepare_embedding_model(args.model)
-                match_scores, output_data = vector_match(es, index_name, query_dataset, fields, model, tokenizer, args.max_batch_tokens)
-
-            
-            if args.match_threshold is not None:
-                match_scores = [1 if score > args.match_threshold else 0 for score in match_scores]
+                match_scores, output_data, train_indices_with_scores = vector_match(es, index_name, query_dataset, fields, model, tokenizer, args.max_batch_tokens)
+                if args.match_threshold is not None:
+                    match_scores = [1 if score > args.match_threshold else 0 for score in match_scores]
+                    contaminated_ids.update([_id for _id, score in train_indices_with_scores.items() if score > args.match_threshold])
+ 
             mean_match_score = sum(match_scores) / len(match_scores)
             print(f"\tMean match score: {mean_match_score}")
             mean_match_scores[dataset] = mean_match_score
@@ -281,6 +314,7 @@ def main():
                 for datum in output_data:
                     print(json.dumps(datum), file=outfile)
         all_index_match_scores.append(mean_match_scores)
+        all_index_contaminated_ids.append(contaminated_ids)
 
     output_file = os.path.join(args.output_dir, "contamination_results.tsv")
     print(f"TSV file with all results: {output_file}")
@@ -288,6 +322,28 @@ def main():
         print("\t" + "\t".join(ev[0] for ev in eval_sets), file=outfile)
         for index_name, mean_match_scores in zip(index_names, all_index_match_scores):
             print(index_name + "\t" + "\t".join([f"{mean_match_scores[ev[0]]:.4f}" for ev in eval_sets]), file=outfile)
+    
+    if args.decontaminate:
+        # Output training sets without the instances that match any of the test instances.
+        for dataset_name, contaminated_ids in zip(dataset_names, all_index_contaminated_ids):
+            print(f"Decontaminating {dataset_name}")
+            # Assuming dataset has no subsets and we want the train split.
+            train_dataset = load_dataset(dataset_name, split="train")
+            decontaminated_dataset = []
+            num_kept = 0
+            num_total = 0
+            for i, datum in enumerate(train_dataset):
+                num_total += 1
+                if i in contaminated_ids:
+                    continue
+                num_kept += 1
+                decontaminated_dataset.append(datum)
+            output_file_name = os.path.join(args.output_dir, dataset_name.replace("/", "_") + "_decontaminated.jsonl")
+            with open(output_file_name, "w") as outfile:
+                for datum in decontaminated_dataset:
+                    print(json.dumps(datum), file=outfile)
+            print(f"\tWrote {output_file_name}")
+            print(f"\tContains {100 * num_kept / num_total:.2f}% of the original data.")
 
 
 if __name__ == "__main__":

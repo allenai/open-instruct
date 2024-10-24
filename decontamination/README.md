@@ -64,14 +64,14 @@ The script assumes you are running this on GPUs and uses all the available devic
 The searching script lets you query one or more `text` or a `vector` indices with a test set. When querying a `text` index, you can perform an ngram match, a full text match, or an embedding-based match of a specified field(s) in the test set. The basic usage looks like
 
 ```bash
-python search.py --index_names allenai_tulu-2-sft-mixture allenai_wildchat-1m --dataset tatsu-lab/alpaca_eval --split eval --field instruction --output_dir /path/to/output
+python search.py --train_dataset_names allenai/tulu-2-sft-mixture allenai/wildchat-1m --dataset tatsu-lab/alpaca_eval --split eval --field instruction --output_dir /path/to/output
 ```
 
-The command above queries two indices, `allenai_tulu-2-sft-mixture` and `allenai_wildchat-1m` (assuming these were created earlier) with the AlpacaEval dataset, particularly the `instruction` field in the `eval` split.
+The command above queries the indices corresponding to the two training sets, `allenai/tulu-2-sft-mixture` and `allenai/wildchat-1m` (assuming these were indexed earlier) with the AlpacaEval dataset, particularly the `instruction` field in the `eval` split.
 
 The script will create in the output directory one `jsonl` file per each pair of index and evaluation dataset with instance-level information about the matches, and a TSV file called `contamination_report.tsv` with a table of contamination scores for all the pairs.
 
-Like with the indexing script, a dataset mixer configuration can be passed with the `--dataset_mixer_config` option instead of `--index_names`.
+Like with the indexing script, a dataset mixer configuration can be passed with the `--dataset_mixer_config` option instead of `--train_dataset_names`.
 
 ### Checking for contamination against the Tulu 3 evaluation suite
 
@@ -82,7 +82,7 @@ If no evaluation dataset is specified using the `--dataset` option, the entire T
 Text indexes can be queried for ngram matches instead of full field matches (default) as follows
 
 ```bash
-python search.py --index_names INDEX_NAME --ngram_size SIZE [--match_threshold THRESHOLD]
+python search.py --train_dataset_names TRAIN_DATASET_NAME --ngram_size SIZE [--match_threshold THRESHOLD]
 ```
 
 Matching scores are then computed as follows:
