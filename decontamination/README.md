@@ -96,3 +96,7 @@ Matching scores are then computed as follows:
 If the index is created using `--index_type vector`, the same option needs to be specified for searching as well, along with the same `--model MODEL_NAME`. The searching script also assumes you are running this on GPUs.
 
 You can specify a `--match_threshold` here as well, and the behavior is similar to that in ngram matching, except that the match scores here come from embedding similarity.
+
+### Decontamination
+
+If you need to remove instances from the training sets that match any of the test instances, just pass a `--decontaminate` option to `search.py`. The output directory will contain one decontaminated `jsonl` file per training dataset. If you pass a `--match_treshold`, only those train instances that have a matching score greater than the threshold with *any* of the test instances will be removed.
