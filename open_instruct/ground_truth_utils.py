@@ -97,11 +97,6 @@ def verify_ifeval_sample(model_output, constraint):
     func_name = constraint.pop("func_name")
     # get the function
     func = IF_FUNCTIONS_MAP[func_name]
-    # for now, ignore this due to data issues. TODO: fix.
-    if func_name == "validate_repeat_prompt":
-        return False # missing 'original_prompt'
-    if func_name == "validate_sections":
-        return False  # missing 'section_splitter'
     # now, run the function
     # pop out any none args
     non_none_args = {k:v for k,v in constraint.items() if v is not None}
