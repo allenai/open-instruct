@@ -89,6 +89,7 @@ from open_instruct.model_utils import (
     forward,
     get_reward,
     print_rich_single_line_metrics,
+    print_rich_table,
     push_folder_to_hub,
     truncate_response,
 )
@@ -841,6 +842,7 @@ class PolicyTrainerRayProcess(RayProcess):
             queries = queries_next
 
             if accelerator.is_main_process:
+                df = None
                 try:
                     evaluation_responses = evaluation_Q.get(timeout=0.01)
                     print("🔥🔥🔥 Evaluation responses received")
@@ -848,11 +850,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     table["prompt"] = tokenizer.batch_decode(sample_evaluation_prompt_token_ids)
                     table["response"] = tokenizer.batch_decode(evaluation_responses)
                     table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
-                    pd.DataFrame(table)
-                    # if args.with_tracking:
-                    #     wandb.log({"sample_completions": wandb.Table(dataframe=df)})
-                    # else:
-                    #     print_rich_table(df)
+                    df = pd.DataFrame(table)
                     del table
                 except Empty:
                     print("🙈 Evaluation responses not received")
@@ -1172,7 +1170,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 }
                 if accelerator.is_main_process:
                     print_rich_single_line_metrics(metrics)
-                    metrics_queue.put((metrics, episode))
+                    metrics_queue.put((metrics, episode, df))
             del (queries, responses, postprocessed_responses, logprobs, ref_logprobs, sequence_lengths, scores, values)
             del (global_metrics, metrics, kl, non_score_reward, non_score_reward_sum, rlhf_reward)
             gc.collect()
@@ -1701,9 +1699,15 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     resume_training_step = 1
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         result = metrics_queue.get()
-        metrics, episode = result
+        metrics, episode, df = result
         for key, value in metrics.items():
             writer.add_scalar(key, value, episode)
+        
+        if df is not None:
+            if args.with_tracking:
+                wandb.log({"sample_completions": wandb.Table(dataframe=df)})
+            else:
+                print_rich_table(df)
     ray.get(refs)
 
     # save model
