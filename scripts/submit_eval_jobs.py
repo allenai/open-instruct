@@ -75,7 +75,16 @@ parser.add_argument("--hf_revision", type=str, default=None)
 parser.add_argument("--location", type=str, default=None)
 parser.add_argument("--beaker_image", type=str, default="nathanl/open_instruct_auto", help="If given, use this Beaker image.")
 parser.add_argument("--beaker_subfolder", type=str, default=None)
-parser.add_argument("--cluster", nargs='+', default=["ai2/allennlp-cirrascale", "ai2/general-cirrascale", "ai2/mosaic-cirrascale-a100", "ai2/s2-cirrascale-l40", "ai2/jupiter-cirrascale-2"])
+parser.add_argument("--cluster", nargs='+', default=[
+    "ai2/allennlp-cirrascale",
+    "ai2/general-cirrascale",
+    "ai2/s2-cirrascale-l40",
+    "ai2/allennlp-elara-cirrascale",
+    "ai2/pluto-cirrascale",
+    "ai2/neptune-cirrascale",
+    "ai2/saturn-cirrascale",
+    "ai2/jupiter-cirrascale-2",
+])
 parser.add_argument("--is_tuned", action="store_true")
 parser.add_argument("--use_hf_tokenizer_template", action="store_true")
 parser.add_argument("--priority", type=str, default="low")
