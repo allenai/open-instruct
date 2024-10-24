@@ -591,7 +591,7 @@ if args.run_oe_eval_experiments:
     # if num_gpus > 1, double it again for oe-eval configs
     # open_instruct GPT adjustment wasn't quite enough
     # adjusted here so the GPU configs in open-instruct eval are not impacted by the change
-    # tested reasonably extensively with 70B models.
+    # tested reasonably extensively with 70B
     if num_gpus > 1:
         num_gpus *= 2
     oe_eval_cmd += f" --num_gpus {num_gpus}"
@@ -632,8 +632,9 @@ PYTHONPATH=. python evaluation/run_all_generation_benchmarks.py \
         hf_dataset = args.upload_to_hf
         # to match the way oe-eval script works.
         # if we prepended hf- to the model name, remove it.
-        if model_name.startswith("hf-"):
-            model_name = model_name[3:]
+        # if model_name.startswith("hf-"):
+        #     model_name = model_name[3:]
+        # Above is no longer the case, oe-eval includes hf- again
         task_spec['arguments'] = [task_spec['arguments'][0] + f" --upload_to_hf {hf_dataset} --hf_upload_name results/{model_name}"]
 
     d["tasks"] = [task_spec]
