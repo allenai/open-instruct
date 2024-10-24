@@ -1184,6 +1184,8 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # save model weights for ZeRO2/3
         model_to_save = self.model
+        if hasattr(model_to_save, "module"):
+            model_to_save = model_to_save.module
 
         # gather parameters
         output_state_dict = {}
