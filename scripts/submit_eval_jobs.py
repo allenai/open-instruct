@@ -587,7 +587,14 @@ if args.run_oe_eval_experiments:
     if args.hf_revision:
         oe_eval_cmd += f" --revision {args.hf_revision}"
     # add string with number of gpus
-    oe_eval_cmd += f" --num_gpus {task_spec['resources']['gpuCount']}"
+    num_gpus = task_spec['resources']['gpuCount']
+    # if num_gpus > 1, double it again for oe-eval configs
+    # open_instruct GPT adjustment wasn't quite enough
+    # adjusted here so the GPU configs in open-instruct eval are not impacted by the change
+    # tested reasonably extensively with 70B models.
+    if num_gpus > 1:
+        num_gpus *= 2
+    oe_eval_cmd += f" --num_gpus {num_gpus}"
     if args.oe_eval_max_length:
         oe_eval_cmd += f" --max-length {args.oe_eval_max_length}"
     print(f"Running OE eval with command: {oe_eval_cmd}")
