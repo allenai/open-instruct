@@ -115,13 +115,15 @@ python open_instruct/ppo_vllm_thread_ray.py \
     --deepspeed_stage 3 \
     --num_epochs 1 \
     --num_mini_batches 1 \
-    --total_episodes 256 \
+    --total_episodes 10000 \
     --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr  \
     --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
     --non_stop_penalty \
     --stop_token eos \
     --beta 0.05 \
     --response_length 53 \
+    --hf_metadata_dataset "" \
+    --no_try_launch_beaker_eval_jobs \
     --with_tracking \
     --push_to_hub
 ```
