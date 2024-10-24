@@ -307,6 +307,7 @@ def main():
                     contaminated_ids.update([_id for _id, score in train_indices_with_scores.items() if score > args.match_threshold])
  
             mean_match_score = sum(match_scores) / len(match_scores)
+            print(f"\tNumber of matching train instances: {len(contaminated_ids)}")
             print(f"\tMean match score: {mean_match_score}")
             mean_match_scores[dataset] = mean_match_score
             output_filename = os.path.join(args.output_dir, f"{index_name}_{dataset.split('/')[-1]}.jsonl")
@@ -343,7 +344,8 @@ def main():
                 for datum in decontaminated_dataset:
                     print(json.dumps(datum), file=outfile)
             print(f"\tWrote {output_file_name}")
-            print(f"\tContains {100 * num_kept / num_total:.2f}% of the original data.")
+            print(f"\tRemoved {num_total - num_kept} train instances.")
+            print(f"\tKept {100 * num_kept / num_total:.2f}% of the original data.")
 
 
 if __name__ == "__main__":
