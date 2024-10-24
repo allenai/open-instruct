@@ -1702,7 +1702,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         metrics, episode, df = result
         for key, value in metrics.items():
             writer.add_scalar(key, value, episode)
-        
+
         if df is not None:
             if args.with_tracking:
                 wandb.log({"sample_completions": wandb.Table(dataframe=df)})
