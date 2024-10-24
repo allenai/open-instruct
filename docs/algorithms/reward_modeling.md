@@ -40,7 +40,7 @@ python -i open_instruct/reward_modeling.py \
     --per_device_eval_batch_size 1 \
     --gradient_accumulation_steps 32 \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 1024 \
+    --max_prompt_token_length 1024 \
     --num_train_epochs 1 \
     --output_dir models/rm/rm \
     --sanity_check \
@@ -71,7 +71,7 @@ python mason.py \
     --per_device_eval_batch_size 16 \
     --gradient_accumulation_steps 4 \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --num_train_epochs 1 \
     --output_dir models/rm/rm_sentiment_1b \
     --with_tracking \
@@ -103,7 +103,7 @@ python mason.py \
     --per_device_eval_batch_size 8 \
     --gradient_accumulation_steps 8 \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --num_train_epochs 1 \
     --output_dir models/rm/rm_sentiment_1b \
     --with_tracking \
@@ -134,7 +134,7 @@ python mason.py \
     --per_device_eval_batch_size 8 \
     --gradient_accumulation_steps 4 \
     --max_token_length 2048 \
-    --max_prompt_token_lenth 1024 \
+    --max_prompt_token_length 1024 \
     --num_train_epochs 1 \
     --output_dir models/rm/rm_hh_1b \
     --with_tracking \
@@ -165,7 +165,7 @@ python mason.py \
     --per_device_eval_batch_size 8 \
     --gradient_accumulation_steps 4 \
     --max_token_length 2048 \
-    --max_prompt_token_lenth 1024 \
+    --max_prompt_token_length 1024 \
     --num_train_epochs 1 \
     --output_dir models/rm/rm_hh_1b \
     --with_tracking \
@@ -198,7 +198,7 @@ python mason.py \
     --per_device_eval_batch_size 1 \
     --gradient_accumulation_steps 32 \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 1024 \
+    --max_prompt_token_length 1024 \
     --num_train_epochs 1 \
     --output_dir models/rm/rm_tulu_8b \
     --gradient_checkpointing \
@@ -391,7 +391,7 @@ dataset_config = DatasetConfig(
     dataset_name="trl-internal-testing/sentiment-trl-style",
     chat_template="simple_chat",
     max_token_length=1024,
-    max_prompt_token_lenth=1024,
+    max_prompt_token_length=1024,
 )
 tokenizer = AutoTokenizer.from_pretrained("gpt2")
 tokenizer.chat_template = CHAT_TEMPLATES["simple_chat"]
