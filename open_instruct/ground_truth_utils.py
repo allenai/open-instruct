@@ -3,8 +3,9 @@ Collection of 'ground truth rewards' for different datasets/tasks.
 Used to give feedback to the model based on the ground truth answer.
 '''
 import re
+import json
 from open_instruct.math_utils import last_boxed_only_string, remove_boxed, get_unnormalized_answer, normalize_final_answer, is_equiv, hendrycks_is_equiv
-
+from open_instruct.if_functions import IF_FUNCTIONS_MAP
 
 def verify_gsm8k_sample(model_output, ground_truth_answer):
     # gsm is easy: extract numbers, and then just compare last number with answer.
@@ -85,11 +86,39 @@ def verify_strict_math_sample(model_output, ground_truth_answer):
     return matched
 
 
-def verify_ifeval_sample(model_output, constraint_list):
-    # TODO: IFeval. probably have some constraint list we check against.
-    pass
+def verify_ifeval_sample(model_output, constraint):
+    # TODO: just pass in final answer. this should be fine for other evals too.
+    answer = model_output.split("<|assistant|>\n")[-1].strip()
+    if "func_name" not in constraint:
+        print("WARNING: constraint missing func_name")
+        print(constraint)
+        return False
+    # first, parse out the constraint string.
+    func_name = constraint.pop("func_name")
+    # get the function
+    func = IF_FUNCTIONS_MAP[func_name]
+    # for now, ignore this due to data issues. TODO: fix.
+    if func_name == "validate_repeat_prompt":
+        return False # missing 'original_prompt'
+    if func_name == "validate_sections":
+        return False  # missing 'section_splitter'
+    # now, run the function
+    # pop out any none args
+    non_none_args = {k:v for k,v in constraint.items() if v is not None}
+    # sometimes we have extra args, sometimes not.
+    if len(constraint) == 0:
+        return func(model_output)
+    return func(answer, **non_none_args)
 
 
 def verify_flan_sample(model_output, ground_truth_answer):
     # TODO: flan. we could do BLEU/ROUGE.... or maybe something like BertScore?
     pass
+
+# debug code
+if __name__ == "__main__":
+    from datasets import load_dataset
+    ds = load_dataset("ai2-adapt-dev/prompts_with_constraints_for_ground_truth")
+    test_model_output = "<|assistant|>\nThe answer is $\\boxed{3.14}$"
+    for sample in ds['train']:
+        verify_ifeval_sample(test_model_output, sample['ground_truth'])
