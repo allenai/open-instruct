@@ -101,6 +101,7 @@ parser.add_argument("--hf_upload_experiments", type=str, nargs="*", default=None
 parser.add_argument("--run_oe_eval_experiments", action="store_true", help="Run the OE eval tool and experiments too.")
 parser.add_argument("--run_safety_evaluations", action="store_true", help="Run the OE safety evaluations too.")
 parser.add_argument("--skip_oi_evals", action="store_true", help="Don't run open instruct evals.")
+parser.add_argument("--oe_eval_max_length", type=int, default=4096, help="Max length for OE eval.")
 args = parser.parse_args()
 
 
@@ -585,6 +586,11 @@ if args.run_oe_eval_experiments:
         oe_eval_cmd += f" --model-location beaker://{model_info[1]}"
     if args.hf_revision:
         oe_eval_cmd += f" --revision {args.hf_revision}"
+    # add string with number of gpus
+    oe_eval_cmd += f" --num_gpus {task_spec['resources']['gpuCount']}"
+    if args.oe_eval_max_length:
+        oe_eval_cmd += f" --max-length {args.oe_eval_max_length}"
+    print(f"Running OE eval with command: {oe_eval_cmd}")
     subprocess.Popen(oe_eval_cmd, shell=True)
 
 # create an experiment that runs the safety eval tasks

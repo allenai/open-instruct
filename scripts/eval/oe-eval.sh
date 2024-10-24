@@ -36,7 +36,7 @@ set -ex
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--hf-upload] [--revision REVISION] [--max-length <max_length>]"
+    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--hf-upload] [--revision REVISION] [--max-length <max_length>]"
     exit 1
 }
 
@@ -45,12 +45,17 @@ while [[ "$#" -gt 0 ]]; do
     case $1 in
         --model-name) MODEL_NAME="$2"; shift ;;
         --model-location) MODEL_LOCATION="$2"; shift ;;
+        --num_gpus) NUM_GPUS="$2"; shift ;;
         --hf-upload) HF_UPLOAD="true" ;;
         --revision) REVISION="$2"; shift ;;
+        --max-length) MAX_LENGTH="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
 done
+
+# Optional: Default number of GPUs if not specified
+NUM_GPUS="${NUM_GPUS:-1}"
 
 # Check required arguments
 if [[ -z "$MODEL_NAME" || -z "$MODEL_LOCATION" ]]; then
