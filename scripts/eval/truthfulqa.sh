@@ -13,7 +13,7 @@ export CUDA_VISIBLE_DEVICES=0
 
 python -m eval.truthfulqa.run_eval \
     --data_dir data/eval/truthfulqa \
-    --save_dir results/trutufulqa/llama2-7B \
+    --save_dir results/truthfulqa/llama2-7B \
     --model_name_or_path ../hf_llama2_models/7B \
     --tokenizer_name_or_path ../hf_llama2_models/7B \
     --metrics truth info mc \
@@ -27,7 +27,7 @@ python -m eval.truthfulqa.run_eval \
 # # Evaluating Tulu 7B model using chat format, getting the truth and info scores and multiple choice accuracy
 python -m eval.truthfulqa.run_eval \
     --data_dir data/eval/truthfulqa \
-    --save_dir results/trutufulqa/tulu2-7B/ \
+    --save_dir results/truthfulqa/tulu2-7B/ \
     --model_name_or_path ../checkpoints/tulu2/7B/ \
     --tokenizer_name_or_path ../checkpoints/tulu2/7B/ \
     --metrics truth info mc \
@@ -43,7 +43,7 @@ python -m eval.truthfulqa.run_eval \
 # Evaluating llama2 chat model using chat format, getting the truth and info scores and multiple choice accuracy
 python -m eval.truthfulqa.run_eval \
     --data_dir data/eval/truthfulqa \
-    --save_dir results/trutufulqa/llama2-chat-7B \
+    --save_dir results/truthfulqa/llama2-chat-7B \
     --model_name_or_path ../hf_llama2_models/7B-chat \
     --tokenizer_name_or_path ../hf_llama2_models/7B-chat \
     --metrics truth info mc \
@@ -60,7 +60,7 @@ python -m eval.truthfulqa.run_eval \
 # Multiple choice accuracy is not supported for chatgpt, since we cannot get the probabilities from chatgpt
 python -m eval.truthfulqa.run_eval \
     --data_dir data/eval/truthfulqa \
-    --save_dir results/trutufulqa/chatgpt \
+    --save_dir results/truthfulqa/chatgpt \
     --openai_engine gpt-3.5-turbo-0301 \
     --metrics truth info \
     --preset qa \
@@ -72,7 +72,7 @@ python -m eval.truthfulqa.run_eval \
 # Multiple choice accuracy is not supported for gpt-4, since we cannot get the probabilities from gpt-4
 python -m eval.truthfulqa.run_eval \
     --data_dir data/eval/truthfulqa \
-    --save_dir results/trutufulqa/gpt4 \
+    --save_dir results/truthfulqa/gpt4 \
     --openai_engine gpt-4-0314 \
     --metrics truth info \
     --preset qa \
