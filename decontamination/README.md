@@ -100,3 +100,5 @@ You can specify a `--match_threshold` here as well, and the behavior is similar 
 ### Decontamination
 
 If you need to remove instances from the training sets that match any of the test instances, just pass a `--decontaminate` option to `search.py`. The output directory will contain one decontaminated `jsonl` file per training dataset. If you pass a `--match_treshold`, only those train instances that have a matching score greater than the threshold with *any* of the test instances will be removed.
+
+Note that elasticsearch retrieves a limited number of hits each time you search. You can increase this by requesting a larger number of results by passing a different value to `--search_size` (default is 100). Setting this to a larger number (e.g. 10000) is a good idea if you are decontaminating datasets. Since elasticsearch does not necessarily retrieve all the documents that match, it is not guaranteed that decontamination removes all the matching training instances. You can always check for contamination after decontaminating a dataset to see how effective it was. 
