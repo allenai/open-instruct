@@ -67,12 +67,11 @@ python scripts/submit_eval_jobs.py --model_name llama_31_tulu_2_8b --location 01
 python scripts/submit_eval_jobs.py --model_name hf-llama_31_tulu_2_8b --location allenai/llama-3-tulu-2-8b --is_tuned --workspace tulu-3-results --preemptible --use_hf_tokenizer_template --beaker_image nathanl/open_instruct_auto --upload_to_hf allenai/tulu-3-evals
 python scripts/submit_eval_jobs.py --model_name hf-llama_31_tulu_2_8b --location vwxyzjn/online_dpo_tulu_2 --is_tuned --workspace tulu-3-results --preemptible --use_hf_tokenizer_template --beaker_image nathanl/open_instruct_auto --upload_to_hf allenai/tulu-3-evals
 
-
 python scripts/submit_eval_jobs.py --model_name hf-online-dpo-llama-tulu2-longer --beaker_image costah/open_instruct_test --location vwxyzjn/online_dpo_vllm__allenai_llama-3-tulu-2-8b --hf_revision online_dpo_vllm__1__1724038538 --is_tuned --workspace tulu-3-results --preemptible --use_hf_tokenizer_template --upload_to_hf allenai/tulu-3-evals
 
-
-https://huggingface.co/vwxyzjn/online_dpo_vllm__allenai_llama-3-tulu-2-8b/tree/online_dpo_vllm__1__1724038538
 ```
+Here, it is important to know that for using `oe-eval`, normally we run `--skip_oi_evals`, `run_safety_evaluations`, and `run_oe_eval_experiments`.
+
 2. `submit_finetune_jobs.py`: **Core script** for submitting multiple and configurable instruction tuning jobs. This script works for both single- and multi-node configurations. It by default reads configs in `configs/train_configs`, but also can take in CLI arguments matching those in `open_instruct/utils.py` `FlatArguments` class. 
 Example of running this is in `scripts/submit_finetune_jobs.sh`. 
 ```

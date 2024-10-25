@@ -1,6 +1,8 @@
 version: v2
 description: open-instruct-eval-default
 budget: ai2/oe-adapt
+retry:
+  allowedTaskRetries: 2
 tasks:
   - name: open-instruct-eval-default
     image:
