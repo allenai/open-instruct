@@ -15,7 +15,7 @@ import os
 def adjust_batch_size(task_spec, model_name, batch_size_reduction):
     "Adjust batch size using heuristics that are good for A100-size GPUs."
     reduce_by_2 = ["13B"]
-    reduce_by_4 = ["30B", "34B", "40B", "65B", "70B"]
+    reduce_by_4 = ["30B", "34B", "40B", "65B", "70B", "70b", "72B", "72b"]
     # If not given, choose a value based on the model name.
     if batch_size_reduction is None:
         if any([pattern in model_name for pattern in reduce_by_2]):
@@ -37,7 +37,7 @@ def adjust_batch_size(task_spec, model_name, batch_size_reduction):
 def adjust_gpus(task_spec, experiment_group, model_name, gpu_multiplier):
     "Adjust GPU count using heuristics that are good for A100-size GPUs."
     medium = ["30B", "34B"]
-    large = ["40B", "65B", "70B"]
+    large = ["40B", "65B", "70B", "70b", "72B", "72b"]
     # If not given, choose a value based on model name. 
     if gpu_multiplier is None:
         if any([pattern in model_name for pattern in medium]):
@@ -101,6 +101,7 @@ parser.add_argument("--hf_upload_experiments", type=str, nargs="*", default=None
 parser.add_argument("--run_oe_eval_experiments", action="store_true", help="Run the OE eval tool and experiments too.")
 parser.add_argument("--run_safety_evaluations", action="store_true", help="Run the OE safety evaluations too.")
 parser.add_argument("--skip_oi_evals", action="store_true", help="Don't run open instruct evals.")
+parser.add_argument("--oe_eval_max_length", type=int, default=4096, help="Max length for OE eval.")
 args = parser.parse_args()
 
 
@@ -585,6 +586,18 @@ if args.run_oe_eval_experiments:
         oe_eval_cmd += f" --model-location beaker://{model_info[1]}"
     if args.hf_revision:
         oe_eval_cmd += f" --revision {args.hf_revision}"
+    # add string with number of gpus
+    num_gpus = task_spec['resources']['gpuCount']
+    # if num_gpus > 1, double it again for oe-eval configs
+    # open_instruct GPT adjustment wasn't quite enough
+    # adjusted here so the GPU configs in open-instruct eval are not impacted by the change
+    # tested reasonably extensively with 70B
+    if num_gpus > 1:
+        num_gpus *= 2
+    oe_eval_cmd += f" --num_gpus {num_gpus}"
+    if args.oe_eval_max_length:
+        oe_eval_cmd += f" --max-length {args.oe_eval_max_length}"
+    print(f"Running OE eval with command: {oe_eval_cmd}")
     subprocess.Popen(oe_eval_cmd, shell=True)
 
 # create an experiment that runs the safety eval tasks
@@ -619,8 +632,9 @@ PYTHONPATH=. python evaluation/run_all_generation_benchmarks.py \
         hf_dataset = args.upload_to_hf
         # to match the way oe-eval script works.
         # if we prepended hf- to the model name, remove it.
-        if model_name.startswith("hf-"):
-            model_name = model_name[3:]
+        # if model_name.startswith("hf-"):
+        #     model_name = model_name[3:]
+        # Above is no longer the case, oe-eval includes hf- again
         task_spec['arguments'] = [task_spec['arguments'][0] + f" --upload_to_hf {hf_dataset} --hf_upload_name results/{model_name}"]
 
     d["tasks"] = [task_spec]
