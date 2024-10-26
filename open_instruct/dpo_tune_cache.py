@@ -24,7 +24,6 @@ import os
 import random
 import subprocess
 import time
-from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
@@ -33,6 +32,8 @@ from typing import List, Optional, Union
 import datasets
 import deepspeed
 import torch
+import torch.utils
+import torch.utils.data
 import transformers
 from accelerate import Accelerator
 from accelerate.logging import get_logger
@@ -434,38 +435,40 @@ def encode_dpo_example(example, tokenizer, max_seq_length):
     }
 
 
-# from trl, we have to prep the ref model separately.
-def prepare_deepspeed(accelerator, model):
-    deepspeed_plugin = accelerator.state.deepspeed_plugin
-    config_kwargs = deepcopy(deepspeed_plugin.deepspeed_config)
-
-    if model is not None:
-        if hasattr(model, "config"):
-            hidden_size = (
-                max(model.config.hidden_sizes)
-                if getattr(model.config, "hidden_sizes", None)
-                else getattr(model.config, "hidden_size", None)
-            )
-            if hidden_size is not None and config_kwargs["zero_optimization"]["stage"] == 3:
-                # Note that `stage3_prefetch_bucket_size` can produce DeepSpeed messages like:
-                # `Invalidate trace cache @ step 0: expected module 1, but got module 0`
-                # This is expected and is not an error, see: https://github.com/microsoft/DeepSpeed/discussions/4081
-                config_kwargs.update(
-                    {
-                        "zero_optimization.reduce_bucket_size": hidden_size * hidden_size,
-                        "zero_optimization.stage3_param_persistence_threshold": 10 * hidden_size,
-                        "zero_optimization.stage3_prefetch_bucket_size": 0.9 * hidden_size * hidden_size,
-                    }
-                )
-
-    # If ZeRO-3 is used, we shard both the active and reference model.
-    # Otherwise, we assume the reference model fits in memory and
-    # is initialized on each device with ZeRO disabled (stage 0)
-    if config_kwargs["zero_optimization"]["stage"] != 3:
-        config_kwargs["zero_optimization"]["stage"] = 0
-    model, *_ = deepspeed.initialize(model=model, config=config_kwargs)
-    model.eval()
-    return model
+def get_cache_ref_logprobs(
+    model: torch.nn.Module,
+    active_dataloader: torch.utils.data.DataLoader,
+    accelerator: Accelerator,
+    average_log_prob: bool,
+    last_checkpoint_path: Optional[str],
+    resume_step: int,
+    epoch_range: range,
+):
+    epoch_cached_reference_chosen_logps = []
+    epoch_cached_reference_rejected_logps = []
+    for epoch in epoch_range:
+        active_dataloader.set_epoch(epoch)
+        if last_checkpoint_path and resume_step is not None:
+            # We skip the first `n` batches in the dataloader when resuming from a checkpoint
+            active_dataloader = accelerator.skip_first_batches(active_dataloader, resume_step)
+        cached_reference_chosen_logps = []
+        cached_reference_rejected_logps = []
+        with torch.no_grad():
+            for step, batch in tqdm(enumerate(active_dataloader), disable=not accelerator.is_local_main_process):
+                if args.use_lora:
+                    with accelerator.unwrap_model(model).disable_adapter():
+                        reference_chosen_logps, reference_rejected_logps, _ = concatenated_forward(
+                            model, batch, average_log_prob=average_log_prob
+                        )
+                else:
+                    reference_chosen_logps, reference_rejected_logps, _ = concatenated_forward(
+                        model, batch, average_log_prob=average_log_prob
+                    )
+                cached_reference_chosen_logps.append(reference_chosen_logps.cpu())
+                cached_reference_rejected_logps.append(reference_rejected_logps.cpu())
+        epoch_cached_reference_chosen_logps.append(cached_reference_chosen_logps)
+        epoch_cached_reference_rejected_logps.append(cached_reference_rejected_logps)
+    return epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps
 
 
 def main(args: FlatArguments):
@@ -649,14 +652,6 @@ def main(args: FlatArguments):
         return model
 
     model = load_model()
-    # only simpo is reference model free rn
-    if args.dpo_loss_type != "simpo":
-        if not args.use_lora:
-            reference_model = load_model()
-        else:
-            reference_model = model
-    else:
-        reference_model = None
 
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
@@ -703,11 +698,6 @@ def main(args: FlatArguments):
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
         if len(tokenizer) > embeddings.weight.shape[0]:
             model.resize_token_embeddings(len(tokenizer))
-    if reference_model is not None:
-        reference_embeddings = reference_model.get_input_embeddings()
-        with deepspeed.zero.GatheredParameters(reference_embeddings.weight, modifier_rank=None):
-            if len(tokenizer) > reference_embeddings.weight.shape[0]:
-                reference_model.resize_token_embeddings(len(tokenizer))
 
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
@@ -862,9 +852,6 @@ def main(args: FlatArguments):
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
-    # reference model may not be none with e.g. SimPO loss.
-    if not args.use_lora and reference_model is not None:
-        reference_model = prepare_deepspeed(accelerator, reference_model)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
@@ -913,13 +900,13 @@ def main(args: FlatArguments):
     logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
-    # Only show the progress bar once on each machine.
-    progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
+
     completed_steps = 0
     starting_epoch = 0
 
     # Potentially load in the weights and states from a previous save
     last_checkpoint_path = get_last_checkpoint_path(args)
+    resume_step = None
     if last_checkpoint_path:
         accelerator.print(f"Resumed from checkpoint: {last_checkpoint_path}")
         accelerator.load_state(last_checkpoint_path)
@@ -939,6 +926,24 @@ def main(args: FlatArguments):
             resume_step -= starting_epoch * len(train_dataloader)
 
     print(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
+
+    # Cache the logprobs
+    average_log_prob_loss_types = ["simpo", "dpo_norm"]
+    average_log_prob = args.dpo_loss_type in average_log_prob_loss_types
+    if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
+        epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = get_cache_ref_logprobs(
+            model,
+            train_dataloader,
+            accelerator,
+            average_log_prob,
+            last_checkpoint_path,
+            resume_step,
+            range(starting_epoch, args.num_train_epochs),
+        )
+        torch.cuda.empty_cache()  # clear cache
+
+    # Only show the progress bar once on each machine.
+    progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
 
@@ -953,8 +958,6 @@ def main(args: FlatArguments):
         else:
             active_dataloader = train_dataloader
         # we need to average the log probs for simpo loss
-        average_log_prob_loss_types = ["simpo", "dpo_norm"]
-        average_log_prob = args.dpo_loss_type in average_log_prob_loss_types
         for step, batch in enumerate(active_dataloader):
             episode += len(batch["chosen_input_ids"]) * accelerator.num_processes
             # dpo forward pass & loss
@@ -963,16 +966,9 @@ def main(args: FlatArguments):
                     model, batch, average_log_prob=average_log_prob, output_router_logits=args.load_balancing_loss
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
                 if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-                    with torch.no_grad():
-                        if args.use_lora:
-                            with accelerator.unwrap_model(model).disable_adapter():
-                                reference_chosen_logps, reference_rejected_logps, _ = concatenated_forward(
-                                    model, batch, average_log_prob=average_log_prob
-                                )
-                        else:
-                            reference_chosen_logps, reference_rejected_logps, _ = concatenated_forward(
-                                reference_model, batch, average_log_prob=average_log_prob
-                            )
+                    p_device = policy_chosen_logps.device
+                    reference_chosen_logps = epoch_cached_reference_chosen_logps[epoch][step].to(p_device)
+                    reference_rejected_logps = epoch_cached_reference_rejected_logps[epoch][step].to(p_device)
                     losses, _, _ = dpo_loss(
                         policy_chosen_logps,
                         policy_rejected_logps,
@@ -1156,7 +1152,7 @@ def main(args: FlatArguments):
         if args.try_launch_beaker_eval_jobs:
             command = f"""\
             python mason.py  \
-                --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale ai2/neptune-cirrascale ai2/saturn-cirrascale ai2/jupiter-cirrascale-2 \
+                --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/s2-cirrascale ai2/general-cirrascale \
                 --priority low \
                 --preemptible \
                 --budget ai2/allennlp \
