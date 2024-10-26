@@ -13,13 +13,13 @@ dataset_mixer:
     ai2-adapt-dev/personahub_math_v5_regen_149960: 149960
     ai2-adapt-dev/personahub_grade_math_v1_49980: 49980
     ai2-adapt-dev/open_math_2_gsm8k_converted: 50000
+    ai2-adapt-dev/personahub_math_interm_algebra_50000: 20000
 
     # Coding datasets:
-    ai2-adapt-dev/evol_codealpaca_converted: 110999
-    ai2-adapt-dev/personahub_code_v2_34999: 34999
+    ai2-adapt-dev/personahub_code_v3_75329: 75329
+    ai2-adapt-dev/evol_codealpaca_heval_decontaminated: 107276
 
     # IF datasets:
-    # ai2-adapt-dev/personahub_ifdata_manual_seed_v2_19891: 19891
     ai2-adapt-dev/personahub_ifdata_manual_seed_v3_29980: 29980
 
     # Safety datasets:

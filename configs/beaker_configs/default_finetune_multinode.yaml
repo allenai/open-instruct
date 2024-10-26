@@ -8,7 +8,7 @@ tasks:
     hostNetworking: true
     propagateFailure: true
     propagatePreemption: true
-    synchronizedStartTimeout: 15m
+    synchronizedStartTimeout: 60m
     image:
       beaker: nathanl/open_instruct_auto
     command: [
