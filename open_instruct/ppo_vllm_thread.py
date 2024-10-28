@@ -698,7 +698,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     # setup extraction model. For now keep on CPU?
     if args.answer_extraction_model:
         answer_extraction_model = AutoModelForCausalLM.from_pretrained(args.answer_extraction_model)
-        answer_extraction_tokenizer = AutoTokenizer.from_pretrained(aargs.answer_extraction_model)
+        answer_extraction_tokenizer = AutoTokenizer.from_pretrained(args.answer_extraction_model)
     else:
         answer_extraction_model = None
         answer_extraction_tokenizer = None
@@ -708,7 +708,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     data = next(iter_dataloader)
     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
     ground_truths_next = data[GROUND_TRUTHS_KEY]
-    datsets_next = data[DATASET_SOURCE_KEY]
+    datasets_next = data[DATASET_SOURCE_KEY]
     send_queries(accelerator, None, tokenizer, param_prompt_Q, queries_next)
 
     for _ in range(1, resume_training_step):  # we didn't store scheduler state
@@ -719,7 +719,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         scheduler.step()
         queries = queries_next
         ground_truths = ground_truths_next
-        datasets = datsets_next
+        datasets = datasets_next
         if ph.preempted:
             break
 
