@@ -611,7 +611,7 @@ if args.run_safety_evaluations:
     task_spec = d["tasks"][0]
     task_spec["name"] = experiment_name
     task_spec["arguments"][0] = f'''
-PYTHONPATH=. python evaluation/run_all_generation_benchmarks.py \
+VLLM_WORKER_MULTIPROC_METHOD=spawn PYTHONPATH=. python evaluation/run_all_generation_benchmarks.py \
     --model_name_or_path /model \
     --model_input_template_path_or_name hf \
     --report_output_path /output/metrics.json \
