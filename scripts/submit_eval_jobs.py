@@ -628,6 +628,18 @@ PYTHONPATH=. python evaluation/run_all_generation_benchmarks.py \
     else:  # if it's a beaker model, mount the beaker dataset to `/model`
         task_spec['datasets'][1]['source']['beaker'] = model_info[1]
 
+    task_spec = adjust_gpus(
+        task_spec=task_spec,
+        experiment_group="safety_eval",
+        model_name=model_info[0],
+        gpu_multiplier=args.gpu_multiplier,
+    )
+
+    # add gpu information.
+    # we just assume you want to use all the gpus for one task at a time
+    num_gpus = task_spec['resources']['gpuCount']
+    task_spec["arguments"][0]+= f" --min_gpus_per_task {num_gpus}"
+
     if args.upload_to_hf:
         hf_dataset = args.upload_to_hf
         # to match the way oe-eval script works.
