@@ -1,8 +1,10 @@
 import argparse
+import re
 from typing import List
 import beaker
 import os
-
+import secrets
+import string
 
 def parse_beaker_dataset(dataset_str):
     splt = dataset_str.split(":")
@@ -10,6 +12,12 @@ def parse_beaker_dataset(dataset_str):
         raise argparse.ArgumentError()
 
     return {"mount_path": splt[0], "beaker": splt[1]}
+
+WEKA_CLUSTERS = [
+    "ai2/jupiter-cirrascale-2",
+    "ai2/saturn-cirrascale",
+    "ai2/neptune-cirrascale",
+]
 
 
 def get_args():
@@ -23,6 +31,7 @@ def get_args():
     )
     parser.add_argument("--budget", type=str, help="Budget to use.", required=True)
     parser.add_argument("--gpus", type=int, help="Number of gpus", default=0)
+    parser.add_argument("--num_nodes", type=int, help="Number of nodes", default=1)
     parser.add_argument(
         "--image",
         type=str,
@@ -67,10 +76,13 @@ def get_args():
         "--pure_docker_mode", action="store_true", help="If given, run in pure docker mode"
     )
     parser.add_argument(
-        "--no_hf_cache_env", action="store_true", help="If given, do not pass in `HF_DATASETS_CACHE`, `HF_HUB_CACHE`, and `HF_ASSETS_CACHE`"
+        "--no_hf_cache_env", action="store_true", help="Getting deprecated; it does nothing"
     )
     parser.add_argument(
-        "--no_mount_nfs", action="store_true", help="If given, do not mount NFS"
+        "--no_mount_nfs", action="store_true", help="Getting deprecated; it does nothing"
+    )
+    parser.add_argument(
+        "--resumable", action="store_true", help="If given, make the job resumable"
     )
 
 
@@ -78,6 +90,17 @@ def get_args():
     mason_args, command_args = parser.parse_known_args()
     commands = parse_commands(command_args)
     return mason_args, commands
+
+
+def generate_id(length: int = 8) -> str:
+    """Generate a random base-36 string of `length` digits."""
+    # There are ~2.8T base-36 8-digit strings. If we generate 210k ids,
+    # we'll have a ~1% chance of collision.
+    alphabet = string.ascii_lowercase + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+global_wandb_id = generate_id()
 
 
 def parse_commands(command_args: List[str]) -> List[List[str]]:
@@ -103,12 +126,13 @@ def parse_commands(command_args: List[str]) -> List[List[str]]:
     return commands
 
 
-def get_env_vars(pure_docker_mode, no_mount_hf_cache, beaker_secrets, whoami):
+def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: List[str], whoami: str, resumable: bool, num_nodes: int):
     env_vars = []
     useful_secrets = [
         "HF_TOKEN",
         "WANDB_API_KEY",
         "BEAKER_TOKEN",
+        "OPENAI_API_KEY",
     ]
     for useful_secret in useful_secrets:
         if f"{whoami}_{useful_secret}" in beaker_secrets:
@@ -134,33 +158,105 @@ def get_env_vars(pure_docker_mode, no_mount_hf_cache, beaker_secrets, whoami):
                 value=os.getenv("PATH"),
             ),
         ])
-    if not no_mount_hf_cache:
+    
+    # if none of the cluster is in weka, we mount the NFS
+    if all(c not in WEKA_CLUSTERS for c in cluster):
         env_vars.extend([
             beaker.EnvVar(
                 name="HF_DATASETS_CACHE",
-                value=os.getenv("HF_DATASETS_CACHE"),
+                value="/net/nfs.cirrascale/allennlp/.cache/huggingface",
             ),
             beaker.EnvVar(
                 name="HF_HUB_CACHE",
-                value=os.getenv("HF_HUB_CACHE"),
+                value="/net/nfs.cirrascale/allennlp/.cache/hub",
             ),
             beaker.EnvVar(
                 name="HF_ASSETS_CACHE",
-                value=os.getenv("HF_ASSETS_CACHE"),
+                value="/net/nfs.cirrascale/allennlp/.cache/assets",
+            ),
+            beaker.EnvVar(
+                name="CHECKPOINT_OUTPUT_DIR",
+                value=f"/net/nfs.cirrascale/allennlp/deletable_checkpoint_states/{global_wandb_id}",
+            ),
+        ])
+        if len(cluster) == 1 and "ai2/pluto-cirrascale" in cluster:
+            env_vars.extend([
+                beaker.EnvVar(
+                    name="NCCL_IB_HCA",
+                    value="^=mlx5_1,mlx5_2",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_DEBUG",
+                    value="INFO",
+                ),
+            ])
+    # if all cluster is in weka, we mount the weka
+    elif all(c in WEKA_CLUSTERS for c in cluster):
+        env_vars.extend([
+            beaker.EnvVar(
+                name="HF_DATASETS_CACHE",
+                value="/weka/allennlp/.cache/huggingface",
+            ),
+            beaker.EnvVar(
+                name="HF_HUB_CACHE",
+                value="/weka/allennlp/.cache/hub",
+            ),
+            beaker.EnvVar(
+                name="CHECKPOINT_OUTPUT_DIR",
+                value=f"/weka/allennlp/deletable_checkpoint_states/{global_wandb_id}",
+            ),
+        ])
+        if num_nodes > 1:
+            env_vars.extend([
+                beaker.EnvVar(
+                    name="NCCL_SOCKET_IFNAME",
+                    value="ib",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_IB_HCA",
+                    value="^=mlx5_bond_0",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_DEBUG",
+                    value="INFO",
+                ),
+            ])
+    # don't mount anything; assume no cache
+    else:
+        pass
+
+    if resumable:
+        env_vars.extend([
+            beaker.EnvVar(
+                name="WANDB_RUN_ID",
+                value=global_wandb_id,
+            ),
+            beaker.EnvVar(
+                name="WANDB_RESUME",
+                value="allow",
             ),
         ])
 
     return env_vars
 
 
-def get_datasets(beaker_datasets, no_mount_nfs):
+def get_datasets(beaker_datasets, cluster: List[str]):
     """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
     res = []
-    if not no_mount_nfs:
+    # if none of the cluster is in weka, we mount the NFS
+    if all(c not in WEKA_CLUSTERS for c in cluster):
         res = [
             beaker.DataMount(
                 source=beaker.DataSource(host_path="/net/nfs.cirrascale"),
                 mount_path="/net/nfs.cirrascale",
+            ),
+        ]
+    # if all cluster is in weka, we mount the weka
+    elif all(c in WEKA_CLUSTERS for c in cluster):
+        res = [
+            beaker.DataMount(
+                source=beaker.DataSource(weka="oe-adapt-default"),
+                mount_path="/weka",
             ),
         ]
     for beaker_dataset in beaker_datasets:
@@ -173,7 +269,7 @@ def get_datasets(beaker_datasets, no_mount_nfs):
     return res
 
 
-def make_task_spec(args, command, i, beaker_secrets, whoami):
+def make_task_spec(args, command, i, beaker_secrets, whoami, resumable: bool):
     # special logic to deal with escape like
     # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
     # we need to wrap the json string with single quote
@@ -183,12 +279,29 @@ def make_task_spec(args, command, i, beaker_secrets, whoami):
     full_command = command
     command = ['/bin/bash', '-c']
     setup_commands = (
+        "echo 'Running on host: $BEAKER_REPLICA_RANK' && "
+        "echo 'Running on host: $BEAKER_LEADER_REPLICA_HOSTNAME' && "
         "git config --global safe.directory '*' && " # fix the permission issue with git
         "umask 000 && " # fix the permission issue with the cache folder
     )
     if not args.pure_docker_mode:
         setup_commands += f"cd {os.getcwd()} && "
-    fully_command = setup_commands + " ".join(full_command)
+
+    join_full_command = " ".join(full_command)
+    # override accelerate call
+    if args.num_nodes > 1:
+        join_full_command = re.sub(
+            r'--num_processes (\d+)',
+            lambda m: (
+                f'--num_processes {int(m.group(1)) * args.num_nodes} '
+                f'--num_machines {args.num_nodes} '
+                '--machine_rank $BEAKER_REPLICA_RANK '
+                '--main_process_ip $BEAKER_LEADER_REPLICA_HOSTNAME '
+                '--main_process_port 29400 '
+            ),
+            join_full_command
+        )
+    full_command = setup_commands + join_full_command
     print(f"{full_command=}")
 
 
@@ -196,15 +309,21 @@ def make_task_spec(args, command, i, beaker_secrets, whoami):
         name=f"{args.task_name}__{i}",
         image=beaker.ImageSource(beaker=args.image),
         command=command,
-        arguments=[fully_command],
+        arguments=[full_command],
         result=beaker.ResultSpec(path="/output"),
-        datasets=get_datasets(args.beaker_datasets, args.no_mount_nfs),
+        datasets=get_datasets(args.beaker_datasets, args.cluster),
         context=beaker.TaskContext(priority=beaker.Priority(args.priority),
                                    preemptible=args.preemptible),
         constraints=beaker.Constraints(cluster=args.cluster),
-        env_vars=get_env_vars(args.pure_docker_mode, args.no_hf_cache_env, beaker_secrets, whoami),
+        env_vars=get_env_vars(args.pure_docker_mode, args.cluster, beaker_secrets, whoami, resumable, args.num_nodes),
         resources=beaker.TaskResources(gpu_count=args.gpus),
+        replicas=args.num_nodes,
     )
+    if args.num_nodes > 1:
+        spec.leader_selection = True
+        spec.host_networking = True
+        spec.propagate_failure = True
+        spec.propagate_preemption = True
 
     return spec
 
@@ -220,7 +339,7 @@ def main():
     whoami = beaker_client.account.whoami().name
     experiment_spec = beaker.ExperimentSpec(
         description=args.description,
-        tasks=[make_task_spec(args, command, i, beaker_secrets, whoami) for i, command in enumerate(commands)],
+        tasks=[make_task_spec(args, command, i, beaker_secrets, whoami, args.resumable) for i, command in enumerate(commands)],
         budget=args.budget,
     )
 

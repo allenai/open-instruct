@@ -19,6 +19,7 @@ from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from transformers import (
+    AutoConfig,
     AutoModelForSequenceClassification,
     AutoTokenizer,
     PreTrainedModel,
@@ -50,6 +51,7 @@ from open_instruct.utils import (
     get_wandb_tags,
     is_beaker_job,
     maybe_get_beaker_config,
+    maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
 )
 
@@ -138,6 +140,9 @@ class Args:
     output_dir: Optional[str] = None
     """Where to save the model"""
 
+    resize_token_embeddings: bool = True
+    """Whether to resize the token embeddings to a factor of 8 for utilizing tensor cores better"""
+
     def __post_init__(self):
         self.dataset_mixer_dict, self.dataset_mixer = process_dataset_mixer(self.dataset_mixer)
         if self.dataset_eval_mixer is not None:
@@ -168,15 +173,17 @@ def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig
     args.run_name = f"{args.exp_name}__{args.seed}__{time_int}"
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
-            args.hf_repo_id = f"{args.exp_name}__{model_config.model_name_or_path.replace('/', '_')}"
-        if args.hf_entity is None:
-            args.hf_entity = api.whoami()["name"]
+            args.hf_repo_id = "open_instruct_dev"
+        if args.hf_entity is None:  # first try to use AI2 entity
+            args.hf_entity = maybe_use_ai2_hf_entity()
+        if args.hf_entity is None:  # then try to use the user's entity
+            args.hf_entity = HfApi().whoami()["name"]
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
         if args.hf_repo_revision is None:  # auto-generate one
             args.hf_repo_revision = args.run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
 
-    if args.with_tracking:
+    if args.with_tracking and accelerator.is_main_process:
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
     return accelerator
@@ -190,18 +197,18 @@ def layer_init(layer: nn.Module, std: float):
 def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     accelerator = calculate_runtime_args_and_accelerator(args, model_config)
     local_seed = args.seed + accelerator.process_index
-    breakpoint()
 
     # set up experiment tracking and seeds
+    all_configs = {}
+    if is_beaker_job():
+        args.checkpoint_output_dir = os.environ.get("CHECKPOINT_OUTPUT_DIR", args.output_dir)
+        beaker_config = maybe_get_beaker_config()
+        # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
+        if len(beaker_config.beaker_dataset_id_urls) > 0:
+            args.output_dir = "/output"
+        all_configs.update(vars(beaker_config))
+    all_configs.update(**asdict(args), **asdict(dataset_config), **asdict(model_config))
     if accelerator.is_main_process:
-        all_configs = {**asdict(args), **asdict(dataset_config), **asdict(model_config)}
-        if is_beaker_job():
-            beaker_config = maybe_get_beaker_config()
-            # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
-            if len(beaker_config.beaker_dataset_id_urls) > 0:
-                args.output_dir = "/output"
-            all_configs.update(vars(beaker_config))
-
         if args.with_tracking:
             import wandb
 
@@ -226,8 +233,14 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     torch.backends.cudnn.deterministic = True
 
     # create a tokenizer (pad from right)
-    tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path, padding_side="right")
-    tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
+    config = AutoConfig.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_config.model_name_or_path, revision=model_config.model_revision, padding_side="right"
+    )
+    if config.architectures == "LlamaForCausalLM" and config.bos_token_id == 128000:
+        tokenizer.pad_token_id = 128002  # <|reserved_special_token_0|>
+    else:
+        tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
     tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
 
     # create the dataset
@@ -236,7 +249,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     train_dataset = combine_dataset(
         args.dataset_mixer_dict,
         splits=args.dataset_train_splits,
-        columns_to_keep=["chosen", "rejected"],
+        columns_to_keep=[dataset_config.preference_chosen_key, dataset_config.preference_rejected_key],
     )
     if dataset_config.sanity_check:
         train_dataset = train_dataset.select(
@@ -251,7 +264,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         eval_dataset = combine_dataset(
             args.dataset_eval_mixer_dict,
             splits=args.dataset_eval_splits,
-            columns_to_keep=["chosen", "rejected"],
+            columns_to_keep=[dataset_config.preference_chosen_key, dataset_config.preference_rejected_key],
         )
         eval_dataset = eval_dataset.select(range(0, min(len(eval_dataset), dataset_config.sanity_check_max_samples)))
         with accelerator.main_process_first():
@@ -276,8 +289,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # create the model and optimizer
     model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
-        model_config.model_name_or_path, num_labels=1
+        model_config.model_name_or_path, revision=model_config.model_revision, num_labels=1
     )
+    if args.resize_token_embeddings:  # optimize for tensor core
+        model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
     if model_config.gradient_checkpointing:
         model.gradient_checkpointing_enable()
     disable_dropout_in_model(model)  # see p.3. in https://arxiv.org/pdf/1909.08593
@@ -298,7 +313,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         shuffle=True,
         collate_fn=data_collator,
     )
-
     eval_dataloader = DataLoader(
         eval_dataset,
         batch_size=args.per_device_eval_batch_size,
@@ -340,36 +354,37 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 accelerator.backward(loss)
                 optimizer.step()
                 optimizer.zero_grad()
-            losses[gradient_accumulation_idx] = loss
-            accuracies[gradient_accumulation_idx] = accuracy
-            chosen_rewards[gradient_accumulation_idx] = chosen_reward.mean()
-            rejected_rewards[gradient_accumulation_idx] = rejected_reward.mean()
-            reward_margin[gradient_accumulation_idx] = (chosen_reward - rejected_reward).mean()
-            gradient_accumulation_idx = (gradient_accumulation_idx + 1) % args.gradient_accumulation_steps
 
-            if training_step % args.gradient_accumulation_steps == 0:
-                scheduler.step()
-                local_metrics[0] = accuracies.mean()
-                local_metrics[1] = losses.mean()
-                local_metrics[2] = chosen_rewards.mean()
-                local_metrics[3] = rejected_rewards.mean()
-                local_metrics[4] = reward_margin.mean()
-                global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
+            with torch.no_grad():
+                losses[gradient_accumulation_idx] = loss
+                accuracies[gradient_accumulation_idx] = accuracy
+                chosen_rewards[gradient_accumulation_idx] = chosen_reward.mean()
+                rejected_rewards[gradient_accumulation_idx] = rejected_reward.mean()
+                reward_margin[gradient_accumulation_idx] = (chosen_reward - rejected_reward).mean()
+                gradient_accumulation_idx = (gradient_accumulation_idx + 1) % args.gradient_accumulation_steps
+                if training_step % args.gradient_accumulation_steps == 0:
+                    scheduler.step()
+                    local_metrics[0] = accuracies.mean()
+                    local_metrics[1] = losses.mean()
+                    local_metrics[2] = chosen_rewards.mean()
+                    local_metrics[3] = rejected_rewards.mean()
+                    local_metrics[4] = reward_margin.mean()
+                    global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
 
-                metrics = {
-                    "episode": episode,
-                    "epoch": episode / len(train_dataset),
-                    "train/rm/accuracy": global_metrics[0],
-                    "train/rm/loss": global_metrics[1],
-                    "train/rm/chosen_rewards": global_metrics[2],
-                    "train/rm/rejected_rewards": global_metrics[3],
-                    "train/rm/reward_margin": global_metrics[4],
-                    "train/rm/lr": scheduler.get_last_lr()[0],
-                }
-                if accelerator.is_main_process:
-                    print_rich_single_line_metrics(metrics)
-                    for key, value in metrics.items():
-                        writer.add_scalar(key, value, episode)
+                    metrics = {
+                        "episode": episode,
+                        "epoch": episode / len(train_dataset),
+                        "train/rm/accuracy": global_metrics[0],
+                        "train/rm/loss": global_metrics[1],
+                        "train/rm/chosen_rewards": global_metrics[2],
+                        "train/rm/rejected_rewards": global_metrics[3],
+                        "train/rm/reward_margin": global_metrics[4],
+                        "train/rm/lr": scheduler.get_last_lr()[0],
+                    }
+                    if accelerator.is_main_process:
+                        print_rich_single_line_metrics(metrics)
+                        for key, value in metrics.items():
+                            writer.add_scalar(key, value, episode)
 
             # (optionally) evaluate the model
             if args.num_evals > 0 and training_step > 1 and training_step % args.eval_freq == 0:
@@ -388,7 +403,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # save model
     os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
-    original_tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path)
+    original_tokenizer = AutoTokenizer.from_pretrained(
+        model_config.model_name_or_path, revision=model_config.model_revision
+    )
     save_with_accelerate(
         accelerator,
         model,

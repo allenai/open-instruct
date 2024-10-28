@@ -88,49 +88,62 @@ BINARY_DATASET_KEYS = [
 CHAT_TEMPLATES = {
     "simple_concat_with_space": (
         "{% for message in messages %}"
-        "{{' ' if not loop.first else ''}}"
-        "{{message['content']}}"
+        "{{ ' ' if not loop.first else '' }}"
+        "{{ message['content'] }}"
         "{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}"
         "{% endfor %}"
     ),
     "simple_concat_with_new_line": (
         "{% for message in messages %}"
-        "{{'\n' if not loop.first else ''}}"
-        "{{message['content']}}"
+        "{{ '\n' if not loop.first else '' }}"
+        "{{ message['content'] }}"
         "{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}"
         "{% endfor %}"
     ),
     "simple_chat": (
         "{% for message in messages %}"
-        "{{'\n\n' if not loop.first else ''}}"
-        "{{message['role']|capitalize + ': ' +message['content']}}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['role'].capitalize() + ': ' + message['content'] }}"
         "{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}"
         "{% endfor %}"
     ),
+    "assistant_message_only": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'assistant' %}"
+        "{{ message['content'] }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
     "zephyr": (
-        "{% for message in messages %}\n"
-        "{% if message['role'] == 'user' %}\n"
-        "{{ '<|user|>\n' + message['content'] + eos_token }}\n"
-        "{% elif message['role'] == 'system' %}\n"
-        "{{ '<|system|>\n' + message['content'] + eos_token }}\n"
-        "{% elif message['role'] == 'assistant' %}\n"
-        "{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n"
-        "{% endif %}\n"
-        "{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n"
-        "{% endif %}\n"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'user' %}"
+        "{{ '<|user|>\n' + message['content'] + eos_token + '\n' }}"
+        "{% elif message['role'] == 'system' %}"
+        "{{ '<|system|>\n' + message['content'] + eos_token + '\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|assistant|>\n'  + message['content'] + eos_token + '\n' }}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|assistant|>\n' }}"
+        "{% endif %}"
         "{% endfor %}"
     ),
     "tulu": (
-        "{% for message in messages %}\n"
-        "{% if message['role'] == 'system' %}\n"
-        "{{ '<|system|>\n' + message['content'] }}\n"
-        "{% elif message['role'] == 'user' %}\n"
-        "{{ '<|user|>\n' + message['content'] }}\n"
-        "{% elif message['role'] == 'assistant' %}\n"
-        "{{ '<|assistant|>\n'  + message['content'] + eos_token }}\n"
-        "{% endif %}\n"
-        "{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n"
-        "{% endif %}\n"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|system|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'user' %}"
+        "{{ '<|user|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{% if not loop.last %}"
+        "{{ '<|assistant|>\n'  + message['content'] + eos_token + '\n' }}"
+        "{% else %}"
+        "{{ '<|assistant|>\n'  + message['content'] + eos_token }}"
+        "{% endif %}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|assistant|>\n' }}"
+        "{% endif %}"
         "{% endfor %}"
     ),
 }
@@ -471,10 +484,10 @@ class SimplePreferenceCollator:
 class SimpleGenerateCollator:
     """Simple collator for generation task (always pad from the LEFT)"""
 
-    def __init__(self, pad_token_id):
+    def __init__(self, pad_token_id: int):
         self.pad_token_id = pad_token_id
 
-    def __call__(self, batch):
+    def __call__(self, batch: list[dict]):
         """the input will have input_ids_prompt"""
         # Find max length in the batch
         max_length = -1
