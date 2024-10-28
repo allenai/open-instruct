@@ -16,7 +16,7 @@ dataset_mixer:
     ai2-adapt-dev/personahub_math_interm_algebra_50000: 20000
 
     # Coding datasets:
-    ai2-adapt-dev/personahub_code_v3_75329: 75329
+    ai2-adapt-dev/personahub_code_v2_34999: 34999
     ai2-adapt-dev/evol_codealpaca_heval_decontaminated: 107276
 
     # IF datasets:
@@ -29,6 +29,7 @@ dataset_mixer:
 
     # Specialty datasets:
     ai2-adapt-dev/table_gpt_converted: 5000
+    ai2-adapt-dev/aya_dataset_converted: 100000
 
     # Datasets removed because of licensing:
     # ai2-adapt-dev/flan_v2_converted: 89982 # ODC-BY
@@ -36,11 +37,11 @@ dataset_mixer:
     # ai2-adapt-dev/no_robots_converted: 9500 # NC
     # AI-MO/NuminaMath-TIR: 72441 # NC
 
-max_seq_length: 4096 # Note, reduced from 8192 to fit on one GPU with DeepSpeed Stage3
+max_seq_length: 8192
 preprocessing_num_workers: 128
 per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
-gradient_accumulation_steps: 2 # effective batch size 128 with 1 node
-learning_rate: 5.0e-06 # best LR so far
+gradient_accumulation_steps: 4 # effective batch size 128 with 4 nodes
+learning_rate: 5.0e-06
 lr_scheduler_type: linear
 warmup_ratio: 0.03
 weight_decay: 0.0
