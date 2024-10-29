@@ -45,7 +45,9 @@ def gen_prompt(train_df, subject, k=-1):
 
 def load_mmlu_data(subject, split, n_instances=None):
     """Load MMLU data from Hugging Face datasets."""
-    dataset = load_dataset('cais/mmlu', subject)[split]
+    # First load the subject config, then access the split
+    dataset = load_dataset('cais/mmlu', subject)
+    dataset = dataset[split]  # Now access the split
 
     # Convert to DataFrame format compatible with existing code
     df = pd.DataFrame({
@@ -182,7 +184,7 @@ def main(args):
                 model.config.max_position_embeddings))
 
     # Get available subjects from HF dataset
-    dataset = load_dataset('cais/mmlu', 'all')
+    dataset = load_dataset('cais/mmlu')
     subjects = sorted([k for k in dataset.keys() if k not in ['auxiliary_train']])
 
     if args.subjects:
