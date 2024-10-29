@@ -337,7 +337,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--ntrain", type=int, default=5)
-    parser.add_argument("--save_dir", type=str, default="results/mmlu/")
+    parser.add_argument("--save_dir", type=str, default="results/mmlu_Llama-3.1-8B/")
     parser.add_argument("--model_name_or_path", type=str, default=None,
                         help="if specified, we will load the model to generate the predictions.")
     parser.add_argument("--hf_revision", type=str, default=None,
