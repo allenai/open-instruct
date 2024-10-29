@@ -294,7 +294,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data_dir",
         type=str,
-        default="data/mmlu"
+        default="data/cais_mmlu_dataset"
     )
     parser.add_argument(
         "--save_dir",
