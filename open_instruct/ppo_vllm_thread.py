@@ -41,7 +41,7 @@ from open_instruct.dataset_processor import (
     GROUND_TRUTHS_KEY,
     DATASET_SOURCE_KEY,
     DatasetConfig,
-    SFTGroundTruthDatasetProcessor,
+    SFTDatasetProcessor,
     SimpleGenerateCollatorWithGroundTruth,
     visualize_token,
 )
