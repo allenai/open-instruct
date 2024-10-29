@@ -212,6 +212,7 @@ def main(args):
         subcat: [] for subcat_lists in subcategories.values() for subcat in subcat_lists
     }
     cat_cors = {cat: [] for cat in categories}
+    subject_results = {}  # Store results for each subject
 
     for subject in tqdm(subjects, desc=f"Evaluating subjects: "):
         # Load data directly from HF
@@ -224,6 +225,8 @@ def main(args):
             cors, acc, probs = eval_openai_chat_engine(args, subject, args.openai_engine, dev_df, test_df,
                                                        args.eval_batch_size)
 
+        subject_results[subject] = (cors, acc, probs)
+
         subcats = subcategories[subject]
         for subcat in subcats:
             subcat_cors[subcat].append(cors)
@@ -233,35 +236,6 @@ def main(args):
         all_cors.append(cors)
 
         # Save detailed results for this subject
-        # Save detailed results for this subject
-        test_df["correct"] = cors
-        prompts = []
-        for i in range(len(test_df)):
-            prompt = test_df.iloc[i, 0]  # question
-            choices_dict = {
-                "A": test_df.iloc[i, 1],
-                "B": test_df.iloc[i, 2],
-                "C": test_df.iloc[i, 3],
-                "D": test_df.iloc[i, 4],
-            }
-            formatted_prompt = prompt + "\n" + "\n".join([
-                f"{choice}. {text}" for choice, text in choices_dict.items()
-            ])
-            prompts.append(formatted_prompt)
-
-        test_df["prompt"] = prompts
-
-        for j in range(probs.shape[1]):
-            choice = choices[j]
-            test_df[f"choice{choice}_probs"] = probs[:, j]
-
-        # Add model predictions
-        test_df["prediction"] = [choices[pred_idx] for pred_idx in np.argmax(probs, axis=1)]
-
-        # Save both CSV and detailed results
-        test_df.to_csv(os.path.join(args.save_dir, f"{subject}.csv"), index=None)
-
-        # Save detailed results in a more readable format
         detailed_results = []
         for i in range(len(test_df)):
             result = {
@@ -272,8 +246,9 @@ def main(args):
                     "C": test_df.iloc[i, 3],
                     "D": test_df.iloc[i, 4]
                 },
+                "context": format_example(test_df, i, include_answer=False),
                 "correct_answer": test_df.iloc[i, 5],
-                "model_prediction": test_df["prediction"].iloc[i],
+                "model_prediction": choices[np.argmax(probs[i])],
                 "is_correct": bool(cors[i]),
                 "probabilities": {
                     choice: float(probs[i][j])
@@ -282,27 +257,24 @@ def main(args):
             }
             detailed_results.append(result)
 
-        with open(os.path.join(args.save_dir, f"{subject}_detailed.json"), "w") as f:
+        # Save detailed results for this subject
+        with open(os.path.join(args.save_dir, f"{subject}_results.json"), "w") as f:
             json.dump(detailed_results, f, indent=2)
-
-    # Calculate metrics only for subcategories with data
-    for subcat in subcat_cors:
-        if subcat_cors[subcat]:  # Only calculate if we have data
-            subcat_acc = np.mean(np.concatenate(subcat_cors[subcat]))
-            print("Average accuracy {:.3f} - {}".format(subcat_acc, subcat))
-
-    # Calculate metrics only for categories with data
-    for cat in cat_cors:
-        if cat_cors[cat]:  # Only calculate if we have data
-            cat_acc = np.mean(np.concatenate(cat_cors[cat]))
-            print("Average accuracy {:.3f} - {}".format(cat_acc, cat))
 
     weighted_acc = np.mean(np.concatenate(all_cors))
     print("Average accuracy: {:.3f}".format(weighted_acc))
 
-    # Save metrics
+    # Prepare the final metrics
     metrics = {
         "average_acc": float(weighted_acc),
+        "results_by_subject": {
+            subject: {
+                "accuracy": float(acc),
+                "num_examples": len(cors),
+                "num_correct": int(np.sum(cors))
+            }
+            for subject, (cors, acc, _) in subject_results.items()
+        },
         "subcat_acc": {
             subcat: float(np.mean(np.concatenate(subcat_cors[subcat])))
             for subcat in subcat_cors
@@ -312,11 +284,51 @@ def main(args):
             cat: float(np.mean(np.concatenate(cat_cors[cat])))
             for cat in cat_cors
             if cat_cors[cat]
-        },
+        }
     }
 
+    # Save metrics json
     with open(os.path.join(args.save_dir, "metrics.json"), "w") as f:
         json.dump(metrics, f, indent=2)
+
+    # Create and save summary CSV
+    model_name = args.model_name_or_path.split('/')[-1] if args.model_name_or_path else args.openai_engine
+
+    csv_rows = []
+
+    # Add overall accuracy
+    csv_rows.append({
+        'Category_Type': 'Overall',
+        'Category_Name': 'Average',
+        'Score': f"{weighted_acc:.3f}",
+        'Model': model_name
+    })
+
+    # Add category accuracies
+    for cat in categories:
+        if cat in cat_cors and cat_cors[cat]:
+            score = np.mean(np.concatenate(cat_cors[cat]))
+            csv_rows.append({
+                'Category_Type': 'Category',
+                'Category_Name': cat,
+                'Score': f"{score:.3f}",
+                'Model': model_name
+            })
+
+    # Add subject accuracies
+    for subject, (cors, acc, _) in subject_results.items():
+        csv_rows.append({
+            'Category_Type': 'Subject',
+            'Category_Name': subject,
+            'Score': f"{acc:.3f}",
+            'Model': model_name
+        })
+
+    # Save to CSV
+    summary_df = pd.DataFrame(csv_rows)
+    summary_path = os.path.join(args.save_dir, "summary_results.csv")
+    summary_df.to_csv(summary_path, index=False)
+    print(f"\nSummary results saved to: {summary_path}")
 
     if args.upload_to_hf is not None:
         task_name = f"oi_mmlu_{args.ntrain}shots"
