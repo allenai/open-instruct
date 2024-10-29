@@ -184,7 +184,7 @@ def main(args):
                 model.config.max_position_embeddings))
 
     # Get available subjects from HF dataset
-    dataset = load_dataset('cais/mmlu')
+    # dataset = load_dataset('cais/mmlu')
     # Get subjects from categories.py
     subjects = sorted(list(subcategories.keys()))
 
