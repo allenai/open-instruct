@@ -41,7 +41,7 @@ from open_instruct.dataset_processor import (
     GROUND_TRUTHS_KEY,
     DATASET_SOURCE_KEY,
     DatasetConfig,
-    SFTDatasetProcessor,
+    SFTGroundTruthDatasetProcessor,
     SimpleGenerateCollatorWithGroundTruth,
     visualize_token,
 )
@@ -472,7 +472,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # create the dataset
     dataset_dict = DatasetDict()
-    dataset_processor = SFTDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
+    dataset_processor = SFTGroundTruthDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
     train_dataset = combine_dataset(
         args.dataset_mixer_dict,
         splits=args.dataset_train_splits,
@@ -839,9 +839,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 ref_logprobs = torch.cat(ref_logprobs, 0)
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
-                global_scores = accelerator.gather(scores)
                 verifiable_counts = torch.cat(verifiable_counts, 0)
-                accelerator.print(f"global_scores: {global_scores}, {global_scores.mean()}")
+                verifiable_rate = verifiable_counts.sum() / queries.shape[0]
                 values = torch.cat(values, 0)
                 del (logprob, ref_logprob, full_value, value, score)
                 gc.collect()
@@ -878,7 +877,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     kl = kl2
                 elif args.kl_estimator == "kl3":
                     kl = kl3
-                print(f"{accelerator.local_process_index=}, {kl.sum(1)=}")
+                # print(f"{accelerator.local_process_index=}, {kl.sum(1)=}")
                 non_score_reward = -args.beta * kl
                 non_score_reward_sum = non_score_reward.sum(1)
                 rlhf_reward = scores + non_score_reward_sum
@@ -1006,6 +1005,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             local_metrics[17] = (
                 verifiable_counts.mean()
             )  # verifiable count = % of time we trigger the verifiable reward
+            local_metrics[18] = verifiable_rate
             global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
             metrics = {
                 "episode": episode,
@@ -1032,6 +1032,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 "val/ratio": global_metrics[13],
                 "val/ratio_var": global_metrics[14],
                 "objective/verifiable_counts": global_metrics[17],
+                "objective/verifiable_rate": global_metrics[18],
             }
             if accelerator.is_main_process:
                 print_rich_single_line_metrics(metrics)

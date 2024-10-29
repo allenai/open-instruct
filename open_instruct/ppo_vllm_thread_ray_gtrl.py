@@ -79,7 +79,7 @@ from open_instruct.dataset_processor import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     DatasetConfig,
-    SFTDatasetProcessor,
+    SFTGroundTruthDatasetProcessor,
     SimpleGenerateCollatorWithGroundTruth,
     visualize_token,
 )
@@ -1100,9 +1100,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
                 verifiable_counts = torch.cat(verifiable_counts, 0)
-                print(f"{verifiable_counts=}, {queries.shape=}")
                 verifiable_rate = verifiable_counts.sum() / queries.shape[0]
-                print(f"{verifiable_rate=}")
                 values = torch.cat(values, 0)
                 # print(f"get reward stuff finished")
                 del (logprob, ref_logprob, full_value, value, score)
@@ -1505,7 +1503,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # create the dataset
     dataset_dict = DatasetDict()
-    dataset_processor = SFTDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
+    dataset_processor = SFTGroundTruthDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
     train_dataset = combine_dataset(
         args.dataset_mixer_dict,
         splits=args.dataset_train_splits,
@@ -1625,8 +1623,12 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     ray.shutdown()
     stop_event.set()
 
+    # hack
+    accelerator = Namespace()
+    accelerator.is_main_process = True
+
     # Ai2 specific logic
-    if is_beaker_job():
+    if is_beaker_job() and accelerator.is_main_process:
         if args.hf_metadata_dataset:
             dataset_list = list(args.dataset_mixer_dict.keys())
             # mainly just focussing here on what would be useful for the leaderboard.
@@ -1667,8 +1669,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
             print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
 
-    accelerator = Namespace()
-    accelerator.is_main_process = True  # hack
     if args.push_to_hub:
         push_folder_to_hub(
             accelerator,
