@@ -22,13 +22,13 @@ def format_subject(subject):
 
 
 def format_example(df, idx, include_answer=True):
-    prompt = df.iloc[idx, 0]
-    k = df.shape[1] - 2
-    for j in range(k):
-        prompt += "\n{}. {}".format(choices[j], df.iloc[idx, j + 1])
+    """Format a single example with proper indexing for choices."""
+    prompt = df.iloc[idx, 0]  # question
+    for j, choice in enumerate(choices):  # use choices directly
+        prompt += "\n{}. {}".format(choice, df.iloc[idx, j + 1])
     prompt += "\nAnswer:"
     if include_answer:
-        prompt += " {}\n\n".format(df.iloc[idx, k + 1])
+        prompt += " {}\n\n".format(df.iloc[idx, 5])  # correct answer is at index 5
     return prompt
 
 
@@ -227,8 +227,24 @@ def main(args):
         all_cors.append(cors)
 
         # Save detailed results for this subject
+        # Save detailed results for this subject
         test_df["correct"] = cors
-        test_df["prompt"] = [format_example(test_df, i, include_answer=False) for i in range(len(test_df))]
+        prompts = []
+        for i in range(len(test_df)):
+            prompt = test_df.iloc[i, 0]  # question
+            choices_dict = {
+                "A": test_df.iloc[i, 1],
+                "B": test_df.iloc[i, 2],
+                "C": test_df.iloc[i, 3],
+                "D": test_df.iloc[i, 4],
+            }
+            formatted_prompt = prompt + "\n" + "\n".join([
+                f"{choice}. {text}" for choice, text in choices_dict.items()
+            ])
+            prompts.append(formatted_prompt)
+
+        test_df["prompt"] = prompts
+
         for j in range(probs.shape[1]):
             choice = choices[j]
             test_df[f"choice{choice}_probs"] = probs[:, j]
