@@ -45,18 +45,17 @@ def gen_prompt(train_df, subject, k=-1):
 
 def load_mmlu_data(subject, split, n_instances=None):
     """Load MMLU data from Hugging Face datasets."""
-    # First load the subject config, then access the split
-    dataset = load_dataset('cais/mmlu', subject)
-    dataset = dataset[split]  # Now access the split
+    # Correctly load a specific subject configuration
+    dataset = load_dataset('cais/mmlu', subject)[split]
 
     # Convert to DataFrame format compatible with existing code
     df = pd.DataFrame({
         0: dataset['question'],
-        1: [choices[0] for choices in dataset['choices']],
-        2: [choices[1] for choices in dataset['choices']],
-        3: [choices[2] for choices in dataset['choices']],
-        4: [choices[3] for choices in dataset['choices']],
-        5: [choices[dataset['answer'][i]] for i in range(len(dataset))]
+        1: [c[0] for c in dataset['choices']],  # First choice
+        2: [c[1] for c in dataset['choices']],  # Second choice
+        3: [c[2] for c in dataset['choices']],  # Third choice
+        4: [c[3] for c in dataset['choices']],  # Fourth choice
+        5: [choices[a] for a in dataset['answer']]  # Convert numeric answer to letter
     })
 
     if n_instances and n_instances < len(df):
@@ -184,8 +183,11 @@ def main(args):
                 model.config.max_position_embeddings))
 
     # Get available subjects from HF dataset
-    dataset = load_dataset('cais/mmlu', 'all')
-    subjects = sorted([k for k in dataset.keys() if k not in ['auxiliary_train']])
+    # dataset = load_dataset('cais/mmlu')
+    # subjects = sorted([k for k in dataset.keys() if k not in ['auxiliary_train']])
+
+    # Get list of available subjects from HF dataset configs
+    subjects = sorted([k for k in load_dataset('cais/mmlu').builder_configs.keys() if k != 'auxiliary_train'])
 
     if args.subjects:
         assert all(
