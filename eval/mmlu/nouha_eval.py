@@ -67,6 +67,8 @@ def load_mmlu_data(subject, split, n_instances=None):
 
 @torch.no_grad()
 def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1):
+    # Get the device of the model
+    device = next(model.parameters()).device
     prompts = []
     chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
 
@@ -101,11 +103,18 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
             tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
         prompts.append(prompt)
 
-    answer_choice_ids = [tokenizer.encode(" " + answer_choice, add_special_tokens=False)[-1] for answer_choice in
-                         choices]
+    # Get the answer choice ids and ensure they're on the correct device
+    answer_choice_ids = torch.tensor([
+        tokenizer.encode(" " + answer_choice, add_special_tokens=False)[-1]
+        for answer_choice in choices
+    ]).to(device)
+
     pred_indices, all_probs = get_next_word_predictions(
-        model, tokenizer, prompts, candidate_token_ids=answer_choice_ids, return_token_predictions=False,
-        batch_size=batch_size
+        model, tokenizer, prompts,
+        candidate_token_ids=answer_choice_ids,
+        return_token_predictions=False,
+        batch_size=batch_size,
+        device=device  # Pass the device to the prediction function
     )
 
     cors = []
@@ -121,6 +130,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
 
     print("Average accuracy {:.3f} - {}".format(acc, subject))
     return cors, acc, all_probs
+
 
 
 def eval_openai_chat_engine(args, subject, engine, dev_df, test_df, batch_size=1):
@@ -174,9 +184,10 @@ def main(args):
             model_name_or_path=args.model_name_or_path,
             revision=args.hf_revision,
             load_in_8bit=args.load_in_8bit,
-            device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
+            device_map="auto",  # Changed from "balanced_low_0"
             gptq_model=args.gptq,
         )
+
         from transformers import GPTNeoXForCausalLM, OPTForCausalLM
         if isinstance(model, GPTNeoXForCausalLM) or isinstance(model, OPTForCausalLM):
             tokenizer.model_max_length = model.config.max_position_embeddings
