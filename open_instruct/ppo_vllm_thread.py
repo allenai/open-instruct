@@ -855,7 +855,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
                 verifiable_counts = torch.cat(verifiable_counts, 0)
-                verifiable_rate = verifiable_counts.sum() / queries.shape[0]
+                verifiable_correct_rate = verifiable_counts.sum() / queries.shape[0]
                 values = torch.cat(values, 0)
                 del (logprob, ref_logprob, full_value, value, score)
                 gc.collect()
@@ -1017,10 +1017,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             local_metrics[14] = ratio_stats.var()
             local_metrics[15] = ((kl) ** 2 / 2).sum(1).mean()
             local_metrics[16] = ((-kl).exp() - 1 + kl).sum(1).mean()
-            local_metrics[17] = (
-                verifiable_counts.mean()
-            )  # verifiable count = % of time we trigger the verifiable reward
-            local_metrics[18] = verifiable_rate
+            local_metrics[17] = verifiable_correct_rate
             global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
             metrics = {
                 "episode": episode,
@@ -1046,8 +1043,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 "policy/entropy_avg": global_metrics[12],
                 "val/ratio": global_metrics[13],
                 "val/ratio_var": global_metrics[14],
-                "objective/verifiable_counts": global_metrics[17],
-                "objective/verifiable_rate": global_metrics[18],
+                "objective/verifiable_correct_rate": global_metrics[17],
             }
             if accelerator.is_main_process:
                 print_rich_single_line_metrics(metrics)
