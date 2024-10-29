@@ -17,6 +17,7 @@ WEKA_CLUSTERS = [
     "ai2/jupiter-cirrascale-2",
     "ai2/saturn-cirrascale",
     "ai2/neptune-cirrascale",
+    "ai2/allennlp-elara-cirrascale",
 ]
 
 
@@ -194,16 +195,20 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
     elif all(c in WEKA_CLUSTERS for c in cluster):
         env_vars.extend([
             beaker.EnvVar(
+                name="HF_HOME",
+                value="/weka/oe-adapt-default/allennlp/.cache/huggingface",
+            ),
+            beaker.EnvVar(
                 name="HF_DATASETS_CACHE",
-                value="/weka/allennlp/.cache/huggingface",
+                value="/weka/oe-adapt-default/allennlp/.cache/huggingface",
             ),
             beaker.EnvVar(
                 name="HF_HUB_CACHE",
-                value="/weka/allennlp/.cache/hub",
+                value="/weka/oe-adapt-default/allennlp/.cache/hub",
             ),
             beaker.EnvVar(
                 name="CHECKPOINT_OUTPUT_DIR",
-                value=f"/weka/allennlp/deletable_checkpoint_states/{global_wandb_id}",
+                value=f"/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/{global_wandb_id}",
             ),
         ])
         if num_nodes > 1:
@@ -256,7 +261,7 @@ def get_datasets(beaker_datasets, cluster: List[str]):
         res = [
             beaker.DataMount(
                 source=beaker.DataSource(weka="oe-adapt-default"),
-                mount_path="/weka",
+                mount_path="/weka/oe-adapt-default",
             ),
         ]
     for beaker_dataset in beaker_datasets:

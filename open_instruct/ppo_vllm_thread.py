@@ -3,7 +3,6 @@ import json
 import os
 import random
 import shutil
-import signal
 import subprocess
 import threading
 import time
@@ -37,22 +36,22 @@ from vllm import LLM, SamplingParams
 
 from open_instruct.dataset_processor import (
     CHAT_TEMPLATES,
-    INPUT_IDS_PROMPT_KEY,
-    GROUND_TRUTHS_KEY,
     DATASET_SOURCE_KEY,
+    GROUND_TRUTHS_KEY,
+    INPUT_IDS_PROMPT_KEY,
     DatasetConfig,
-    SFTDatasetProcessor,
+    SFTGroundTruthDatasetProcessor,
     SimpleGenerateCollatorWithGroundTruth,
     visualize_token,
 )
 from open_instruct.model_utils import (
     ModelConfig,
+    apply_verifiable_reward,
     disable_dropout_in_model,
     exact_div,
     first_true_indices,
     forward,
     get_reward,
-    apply_verifiable_reward,
     prepare_deepspeed,
     print_rich_single_line_metrics,
     print_rich_table,
@@ -472,11 +471,15 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # create the dataset
     dataset_dict = DatasetDict()
-    dataset_processor = SFTDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
+    dataset_processor = SFTGroundTruthDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
     train_dataset = combine_dataset(
         args.dataset_mixer_dict,
         splits=args.dataset_train_splits,
-        columns_to_keep=[dataset_config.sft_messages_key, dataset_config.ground_truths_key, dataset_config.dataset_source_key],
+        columns_to_keep=[
+            dataset_config.sft_messages_key,
+            dataset_config.ground_truths_key,
+            dataset_config.dataset_source_key,
+        ],
     )
     if dataset_config.sanity_check:
         train_dataset = train_dataset.select(
@@ -491,7 +494,11 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         eval_dataset = combine_dataset(
             args.dataset_eval_mixer_dict,
             splits=args.dataset_eval_splits,
-            columns_to_keep=[dataset_config.sft_messages_key, dataset_config.ground_truths_key, dataset_config.dataset_source_key],
+            columns_to_keep=[
+                dataset_config.sft_messages_key,
+                dataset_config.ground_truths_key,
+                dataset_config.dataset_source_key,
+            ],
         )
         eval_dataset = eval_dataset.select(range(0, min(len(eval_dataset), dataset_config.sanity_check_max_samples)))
         with accelerator.main_process_first():
@@ -599,31 +606,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 break
     resume_training_step > 1
 
-    # handle preemption
-    class PreemptionHandler:
-        preempted = False
-
-        def __init__(self):
-            signal.signal(signal.SIGTERM, self.exit_gracefully)
-
-        def exit_gracefully(self, signum, frame):
-            output_dir = os.path.join(args.checkpoint_output_dir, f"step_{training_step - 1}")
-            print(f"SIGTERM received, saving to {output_dir} from {accelerator.local_process_index}")
-            accelerator.save_state(output_dir)
-            if accelerator.is_main_process and args.with_tracking:
-                wandb.log({"preempted": True}, commit=True)
-                wandb.mark_preempting()
-            if accelerator.is_main_process:
-                try:
-                    param_prompt_Q.put(None, timeout=20)
-                    response_ids_Q.get(timeout=20)
-                    print("vllm thread terminated")
-                except Exception as e:
-                    print(e)
-            self.preempted = True
-
-    ph = PreemptionHandler()
-
     # deepspeed setup
     is_deepspeed_enabled = getattr(accelerator.state, "deepspeed_plugin", None) is not None
     mixed_precision = accelerator.state.mixed_precision
@@ -680,10 +662,16 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         thread.start()
     torch.cuda.set_device(device)
 
-    g_vllm_responses = torch.zeros((args.batch_size * args.number_samples_per_prompt, args.response_length), device=device, dtype=torch.long)
+    g_vllm_responses = torch.zeros(
+        (args.batch_size * args.number_samples_per_prompt, args.response_length), device=device, dtype=torch.long
+    )
 
     # set up the metrics and initial states
-    stats_shape = (args.num_epochs, args.num_mini_batches * args.number_samples_per_prompt, args.gradient_accumulation_steps)
+    stats_shape = (
+        args.num_epochs,
+        args.num_mini_batches * args.number_samples_per_prompt,
+        args.gradient_accumulation_steps,
+    )
     approxkl_stats = torch.zeros(stats_shape, device=device)
     pg_clipfrac_stats = torch.zeros(stats_shape, device=device)
     pg_loss_stats = torch.zeros(stats_shape, device=device)
@@ -698,7 +686,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     # setup extraction model. For now keep on CPU?
     if args.answer_extraction_model:
         answer_extraction_model = AutoModelForCausalLM.from_pretrained(args.answer_extraction_model)
-        answer_extraction_tokenizer = AutoTokenizer.from_pretrained(aargs.answer_extraction_model)
+        answer_extraction_tokenizer = AutoTokenizer.from_pretrained(args.answer_extraction_model)
     else:
         answer_extraction_model = None
         answer_extraction_tokenizer = None
@@ -708,7 +696,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     data = next(iter_dataloader)
     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
     ground_truths_next = data[GROUND_TRUTHS_KEY]
-    datsets_next = data[DATASET_SOURCE_KEY]
+    datasets_next = data[DATASET_SOURCE_KEY]
     send_queries(accelerator, None, tokenizer, param_prompt_Q, queries_next)
 
     for _ in range(1, resume_training_step):  # we didn't store scheduler state
@@ -719,9 +707,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         scheduler.step()
         queries = queries_next
         ground_truths = ground_truths_next
-        datasets = datsets_next
-        if ph.preempted:
-            break
+        datasets = datasets_next
 
         if accelerator.is_main_process:
             try:
@@ -789,18 +775,11 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         response + [DUMMY_PAD_TOKEN] * (args.response_length - len(response))
                         for response in g_response_token_ids
                     ]
-                    for item in g_padded_response_ids:
-                        assert len(item) == args.response_length
-                        for inner_item in item:
-                            if not inner_item < config.vocab_size:
-                                assert inner_item < config.vocab_size, f"{inner_item=}, {tokenizer.vocab_size=}"
                     g_padded_response_ids = torch.tensor(g_padded_response_ids, device=device)
                     g_vllm_responses[:] = g_padded_response_ids
                 broadcast(g_vllm_responses, 0)
                 local_vllm_responses = g_vllm_responses[
-                    accelerator.process_index
-                    * queries.shape[0] : (accelerator.process_index + 1)
-                    * queries.shape[0]
+                    accelerator.process_index * queries.shape[0] : (accelerator.process_index + 1) * queries.shape[0]
                 ]
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
@@ -838,13 +817,19 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     )
                     if args.reward_model_multiplier != 1.0:
                         score *= args.reward_model_multiplier
-                    # also apply verifiable reward 
+                    # also apply verifiable reward
                     if args.apply_verifiable_reward:
                         # we need to batch the gt to match query.
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
                         verifiable_reward, verifiable_count = apply_verifiable_reward(
-                            postprocessed_query_response, tokenizer, ground_truth, dataset, verify_reward=10, answer_extraction_model=answer_extraction_model, answer_extraction_tokenizer=answer_extraction_tokenizer
+                            postprocessed_query_response,
+                            tokenizer,
+                            ground_truth,
+                            dataset,
+                            verify_reward=10,
+                            answer_extraction_model=answer_extraction_model,
+                            answer_extraction_tokenizer=answer_extraction_tokenizer,
                         )
                         score += verifiable_reward
                     else:
@@ -869,9 +854,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 ref_logprobs = torch.cat(ref_logprobs, 0)
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
-                global_scores = accelerator.gather(scores)
                 verifiable_counts = torch.cat(verifiable_counts, 0)
-                accelerator.print(f"global_scores: {global_scores}, {global_scores.mean()}")
+                verifiable_correct_rate = verifiable_counts.sum() / queries.shape[0]
                 values = torch.cat(values, 0)
                 del (logprob, ref_logprob, full_value, value, score)
                 gc.collect()
@@ -908,7 +892,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     kl = kl2
                 elif args.kl_estimator == "kl3":
                     kl = kl3
-                print(f"{accelerator.local_process_index=}, {kl.sum(1)=}")
+                # print(f"{accelerator.local_process_index=}, {kl.sum(1)=}")
                 non_score_reward = -args.beta * kl
                 non_score_reward_sum = non_score_reward.sum(1)
                 rlhf_reward = scores + non_score_reward_sum
@@ -941,7 +925,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         for epoch_idx in range(args.num_epochs):
             b_inds = np.random.permutation(args.local_batch_size * args.number_samples_per_prompt)
             minibatch_idx = 0
-            for mini_batch_start in range(0, args.local_batch_size * args.number_samples_per_prompt, args.local_mini_batch_size):
+            for mini_batch_start in range(
+                0, args.local_batch_size * args.number_samples_per_prompt, args.local_mini_batch_size
+            ):
                 mini_batch_end = mini_batch_start + args.local_mini_batch_size
                 mini_batch_inds = b_inds[mini_batch_start:mini_batch_end]
                 gradient_accumulation_idx = 0
@@ -1031,7 +1017,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             local_metrics[14] = ratio_stats.var()
             local_metrics[15] = ((kl) ** 2 / 2).sum(1).mean()
             local_metrics[16] = ((-kl).exp() - 1 + kl).sum(1).mean()
-            local_metrics[17] = verifiable_counts.mean()  # verifiable count = % of time we trigger the verifiable reward
+            local_metrics[17] = verifiable_correct_rate
             global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
             metrics = {
                 "episode": episode,
@@ -1057,7 +1043,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 "policy/entropy_avg": global_metrics[12],
                 "val/ratio": global_metrics[13],
                 "val/ratio_var": global_metrics[14],
-                "objective/verifiable_counts": global_metrics[17]
+                "objective/verifiable_correct_rate": global_metrics[17],
             }
             if accelerator.is_main_process:
                 print_rich_single_line_metrics(metrics)
@@ -1084,74 +1070,73 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             )
             del original_tokenizer
 
-    if not ph.preempted:
-        # save model
-        os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
-        original_tokenizer = AutoTokenizer.from_pretrained(
-            model_config.model_name_or_path, revision=model_config.model_revision
-        )
-        save_with_accelerate(
-            accelerator,
-            model,
-            original_tokenizer,
-            args.output_dir,
-            model_attribute_to_save="policy",
-        )
+    # save model
+    os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
+    original_tokenizer = AutoTokenizer.from_pretrained(
+        model_config.model_name_or_path, revision=model_config.model_revision
+    )
+    save_with_accelerate(
+        accelerator,
+        model,
+        original_tokenizer,
+        args.output_dir,
+        model_attribute_to_save="policy",
+    )
 
-        # Ai2 specific logic
-        if is_beaker_job() and accelerator.is_main_process:
-            if args.hf_metadata_dataset:
-                dataset_list = list(args.dataset_mixer_dict.keys())
-                # mainly just focussing here on what would be useful for the leaderboard.
-                # wandb will have even more useful information.
-                metadata_blob = {
-                    "model_name": args.exp_name,
-                    "model_type": "sft",
-                    "datasets": dataset_list,
-                    "base_model": model_config.model_name_or_path,
-                    "wandb_path": wandb.run.get_url(),
-                    "beaker_experiment": beaker_config.beaker_experiment_url,
-                    "beaker_datasets": beaker_config.beaker_dataset_id_urls,
-                }
-                upload_metadata_to_hf(
-                    metadata_blob,
-                    "metadata.json",
-                    args.hf_metadata_dataset,
-                    "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
-                )
-
-            if args.try_launch_beaker_eval_jobs and len(beaker_config.beaker_dataset_id_urls) > 0:
-                command = f"""\
-                python mason.py  \
-                    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/s2-cirrascale ai2/general-cirrascale \
-                    --priority low \
-                    --preemptible \
-                    --budget ai2/allennlp \
-                    --workspace ai2/tulu-2-improvements \
-                    --image nathanl/open_instruct_auto \
-                    --pure_docker_mode \
-                    --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
-                    --beaker_workload_id {beaker_config.beaker_workload_id} \
-                    --model_name {args.hf_repo_revision}
-                """
-                process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                stdout, stderr = process.communicate()
-                print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
-                print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
-                print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
-
-        if args.push_to_hub:
-            push_folder_to_hub(
-                accelerator,
-                args.output_dir,
-                args.hf_repo_id,
-                args.hf_repo_revision,
+    # Ai2 specific logic
+    if is_beaker_job() and accelerator.is_main_process:
+        if args.hf_metadata_dataset:
+            dataset_list = list(args.dataset_mixer_dict.keys())
+            # mainly just focussing here on what would be useful for the leaderboard.
+            # wandb will have even more useful information.
+            metadata_blob = {
+                "model_name": args.exp_name,
+                "model_type": "sft",
+                "datasets": dataset_list,
+                "base_model": model_config.model_name_or_path,
+                "wandb_path": wandb.run.get_url(),
+                "beaker_experiment": beaker_config.beaker_experiment_url,
+                "beaker_datasets": beaker_config.beaker_dataset_id_urls,
+            }
+            upload_metadata_to_hf(
+                metadata_blob,
+                "metadata.json",
+                args.hf_metadata_dataset,
+                "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
             )
 
-        if accelerator.is_main_process:
-            # remove args.checkpoint_output_dir
-            if os.path.exists(args.checkpoint_output_dir):
-                shutil.rmtree(args.checkpoint_output_dir, ignore_errors=True)
+        if args.try_launch_beaker_eval_jobs and len(beaker_config.beaker_dataset_id_urls) > 0:
+            command = f"""\
+            python mason.py  \
+                --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/s2-cirrascale ai2/general-cirrascale \
+                --priority low \
+                --preemptible \
+                --budget ai2/allennlp \
+                --workspace ai2/tulu-2-improvements \
+                --image nathanl/open_instruct_auto \
+                --pure_docker_mode \
+                --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
+                --beaker_workload_id {beaker_config.beaker_workload_id} \
+                --model_name {args.hf_repo_revision}
+            """
+            process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = process.communicate()
+            print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
+            print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
+            print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+
+    if args.push_to_hub:
+        push_folder_to_hub(
+            accelerator,
+            args.output_dir,
+            args.hf_repo_id,
+            args.hf_repo_revision,
+        )
+
+    if accelerator.is_main_process:
+        # remove args.checkpoint_output_dir
+        if os.path.exists(args.checkpoint_output_dir):
+            shutil.rmtree(args.checkpoint_output_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
