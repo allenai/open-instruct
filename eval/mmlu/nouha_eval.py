@@ -184,7 +184,14 @@ def main(args):
                 model.config.max_position_embeddings))
 
     # Get subjects from categories.py
-    subjects = sorted(list(subcategories.keys()))
+    math_subjects = ['abstract_algebra', 'college_mathematics', 'elementary_mathematics',
+                     'high_school_mathematics', 'high_school_statistics']
+
+    if args.debug_math:
+        subjects = math_subjects
+        print(f"Evaluating math subjects: {subjects}")
+    else:
+        subjects = sorted(list(subcategories.keys()))
 
     if args.subjects:
         assert all(
@@ -219,40 +226,75 @@ def main(args):
                     cat_cors[key].append(cors)
         all_cors.append(cors)
 
+        # Save detailed results for this subject
         test_df["correct"] = cors
+        test_df["prompt"] = [format_example(test_df, i, include_answer=False) for i in range(len(test_df))]
         for j in range(probs.shape[1]):
             choice = choices[j]
             test_df[f"choice{choice}_probs"] = probs[:, j]
-        test_df.to_csv(
-            os.path.join(args.save_dir, f"{subject}.csv"),
-            index=None,
-        )
 
+        # Add model predictions
+        test_df["prediction"] = [choices[pred_idx] for pred_idx in np.argmax(probs, axis=1)]
+
+        # Save both CSV and detailed results
+        test_df.to_csv(os.path.join(args.save_dir, f"{subject}.csv"), index=None)
+
+        # Save detailed results in a more readable format
+        detailed_results = []
+        for i in range(len(test_df)):
+            result = {
+                "question": test_df.iloc[i, 0],
+                "choices": {
+                    "A": test_df.iloc[i, 1],
+                    "B": test_df.iloc[i, 2],
+                    "C": test_df.iloc[i, 3],
+                    "D": test_df.iloc[i, 4]
+                },
+                "correct_answer": test_df.iloc[i, 5],
+                "model_prediction": test_df["prediction"].iloc[i],
+                "is_correct": bool(cors[i]),
+                "probabilities": {
+                    choice: float(probs[i][j])
+                    for j, choice in enumerate(choices)
+                }
+            }
+            detailed_results.append(result)
+
+        with open(os.path.join(args.save_dir, f"{subject}_detailed.json"), "w") as f:
+            json.dump(detailed_results, f, indent=2)
+
+    # Calculate metrics only for subcategories with data
     for subcat in subcat_cors:
-        subcat_acc = np.mean(np.concatenate(subcat_cors[subcat]))
-        print("Average accuracy {:.3f} - {}".format(subcat_acc, subcat))
+        if subcat_cors[subcat]:  # Only calculate if we have data
+            subcat_acc = np.mean(np.concatenate(subcat_cors[subcat]))
+            print("Average accuracy {:.3f} - {}".format(subcat_acc, subcat))
 
+    # Calculate metrics only for categories with data
     for cat in cat_cors:
-        cat_acc = np.mean(np.concatenate(cat_cors[cat]))
-        print("Average accuracy {:.3f} - {}".format(cat_acc, cat))
+        if cat_cors[cat]:  # Only calculate if we have data
+            cat_acc = np.mean(np.concatenate(cat_cors[cat]))
+            print("Average accuracy {:.3f} - {}".format(cat_acc, cat))
+
     weighted_acc = np.mean(np.concatenate(all_cors))
     print("Average accuracy: {:.3f}".format(weighted_acc))
 
-    # Save results
+    # Save metrics
     metrics = {
-        "average_acc": weighted_acc,
+        "average_acc": float(weighted_acc),
         "subcat_acc": {
-            subcat: np.mean(np.concatenate(subcat_cors[subcat]))
+            subcat: float(np.mean(np.concatenate(subcat_cors[subcat])))
             for subcat in subcat_cors
+            if subcat_cors[subcat]
         },
         "cat_acc": {
-            cat: np.mean(np.concatenate(cat_cors[cat]))
+            cat: float(np.mean(np.concatenate(cat_cors[cat])))
             for cat in cat_cors
+            if cat_cors[cat]
         },
     }
 
     with open(os.path.join(args.save_dir, "metrics.json"), "w") as f:
-        json.dump(metrics, f)
+        json.dump(metrics, f, indent=2)
 
     if args.upload_to_hf is not None:
         task_name = f"oi_mmlu_{args.ntrain}shots"
