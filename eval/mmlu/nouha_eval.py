@@ -10,6 +10,7 @@ from eval.mmlu.categories import subcategories, categories
 from eval.utils import get_next_word_predictions, load_hf_tokenizer, load_hf_lm, query_openai_chat_model, \
     dynamic_import_function, upload_results_to_hf, check_and_upload_model_metadata
 
+
 choices = ["A", "B", "C", "D"]
 
 
@@ -183,11 +184,14 @@ def main(args):
                 model.config.max_position_embeddings))
 
     # Get available subjects from HF dataset
-    # dataset = load_dataset('cais/mmlu')
+    dataset = load_dataset('cais/mmlu')
+    # Get subjects from categories.py
+    subjects = sorted(list(subcategories.keys()))
+
     # subjects = sorted([k for k in dataset.keys() if k not in ['auxiliary_train']])
 
     # Get list of available subjects from HF dataset configs
-    subjects = sorted([k for k in load_dataset('cais/mmlu').builder_configs.keys() if k != 'auxiliary_train'])
+    # subjects = sorted([k for k in load_dataset('cais/mmlu').builder_configs.keys() if k != 'auxiliary_train'])
 
     if args.subjects:
         assert all(
