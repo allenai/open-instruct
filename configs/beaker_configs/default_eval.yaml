@@ -35,16 +35,16 @@ tasks:
       - name: WANDB_DISABLED
         value: true
       - name: OPENAI_API_KEY
-        secret: openai_api_key
+        secret: jacobm_OPENAI_API_KEY
       - name: HF_TOKEN
-        secret: HF_TOKEN
+        secret: jacobm_HF_TOKEN
     datasets:
+      - mountPath: /oe-adapt-default
+        source:
+          weka: oe-adapt-default
       - mountPath: /data/
         source:
           beaker: hamishivi/open-instruct-eval-data
-      - mountPath: /model
-        source:
-          beaker: 01GVYXDGJC6DV0JW9JZ16YM07G
       - mountPath: /net/nfs.cirrascale
         source:
           hostPath: /net/nfs.cirrascale

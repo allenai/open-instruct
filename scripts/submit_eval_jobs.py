@@ -76,11 +76,11 @@ parser.add_argument("--location", type=str, default=None)
 parser.add_argument("--beaker_image", type=str, default="nathanl/open_instruct_auto", help="If given, use this Beaker image.")
 parser.add_argument("--beaker_subfolder", type=str, default=None)
 parser.add_argument("--cluster", nargs='+', default=[
-    "ai2/allennlp-cirrascale",
-    "ai2/general-cirrascale",
-    "ai2/s2-cirrascale-l40",
+    # "ai2/allennlp-cirrascale",
+    # "ai2/general-cirrascale",
+    # "ai2/s2-cirrascale-l40",
     "ai2/allennlp-elara-cirrascale",
-    "ai2/pluto-cirrascale",
+    # "ai2/pluto-cirrascale",
     "ai2/neptune-cirrascale",
     "ai2/saturn-cirrascale",
     "ai2/jupiter-cirrascale-2",
@@ -462,9 +462,11 @@ for experiment_group in experiment_groups:
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", f"--model_name_or_path {model_info[1]} --hf_revision {args.hf_revision}")]
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", f"--tokenizer_name_or_path {model_info[1]}")]
     elif model_info[1].startswith("/"):  # if it's a local model, load it from the local directory
-        assert nfs_available, "NFS is required for path-based models."  # to be safe.
+        # assert nfs_available, "NFS is required for path-based models."  # to be safe.
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", f"--model_name_or_path {model_info[1]}")]
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", f"--tokenizer_name_or_path {model_info[1]}")]
+    elif model_info[1].startswith("weka"):
+        task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1].split(':/')[1])]
     else:  # if it's a beaker model, mount the beaker dataset to `/model`
         task_spec['datasets'][1]['source']['beaker'] = model_info[1]
 
@@ -582,6 +584,8 @@ if args.run_oe_eval_experiments:
     ## model location munging: if beaker, use beaker://. If hf, just name
     if model_info[0].startswith("hf-"):
         oe_eval_cmd += f" --model-location {model_info[1]}"
+    elif "weka" in model_info[1]:
+        oe_eval_cmd += f" --model-location {model_info[1]}"
     else:
         oe_eval_cmd += f" --model-location beaker://{model_info[1]}"
     if args.hf_revision:
@@ -625,6 +629,8 @@ VLLM_WORKER_MULTIPROC_METHOD=spawn PYTHONPATH=. python evaluation/run_all_genera
         assert nfs_available, "NFS is required for path-based models."  # to be safe.
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path "+model_info[1])]
+    elif model_info[1].startswith("weka"):
+        task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1].split(':/')[1])]
     else:  # if it's a beaker model, mount the beaker dataset to `/model`
         task_spec['datasets'][1]['source']['beaker'] = model_info[1]
 
