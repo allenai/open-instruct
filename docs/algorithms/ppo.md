@@ -91,13 +91,13 @@ python open_instruct/ppo_vllm_thread.py \
 
 # LEVEL 0.2: 3 GPUs; 1 GPU for actor and reference, 1 GPU for critic and reward model, and
 # 1 GPU for vLLM generation.
-python open_instruct/ppo_vllm_thread_ray.py \
+python open_instruct/ppo_vllm_thread_ray_old.py \
     --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_train_splits train \
     --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_eval_splits validation \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --learning_rate 3e-6 \
     --output_dir models/minimal/ppo_ray \
     --per_device_train_batch_size 8 \
@@ -138,31 +138,33 @@ Here we are using --vllm_device cuda:7 to say we want to launch the vllm generat
 # for running TL;DR you can likely use GPUs with less memory
 python mason.py \
     --image nathanl/open_instruct_auto --pure_docker_mode \
-    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/general-cirrascale \
-    --priority normal \
+    --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale \
+    --priority high \
+    --workspace ai2/tulu-3-dev \
     --preemptible \
     --budget ai2/allennlp \
     --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
      open_instruct/ppo_vllm_thread.py \
+     --exp_name "ppo_vllm_thread_ds3" \
     --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_train_splits train \
     --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_eval_splits validation \
     --max_token_length 1024 \
-    --max_prompt_token_length 512 \
+    --max_prompt_token_lenth 512 \
     --learning_rate 3e-6 \
     --output_dir models/minimal/ppo_vllm_thread_tldr \
     --per_device_train_batch_size 16 \
     --local_rollout_forward_batch_size 32 \
     --gradient_accumulation_steps 4 \
-    --num_epochs 1 \
+    --num_epochs 4 \
     --num_mini_batches 1 \
     --total_episodes 1000000 \
     --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr  \
     --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
     --non_stop_penalty \
     --stop_token eos \
-    --beta 0.1 \
+    --beta 0.05 \
     --response_length 53 \
     --with_tracking \
     --push_to_hub \
@@ -173,22 +175,24 @@ python mason.py \
 # or with ray
 python mason.py \
     --cluster ai2/allennlp-elara-cirrascale ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale --image costah/open_instruct_ppo_ray --pure_docker_mode \
-    --priority normal \
+    --priority high \
+    --workspace ai2/tulu-3-dev \
     --preemptible \
     --budget ai2/allennlp \
-    --gpus 8 -- python open_instruct/ppo_vllm_thread_ray.py \
+    --gpus 8 -- python open_instruct/ppo_vllm_thread_ray1.py \
+    --exp_name ppo_vllm_thread_ray_not_ds_adamw \
     --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_train_splits train \
     --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_eval_splits validation \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --learning_rate 3e-6 \
     --output_dir models/minimal/ppo_ray \
-    --per_device_train_batch_size 8 \
-    --local_rollout_forward_batch_size 8 \
-    --local_mini_batch_size 64 \
-    --local_rollout_batch_size 64 \
+    --per_device_train_batch_size 16 \
+    --local_rollout_forward_batch_size 32 \
+    --local_mini_batch_size 256 \
+    --local_rollout_batch_size 256 \
     --actor_num_gpus_per_node 4 \
     --ref_num_gpus_per_node 4 \
     --colocate_actor_ref \
@@ -196,17 +200,52 @@ python mason.py \
     --reward_num_gpus_per_node 1 \
     --vllm_tensor_parallel_size 1 \
     --deepspeed_stage 3 \
-    --num_epochs 1 \
+    --num_epochs 4 \
     --num_mini_batches 1 \
     --total_episodes 1000000 \
     --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr  \
     --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
     --non_stop_penalty \
     --stop_token eos \
-    --beta 0.1 \
+    --beta 0.05 \
     --response_length 53 \
+    --hf_metadata_dataset '""' \
+    --no_try_launch_beaker_eval_jobs \
     --with_tracking \
     --push_to_hub \
+
+
+
+python open_instruct/ppo_vllm_thread_ray2.py \
+    --exp_name ppo_vllm_thread_ray_not_ds_adamw \
+    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
+    --dataset_eval_splits validation \
+    --max_token_length 1024 \
+    --max_prompt_token_length 512 \
+    --learning_rate 3e-6 \
+    --output_dir models/minimal/ppo_ray \
+    --per_device_train_batch_size 16 \
+    --local_rollout_forward_batch_size 32 \
+    --local_mini_batch_size 256 \
+    --local_rollout_batch_size 256 \
+    --colocate_everything \
+    --actor_num_gpus_per_node 7 \
+    --ref_num_gpus_per_node 7 \
+    --critic_num_gpus_per_node 7 \
+    --reward_num_gpus_per_node 7 \
+    --vllm_tensor_parallel_size 1 \
+    --deepspeed_stage 3 \
+    --num_epochs 4 \
+    --num_mini_batches 1 \
+    --total_episodes 1000000 \
+    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr  \
+    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
+    --non_stop_penalty \
+    --stop_token eos \
+    --beta 0.05 \
+    --response_length 53 \
     --hf_metadata_dataset '""' \
     --no_try_launch_beaker_eval_jobs
 ```
@@ -281,7 +320,7 @@ python mason.py \
     --dataset_eval_mixer '{"HuggingFaceH4/no_robots": 1.0}' \
     --dataset_eval_splits test \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --learning_rate 8e-7 \
     --output_dir models/minimal/ppo_ray \
     --per_device_train_batch_size 1 \
@@ -385,14 +424,14 @@ python mason.py \
     --num_nodes 6 \
     --image costah/open_instruct_ppo_ray \
     --budget ai2/allennlp \
-    --gpus 8 -- source configs/beaker_configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray.py \
+    --gpus 8 -- source configs/beaker_configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray1.py \
     --exp_name ppo_vllm_thread_ray_70B \
     --dataset_mixer "{\"HuggingFaceH4/no_robots\": 9500}" \
     --dataset_train_splits train \
     --dataset_eval_mixer "{\"HuggingFaceH4/no_robots\": 1.0}" \
     --dataset_eval_splits test \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 1024 \
+    --max_prompt_token_length 1024 \
     --learning_rate 4e-7 \
     --output_dir models/minimal/ppo_ray_tldr \
     --per_device_train_batch_size 1 \

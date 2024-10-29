@@ -599,30 +599,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 break
     resume_training_step > 1
 
-    # handle preemption
-    class PreemptionHandler:
-        preempted = False
-
-        def __init__(self):
-            signal.signal(signal.SIGTERM, self.exit_gracefully)
-
-        def exit_gracefully(self, signum, frame):
-            output_dir = os.path.join(args.checkpoint_output_dir, f"step_{training_step - 1}")
-            print(f"SIGTERM received, saving to {output_dir} from {accelerator.local_process_index}")
-            accelerator.save_state(output_dir)
-            if accelerator.is_main_process and args.with_tracking:
-                wandb.log({"preempted": True}, commit=True)
-                wandb.mark_preempting()
-            if accelerator.is_main_process:
-                try:
-                    param_prompt_Q.put(None, timeout=20)
-                    response_ids_Q.get(timeout=20)
-                    print("vllm thread terminated")
-                except Exception as e:
-                    print(e)
-            self.preempted = True
-
-    ph = PreemptionHandler()
 
     # deepspeed setup
     is_deepspeed_enabled = getattr(accelerator.state, "deepspeed_plugin", None) is not None
@@ -698,7 +674,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     # setup extraction model. For now keep on CPU?
     if args.answer_extraction_model:
         answer_extraction_model = AutoModelForCausalLM.from_pretrained(args.answer_extraction_model)
-        answer_extraction_tokenizer = AutoTokenizer.from_pretrained(aargs.answer_extraction_model)
+        answer_extraction_tokenizer = AutoTokenizer.from_pretrained(args.answer_extraction_model)
     else:
         answer_extraction_model = None
         answer_extraction_tokenizer = None
@@ -708,7 +684,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     data = next(iter_dataloader)
     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
     ground_truths_next = data[GROUND_TRUTHS_KEY]
-    datsets_next = data[DATASET_SOURCE_KEY]
+    datasets_next = data[DATASET_SOURCE_KEY]
     send_queries(accelerator, None, tokenizer, param_prompt_Q, queries_next)
 
     for _ in range(1, resume_training_step):  # we didn't store scheduler state
@@ -719,9 +695,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         scheduler.step()
         queries = queries_next
         ground_truths = ground_truths_next
-        datasets = datsets_next
-        if ph.preempted:
-            break
+        datasets = datasets_next
 
         if accelerator.is_main_process:
             try:
@@ -789,11 +763,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         response + [DUMMY_PAD_TOKEN] * (args.response_length - len(response))
                         for response in g_response_token_ids
                     ]
-                    for item in g_padded_response_ids:
-                        assert len(item) == args.response_length
-                        for inner_item in item:
-                            if not inner_item < config.vocab_size:
-                                assert inner_item < config.vocab_size, f"{inner_item=}, {tokenizer.vocab_size=}"
                     g_padded_response_ids = torch.tensor(g_padded_response_ids, device=device)
                     g_vllm_responses[:] = g_padded_response_ids
                 broadcast(g_vllm_responses, 0)

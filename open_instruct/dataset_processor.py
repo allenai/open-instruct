@@ -388,6 +388,64 @@ class SFTDatasetProcessor(DatasetProcessor):
             if self.config.train_only_on_prompt:
                 labels[: len(row[INPUT_IDS_PROMPT_KEY])] = [-100] * len(row[INPUT_IDS_PROMPT_KEY])
             row[LABELS_KEY] = labels
+            return row
+
+        return dataset.map(
+            tokenize_fn,
+            num_proc=get_num_proc(len(dataset), self.config.num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
+            load_from_cache_file=self.config.load_from_cache_file,
+            desc="Tokenizing and reformatting SFT data",
+        )
+
+    def filter(self, dataset: Dataset, need_contain_labels: bool = True):
+        def filter_fn(row):
+            max_prompt_token_length_ok = True
+            if self.config.max_prompt_token_length is not None:
+                max_prompt_token_length_ok = len(row[INPUT_IDS_PROMPT_KEY]) <= self.config.max_prompt_token_length
+
+            max_token_length_ok = True
+            if self.config.max_token_length is not None:
+                max_token_length_ok = len(row[INPUT_IDS_KEY]) <= self.config.max_token_length
+
+            contain_some_labels = any(x != -100 for x in row[LABELS_KEY])
+            return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
+
+        return dataset.filter(
+            filter_fn,
+            num_proc=get_num_proc(len(dataset), self.config.num_proc, FILTER_EXAMPLE_PER_SECOND_PER_CPU),
+            load_from_cache_file=self.config.load_from_cache_file,
+            desc="Filtering SFT data",
+        )
+
+    def get_token_length_stats(self, dataset: Union[Dataset, DatasetDict]):
+        return super().get_token_length_stats(features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY], dataset=dataset)
+
+    def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):
+        return super().get_token_length_visualization(
+            features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY],
+            dataset=dataset,
+            save_path=save_path,
+            bins=bins,
+        )
+
+
+class SFTGroundTruthDatasetProcessor(DatasetProcessor):
+    def tokenize(self, dataset: Dataset):
+        def tokenize_fn(row):
+            if len(row[self.config.sft_messages_key]) == 1:
+                prompt = row[self.config.sft_messages_key]
+            else:
+                prompt = row[self.config.sft_messages_key][:-1]
+            row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(
+                prompt,
+                add_generation_prompt=True,
+            )
+            row[INPUT_IDS_KEY] = self.tokenizer.apply_chat_template(row[self.config.sft_messages_key])
+            row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
+            labels = copy.deepcopy(row[INPUT_IDS_KEY])
+            if self.config.train_only_on_prompt:
+                labels[: len(row[INPUT_IDS_PROMPT_KEY])] = [-100] * len(row[INPUT_IDS_PROMPT_KEY])
+            row[LABELS_KEY] = labels
             row[GROUND_TRUTHS_KEY] = row[self.config.ground_truths_key]
             row[DATASET_SOURCE_KEY] = row[self.config.dataset_source_key]
             return row
