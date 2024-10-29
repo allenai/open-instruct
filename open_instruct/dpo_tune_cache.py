@@ -104,7 +104,7 @@ class FlatArguments:
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
-    it: bool = field(
+    dpo_use_paged_optimizer: bool = field(
         default=False,
         metadata={
             "help": "Use paged optimizer from bitsandbytes."
@@ -806,8 +806,7 @@ def main(args: FlatArguments):
         collate_fn=DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest"),
         batch_size=args.per_device_train_batch_size,
     )
-    print("=============data loaded")
-    print_gpu_stats(init_gpu_memory)
+
     # Optimizer
     # Split weights in two groups, one with weight decay and the other not.
     no_decay = ["bias", "layer_norm.weight"]
@@ -821,7 +820,7 @@ def main(args: FlatArguments):
             "weight_decay": 0.0,
         },
     ]
-    if args.use_qlora or args.it:
+    if args.use_qlora or args.dpo_use_paged_optimizer:
         from bitsandbytes.optim import AdamW
 
         optimizer = AdamW(
