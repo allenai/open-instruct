@@ -3,6 +3,7 @@ import json
 import os
 import random
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -36,22 +37,22 @@ from vllm import LLM, SamplingParams
 
 from open_instruct.dataset_processor import (
     CHAT_TEMPLATES,
-    DATASET_SOURCE_KEY,
-    GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
+    GROUND_TRUTHS_KEY,
+    DATASET_SOURCE_KEY,
     DatasetConfig,
-    SFTDatasetProcessor,
+    SFTGroundTruthDatasetProcessor,
     SimpleGenerateCollatorWithGroundTruth,
     visualize_token,
 )
 from open_instruct.model_utils import (
     ModelConfig,
-    apply_verifiable_reward,
     disable_dropout_in_model,
     exact_div,
     first_true_indices,
     forward,
     get_reward,
+    apply_verifiable_reward,
     prepare_deepspeed,
     print_rich_single_line_metrics,
     print_rich_table,
@@ -475,11 +476,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     train_dataset = combine_dataset(
         args.dataset_mixer_dict,
         splits=args.dataset_train_splits,
-        columns_to_keep=[
-            dataset_config.sft_messages_key,
-            dataset_config.ground_truths_key,
-            dataset_config.dataset_source_key,
-        ],
+        columns_to_keep=[dataset_config.sft_messages_key, dataset_config.ground_truths_key, dataset_config.dataset_source_key],
     )
     if dataset_config.sanity_check:
         train_dataset = train_dataset.select(
@@ -494,11 +491,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         eval_dataset = combine_dataset(
             args.dataset_eval_mixer_dict,
             splits=args.dataset_eval_splits,
-            columns_to_keep=[
-                dataset_config.sft_messages_key,
-                dataset_config.ground_truths_key,
-                dataset_config.dataset_source_key,
-            ],
+            columns_to_keep=[dataset_config.sft_messages_key, dataset_config.ground_truths_key, dataset_config.dataset_source_key],
         )
         eval_dataset = eval_dataset.select(range(0, min(len(eval_dataset), dataset_config.sanity_check_max_samples)))
         with accelerator.main_process_first():
@@ -662,16 +655,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         thread.start()
     torch.cuda.set_device(device)
 
-    g_vllm_responses = torch.zeros(
-        (args.batch_size * args.number_samples_per_prompt, args.response_length), device=device, dtype=torch.long
-    )
+    g_vllm_responses = torch.zeros((args.batch_size * args.number_samples_per_prompt, args.response_length), device=device, dtype=torch.long)
 
     # set up the metrics and initial states
-    stats_shape = (
-        args.num_epochs,
-        args.num_mini_batches * args.number_samples_per_prompt,
-        args.gradient_accumulation_steps,
-    )
+    stats_shape = (args.num_epochs, args.num_mini_batches * args.number_samples_per_prompt, args.gradient_accumulation_steps)
     approxkl_stats = torch.zeros(stats_shape, device=device)
     pg_clipfrac_stats = torch.zeros(stats_shape, device=device)
     pg_loss_stats = torch.zeros(stats_shape, device=device)
@@ -775,8 +762,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         response + [DUMMY_PAD_TOKEN] * (args.response_length - len(response))
                         for response in g_response_token_ids
                     ]
-                    g_padded_response_ids = torch.tensor(g_padded_response_ids, device=device)
-                    g_vllm_responses[:] = g_padded_response_ids
                 broadcast(g_vllm_responses, 0)
                 local_vllm_responses = g_vllm_responses[
                     accelerator.process_index * queries.shape[0] : (accelerator.process_index + 1) * queries.shape[0]
