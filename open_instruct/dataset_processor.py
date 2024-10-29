@@ -408,7 +408,9 @@ class SFTDatasetProcessor(DatasetProcessor):
                 max_token_length_ok = len(row[INPUT_IDS_KEY]) <= self.config.max_token_length
 
             contain_some_labels = any(x != -100 for x in row[LABELS_KEY])
-            return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
+            return (
+                max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
+            )
 
         return dataset.filter(
             filter_fn,
@@ -468,7 +470,9 @@ class SFTGroundTruthDatasetProcessor(DatasetProcessor):
                 max_token_length_ok = len(row[INPUT_IDS_KEY]) <= self.config.max_token_length
 
             contain_some_labels = any(x != -100 for x in row[LABELS_KEY])
-            return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
+            return (
+                max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
+            )
 
         return dataset.filter(
             filter_fn,
@@ -585,6 +589,7 @@ class SimpleGenerateCollator:
         return {
             INPUT_IDS_PROMPT_KEY: padded_sequences,
         }
+
 
 class SimpleGenerateCollatorWithGroundTruth:
     """Simple collator for generation task (always pad from the LEFT)"""

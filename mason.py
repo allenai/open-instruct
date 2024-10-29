@@ -17,6 +17,7 @@ WEKA_CLUSTERS = [
     "ai2/jupiter-cirrascale-2",
     "ai2/saturn-cirrascale",
     "ai2/neptune-cirrascale",
+    "ai2/allennlp-elara-cirrascale",
 ]
 
 
@@ -193,6 +194,10 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
     # if all cluster is in weka, we mount the weka
     elif all(c in WEKA_CLUSTERS for c in cluster):
         env_vars.extend([
+            beaker.EnvVar(
+                name="HF_HOME",
+                value="/weka/oe-adapt-default/allennlp/.cache/huggingface",
+            ),
             beaker.EnvVar(
                 name="HF_DATASETS_CACHE",
                 value="/weka/oe-adapt-default/allennlp/.cache/huggingface",
