@@ -595,7 +595,7 @@ class PolicyTrainerRayProcess(RayProcess):
             args.lr_scheduler_type,
             optimizer=self.optimizer,
             num_warmup_steps=args.warm_up_steps,
-            num_training_steps=args.num_training_steps * args.num_train_epochs,
+            num_training_steps=args.num_training_steps * args.num_train_epochs * args.num_epochs,
         )
         print(ds_config)
         self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
@@ -630,7 +630,7 @@ class PolicyTrainerRayProcess(RayProcess):
             args.lr_scheduler_type,
             optimizer=self.optimizer,
             num_warmup_steps=args.warm_up_steps,
-            num_training_steps=args.num_training_steps * args.num_train_epochs,
+            num_training_steps=args.num_training_steps * args.num_train_epochs * args.num_epochs,
         )
         self.value_model, self.optimizer, _, self.scheduler = deepspeed.initialize(
             model=self.value_model,
