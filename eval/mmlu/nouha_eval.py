@@ -10,7 +10,6 @@ from eval.mmlu.categories import subcategories, categories
 from eval.utils import get_next_word_predictions, load_hf_tokenizer, load_hf_lm, query_openai_chat_model, \
     dynamic_import_function, upload_results_to_hf, check_and_upload_model_metadata
 
-
 choices = ["A", "B", "C", "D"]
 
 
@@ -46,17 +45,16 @@ def gen_prompt(train_df, subject, k=-1):
 
 def load_mmlu_data(subject, split, n_instances=None):
     """Load MMLU data from Hugging Face datasets."""
-    # Correctly load a specific subject configuration
     dataset = load_dataset('cais/mmlu', subject)[split]
 
     # Convert to DataFrame format compatible with existing code
     df = pd.DataFrame({
         0: dataset['question'],
-        1: [c[0] for c in dataset['choices']],  # First choice
-        2: [c[1] for c in dataset['choices']],  # Second choice
-        3: [c[2] for c in dataset['choices']],  # Third choice
-        4: [c[3] for c in dataset['choices']],  # Fourth choice
-        5: [choices[a] for a in dataset['answer']]  # Convert numeric answer to letter
+        1: [choices[0] for choices in dataset['choices']],
+        2: [choices[1] for choices in dataset['choices']],
+        3: [choices[2] for choices in dataset['choices']],
+        4: [choices[3] for choices in dataset['choices']],
+        5: [choices[dataset['answer'][i]] for i in range(len(dataset))]
     })
 
     if n_instances and n_instances < len(df):
@@ -67,8 +65,6 @@ def load_mmlu_data(subject, split, n_instances=None):
 
 @torch.no_grad()
 def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1):
-    # Get the device of the model
-    device = next(model.parameters()).device
     prompts = []
     chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
 
@@ -103,18 +99,13 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
             tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
         prompts.append(prompt)
 
-    # Get the answer choice ids and ensure they're on the correct device
-    answer_choice_ids = torch.tensor([
-        tokenizer.encode(" " + answer_choice, add_special_tokens=False)[-1]
-        for answer_choice in choices
-    ]).to(device)
-
+    answer_choice_ids = [tokenizer.encode(" " + answer_choice, add_special_tokens=False)[-1] for answer_choice in
+                         choices]
     pred_indices, all_probs = get_next_word_predictions(
         model, tokenizer, prompts,
         candidate_token_ids=answer_choice_ids,
         return_token_predictions=False,
-        batch_size=batch_size,
-        device=device  # Pass the device to the prediction function
+        batch_size=batch_size
     )
 
     cors = []
@@ -130,7 +121,6 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
 
     print("Average accuracy {:.3f} - {}".format(acc, subject))
     return cors, acc, all_probs
-
 
 
 def eval_openai_chat_engine(args, subject, engine, dev_df, test_df, batch_size=1):
@@ -184,25 +174,17 @@ def main(args):
             model_name_or_path=args.model_name_or_path,
             revision=args.hf_revision,
             load_in_8bit=args.load_in_8bit,
-            device_map="auto",  # Changed from "balanced_low_0"
+            device_map="auto",
             gptq_model=args.gptq,
         )
-
         from transformers import GPTNeoXForCausalLM, OPTForCausalLM
         if isinstance(model, GPTNeoXForCausalLM) or isinstance(model, OPTForCausalLM):
             tokenizer.model_max_length = model.config.max_position_embeddings
             print("Set tokenizer.model_max_length to model.config.max_position_embeddings: {}".format(
                 model.config.max_position_embeddings))
 
-    # Get available subjects from HF dataset
-    # dataset = load_dataset('cais/mmlu')
     # Get subjects from categories.py
     subjects = sorted(list(subcategories.keys()))
-
-    # subjects = sorted([k for k in dataset.keys() if k not in ['auxiliary_train']])
-
-    # Get list of available subjects from HF dataset configs
-    # subjects = sorted([k for k in load_dataset('cais/mmlu').builder_configs.keys() if k != 'auxiliary_train'])
 
     if args.subjects:
         assert all(
@@ -256,39 +238,27 @@ def main(args):
     weighted_acc = np.mean(np.concatenate(all_cors))
     print("Average accuracy: {:.3f}".format(weighted_acc))
 
-    # save results
+    # Save results
+    metrics = {
+        "average_acc": weighted_acc,
+        "subcat_acc": {
+            subcat: np.mean(np.concatenate(subcat_cors[subcat]))
+            for subcat in subcat_cors
+        },
+        "cat_acc": {
+            cat: np.mean(np.concatenate(cat_cors[cat]))
+            for cat in cat_cors
+        },
+    }
+
     with open(os.path.join(args.save_dir, "metrics.json"), "w") as f:
-        json.dump(
-            {
-                "average_acc": weighted_acc,
-                "subcat_acc": {
-                    subcat: np.mean(np.concatenate(subcat_cors[subcat]))
-                    for subcat in subcat_cors
-                },
-                "cat_acc": {
-                    cat: np.mean(np.concatenate(cat_cors[cat]))
-                    for cat in cat_cors
-                },
-            },
-            f,
-        )
+        json.dump(metrics, f)
 
     if args.upload_to_hf is not None:
-        results = {
-            "average_acc": weighted_acc,
-            "subcat_acc": {
-                subcat: np.mean(np.concatenate(subcat_cors[subcat]))
-                for subcat in subcat_cors
-            },
-            "cat_acc": {
-                cat: np.mean(np.concatenate(cat_cors[cat]))
-                for cat in cat_cors
-            },
-        }
         task_name = f"oi_mmlu_{args.ntrain}shots"
-        primary_score = results["average_acc"]
+        primary_score = metrics["average_acc"]
         upload_results_to_hf(
-            results,
+            metrics,
             args.upload_to_hf,
             args.hf_upload_name,
             task_name=task_name,
