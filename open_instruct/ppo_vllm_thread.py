@@ -1058,74 +1058,73 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             )
             del original_tokenizer
 
-    if not ph.preempted:
-        # save model
-        os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
-        original_tokenizer = AutoTokenizer.from_pretrained(
-            model_config.model_name_or_path, revision=model_config.model_revision
-        )
-        save_with_accelerate(
-            accelerator,
-            model,
-            original_tokenizer,
-            args.output_dir,
-            model_attribute_to_save="policy",
-        )
+    # save model
+    os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
+    original_tokenizer = AutoTokenizer.from_pretrained(
+        model_config.model_name_or_path, revision=model_config.model_revision
+    )
+    save_with_accelerate(
+        accelerator,
+        model,
+        original_tokenizer,
+        args.output_dir,
+        model_attribute_to_save="policy",
+    )
 
-        # Ai2 specific logic
-        if is_beaker_job() and accelerator.is_main_process:
-            if args.hf_metadata_dataset:
-                dataset_list = list(args.dataset_mixer_dict.keys())
-                # mainly just focussing here on what would be useful for the leaderboard.
-                # wandb will have even more useful information.
-                metadata_blob = {
-                    "model_name": args.exp_name,
-                    "model_type": "sft",
-                    "datasets": dataset_list,
-                    "base_model": model_config.model_name_or_path,
-                    "wandb_path": wandb.run.get_url(),
-                    "beaker_experiment": beaker_config.beaker_experiment_url,
-                    "beaker_datasets": beaker_config.beaker_dataset_id_urls,
-                }
-                upload_metadata_to_hf(
-                    metadata_blob,
-                    "metadata.json",
-                    args.hf_metadata_dataset,
-                    "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
-                )
-
-            if args.try_launch_beaker_eval_jobs and len(beaker_config.beaker_dataset_id_urls) > 0:
-                command = f"""\
-                python mason.py  \
-                    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/s2-cirrascale ai2/general-cirrascale \
-                    --priority low \
-                    --preemptible \
-                    --budget ai2/allennlp \
-                    --workspace ai2/tulu-2-improvements \
-                    --image nathanl/open_instruct_auto \
-                    --pure_docker_mode \
-                    --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
-                    --beaker_workload_id {beaker_config.beaker_workload_id} \
-                    --model_name {args.hf_repo_revision}
-                """
-                process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                stdout, stderr = process.communicate()
-                print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
-                print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
-                print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
-
-        if args.push_to_hub:
-            push_folder_to_hub(
-                accelerator,
-                args.output_dir,
-                args.hf_repo_id,
-                args.hf_repo_revision,
+    # Ai2 specific logic
+    if is_beaker_job() and accelerator.is_main_process:
+        if args.hf_metadata_dataset:
+            dataset_list = list(args.dataset_mixer_dict.keys())
+            # mainly just focussing here on what would be useful for the leaderboard.
+            # wandb will have even more useful information.
+            metadata_blob = {
+                "model_name": args.exp_name,
+                "model_type": "sft",
+                "datasets": dataset_list,
+                "base_model": model_config.model_name_or_path,
+                "wandb_path": wandb.run.get_url(),
+                "beaker_experiment": beaker_config.beaker_experiment_url,
+                "beaker_datasets": beaker_config.beaker_dataset_id_urls,
+            }
+            upload_metadata_to_hf(
+                metadata_blob,
+                "metadata.json",
+                args.hf_metadata_dataset,
+                "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
             )
 
-        if accelerator.is_main_process:
-            # remove args.checkpoint_output_dir
-            if os.path.exists(args.checkpoint_output_dir):
-                shutil.rmtree(args.checkpoint_output_dir, ignore_errors=True)
+        if args.try_launch_beaker_eval_jobs and len(beaker_config.beaker_dataset_id_urls) > 0:
+            command = f"""\
+            python mason.py  \
+                --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/s2-cirrascale ai2/general-cirrascale \
+                --priority low \
+                --preemptible \
+                --budget ai2/allennlp \
+                --workspace ai2/tulu-2-improvements \
+                --image nathanl/open_instruct_auto \
+                --pure_docker_mode \
+                --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
+                --beaker_workload_id {beaker_config.beaker_workload_id} \
+                --model_name {args.hf_repo_revision}
+            """
+            process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = process.communicate()
+            print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
+            print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
+            print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+
+    if args.push_to_hub:
+        push_folder_to_hub(
+            accelerator,
+            args.output_dir,
+            args.hf_repo_id,
+            args.hf_repo_revision,
+        )
+
+    if accelerator.is_main_process:
+        # remove args.checkpoint_output_dir
+        if os.path.exists(args.checkpoint_output_dir):
+            shutil.rmtree(args.checkpoint_output_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
