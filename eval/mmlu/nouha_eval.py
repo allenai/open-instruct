@@ -320,6 +320,8 @@ if __name__ == "__main__":
                         help="if specified, we will load the model to generate the predictions.")
     parser.add_argument("--hf_revision", type=str, default=None,
                         help="if specified, we will load the model from a revision of the model in the hub")
+    parser.add_argument("--debug_math", action="store_true",
+                        help="Only evaluate math-related subjects")
     parser.add_argument("--tokenizer_name_or_path", type=str, default=None,
                         help="if specified, we will load the tokenizer from here.")
     parser.add_argument("--use_slow_tokenizer", action="store_true",
