@@ -6,39 +6,14 @@ import pandas as pd
 import json
 from tqdm import tqdm
 from datasets import load_dataset
-from typing import List, Dict, Tuple, Optional
-import tiktoken
+from eval.mmlu.categories import subcategories, categories
+from eval.utils import get_next_word_predictions, load_hf_tokenizer, load_hf_lm, query_openai_chat_model, \
+    dynamic_import_function, upload_results_to_hf, check_and_upload_model_metadata
 
 choices = ["A", "B", "C", "D"]
 
 
-def load_mmlu_data_from_hf(subject: str, split: str, n_instances: Optional[int] = None) -> pd.DataFrame:
-    """Load MMLU data for a specific subject and split from Hugging Face."""
-    dataset = load_dataset('cais/mmlu', subject)[split]
-
-    # Convert the dataset to pandas DataFrame
-    df = pd.DataFrame({
-        0: dataset['question'],
-        1: [choices[0] for choices in dataset['choices']],  # A
-        2: [choices[1] for choices in dataset['choices']],  # B
-        3: [choices[2] for choices in dataset['choices']],  # C
-        4: [choices[3] for choices in dataset['choices']],  # D
-        5: [choices[dataset['answer'][i]] for i in range(len(dataset))]  # Convert answer index to letter
-    })
-
-    if n_instances and n_instances < len(df):
-        df = df.sample(n_instances, random_state=42)
-
-    return df
-
-
-def get_available_subjects() -> List[str]:
-    """Get list of available subjects in MMLU."""
-    dataset = load_dataset('cais/mmlu')
-    return sorted(dataset.keys())
-
-
-def format_subject(subject: str) -> str:
+def format_subject(subject):
     l = subject.split("_")
     s = ""
     for entry in l:
@@ -46,7 +21,7 @@ def format_subject(subject: str) -> str:
     return s
 
 
-def format_example(df: pd.DataFrame, idx: int, include_answer: bool = True) -> str:
+def format_example(df, idx, include_answer=True):
     prompt = df.iloc[idx, 0]
     k = df.shape[1] - 2
     for j in range(k):
@@ -57,7 +32,7 @@ def format_example(df: pd.DataFrame, idx: int, include_answer: bool = True) -> s
     return prompt
 
 
-def gen_prompt(train_df: pd.DataFrame, subject: str, k: int = -1) -> str:
+def gen_prompt(train_df, subject, k=-1):
     prompt = "The following are multiple choice questions (with answers) about {}.\n\n".format(
         format_subject(subject)
     )
@@ -68,9 +43,28 @@ def gen_prompt(train_df: pd.DataFrame, subject: str, k: int = -1) -> str:
     return prompt
 
 
+def load_mmlu_data(subject, split, n_instances=None):
+    """Load MMLU data from Hugging Face datasets."""
+    dataset = load_dataset('cais/mmlu', subject)[split]
+
+    # Convert to DataFrame format compatible with existing code
+    df = pd.DataFrame({
+        0: dataset['question'],
+        1: [choices[0] for choices in dataset['choices']],
+        2: [choices[1] for choices in dataset['choices']],
+        3: [choices[2] for choices in dataset['choices']],
+        4: [choices[3] for choices in dataset['choices']],
+        5: [choices[dataset['answer'][i]] for i in range(len(dataset))]
+    })
+
+    if n_instances and n_instances < len(df):
+        df = df.sample(n_instances, random_state=42)
+
+    return df
+
+
 @torch.no_grad()
-def eval_hf_model(args, subject: str, model, tokenizer, dev_df: pd.DataFrame, test_df: pd.DataFrame,
-                  batch_size: int = 1) -> Tuple[np.ndarray, float, np.ndarray]:
+def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1):
     prompts = []
     chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
 
@@ -83,11 +77,12 @@ def eval_hf_model(args, subject: str, model, tokenizer, dev_df: pd.DataFrame, te
         if args.use_chat_format:
             messages = [{"role": "user", "content": prompt}]
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
-            prompt += " The answer is:" if prompt[-1] not in ["\n", " "] else "The answer is:"
+            if prompt[-1] in ["\n", " "]:
+                prompt += "The answer is:"
+            else:
+                prompt += " The answer is:"
 
         tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
-
-        # Ensure prompt is within token limit
         while len(tokenized_prompt) > 2048:
             k -= 1
             train_prompt = gen_prompt(dev_df, subject, k)
@@ -96,25 +91,26 @@ def eval_hf_model(args, subject: str, model, tokenizer, dev_df: pd.DataFrame, te
             if args.use_chat_format:
                 messages = [{"role": "user", "content": prompt}]
                 prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
-                prompt += " The answer is:" if prompt[-1] not in ["\n", " "] else "The answer is:"
+                if prompt[-1] in ["\n", " "]:
+                    prompt += "The answer is:"
+                else:
+                    prompt += " The answer is:"
 
             tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
         prompts.append(prompt)
 
-    # Get predictions
     answer_choice_ids = [tokenizer.encode(" " + answer_choice, add_special_tokens=False)[-1] for answer_choice in
                          choices]
     pred_indices, all_probs = get_next_word_predictions(
-        model, tokenizer, prompts, candidate_token_ids=answer_choice_ids,
-        return_token_predictions=False, batch_size=batch_size
+        model, tokenizer, prompts, candidate_token_ids=answer_choice_ids, return_token_predictions=False,
+        batch_size=batch_size
     )
 
-    # Calculate metrics
     cors = []
-    ground_truths = test_df.iloc[:, -1].values
+    groud_truths = test_df.iloc[:, -1].values
     for i in range(len(pred_indices)):
         prediction = choices[pred_indices[i]]
-        ground_truth = ground_truths[i]
+        ground_truth = groud_truths[i]
         cors.append(prediction == ground_truth)
 
     acc = np.mean(cors)
@@ -125,8 +121,8 @@ def eval_hf_model(args, subject: str, model, tokenizer, dev_df: pd.DataFrame, te
     return cors, acc, all_probs
 
 
-def eval_openai_chat_engine(args, subject: str, engine: str, dev_df: pd.DataFrame, test_df: pd.DataFrame,
-                            batch_size: int = 1) -> Tuple[np.ndarray, float, np.ndarray]:
+def eval_openai_chat_engine(args, subject, engine, dev_df, test_df, batch_size=1):
+    import tiktoken
     gpt_tokenizer = tiktoken.get_encoding("cl100k_base")
     answer_choice_ids = [gpt_tokenizer.encode(" " + x)[0] for x in choices]
 
@@ -149,10 +145,10 @@ def eval_openai_chat_engine(args, subject: str, engine: str, dev_df: pd.DataFram
     )
 
     cors = []
-    ground_truths = test_df.iloc[:, -1].values
+    groud_truths = test_df.iloc[:, -1].values
     for i in range(len(test_df)):
         prediction = results[i]["output"].strip()
-        ground_truth = ground_truths[i]
+        ground_truth = groud_truths[i]
         cors.append(prediction == ground_truth)
 
     acc = np.mean(cors)
@@ -179,29 +175,34 @@ def main(args):
             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
             gptq_model=args.gptq,
         )
-
         from transformers import GPTNeoXForCausalLM, OPTForCausalLM
         if isinstance(model, GPTNeoXForCausalLM) or isinstance(model, OPTForCausalLM):
             tokenizer.model_max_length = model.config.max_position_embeddings
-            print(f"Set tokenizer.model_max_length to {model.config.max_position_embeddings}")
+            print("Set tokenizer.model_max_length to model.config.max_position_embeddings: {}".format(
+                model.config.max_position_embeddings))
 
-    # Get subjects from HF dataset
-    subjects = get_available_subjects()
+    # Get available subjects from HF dataset
+    dataset = load_dataset('cais/mmlu')
+    subjects = sorted([k for k in dataset.keys() if k not in ['auxiliary_train']])
+
     if args.subjects:
-        assert all(subj in subjects for subj in args.subjects), f"Invalid subjects: {args.subjects}"
+        assert all(
+            subj in subjects for subj in args.subjects), f"Some subjects specified are not valid: {args.subjects}"
         subjects = args.subjects
 
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
 
     all_cors = []
-    subcat_cors = {subcat: [] for subcat_lists in subcategories.values() for subcat in subcat_lists}
+    subcat_cors = {
+        subcat: [] for subcat_lists in subcategories.values() for subcat in subcat_lists
+    }
     cat_cors = {cat: [] for cat in categories}
 
-    for subject in tqdm(subjects, desc="Evaluating subjects"):
-        # Load data from HF
-        dev_df = load_mmlu_data_from_hf(subject, 'dev')[:args.ntrain]
-        test_df = load_mmlu_data_from_hf(subject, 'test', args.n_instances)
+    for subject in tqdm(subjects, desc=f"Evaluating subjects: "):
+        # Load data directly from HF
+        dev_df = load_mmlu_data(subject, 'dev')[:args.ntrain]
+        test_df = load_mmlu_data(subject, 'test', args.n_instances)
 
         if args.model_name_or_path:
             cors, acc, probs = eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, args.eval_batch_size)
@@ -209,7 +210,6 @@ def main(args):
             cors, acc, probs = eval_openai_chat_engine(args, subject, args.openai_engine, dev_df, test_df,
                                                        args.eval_batch_size)
 
-        # Update metrics
         subcats = subcategories[subject]
         for subcat in subcats:
             subcat_cors[subcat].append(cors)
@@ -218,49 +218,62 @@ def main(args):
                     cat_cors[key].append(cors)
         all_cors.append(cors)
 
-        # Save results
         test_df["correct"] = cors
         for j in range(probs.shape[1]):
-            test_df[f"choice{choices[j]}_probs"] = probs[:, j]
-        test_df.to_csv(os.path.join(args.save_dir, f"{subject}.csv"), index=None)
+            choice = choices[j]
+            test_df[f"choice{choice}_probs"] = probs[:, j]
+        test_df.to_csv(
+            os.path.join(args.save_dir, f"{subject}.csv"),
+            index=None,
+        )
 
-    # Calculate and print metrics
     for subcat in subcat_cors:
         subcat_acc = np.mean(np.concatenate(subcat_cors[subcat]))
-        print(f"Average accuracy {subcat_acc:.3f} - {subcat}")
+        print("Average accuracy {:.3f} - {}".format(subcat_acc, subcat))
 
     for cat in cat_cors:
         cat_acc = np.mean(np.concatenate(cat_cors[cat]))
-        print(f"Average accuracy {cat_acc:.3f} - {cat}")
-
+        print("Average accuracy {:.3f} - {}".format(cat_acc, cat))
     weighted_acc = np.mean(np.concatenate(all_cors))
-    print(f"Average accuracy: {weighted_acc:.3f}")
+    print("Average accuracy: {:.3f}".format(weighted_acc))
 
-    # Save metrics
-    metrics = {
-        "average_acc": weighted_acc,
-        "subcat_acc": {
-            subcat: np.mean(np.concatenate(subcat_cors[subcat]))
-            for subcat in subcat_cors
-        },
-        "cat_acc": {
-            cat: np.mean(np.concatenate(cat_cors[cat]))
-            for cat in cat_cors
-        },
-    }
-
+    # save results
     with open(os.path.join(args.save_dir, "metrics.json"), "w") as f:
-        json.dump(metrics, f)
+        json.dump(
+            {
+                "average_acc": weighted_acc,
+                "subcat_acc": {
+                    subcat: np.mean(np.concatenate(subcat_cors[subcat]))
+                    for subcat in subcat_cors
+                },
+                "cat_acc": {
+                    cat: np.mean(np.concatenate(cat_cors[cat]))
+                    for cat in cat_cors
+                },
+            },
+            f,
+        )
 
-    # Upload results if specified
     if args.upload_to_hf is not None:
+        results = {
+            "average_acc": weighted_acc,
+            "subcat_acc": {
+                subcat: np.mean(np.concatenate(subcat_cors[subcat]))
+                for subcat in subcat_cors
+            },
+            "cat_acc": {
+                cat: np.mean(np.concatenate(cat_cors[cat]))
+                for cat in cat_cors
+            },
+        }
         task_name = f"oi_mmlu_{args.ntrain}shots"
+        primary_score = results["average_acc"]
         upload_results_to_hf(
-            metrics,
+            results,
             args.upload_to_hf,
             args.hf_upload_name,
             task_name=task_name,
-            primary_score=metrics["average_acc"],
+            primary_score=primary_score,
             prepend_timestamp=True,
         )
         check_and_upload_model_metadata(
@@ -275,21 +288,21 @@ if __name__ == "__main__":
     parser.add_argument("--model_name_or_path", type=str, default=None,
                         help="if specified, we will load the model to generate the predictions.")
     parser.add_argument("--hf_revision", type=str, default=None,
-                        help="revision of the model to load from the hub")
+                        help="if specified, we will load the model from a revision of the model in the hub")
     parser.add_argument("--tokenizer_name_or_path", type=str, default=None,
                         help="if specified, we will load the tokenizer from here.")
     parser.add_argument("--use_slow_tokenizer", action="store_true",
                         help="If given, we will use the slow tokenizer.")
     parser.add_argument("--openai_engine", type=str, default=None,
-                        help="if specified, we will use the OpenAI API")
+                        help="if specified, we will use the OpenAI API to generate the predictions.")
     parser.add_argument("--subjects", nargs="*",
                         help="which subjects to evaluate. If not specified, all subjects will be evaluated.")
     parser.add_argument("--n_instances", type=int,
-                        help="if specified, maximum number of instances per subject")
+                        help="if specified, a maximum of n_instances per subject will be used for evaluation.")
     parser.add_argument("--eval_batch_size", type=int, default=1,
                         help="batch size for evaluation.")
     parser.add_argument("--load_in_8bit", action="store_true",
-                        help="load model in 8bit mode")
+                        help="load model in 8bit mode, which will reduce memory and speed up inference.")
     parser.add_argument("--gptq", action="store_true",
                         help="If given, we're evaluating a 4-bit quantized GPTQ model.")
     parser.add_argument("--use_chat_format", action="store_true",
@@ -298,7 +311,7 @@ if __name__ == "__main__":
                         default="eval.templates.create_prompt_with_tulu_chat_format",
                         help="The function to use to create the chat format.")
     parser.add_argument("--upload_to_hf", type=str, default=None,
-                        help="If specified, upload results to Hugging Face Datasets.")
+                        help="If specified, we will upload the results to Hugging Face Datasets.")
     parser.add_argument("--hf_upload_name", type=str, default=None,
                         help="If uploading to hf, this is the model name")
 
