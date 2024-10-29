@@ -26,6 +26,12 @@ def format_example(df, idx, include_answer=True):
     prompt = df.iloc[idx, 0]  # question
     for j, choice in enumerate(choices):  # use choices directly
         prompt += "\n{}. {}".format(choice, df.iloc[idx, j + 1])
+
+    # Conditional chain-of-thought instruction
+    prompt += (
+        "\n\nIf this question involves math or requires logical reasoning, please solve it step-by-step to ensure accuracy. "
+        "Otherwise, select the answer based on your knowledge."
+    )
     prompt += "\nAnswer:"
     if include_answer:
         prompt += " {}\n\n".format(df.iloc[idx, 5])  # correct answer is at index 5
@@ -33,7 +39,8 @@ def format_example(df, idx, include_answer=True):
 
 
 def gen_prompt(train_df, subject, k=-1):
-    prompt = "The following are multiple choice questions (with answers) about {}.\n\n".format(
+
+    prompt = "The following are multiple-choice questions (with answers) about {}. For each question, if it requires math or logical reasoning, please solve step-by-step before answering. For other questions, select the best answer directly.\n\n".format(
         format_subject(subject)
     )
     if k == -1:
