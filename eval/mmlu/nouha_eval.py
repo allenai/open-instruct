@@ -182,7 +182,7 @@ def main(args):
                 model.config.max_position_embeddings))
 
     # Get available subjects from HF dataset
-    dataset = load_dataset('cais/mmlu')
+    dataset = load_dataset('cais/mmlu', 'all')
     subjects = sorted([k for k in dataset.keys() if k not in ['auxiliary_train']])
 
     if args.subjects:
