@@ -64,14 +64,14 @@ The script assumes you are running this on GPUs and uses all the available devic
 The searching script lets you query one or more `text` or a `vector` indices with a test set. When querying a `text` index, you can perform an ngram match, a full text match, or an embedding-based match of a specified field(s) in the test set. The basic usage looks like
 
 ```bash
-python search.py --index_names allenai_tulu-2-sft-mixture allenai_wildchat-1m --dataset tatsu-lab/alpaca_eval --split eval --field instruction --output_dir /path/to/output
+python search.py --train_dataset_names allenai/tulu-2-sft-mixture allenai/wildchat-1m --dataset tatsu-lab/alpaca_eval --split eval --field instruction --output_dir /path/to/output
 ```
 
-The command above queries two indices, `allenai_tulu-2-sft-mixture` and `allenai_wildchat-1m` (assuming these were created earlier) with the AlpacaEval dataset, particularly the `instruction` field in the `eval` split.
+The command above queries the indices corresponding to the two training sets, `allenai/tulu-2-sft-mixture` and `allenai/wildchat-1m` (assuming these were indexed earlier) with the AlpacaEval dataset, particularly the `instruction` field in the `eval` split.
 
 The script will create in the output directory one `jsonl` file per each pair of index and evaluation dataset with instance-level information about the matches, and a TSV file called `contamination_report.tsv` with a table of contamination scores for all the pairs.
 
-Like with the indexing script, a dataset mixer configuration can be passed with the `--dataset_mixer_config` option instead of `--index_names`.
+Like with the indexing script, a dataset mixer configuration can be passed with the `--dataset_mixer_config` option instead of `--train_dataset_names`.
 
 ### Checking for contamination against the Tulu 3 evaluation suite
 
@@ -82,7 +82,7 @@ If no evaluation dataset is specified using the `--dataset` option, the entire T
 Text indexes can be queried for ngram matches instead of full field matches (default) as follows
 
 ```bash
-python search.py --index_names INDEX_NAME --ngram_size SIZE [--match_threshold THRESHOLD]
+python search.py --train_dataset_names TRAIN_DATASET_NAME --ngram_size SIZE [--match_threshold THRESHOLD]
 ```
 
 Matching scores are then computed as follows:
@@ -96,3 +96,9 @@ Matching scores are then computed as follows:
 If the index is created using `--index_type vector`, the same option needs to be specified for searching as well, along with the same `--model MODEL_NAME`. The searching script also assumes you are running this on GPUs.
 
 You can specify a `--match_threshold` here as well, and the behavior is similar to that in ngram matching, except that the match scores here come from embedding similarity.
+
+### Decontamination
+
+If you need to remove instances from the training sets that match any of the test instances, just pass a `--decontaminate` option to `search.py`. The output directory will contain one decontaminated `jsonl` file per training dataset. If you pass a `--match_treshold`, only those train instances that have a matching score greater than the threshold with *any* of the test instances will be removed.
+
+Note that elasticsearch retrieves a limited number of hits each time you search. You can increase this by requesting a larger number of results by passing a different value to `--search_size` (default is 100). Setting this to a larger number (e.g. 10000) is a good idea if you are decontaminating datasets. Since elasticsearch does not necessarily retrieve all the documents that match, it is not guaranteed that decontamination removes all the matching training instances. You can always check for contamination after decontaminating a dataset to see how effective it was. 
