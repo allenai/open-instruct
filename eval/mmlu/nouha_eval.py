@@ -283,7 +283,7 @@ def main(args):
             }
             detailed_results.append(result)
 
-        with open(os.path.join(args.save_dir, f"{subject}_detailed.json"), "w") as f:
+        with open(os.path.join(args.save_dir, f"{subject}_detailed_cot.json"), "w") as f:
             json.dump(detailed_results, f, indent=2)
 
     # Calculate metrics only for subcategories with data
