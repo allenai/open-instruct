@@ -90,7 +90,6 @@ from open_instruct.model_utils import (
     forward,
     get_reward,
     print_rich_single_line_metrics,
-    print_rich_table,
     push_folder_to_hub,
     truncate_response,
 )
@@ -825,8 +824,12 @@ class PolicyTrainerRayProcess(RayProcess):
         # training loop
         start_time = time.time()
         global_data = next(iter_dataloader)
-        data = data_collator(global_data[self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size])
-        global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist() # can be simplified since we `remove_padding` later anyway
+        data = data_collator(
+            global_data[self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size]
+        )
+        global_queries = data_collator(global_data)[
+            INPUT_IDS_PROMPT_KEY
+        ].tolist()  # can be simplified since we `remove_padding` later anyway
         queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
         if accelerator.is_main_process:
             param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
@@ -856,7 +859,11 @@ class PolicyTrainerRayProcess(RayProcess):
             if args.async_mode:
                 if training_step != 1:
                     global_data = next(iter_dataloader)
-                    data = data_collator(global_data[self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size])
+                    data = data_collator(
+                        global_data[
+                            self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size
+                        ]
+                    )
                     global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
 
@@ -872,7 +879,11 @@ class PolicyTrainerRayProcess(RayProcess):
                     # NOTE: important: the indent here is different for sync mode
                     # we also set to use `queries = queries_next` immediately
                     global_data = next(iter_dataloader)
-                    data = data_collator(global_data[self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size])
+                    data = data_collator(
+                        global_data[
+                            self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size
+                        ]
+                    )
                     global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
                     start_time = time.time()

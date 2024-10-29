@@ -54,7 +54,6 @@ import torch.utils
 import torch.utils.data
 import vllm
 from datasets import Dataset, DatasetDict
-from deepspeed.ops.adam import FusedAdam
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from huggingface_hub import HfApi
 from ray.util.placement_group import PlacementGroup, placement_group
@@ -76,9 +75,9 @@ from vllm import SamplingParams
 
 from open_instruct.dataset_processor import (
     CHAT_TEMPLATES,
-    INPUT_IDS_PROMPT_KEY,
-    GROUND_TRUTHS_KEY,
     DATASET_SOURCE_KEY,
+    GROUND_TRUTHS_KEY,
+    INPUT_IDS_PROMPT_KEY,
     DatasetConfig,
     SFTDatasetProcessor,
     SimpleGenerateCollatorWithGroundTruth,
@@ -86,12 +85,12 @@ from open_instruct.dataset_processor import (
 )
 from open_instruct.model_utils import (
     ModelConfig,
+    apply_verifiable_reward,
     disable_dropout_in_model,
     exact_div,
     first_true_indices,
     forward,
     get_reward,
-    apply_verifiable_reward,
     print_rich_single_line_metrics,
     print_rich_table,
     push_folder_to_hub,
@@ -608,7 +607,7 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         self.model.train()
 
-        ### value model
+        # value model
         self.value_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
             args.reward_model_path,
             revision=args.reward_model_revision,
@@ -641,9 +640,8 @@ class PolicyTrainerRayProcess(RayProcess):
             dist_init_required=True,
         )
         self.value_model.train()
-        
 
-        ### reference model
+        # reference model
         ds_config = get_eval_ds_config(
             offload=False,
             stage=args.deepspeed_stage,
@@ -672,7 +670,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
         self.ref_policy.eval()
 
-        ### reward model
+        # reward model
         self.reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
             args.reward_model_path,
             revision=args.reward_model_revision,
@@ -791,8 +789,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     # with deepspeed.zero.GatheredParameters([param], enabled=args.deepspeed_stage == 3):
                     if torch.distributed.get_rank() == 0:
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
-                            # ray.get(refs)
-                            # print(f"broadcasting {name=} {shape=} success")
+                        # ray.get(refs)
+                        # print(f"broadcasting {name=} {shape=} success")
             if torch.distributed.get_rank() == 0:
                 ray.get(refss)
 
@@ -889,9 +887,15 @@ class PolicyTrainerRayProcess(RayProcess):
         # set up the metrics and initial states
         device = torch.device(self.local_rank)
         g_vllm_responses = torch.zeros(
-            (args.rollout_batch_size * args.number_samples_per_prompt, args.response_length), device=device, dtype=torch.long
+            (args.rollout_batch_size * args.number_samples_per_prompt, args.response_length),
+            device=device,
+            dtype=torch.long,
         )
-        stats_shape = (args.num_epochs, args.num_mini_batches * args.number_samples_per_prompt, args.gradient_accumulation_steps)
+        stats_shape = (
+            args.num_epochs,
+            args.num_mini_batches * args.number_samples_per_prompt,
+            args.gradient_accumulation_steps,
+        )
         approxkl_stats = torch.zeros(stats_shape, device=device)
         pg_clipfrac_stats = torch.zeros(stats_shape, device=device)
         pg_loss_stats = torch.zeros(stats_shape, device=device)
@@ -905,8 +909,12 @@ class PolicyTrainerRayProcess(RayProcess):
         # training loop
         start_time = time.time()
         global_data = next(iter_dataloader)
-        data = data_collator(global_data[self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size])
-        global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist() # can be simplified since we `remove_padding` later anyway
+        data = data_collator(
+            global_data[self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size]
+        )
+        global_queries = data_collator(global_data)[
+            INPUT_IDS_PROMPT_KEY
+        ].tolist()  # can be simplified since we `remove_padding` later anyway
         queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
         ground_truths_next = data[GROUND_TRUTHS_KEY]
         datasets_next = data[DATASET_SOURCE_KEY]
@@ -942,7 +950,11 @@ class PolicyTrainerRayProcess(RayProcess):
             if args.async_mode:
                 if training_step != 1:
                     global_data = next(iter_dataloader)
-                    data = data_collator(global_data[self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size])
+                    data = data_collator(
+                        global_data[
+                            self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size
+                        ]
+                    )
                     global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
                     ground_truths_next = data[GROUND_TRUTHS_KEY]
@@ -960,7 +972,11 @@ class PolicyTrainerRayProcess(RayProcess):
                     # NOTE: important: the indent here is different for sync mode
                     # we also set to use `queries = queries_next` immediately
                     global_data = next(iter_dataloader)
-                    data = data_collator(global_data[self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size])
+                    data = data_collator(
+                        global_data[
+                            self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size
+                        ]
+                    )
                     global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
                     ground_truths_next = data[GROUND_TRUTHS_KEY]
@@ -1045,13 +1061,19 @@ class PolicyTrainerRayProcess(RayProcess):
                     )
                     if args.reward_model_multiplier != 1.0:
                         score *= args.reward_model_multiplier
-                    # also apply verifiable reward 
+                    # also apply verifiable reward
                     if args.apply_verifiable_reward:
                         # we need to batch the gt to match query.
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
                         verifiable_reward, verifiable_count = apply_verifiable_reward(
-                            postprocessed_query_response, tokenizer, ground_truth, dataset, verify_reward=10, answer_extraction_model=answer_extraction_model, answer_extraction_tokenizer=answer_extraction_tokenizer
+                            postprocessed_query_response,
+                            tokenizer,
+                            ground_truth,
+                            dataset,
+                            verify_reward=10,
+                            answer_extraction_model=answer_extraction_model,
+                            answer_extraction_tokenizer=answer_extraction_tokenizer,
                         )
                         score += verifiable_reward
                     else:
@@ -1156,7 +1178,9 @@ class PolicyTrainerRayProcess(RayProcess):
             for epoch_idx in range(args.num_epochs):
                 b_inds = np.random.permutation(args.local_rollout_batch_size * args.number_samples_per_prompt)
                 minibatch_idx = 0
-                for mini_batch_start in range(0, args.local_rollout_batch_size * args.number_samples_per_prompt, args.local_mini_batch_size):
+                for mini_batch_start in range(
+                    0, args.local_rollout_batch_size * args.number_samples_per_prompt, args.local_mini_batch_size
+                ):
                     mini_batch_end = mini_batch_start + args.local_mini_batch_size
                     mini_batch_inds = b_inds[mini_batch_start:mini_batch_end]
                     gradient_accumulation_idx = 0
@@ -1172,7 +1196,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         mb_values = values[micro_batch_inds]
                         mb_padding_mask_p1 = padding_mask_p1[micro_batch_inds]
 
-                        vpred_temp = get_reward(self.value_model, mb_query_responses, tokenizer.pad_token_id, context_length)
+                        vpred_temp = get_reward(
+                            self.value_model, mb_query_responses, tokenizer.pad_token_id, context_length
+                        )
                         vpred_temp = vpred_temp[0]
                         vpred = vpred_temp[:, context_length - 1 : -1].squeeze(-1)
                         vpred = torch.masked_fill(vpred, mb_padding_mask_p1, 0)
@@ -1187,7 +1213,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         vf_loss = 0.5 * masked_mean(vf_loss_max, ~mb_padding_mask_p1)
                         self.value_model.backward(vf_loss * args.vf_coef)
                         self.value_model.step()
-
 
                         new_logprobs = self.forward(
                             mb_query_responses, mb_responses, tokenizer.pad_token_id, context_length, args.temperature
@@ -1255,7 +1280,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics[14] = ratio_stats.var()
                 local_metrics[15] = ((kl) ** 2 / 2).sum(1).mean()
                 local_metrics[16] = ((-kl).exp() - 1 + kl).sum(1).mean()
-                local_metrics[17] = verifiable_counts.mean()  # verifiable count = % of time we trigger the verifiable reward
+                local_metrics[17] = (
+                    verifiable_counts.mean()
+                )  # verifiable count = % of time we trigger the verifiable reward
                 local_metrics[18] = verifiable_rate
                 # global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
                 local_metrics /= dist.get_world_size()
@@ -1482,7 +1509,11 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     train_dataset = combine_dataset(
         args.dataset_mixer_dict,
         splits=args.dataset_train_splits,
-        columns_to_keep=[dataset_config.sft_messages_key, dataset_config.ground_truths_key, dataset_config.dataset_source_key],
+        columns_to_keep=[
+            dataset_config.sft_messages_key,
+            dataset_config.ground_truths_key,
+            dataset_config.dataset_source_key,
+        ],
     )
     if dataset_config.sanity_check:
         train_dataset = train_dataset.select(
@@ -1496,7 +1527,11 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         eval_dataset = combine_dataset(
             args.dataset_eval_mixer_dict,
             splits=args.dataset_eval_splits,
-            columns_to_keep=[dataset_config.sft_messages_key, dataset_config.ground_truths_key, dataset_config.dataset_source_key],
+            columns_to_keep=[
+                dataset_config.sft_messages_key,
+                dataset_config.ground_truths_key,
+                dataset_config.dataset_source_key,
+            ],
         )
         eval_dataset = eval_dataset.select(range(0, min(len(eval_dataset), dataset_config.sanity_check_max_samples)))
         eval_dataset = dataset_processor.tokenize(eval_dataset)
@@ -1516,10 +1551,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # create the model and optimizer
     pg = None
-    bundles = [
-        {"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10}
-        for actor_num_gpus in args.actor_num_gpus_per_node
-    ]
+    bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.actor_num_gpus_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
     ray.get(pg.ready())
 
@@ -1529,10 +1561,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         PolicyTrainerRayProcess,
         args.actor_num_gpus_per_node,
     )
-    inits.extend(
-        model.from_pretrained.remote(args, model_config)
-        for model in policy_group.models
-    )
+    inits.extend(model.from_pretrained.remote(args, model_config) for model in policy_group.models)
     max_len = dataset_config.max_prompt_token_length + args.response_length
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
@@ -1547,7 +1576,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     metrics_queue = RayQueue()
     ray.get(inits)
     print("======== all models initialized =========")
-    policy_vocab_size = ray.get(policy_group.models[0].get_vocab_size.remote())
+    ray.get(policy_group.models[0].get_vocab_size.remote())
     # print(f"{policy_vocab_size=}, {reward_vocab_size=}")
     # if policy_vocab_size != reward_vocab_size:
     #     ray.shutdown()  # shutdown here so this error message is not buried in the logs
@@ -1592,9 +1621,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     ray.get(refs)
 
     # save model
-    ray.get(
-        [policy_model.save_model.remote(args.output_dir) for policy_model in policy_group.models]
-    )
+    ray.get([policy_model.save_model.remote(args.output_dir) for policy_model in policy_group.models])
     ray.shutdown()
     stop_event.set()
 
