@@ -1,4 +1,5 @@
-merge_method: linear
+merge_method: task_arithmetic
+base_model: ai2-adapt-dev/llama-3.1-8b-resized
 normalize: true
 models:
   # - name: deepseek-math-7b-instruct
@@ -13,9 +14,9 @@ models:
     location: weka
     path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.8-nc-final/
     wekaBucket: "oe-adapt-default"
-    weight: 0.9
+    weight: 1.0
   - name: L3.1-8B-v3.8-math_subset
     location: weka
     path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.8-math_subset/
     wekaBucket: "oe-adapt-default"
-    weight: 0.4
+    weight: 0.46

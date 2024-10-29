@@ -8,7 +8,7 @@ tasks:
     command: [
       '/bin/sh', '-c'
     ]
-    arguments: ['echo rawconfig > /output/config.yaml; mergekit-yaml /output/config.yaml /output --cuda']
+    arguments: ['mkdir {OUTPUT_DIR}; echo {RAW_CONFIG} > {OUTPUT_DIR}/config.yaml; mergekit-yaml {OUTPUT_DIR}/config.yaml {OUTPUT_DIR} --cuda']
     envVars:
       - name: CUDA_DEVICE_ORDER
         value: PCI_BUS_ID
@@ -31,6 +31,10 @@ tasks:
     resources:
       gpuCount: 1
     context:
-      cluster: ai2/allennlp-cirrascale
       priority: low
-      preemptible: false
+      preemptible: true
+    constraints:
+      cluster:
+        - ai2/neptune-cirrascale
+        - ai2/saturn-cirrascale
+        - ai2/jupiter-cirrascale-2

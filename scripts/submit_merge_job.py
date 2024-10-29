@@ -13,17 +13,17 @@ def main():
     parser.add_argument("--beaker_image", type=str, default="nathanl/open_instruct_auto", help="If given, use this Beaker image.")
     parser.add_argument("--beaker_config", type=str, default="configs/beaker_configs/default_merge.yaml")
     parser.add_argument("--merge_config", type=str, default="configs/merge_configs/example_linear_merge_config.yaml")
-    parser.add_argument("--cluster", nargs='+', default=["ai2/allennlp-cirrascale", "ai2/general-cirrascale", "ai2/pluto-cirrascale", "ai2/s2-cirrascale-l40"])
-    parser.add_argument("--priority", type=str, default="low")
-    parser.add_argument("--preemptible", action="store_true", default=False, help="for using preemtipble jobs (required on some instances)")
+    parser.add_argument("--cluster", nargs='+', default=["ai2/neptune-cirrascale", "ai2/saturn-cirrascale", "ai2/jupiter-cirrascale-2"])
+    parser.add_argument("--priority", type=str, default="high")
+    parser.add_argument("--preemptible", action="store_true", default=True, help="for using preemtipble jobs (required on some instances)")
+    parser.add_argument("--output_dir", type=str, default="/output")
     args = parser.parse_args()
-
-    today = date.today().strftime("%m%d%Y")
 
     with open(args.merge_config, 'r') as f:
         default_yaml = f.read()
     mergeConfig = yaml.load(default_yaml, Loader=yaml.FullLoader)
 
+    # TODO: support SLERP
     assert mergeConfig["merge_method"] in ["linear", "task_arithmetic"], f"merging method {mergeConfig['merge_method']} not supported"
 
     with open(f"configs/merge_configs/base_configs/default_{mergeConfig['merge_method']}_merge.yaml", 'r') as f:
@@ -32,7 +32,15 @@ def main():
 
     baseConfig["normalize"] = mergeConfig["normalize"]
     baseConfig["models"] = []
+
+    if mergeConfig["merge_method"] == "task_arithmetic":
+        baseConfig["models"].append({
+            "model": mergeConfig["base_model"]
+        })
+        baseConfig["base_model"] = mergeConfig["base_model"]
+
     beakerDatasets = []
+    wekaBuckets = set()
     for elem in mergeConfig["models"]:
     #   - model: /model-one
     #     parameters:
@@ -47,6 +55,8 @@ def main():
                 "model": f"/{elem['name']}",
                 "parameters": {"weight": float(elem["weight"])}
             }
+            if mergeConfig["merge_method"] == "task_arithmetic":
+                model_data["parameters"]["normalize"] = mergeConfig["normalize"]
             # beakerConfig['datasets'][1]['source']['beaker'] = model_info[1]
     #   - mountPath: /hf_llama_models
     #     source:
@@ -61,8 +71,21 @@ def main():
                 "model": elem['path'],
                 "parameters": {"weight": float(elem["weight"])}
             }
+            if mergeConfig["merge_method"] == "task_arithmetic":
+                model_data["parameters"]["normalize"] = mergeConfig["normalize"]
         elif elem["location"] == "weka": # verify the only available cluster(s) have weka
-            pass
+            if elem["wekaBucket"] not in wekaBuckets:
+                beakerDatasets.append({
+                    "mountPath": f"/{elem['wekaBucket']}",
+                    "source": {"weka": elem["wekaBucket"]}
+                })
+                wekaBuckets.add(elem["wekaBucket"])
+            model_data = {
+                "model": elem["path"],
+                "parameters": {"weight": float(elem["weight"])}
+            }
+            if mergeConfig["merge_method"] == "task_arithmetic":
+                model_data["parameters"]["normalize"] = mergeConfig["normalize"]
         else:
             print(f"Unsupported location: {elem['location']}")
         baseConfig["models"].append(model_data)
@@ -72,18 +95,19 @@ def main():
     beakerConfig = yaml.load(beaker_yaml, Loader=yaml.FullLoader)
 
     beakerConfig['tasks'][0]['image']['beaker'] = args.beaker_image
-    # beakerConfig['tasks'][0]['context']['cluster'] = args.cluster
-    # beakerConfig['tasks'][0]['context']['priority'] = args.priority
-    # beakerConfig['tasks'][0]['context']['preemptible'] = args.preemptible # True requried for Jupiter/Pluto
+    # TODO: fix these
+    beakerConfig['tasks'][0]['constraints']['cluster'] = args.cluster
+    beakerConfig['tasks'][0]['context']['priority'] = args.priority
+    beakerConfig['tasks'][0]['context']['preemptible'] = args.preemptible # True required for Jupiter/Pluto
 
     print(beakerConfig)
     
     if len(beakerDatasets) > 0:
         beakerConfig["tasks"][0]["datasets"] = beakerDatasets
-    base_command = beakerConfig["tasks"][0]["arguments"][0]
-    beakerConfig["tasks"][0]["arguments"][0] = base_command.replace("rawconfig", f'"{str(baseConfig)}"')
+    base_command = beakerConfig["tasks"][0]["arguments"][0].replace("{OUTPUT_DIR}", args.output_dir)
+    beakerConfig["tasks"][0]["arguments"][0] = base_command.replace("{RAW_CONFIG}", f'"{str(baseConfig)}"')
 
-    experiment_name = f"open_instruct_merge_models_{today}" 
+    experiment_name = f"open_instruct_merge_models" 
     beakerConfig["description"] = experiment_name
     # if configs/beaker_configs/auto_created doesn't exist, create it with os
     if not os.path.exists("configs/beaker_configs/auto_created"):
