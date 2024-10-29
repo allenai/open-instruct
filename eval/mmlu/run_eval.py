@@ -253,6 +253,7 @@ def main(args):
         )
 
     for subcat in subcat_cors:
+        breakpoint()
         subcat_acc = np.mean(np.concatenate(subcat_cors[subcat]))
         print("Average accuracy {:.3f} - {}".format(subcat_acc, subcat))
 
