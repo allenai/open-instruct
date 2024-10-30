@@ -47,43 +47,6 @@ def gen_prompt(train_df, subject, k=-1):
     return prompt
 
 
-# def format_example(df, idx, include_answer=True):
-#     """Format a single example with CoT prompting."""
-#     prompt = df.iloc[idx, 0]
-#     for j, choice in enumerate(choices):
-#         prompt += "\n{}. {}".format(choice, df.iloc[idx, j + 1])
-#
-#     if include_answer:
-#         # For few-shot examples, include the reasoning steps
-#         prompt += "\n\nLet's solve this step by step:\n"
-#         prompt += "1) First, let's understand what we need to solve:\n   - " + df.iloc[idx, 0] + "\n"
-#         prompt += "2) Let's analyze our options:\n"
-#         for j, choice in enumerate(choices):
-#             prompt += f"   - Option {choice}: {df.iloc[idx, j + 1]}\n"
-#         prompt += "3) Reasoning through the solution:\n   - Given this analysis\n"
-#         prompt += f"4) Therefore, the answer is: {df.iloc[idx, 5]}\n\n"
-#     else:
-#         # For test examples, just prompt for step-by-step thinking
-#         prompt += "\n\nLet's solve this step by step:\n"
-#         prompt += "1) First, let's understand what we need to solve:\n"
-#         prompt += "2) Let's analyze our options:\n"
-#         prompt += "3) Reasoning through the solution:\n"
-#         prompt += "4) Therefore, the answer is:"
-#     return prompt
-#
-#
-# def gen_prompt(train_df, subject, k=-1):
-#     """Generate prompt with CoT formatting."""
-#     prompt = "The following are multiple choice questions about {}. For each question, we'll solve it step by step using careful reasoning.\n\n".format(
-#         format_subject(subject)
-#     )
-#     if k == -1:
-#         k = train_df.shape[0]
-#     for i in range(k):
-#         prompt += format_example(train_df, i)
-#     return prompt
-
-
 import re
 
 
@@ -165,8 +128,10 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
             num_return_sequences=1,
             use_cache=True
         )
-        # breakpoint()
+
         decoded_response = tokenizer.decode(response[0], skip_special_tokens=True)
+
+        breakpoint()
         # Remove the prompt from the response
         if decoded_response.startswith(prompt):
             decoded_response = decoded_response[len(prompt):]
