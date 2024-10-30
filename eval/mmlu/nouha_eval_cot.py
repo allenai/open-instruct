@@ -147,7 +147,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
         full_responses.append(decoded_response)
 
     # Rest of the function remains the same
-    breakpoint()
+    # breakpoint()
     parsed_answers = []
     for response in full_responses:
         answer = parse_cot_response(response)
