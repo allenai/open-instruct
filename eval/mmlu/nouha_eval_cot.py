@@ -54,20 +54,20 @@ import re
 
 def parse_cot_response(response):
     """Parse the model's CoT response to extract the final answer."""
-    # Look for the answer pattern at the end of the reasoning
-    answer_patterns = [
+    # First try to find the explicit "Answer: X" format
+    answer_pattern = r"Answer:\s*([ABCD])"
+    match = re.search(answer_pattern, response, re.IGNORECASE)
+    if match:
+        return match.group(1).upper()
+
+    # Fallback patterns if the model didn't follow the format
+    backup_patterns = [
         r"therefore,?\s*the\s*answer\s*is:?\s*([ABCD])",
-        r"thus,?\s*the\s*answer\s*is:?\s*([ABCD])",
-        r"so,?\s*the\s*answer\s*is:?\s*([ABCD])",
-        r"final\s*answer:?\s*([ABCD])",
-        r"answer:?\s*([ABCD])",
         r"([ABCD])\s*is\s*correct",
-        r"selecting\s*([ABCD])",
-        # Last resort: just find the last occurrence of A, B, C, or D
         r".*[^A-D]*([ABCD])[^A-D]*$"
     ]
 
-    for pattern in answer_patterns:
+    for pattern in backup_patterns:
         match = re.search(pattern, response, re.IGNORECASE)
         if match:
             return match.group(1).upper()
