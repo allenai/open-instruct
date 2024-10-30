@@ -57,6 +57,7 @@ def parse_cot_response(response):
     # First try to find the explicit "Answer: X" format
     answer_pattern = r"Answer:\s*([ABCD])"
     match = re.search(answer_pattern, response, re.IGNORECASE)
+    breakpoint
     if match:
         return match.group(1).upper()
 
