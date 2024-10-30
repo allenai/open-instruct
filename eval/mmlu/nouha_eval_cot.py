@@ -252,6 +252,11 @@ def main(args):
             tokenizer_name_or_path=args.tokenizer_name_or_path,
             use_fast_tokenizer=not args.use_slow_tokenizer,
         )
+        # Add these lines to properly set up the tokenizer
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+            tokenizer.pad_token_id = tokenizer.eos_token_id
+
         model = load_hf_lm(
             model_name_or_path=args.model_name_or_path,
             revision=args.hf_revision,
