@@ -138,7 +138,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
             num_return_sequences=1,
             use_cache=True
         )
-        breakpoint()
+        # breakpoint()
         decoded_response = tokenizer.decode(response[0], skip_special_tokens=True)
         # Remove the prompt from the response
         if decoded_response.startswith(prompt):
