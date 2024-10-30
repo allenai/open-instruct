@@ -125,6 +125,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
         ).to(model.device)
 
         # Generate with proper parameters
+        breakpoint()
         response = model.generate(
             **inputs,
             max_new_tokens=512,
@@ -253,9 +254,9 @@ def main(args):
             use_fast_tokenizer=not args.use_slow_tokenizer,
         )
         # Add these lines to properly set up the tokenizer
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-            tokenizer.pad_token_id = tokenizer.eos_token_id
+        # if tokenizer.pad_token is None:
+        #     tokenizer.pad_token = tokenizer.eos_token
+        #     tokenizer.pad_token_id = tokenizer.eos_token_id
 
         model = load_hf_lm(
             model_name_or_path=args.model_name_or_path,
