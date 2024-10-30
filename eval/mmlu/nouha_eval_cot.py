@@ -116,6 +116,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
     full_responses = []
     for prompt in prompts:
         # Properly tokenize with attention mask
+        breakpoint()
         inputs = tokenizer(
             prompt,
             return_tensors="pt",
