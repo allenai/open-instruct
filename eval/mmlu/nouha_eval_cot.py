@@ -125,15 +125,20 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
         ).to(model.device)
 
         # Generate with proper parameters
-        breakpoint()
+        # breakpoint()
+        # Generate with proper parameters
         response = model.generate(
             **inputs,
             max_new_tokens=512,
-            do_sample=True,  # Changed this to True
+            pad_token_id=tokenizer.pad_token_id,
+            eos_token_id=tokenizer.eos_token_id,
+            do_sample=True,
             temperature=0.7,
             top_p=0.9,
             num_return_sequences=1,
+            use_cache=True
         )
+        breakpoint()
         decoded_response = tokenizer.decode(response[0], skip_special_tokens=True)
         # Remove the prompt from the response
         if decoded_response.startswith(prompt):
