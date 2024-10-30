@@ -131,7 +131,6 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
 
         decoded_response = tokenizer.decode(response[0], skip_special_tokens=True)
 
-        breakpoint()
         # Remove the prompt from the response
         if decoded_response.startswith(prompt):
             decoded_response = decoded_response[len(prompt):]
@@ -142,6 +141,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
     parsed_answers = []
     for response in full_responses:
         answer = parse_cot_response(response)
+        breakpoint()
         parsed_answers.append(answer if answer else "A")  # Default to A if parsing fails
 
     pred_indices = [choices.index(ans) for ans in parsed_answers]
