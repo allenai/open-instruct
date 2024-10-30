@@ -248,9 +248,11 @@ def plot_token_length_histogram(dataset_name,
                 for category, color in category_colors.items():
                     # Convert RGBA tuple to RGB for LaTeX (dropping alpha value)
                     r, g, b, _ = color
+                    r_255 = round(r * 255)
+                    g_255 = round(g * 255)
+                    b_255 = round(b * 255)
                     # Print directly with \colorbox using rgb color model
-                    print(f"\\colorbox[rgb]{{{r:.2f},{g:.2f},{b:.2f}}}{{\\strut}} {DATASET_NAME_MAPPING[category]}")
-
+                    print(f"\\cblock{{{r_255}}}{{{g_255}}}{{{b_255}}}~{DATASET_NAME_MAPPING[category]}, \\quad")
     
     # Print statistics
     print(f"Total samples: {len(metric_values)}")
