@@ -48,16 +48,10 @@ tasks:
         value: true
       - name: HF_TOKEN
         secret: HF_TOKEN
-    # datasets: # example for how to include datasets in mounting
-    #   - mountPath: /data
-    #     source:
-    #       beaker: Yizhongw03/processed_open_instruct_data
-    #   - mountPath: /mmlu
-    #     source:
-    #       beaker: Yizhongw03/mmlu
-    #   - mountPath: /hf_llama_models
-    #     source:
-    #       beaker: Yizhongw03/hf_llama_model_7B
+    datasets:
+      - mountPath: /oe-adapt-default
+        source:
+          weka: oe-adapt-default
     result:
       path: /output
     resources:

@@ -40,7 +40,7 @@ For all benchmarks requiring safety evaluation unless noted otherwise, as a defa
 PYTHONPATH=safety-eval python evaluation/run_all_generation_benchmarks.py    \
  --model_name_or_path allenai/tulu-2-dpo-7b     --model_input_template_path_or_name tulu2    \
   --report_output_path ./generation_results/metrics.json     --save_individual_results_path ./generation_results/all.json \
-  --hf_upload_name {HF upload name} --upload_to_hf {HF repo ID}
+  --hf_upload_name {HF upload name} --upload_to_hf {HF repo ID} --min_gpus_per_task {num. GPUs available}
 ```
 
 **Changing classifiers for safety benchmarks**:

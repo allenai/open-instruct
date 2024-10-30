@@ -21,7 +21,7 @@ Please see our first paper [How Far Can Camels Go? Exploring the State of Instru
 - [2023-09-26] We switched to use the official [alpaca-eval](https://github.com/tatsu-lab/alpaca_eval) library to run AlpacaFarm evaluation but use regenerated longer reference outputs. This will change our numbers reported in the paper. We will update the paper soon.
 - [2023-09-25] Supported using [vLLM](https://github.com/vllm-project/vllm/) for our evaluations, which speeds up the evaluation by 10x.
 - [2023-09-17] Supported [LoRA](https://arxiv.org/abs/2106.09685) and [QLoRA](https://arxiv.org/abs/2305.14314) finetuning. See [here](#parameter-efficient-finetuning) for more details.
-- [2023-08-18] Added support for [ToxiGen](https://github.com/microsoft/TOXIGEN)/[TrutufulQA](https://github.com/sylinrl/TruthfulQA) evaluation. Check our `scripts/eval/` for examples of running them.
+- [2023-08-18] Added support for [ToxiGen](https://github.com/microsoft/TOXIGEN)/[TruthfulQA](https://github.com/sylinrl/TruthfulQA) evaluation. Check our `scripts/eval/` for examples of running them.
 - [2023-08-08] Supported several new instruction dataset, including [LIMA](https://huggingface.co/datasets/GAIR/lima) / [WizardLM](https://github.com/nlpxucan/WizardLM) / [Open-Orca](https://huggingface.co/datasets/Open-Orca/OpenOrca). See the [preparation script](./scripts/data/prepare_train_data.sh) for details. Performance hasn't been evaluated yet.
 - [2023-08-06] Supported LLaMa 2 finetuning and FlashAttention-2 by bumping the version of transformers and many other dependencies.
 - [2023-06-29] Added [licensing info](#licensing) for our released models.
@@ -79,6 +79,7 @@ make quality
 |     ├── beaker_configs/       <- AI2 Beaker configs
 |     ├── ds_configs/           <- DeepSpeed configs
 |     └── train_configs/        <- Training configs
+├── decontamination/            <- Scripts for measuring train-eval overlap
 ├── eval/                       <- Evaluation suite for fine-tuned models
 ├── human_eval/                 <- Human evaluation interface (not maintained)
 ├── open_instruct/              <- Source code (flat)
@@ -223,6 +224,10 @@ python scripts/add_metadata_from_wandb.py --hf_repo_revision valpy_dpo_mix_uf_wc
 ### Human evaluation
 
 We release our human evaluation interface and collected annotations in the `./human_eval` folder. Please see the corresponding [README](./human_eval/README.md) for more details.
+
+## Contamination checks
+
+We release our scripts for measuring the overlap between instruction tuning datasets and evaluation datasets in `./decontamination`. See the [README](./decontamination/README.md) for more details.
 
 ## Licensing
 
