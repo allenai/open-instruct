@@ -22,22 +22,25 @@ def format_subject(subject):
 
 
 def format_example(df, idx, include_answer=True):
-    """Format a single example with simple CoT prompting."""
+    """Format a single example with structured CoT prompting."""
     prompt = df.iloc[idx, 0]
     for j, choice in enumerate(choices):
         prompt += "\n{}. {}".format(choice, df.iloc[idx, j + 1])
 
     if include_answer:
-        prompt += "\n\nExplain your reasoning step by step, then give your answer: "
-        prompt += f"The correct answer is {df.iloc[idx, 5]} because\n\n"
+        prompt += "\n\nLet's solve this step by step. After explaining your reasoning, state your answer in the format 'Answer: X'\n"
+        prompt += f"Step-by-step solution:\n"
+        prompt += f"[Your reasoning here]\n"
+        prompt += f"Answer: {df.iloc[idx, 5]}\n\n"
     else:
-        prompt += "\n\nExplain your reasoning step by step, then give your answer: "
+        prompt += "\n\nLet's solve this step by step. After explaining your reasoning, state your answer in the format 'Answer: X'\n"
+        prompt += f"Step-by-step solution:\n"
     return prompt
 
 
 def gen_prompt(train_df, subject, k=-1):
-    """Generate prompt with CoT formatting."""
-    prompt = "The following are multiple choice questions about {}. For each question, explain your thinking step by step before providing the final answer.\n\n".format(
+    """Generate prompt with structured CoT formatting."""
+    prompt = "The following are multiple choice questions about {}. For each question, provide your step-by-step reasoning, then give your answer in the format 'Answer: X' where X is one of A, B, C, or D.\n\n".format(
         format_subject(subject)
     )
     if k == -1:
@@ -45,7 +48,6 @@ def gen_prompt(train_df, subject, k=-1):
     for i in range(k):
         prompt += format_example(train_df, i)
     return prompt
-
 
 import re
 
