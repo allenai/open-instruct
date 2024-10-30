@@ -643,6 +643,7 @@ VLLM_WORKER_MULTIPROC_METHOD=spawn PYTHONPATH=. python evaluation/run_all_genera
 
     # add gpu information.
     # we just assume you want to use all the gpus for one task at a time
+    task_spec['resources']['gpuCount'] = 8
     num_gpus = task_spec['resources']['gpuCount']
     task_spec["arguments"][0]+= f" --min_gpus_per_task {num_gpus}"
 
