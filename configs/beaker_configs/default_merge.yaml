@@ -15,7 +15,7 @@ tasks:
       - name: TRANSFORMERS_CACHE
         value: ./cache/
       - name: WANDB_API_KEY
-        secret: WANDB_API_KEY
+        secret: jacobm_WANDB_API_KEY
       - name: WANDB_PROJECT
         value: open-instruct
       - name: WANDB_WATCH
@@ -25,7 +25,7 @@ tasks:
       - name: WANDB_DISABLED
         value: true
       - name: HF_TOKEN
-        secret: HF_TOKEN
+        secret: jacobm_HF_TOKEN
     result:
       path: /output
     resources:

@@ -13,9 +13,14 @@ models:
     location: weka
     path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.8-nc-final/
     wekaBucket: "oe-adapt-default"
-    weight: 0.9
-  - name: L3.1-8B-v3.8-math_subset
+    weight: 1.0
+  - name: L3.1-8B-v3.8-nc-2
     location: weka
-    path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.8-math_subset/
+    path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.8-nc-2/
     wekaBucket: "oe-adapt-default"
-    weight: 0.4
+    weight: 1.0
+  - name: L3.1-8B-v3.8-nc-3
+    location: weka
+    path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.8-nc-3/
+    wekaBucket: "oe-adapt-default"
+    weight: 1.0
