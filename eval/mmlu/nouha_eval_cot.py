@@ -21,7 +21,7 @@ def format_subject(subject):
     return s
 
 
-def format_example(df, idx, include_answer=True):
+def format_example(df, idx, include_answer=False):
     """Format a single example with structured CoT prompting."""
     prompt = df.iloc[idx, 0]
     for j, choice in enumerate(choices):
@@ -34,7 +34,8 @@ def format_example(df, idx, include_answer=True):
         prompt += f"Answer: {df.iloc[idx, 5]}\n\n"
     else:
         prompt += "\n\nLet's solve this step by step. After explaining your reasoning, state your answer in the format 'Answer: X'\n"
-        prompt += f"Step-by-step solution:\n"
+        prompt += f"Step-by-step solution: [Your reasoning here]\n"
+        prompt += f"Answer:"
     return prompt
 
 
