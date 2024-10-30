@@ -275,6 +275,8 @@ class Args:
     """Where to save the model"""
     checkpoint_output_dir: Optional[str] = None
     """Where to save the model checkpoints in case of preemption"""
+    overwrite_beaker_output_dir: Optional[str] = None
+    """Where to save in a beaker job, if not just /output. Useful with weka."""
 
     # Ai2 specific settings
     try_launch_beaker_eval_jobs: bool = True
@@ -1466,6 +1468,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
         if len(beaker_config.beaker_dataset_id_urls) > 0:
             args.output_dir = "/output"
+        # if the user has asked to save to a specific directory, use that instead
+        if args.overwrite_beaker_output_dir is not None:
+            args.output_dir = args.overwrite_beaker_output_dir
         all_configs.update(vars(beaker_config))
     all_configs.update(**asdict(args), **asdict(dataset_config), **asdict(model_config))
     if args.with_tracking:
