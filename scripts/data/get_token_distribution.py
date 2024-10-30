@@ -6,6 +6,35 @@ from transformers import AutoTokenizer
 from matplotlib.patches import Patch
 from collections import defaultdict
 
+"""
+Example commands
+SFT plot in paper:
+python scripts/data/get_token_distribution.py --dataset allenai/tulu-v.3.8-mix-preview-noncommercial --log_x --not_log_y --automatic_binning --hide_legend
+
+"""
+
+DATASET_NAME_MAPPING = {
+    "NuminaMath-TIR": "NuminaMath-TIR",
+    "aya_dataset_converted": "Aya",
+    "evol_codealpaca_heval_decontaminated": "Evol CodeAlpaca",
+    "flan_v2_converted": "Flan v2",
+    "no_robots_converted": "No Robots",
+    "open_math_2_gsm8k_converted": "OpenMathInstruct2",
+    "processed-wildjailbreak": "WildJailbreak",
+    "synthetic-finalresp-wildguarmixtrain": "WildGuard",
+    "table_gpt_converted": "TableGPT",
+    "wildchat_gpt4_converted": "WildChat GPT4",
+    "coconot_converted": "CoCoNot",
+    "oasst1_converted": "OASST1",
+    "personahub_code_v2_34999": "Tulu 3 Persona Code",
+    "personahub_ifdata_manual_seed_v3_29980": "Tulu 3 Persona IF",
+    "personahub_math_interm_algebra_50000": "Tulu 3 Persona MATH - Algebra",
+    "personahub_math_v5_regen_149960": "Tulu 3 Persona MATH",
+    "personahub_grade_math_v1_49980": "Tulu 3 Persona Grade School Math",
+    "sciriff_converted": "SciRIFF",
+    "tulu_hard_coded_repeated_10": "Hardcoded"
+}
+
 def plot_token_length_histogram(dataset_name, 
                                 column_name='messages', 
                                 tokenizer_name="baseten/Meta-Llama-3-tokenizer", 
@@ -34,7 +63,7 @@ def plot_token_length_histogram(dataset_name,
         dataset = dataset.map(convert_to_messages, num_proc=num_proc)
 
     # If allenai/tulu in name, turn on categories
-    TRACK_CATEGORIES = "allenai/tulu" in dataset_name
+    TRACK_CATEGORIES = "allenai/tulu" in dataset_name or "source" in dataset['train'].column_names
     
     if plot_num_turns:
         # Count turns (number of messages divided by 2)
@@ -74,17 +103,22 @@ def plot_token_length_histogram(dataset_name,
     metric_values = processed_dataset['metric_value']
     
     if TRACK_CATEGORIES:
-        categories = processed_dataset['id']
-        categories = [category.rsplit('_', 1)[0] for category in categories]
+        # if source in dataset, take those as categories
+        if "source" in dataset['train'].column_names:
+            categories = processed_dataset['source']
+        else:
+            categories = processed_dataset['id']
+            categories = [category.rsplit('_', 1)[0] for category in categories]
 
-        repeated_ids = ["sharegpt"]
-        for repeated_id in repeated_ids:
-            categories = [repeated_id if repeated_id in category else category for category in categories]
-        
+            repeated_ids = ["sharegpt"]
+            for repeated_id in repeated_ids:
+                categories = [repeated_id if repeated_id in category else category for category in categories]
+
         if any("/" in category for category in categories):
             categories = [category.split("/")[1] if "/" in category else "Other" for category in categories]
 
         unique_categories = np.unique(categories)
+
         # alphabetical the unique categories
         unique_categories = np.sort(unique_categories)
         category_colors = {category: plt.cm.tab20(i) for i, category in enumerate(unique_categories)}
@@ -169,7 +203,17 @@ def plot_token_length_histogram(dataset_name,
     # Set y-axis properties
     if not_log_y:
         # Linear scale
-        ax.set_ylabel('Count')
+        # ax.set_ylabel('Count')
+
+        # Create 4 major ticks
+        if TRACK_CATEGORIES:
+            max_count = max(bottom_counts)
+        else:
+            max_count = max(n)
+        # Round up to the nearest 10000
+        max_count = 10000 * (max_count // 10000 + 1)
+        major_ticks = np.linspace(0, max_count, 5)
+        ax.set_yticks(major_ticks)
     else:
         # Log scale
         ax.set_yscale('log')
@@ -194,6 +238,19 @@ def plot_token_length_histogram(dataset_name,
     else:
         plt.margins(x=0.01)
         plt.tight_layout(pad=0.1)
+
+        # print the colors for the datasets for use in custome legend
+        if TRACK_CATEGORIES:
+            for category, color in category_colors.items():
+                print(f"{category}: {color}")
+            
+                print("\n% Color blocks with labels")
+                for category, color in category_colors.items():
+                    # Convert RGBA tuple to RGB for LaTeX (dropping alpha value)
+                    r, g, b, _ = color
+                    # Print directly with \colorbox using rgb color model
+                    print(f"\\colorbox[rgb]{{{r:.2f},{g:.2f},{b:.2f}}}{{\\strut}} {DATASET_NAME_MAPPING[category]}")
+
     
     # Print statistics
     print(f"Total samples: {len(metric_values)}")
