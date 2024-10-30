@@ -24,6 +24,7 @@ tasks:
         --main_process_port 29400
         --use_deepspeed
         --deepspeed_config_file configs/ds_configs/stage3_offloading_accelerate.conf
+        --deepspeed_multinode_launcher standard
         open_instruct/dpo_tune_cache.py
         --model_name_or_path /hf_llama_models
         --use_flash_attn
@@ -47,7 +48,7 @@ tasks:
       - name: TRANSFORMERS_CACHE
         value: ./cache/
       - name: WANDB_API_KEY
-        secret: WANDB_API_KEY
+        secret: jacobm_WANDB_API_KEY
       - name: WANDB_PROJECT
         value: open-instruct
       - name: WANDB_WATCH
@@ -57,7 +58,7 @@ tasks:
       - name: WANDB_DISABLED
         value: true
       - name: HF_TOKEN
-        secret: HF_TOKEN
+        secret: jacobm_HF_TOKEN
     # datasets: # example for how to include datasets in mounting
     #   - mountPath: /data
     #     source:
