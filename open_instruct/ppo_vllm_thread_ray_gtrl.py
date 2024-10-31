@@ -70,7 +70,7 @@ from transformers import (
     PreTrainedTokenizer,
     get_scheduler,
 )
-from transformers.deepspeed import HfDeepSpeedConfig
+from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
 from open_instruct.dataset_processor import (
