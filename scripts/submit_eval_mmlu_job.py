@@ -179,7 +179,7 @@ for experiment_group in experiment_groups:
 
     if experiment_group == "mmlu_0shot":
         task_spec['arguments'][0] = '''
-            python -m eval.mmlu.nouha_eval_cot \
+            python -m eval.mmlu.run_eval \
             --ntrain 0 \
             --debug_math \
             --use_cot \ 
