@@ -23,21 +23,37 @@ def format_subject(subject):
 
 def format_example(df, idx, include_answer=False):
     """Format a single example with structured CoT prompting."""
+    instruction = "You're a helpful assistant, answer the following question by choosing an option. Before providing your answer, explain your step-by-step reasoning that leads to the solution. End your response with 'Answer: X' where X is one of A, B, C, or D.\n\n"
     prompt = df.iloc[idx, 0]
-    breakpoint()
+    prompt = instruction + "Question: " + prompt
+
+    # Add choices
     for j, choice in enumerate(choices):
         prompt += "\n{}. {}".format(choice, df.iloc[idx, j + 1])
 
-    if include_answer:
-        prompt += "\n\nLet's solve this step by step. After explaining your reasoning, state your answer in the format 'Answer: X'\n"
-        prompt += f"Step-by-step solution:\n"
-        prompt += f"[Your reasoning here]\n"
-        prompt += f"Answer: {df.iloc[idx, 5]}\n\n"
-    else:
-        prompt += "\n\nLet's solve this step by step. After explaining your reasoning, state your answer in the format 'Answer: X'\n"
-        prompt += f"Step-by-step solution: [Your reasoning here]\n"
-        prompt += f"Answer:"
+    # Add final instruction
+    prompt += "\n\nExplain your reasoning step by step, then provide your final answer:"
     return prompt
+
+# def format_example(df, idx, include_answer=False):
+#     """Format a single example with structured CoT prompting."""
+#     instruction = "You're a helpful assistant, answer the following question by choosing an option. But before, provide your step-by-step reasoning that arrive at the solution, then give your answer in the format 'Answer: X' where X is one of A, B, C, or D.\n\n"
+#     prompt = df.iloc[idx, 0]
+#     prompt = instruction + prompt
+#     breakpoint()
+#     for j, choice in enumerate(choices):
+#         prompt += "\n{}. {}".format(choice, df.iloc[idx, j + 1])
+#
+#     if include_answer:
+#         prompt += "\n\nLet's solve this step by step. After explaining your reasoning, state your answer in the format 'Answer: X'\n"
+#         prompt += f"Step-by-step solution:\n"
+#         prompt += f"[Your reasoning here]\n"
+#         prompt += f"Answer: {df.iloc[idx, 5]}\n\n"
+#     else:
+#         prompt += "\n\nLet's solve this step by step. After explaining your reasoning, state your answer in the format 'Answer: X'\n"
+#         prompt += f"Step-by-step solution: [Your reasoning here]\n"
+#         prompt += f"Answer:"
+#     return prompt
 
 
 def gen_prompt(train_df, subject, k=-1):
@@ -59,7 +75,6 @@ def parse_cot_response(response):
     # First try to find the explicit "Answer: X" format
     answer_pattern = r"Answer:\s*([ABCD])"
     match = re.search(answer_pattern, response, re.IGNORECASE)
-    breakpoint
     if match:
         return match.group(1).upper()
 
@@ -85,11 +100,12 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
 
     for i in range(0, test_df.shape[0]):
         k = args.ntrain
-        breakpoint()
         prompt_end = format_example(test_df, i, include_answer=False)
 
-        train_prompt = gen_prompt(dev_df, subject, k)
-        prompt = train_prompt + prompt_end
+        # train_prompt = gen_prompt(dev_df, subject, k)
+        prompt = prompt_end
+        breakpoint()
+
 
         if args.use_chat_format:
             messages = [{"role": "user", "content": prompt}]
