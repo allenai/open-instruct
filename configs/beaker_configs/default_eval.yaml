@@ -11,6 +11,8 @@ tasks:
     arguments: ['python -m eval.mmlu.run_eval
       --ntrain 5
       --data_dir /data/mmlu/
+      --debug_math \
+      --use_cot \ 
       --save_dir /output/
       --model_name_or_path /model
       --tokenizer_name_or_path /model
