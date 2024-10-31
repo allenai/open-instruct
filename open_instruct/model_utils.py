@@ -39,7 +39,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from open_instruct.utils import retry_on_exception
-from open_instruct.ground_truth_utils import verify_gsm8k_sample, verify_math_sample, verify_strict_math_sample, verify_ifeval_sample
+from open_instruct.ground_truth_utils import verify_gsm8k_sample, verify_math_sample, verify_ifeval_sample
 
 
 @dataclass

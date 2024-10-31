@@ -1,9 +1,14 @@
 import re
-import sympy
+import signal
 import logging
 from typing import Optional
 
+import sympy
+from sympy.parsing.latex import parse_latex
+
+
 eval_logger = logging.getLogger("math_utils")
+
 
 # from https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/minerva_math/utils.py#L187
 def last_boxed_only_string(string: str) -> Optional[str]:
@@ -121,6 +126,7 @@ REMOVED_EXPRESSIONS = [
     "\\dots",
 ]
 
+
 def normalize_final_answer(final_answer: str) -> str:
     """
     Normalize a final answer to a quantitative reasoning question.
@@ -157,6 +163,22 @@ def normalize_final_answer(final_answer: str) -> str:
         final_answer = final_answer.replace(",", "")
 
     return final_answer
+
+
+class timeout:
+    def __init__(self, seconds=1, error_message="Timeout"):
+        self.seconds = seconds
+        self.error_message = error_message
+
+    def handle_timeout(self, signum, frame):
+        raise TimeoutError(self.error_message)
+
+    def __enter__(self):
+        signal.signal(signal.SIGALRM, self.handle_timeout)
+        signal.alarm(self.seconds)
+
+    def __exit__(self, type, value, traceback):
+        signal.alarm(0)
 
 
 def is_equiv(x1: str, x2: str) -> bool:
@@ -200,6 +222,79 @@ def is_equiv(x1: str, x2: str) -> bool:
     except Exception as e:
         eval_logger.debug(f"Failed comparing {x1} and {x2} with {e}")
         return False
+
+
+def fix_fracs(string):
+    substrs = string.split("\\frac")
+    new_str = substrs[0]
+    if len(substrs) > 1:
+        substrs = substrs[1:]
+        for substr in substrs:
+            new_str += "\\frac"
+            if substr[0] == "{":
+                new_str += substr
+            else:
+                try:
+                    assert len(substr) >= 2
+                except AssertionError:
+                    return string
+                a = substr[0]
+                b = substr[1]
+                if b != "{":
+                    if len(substr) > 2:
+                        post_substr = substr[2:]
+                        new_str += "{" + a + "}{" + b + "}" + post_substr
+                    else:
+                        new_str += "{" + a + "}{" + b + "}"
+                else:
+                    if len(substr) > 2:
+                        post_substr = substr[2:]
+                        new_str += "{" + a + "}" + b + post_substr
+                    else:
+                        new_str += "{" + a + "}" + b
+    string = new_str
+    return string
+
+
+def fix_a_slash_b(string):
+    if len(string.split("/")) != 2:
+        return string
+    a = string.split("/")[0]
+    b = string.split("/")[1]
+    try:
+        a = int(a)
+        b = int(b)
+        assert string == "{}/{}".format(a, b)
+        new_string = "\\frac{" + str(a) + "}{" + str(b) + "}"
+        return new_string
+    except AssertionError:
+        return string
+
+
+def remove_right_units(string):
+    # "\\text{ " only ever occurs (at least in the val set) when describing units
+    if "\\text{ " in string:
+        splits = string.split("\\text{ ")
+        assert len(splits) == 2
+        return splits[0]
+    else:
+        return string
+
+
+def fix_sqrt(string):
+    if "\\sqrt" not in string:
+        return string
+    splits = string.split("\\sqrt")
+    new_string = splits[0]
+    for split in splits[1:]:
+        if split[0] != "{":
+            a = split[0]
+            new_substr = "\\sqrt{" + a + "}" + split[1:]
+        else:
+            new_substr = "\\sqrt" + split
+        new_string += new_substr
+    return new_string
+
 
 def strip_string(string):
     # linebreaks

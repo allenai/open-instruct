@@ -3,9 +3,9 @@ Collection of 'ground truth rewards' for different datasets/tasks.
 Used to give feedback to the model based on the ground truth answer.
 '''
 import re
-import json
 from open_instruct.math_utils import last_boxed_only_string, remove_boxed, get_unnormalized_answer, normalize_final_answer, is_equiv, hendrycks_is_equiv
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
+
 
 def verify_gsm8k_sample(model_output, ground_truth_answer):
     # gsm is easy: extract numbers, and then just compare last number with answer.
@@ -99,7 +99,7 @@ def verify_ifeval_sample(model_output, constraint):
     func = IF_FUNCTIONS_MAP[func_name]
     # now, run the function
     # pop out any none args
-    non_none_args = {k:v for k,v in constraint.items() if v is not None}
+    non_none_args = {k: v for k, v in constraint.items() if v is not None}
     # sometimes we have extra args, sometimes not.
     if len(constraint) == 0:
         return func(model_output)
@@ -109,6 +109,7 @@ def verify_ifeval_sample(model_output, constraint):
 def verify_flan_sample(model_output, ground_truth_answer):
     # TODO: flan. we could do BLEU/ROUGE.... or maybe something like BertScore?
     pass
+
 
 # debug code
 if __name__ == "__main__":
