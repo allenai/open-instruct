@@ -24,6 +24,7 @@ def format_subject(subject):
 def format_example(df, idx, include_answer=False):
     """Format a single example with structured CoT prompting."""
     prompt = df.iloc[idx, 0]
+    breakpoint()
     for j, choice in enumerate(choices):
         prompt += "\n{}. {}".format(choice, df.iloc[idx, j + 1])
 
