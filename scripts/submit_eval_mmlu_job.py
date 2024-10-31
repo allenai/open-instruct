@@ -181,7 +181,8 @@ for experiment_group in experiment_groups:
         task_spec['arguments'][0] = '''
             python -m eval.mmlu.nouha_eval_cot \
             --ntrain 0 \
-            --data_dir /data/mmlu/ \
+            --debug_math \
+            --use_cot \ 
             --save_dir /output/ \
             --model_name_or_path /model \
             --tokenizer_name_or_path /model \

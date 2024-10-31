@@ -458,7 +458,7 @@ if __name__ == "__main__":
     parser.add_argument("--hf_revision", type=str, default=None,
                         help="if specified, we will load the model from a revision of the model in the hub")
     parser.add_argument("--debug_math", action="store_true",
-                        help="Only evaluate math-related subjects")
+                        help="Only evaluate math-related subjects", default=False)
     parser.add_argument("--use_cot", action="store_true",
                         help="Use Chain-of-Thought prompting for reasoning tasks")
     parser.add_argument("--tokenizer_name_or_path", type=str, default=None,
