@@ -290,8 +290,11 @@ def main(args):
                 model.config.max_position_embeddings))
 
     # Get subjects from categories.py
-    math_subjects = ['abstract_algebra', 'college_mathematics', 'elementary_mathematics',
-                     'high_school_mathematics', 'high_school_statistics']
+    math_subjects = ['global_facts', 'high_school_physics', 'moral_scenarios', 'abstract_algebra', 'college_physics',
+                     'college_chemistry', 'machine_learning', 'econometrics', 'professional_law', 'professional_accounting',
+                     'college_mathematics', 'elementary_mathematics', 'high_school_chemistry', 'formal_logic', 'STEM',
+                     'high_school_mathematics', 'high_school_statistics',
+                     'college_medicine', 'college_computer_science', 'conceptual_physics']
 
     if args.debug_math:
         subjects = math_subjects
