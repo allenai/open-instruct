@@ -104,9 +104,6 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
 
         # train_prompt = gen_prompt(dev_df, subject, k)
         prompt = prompt_end
-        breakpoint()
-
-
         if args.use_chat_format:
             messages = [{"role": "user", "content": prompt}]
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
@@ -114,8 +111,8 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
         tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
         while len(tokenized_prompt) > 2048:
             k -= 1
-            train_prompt = gen_prompt(dev_df, subject, k)
-            prompt = train_prompt + prompt_end
+            # train_prompt = gen_prompt(dev_df, subject, k)
+            prompt = prompt_end
 
             if args.use_chat_format:
                 messages = [{"role": "user", "content": prompt}]
