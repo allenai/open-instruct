@@ -292,7 +292,7 @@ def main(args):
     # Get subjects from categories.py
     math_subjects = ['global_facts', 'high_school_physics', 'moral_scenarios', 'abstract_algebra', 'college_physics',
                      'college_chemistry', 'machine_learning', 'econometrics', 'professional_law', 'professional_accounting',
-                     'college_mathematics', 'elementary_mathematics', 'high_school_chemistry', 'formal_logic', 'STEM',
+                     'college_mathematics', 'elementary_mathematics', 'high_school_chemistry', 'formal_logic',
                      'high_school_mathematics', 'high_school_statistics',
                      'college_medicine', 'college_computer_science', 'conceptual_physics']
 
