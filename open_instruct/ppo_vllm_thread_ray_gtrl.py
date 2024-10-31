@@ -818,7 +818,7 @@ class PolicyTrainerRayProcess(RayProcess):
             include_stop_str_in_output=True,
             n=args.number_samples_per_prompt,
         )
-        print("setup async queues")
+        # print("setup async queues")
         param_prompt_Q = None
         response_ids_Q = None
         evaluation_Q = None
@@ -850,7 +850,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 generation_start_time = time.time()
 
                 outputs = ray.get(
-                    llm.generate.remote(sampling_params=generation_config, prompt_token_ids=g_queries_list)
+                    llm.generate.remote(sampling_params=generation_config, prompt_token_ids=g_queries_list, use_tqdm=False)
                 )
                 response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
                 print(f"🔥🔥🔥 Generation time: {time.time() - generation_start_time:.2f} seconds")
@@ -859,7 +859,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 if sample_evaluation_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
                     outputs = ray.get(
                         llm.generate.remote(
-                            prompt_token_ids=sample_evaluation_prompt_token_ids, sampling_params=generation_config
+                            prompt_token_ids=sample_evaluation_prompt_token_ids, sampling_params=generation_config, use_tqdm=False
                         )
                     )
                     # for evaluation, even if we have multiple outputs, we only look at one of them for simplicity
@@ -1028,7 +1028,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 # print(f"{local_vllm_responses.shape=}, {local_vllm_responses=}")
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
-                    print(f"get reward stuff starts {i=}")
+                    # print(f"get reward stuff starts {i=}")
                     query = queries[i : i + args.local_rollout_forward_batch_size]
                     query_response = query_responses[i : i + args.local_rollout_forward_batch_size]
                     response = query_response[:, context_length:]
@@ -1183,7 +1183,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     mini_batch_inds = b_inds[mini_batch_start:mini_batch_end]
                     gradient_accumulation_idx = 0
                     for micro_batch_start in range(0, args.local_mini_batch_size, args.per_device_train_batch_size):
-                        print("micro batch start", micro_batch_start, self.rank)
+                        # print("micro batch start", micro_batch_start, self.rank)
                         micro_batch_end = micro_batch_start + args.per_device_train_batch_size
                         micro_batch_inds = mini_batch_inds[micro_batch_start:micro_batch_end]
                         mb_advantage = advantages[micro_batch_inds]
@@ -1316,7 +1316,7 @@ class PolicyTrainerRayProcess(RayProcess):
             del (global_metrics, metrics, kl, non_score_reward, non_score_reward_sum, rlhf_reward)
             gc.collect()
             torch.cuda.empty_cache()
-            print(f"finished training {training_step}")
+            # print(f"finished training {training_step}")
 
             # save steps
             if args.save_freq > 0 and training_step % args.save_freq == 0:
