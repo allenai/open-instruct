@@ -139,7 +139,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
         # Generate with proper parameters
         response = model.generate(
             **inputs,
-            max_new_tokens=512,
+            max_new_tokens=2048,
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
             do_sample=True,
