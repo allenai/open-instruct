@@ -133,7 +133,7 @@ if args.beaker_image is not None:
 # modify here, or use "--experiments", for different set of experiments
 experiment_groups_default = [
     "mmlu_0shot",
-    "mmlu_5shot",
+    # "mmlu_5shot",
     # "gsm_direct",
     # "gsm_cot",
     # "MATH_cot",
@@ -179,7 +179,7 @@ for experiment_group in experiment_groups:
 
     if experiment_group == "mmlu_0shot":
         task_spec['arguments'][0] = '''
-            python -m eval.mmlu.run_eval \
+            python -m eval.mmlu.nouha_eval_cot \
             --ntrain 0 \
             --data_dir /data/mmlu/ \
             --save_dir /output/ \
