@@ -1,0 +1,57 @@
+model_name_or_path: meta-llama/Llama-3.1-70B
+model_revision: main
+use_flash_attn: true
+tokenizer_name: meta-llama/Llama-3.1-70B
+use_slow_tokenizer: true
+dataset_mixer:
+    # Static v3.8 nc mix file
+    /oe-adapt-default/jacobm/tulu-3-dev/data/tulu_v3.8_preview_nc.jsonl: 1.0
+
+    # # General datasets:
+    # ai2-adapt-dev/oasst1_converted: 7132 # all
+    # ai2-adapt-dev/flan_v2_converted: 89982 # all
+    # ai2-adapt-dev/tulu_hard_coded_repeated_10: 240 # all
+    # ai2-adapt-dev/no_robots_converted: 9500 # all
+    # ai2-adapt-dev/wildchat_gpt4_converted: 100000
+
+    # # Math datasets:
+    # ai2-adapt-dev/personahub_math_v5_regen_149960: 149960 # all
+    # ai2-adapt-dev/personahub_grade_math_v1_49980: 49980 # all
+    # ai2-adapt-dev/open_math_2_gsm8k_converted: 50000 
+    # AI-MO/NuminaMath-TIR: 72441 # all
+    # ai2-adapt-dev/personahub_math_interm_algebra_50000: 20000
+
+    # # Coding datasets:
+    # ai2-adapt-dev/personahub_code_v2_34999: 34999 # all
+    # ai2-adapt-dev/evol_codealpaca_heval_decontaminated: 107276 # all
+
+    # # IF datasets:
+    # ai2-adapt-dev/personahub_ifdata_manual_seed_v3_29980: 29980 # all
+
+    # # Safety datasets:
+    # ai2-adapt-dev/coconot_converted: 10983 # all
+    # ai2-adapt-dev/processed-wildjailbreak: 50000
+    # ai2-adapt-dev/synthetic-finalresp-wildguarmixtrain: 50000
+
+    # # Specialty datasets:
+    # ai2-adapt-dev/sciriff_converted: 10000
+    # ai2-adapt-dev/table_gpt_converted: 5000
+    # ai2-adapt-dev/aya_dataset_converted: 100000
+
+max_seq_length: 4096
+preprocessing_num_workers: 128
+per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
+gradient_accumulation_steps: 2 # effective batch size 128 with 8 nodes
+learning_rate: 2.0e-07
+lr_scheduler_type: linear
+warmup_ratio: 0.03
+weight_decay: 0.0
+num_train_epochs: 2
+output_dir: /output/
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+checkpointing_steps: epoch
+dataset_mix_dir: /output/
+gradient_checkpointing: true

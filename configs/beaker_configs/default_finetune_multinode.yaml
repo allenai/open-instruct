@@ -8,7 +8,7 @@ tasks:
     hostNetworking: true
     propagateFailure: true
     propagatePreemption: true
-    synchronizedStartTimeout: 15m
+    synchronizedStartTimeout: 60m
     image:
       beaker: nathanl/open_instruct_auto
     command: [
@@ -62,6 +62,10 @@ tasks:
         value: true
       - name: HF_TOKEN
         secret: HF_TOKEN
+    datasets:
+      - mountPath: /oe-adapt-default
+        source:
+          weka: oe-adapt-default
     result:
       path: /output
     resources:

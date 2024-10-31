@@ -1156,7 +1156,7 @@ def main(args: FlatArguments):
         if args.try_launch_beaker_eval_jobs:
             command = f"""\
             python mason.py  \
-                --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/s2-cirrascale ai2/general-cirrascale \
+                --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale ai2/neptune-cirrascale ai2/saturn-cirrascale ai2/jupiter-cirrascale-2 \
                 --priority low \
                 --preemptible \
                 --budget ai2/allennlp \
