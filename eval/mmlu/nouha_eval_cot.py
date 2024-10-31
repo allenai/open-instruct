@@ -84,7 +84,9 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
 
     for i in range(0, test_df.shape[0]):
         k = args.ntrain
+        breakpoint()
         prompt_end = format_example(test_df, i, include_answer=False)
+
         train_prompt = gen_prompt(dev_df, subject, k)
         prompt = train_prompt + prompt_end
 
