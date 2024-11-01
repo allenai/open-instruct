@@ -114,25 +114,16 @@ def parse_cot_response(response):
 
     return None
 
-
-def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
+def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int],
+                       gen_args: GenerationArgs):
     """Generate text using vLLM."""
-    from vllm.engine.arg_utils import EngineArgs
-
-    # Create engine arguments correctly for vLLM 0.5.1
-    engine_args = EngineArgs(
+    # Create LLM instance directly
+    llm = LLM(
         model=model_name_or_path,
-        download_dir=None,
         revision=revision,
-        tokenizer=None,
         trust_remote_code=True,
         tensor_parallel_size=gen_args.tensor_parallel_size,
-        dtype="auto",
-        seed=0,
     )
-
-    # Create LLM instance
-    llm = LLM.from_engine_args(engine_args)
 
     # Set up sampling parameters
     sampling_params = SamplingParams(
@@ -161,8 +152,6 @@ def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids:
         }
         for output in outputs
     ]
-
-
 # def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
 #     llm = LLM(
 #         model=model_name_or_path,
