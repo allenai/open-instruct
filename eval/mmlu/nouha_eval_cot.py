@@ -118,32 +118,20 @@ def parse_cot_response(response):
 def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
     from vllm.engine.arg_utils import EngineArgs
 
-    # Create engine args first
+    # Use only the essential parameters
     engine_args = EngineArgs(
         model=model_name_or_path,
-        revision=revision,
-        tensor_parallel_size=gen_args.tensor_parallel_size,
-        max_num_seqs=gen_args.num_completions,
-        max_model_len=gen_args.response_length,
-        disable_rope_scaling=True,  # Add this to disable RoPE scaling
         trust_remote_code=True,
-        gpu_memory_utilization=0.9
+        tensor_parallel_size=gen_args.tensor_parallel_size
     )
 
-    llm = LLM(engine_args=engine_args)  # Use engine_args instead of direct parameters
-
-    # Filter out prompts which are beyond the model's max token length
-    max_model_len = llm.llm_engine.scheduler_config.max_model_len
-    prompt_token_ids_len = len(prompt_token_ids)
-    prompt_token_ids = [item for item in prompt_token_ids if len(item) < max_model_len]
-    if len(prompt_token_ids) != prompt_token_ids_len:
-        print(f"Filtered out {prompt_token_ids_len - len(prompt_token_ids)} prompts which exceeds max token length")
+    llm = LLM(engine_args=engine_args)
 
     sampling_params = SamplingParams(
         n=gen_args.num_completions,
         temperature=gen_args.temperature,
         top_p=gen_args.top_p,
-        max_tokens=gen_args.response_length,
+        max_tokens=gen_args.response_length
     )
 
     outputs = llm.generate(
@@ -157,14 +145,12 @@ def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids:
                 {
                     "text": out.text,
                     "token_ids": out.token_ids,
-                    "logprobs": out.logprobs if hasattr(out, 'logprobs') else None,
                 } for out in output.outputs
             ],
             "prompt": output.prompt,
         }
         for output in outputs
     ]
-
 # def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
 #     llm = LLM(
 #         model=model_name_or_path,
