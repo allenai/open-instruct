@@ -120,10 +120,9 @@ def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids:
         revision=revision,
         tokenizer_revision=revision,
         tensor_parallel_size=gen_args.tensor_parallel_size,
+        trust_remote_code=True,
         max_model_len=gen_args.response_length,
-        trust_remote_code=True,  # Add this
-        max_num_batched_tokens=4096,  # Add this for better batching
-        disable_custom_kernels=True,  # Add this to avoid potential CUDA issues
+        gpu_memory_utilization=0.9,  # Add this for better memory management
     )
 
     # filter out prompts which are beyond the model's max token length
@@ -138,8 +137,7 @@ def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids:
         temperature=gen_args.temperature,
         top_p=gen_args.top_p,
         max_tokens=gen_args.response_length,
-        stop_token_ids=[0],  # Add common stop token
-        include_stop_str_in_output=True,
+        stop=None,  # Changed this
     )
 
     outputs = llm.generate(
@@ -153,7 +151,7 @@ def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids:
                 {
                     "text": out.text,
                     "token_ids": out.token_ids,
-                    "logprobs": out.logprobs,
+                    "logprobs": out.logprobs if hasattr(out, 'logprobs') else None,
                 } for out in output.outputs
             ],
             "prompt": output.prompt,
