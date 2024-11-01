@@ -199,6 +199,9 @@ def main():
                 },
             ]
 
+    if "google" in args.cluster:
+        d["tasks"][0]["datasets"].pop(0)
+
     # WANDB settings
     for env in d['tasks'][0]['envVars']:
         if env['name'] == "WANDB_DISABLED":

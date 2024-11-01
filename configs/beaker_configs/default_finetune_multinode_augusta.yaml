@@ -1,0 +1,128 @@
+version: v2
+description: open-instruct-finetune-multinode
+budget: ai2/oe-adapt
+tasks:
+  - name: open-instruct-finetune-multinode
+    replicas: 4
+    leaderSelection: true
+    hostNetworking: true
+    propagateFailure: true
+    propagatePreemption: true
+    synchronizedStartTimeout: 60m
+    image:
+      beaker: nathanl/open_instruct_auto
+    command: [
+      '/bin/sh', '-c'
+    ]
+    arguments: ['
+        unset CUDA_LAUNCH_BLOCKING && export LD_LIBRARY_PATH=/var/lib/tcpxo/lib64:${LD_LIBRARY_PATH} && PYTHONPATH="/stage:$PYTHONPATH" accelerate launch
+        --mixed_precision bf16
+        --num_machines 4
+        --num_processes 32
+        --machine_rank $BEAKER_REPLICA_RANK
+        --main_process_ip $BEAKER_LEADER_REPLICA_HOSTNAME
+        --main_process_port 29400
+        --use_deepspeed
+        --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf
+        --deepspeed_multinode_launcher standard
+        open_instruct/finetune.py
+        --model_name_or_path meta-llama/Meta-Llama-3-8B
+        --tokenizer_name meta-llama/Meta-Llama-3-8B
+        --use_slow_tokenizer
+        --use_flash_attn
+        --max_seq_length 4096 
+        --preprocessing_num_workers 16
+        --per_device_train_batch_size 1
+        --gradient_accumulation_steps 4
+        --learning_rate 5e-6
+        --lr_scheduler_type linear
+        --warmup_ratio 0.03
+        --weight_decay 0.
+        --num_train_epochs 2
+        --output_dir /output/
+        --with_tracking
+        --report_to tensorboard
+        --logging_steps 1
+        --reduce_loss sum
+    ']
+    envVars:
+      - name: CUDA_DEVICE_ORDER
+        value: PCI_BUS_ID
+      - name: TRANSFORMERS_CACHE
+        value: ./cache/
+      - name: WANDB_API_KEY
+        secret: jacobm_WANDB_API_KEY
+      - name: WANDB_PROJECT
+        value: open-instruct
+      - name: WANDB_WATCH
+        value: false
+      - name: WANDB_LOG_MODEL
+        value: false
+      - name: WANDB_DISABLED
+        value: true
+      - name: HF_TOKEN
+        secret: jacobm_HF_TOKEN
+      - name: NCCL_CROSS_NIC
+        value: 0
+      - name: NCCL_ALGO
+        value: Ring,Tree
+      - name: NCCL_PROTO
+        value: Simple
+      - name: NCCL_MIN_NCHANNELS
+        value: 4
+      - name: NCCL_P2P_NET_CHUNKSIZE
+        value: 524288
+      - name: NCCL_P2P_PCI_CHUNKSIZE
+        value: 524288
+      - name: NCCL_P2P_NVL_CHUNKSIZE
+        value: 1048576
+      - name: NCCL_FASTRAK_NUM_FLOWS
+        value: 2
+      - name: NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL
+        value: 0
+      - name: NCCL_BUFFSIZE
+        value: 8388608
+      - name: NCCL_FASTRAK_USE_SNAP
+        value: 1
+      - name: CUDA_VISIBLE_DEVICES
+        value: 0,1,2,3,4,5,6,7
+      - name: NCCL_NET_GDR_LEVEL
+        value: PIX
+      - name: NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING
+        value: 0
+      - name: NCCL_TUNER_PLUGIN
+        value: libnccl-tuner.so
+      - name: NCCL_TUNER_CONFIG_PATH
+        value: /var/lib/tcpxo/lib64/a3plus_tuner_config.textproto
+      - name: NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE
+        value: /var/lib/tcpxo/lib64/a3plus_guest_config.textproto
+      - name: NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS
+        value: 600000
+      - name: NCCL_NVLS_ENABLE
+        value: 0
+      - name: NCCL_DEBUG
+        value: WARN
+      - name: NCCL_FASTRAK_CTRL_DEV
+        value: enp0s12
+      - name: NCCL_FASTRAK_IFNAME
+        value: enp6s0,enp7s0,enp13s0,enp14s0,enp134s0,enp135s0,enp141s0,enp142s0
+      - name: NCCL_SOCKET_IFNAME
+        value: enp0s12
+      - name: NCCL_USE_SNAP
+        value: 1
+      - name: NCCL_FASTRAK_USE_LLCM
+        value: 1
+      - name: NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY
+        value: /dev/aperture_devices
+
+    datasets:
+      - mountPath: /oe-adapt-default
+        source:
+          weka: oe-adapt-default
+    result:
+      path: /output
+    resources:
+      gpuCount: 8
+    context:
+      priority: normal
+      preemptible: true
