@@ -114,7 +114,6 @@ def parse_cot_response(response):
 
     return None
 
-
 def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
     llm = LLM(
         model=model_name_or_path,
@@ -122,7 +121,11 @@ def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids:
         tokenizer_revision=revision,
         tensor_parallel_size=gen_args.tensor_parallel_size,
         max_model_len=gen_args.response_length,
+        trust_remote_code=True,  # Add this
+        max_num_batched_tokens=4096,  # Add this for better batching
+        disable_custom_kernels=True,  # Add this to avoid potential CUDA issues
     )
+
     # filter out prompts which are beyond the model's max token length
     max_model_len = llm.llm_engine.scheduler_config.max_model_len
     prompt_token_ids_len = len(prompt_token_ids)
@@ -130,25 +133,68 @@ def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids:
     if len(prompt_token_ids) != prompt_token_ids_len:
         print(f"Filtered out {prompt_token_ids_len - len(prompt_token_ids)} prompts which exceeds max token length")
 
+    sampling_params = SamplingParams(
+        n=gen_args.num_completions,
+        temperature=gen_args.temperature,
+        top_p=gen_args.top_p,
+        max_tokens=gen_args.response_length,
+        stop_token_ids=[0],  # Add common stop token
+        include_stop_str_in_output=True,
+    )
+
     outputs = llm.generate(
         prompt_token_ids=prompt_token_ids,
-        sampling_params=SamplingParams(
-            n=gen_args.num_completions,
-            temperature=gen_args.temperature,
-            top_p=1.0,
-            max_tokens=gen_args.response_length,
-            include_stop_str_in_output=True,
-        ),
+        sampling_params=sampling_params,
     )
+
     return [
         {
-            "outputs": [asdict(out) for out in output.outputs],
+            "outputs": [
+                {
+                    "text": out.text,
+                    "token_ids": out.token_ids,
+                    "logprobs": out.logprobs,
+                } for out in output.outputs
+            ],
             "prompt": output.prompt,
-            "prompt_logprobs": output.prompt_logprobs,
-            "metrics": output.metrics,
         }
         for output in outputs
     ]
+
+# def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
+#     llm = LLM(
+#         model=model_name_or_path,
+#         revision=revision,
+#         tokenizer_revision=revision,
+#         tensor_parallel_size=gen_args.tensor_parallel_size,
+#         max_model_len=gen_args.response_length,
+#     )
+#     # filter out prompts which are beyond the model's max token length
+#     max_model_len = llm.llm_engine.scheduler_config.max_model_len
+#     prompt_token_ids_len = len(prompt_token_ids)
+#     prompt_token_ids = [item for item in prompt_token_ids if len(item) < max_model_len]
+#     if len(prompt_token_ids) != prompt_token_ids_len:
+#         print(f"Filtered out {prompt_token_ids_len - len(prompt_token_ids)} prompts which exceeds max token length")
+#
+#     outputs = llm.generate(
+#         prompt_token_ids=prompt_token_ids,
+#         sampling_params=SamplingParams(
+#             n=gen_args.num_completions,
+#             temperature=gen_args.temperature,
+#             top_p=1.0,
+#             max_tokens=gen_args.response_length,
+#             include_stop_str_in_output=True,
+#         ),
+#     )
+#     return [
+#         {
+#             "outputs": [asdict(out) for out in output.outputs],
+#             "prompt": output.prompt,
+#             "prompt_logprobs": output.prompt_logprobs,
+#             "metrics": output.metrics,
+#         }
+#         for output in outputs
+#     ]
 
 
 @torch.no_grad()
@@ -156,6 +202,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
     prompts = []
     chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
 
+    # Prepare all prompts
     for i in range(0, test_df.shape[0]):
         prompt_end = format_example(test_df, i, include_answer=False, subject=subject)
         prompt = prompt_end
@@ -163,7 +210,6 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
         if args.use_chat_format:
             messages = [{"role": "user", "content": prompt}]
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
-
         prompts.append(prompt)
 
     # Set up vLLM generation arguments
@@ -175,21 +221,26 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
         tensor_parallel_size=1
     )
 
-    # Generate responses using vLLM
-    outputs = generate_with_vllm(
-        model_name_or_path=args.model_name_or_path,
-        revision=args.hf_revision if args.hf_revision else None,
-        prompt_token_ids=[tokenizer.encode(p) for p in prompts],
-        gen_args=gen_args
-    )
+    try:
+        # Generate responses using vLLM
+        outputs = generate_with_vllm(
+            model_name_or_path=args.model_name_or_path,
+            revision=args.hf_revision if args.hf_revision else None,
+            prompt_token_ids=[tokenizer.encode(p) for p in prompts],
+            gen_args=gen_args
+        )
 
-    # Process vLLM outputs
-    full_responses = []
-    for output in outputs:
-        response_text = output["outputs"][0]["text"]  # Get first completion
-        if response_text.startswith(output["prompt"]):
-            response_text = response_text[len(output["prompt"]):]
-        full_responses.append(response_text)
+        # Process vLLM outputs
+        full_responses = []
+        for output in outputs:
+            response_text = output["outputs"][0]["text"]  # Get first completion
+            if response_text.startswith(output["prompt"]):
+                response_text = response_text[len(output["prompt"]):]
+            full_responses.append(response_text)
+
+    except Exception as e:
+        print(f"Error during vLLM generation: {e}")
+        raise
 
     # Rest of the function remains the same
     parsed_answers = []
