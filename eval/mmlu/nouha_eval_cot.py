@@ -7,13 +7,38 @@ import numpy as np
 import pandas as pd
 import json
 from tqdm import tqdm
+from typing import Dict, List, Optional
 from datasets import load_dataset
+from dataclasses import asdict, dataclass
 from eval.mmlu.categories import subcategories, categories
 from eval.utils import get_next_word_predictions, load_hf_tokenizer, load_hf_lm, query_openai_chat_model, \
     dynamic_import_function, upload_results_to_hf, check_and_upload_model_metadata
+from vllm import LLM, SamplingParams
+
+
 
 choices = ["A", "B", "C", "D"]
 
+@dataclass
+class GenerationArgs:
+    num_completions: int = 3
+    temperature: float = 0.8
+    response_length: int = 2048
+    top_p: float = 0.9
+    tensor_parallel_size: int = 1
+
+
+COT_SUBJECTS = {
+    'abstract_algebra',
+    'college_mathematics',
+    'elementary_mathematics',
+    'high_school_mathematics',
+    'high_school_statistics',
+    'formal_logic',
+    'conceptual_physics',
+    'high_school_physics',
+    'college_physics'
+}
 
 def format_subject(subject):
     l = subject.split("_")
@@ -23,9 +48,20 @@ def format_subject(subject):
     return s
 
 
-def format_example(df, idx, include_answer=False):
-    """Format a single example with structured CoT prompting."""
-    instruction = "You're a helpful assistant, answer the following question by choosing an option. Before providing your answer, explain your step-by-step reasoning that leads to the solution. End your response with 'Answer: X' where X is one of A, B, C, or D.\n\n"
+def format_example(df, idx, include_answer=False, subject=None):
+    """Format a single example with or without CoT based on subject type."""
+    is_cot_subject = subject in COT_SUBJECTS
+
+    if is_cot_subject:
+        # CoT prompt for math/logic subjects
+        instruction = ("You're a helpful assistant, answer the following question by choosing an option. "
+                       "Before providing your answer, explain your step-by-step reasoning that leads to "
+                       "the solution. End your response with 'Answer: X' where X is one of A, B, C, or D.\n\n")
+    else:
+        # Direct prompt for other subjects
+        instruction = ("You're a helpful assistant. Choose the correct option for this question."
+                       " Provide your answer in the format 'Answer: X' where X is one of A, B, C, or D.\n\n")
+
     prompt = df.iloc[idx, 0]
     prompt = instruction + "Question: " + prompt
 
@@ -34,28 +70,12 @@ def format_example(df, idx, include_answer=False):
         prompt += "\n{}. {}".format(choice, df.iloc[idx, j + 1])
 
     # Add final instruction
-    prompt += "\n\nExplain your reasoning step by step, then provide your final answer:"
+    if is_cot_subject:
+        prompt += ("\n\nExplain your reasoning step by step, then provide your final answer."
+                   " End your response with 'Answer: X' where X is one of A, B, C, or D.")
+    else:
+        prompt += "\n\nProvide your answer:"
     return prompt
-
-# def format_example(df, idx, include_answer=False):
-#     """Format a single example with structured CoT prompting."""
-#     instruction = "You're a helpful assistant, answer the following question by choosing an option. But before, provide your step-by-step reasoning that arrive at the solution, then give your answer in the format 'Answer: X' where X is one of A, B, C, or D.\n\n"
-#     prompt = df.iloc[idx, 0]
-#     prompt = instruction + prompt
-#     breakpoint()
-#     for j, choice in enumerate(choices):
-#         prompt += "\n{}. {}".format(choice, df.iloc[idx, j + 1])
-#
-#     if include_answer:
-#         prompt += "\n\nLet's solve this step by step. After explaining your reasoning, state your answer in the format 'Answer: X'\n"
-#         prompt += f"Step-by-step solution:\n"
-#         prompt += f"[Your reasoning here]\n"
-#         prompt += f"Answer: {df.iloc[idx, 5]}\n\n"
-#     else:
-#         prompt += "\n\nLet's solve this step by step. After explaining your reasoning, state your answer in the format 'Answer: X'\n"
-#         prompt += f"Step-by-step solution: [Your reasoning here]\n"
-#         prompt += f"Answer:"
-#     return prompt
 
 
 def gen_prompt(train_df, subject, k=-1):
@@ -95,71 +115,83 @@ def parse_cot_response(response):
     return None
 
 
+def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
+    llm = LLM(
+        model=model_name_or_path,
+        revision=revision,
+        tokenizer_revision=revision,
+        tensor_parallel_size=gen_args.tensor_parallel_size,
+        max_model_len=gen_args.response_length,
+    )
+    # filter out prompts which are beyond the model's max token length
+    max_model_len = llm.llm_engine.scheduler_config.max_model_len
+    prompt_token_ids_len = len(prompt_token_ids)
+    prompt_token_ids = [item for item in prompt_token_ids if len(item) < max_model_len]
+    if len(prompt_token_ids) != prompt_token_ids_len:
+        print(f"Filtered out {prompt_token_ids_len - len(prompt_token_ids)} prompts which exceeds max token length")
+
+    outputs = llm.generate(
+        prompt_token_ids=prompt_token_ids,
+        sampling_params=SamplingParams(
+            n=gen_args.num_completions,
+            temperature=gen_args.temperature,
+            top_p=1.0,
+            max_tokens=gen_args.response_length,
+            include_stop_str_in_output=True,
+        ),
+    )
+    return [
+        {
+            "outputs": [asdict(out) for out in output.outputs],
+            "prompt": output.prompt,
+            "prompt_logprobs": output.prompt_logprobs,
+            "metrics": output.metrics,
+        }
+        for output in outputs
+    ]
+
+
 @torch.no_grad()
 def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1):
     prompts = []
     chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
 
     for i in range(0, test_df.shape[0]):
-        k = args.ntrain
-        prompt_end = format_example(test_df, i, include_answer=False)
-
-        # train_prompt = gen_prompt(dev_df, subject, k)
+        prompt_end = format_example(test_df, i, include_answer=False, subject=subject)
         prompt = prompt_end
+
         if args.use_chat_format:
             messages = [{"role": "user", "content": prompt}]
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
 
-        tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
-        while len(tokenized_prompt) > 2048:
-            k -= 1
-            # train_prompt = gen_prompt(dev_df, subject, k)
-            prompt = prompt_end
-
-            if args.use_chat_format:
-                messages = [{"role": "user", "content": prompt}]
-                prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
-
-            tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
         prompts.append(prompt)
 
-    # Get the full model responses for CoT
+    # Set up vLLM generation arguments
+    gen_args = GenerationArgs(
+        num_completions=1,
+        temperature=0.9,
+        response_length=2048,
+        top_p=0.9,
+        tensor_parallel_size=1
+    )
+
+    # Generate responses using vLLM
+    outputs = generate_with_vllm(
+        model_name_or_path=args.model_name_or_path,
+        revision=args.hf_revision if args.hf_revision else None,
+        prompt_token_ids=[tokenizer.encode(p) for p in prompts],
+        gen_args=gen_args
+    )
+
+    # Process vLLM outputs
     full_responses = []
-    for prompt in tqdm(prompts, desc=f"Generating responses for {subject}", leave=False):
-        # Properly tokenize with attention mask
-        # breakpoint()
-        inputs = tokenizer(
-            prompt,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=2048,
-        ).to(model.device)
-
-        # Generate with proper parameters
-        # breakpoint()
-        # Generate with proper parameters
-        response = model.generate(
-            **inputs,
-            max_new_tokens=2048,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-            do_sample=True,
-            temperature=0.9,
-            top_p=0.9,
-            num_return_sequences=1,
-            use_cache=True
-        )
-
-        decoded_response = tokenizer.decode(response[0], skip_special_tokens=True)
-
-        # Remove the prompt from the response
-        if decoded_response.startswith(prompt):
-            decoded_response = decoded_response[len(prompt):]
-        full_responses.append(decoded_response)
+    for output in outputs:
+        response_text = output["outputs"][0]["text"]  # Get first completion
+        if response_text.startswith(output["prompt"]):
+            response_text = response_text[len(output["prompt"]):]
+        full_responses.append(response_text)
 
     # Rest of the function remains the same
-    # breakpoint()
     parsed_answers = []
     for response in full_responses:
         # breakpoint()

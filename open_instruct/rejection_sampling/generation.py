@@ -169,7 +169,8 @@ def main(args: Args, dataset_config: DatasetConfig, gen_args: GenerationArgs):
         dataset = dataset_processor.tokenize(dataset)
         dataset = dataset_processor.filter(dataset)
         prompt_token_ids = dataset[INPUT_IDS_PROMPT_KEY]
-        outputs = generate_with_vllm(args.model_name_or_path, args.revision, prompt_token_ids, gen_args)
+        outputs = generate_with_vllm(args.model_name_or_path, args.revision,
+                                     prompt_token_ids, gen_args)
 
     # Assuming we generate n=3 completions per prompt; the outputs will look like:
     # prompt | completions
