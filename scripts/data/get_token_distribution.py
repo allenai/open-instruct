@@ -10,14 +10,17 @@ from collections import defaultdict
 Example commands
 SFT plot in paper:
 python scripts/data/get_token_distribution.py --dataset allenai/tulu-v.3.8-mix-preview-noncommercial --log_x --not_log_y --automatic_binning --hide_legend
-
+python scripts/data/get_token_distribution.py --dataset allenai/tulu-v1-sft-mixture --log_x --not_log_y --automatic_binning --hide_legend --dont_split_histogram --set_max_y 60000
+python scripts/data/get_token_distribution.py --dataset allenai/tulu-v2-sft-mixture --log_x --not_log_y --automatic_binning --hide_legend --dont_split_histogram --set_max_y 60000
+python scripts/data/get_token_distribution.py --dataset teknium/OpenHermes-2.5 --column_name conversations --log_x --not_log_y --automatic_binning --hide_legend --dont_split_histogram --set_max_y 60000
 """
 
 DATASET_NAME_MAPPING = {
     "NuminaMath-TIR": "NuminaMath-TIR",
     "aya_dataset_converted": "Aya",
     "evol_codealpaca_heval_decontaminated": "Evol CodeAlpaca",
-    "flan_v2_converted": "Flan v2",
+    "flan_v2_converted": "FLAN v2",
+    # "flan_v2": "FLAN v2",
     "no_robots_converted": "No Robots",
     "open_math_2_gsm8k_converted": "OpenMathInstruct2",
     "processed-wildjailbreak": "WildJailbreak",
@@ -26,13 +29,25 @@ DATASET_NAME_MAPPING = {
     "wildchat_gpt4_converted": "WildChat GPT4",
     "coconot_converted": "CoCoNot",
     "oasst1_converted": "OASST1",
+    # "oasst1": "OASST1",
+    # "open_orca": "OpenOrca",
     "personahub_code_v2_34999": "Tulu 3 Persona Code",
     "personahub_ifdata_manual_seed_v3_29980": "Tulu 3 Persona IF",
     "personahub_math_interm_algebra_50000": "Tulu 3 Persona MATH - Algebra",
     "personahub_math_v5_regen_149960": "Tulu 3 Persona MATH",
     "personahub_grade_math_v1_49980": "Tulu 3 Persona Grade School Math",
     "sciriff_converted": "SciRIFF",
-    "tulu_hard_coded_repeated_10": "Hardcoded"
+    # "tulu_hard_coded_repeated_10": "Hardcoded",
+    # "Hardcoded": "Hardcoded",
+    # "code_alpaca": "CodeAlpaca",
+    # "cot": "FLAN CoT",
+    # "sharegpt": "ShareGPT",
+    # "dolly": "Dolly",
+    # "gpt4_alpaca": "Alpaca (GPT4)",
+    # "lima": "LIMA",
+    # "science": "Science",
+    # "wizardlm": "WizardLM",
+    # "wizardlm_alpaca": "WizardLM (Alpaca)",
 }
 
 def plot_token_length_histogram(dataset_name, 
@@ -43,7 +58,9 @@ def plot_token_length_histogram(dataset_name,
                                 log_x=False,
                                 not_log_y=False,
                                 hide_legend=False,
-                                plot_num_turns=False):
+                                plot_num_turns=False,
+                                dont_split_histogram=False,
+                                set_max_y=0):
     
     print("Running analytics...")
     # Load the dataset
@@ -64,7 +81,9 @@ def plot_token_length_histogram(dataset_name,
 
     # If allenai/tulu in name, turn on categories
     TRACK_CATEGORIES = "allenai/tulu" in dataset_name or "source" in dataset['train'].column_names
-    
+    if dont_split_histogram:
+        TRACK_CATEGORIES = False
+
     if plot_num_turns:
         # Count turns (number of messages divided by 2)
         def process_sample(example):
@@ -121,7 +140,10 @@ def plot_token_length_histogram(dataset_name,
 
         # alphabetical the unique categories
         unique_categories = np.sort(unique_categories)
-        category_colors = {category: plt.cm.tab20(i) for i, category in enumerate(unique_categories)}
+
+        # make colors for all of DATASET_NAME_MAPPING, then assign colors to unique_categories, only for unique values in dict
+        colors_full = plt.cm.tab20(np.linspace(0, 1, len(DATASET_NAME_MAPPING)))
+        category_colors = {category: colors_full[i] for i, category in enumerate(DATASET_NAME_MAPPING.keys())}
 
         category_metric_values = defaultdict(list)
         for value, category in zip(metric_values, categories):
@@ -168,7 +190,7 @@ def plot_token_length_histogram(dataset_name,
                   edgecolor='black', label=category, align='edge', bottom=bottom_counts)
             bottom_counts += counts
     else:
-        n, bins, patches = ax.hist(metric_values, bins=bins, color='blue', edgecolor='black')
+        n, bins, patches = ax.hist(metric_values, bins=bins, color='grey', edgecolor='black')
     
     # Set axis properties
     if not automatic_binning and not plot_num_turns:
@@ -212,6 +234,9 @@ def plot_token_length_histogram(dataset_name,
             max_count = max(n)
         # Round up to the nearest 10000
         max_count = 10000 * (max_count // 10000 + 1)
+
+        if set_max_y > 0:
+            max_count = set_max_y
         major_ticks = np.linspace(0, max_count, 5)
         ax.set_yticks(major_ticks)
     else:
@@ -242,10 +267,12 @@ def plot_token_length_histogram(dataset_name,
         # print the colors for the datasets for use in custome legend
         if TRACK_CATEGORIES:
             for category, color in category_colors.items():
-                print(f"{category}: {color}")
+                if category in unique_categories:
+                    print(f"{category}: {color}")
             
-                print("\n% Color blocks with labels")
-                for category, color in category_colors.items():
+            print("\n% Color blocks with labels")
+            for category, color in category_colors.items():
+                if category in unique_categories:
                     # Convert RGBA tuple to RGB for LaTeX (dropping alpha value)
                     r, g, b, _ = color
                     r_255 = round(r * 255)
@@ -279,7 +306,8 @@ def main():
     parser.add_argument('--not_log_y', action='store_true', help="Use log scale for y-axis")
     parser.add_argument('--hide_legend', action='store_true', help="Hide the legend")
     parser.add_argument('--plot_num_turns', action='store_true', help="Plot number of turns instead of token length")
-
+    parser.add_argument('--dont_split_histogram', action='store_true', help="Unicolor histogram")
+    parser.add_argument('--set_max_y', type=int, default=0, help="Set max y value")
     args = parser.parse_args()
     
     fig, ax = plot_token_length_histogram(
@@ -291,7 +319,9 @@ def main():
         args.log_x, 
         args.not_log_y, 
         args.hide_legend,
-        args.plot_num_turns
+        args.plot_num_turns,
+        args.dont_split_histogram,
+        args.set_max_y
     )
 
 if __name__ == "__main__":
