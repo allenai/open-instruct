@@ -114,18 +114,13 @@ def parse_cot_response(response):
 
     return None
 
-
 def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
-    from vllm.engine.arg_utils import EngineArgs
-
-    # Use only the essential parameters
-    engine_args = EngineArgs(
+    # Initialize LLM with direct parameters
+    llm = LLM(
         model=model_name_or_path,
         trust_remote_code=True,
         tensor_parallel_size=gen_args.tensor_parallel_size
     )
-
-    llm = LLM(engine_args=engine_args)
 
     sampling_params = SamplingParams(
         n=gen_args.num_completions,
@@ -151,6 +146,9 @@ def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids:
         }
         for output in outputs
     ]
+
+
+
 # def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
 #     llm = LLM(
 #         model=model_name_or_path,
