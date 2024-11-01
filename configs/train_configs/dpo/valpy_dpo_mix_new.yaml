@@ -52,6 +52,9 @@ dataset_mixer:
   #ai2-adapt-dev/DaringAnteater-prefs-RM-filter-uf-pipeline-regen: 1.0
   #ai2-adapt-dev/WildChat-prefs-280824-uf-pipeline-regen: 1.0
   #ai2-adapt-dev/Llama-3.1-if_taxonomy_tulu-uf-regen: 1.0
+  
+  #Faeze's persona IF preference dataset
+  ai2-adapt-dev/personahub_if_pref_data_manualseed_v2_19890: 1.0
 tokenizer_name: /model
 use_slow_tokenizer: true
 max_seq_length: 2048
