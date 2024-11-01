@@ -3,6 +3,7 @@ Collection of 'ground truth rewards' for different datasets/tasks.
 Used to give feedback to the model based on the ground truth answer.
 '''
 import re
+import string
 from open_instruct.math_utils import last_boxed_only_string, remove_boxed, get_unnormalized_answer, normalize_final_answer, is_equiv, hendrycks_is_equiv
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 
@@ -106,9 +107,32 @@ def verify_ifeval_sample(model_output, constraint):
     return func(answer, **non_none_args)
 
 
+def normalize_answer(s):
+    """
+    Lower text and remove punctuation, articles and extra whitespace.
+    From https://github.com/huggingface/evaluate/blob/main/metrics/squad/compute_score.py
+    """
+
+    def remove_articles(text):
+        return re.sub(r"\b(a|an|the)\b", " ", text)
+
+    def white_space_fix(text):
+        return " ".join(text.split())
+
+    def remove_punc(text):
+        exclude = set(string.punctuation)
+        return "".join(ch for ch in text if ch not in exclude)
+
+    def lower(text):
+        return text.lower()
+
+    return white_space_fix(remove_articles(remove_punc(lower(s))))
+
+
 def verify_flan_sample(model_output, ground_truth_answer):
-    # TODO: flan. we could do BLEU/ROUGE.... or maybe something like BertScore?
-    pass
+    # Flan! we will just use... exact match with some basic cleaning, after extracting the answer.
+    answer_string = model_output.split("The answer is: ")[-1].strip()
+    return normalize_answer(answer_string) == normalize_answer(ground_truth_answer)
 
 
 # debug code
