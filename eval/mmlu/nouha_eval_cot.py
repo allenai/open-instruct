@@ -114,44 +114,48 @@ def parse_cot_response(response):
 
     return None
 
-def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int],
-                       gen_args: GenerationArgs):
-    """Generate text using vLLM."""
-    # Create LLM instance directly
+
+def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
     llm = LLM(
         model=model_name_or_path,
         revision=revision,
-        trust_remote_code=True,
-        tensor_parallel_size=gen_args.tensor_parallel_size,
+        tokenizer_revision=revision,  # Add this
+        tensor_parallel_size=gen_args.tensor_parallel_size,  # For parallel processing
+        max_model_len=gen_args.response_length,  # Set max length
     )
 
-    # Set up sampling parameters
-    sampling_params = SamplingParams(
-        n=gen_args.num_completions,
-        temperature=gen_args.temperature,
-        top_p=gen_args.top_p,
-        max_tokens=gen_args.response_length,
-    )
+    # Get max length from model config
+    max_model_len = llm.llm_engine.scheduler_config.max_model_len
 
-    # Generate completions
+    # Filter long prompts
+    prompt_token_ids_len = len(prompt_token_ids)
+    prompt_token_ids = [item for item in prompt_token_ids if len(item) < max_model_len]
+    if len(prompt_token_ids) != prompt_token_ids_len:
+        print(f"Filtered out {prompt_token_ids_len - len(prompt_token_ids)} prompts which exceeds max token length")
+
+    # Generate with the correct sampling params
     outputs = llm.generate(
         prompt_token_ids=prompt_token_ids,
-        sampling_params=sampling_params,
+        sampling_params=SamplingParams(
+            n=gen_args.num_completions,
+            temperature=gen_args.temperature,
+            top_p=gen_args.top_p,
+            max_tokens=gen_args.response_length,
+            include_stop_str_in_output=True,
+        ),
     )
 
-    # Format outputs
+    # Return outputs in the correct format
     return [
         {
-            "outputs": [
-                {
-                    "text": out.text,
-                    "token_ids": out.token_ids,
-                } for out in output.outputs
-            ],
+            "outputs": [asdict(out) for out in output.outputs],
             "prompt": output.prompt,
+            "prompt_logprobs": output.prompt_logprobs,
+            "metrics": output.metrics,
         }
         for output in outputs
     ]
+
 # def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
 #     llm = LLM(
 #         model=model_name_or_path,
@@ -186,12 +190,11 @@ def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids:
 #         }
 #         for output in outputs
 #     ]
-
-
 @torch.no_grad()
 def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1):
     prompts = []
-    chat_formatting_function = dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
+    chat_formatting_function = dynamic_import_function(
+        args.chat_formatting_function) if args.use_chat_format else None
 
     # Prepare all prompts
     for i in range(0, test_df.shape[0]):
@@ -203,22 +206,25 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
         prompts.append(prompt)
 
-    # Set up vLLM generation arguments
-    gen_args = GenerationArgs(
-        num_completions=1,
-        temperature=0.9,
-        response_length=2048,
-        top_p=0.9,
-        tensor_parallel_size=1
-    )
+    # Tokenize all prompts
+    tokenized_prompts = [
+        tokenizer(prompt, return_tensors="pt", add_special_tokens=True)["input_ids"][0].tolist()
+        for prompt in prompts
+    ]
 
     try:
         # Generate responses using vLLM
         outputs = generate_with_vllm(
             model_name_or_path=args.model_name_or_path,
             revision=args.hf_revision if args.hf_revision else None,
-            prompt_token_ids=[tokenizer.encode(p) for p in prompts],
-            gen_args=gen_args
+            prompt_token_ids=tokenized_prompts,  # Now properly defined
+            gen_args=GenerationArgs(
+                num_completions=1,
+                temperature=0.9,
+                response_length=2048,
+                top_p=0.9,
+                tensor_parallel_size=1
+            )
         )
 
         # Process vLLM outputs
