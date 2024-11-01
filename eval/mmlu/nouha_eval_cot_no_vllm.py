@@ -37,27 +37,6 @@ def format_example(df, idx, include_answer=False):
     prompt += "\n\nExplain your reasoning step by step, then provide your final answer:"
     return prompt
 
-# def format_example(df, idx, include_answer=False):
-#     """Format a single example with structured CoT prompting."""
-#     instruction = "You're a helpful assistant, answer the following question by choosing an option. But before, provide your step-by-step reasoning that arrive at the solution, then give your answer in the format 'Answer: X' where X is one of A, B, C, or D.\n\n"
-#     prompt = df.iloc[idx, 0]
-#     prompt = instruction + prompt
-#     breakpoint()
-#     for j, choice in enumerate(choices):
-#         prompt += "\n{}. {}".format(choice, df.iloc[idx, j + 1])
-#
-#     if include_answer:
-#         prompt += "\n\nLet's solve this step by step. After explaining your reasoning, state your answer in the format 'Answer: X'\n"
-#         prompt += f"Step-by-step solution:\n"
-#         prompt += f"[Your reasoning here]\n"
-#         prompt += f"Answer: {df.iloc[idx, 5]}\n\n"
-#     else:
-#         prompt += "\n\nLet's solve this step by step. After explaining your reasoning, state your answer in the format 'Answer: X'\n"
-#         prompt += f"Step-by-step solution: [Your reasoning here]\n"
-#         prompt += f"Answer:"
-#     return prompt
-
-
 def gen_prompt(train_df, subject, k=-1):
     """Generate prompt with structured CoT formatting."""
     prompt = "The following are multiple choice questions about {}. For each question, provide your step-by-step reasoning, then give your answer in the format 'Answer: X' where X is one of A, B, C, or D.\n\n".format(
@@ -103,8 +82,6 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
     for i in range(0, test_df.shape[0]):
         k = args.ntrain
         prompt_end = format_example(test_df, i, include_answer=False)
-
-        # train_prompt = gen_prompt(dev_df, subject, k)
         prompt = prompt_end
         if args.use_chat_format:
             messages = [{"role": "user", "content": prompt}]
@@ -113,7 +90,6 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
         tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
         while len(tokenized_prompt) > 2048:
             k -= 1
-            # train_prompt = gen_prompt(dev_df, subject, k)
             prompt = prompt_end
 
             if args.use_chat_format:
@@ -127,7 +103,6 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
     full_responses = []
     for prompt in tqdm(prompts, desc=f"Generating responses for {subject}", leave=False):
         # Properly tokenize with attention mask
-        # breakpoint()
         inputs = tokenizer(
             prompt,
             return_tensors="pt",
@@ -137,8 +112,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
         ).to(model.device)
 
         # Generate with proper parameters
-        # breakpoint()
-        # Generate with proper parameters
+
         response = model.generate(
             **inputs,
             max_new_tokens=2048,
@@ -158,11 +132,8 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
             decoded_response = decoded_response[len(prompt):]
         full_responses.append(decoded_response)
 
-    # Rest of the function remains the same
-    # breakpoint()
     parsed_answers = []
     for response in full_responses:
-        # breakpoint()
         answer = parse_cot_response(response)
         parsed_answers.append(answer if answer else "A")  # Default to A if parsing fails
 
