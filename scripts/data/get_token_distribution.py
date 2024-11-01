@@ -50,6 +50,17 @@ DATASET_NAME_MAPPING = {
     # "wizardlm_alpaca": "WizardLM (Alpaca)",
 }
 
+DATASET_NAME_MAPPING_PREF = {
+    "helpsteer2-uf-pipeline-regen": "Tulu 3 HelpSteer2 Regen",
+    "ultrafeedback_binarized_cleaned_train": "UltraFeedback",
+    # Custom conversion of daring anteater synthetic data into preferences
+    "tulu3.4-sft-replica-50k-gpt4-prefs-on-policy": "Tulu 3 UltraFeedback+",
+    # Modifications of WildChat data to preferences with
+    "personahub_if_pref_data_manualseed_v2_19890": "Tulu 3 Persona IF Preferences",
+    # Custom IF Eval data with Llama 3.1 405B for chosen and Tulu 2 as rejected
+    "Llama-3.1-if_taxonomy_tulu": "Tulu 3 IFEval"
+}
+
 def plot_token_length_histogram(dataset_name, 
                                 column_name='messages', 
                                 tokenizer_name="baseten/Meta-Llama-3-tokenizer", 
@@ -61,6 +72,10 @@ def plot_token_length_histogram(dataset_name,
                                 plot_num_turns=False,
                                 dont_split_histogram=False,
                                 set_max_y=0):
+    
+    # swap dataset mapping if preferences
+    if column_name in ['chosen', 'rejected']:
+        DATASET_NAME_MAPPING = DATASET_NAME_MAPPING_PREF
     
     print("Running analytics...")
     # Load the dataset
@@ -75,7 +90,7 @@ def plot_token_length_histogram(dataset_name,
             new_messages.append({"role": role, "content": content})
         sample[column_name] = new_messages
         return sample
-
+    
     if "from" in dataset['train'][0][column_name][0].keys():
         dataset = dataset.map(convert_to_messages, num_proc=num_proc)
 
@@ -148,7 +163,7 @@ def plot_token_length_histogram(dataset_name,
         category_metric_values = defaultdict(list)
         for value, category in zip(metric_values, categories):
             category_metric_values[category].append(value)
-    
+
     # Create figure and axis
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.spines['top'].set_visible(False)
@@ -191,7 +206,7 @@ def plot_token_length_histogram(dataset_name,
             bottom_counts += counts
     else:
         n, bins, patches = ax.hist(metric_values, bins=bins, color='grey', edgecolor='black')
-    
+
     # Set axis properties
     if not automatic_binning and not plot_num_turns:
         ax.set_xlim(0, 12000)
