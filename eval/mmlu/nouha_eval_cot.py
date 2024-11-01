@@ -114,18 +114,25 @@ def parse_cot_response(response):
 
     return None
 
+
 def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids: List[int], gen_args: GenerationArgs):
-    llm = LLM(
+    from vllm.engine.arg_utils import EngineArgs
+
+    # Create engine args first
+    engine_args = EngineArgs(
         model=model_name_or_path,
         revision=revision,
-        tokenizer_revision=revision,
         tensor_parallel_size=gen_args.tensor_parallel_size,
-        trust_remote_code=True,
+        max_num_seqs=gen_args.num_completions,
         max_model_len=gen_args.response_length,
-        gpu_memory_utilization=0.9,  # Add this for better memory management
+        disable_rope_scaling=True,  # Add this to disable RoPE scaling
+        trust_remote_code=True,
+        gpu_memory_utilization=0.9
     )
 
-    # filter out prompts which are beyond the model's max token length
+    llm = LLM(engine_args=engine_args)  # Use engine_args instead of direct parameters
+
+    # Filter out prompts which are beyond the model's max token length
     max_model_len = llm.llm_engine.scheduler_config.max_model_len
     prompt_token_ids_len = len(prompt_token_ids)
     prompt_token_ids = [item for item in prompt_token_ids if len(item) < max_model_len]
@@ -137,7 +144,6 @@ def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids:
         temperature=gen_args.temperature,
         top_p=gen_args.top_p,
         max_tokens=gen_args.response_length,
-        stop=None,  # Changed this
     )
 
     outputs = llm.generate(
