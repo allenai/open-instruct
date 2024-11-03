@@ -1,7 +1,7 @@
-model_name_or_path: meta-llama/Llama-3.1-70B
+model_name_or_path: /oe-training-default/ai2-llm/checkpoints/OLMo-medium/peteish7-anneal-from-928646-50B-nowup-moremath-dclm07-fw2-se-flan/step11931-hf
 model_revision: main
 use_flash_attn: true
-tokenizer_name: meta-llama/Llama-3.1-70B
+tokenizer_name: /oe-training-default/ai2-llm/checkpoints/OLMo-medium/peteish7-anneal-from-928646-50B-nowup-moremath-dclm07-fw2-se-flan/step11931-hf
 use_slow_tokenizer: true
 dataset_mixer:
     # Static v3.9 nc mix file
@@ -19,7 +19,7 @@ dataset_mixer:
 
     # # Math datasets:
     # ai2-adapt-dev/personahub_math_v5_regen_149960: 1.0 # 149960 # all
-    # allenai/tulu-3-sft-personas-math-grade: 1.0 # 49980 # all
+    # ai2-adapt-dev/tulu_v3.9_personahub_math_interm_algebra_20k: 1.0 # 49980 # all
     # ai2-adapt-dev/tulu_v3.9_open_math_2_gsm8k_50k: 1.0 
     # ai2-adapt-dev/numinamath_tir_math_decontaminated: 1.0
     # ai2-adapt-dev/tulu_v3.9_personahub_math_interm_algebra_20k: 1.0
@@ -41,10 +41,10 @@ dataset_mixer:
     # ai2-adapt-dev/tulu_v3.9_table_gpt_5k: 1.0
     # ai2-adapt-dev/tulu_v3.9_aya_100k: 1.0
 
-max_seq_length: 4096
+max_seq_length: 4096 # need to increase to 8k
 preprocessing_num_workers: 128
 per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
-gradient_accumulation_steps: 1 # effective batch size 128 with 8 nodes
+gradient_accumulation_steps: 16 # effective batch size 128 with 4 nodes
 learning_rate: 2.0e-06
 lr_scheduler_type: linear
 warmup_ratio: 0.03
@@ -57,4 +57,3 @@ report_to:
 logging_steps: 1
 checkpointing_steps: epoch
 dataset_mix_dir: /output/
-gradient_checkpointing: true

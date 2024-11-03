@@ -166,7 +166,7 @@ def main():
     d['tasks'][0]['arguments'][0] = new_arguments
 
     # name and description
-    exp_name = f"open_instruct_finetune_{model_name}_{now}"
+    exp_name = f"open_instruct_finetune_{model_name}_{now}"[:128]
     d['description'] = exp_name
     d['tasks'][0]['name'] = exp_name
 

@@ -19,7 +19,7 @@ dataset_mixer:
 
     # # Math datasets:
     # ai2-adapt-dev/personahub_math_v5_regen_149960: 1.0 # 149960 # all
-    # ai2-adapt-dev/tulu_v3.9_personahub_math_interm_algebra_20k: 1.0 # 49980 # all
+    # allenai/tulu-3-sft-personas-math-grade: 1.0 # 49980 # all
     # ai2-adapt-dev/tulu_v3.9_open_math_2_gsm8k_50k: 1.0 
     # ai2-adapt-dev/numinamath_tir_math_decontaminated: 1.0
     # ai2-adapt-dev/tulu_v3.9_personahub_math_interm_algebra_20k: 1.0

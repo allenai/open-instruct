@@ -1,5 +1,5 @@
-model_name_or_path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.9-nc-1
-tokenizer_name: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.9-nc-1
+model_name_or_path: /model
+tokenizer_name: /model
 model_revision: main
 use_flash_attn: true
 gradient_checkpointing: true
@@ -8,6 +8,8 @@ gradient_checkpointing: true
 dataset_mixer:
   ai2-adapt-dev/tulu3.4-sft-replica-50k-gpt4-prefs-on-policy: 1.0
   ai2-adapt-dev/personahub_if_pref_data_manualseed_v2_19890: 1.0
+  ai2-adapt-dev/helpsteer2-uf-pipeline-regen: 1.0
+  allenai/ultrafeedback_binarized_cleaned_train: 1.0
 use_slow_tokenizer: true
 max_seq_length: 2048
 preprocessing_num_workers: 16
