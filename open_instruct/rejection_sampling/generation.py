@@ -24,17 +24,22 @@ from dataclasses import asdict, dataclass
 from pprint import pformat
 from typing import Dict, List, Optional
 
-from datasets import load_dataset
 from huggingface_hub import HfApi
 from huggingface_hub.repocard import RepoCard
 from rich.pretty import pprint
-from transformers import AutoTokenizer, HfArgumentParser
+from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
+from open_instruct.dataset_processor import (
+    INPUT_IDS_PROMPT_KEY,
+    DatasetConfig,
+    SFTDatasetProcessor,
+)
 from open_instruct.rejection_sampling.api_generate import (  # Import your classes
     LLMGenerationConfig,
     LLMProcessor,
 )
+from open_instruct.utils import ArgumentParserPlus, combine_dataset
 
 api = HfApi()
 # we don't use `multiprocessing.cpu_count()` because typically we only have 12 CPUs
@@ -44,6 +49,11 @@ NUM_CPUS_FOR_DATASET_MAP = 4
 
 @dataclass
 class Args:
+    dataset_mixer_list: List[str]
+    dataset_splits: List[str] = None
+    dataset_start_idx: int = 0
+    dataset_end_idx: Optional[int] = None
+
     model_name_or_path: str = "cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr"
     revision: str = "main"
     save_filename: str = "completions.jsonl"
@@ -64,18 +74,6 @@ class GenerationArgs:
     response_length: int = 2048
     top_p: float = 0.9
     tensor_parallel_size: int = 1
-
-
-@dataclass
-class DatasetArgs:
-    dataset_name: str = None
-    dataset_text_field: str = "prompt"
-    dataset_train_split: str = "train"
-    dataset_test_split: str = "validation"
-    dataset_start_idx: int = 0
-    dataset_end_idx: Optional[int] = 100
-    sanity_check: bool = False
-    sanity_check_size: int = 100
 
 
 def save_jsonl(save_filename: str, table: Dict[str, List]):
@@ -100,6 +98,7 @@ def generate_with_vllm(model_name_or_path: str, revision: str, prompt_token_ids:
         revision=revision,
         tokenizer_revision=revision,
         tensor_parallel_size=gen_args.tensor_parallel_size,
+        max_model_len=gen_args.response_length,
     )
 
     # filter out prompts which are beyond the model's max token length
@@ -144,35 +143,32 @@ def format_conversation(messages: list) -> str:
     return "\n".join(formatted_conversation)
 
 
-def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
-
-    ds = load_dataset(dataset_args.dataset_name)
-    if dataset_args.sanity_check:
-        for key in ds:
-            ds[key] = ds[key].select(range(min(dataset_args.sanity_check_size, len(ds[key]))))
-    if dataset_args.dataset_end_idx is None:
-        dataset_args.dataset_end_idx = len(ds[dataset_args.dataset_train_split])
-    for key in ds:
-        ds[key] = ds[key].select(range(dataset_args.dataset_start_idx, dataset_args.dataset_end_idx))
-    pprint([dataset_args, args, gen_args])
+def main(args: Args, dataset_config: DatasetConfig, gen_args: GenerationArgs):
+    dataset = combine_dataset(
+        args.dataset_mixer_list,
+        splits=args.dataset_splits,
+        columns_to_keep=[dataset_config.sft_messages_key],
+    )
+    if args.dataset_end_idx is None:
+        args.dataset_end_idx = len(dataset)
+    dataset = dataset.select(range(args.dataset_start_idx, args.dataset_end_idx))
+    pprint([dataset_config, args, gen_args])
 
     if "gpt-3.5" in args.model_name_or_path or "gpt-4" in args.model_name_or_path:
-        ds = ds.map(
+        dataset = dataset.map(
             lambda x: {"prompt": format_conversation(x["messages"][:-1])},
             num_proc=NUM_CPUS_FOR_DATASET_MAP,
         )
-        messages = ds[dataset_args.dataset_train_split]["prompt"]
+        messages = dataset["prompt"]
         responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args))
         outputs = [{"outputs": [{"text": response} for response in responses]}]
 
     else:
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, revision=args.revision)
-
-        ds = ds.map(
-            lambda x: {"prompt_token_ids": tokenizer.apply_chat_template(x["messages"][:-1])},
-            num_proc=NUM_CPUS_FOR_DATASET_MAP,
-        )
-        prompt_token_ids = ds[dataset_args.dataset_train_split]["prompt_token_ids"]
+        dataset_processor = SFTDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
+        dataset = dataset_processor.tokenize(dataset)
+        dataset = dataset_processor.filter(dataset)
+        prompt_token_ids = dataset[INPUT_IDS_PROMPT_KEY]
         outputs = generate_with_vllm(args.model_name_or_path, args.revision, prompt_token_ids, gen_args)
 
     # Assuming we generate n=3 completions per prompt; the outputs will look like:
@@ -185,7 +181,7 @@ def main(args: Args, dataset_args: DatasetArgs, gen_args: GenerationArgs):
     # ...
     table = defaultdict(list)
     num_prompt_with_identical_completions = 0
-    for output, messages in zip(outputs, ds[dataset_args.dataset_train_split]["messages"]):
+    for output, messages in zip(outputs, dataset["messages"]):
         # if the model completions are exactly the same across all completions per prompt, we can skip this
         if len(set(tuple(item["text"]) for item in output["outputs"])) == 1:
             num_prompt_with_identical_completions += 1
@@ -231,8 +227,8 @@ See https://github.com/allenai/open-instruct/blob/main/docs/algorithms/rejection
 args:
 {pformat(vars(args))}
 
-dataset_args:
-{pformat(vars(dataset_args))}
+dataset_config:
+{pformat(vars(dataset_config))}
 
 gen_args:
 {pformat(vars(gen_args))}
@@ -251,6 +247,5 @@ gen_args:
 
 
 if __name__ == "__main__":
-    parser = HfArgumentParser((Args, DatasetArgs, GenerationArgs))
-    args, dataset_args, gen_args = parser.parse_args_into_dataclasses()
-    main(args, dataset_args, gen_args)
+    parser = ArgumentParserPlus((Args, DatasetConfig, GenerationArgs))
+    main(*parser.parse())
