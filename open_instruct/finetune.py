@@ -1084,7 +1084,7 @@ def main(args: FlatArguments):
                 --preemptible \
                 --budget ai2/allennlp \
                 --workspace ai2/tulu-2-improvements \
-                --image nathanl/open_instruct_auto \
+                --image nouhad/open_instruct_olmo\
                 --pure_docker_mode \
                 --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
                 --beaker_workload_id {beaker_config.beaker_workload_id} \
