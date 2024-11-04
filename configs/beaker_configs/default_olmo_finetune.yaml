@@ -4,7 +4,7 @@ budget: ai2/oe-adapt
 tasks:
   - name: open-instruct-finetune
     image:
-      beaker: nouhad/open_instruct_olmo
+      beaker: nathanl/open_instruct_olmo_13
     command: [
       '/bin/sh', '-c'
     ]
