@@ -23,7 +23,7 @@ def main():
     parser.add_argument("--preemptible", type=bool, default=True, help="Whether to use preemptible instances")
     parser.add_argument("--num_gpus", type=int, default=8, help="Number of GPUs to use")
     parser.add_argument("--num_nodes", type=int, default=1, help="Number of nodes to use")
-    parser.add_argument("--image", type=str, default="nathanl/open_instruct_auto", help="Beaker image to use.")
+    parser.add_argument("--image", type=str, default="nouhad/open_instruct_olmo", help="Beaker image to use.")
     parser.add_argument("--workspace", type=str, default="ai2/tulu-2-improvements", help="Beaker workspace to use.")
     parser.add_argument("--mount_on_weka", type=str, default=None, help="Mount a Weka directory to the job")
     parser.add_argument("--weka_mount_path", type=str, default="/adapt-data", help="Path to mount the Weka directory")
