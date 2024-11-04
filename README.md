@@ -65,6 +65,12 @@ If you are internally at AI2, you can use this pre-built beaker image `hamishivi
 
 For training, you can use the previous image.
 
+**OLMo Images**: To support the latest OLMo architectures, we have a separate requirements and docker files, primarily to handle the installation of `ai2-olmo`.
+To build this image, run:
+```
+docker build --build-arg BUILDKIT_INLINE_CACHE=1 --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 -f Dockerfile.olmo . -t open_instruct_olmo
+```
+
 ### Developing
 When submitting a PR to this repo, we check the core code in `open_instruct/` for style with the following:
 ```
