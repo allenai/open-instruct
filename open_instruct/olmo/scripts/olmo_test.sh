@@ -5,4 +5,4 @@ python scripts/submit_finetune_job.py \
   --priority high \
   --image nouhad/open_instruct_olmo
   --exp_name nd-SFT-olmo_7b_0924_v3.9_safety \
-  --num_gpus 8
+  --num_gpus 6
