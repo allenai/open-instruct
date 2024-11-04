@@ -5,3 +5,5 @@ python scripts/submit_finetune_job.py \
   --priority high \
   --exp_name nd-SFT-olmo_7b_0924_v3.9_safety \
   --num_gpus 8
+
+
