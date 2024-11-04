@@ -70,7 +70,7 @@ from transformers import (
     PreTrainedTokenizer,
     get_scheduler,
 )
-from transformers.deepspeed import HfDeepSpeedConfig
+from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
 from open_instruct.dataset_processor import (
@@ -98,6 +98,7 @@ from open_instruct.model_utils import (
 )
 from open_instruct.utils import (
     ArgumentParserPlus,
+    BeakerRuntimeConfig,
     combine_dataset,
     get_wandb_tags,
     is_beaker_job,
@@ -253,6 +254,9 @@ class Args:
     enable_prefix_caching: bool = False
     """whether to enable prefix caching"""
     deepspeed_stage: int = 0
+    """the deepspeed stage"""
+    gather_whole_model: bool = False
+    """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
 
     # wandb and HF tracking configs
     with_tracking: bool = False
@@ -275,12 +279,12 @@ class Args:
     """Where to save the model"""
     checkpoint_output_dir: Optional[str] = None
     """Where to save the model checkpoints in case of preemption"""
-    overwrite_beaker_output_dir: Optional[str] = None
-    """Where to save in a beaker job, if not just /output. Useful with weka."""
 
     # Ai2 specific settings
     try_launch_beaker_eval_jobs: bool = True
     """Whether to launch beaker evaluation jobs after training"""
+    try_launch_beaker_eval_jobs_on_weka: bool = False
+    """Whether to launch beaker evaluation jobs after training on weka"""
     hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
@@ -552,8 +556,11 @@ class RayProcess:
 
 @ray.remote(num_gpus=1)
 class PolicyTrainerRayProcess(RayProcess):
-    def from_pretrained(self, args: Args, model_config: ModelConfig):
+    def from_pretrained(self, args: Args, model_config: ModelConfig, beaker_config: BeakerRuntimeConfig, wandb_url: str):
         self.args = args
+        self.model_config = model_config
+        self.beaker_config = beaker_config
+        self.wandb_url = wandb_url
         torch.cuda.set_device(self.local_rank)
         deepspeed.init_distributed()
 
@@ -772,14 +779,27 @@ class PolicyTrainerRayProcess(RayProcess):
             model = self.model.module
             count, num_params = 0, len(list(model.named_parameters()))
             refss = []
-            with deepspeed.zero.GatheredParameters(model.parameters(), enabled=args.deepspeed_stage == 3):
+            if args.gather_whole_model:
+                with deepspeed.zero.GatheredParameters(model.parameters(), enabled=args.deepspeed_stage == 3):
+                    for name, param in model.named_parameters():
+                        count += 1  # empty_cache at last param
+                        # Fire all vllm engines for broadcast
+                        if torch.distributed.get_rank() == 0:
+                            shape = param.shape if args.deepspeed_stage != 3 else param.ds_shape
+                            refs = [
+                                engine.update_weight.remote(
+                                    name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
+                                )
+                                for engine in vllm_engines
+                            ]
+                            refss.extend(refs)
+                        if torch.distributed.get_rank() == 0:
+                            torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+            else: # broadcast each parameter independently
                 for name, param in model.named_parameters():
-                    count += 1  # empty_cache at last param
-
-                    # Fire all vllm engines for broadcast
+                    count += 1
                     if torch.distributed.get_rank() == 0:
                         shape = param.shape if args.deepspeed_stage != 3 else param.ds_shape
-                        # print(f"broadcasting {name=} {shape=}")
                         refs = [
                             engine.update_weight.remote(
                                 name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
@@ -787,12 +807,9 @@ class PolicyTrainerRayProcess(RayProcess):
                             for engine in vllm_engines
                         ]
                         refss.extend(refs)
-                    # For ZeRO-3, allgather sharded parameter and broadcast to all vllm engines by rank 0
-                    # with deepspeed.zero.GatheredParameters([param], enabled=args.deepspeed_stage == 3):
-                    if torch.distributed.get_rank() == 0:
-                        torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
-                        # ray.get(refs)
-                        # print(f"broadcasting {name=} {shape=} success")
+                    with deepspeed.zero.GatheredParameters([param], enabled=args.deepspeed_stage == 3):
+                        if torch.distributed.get_rank() == 0:
+                            torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
             if torch.distributed.get_rank() == 0:
                 ray.get(refss)
 
@@ -820,7 +837,7 @@ class PolicyTrainerRayProcess(RayProcess):
             include_stop_str_in_output=True,
             n=args.number_samples_per_prompt,
         )
-        print("setup async queues")
+        # print("setup async queues")
         param_prompt_Q = None
         response_ids_Q = None
         evaluation_Q = None
@@ -852,7 +869,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 generation_start_time = time.time()
 
                 outputs = ray.get(
-                    llm.generate.remote(sampling_params=generation_config, prompt_token_ids=g_queries_list)
+                    llm.generate.remote(sampling_params=generation_config, prompt_token_ids=g_queries_list, use_tqdm=False)
                 )
                 response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
                 print(f"🔥🔥🔥 Generation time: {time.time() - generation_start_time:.2f} seconds")
@@ -861,7 +878,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 if sample_evaluation_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
                     outputs = ray.get(
                         llm.generate.remote(
-                            prompt_token_ids=sample_evaluation_prompt_token_ids, sampling_params=generation_config
+                            prompt_token_ids=sample_evaluation_prompt_token_ids, sampling_params=generation_config, use_tqdm=False
                         )
                     )
                     # for evaluation, even if we have multiple outputs, we only look at one of them for simplicity
@@ -1030,7 +1047,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 # print(f"{local_vllm_responses.shape=}, {local_vllm_responses=}")
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
-                    print(f"get reward stuff starts {i=}")
+                    # print(f"get reward stuff starts {i=}")
                     query = queries[i : i + args.local_rollout_forward_batch_size]
                     query_response = query_responses[i : i + args.local_rollout_forward_batch_size]
                     response = query_response[:, context_length:]
@@ -1185,7 +1202,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     mini_batch_inds = b_inds[mini_batch_start:mini_batch_end]
                     gradient_accumulation_idx = 0
                     for micro_batch_start in range(0, args.local_mini_batch_size, args.per_device_train_batch_size):
-                        print("micro batch start", micro_batch_start, self.rank)
+                        # print("micro batch start", micro_batch_start, self.rank)
                         micro_batch_end = micro_batch_start + args.per_device_train_batch_size
                         micro_batch_inds = mini_batch_inds[micro_batch_start:micro_batch_end]
                         mb_advantage = advantages[micro_batch_inds]
@@ -1318,14 +1335,29 @@ class PolicyTrainerRayProcess(RayProcess):
             del (global_metrics, metrics, kl, non_score_reward, non_score_reward_sum, rlhf_reward)
             gc.collect()
             torch.cuda.empty_cache()
-            print(f"finished training {training_step}")
+            # print(f"finished training {training_step}")
 
             # save steps
             if args.save_freq > 0 and training_step % args.save_freq == 0:
-                step_dir = os.path.join(args.output_dir, f"step_{training_step}")
+                checkpoint_dir = f"{args.output_dir}_checkpoints"
+                os.makedirs(checkpoint_dir, exist_ok=True)
+                step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
                 os.makedirs(step_dir, exist_ok=True)
+                print(f"Saving model at step {training_step} to {step_dir}")
                 self.save_model(step_dir)
+                if args.try_launch_beaker_eval_jobs_on_weka:
+                    self.launch_ai2_evals_on_weka(step_dir, training_step)
+        print(f"Saving final model at step {training_step} to {args.output_dir}")
+        self.save_model(args.output_dir)
+        if args.try_launch_beaker_eval_jobs_on_weka:
+            self.launch_ai2_evals_on_weka(args.output_dir)
+
+        # Ai2 logic: we use /output to store the artifacts of the job, so we
+        # make a copy of the model to `/output` in the end.
+        if len(self.beaker_config.beaker_dataset_id_urls) > 0:
+             shutil.copytree(args.output_dir, "/output")
         print("finished training")
+
 
     def save_model(self, output_dir: str) -> None:
         if self.rank == 0:
@@ -1382,6 +1414,60 @@ class PolicyTrainerRayProcess(RayProcess):
             # save tokenizer
             self.original_tokenizer.save_pretrained(output_dir)
 
+    def launch_ai2_evals_on_weka(self, step_dir: str, training_step: Optional[int] = None) -> None:
+        """auto eval the metrics as `f"{args.exp_name}_step_{training_step}"` in our leaderboard"""
+        args = self.args
+        beaker_config = self.beaker_config
+        model_config = self.model_config
+        wandb_url = self.wandb_url
+        # Ai2 specific logic
+        if is_beaker_job() and self.rank == 0:
+            if training_step is not None:
+                leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
+            else:
+                leaderboard_name = args.hf_repo_revision
+            if args.hf_metadata_dataset:
+                dataset_list = list(args.dataset_mixer_dict.keys())
+                # mainly just focussing here on what would be useful for the leaderboard.
+                # wandb will have even more useful information.
+                metadata_blob = {
+                    "model_name": args.exp_name,
+                    "model_type": "ppo",
+                    "datasets": dataset_list,
+                    "base_model": model_config.model_name_or_path,
+                    "wandb_path": wandb_url,
+                    "beaker_experiment": beaker_config.beaker_experiment_url,
+                    "beaker_datasets": beaker_config.beaker_dataset_id_urls,
+                }
+                upload_metadata_to_hf(
+                    metadata_blob,
+                    "metadata.json",
+                    args.hf_metadata_dataset,
+                    "results/" + leaderboard_name,  # to match what the auto-evals name as.
+                )
+
+            if args.try_launch_beaker_eval_jobs and len(beaker_config.beaker_dataset_id_urls) > 0:
+                command = f"""\
+                    python scripts/submit_eval_jobs.py \
+                        --model_name {leaderboard_name} \
+                        --location {step_dir} \
+                        --cluster ai2/saturn-cirrascale \
+                        --is_tuned \
+                        --workspace "tulu-3-results" \
+                        --preemptible \
+                        --use_hf_tokenizer_template \
+                        --beaker_image "nathanl/open_instruct_auto" \
+                        --upload_to_hf allenai/tulu-3-evals \
+                        --run_oe_eval_experiments \
+                        --run_safety_evaluations \
+                        --skip_oi_evals
+                """
+                print(f"Launching eval jobs with command: {command}")
+                process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                stdout, stderr = process.communicate()
+                print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
+                print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
+                print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
 
 def kill_ray_cluster_if_a_worker_dies(object_refs: List[Any], stop_event: threading.Event):
     while True:
@@ -1462,15 +1548,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # set up experiment tracking and seeds
     all_configs = {}
+    beaker_config = None
     if is_beaker_job():
-        args.checkpoint_output_dir = os.environ.get("CHECKPOINT_OUTPUT_DIR", args.output_dir)
+        args.checkpoint_output_dir = os.environ.get("CHECKPOINT_OUTPUT_DIR", None)
         beaker_config = maybe_get_beaker_config()
-        # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
-        if len(beaker_config.beaker_dataset_id_urls) > 0:
-            args.output_dir = "/output"
-        # if the user has asked to save to a specific directory, use that instead
-        if args.overwrite_beaker_output_dir is not None:
-            args.output_dir = args.overwrite_beaker_output_dir
         all_configs.update(vars(beaker_config))
     all_configs.update(**asdict(args), **asdict(dataset_config), **asdict(model_config))
     if args.with_tracking:
@@ -1505,6 +1586,12 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     # create the dataset
     dataset_dict = DatasetDict()
     dataset_processor = SFTGroundTruthDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
+    if len(args.dataset_train_splits) != len(args.dataset_mixer_dict) and len(args.dataset_train_splits) == 1:
+        args.dataset_train_splits = [args.dataset_train_splits[0]] * len(args.dataset_mixer_dict)
+        print(f"Dataset splits not provided for all datasets. Using the same {args.dataset_train_splits[0]} split for all datasets.")
+    if len(args.dataset_eval_splits) != len(args.dataset_eval_mixer_dict) and len(args.dataset_eval_splits) == 1:
+        args.dataset_eval_splits = [args.dataset_eval_splits[0]] * len(args.dataset_eval_mixer_dict)
+        print(f"Dataset splits not provided for all datasets. Using the same {args.dataset_eval_splits[0]} split for all datasets.")
     train_dataset = combine_dataset(
         args.dataset_mixer_dict,
         splits=args.dataset_train_splits,
@@ -1532,7 +1619,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 dataset_config.dataset_source_key,
             ],
         )
-        eval_dataset = eval_dataset.select(range(0, min(len(eval_dataset), dataset_config.sanity_check_max_samples)))
+        if dataset_config.sanity_check:
+            eval_dataset = eval_dataset.select(range(0, min(len(eval_dataset), dataset_config.sanity_check_max_samples)))
         eval_dataset = dataset_processor.tokenize(eval_dataset)
         eval_dataset = dataset_processor.filter(eval_dataset, need_contain_labels=False)
         dataset_dict["eval"] = eval_dataset
@@ -1560,7 +1648,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         PolicyTrainerRayProcess,
         args.actor_num_gpus_per_node,
     )
-    inits.extend(model.from_pretrained.remote(args, model_config) for model in policy_group.models)
+    wandb_url = wandb.run.get_url() if args.with_tracking else None
+    inits.extend(model.from_pretrained.remote(args, model_config, beaker_config, wandb_url) for model in policy_group.models)
     max_len = dataset_config.max_prompt_token_length + args.response_length
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
@@ -1620,16 +1709,11 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     ray.get(refs)
 
     # save model
-    ray.get([policy_model.save_model.remote(args.output_dir) for policy_model in policy_group.models])
     ray.shutdown()
     stop_event.set()
 
-    # hack
-    accelerator = Namespace()
-    accelerator.is_main_process = True
-
     # Ai2 specific logic
-    if is_beaker_job() and accelerator.is_main_process:
+    if is_beaker_job():
         if args.hf_metadata_dataset:
             dataset_list = list(args.dataset_mixer_dict.keys())
             # mainly just focussing here on what would be useful for the leaderboard.
@@ -1670,6 +1754,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
             print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
 
+    accelerator = Namespace()
+    accelerator.is_main_process = True  # hack
     if args.push_to_hub:
         push_folder_to_hub(
             accelerator,
@@ -1678,10 +1764,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             args.hf_repo_revision,
         )
 
-    if accelerator.is_main_process:
-        # remove args.checkpoint_output_dir
-        if os.path.exists(args.checkpoint_output_dir):
-            shutil.rmtree(args.checkpoint_output_dir, ignore_errors=True)
+    # The `checkpoint_output_dir` is only used in case of preemption and should be deleted if the run was successful.
+    # We use `--save_freq` to save intermediate checkpoints in the output folder instead.
+    if args.checkpoint_output_dir is not None and os.path.exists(args.checkpoint_output_dir):
+        shutil.rmtree(args.checkpoint_output_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
