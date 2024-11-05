@@ -427,7 +427,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     # set up experiment tracking and seeds
     all_configs = {}
     if is_beaker_job():
-        args.checkpoint_output_dir = os.environ.get("CHECKPOINT_OUTPUT_DIR", args.output_dir)
+        args.checkpoint_output_dir = os.environ.get("CHECKPOINT_OUTPUT_DIR", None)
         beaker_config = maybe_get_beaker_config()
         # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
         if len(beaker_config.beaker_dataset_id_urls) > 0:
@@ -472,6 +472,16 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     # create the dataset
     dataset_dict = DatasetDict()
     dataset_processor = SFTGroundTruthDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
+    if len(args.dataset_train_splits) != len(args.dataset_mixer_dict) and len(args.dataset_train_splits) == 1:
+        args.dataset_train_splits = [args.dataset_train_splits[0]] * len(args.dataset_mixer_dict)
+        print(
+            f"Dataset splits not provided for all datasets. Using the same {args.dataset_train_splits[0]} split for all datasets."
+        )
+    if len(args.dataset_eval_splits) != len(args.dataset_eval_mixer_dict) and len(args.dataset_eval_splits) == 1:
+        args.dataset_eval_splits = [args.dataset_eval_splits[0]] * len(args.dataset_eval_mixer_dict)
+        print(
+            f"Dataset splits not provided for all datasets. Using the same {args.dataset_eval_splits[0]} split for all datasets."
+        )
     train_dataset = combine_dataset(
         args.dataset_mixer_dict,
         splits=args.dataset_train_splits,
@@ -1134,8 +1144,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         )
 
     if accelerator.is_main_process:
-        # remove args.checkpoint_output_dir
-        if os.path.exists(args.checkpoint_output_dir):
+        # The `checkpoint_output_dir` is only used in case of preemption and should be deleted if the run was successful.
+        # We use `--save_freq` to save intermediate checkpoints in the output folder instead.
+        if args.checkpoint_output_dir is not None and os.path.exists(args.checkpoint_output_dir):
             shutil.rmtree(args.checkpoint_output_dir, ignore_errors=True)
 
 
