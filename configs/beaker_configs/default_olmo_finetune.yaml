@@ -10,8 +10,8 @@ tasks:
     ]
     arguments: ['PYTHONPATH="/stage:$PYTHONPATH" accelerate launch
       --mixed_precision bf16
-      --num_machines 1
-      --num_processes 4
+      --num_machines 2
+      --num_processes 16
       --use_deepspeed
       --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf
       open_instruct/finetune.py
