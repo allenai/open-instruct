@@ -1,0 +1,28 @@
+model_name_or_path: ai2-adapt-dev/OLMo-medium-peteish7-anneal-from-928646-50B-nowup-dclm07-flan
+model_revision: main
+use_flash_attn: true
+tokenizer_name: allenai/dolma2-tokenizer
+#tokenizer_name: ai2-adapt-dev/OLMo-medium-peteish7-anneal-from-928646-50B-nowup-dclm07-flan
+use_slow_tokenizer: false # olmo models only use fast tokenizers
+dataset_mixer:
+    allenai/tulu-v3.9-mix-preview-noncommercial: 1.0
+max_seq_length: 4096
+preprocessing_num_workers: 128
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 4 # designed for 4 nodes
+# gradient_accumulation_steps: 8 # designed for 2 nodes
+# gradient_accumulation_steps: 16 # designed for 1 nodes
+gradient_checkpointing: true
+learning_rate: 2.0e-06
+lr_scheduler_type: linear
+warmup_ratio: 0.03
+weight_decay: 0.0
+num_train_epochs: 2
+output_dir: /output/
+with_tracking: true
+# reduce_loss: mean
+report_to:
+  - wandb
+logging_steps: 1
+checkpointing_steps: epoch
+add_bos: true
