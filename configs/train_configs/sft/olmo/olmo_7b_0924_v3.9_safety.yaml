@@ -9,7 +9,10 @@ dataset_mixer:
 max_seq_length: 4096
 preprocessing_num_workers: 128
 per_device_train_batch_size: 1
-gradient_accumulation_steps: 8 # should run with this set to 16 for 1 node only
+gradient_accumulation_steps: 4 # designed for 4 nodes
+# gradient_accumulation_steps: 8 # designed for 2 nodes
+# gradient_accumulation_steps: 16 # designed for 1 nodes
+gradient_checkpointing: true
 learning_rate: 2.0e-06
 lr_scheduler_type: linear
 warmup_ratio: 0.03
@@ -17,6 +20,7 @@ weight_decay: 0.0
 num_train_epochs: 3
 output_dir: /output/
 with_tracking: true
+# reduce_loss: mean
 report_to:
   - wandb
 logging_steps: 1
