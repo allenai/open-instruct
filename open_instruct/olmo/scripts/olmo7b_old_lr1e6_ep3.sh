@@ -10,3 +10,6 @@ python scripts/submit_finetune_job.py \
   --exp_name nd-SFT-olmo7b_old_lr1e6_ep3_v3.9-mix \
   --num_gpus 8
 
+
+
+
