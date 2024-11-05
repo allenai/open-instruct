@@ -227,6 +227,9 @@ def apply_verifiable_reward(
     rewards = []
     for prediction, ground_truth, dataset in zip(decoded_responses, ground_truths, datasets):
         verified = False
+        if ground_truth is None:
+            rewards.append(0)
+            continue
         if dataset.lower() == 'gsm8k':
             verified = verify_gsm8k_sample(prediction, ground_truth)
         elif dataset.lower() == 'math':
