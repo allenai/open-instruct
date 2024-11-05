@@ -46,8 +46,8 @@ tasks:
         value: false
       - name: WANDB_DISABLED
         value: true
-      - name: HF_TOKEN
-        secret: HF_TOKEN
+      - name: nouhad_HF_TOKEN
+        secret: nouhad_HF_TOKEN
     datasets:
       - mountPath: /oe-adapt-default
         source:
