@@ -1,9 +1,11 @@
 model_name_or_path: ai2-adapt-dev/OLMo-medium-peteish7-anneal-from-928646-50B-nowup-dclm07-flan
 model_revision: main
 use_flash_attn: true
-tokenizer_name: ai2-adapt-dev/OLMo-medium-peteish7-anneal-from-928646-50B-nowup-dclm07-flan
+tokenizer_name: allenai/dolma2-tokenizer
+#tokenizer_name: ai2-adapt-dev/OLMo-medium-peteish7-anneal-from-928646-50B-nowup-dclm07-flan
 use_slow_tokenizer: false # olmo models only use fast tokenizers
-dataset_name: allenai/llama-3-tulu-v3.3-mix-preview
+dataset_mixer:
+    allenai/tulu-v3.9-mix-preview-noncommercial: 1.0
 max_seq_length: 4096
 preprocessing_num_workers: 128
 per_device_train_batch_size: 1
