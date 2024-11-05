@@ -4,9 +4,6 @@ use_flash_attn: true
 tokenizer_name: meta-llama/Llama-3.1-8B
 use_slow_tokenizer: true
 dataset_mixer:
-    # Static v3.9 nc mix file
-    # WIP
-
     # Static v3.9 huggingface dataset
     allenai/tulu-v.3.9-mix-preview-noncommercial: 1.0
 
@@ -41,7 +38,7 @@ dataset_mixer:
     # ai2-adapt-dev/tulu_v3.9_table_gpt_5k: 1.0
     # ai2-adapt-dev/tulu_v3.9_aya_100k: 1.0
 
-max_seq_length: 4096 # need to increase to 8k
+max_seq_length: 4096
 preprocessing_num_workers: 128
 per_device_train_batch_size: 1 # note, this is set up for 8 GPUs
 gradient_accumulation_steps: 2 # effective batch size 128 with 4 nodes
