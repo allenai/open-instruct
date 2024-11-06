@@ -1,4 +1,3 @@
-
 import os
 import json
 import yaml
@@ -8,7 +7,7 @@ from tqdm import tqdm
 import spacy
 import torch
 from transformers import AutoModel, AutoTokenizer
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 from elasticsearch import Elasticsearch
 
 SPACY_MODEL = spacy.load("en_core_web_lg")
