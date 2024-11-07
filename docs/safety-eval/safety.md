@@ -9,15 +9,15 @@ This should be the most relevant thing for internal Ai2 users of open-instruct. 
 An example command would be:
 ```bash
 python scripts/submit_eval_jobs.py \
-      --model_name open_instruct_dpo_tune_olmo_7b_soup_anneal_v3.9_4_DPO_11062024031845 \
-      --location 01JBZQPN85V7WX857VV9BTP5G6 \
+    --model_name <model name> \
+      --location <beaker id> \
       --is_tuned --workspace tulu-3-results \
       --preemptible \
       --use_hf_tokenizer_template \
       --beaker_image nathanl/open_instruct_auto \
-      --run_safety_evaluations \
-      --skip_oi_evals \
-      --use_alternate_safety_image hamishivi/safety_eval_olmo
+      --upload_to_hf allenai/tulu-3-evals \
+      --run_oe_eval_experiments \
+      --run_safety_evaluations
 ```
 
 Use the `--use_alternate_safety_image` to change the safety image, for example: `--use_alternate_safety_image hamishivi/safety_eval_olmo`.
