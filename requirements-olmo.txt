@@ -44,3 +44,5 @@ autoflake
 pytest
 hf_transfer
 beaker-py
+litellm
+matplotlib

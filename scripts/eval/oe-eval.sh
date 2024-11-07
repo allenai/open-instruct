@@ -85,27 +85,27 @@ else
 fi
 
 TASKS=(
-    "gsm8k::tulu"
+    # "gsm8k::tulu"
     "bbh:cot::tulu"
-    "drop::llama3"
+    # "drop::llama3"
     "minerva_math::tulu"
-    "codex_humaneval::tulu"
-    "codex_humanevalplus::tulu"
-    "ifeval::tulu"
-    "popqa::tulu"
-    "mmlu:mc::tulu"
-    "alpaca_eval_v2::tulu"
-    "truthfulqa::tulu"
+    # "codex_humaneval::tulu"
+    # "codex_humanevalplus::tulu"
+    # "ifeval::tulu"
+    # "popqa::tulu"
+    # "mmlu:mc::tulu"
+    # "alpaca_eval_v2::tulu"
+    # "truthfulqa::tulu"
 )
 # For models without VLLM (experimental architectures)
 # comment out the VLLM arg and set GPU_COUNT_OTHER to 1
 # also consider lowering the batch size (VLLM arg), maybe to 5, VLLM handles it differently
 # MODEL_TYPE="--model-type vllm"
-BATCH_SIZE_VLLM=10000
+BATCH_SIZE_VLLM=1
 BATCH_SIZE_OTHER=1
 # Set GPU_COUNT and GPU_COUNT_OTHER based on NUM_GPUS
 GPU_COUNT="$NUM_GPUS"
-GPU_COUNT_OTHER=$((NUM_GPUS * 2)) 
+GPU_COUNT_OTHER=1 #$((NUM_GPUS * 2)) 
 MODEL_TYPE_OTHER=""
 
 for TASK in "${TASKS[@]}"; do
@@ -116,9 +116,20 @@ for TASK in "${TASKS[@]}"; do
         MODEL_TYPE=$MODEL_TYPE_OTHER
     else
         BATCH_SIZE=$BATCH_SIZE_VLLM
-        MODEL_TYPE="--model-type vllm"
+        MODEL_TYPE="" #"--model-type vllm"
         GPU_COUNT=$GPU_COUNT
     fi
     
-    python oe-eval-internal/oe_eval/launch.py --model "$MODEL_NAME" --beaker-workspace "ai2/tulu-3-results" --beaker-budget ai2/oe-adapt --task "$TASK" $MODEL_TYPE --batch-size "$BATCH_SIZE" --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" ${HF_UPLOAD_ARG} --gpus "$GPU_COUNT" --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key"}' ${REVISION_ARG} --beaker-retries 2
+    python oe-eval-internal/oe_eval/launch.py --cluster "ai2/allennlp-cirrascale","ai2/pluto-cirrascale","ai2/saturn-cirrascale","ai2/jupiter-cirrascale-2" --model "$MODEL_NAME" --beaker-workspace "ai2/tulu-3-results" --beaker-budget ai2/oe-adapt --task "$TASK" $MODEL_TYPE --batch-size "$BATCH_SIZE" --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" ${HF_UPLOAD_ARG} --gpus "$GPU_COUNT" --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key"}' ${REVISION_ARG} --beaker-retries 2
 done
+
+#     "ai2/allennlp-cirrascale",
+#     "ai2/general-cirrascale",
+#     "ai2/s2-cirrascale-l40",
+#     "ai2/allennlp-elara-cirrascale",
+#     "ai2/pluto-cirrascale",
+#     "ai2/neptune-cirrascale",
+#     "ai2/saturn-cirrascale",
+#     "ai2/jupiter-cirrascale-2",
+# ])
+`
