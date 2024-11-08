@@ -102,6 +102,7 @@ parser.add_argument("--run_oe_eval_experiments", action="store_true", help="Run 
 parser.add_argument("--run_safety_evaluations", action="store_true", help="Run the OE safety evaluations too.")
 parser.add_argument("--skip_oi_evals", action="store_true", help="Don't run open instruct evals.")
 parser.add_argument("--oe_eval_max_length", type=int, default=4096, help="Max length for OE eval.")
+parser.add_argument("--use_alternate_safety_image", type=str, default=None, help="Use a different image for safety eval.")
 args = parser.parse_args()
 
 
@@ -120,9 +121,15 @@ d1['tasks'][0]['context']['priority'] = args.priority
 d1['tasks'][0]['context']['preemptible'] = args.preemptible
 d1['tasks'][0]['resources']['gpuCount'] = 1
 
+WEKA_CLUSTERS = [
+    "ai2/saturn-cirrascale",
+    "ai2/neptune-cirrascale",
+    "ai2/jupiter-cirrascale-2",
+]
+
 # remove nfs if asked or jupiter in cluster list.
 nfs_available = True
-if args.no_nfs or any(["jupiter" in c for c in cluster]):
+if args.no_nfs or any([c in WEKA_CLUSTERS for c in cluster]):
     # remove the NFS dataset - last element in the list.
     d1['tasks'][0]['datasets'] = d1['tasks'][0]['datasets'][:-1]
     nfs_available = False
@@ -607,6 +614,8 @@ if args.run_safety_evaluations:
     d["description"] = experiment_name
     # specific image for safety eval
     d["tasks"][0]["image"]["beaker"] = "hamishivi/open-safety"
+    if args.use_alternate_safety_image:
+        d["tasks"][0]["image"]["beaker"] = args.use_alternate_safety_image
     d["tasks"] = [d["tasks"][0]]
     task_spec = d["tasks"][0]
     task_spec["name"] = experiment_name

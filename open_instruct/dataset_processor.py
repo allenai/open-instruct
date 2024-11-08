@@ -174,7 +174,7 @@ class DatasetConfig:
 
     # filter config
     max_token_length: Optional[int] = None
-    max_prompt_token_lenth: Optional[int] = None
+    max_prompt_token_length: Optional[int] = None
 
     # dataset.map config
     sanity_check: bool = False
@@ -314,8 +314,8 @@ class PreferenceDatasetProcessor(DatasetProcessor):
     def filter(self, dataset: Union[Dataset, DatasetDict]):
         def filter_fn(row):
             return (
-                len(row[INPUT_IDS_PROMPT_KEY]) <= self.config.max_prompt_token_lenth
-                if self.config.max_prompt_token_lenth is not None
+                len(row[INPUT_IDS_PROMPT_KEY]) <= self.config.max_prompt_token_length
+                if self.config.max_prompt_token_length is not None
                 else (
                     True and len(row[INPUT_IDS_CHOSEN_KEY]) <= self.config.max_token_length
                     if self.config.max_token_length is not None
@@ -388,8 +388,8 @@ class SFTDatasetProcessor(DatasetProcessor):
     def filter(self, dataset: Dataset):
         def filter_fn(row):
             max_prompt_token_length_ok = True
-            if self.config.max_prompt_token_lenth is not None:
-                max_prompt_token_length_ok = len(row[INPUT_IDS_PROMPT_KEY]) <= self.config.max_prompt_token_lenth
+            if self.config.max_prompt_token_length is not None:
+                max_prompt_token_length_ok = len(row[INPUT_IDS_PROMPT_KEY]) <= self.config.max_prompt_token_length
 
             max_token_length_ok = True
             if self.config.max_token_length is not None:
