@@ -177,8 +177,8 @@ def get_reward(
     output = lm_backbone(
         input_ids=input_ids,
         attention_mask=attention_mask,
-        position_ids=position_ids,
-        return_dict=True,
+        # position_ids=position_ids,
+        # return_dict=True,
         output_hidden_states=True,
         use_cache=False,  # otherwise mistral-based RM would error out
     )
@@ -266,12 +266,12 @@ def forward(
             The output of the model, including hidden states.
     """
     attention_mask = query_responses != pad_token_id
-    position_ids = attention_mask.cumsum(1) - attention_mask.long()
+    # position_ids = attention_mask.cumsum(1) - attention_mask.long()
     input_ids = torch.masked_fill(query_responses, ~attention_mask, 0)
     return model(
         input_ids=input_ids,
         attention_mask=attention_mask,
-        position_ids=position_ids,
+        # # position_ids=position_ids,
         return_dict=True,
         output_hidden_states=True,
     )
