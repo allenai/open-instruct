@@ -3,23 +3,25 @@
 
 # List of datasets
 datasets=(
-    natolambert/tulu-v2-sft-mixture-flan
-    natolambert/tulu-v2-sft-mixture-cot
-    ai2-adapt-dev/personahub_math_v4_149975
-    AI-MO/NuminaMath-TIR
-    HuggingFaceH4/no_robots
-    allenai/openassistant-guanaco-reformatted
-    ai2-adapt-dev/tulu_hard_coded_examples
-    ai2-adapt-dev/SciRIFF-train-mix-science
-    ai2-adapt-dev/Table-GPT-All-train
-    ai2-adapt-dev/personahub_ifdata_v1_29980
-    ai2-adapt-dev/coconot-sft-reformat
-    ai2-adapt-dev/openmath-2-gsm8k
-    # m-a-p/CodeFeedback-Filtered-Instruction
-    ai2-adapt-dev/codefeedback-single-turn-reformat
-    ai2-adapt-dev/WildChat-1M-Full-GPT4-Only
-    ai2-adapt-dev/synthetic-finalresp-wildguarmixtrain
-    ai2-adapt-dev/processed-wildjailbreak
+    ai2-adapt-dev/oasst1_converted
+    ai2-adapt-dev/flan_v2_converted
+    ai2-adapt-dev/tulu_hard_coded_repeated_10
+    ai2-adapt-dev/no_robots_converted
+    ai2-adapt-dev/tulu_v3.9_wildchat_100k
+    ai2-adapt-dev/personahub_math_v5_regen_149960
+    allenai/tulu-3-sft-personas-math-grade
+    ai2-adapt-dev/tulu_v3.9_open_math_2_gsm8k_50k 
+    ai2-adapt-dev/numinamath_tir_math_decontaminated
+    ai2-adapt-dev/tulu_v3.9_personahub_math_interm_algebra_20k
+    ai2-adapt-dev/personahub_code_v2_34999
+    ai2-adapt-dev/evol_codealpaca_heval_decontaminated
+    ai2-adapt-dev/personahub_ifdata_manual_seed_v3_29980
+    ai2-adapt-dev/coconot_converted
+    ai2-adapt-dev/tulu_v3.9_wildjailbreak_decontaminated_50k
+    ai2-adapt-dev/tulu_v3.9_synthetic_finalresp_wildguardmixtrain_decontaminated_50k
+    ai2-adapt-dev/tulu_v3.9_sciriff_10k
+    ai2-adapt-dev/tulu_v3.9_table_gpt_5k
+    ai2-adapt-dev/tulu_v3.9_aya_100k
 )
 
 # For every dataset, get the statistics if the output directory doesn't exist

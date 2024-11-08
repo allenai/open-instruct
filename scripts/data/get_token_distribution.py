@@ -15,52 +15,6 @@ python scripts/data/get_token_distribution.py --dataset allenai/tulu-v2-sft-mixt
 python scripts/data/get_token_distribution.py --dataset teknium/OpenHermes-2.5 --column_name conversations --log_x --not_log_y --automatic_binning --hide_legend --dont_split_histogram --set_max_y 60000
 """
 
-DATASET_NAME_MAPPING = {
-    "NuminaMath-TIR": "NuminaMath-TIR",
-    "aya_dataset_converted": "Aya",
-    "evol_codealpaca_heval_decontaminated": "Evol CodeAlpaca",
-    "flan_v2_converted": "FLAN v2",
-    # "flan_v2": "FLAN v2",
-    "no_robots_converted": "No Robots",
-    "open_math_2_gsm8k_converted": "OpenMathInstruct2",
-    "processed-wildjailbreak": "WildJailbreak",
-    "synthetic-finalresp-wildguarmixtrain": "WildGuard",
-    "table_gpt_converted": "TableGPT",
-    "wildchat_gpt4_converted": "WildChat GPT4",
-    "coconot_converted": "CoCoNot",
-    "oasst1_converted": "OASST1",
-    # "oasst1": "OASST1",
-    # "open_orca": "OpenOrca",
-    "personahub_code_v2_34999": "Tulu 3 Persona Code",
-    "personahub_ifdata_manual_seed_v3_29980": "Tulu 3 Persona IF",
-    "personahub_math_interm_algebra_50000": "Tulu 3 Persona MATH - Algebra",
-    "personahub_math_v5_regen_149960": "Tulu 3 Persona MATH",
-    "personahub_grade_math_v1_49980": "Tulu 3 Persona Grade School Math",
-    "sciriff_converted": "SciRIFF",
-    # "tulu_hard_coded_repeated_10": "Hardcoded",
-    # "Hardcoded": "Hardcoded",
-    # "code_alpaca": "CodeAlpaca",
-    # "cot": "FLAN CoT",
-    # "sharegpt": "ShareGPT",
-    # "dolly": "Dolly",
-    # "gpt4_alpaca": "Alpaca (GPT4)",
-    # "lima": "LIMA",
-    # "science": "Science",
-    # "wizardlm": "WizardLM",
-    # "wizardlm_alpaca": "WizardLM (Alpaca)",
-}
-
-DATASET_NAME_MAPPING_PREF = {
-    "helpsteer2-uf-pipeline-regen": "Tulu 3 HelpSteer2 Regen",
-    "ultrafeedback_binarized_cleaned_train": "UltraFeedback",
-    # Custom conversion of daring anteater synthetic data into preferences
-    "tulu3.4-sft-replica-50k-gpt4-prefs-on-policy": "Tulu 3 UltraFeedback+",
-    # Modifications of WildChat data to preferences with
-    "personahub_if_pref_data_manualseed_v2_19890": "Tulu 3 Persona IF Preferences",
-    # Custom IF Eval data with Llama 3.1 405B for chosen and Tulu 2 as rejected
-    "Llama-3.1-if_taxonomy_tulu": "Tulu 3 IFEval"
-}
-
 def plot_token_length_histogram(dataset_name, 
                                 column_name='messages', 
                                 tokenizer_name="baseten/Meta-Llama-3-tokenizer", 
@@ -72,7 +26,62 @@ def plot_token_length_histogram(dataset_name,
                                 plot_num_turns=False,
                                 dont_split_histogram=False,
                                 set_max_y=0):
-    
+    DATASET_NAME_MAPPING = {
+        # "NuminaMath-TIR": "NuminaMath-TIR",
+        # "aya_dataset_converted": "Aya",
+        "evol_codealpaca_heval_decontaminated": "Evol CodeAlpaca",
+        "flan_v2_converted": "FLAN v2",
+        # "flan_v2": "FLAN v2",
+        "no_robots_converted": "No Robots",
+        # "open_math_2_gsm8k_converted": "OpenMathInstruct2",
+        # "processed-wildjailbreak": "WildJailbreak",
+        # "synthetic-finalresp-wildguarmixtrain": "WildGuard",
+        # "table_gpt_converted": "TableGPT",
+        # "wildchat_gpt4_converted": "WildChat GPT4",
+        "coconot_converted": "CoCoNot",
+        "oasst1_converted": "OASST1",
+        # "oasst1": "OASST1",
+        # "open_orca": "OpenOrca",
+        "personahub_code_v2_34999": "Tulu 3 Persona Code",
+        "personahub_ifdata_manual_seed_v3_29980": "Tulu 3 Persona IF",
+        # "personahub_math_interm_algebra_50000": "Tulu 3 Persona MATH - Algebra",
+        "tulu_v3.9_personahub_math_interm_algebra_20k": "Tulu 3 Persona MATH - Algebra",
+        "personahub_math_v5_regen_149960": "Tulu 3 Persona MATH",
+        # "personahub_grade_math_v1_49980": "Tulu 3 Persona Grade School Math",
+        # "sciriff_converted": "SciRIFF",
+        "tulu_hard_coded_repeated_10": "Hardcoded",
+        # "Hardcoded": "Hardcoded",
+        # "code_alpaca": "CodeAlpaca",
+        # "cot": "FLAN CoT",
+        # "sharegpt": "ShareGPT",
+        # "dolly": "Dolly",
+        # "gpt4_alpaca": "Alpaca (GPT4)",
+        # "lima": "LIMA",
+        # "science": "Science",
+        # "wizardlm": "WizardLM",
+        # "wizardlm_alpaca": "WizardLM (Alpaca)",
+        "numinamath_tir_math_decontaminated": "NuminaMath-TIR",
+        "tulu_v3.9_aya_100k": "Aya",
+        "tulu_v3.9_open_math_2_gsm8k_50k": "OpenMathInstruct2",
+        "tulu_v3.9_sciriff_10k": "SciRIFF",
+        "tulu_v3.9_synthetic_finalresp_wildguardmixtrain_decontaminated_50k": "WildGuard",
+        "tulu_v3.9_table_gpt_5k": "TableGPT",
+        "tulu_v3.9_wildchat_100k": "WildChat",
+        "tulu_v3.9_wildjailbreak_decontaminated_50k": "WildJailbreak",
+        "tulu-3-sft-personas-math-grade": "Tulu 3 Persona Grade School Math",
+    }
+
+    DATASET_NAME_MAPPING_PREF = {
+        "helpsteer2-uf-pipeline-regen": "Tulu 3 HelpSteer2 Regen",
+        "ultrafeedback_binarized_cleaned_train": "UltraFeedback",
+        # Custom conversion of daring anteater synthetic data into preferences
+        "tulu3.4-sft-replica-50k-gpt4-prefs-on-policy": "Tulu 3 UltraFeedback+",
+        # Modifications of WildChat data to preferences with
+        "personahub_if_pref_data_manualseed_v2_19890": "Tulu 3 Persona IF Preferences",
+        # Custom IF Eval data with Llama 3.1 405B for chosen and Tulu 2 as rejected
+        "Llama-3.1-if_taxonomy_tulu": "Tulu 3 IFEval"
+    }
+
     # swap dataset mapping if preferences
     if column_name in ['chosen', 'rejected']:
         DATASET_NAME_MAPPING = DATASET_NAME_MAPPING_PREF
