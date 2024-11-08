@@ -111,6 +111,10 @@ fi
 NUM_GPUS="${NUM_GPUS:-1}"
 
 MODEL_TYPE="--model-type vllm"
+# For models without VLLM (experimental architectures)
+# comment out the VLLM arg and set GPU_COUNT_OTHER to 1
+# also consider lowering the batch size (VLLM arg), maybe to 5, VLLM handles it differently
+# MODEL_TYPE="--model-type vllm"
 BATCH_SIZE_VLLM=10000
 BATCH_SIZE_OTHER=1
 # Set GPU_COUNT and GPU_COUNT_OTHER based on NUM_GPUS

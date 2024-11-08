@@ -25,6 +25,8 @@ def main():
     parser.add_argument("--num_nodes", type=int, default=1, help="Number of nodes to use")
     parser.add_argument("--image", type=str, default="nathanl/open_instruct_auto", help="Beaker image to use.")
     parser.add_argument("--workspace", type=str, default="ai2/tulu-2-improvements", help="Beaker workspace to use.")
+    parser.add_argument("--mount_on_weka", type=str, default=None, help="Mount a Weka directory to the job")
+    parser.add_argument("--weka_mount_path", type=str, default="/adapt-data", help="Path to mount the Weka directory")
     # allow unknown args from CLI, use this to modify loaded config in bash scripts for sweeping
     # Note, can only override args in --config passed (not default FlatArguments class in open_instruct/utils.py)
     
@@ -166,7 +168,7 @@ def main():
     d['tasks'][0]['arguments'][0] = new_arguments
 
     # name and description
-    exp_name = f"open_instruct_finetune_{model_name}_{now}"
+    exp_name = f"open_instruct_finetune_{model_name}_{now}"[:128]
     d['description'] = exp_name
     d['tasks'][0]['name'] = exp_name
 
@@ -221,6 +223,14 @@ def main():
     d['tasks'][0]['envVars'].append({
         'name': 'WANDB_API_KEY', 'secret': f"{beaker_whoami}_WANDB_API_KEY"
     })
+    
+    # Weka setting
+    if args.mount_on_weka:
+        if d['tasks'][0].get('datasets') is None:
+            d['tasks'][0]['datasets'] = []
+        d['tasks'][0]['datasets'].append({
+            'mountPath': f"{args.weka_mount_path}", 'source': {'weka': f"{args.mount_on_weka}"}
+        })
 
     # optionally, print to debug config
     print(d)
