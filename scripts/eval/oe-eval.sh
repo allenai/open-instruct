@@ -97,35 +97,31 @@ else
     REVISION_ARG=""
 fi
 
-DEV_TASKS=(
-    "gsm8k::tulu"
-    "bbh:cot::tulu"
-    "drop::llama3"
-    "minerva_math::tulu"
-    "codex_humaneval::tulu"
-    "codex_humanevalplus::tulu"
-    "ifeval::tulu"
-    "popqa::tulu"
-    "mmlu:mc::tulu"
-    "alpaca_eval_v2::tulu"
-    "truthfulqa::tulu"
-)
-
-UNSEEN_TASKS=(
-    "agi_eval_english:0shot_cot::tulu3"
-    "gpqa:0shot_cot::tulu3"
-    "mmlu_pro:0shot_cot::tulu3"
-    "deepmind_math:0shot_cot::tulu3"
-    "bigcodebench_hard::tulu"
-    "gpqa:0shot_cot::llama3.1"
-    "mmlu_pro:cot::llama3.1"
-    "bigcodebench::tulu"
-)
-
 if [ "$UNSEEN_EVALS" == "true" ]; then
-    TASKS=$UNSEEN_TASKS
+    TASKS=(
+        "agi_eval_english:0shot_cot::tulu3"
+        "gpqa:0shot_cot::tulu3"
+        "mmlu_pro:0shot_cot::tulu3"
+        "deepmind_math:0shot_cot::tulu3"
+        "bigcodebench_hard::tulu"
+        "gpqa:0shot_cot::llama3.1"
+        "mmlu_pro:cot::llama3.1"
+        "bigcodebench::tulu"
+    )
 else
-    TASKS=$DEV_TASKS
+    TASKS=(
+        "gsm8k::tulu"
+        "bbh:cot::tulu"
+        "drop::llama3"
+        "minerva_math::tulu"
+        "codex_humaneval::tulu"
+        "codex_humanevalplus::tulu"
+        "ifeval::tulu"
+        "popqa::tulu"
+        "mmlu:mc::tulu"
+        "alpaca_eval_v2::tulu"
+        "truthfulqa::tulu"
+    )
 fi
 
 MODEL_TYPE="--model-type vllm"
