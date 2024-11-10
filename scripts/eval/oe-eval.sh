@@ -81,6 +81,7 @@ MODEL_NAME_SAFE=${MODEL_NAME//\//_}
 # Set defaults for optional arguments
 HF_UPLOAD="${HF_UPLOAD:-false}"
 MAX_LENGTH="${MAX_LENGTH:-4096}"
+UNSEEN_EVALS="${UNSEEN_EVALS:-false}"
 
 # Set HF_UPLOAD_ARG if HF_UPLOAD is true
 if [ "$HF_UPLOAD" == "true" ]; then
