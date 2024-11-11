@@ -102,6 +102,7 @@ parser.add_argument("--run_oe_eval_experiments", action="store_true", help="Run 
 parser.add_argument("--run_safety_evaluations", action="store_true", help="Run the OE safety evaluations too.")
 parser.add_argument("--skip_oi_evals", action="store_true", help="Don't run open instruct evals.")
 parser.add_argument("--oe_eval_max_length", type=int, default=4096, help="Max length for OE eval.")
+parser.add_argument("--oe_eval_unseen_evals", action="store_true", help="Run unseen task evals instead of dev task evals on OE Eval.")
 parser.add_argument("--use_alternate_safety_image", type=str, default=None, help="Use a different image for safety eval.")
 args = parser.parse_args()
 
@@ -604,6 +605,8 @@ if args.run_oe_eval_experiments:
     oe_eval_cmd += f" --num_gpus {num_gpus}"
     if args.oe_eval_max_length:
         oe_eval_cmd += f" --max-length {args.oe_eval_max_length}"
+    if args.oe_eval_unseen_evals:
+        oe_eval_cmd += " --unseen-evals"
     print(f"Running OE eval with command: {oe_eval_cmd}")
     subprocess.Popen(oe_eval_cmd, shell=True)
 
