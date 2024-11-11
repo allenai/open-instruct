@@ -30,7 +30,7 @@ for dataset in "${datasets[@]}"; do
     
     if [ ! -f "$output_file" ]; then
         echo "Getting statistics for $dataset..."
-        python open_instruct/get_statistics.py --data_path ${dataset} --save_path ${output_file}
+        python scripts/data/get_statistics.py --data_path ${dataset} --save_path ${output_file}
     else
         echo "Statistics for $dataset already exist. Skipping..."
     fi
@@ -50,7 +50,7 @@ for dataset in "${datasets_pref[@]}"; do
     
     if [ ! -f "$output_file" ]; then
         echo "Getting statistics for $dataset..."
-        python open_instruct/get_statistics.py --data_path ${dataset} --save_path ${output_file} --messages_key chosen
+        python scripts/data/get_statistics.py --data_path ${dataset} --save_path ${output_file} --messages_key chosen
     else
         echo "Statistics for $dataset already exist. Skipping..."
     fi
