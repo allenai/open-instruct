@@ -87,7 +87,12 @@ PRIORITY="${PRIORITY:normal}"
 
 # Set HF_UPLOAD_ARG if HF_UPLOAD is true
 if [ "$HF_UPLOAD" == "true" ]; then
-    HF_UPLOAD_ARG="--hf-save-dir allenai/tulu-3-evals//results/${MODEL_NAME_SAFE}"
+    # if UNSEEN_EVALS, save results to a different directory
+    if [ "$UNSEEN_EVALS" == "true" ]; then
+        HF_UPLOAD_ARG="--hf-save-dir allenai/tulu-3-evals-unseen//results/${MODEL_NAME_SAFE}"
+    else
+        HF_UPLOAD_ARG="--hf-save-dir allenai/tulu-3-evals//results/${MODEL_NAME_SAFE}"
+    fi
 else
     HF_UPLOAD_ARG=""
 fi
