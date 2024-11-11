@@ -180,6 +180,7 @@ def get_datasets(
     save_data_dir: Optional[str] = None,
     need_columns: Optional[List[str]] = None,
     keep_ids: bool = False,
+    add_source_col: bool = False,
 ) -> DatasetDict:
     """
     Loads and mixes datasets according to proportions specified in `dataset_mixer`.
@@ -207,6 +208,8 @@ def get_datasets(
         keep_ids (`bool`, *optional*, defaults to `False`):
             Whether to keep ids for training that are added during mixing.
             Used primarily in mix_data.py for saving, or the saved dataset has IDs already.
+        add_source_col (`bool`, *optional*, defaults to `False`):
+            Whether to add a column to the dataset that indicates the source of the data explicitly.
     """
     if isinstance(dataset_mixer, list):
         assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
@@ -311,6 +314,11 @@ def get_datasets(
             dataset = dataset.remove_columns(
                 [col for col in dataset.column_names if col not in (columns_to_keep + ["id"])]
             )
+
+            # if add_source_col, add that column
+            if add_source_col:
+                source_col = [ds] * len(dataset)
+                dataset = dataset.add_column("source", source_col)
 
             # add tag to the dataset corresponding to where it was sourced from, for
             if "train" in split:
@@ -418,6 +426,7 @@ def combine_dataset(
             Whether to keep ids for training that are added during mixing.
             Used primarily in mix_data.py for saving, or the saved dataset has IDs already.
     """
+    assert len(splits) == len(dataset_mixer), "Number of splits must match the number of datasets."
     if isinstance(dataset_mixer, list):
         assert len(dataset_mixer) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer}"
         mixer_dict = {}
