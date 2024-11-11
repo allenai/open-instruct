@@ -1601,11 +1601,31 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     tokenizer = AutoTokenizer.from_pretrained(
         model_config.model_name_or_path, revision=model_config.model_revision, padding_side="right"
     )
-    if config.architectures == "LlamaForCausalLM" and config.bos_token_id == 128000:
-        tokenizer.pad_token_id = 128002  # <|reserved_special_token_0|>
+    if check_hf_olmo_availability():
+        print("Using exsiting tokenier chat template...")
+        pass
     else:
-        tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
-    tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
+        tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
+    # if config.architectures == "LlamaForCausalLM" and config.bos_token_id == 128000:
+    #     tokenizer.pad_token_id = 128002  # <|reserved_special_token_0|>
+    # elif check_hf_olmo_availability() and isinstance(tokenizer, OLMoTokenizerFast):
+    #     # OLMo newer models use this tokenizer
+    #     breakpoint()
+    #     if tokenizer.bos_token is None:
+    #         tokenizer.bos_token = tokenizer.eos_token
+    #         assert (
+    #             args.add_bos
+    #         ), "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
+    #     # else, pythia / other models
+    #     else:
+    #         num_added_tokens = tokenizer.add_special_tokens(
+    #             {
+    #                 "pad_token": "<pad>",
+    #             }
+    #         )
+    #         assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
+    # else:
+    #     tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
 
     # create the dataset
     dataset_dict = DatasetDict()

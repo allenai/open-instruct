@@ -91,6 +91,7 @@ RUN pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url h
 RUN pip install packaging
 RUN pip install flash-attn==2.6.3 --no-build-isolation
 RUN pip install -r requirements.txt
+RUN pip install ai2_olmo
 
 # NLTK download
 RUN python -m nltk.downloader punkt
