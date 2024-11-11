@@ -582,7 +582,7 @@ if not args.skip_oi_evals:
     cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
     subprocess.Popen(cmd, shell=True)
 
-if args.run_oe_eval_experiments:
+if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
     # if so, run oe-eval. We assume it is cloned in the top-level repo directory.
     oe_eval_cmd = f"scripts/eval/oe-eval.sh --model-name {model_name}"
     if args.upload_to_hf:
@@ -607,6 +607,8 @@ if args.run_oe_eval_experiments:
         oe_eval_cmd += f" --max-length {args.oe_eval_max_length}"
     if args.oe_eval_unseen_evals:
         oe_eval_cmd += " --unseen-evals"
+    # add priority
+    oe_eval_cmd += f" --priority {args.priority}"
     print(f"Running OE eval with command: {oe_eval_cmd}")
     subprocess.Popen(oe_eval_cmd, shell=True)
 
