@@ -25,31 +25,23 @@ def plot_token_length_histogram(dataset_name,
                                 hide_legend=False,
                                 plot_num_turns=False,
                                 dont_split_histogram=False,
-                                set_max_y=0):
+                                set_max_y=0,
+                                min_category_count=0):
     DATASET_NAME_MAPPING = {
+        # EXTRA DATASETS
         # "NuminaMath-TIR": "NuminaMath-TIR",
         # "aya_dataset_converted": "Aya",
-        "evol_codealpaca_heval_decontaminated": "Evol CodeAlpaca",
-        "flan_v2_converted": "FLAN v2",
         # "flan_v2": "FLAN v2",
-        "no_robots_converted": "No Robots",
         # "open_math_2_gsm8k_converted": "OpenMathInstruct2",
         # "processed-wildjailbreak": "WildJailbreak",
         # "synthetic-finalresp-wildguarmixtrain": "WildGuard",
         # "table_gpt_converted": "TableGPT",
         # "wildchat_gpt4_converted": "WildChat GPT4",
-        "coconot_converted": "CoCoNot",
-        "oasst1_converted": "OASST1",
         # "oasst1": "OASST1",
         # "open_orca": "OpenOrca",
-        "personahub_code_v2_34999": "Tulu 3 Persona Code",
-        "personahub_ifdata_manual_seed_v3_29980": "Tulu 3 Persona IF",
         # "personahub_math_interm_algebra_50000": "Tulu 3 Persona MATH - Algebra",
-        "tulu_v3.9_personahub_math_interm_algebra_20k": "Tulu 3 Persona MATH - Algebra",
-        "personahub_math_v5_regen_149960": "Tulu 3 Persona MATH",
         # "personahub_grade_math_v1_49980": "Tulu 3 Persona Grade School Math",
         # "sciriff_converted": "SciRIFF",
-        "tulu_hard_coded_repeated_10": "Hardcoded",
         # "Hardcoded": "Hardcoded",
         # "code_alpaca": "CodeAlpaca",
         # "cot": "FLAN CoT",
@@ -60,15 +52,34 @@ def plot_token_length_histogram(dataset_name,
         # "science": "Science",
         # "wizardlm": "WizardLM",
         # "wizardlm_alpaca": "WizardLM (Alpaca)",
-        "numinamath_tir_math_decontaminated": "NuminaMath-TIR",
-        "tulu_v3.9_aya_100k": "Aya",
-        "tulu_v3.9_open_math_2_gsm8k_50k": "OpenMathInstruct2",
-        "tulu_v3.9_sciriff_10k": "SciRIFF",
-        "tulu_v3.9_synthetic_finalresp_wildguardmixtrain_decontaminated_50k": "WildGuard",
-        "tulu_v3.9_table_gpt_5k": "TableGPT",
-        "tulu_v3.9_wildchat_100k": "WildChat",
-        "tulu_v3.9_wildjailbreak_decontaminated_50k": "WildJailbreak",
+        # PERSONA DATASETS
+        "tulu_v3.9_personahub_math_interm_algebra_20k": "Tulu 3 Persona MATH - Algebra",
+        "personahub_math_v5_regen_149960": "Tulu 3 Persona MATH",
         "tulu-3-sft-personas-math-grade": "Tulu 3 Persona Grade School Math",
+        "personahub_code_v2_34999": "Tulu 3 Persona Code",
+
+        # GENERAL DATASETS
+        "flan_v2_converted": "FLAN v2",
+        "no_robots_converted": "No Robots",
+        "oasst1_converted": "OASST1",
+        "tulu_v3.9_wildchat_100k": "WildChat",
+
+        # MATH DATASETS
+        "numinamath_tir_math_decontaminated": "NuminaMath-TIR",
+        "tulu_v3.9_open_math_2_gsm8k_50k": "OpenMathInstruct2",
+
+        # SAFETY
+        "coconot_converted": "CoCoNot",
+        "tulu_v3.9_wildjailbreak_decontaminated_50k": "WildJailbreak",
+        "tulu_v3.9_synthetic_finalresp_wildguardmixtrain_decontaminated_50k": "WildGuard",
+        
+        # OTHER
+        "evol_codealpaca_heval_decontaminated": "Evol CodeAlpaca",
+        "tulu_hard_coded_repeated_10": "Hardcoded",
+        "tulu_v3.9_aya_100k": "Aya",
+        "tulu_v3.9_sciriff_10k": "SciRIFF",
+        "tulu_v3.9_table_gpt_5k": "TableGPT",
+        "personahub_ifdata_manual_seed_v3_29980": "Tulu 3 Persona IF",
     }
 
     DATASET_NAME_MAPPING_PREF = {
@@ -161,13 +172,31 @@ def plot_token_length_histogram(dataset_name,
             categories = [category.split("/")[1] if "/" in category else "Other" for category in categories]
 
         unique_categories = np.unique(categories)
-
-        # alphabetical the unique categories
-        unique_categories = np.sort(unique_categories)
+        # if min_category_count is set, combine categories with less than min_category_count samples to "Other"
+        if min_category_count > 0:
+            category_counts = {category: sum([1 for c in categories if c == category]) for category in unique_categories}
+            categories = [category if category_counts[category] >= min_category_count else "Other" for category in categories]
+            unique_categories = np.unique(categories)
+            # add other to category counts
+            DATASET_NAME_MAPPING["Other"] = "Other"
+            category_counts["Other"] = sum([1 for c in categories if c == "Other"])
+            # sort the unique categories by count
+            unique_categories = sorted(unique_categories, key=lambda x: category_counts[x], reverse=True)
+            # sort DATA_NAME_MAPPING by count
+            DATASET_NAME_MAPPING = {category: DATASET_NAME_MAPPING[category] for category in unique_categories}
+            
+        else:
+            # alphabetical the unique categories
+            unique_categories = np.sort(unique_categories)
 
         # make colors for all of DATASET_NAME_MAPPING, then assign colors to unique_categories, only for unique values in dict
-        colors_full = plt.cm.tab20(np.linspace(0, 1, len(DATASET_NAME_MAPPING)))
+        # colors_full = plt.cm.tab20(np.linspace(0, 1, len(DATASET_NAME_MAPPING)))
+        colors_full = plt.cm.tab20c(np.linspace(0, 1, len(DATASET_NAME_MAPPING)))
         category_colors = {category: colors_full[i] for i, category in enumerate(DATASET_NAME_MAPPING.keys())}
+
+        # if other is a category, make it white
+        if "Other" in unique_categories:
+            category_colors["Other"] = (1.0, 1.0, 1.0, 1.0)
 
         category_metric_values = defaultdict(list)
         for value, category in zip(metric_values, categories):
@@ -332,6 +361,7 @@ def main():
     parser.add_argument('--plot_num_turns', action='store_true', help="Plot number of turns instead of token length")
     parser.add_argument('--dont_split_histogram', action='store_true', help="Unicolor histogram")
     parser.add_argument('--set_max_y', type=int, default=0, help="Set max y value")
+    parser.add_argument('--min_category_count', type=int, default=0, help="Minimum number of samples for a category to be included")
     args = parser.parse_args()
     
     fig, ax = plot_token_length_histogram(
@@ -345,7 +375,8 @@ def main():
         args.hide_legend,
         args.plot_num_turns,
         args.dont_split_histogram,
-        args.set_max_y
+        args.set_max_y,
+        args.min_category_count
     )
 
 if __name__ == "__main__":
