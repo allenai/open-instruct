@@ -80,18 +80,18 @@ else
 fi
 
 TASKS=(
-    "gsm8k::tulu"
-    "bbh:cot::tulu"
-    "drop::llama3"
-    "minerva_math::tulu"
-    "codex_humaneval::tulu"
-    "codex_humanevalplus::tulu"
-    "ifeval::tulu"
-    "popqa::tulu"
-    "mmlu:mc::tulu"
+#    "gsm8k::tulu"
+#    "bbh:cot::tulu"
+#    "drop::llama3"
+#    "minerva_math::tulu"
+#    "codex_humaneval::tulu"
+#    "codex_humanevalplus::tulu"
+#    "ifeval::tulu"
+#    "popqa::tulu"
+#    "mmlu:mc::tulu"
     "mmlu:cot::reasoning"
-    "alpaca_eval_v2::tulu"
-    "truthfulqa::tulu"
+#    "alpaca_eval_v2::tulu"
+#    "truthfulqa::tulu"
 )
 MODEL_TYPE="--model-type vllm"
 BATCH_SIZE_VLLM=10000
