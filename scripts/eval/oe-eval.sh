@@ -137,14 +137,12 @@ BATCH_SIZE_OTHER=1
 # Set GPU_COUNT and GPU_COUNT_OTHER based on NUM_GPUS
 GPU_COUNT="$NUM_GPUS"
 GPU_COUNT_OTHER=$((NUM_GPUS * 2)) 
-MODEL_TYPE_OTHER=""
 
 for TASK in "${TASKS[@]}"; do
     # mmlu and truthfulqa need different batch sizes and gpu counts
     if [[ "$TASK" == "mmlu:mc::tulu" || "$TASK" == "truthfulqa::tulu" || "$TASK" == "mmlu_pro:0shot_cot::tulu3" || "$TASK" == "mmlu_pro:cot::llama3.1" ]]; then
         BATCH_SIZE=$BATCH_SIZE_OTHER
         GPU_COUNT=$GPU_COUNT_OTHER
-        MODEL_TYPE=$MODEL_TYPE_OTHER
     else
         BATCH_SIZE=$BATCH_SIZE_VLLM
         MODEL_TYPE="--model-type vllm"
