@@ -24,3 +24,4 @@ checkpointing_steps: 1000
 keep_last_n_checkpoints: 1
 load_balancing_loss: true # TODO: set to false
 load_balancing_weight: 0.5
+add_bos: true
