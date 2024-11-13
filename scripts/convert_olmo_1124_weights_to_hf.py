@@ -35,7 +35,7 @@ Sample usage:
 # make sure to donwload an olmo checkpoint with a `config.yaml` and `model.pt`
 
 exp_name=peteish7-anneal-from-928646-50B-nowup-moremath-dclm07-fw2
-python open_instruct/olmo_adapter/convert_olmo_1124_weights_to_hf.py \
+python scripts/convert_olmo_1124_weights_to_hf.py \
     --input_dir models/$exp_name  --output_dir "models/${exp_name}_hf"
 huggingface-cli upload --revision "${exp_name}_hf" allenai/open_instruct_dev "models/${exp_name}_hf" .
 ```
