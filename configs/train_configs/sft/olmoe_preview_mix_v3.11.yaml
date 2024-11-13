@@ -1,0 +1,54 @@
+model_name_or_path: allenai/OLMoE-1B-7B-0924
+model_revision: main
+tokenizer_name: allenai/OLMoE-1B-7B-0924
+use_slow_tokenizer: true
+dataset_mixer:
+    # General datasets:
+    ai2-adapt-dev/oasst1_converted: 1.0 # 7132 # all
+    ai2-adapt-dev/flan_v2_converted: 1.0 # 89982 # all
+    ai2-adapt-dev/tulu_hard_coded_repeated_10: 1.0 # 240 # all
+    ai2-adapt-dev/no_robots_converted: 1.0 # 9500 # all
+    ai2-adapt-dev/tulu_v3.9_wildchat_100k: 1.0
+
+    # Math datasets:
+    ai2-adapt-dev/personahub_math_v5_regen_149960: 1.0 # 149960 # all
+    allenai/tulu-3-sft-personas-math-grade: 1.0 # 49980 # all
+    ai2-adapt-dev/tulu_v3.9_open_math_2_gsm8k_50k: 1.0 
+    ai2-adapt-dev/numinamath_tir_math_decontaminated: 1.0
+    ai2-adapt-dev/tulu_v3.9_personahub_math_interm_algebra_20k: 1.0
+
+    # Coding datasets:
+    ai2-adapt-dev/personahub_code_v2_34999: 1.0 # 34999 # all
+    ai2-adapt-dev/evol_codealpaca_heval_decontaminated: 1.0 # 107276 # all
+    # semcoder dataset (from columbia)
+    ai2-adapt-dev/columbia-semcoder-formatted: 1.0
+    # advanced semcoder data
+    ai2-adapt-dev/columbia-semcoder-adv-formatted: 1.0
+    
+    # IF datasets:
+    ai2-adapt-dev/personahub_ifdata_manual_seed_v3_29980: 1.0 # 29980 # all
+
+    # Specialty datasets:
+    ai2-adapt-dev/tulu_v3.9_sciriff_10k: 1.0
+    ai2-adapt-dev/tulu_v3.9_table_gpt_5k: 1.0
+    ai2-adapt-dev/tulu_v3.9_aya_100k: 1.0
+max_seq_length: 4096 # Note, reduced from 8192 to fit on one GPU with DeepSpeed Stage3
+preprocessing_num_workers: 128
+per_device_train_batch_size: 2 # note, this is set up for 8 GPUs
+gradient_accumulation_steps: 2 # effective batch size 128 with 4 nodes
+learning_rate: 2.0e-05
+lr_scheduler_type: linear
+warmup_ratio: 0.03
+weight_decay: 0.0
+num_train_epochs: 2
+output_dir: /output/
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+dataset_mix_dir: /output/
+checkpointing_steps: 1000
+keep_last_n_checkpoints: 1
+load_balancing_loss: true # TODO: set to false
+load_balancing_weight: 0.5
+add_bos: true
