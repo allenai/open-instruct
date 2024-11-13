@@ -54,5 +54,5 @@ report_to:
 logging_steps: 1
 dataset_mix_dir: /output/
 checkpointing_steps: 1000
-keep_last_n_checkpoints: 20
-gradient_checkpointing: true
+keep_last_n_checkpoints: 1
+dataset_mix_dir: /output/
