@@ -193,4 +193,5 @@ for TASK in "${TASKS[@]}"; do
         ${REVISION_ARG} \
         --beaker-retries 2 \
         --beaker-priority "$PRIORITY"
+    fi
 done

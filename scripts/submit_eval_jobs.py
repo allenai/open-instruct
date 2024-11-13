@@ -63,8 +63,32 @@ def adjust_gpus(task_spec, experiment_group, model_name, gpu_multiplier):
 
     
 ########################################
-
 # Launcher
+
+NFS_CLUSTERS = [
+    "ai2/allennlp-cirrascale",
+    "ai2/aristo-cirrascale",
+    "ai2/climate-cirrascale",
+    "ai2/general-cirrascale",
+    "ai2/general-cirrascale-a5000",
+    "ai2/mosaic-cirrascale",
+    "ai2/mosaic-cirrascale-a100",
+    "ai2/pluto-cirrascale",
+    "ai2/prior-cirrascale",
+    "ai2/s2-cirrascale",
+    "ai2/s2-cirrascale-l40",
+]
+
+WEKA_CLUSTERS = [
+    "ai2/jupiter-cirrascale-2",
+    "ai2/saturn-cirrascale",
+    "ai2/neptune-cirrascale",
+    "ai2/allennlp-elara-cirrascale",
+]
+GCP_CLUSTERS = [
+    "ai2/augusta-google-1"
+]
+
 
 today = date.today().strftime("%m%d%Y")
 
@@ -123,12 +147,6 @@ d1['tasks'][0]['constraints']['cluster'] = cluster
 d1['tasks'][0]['context']['priority'] = args.priority
 d1['tasks'][0]['context']['preemptible'] = args.preemptible
 d1['tasks'][0]['resources']['gpuCount'] = 1
-
-WEKA_CLUSTERS = [
-    "ai2/saturn-cirrascale",
-    "ai2/neptune-cirrascale",
-    "ai2/jupiter-cirrascale-2",
-]
 
 # remove nfs if asked or jupiter in cluster list.
 nfs_available = False
@@ -486,7 +504,7 @@ for experiment_group in experiment_groups:
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", f"--model_name_or_path {model_info[1]} --hf_revision {args.hf_revision}")]
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", f"--tokenizer_name_or_path {model_info[1]}")]
     elif model_info[1].startswith("/"):  # if it's a local model, load it from the local directory
-        assert nfs_available, "NFS is required for path-based models."  # to be safe.
+        assert nfs_available or weka_available, "NFS / Weka is required for path-based models."  # to be safe.
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", f"--model_name_or_path {model_info[1]}")]
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", f"--tokenizer_name_or_path {model_info[1]}")]
     else:  # if it's a beaker model, mount the beaker dataset to `/model`
@@ -638,7 +656,7 @@ if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
 if args.run_safety_evaluations:
     # just take the original spec we had, modify it for safety eval.
     experiment_name = f"oi_safety_{model_name}"
-    experiment_name.replace('β', '').replace(r"{", "").replace(r"}", "") # hack: remove characters beaker doesn't like
+    experiment_name = experiment_name.replace('β', '').replace(r"{", "").replace(r"}", "") # hack: remove characters beaker doesn't like
     d["description"] = experiment_name
     # specific image for safety eval
     d["tasks"][0]["image"]["beaker"] = "hamishivi/open-safety"
