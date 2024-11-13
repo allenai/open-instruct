@@ -1,28 +1,37 @@
 merge_method: linear
 normalize: true
 models:
-  - name: L3.1-8B-v3.9-nc-fixed-2
+  - name: llama-3.1-8b-resized
+    location: huggingface
+    path: ai2-adapt-dev/llama-3.1-8b-resized
+    weight: 0.5
+  - name: L3.1-8B-v3.9-nc-fixed-soup-best_2
     location: weka
-    path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.9-nc-fixed-2/
+    path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.9-nc-fixed-best_2/
     wekaBucket: "oe-adapt-default"
-    weight: 1.0
-  - name: L3.1-8B-v3.9-nc-fixed-3
-    location: weka
-    path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.9-nc-fixed-3/
-    wekaBucket: "oe-adapt-default"
-    weight: 1.0
-  - name: L3.1-8B-v3.9-nc-fixed-1
-    location: weka
-    path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.9-nc-fixed-1/
-    wekaBucket: "oe-adapt-default"
-    weight: 1.0
-  - name: L3.1-8B-v3.9-nc-fixed-5
-    location: weka
-    path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.9-nc-fixed-5/
-    wekaBucket: "oe-adapt-default"
-    weight: 1.0
-  - name: L3.1-8B-v3.9-nc-fixed-4
-    location: weka
-    path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.9-nc-fixed-4/
-    wekaBucket: "oe-adapt-default"
-    weight: 1.0
+    weight: 0.5
+  # - name: L3.1-8B-v3.9-nc-fixed-2
+  #   location: weka
+  #   path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.9-nc-fixed-2/
+  #   wekaBucket: "oe-adapt-default"
+  #   weight: 1.0
+  # - name: L3.1-8B-v3.9-nc-fixed-3
+  #   location: weka
+  #   path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.9-nc-fixed-3/
+  #   wekaBucket: "oe-adapt-default"
+  #   weight: 1.0
+  # - name: L3.1-8B-v3.9-nc-fixed-1
+  #   location: weka
+  #   path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.9-nc-fixed-1/
+  #   wekaBucket: "oe-adapt-default"
+  #   weight: 1.0
+  # - name: L3.1-8B-v3.9-nc-fixed-5
+  #   location: weka
+  #   path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.9-nc-fixed-5/
+  #   wekaBucket: "oe-adapt-default"
+  #   weight: 1.0
+  # - name: L3.1-8B-v3.9-nc-fixed-4
+  #   location: weka
+  #   path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.9-nc-fixed-4/
+  #   wekaBucket: "oe-adapt-default"
+  #   weight: 1.0

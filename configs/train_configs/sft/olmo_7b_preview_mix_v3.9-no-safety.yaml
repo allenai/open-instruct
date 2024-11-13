@@ -29,9 +29,9 @@ dataset_mixer:
     ai2-adapt-dev/personahub_ifdata_manual_seed_v3_29980: 0.05 # 29980 # all
 
     # Safety datasets:
-    ai2-adapt-dev/coconot_converted: 0.05 # 10983 # all
-    ai2-adapt-dev/tulu_v3.9_wildjailbreak_decontaminated_50k: 0.05
-    ai2-adapt-dev/tulu_v3.9_synthetic_finalresp_wildguardmixtrain_decontaminated_50k: 0.05
+    # ai2-adapt-dev/coconot_converted: 0.05 # 10983 # all
+    # ai2-adapt-dev/tulu_v3.9_wildjailbreak_decontaminated_50k: 0.05
+    # ai2-adapt-dev/tulu_v3.9_synthetic_finalresp_wildguardmixtrain_decontaminated_50k: 0.05
 
     # Specialty datasets:
     ai2-adapt-dev/tulu_v3.9_sciriff_10k: 0.05

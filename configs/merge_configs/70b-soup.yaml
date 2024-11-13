@@ -1,0 +1,18 @@
+merge_method: linear
+normalize: true
+models:
+  # - name: L3.1-70B-v3.9-nc-2e-6-2_ep-fixed
+  #   location: weka
+  #   path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-70B-v3.9-nc-2e-6-2_ep-fixed/
+  #   wekaBucket: "oe-adapt-default"
+  #   weight: 1.0
+  - name: L3.1-70B-v3.9-nc-2e-6-2_ep-fixed-2
+    location: weka
+    path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-70B-v3.9-nc-2e-6-2_ep-fixed-2/
+    wekaBucket: "oe-adapt-default"
+    weight: 1.0
+  - name: L3.1-70B-v3.9-nc-2e-6-2_ep-fixed-3
+    location: weka
+    path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-70B-v3.9-nc-2e-6-2_ep-fixed-3/
+    wekaBucket: "oe-adapt-default"
+    weight: 1.0

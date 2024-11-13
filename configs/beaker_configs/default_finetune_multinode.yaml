@@ -15,7 +15,7 @@ tasks:
       '/bin/sh', '-c'
     ]
     arguments: ['
-        unset CUDA_LAUNCH_BLOCKING && PYTHONPATH="/stage:$PYTHONPATH" accelerate launch
+        unset CUDA_LAUNCH_BLOCKING && PYTHONPATH="/stage:$PYTHONPATH" pip install git+https://github.com/vwxyzjn/transformers.git@olmo1124_classification && accelerate launch
         --mixed_precision bf16
         --num_machines 4
         --num_processes 32
