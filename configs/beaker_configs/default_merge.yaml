@@ -1,0 +1,40 @@
+version: v2
+description: open-instruct-merge-models
+budget: ai2/oe-adapt
+tasks:
+  - name: open-instruct-merge-models
+    image:
+      beaker: nathanl/open_instruct_auto
+    command: [
+      '/bin/sh', '-c'
+    ]
+    arguments: ['mkdir {OUTPUT_DIR}; echo {RAW_CONFIG} > {OUTPUT_DIR}/config.yaml; mergekit-yaml {OUTPUT_DIR}/config.yaml {OUTPUT_DIR} --cuda']
+    envVars:
+      - name: CUDA_DEVICE_ORDER
+        value: PCI_BUS_ID
+      - name: TRANSFORMERS_CACHE
+        value: ./cache/
+      - name: WANDB_API_KEY
+        secret: jacobm_WANDB_API_KEY
+      - name: WANDB_PROJECT
+        value: open-instruct
+      - name: WANDB_WATCH
+        value: false
+      - name: WANDB_LOG_MODEL
+        value: false
+      - name: WANDB_DISABLED
+        value: true
+      - name: HF_TOKEN
+        secret: jacobm_HF_TOKEN
+    result:
+      path: /output
+    resources:
+      gpuCount: 1
+    context:
+      priority: low
+      preemptible: true
+    constraints:
+      cluster:
+        - ai2/neptune-cirrascale
+        - ai2/saturn-cirrascale
+        - ai2/jupiter-cirrascale-2

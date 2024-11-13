@@ -1,0 +1,14 @@
+models:
+    # no parameters necessary for base model
+  - model: /base-model
+  - model: /model-one
+    parameters:
+      weight: 0.70
+      normalize: False
+  - model: /model-2
+    parameters:
+      weight: 0.30
+      normalize: False
+merge_method: task_arithmetic
+base_model: /base-model
+dtype: bfloat16

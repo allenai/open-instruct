@@ -1,0 +1,10 @@
+models:
+  - model: /model-one
+    parameters:
+      weight: 1.0
+  - model: /model-two
+    parameters:
+      weight: 1.0
+normalize: true
+merge_method: linear
+dtype: bfloat16
