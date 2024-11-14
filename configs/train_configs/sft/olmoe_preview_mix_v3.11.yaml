@@ -1,7 +1,7 @@
 model_name_or_path: allenai/OLMoE-1B-7B-0924
 model_revision: main
 tokenizer_name: allenai/OLMoE-1B-7B-0924
-use_slow_tokenizer: true
+use_slow_tokenizer: false
 dataset_mixer:
     # General datasets:
     ai2-adapt-dev/oasst1_converted: 1.0 # 7132 # all
@@ -21,9 +21,9 @@ dataset_mixer:
     ai2-adapt-dev/personahub_code_v2_34999: 1.0 # 34999 # all
     ai2-adapt-dev/evol_codealpaca_heval_decontaminated: 1.0 # 107276 # all
     # semcoder dataset (from columbia)
-    ai2-adapt-dev/columbia-semcoder-formatted: 1.0
-    # advanced semcoder data
-    ai2-adapt-dev/columbia-semcoder-adv-formatted: 1.0
+    # ai2-adapt-dev/columbia-semcoder-formatted: 1.0
+    # # advanced semcoder data
+    # ai2-adapt-dev/columbia-semcoder-adv-formatted: 1.0
     
     # IF datasets:
     ai2-adapt-dev/personahub_ifdata_manual_seed_v3_29980: 1.0 # 29980 # all
