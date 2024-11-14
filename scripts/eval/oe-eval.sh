@@ -119,6 +119,7 @@ DEFAULT_TASKS=(
     "ifeval::tulu"
     "popqa::tulu"
     "mmlu:mc::tulu"
+    "mmlu:cot::reasoning"
     "alpaca_eval_v2::tulu"
     "truthfulqa::tulu"
 )
