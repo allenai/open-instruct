@@ -151,7 +151,7 @@ python mason.py \
     --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
     --dataset_eval_splits validation \
     --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
+    --max_prompt_token_length 512 \
     --learning_rate 3e-6 \
     --output_dir models/minimal/ppo_vllm_thread_tldr \
     --per_device_train_batch_size 16 \
