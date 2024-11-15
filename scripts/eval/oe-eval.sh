@@ -88,9 +88,9 @@ TASKS=(
 #    "codex_humanevalplus::tulu"
 #    "ifeval::tulu"
 #    "popqa::tulu"
-    "mmlu:mc::tulu"
+#    "mmlu:mc::tulu"
     "mmlu:cot::reasoning"
-    "mmlu:cot::reasoning-self-judge"
+#    "mmlu:cot::reasoning-self-judge"
 #    "alpaca_eval_v2::tulu"
 #    "truthfulqa::tulu"
 )
