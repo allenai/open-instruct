@@ -522,15 +522,26 @@ class RayProcess:
             datefmt="%Y-%m-%d %H:%M:%S",
         )
 
-        if check_hf_olmo_availability():
-            # allows AutoModel... to work with not in transformers olmo models
-            import hf_olmo  # noqa
-            from hf_olmo import OLMoTokenizerFast
-            from open_instruct.olmo_adapter.modeling_olmo2 import OLMoForSequenceClassification
-            from open_instruct.olmo_adapter.olmo_new import OlmoNewForCausalLM
-            from vllm.model_executor.models import ModelRegistry
-            AutoModelForSequenceClassification.register(hf_olmo.OLMoConfig, OLMoForSequenceClassification)
-            ModelRegistry.register_model("OLMoForCausalLM", OlmoNewForCausalLM)
+        # olmo 1124; pip install git+https://github.com/vwxyzjn/transformers.git@olmo1124_classification
+        from vllm.model_executor.models import ModelRegistry
+        from transformers.models.olmo_1124.modeling_olmo_1124 import Olmo1124ForSequenceClassification, Olmo1124Config
+        AutoModelForSequenceClassification.register(Olmo1124Config, Olmo1124ForSequenceClassification)
+        from open_instruct.olmo_adapter.olmo_1124_vllm import OlmoNewForCausalLM
+        ModelRegistry.register_model("Olmo1124ForCausalLM", OlmoNewForCausalLM)
+        
+        # # hf_olmo
+        # import hf_olmo  # noqa
+        # from open_instruct.olmo_adapter.modeling_olmo2 import OLMoForSequenceClassification
+        # AutoModelForSequenceClassification.register(hf_olmo.OLMoConfig, OLMoForSequenceClassification)
+        # from open_instruct.olmo_adapter.olmo_new import OlmoNewForCausalLM
+        # ModelRegistry.register_model("OLMoForCausalLM", OlmoNewForCausalLM)
+        
+        # other hf olmo
+        from open_instruct.olmo_adapter.modeling_olmo3 import OlmoForSequenceClassification
+        from open_instruct.olmo_adapter.modeling_olmoe3 import OlmoeForSequenceClassification
+        from transformers import OlmoConfig, OlmoeConfig
+        AutoModelForSequenceClassification.register(OlmoConfig, OlmoForSequenceClassification)
+        AutoModelForSequenceClassification.register(OlmoeConfig, OlmoeForSequenceClassification)
         self.world_size = world_size
         self.rank = rank
         self.local_rank = local_rank
@@ -1097,6 +1108,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     _, score, _ = get_reward(
                         self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
+                    if self.rank == 0 and i == 0:
+                        print(postprocessed_query_response[0].tolist(), tokenizer.decode(postprocessed_query_response[0]))
                     if args.reward_model_multiplier != 1.0:
                         score *= args.reward_model_multiplier
                     # also apply verifiable reward
@@ -1373,7 +1386,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # Ai2 logic: we use /output to store the artifacts of the job, so we
         # make a copy of the model to `/output` in the end.
-        if self.rank == 0 and len(self.beaker_config.beaker_dataset_id_urls) > 0:
+        if self.rank == 0 and len(self.beaker_config.beaker_dataset_id_urls) > 0 and args.output_dir != "/output":
             shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
         print("finished training")
 

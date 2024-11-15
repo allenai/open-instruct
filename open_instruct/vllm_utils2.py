@@ -133,12 +133,15 @@ class WorkerWrap(Worker):
 class LLMRayActor:
     def __init__(self, *args, **kwargs):
         import vllm
-        if check_hf_olmo_availability():
+        from vllm.model_executor.models import ModelRegistry
+        # if check_hf_olmo_availability():
             # allows AutoModel... to work with not in transformers olmo models
-            import hf_olmo  # noqa
-            from open_instruct.olmo_adapter.olmo_new import OlmoNewForCausalLM
-            from vllm.model_executor.models import ModelRegistry
-            ModelRegistry.register_model("OLMoForCausalLM", OlmoNewForCausalLM)
+            # import hf_olmo  # noqa
+            # from open_instruct.olmo_adapter.olmo_new import OlmoNewForCausalLM
+            # ModelRegistry.register_model("OLMoForCausalLM", OlmoNewForCausalLM)
+        from open_instruct.olmo_adapter.olmo_1124_vllm import OlmoNewForCausalLM
+        ModelRegistry.register_model("Olmo1124ForCausalLM", OlmoNewForCausalLM)
+
 
         self.__version__ = vllm.__version__
         assert self.__version__ >= "0.4.1", "OpenRLHF only supports vLLM >= 0.4.1"
