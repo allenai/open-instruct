@@ -16,7 +16,7 @@ for X in {1..3}; do
       # Execute the Python script
       python scripts/submit_dpo_job.py \
         --config "$CONFIG" \
-        --default_beaker_config configs/beaker_configs/default_dpo_multinode.yaml \
+        --default_beaker_config configs/beaker_configs/default_dpo_multinode_transformers_main.yaml \
         --cluster ai2/jupiter-cirrascale-2 \
         --num_nodes 4 \
         --num_gpus 8 \
