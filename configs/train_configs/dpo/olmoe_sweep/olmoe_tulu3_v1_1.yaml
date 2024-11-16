@@ -21,7 +21,7 @@ dataset_mixer:
   ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_truthful_qa: 1.0
   ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_flan_v2: 1.0
   ai2-adapt-dev/tulu-2.5-prefs-ultrafeedback_false_qa: 1.0
-use_slow_tokenizer: true
+use_slow_tokenizer: false
 max_seq_length: 2048
 preprocessing_num_workers: 16
 # designed for 32 GPUs, so batch size 32

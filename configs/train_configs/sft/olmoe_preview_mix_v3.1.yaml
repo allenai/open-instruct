@@ -1,7 +1,7 @@
 model_name_or_path: allenai/OLMoE-1B-7B-0924
 model_revision: main
 tokenizer_name: allenai/OLMoE-1B-7B-0924
-use_slow_tokenizer: true
+use_slow_tokenizer: false
 dataset_mixer:
   allenai/tulu-v3-mix-preview-4096-OLMoE: 1.0
   ai2-adapt-dev/daring-anteater-specialized: 1.0
