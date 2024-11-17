@@ -1,15 +1,26 @@
 merge_method: linear
 normalize: true
 models:
-  - name: llama-3.1-8b-resized
-    location: huggingface
-    path: ai2-adapt-dev/llama-3.1-8b-resized
-    weight: 0.5
-  - name: L3.1-8B-v3.9-nc-fixed-soup-best_2
+  # - name: llama-3.1-8b-resized
+  #   location: huggingface
+  #   path: ai2-adapt-dev/llama-3.1-8b-resized
+  #   weight: 0.5
+  # - name: L3.1-8B-v3.9-nc-fixed-soup-best_2
+  #   location: weka
+  #   path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.9-nc-fixed-best_2/
+  #   wekaBucket: "oe-adapt-default"
+  #   weight: 0.5
+
+  - name: gsm_math_if_valpy_best_overall_avg_8b_beta0.05-step_200
     location: weka
-    path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.9-nc-fixed-best_2/
+    path: /oe-adapt-default/hamishi/model_checkpoints/gsm_math_if_valpy_best_overall_avg_8b_beta0.05_checkpoints/step_200/
     wekaBucket: "oe-adapt-default"
-    weight: 0.5
+    weight: 1.0
+  - name: gsm_math_if_valpy_best_and_if_avg_8b_beta0.05-step_200
+    location: weka
+    path: /oe-adapt-default/hamishi/model_checkpoints/gsm_math_if_valpy_best_and_if_avg_8b_beta0.05_checkpoints/step_200/
+    wekaBucket: "oe-adapt-default"
+    weight: 1.0
   # - name: L3.1-8B-v3.9-nc-fixed-2
   #   location: weka
   #   path: /oe-adapt-default/jacobm/tulu-3-dev/checkpoints/base_models/L3.1-8B-v3.9-nc-fixed-2/

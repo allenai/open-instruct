@@ -15,7 +15,7 @@ tasks:
       '/bin/sh', '-c'
     ]
     arguments: ['
-        unset CUDA_LAUNCH_BLOCKING && PYTHONPATH="/stage:$PYTHONPATH" accelerate launch
+        unset CUDA_LAUNCH_BLOCKING && pip install git+https://github.com/vwxyzjn/transformers.git@olmo1124_classification && PYTHONPATH="/stage:$PYTHONPATH" accelerate launch
         --mixed_precision bf16
         --num_machines 4
         --num_processes 32
@@ -67,8 +67,8 @@ tasks:
         source:
           weka: oe-adapt-default
       # - mountPath: /model
-        # source:
-          # beaker: jacobm/llama-3.1-8b
+      #   source:
+      #     beaker: jacobm/llama-3.1-8b
     result:
       path: /output
     resources:
