@@ -119,7 +119,7 @@ DEFAULT_TASKS=(
     "ifeval::tulu"
     "popqa::tulu"
     "mmlu:mc::tulu"
-    "mmlu:cot::reasoning"
+    "mmlu:cot::summarize"
     "alpaca_eval_v2::tulu"
     "truthfulqa::tulu"
 )
@@ -127,7 +127,7 @@ UNSEEN_TASKS=(
     "agi_eval_english:0shot_cot::tulu3"
     "gpqa:0shot_cot::tulu3"
     "mmlu_pro:0shot_cot::tulu3"
-    "deepmind_math:0shot_cot::tulu3"
+    "deepmind_math:0shot_cot-v3::tulu3"
     "bigcodebench_hard::tulu"
     "gpqa:0shot_cot::llama3.1"
     "mmlu_pro:cot::llama3.1"
