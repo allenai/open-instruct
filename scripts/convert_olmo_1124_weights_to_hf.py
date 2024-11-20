@@ -198,7 +198,7 @@ def write_model(
             output_path=model_path,
             config=config,
             checkpoint_dir=input_base_path,
-            input_tokenizer_path=tokenizer_path
+            input_tokenizer_path=(override_tokenizer or tokenizer_path)
         )
 
     print("Loading the checkpoint in a OLMo November 2024 model.")
