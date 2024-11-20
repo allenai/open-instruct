@@ -64,6 +64,7 @@ def write_model(
     safe_serialization=True,
     fix_eos_token_id=True,
     tmp_cleanup=True,
+    override_tokenizer: str | None = None
 ):
     os.makedirs(model_path, exist_ok=True)
     tmp_model_path = os.path.join(model_path, "tmp")
@@ -193,7 +194,12 @@ def write_model(
     gc.collect()
 
     if include_tokenizer:
-        _write_tokenizer(model_path, config, input_base_path, tokenizer_path)
+        _write_tokenizer(
+            output_path=model_path,
+            config=config,
+            checkpoint_dir=input_base_path,
+            input_tokenizer_path=tokenizer_path
+        )
 
     print("Loading the checkpoint in a OLMo November 2024 model.")
     model = Olmo1124ForCausalLM.from_pretrained(tmp_model_path, torch_dtype=torch.float32, low_cpu_mem_usage=True)
@@ -211,12 +217,17 @@ def _write_tokenizer(
     output_path: Path,
     config: Olmo1124Config,
     checkpoint_dir: str,
-    input_tokenizer_path: Path | None,
+    input_tokenizer_path: Path | str | None,
 ) -> None:
     print(f"Saving a {GPT2TokenizerFast.__name__} to {output_path}.")
 
     if input_tokenizer_path is not None:
-        base_tokenizer = Tokenizer.from_file(str(input_tokenizer_path))
+        if os.path.exists(input_tokenizer_path):
+            # input_tokenizer_path is a file
+            base_tokenizer = Tokenizer.from_file(str(input_tokenizer_path))
+        else:
+            # input_tokenizer_path is a huggingface identifier
+            base_tokenizer = Tokenizer.from_pretrained(str(input_tokenizer_path))
     else:
         config_path = Path(checkpoint_dir) / "config.yaml"
         tokenizer_config = yaml.safe_load(config_path.read_text())["tokenizer"]
@@ -253,6 +264,12 @@ def main():
         help="If set, do not convert OLMo tokenizer to HF tokenizer.",
     )
     parser.add_argument(
+        '--override_tokenizer',
+        type=str,
+        help="Path to tokenizer json file to use for conversion.",
+        default=None
+    )
+    parser.add_argument(
         "--tokenizer_json_path",
         type=Path,
         default=None,
@@ -286,6 +303,7 @@ def main():
         tokenizer_path=args.tokenizer_json_path,
         fix_eos_token_id=args.fix_eos_token_id,
         tmp_cleanup=args.tmp_cleanup,
+        override_tokenizer=args.override_tokenizer
     )
 
 
