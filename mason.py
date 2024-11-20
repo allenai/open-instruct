@@ -32,6 +32,7 @@ WEKA_CLUSTERS = [
     "ai2/saturn-cirrascale",
     "ai2/neptune-cirrascale",
     "ai2/allennlp-elara-cirrascale",
+
 ]
 GCP_CLUSTERS = [
     "ai2/augusta-google-1"
