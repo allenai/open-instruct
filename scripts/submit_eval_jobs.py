@@ -63,7 +63,6 @@ def adjust_gpus(task_spec, experiment_group, model_name, gpu_multiplier):
 
     
 ########################################
-
 # Launcher
 
 NFS_CLUSTERS = [
@@ -127,6 +126,8 @@ parser.add_argument("--run_oe_eval_experiments", action="store_true", help="Run 
 parser.add_argument("--run_safety_evaluations", action="store_true", help="Run the OE safety evaluations too.")
 parser.add_argument("--skip_oi_evals", action="store_true", help="Don't run open instruct evals.")
 parser.add_argument("--oe_eval_max_length", type=int, default=4096, help="Max length for OE eval.")
+parser.add_argument("--oe_eval_unseen_evals", action="store_true", help="Run unseen task evals instead of dev task evals on OE Eval.")
+parser.add_argument("--use_alternate_safety_image", type=str, default=None, help="Use a different image for safety eval.")
 parser.add_argument("--evaluate_on_weka", action="store_true", help="Evaluate OE eval on Beaker.")
 parser.add_argument("--oe_eval_tasks", type=str, default=None, help="Evaluate OE eval on Beaker.")
 args = parser.parse_args()
@@ -615,7 +616,7 @@ if not args.skip_oi_evals:
     cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
     subprocess.Popen(cmd, shell=True)
 
-if args.run_oe_eval_experiments:
+if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
     # if so, run oe-eval. We assume it is cloned in the top-level repo directory.
     oe_eval_cmd = f"scripts/eval/oe-eval.sh --model-name {model_name}"
     if args.upload_to_hf:
@@ -644,16 +645,23 @@ if args.run_oe_eval_experiments:
     oe_eval_cmd += f" --num_gpus {num_gpus}"
     if args.oe_eval_max_length:
         oe_eval_cmd += f" --max-length {args.oe_eval_max_length}"
+    if args.oe_eval_unseen_evals:
+        oe_eval_cmd += " --unseen-evals"
+    # add priority
+    oe_eval_cmd += f" --priority {args.priority}"
     print(f"Running OE eval with command: {oe_eval_cmd}")
     subprocess.Popen(oe_eval_cmd, shell=True)
 
 # create an experiment that runs the safety eval tasks
 if args.run_safety_evaluations:
     # just take the original spec we had, modify it for safety eval.
-    experiment_name = f"oi_safety_{model_name.replace('β', '')}"
+    experiment_name = f"oi_safety_{model_name}"
+    experiment_name = experiment_name.replace('β', '').replace(r"{", "").replace(r"}", "") # hack: remove characters beaker doesn't like
     d["description"] = experiment_name
     # specific image for safety eval
     d["tasks"][0]["image"]["beaker"] = "hamishivi/open-safety"
+    if args.use_alternate_safety_image:
+        d["tasks"][0]["image"]["beaker"] = args.use_alternate_safety_image
     d["tasks"] = [d["tasks"][0]]
     task_spec = d["tasks"][0]
     task_spec["name"] = experiment_name
@@ -708,4 +716,3 @@ VLLM_WORKER_MULTIPROC_METHOD=spawn PYTHONPATH=. python evaluation/run_all_genera
 
     cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
     subprocess.Popen(cmd, shell=True)
-    

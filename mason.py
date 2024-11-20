@@ -13,11 +13,29 @@ def parse_beaker_dataset(dataset_str):
 
     return {"mount_path": splt[0], "beaker": splt[1]}
 
+NFS_CLUSTERS = [
+    "ai2/allennlp-cirrascale",
+    "ai2/aristo-cirrascale",
+    "ai2/climate-cirrascale",
+    "ai2/general-cirrascale",
+    "ai2/general-cirrascale-a5000",
+    "ai2/mosaic-cirrascale",
+    "ai2/mosaic-cirrascale-a100",
+    "ai2/pluto-cirrascale",
+    "ai2/prior-cirrascale",
+    "ai2/s2-cirrascale",
+    "ai2/s2-cirrascale-l40",
+]
+
 WEKA_CLUSTERS = [
     "ai2/jupiter-cirrascale-2",
     "ai2/saturn-cirrascale",
     "ai2/neptune-cirrascale",
     "ai2/allennlp-elara-cirrascale",
+
+]
+GCP_CLUSTERS = [
+    "ai2/augusta-google-1"
 ]
 
 
@@ -161,7 +179,7 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
         ])
     
     # if none of the cluster is in weka, we mount the NFS
-    if all(c not in WEKA_CLUSTERS for c in cluster):
+    if all(c in NFS_CLUSTERS for c in cluster):
         env_vars.extend([
             beaker.EnvVar(
                 name="HF_DATASETS_CACHE",
@@ -226,6 +244,120 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
                     value="INFO",
                 ),
             ])
+    # if all cluster is in gcp we add the following env
+
+    elif all(c in GCP_CLUSTERS for c in cluster):
+        if num_nodes > 1:
+            env_vars.extend([
+                beaker.EnvVar(
+                    name="LD_LIBRARY_PATH",
+                    value=r"/var/lib/tcpxo/lib64:${LD_LIBRARY_PATH}",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_CROSS_NIC",
+                    value="0",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_ALGO",
+                    value="Ring,Tree",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_PROTO",
+                    value="Simple",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_MIN_NCHANNELS",
+                    value="4",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_P2P_NET_CHUNKSIZE",
+                    value="524288",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_P2P_PCI_CHUNKSIZE",
+                    value="524288",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_P2P_NVL_CHUNKSIZE",
+                    value="1048576",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_NUM_FLOWS",
+                    value="2",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL",
+                    value="0",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_BUFFSIZE",
+                    value="8388608",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_USE_SNAP",
+                    value="1",
+                ),
+                beaker.EnvVar(
+                    name="CUDA_VISIBLE_DEVICES",
+                    value="0,1,2,3,4,5,6,7",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_NET_GDR_LEVEL",
+                    value="PIX",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING",
+                    value="0",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_TUNER_PLUGIN",
+                    value="libnccl-tuner.so",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_TUNER_CONFIG_PATH",
+                    value="/var/lib/tcpxo/lib64/a3plus_tuner_config.textproto",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE",
+                    value="/var/lib/tcpxo/lib64/a3plus_guest_config.textproto",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS",
+                    value="600000",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_NVLS_ENABLE",
+                    value="0",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_DEBUG",
+                    value="WARN",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_CTRL_DEV",
+                    value="enp0s12",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_IFNAME",
+                    value="enp6s0,enp7s0,enp13s0,enp14s0,enp134s0,enp135s0,enp141s0,enp142s0",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_SOCKET_IFNAME",
+                    value="enp0s12",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_USE_SNAP",
+                    value="1",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_USE_LLCM",
+                    value="1",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY",
+                    value="/dev/aperture_devices",
+                ),
+            ])
     # don't mount anything; assume no cache
     else:
         pass
@@ -249,7 +381,7 @@ def get_datasets(beaker_datasets, cluster: List[str]):
     """if pure docker mode we don't mount the NFS; so we can run it on jupiter2"""
     res = []
     # if none of the cluster is in weka, we mount the NFS
-    if all(c not in WEKA_CLUSTERS for c in cluster):
+    if all(c in NFS_CLUSTERS for c in cluster):
         res = [
             beaker.DataMount(
                 source=beaker.DataSource(host_path="/net/nfs.cirrascale"),
@@ -262,6 +394,10 @@ def get_datasets(beaker_datasets, cluster: List[str]):
             beaker.DataMount(
                 source=beaker.DataSource(weka="oe-adapt-default"),
                 mount_path="/weka/oe-adapt-default",
+            ),
+            beaker.DataMount(
+                source=beaker.DataSource(weka="oe-training-default"),
+                mount_path="/weka/oe-training-default",
             ),
         ]
     for beaker_dataset in beaker_datasets:
