@@ -48,7 +48,7 @@ accelerate launch \
     --logging_steps 1 \
     --reduce_loss sum \
     --model_revision main \
-    --dataset_mixer_list allenai/tulu-v.3.9-mix-preview-noncommercial 1.0 \
+    --dataset_mixer_list allenai/tulu-3-sft-mixture 1.0 \
     --checkpointing_steps epoch \
     --dataset_mix_dir output/sft_8b \
     --exp_name tulu-3-8b-sft \
@@ -104,7 +104,7 @@ accelerate launch \
     --logging_steps 1 \
     --reduce_loss sum \
     --model_revision main \
-    --dataset_mixer_list allenai/tulu-v.3.9-mix-preview-noncommercial 1.0 \
+    --dataset_mixer_list allenai/tulu-3-sft-mixture 1.0 \
     --dataset_mix_dir output/sft_70B \
     --checkpointing_steps 1000 \
     --keep_last_n_checkpoints 20 \
@@ -148,14 +148,7 @@ accelerate launch \
     --logging_steps 1 \
     --model_revision main \
     --gradient_checkpointing \
-    --dataset_mixer_list \
-        ai2-adapt-dev/sft_v3.9_used_off_policy 1.0 \
-         ai2-adapt-dev/sft_v3.9_used_on_policy_small_8b_ckpt 1.0 \
-         ai2-adapt-dev/WildChat-prefs-280824-uf-pipeline-regen-v3.9 1.0 \
-         ai2-adapt-dev/Llama-3.1-if_taxonomy_tulu-uf-pipeline-regen-v3.9 1.0 \
-         ai2-adapt-dev/wildchat_v3.9_used_on_policy_small_8b_ckpt 1.0 \
-         ai2-adapt-dev/personahub_if_pref_data_manualseed_v2_19890 1.0 \
-         ai2-adapt-dev/ultrafeedback-cleaned-regen-v3.9-8b-sft 1.0 \
+    --dataset_mixer_list allenai/llama-3.1-tulu-3-8b-preference-mixture 1.0 \
     --use_slow_tokenizer \
     --use_lora False \
     --dpo_loss_type dpo_norm \
@@ -210,14 +203,7 @@ accelerate launch \
     --logging_steps 1 \
     --model_revision main \
     --gradient_checkpointing \
-    --dataset_mixer_list \
-        ai2-adapt-dev/sft_v3.9_used_off_policy 1.0 \
-        ai2-adapt-dev/sft_v3.9_used_on_policy_large_70b_ckpt 1.0 \
-        ai2-adapt-dev/WildChat-prefs-280824-uf-pipeline-regen-v3.9_large_70b_ckpt 1.0 \
-        ai2-adapt-dev/Llama-3.1-if_taxonomy_tulu-uf-pipeline-regen-v3.9_large_70b_ckpt 1.0 \
-        ai2-adapt-dev/wildchat_v3.9_unused_off_policy 1.0 \
-        ai2-adapt-dev/wildchat_v3.9_used_on_policy_large_70b_ckpt 1.0 \
-        ai2-adapt-dev/ultrafeedback-cleaned-regen-v3.9-70b-sft 1.0 \
+    --dataset_mixer_list allenai/llama-3.1-tulu-3-70b-preference-mixture \
     --use_slow_tokenizer \
     --use_lora False \
     --dpo_loss_type dpo_norm \
@@ -239,7 +225,7 @@ This is (almost) the exact command which produced [allenai/Llama-3.1-Tulu-3-8B-R
 ```bash
 accelerate launch \
     --config_file configs/ds_configs/deepspeed_zero3.yaml open_instruct/reward_modeling.py \
-    --dataset_mixer '{"ai2-adapt-dev/sft_v3.9_used_off_policy": 1.0, "ai2-adapt-dev/sft_v3.9_used_on_policy_small_8b_ckpt": 1.0, "ai2-adapt-dev/WildChat-prefs-280824-uf-pipeline-regen-v3.9": 1.0, "ai2-adapt-dev/Llama-3.1-if_taxonomy_tulu-uf-pipeline-regen-v3.9": 1.0, "ai2-adapt-dev/wildchat_v3.9_used_on_policy_small_8b_ckpt": 1.0, "ai2-adapt-dev/ultrafeedback-cleaned-regen-v3.9-8b-sft": 1.0}' \
+    --dataset_mixer '{"allenai/llama-3.1-tulu-3-8b-preference-mixture": 1.0}' \
     --dataset_train_splits train \
     --dataset_eval_mixer '{"allenai/ultrafeedback_binarized_cleaned": 1.0}' \
     --dataset_eval_splits test_prefs \
@@ -267,10 +253,10 @@ This is (almost) the exact command which produced [allenai/Llama-3.1-Tulu-3-8B](
 ```bash
 python open_instruct/ppo_vllm_thread_ray_gtrl.py \
     --exp_name tulu-3-8b-rlvr \
-    --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
+    --dataset_mixer '{"allenai/RLVR-GSM-MATH-IF-Mixed-Constraints": 1.0}' \
     --dataset_train_splits train \
-    --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ground_truth": 1.0}' \
-    --dataset_eval_splits test \
+    --dataset_eval_mixer '{"allenai/RLVR-GSM-MATH-IF-Mixed-Constraints": 128}' \
+    --dataset_eval_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -317,9 +303,9 @@ Couple of notes:
 
 ```bash
 source configs/beaker_configs/ray_node_setup.sh && python open_instruct/ppo_vllm_thread_ray_gtrl.py \
-    --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
+    --dataset_mixer '{"allenai/RLVR-GSM-MATH-IF-Mixed-Constraints": 1.0}' \
     --dataset_train_splits train \
-    --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 128}' \
+    --dataset_eval_mixer '{"allenai/RLVR-GSM-MATH-IF-Mixed-Constraints": 128}' \
     --dataset_eval_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
