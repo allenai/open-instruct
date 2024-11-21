@@ -86,7 +86,8 @@ sh scripts/finetune_with_accelerate_config.sh 8 configs/train_configs/tulu3/tulu
 
 ```bash
 # quick debugging run using 2 GPU (1 for inference, 1 for training)
-# here we are 
+# here we are using `HuggingFaceTB/SmolLM2-360M-Instruct`; it's prob not
+# gonna work, but it's easy to test run and print stuff.
 python open_instruct/ppo_vllm_thread_ray_gtrl.py \
     --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
     --dataset_train_splits train \
