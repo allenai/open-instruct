@@ -7,7 +7,7 @@ This document details the commands and configs to reproduce the tulu3 models.
 
 ### Llama-3.1-Tulu-3-8B-SFT Reproduction
 
-Below is the exact command which produced [Llama-3.1-Tulu-3-8B-SFT](https://huggingface.co/allenai/Llama-3.1-Tulu-3-8B-SFT). In our setup we ran this command on 8 machines with 64 gpus in total. 
+Below is (almost) the exact command which produced [Llama-3.1-Tulu-3-8B-SFT](https://huggingface.co/allenai/Llama-3.1-Tulu-3-8B-SFT). In our setup we ran this command on 8 machines with 64 gpus in total. 
 
 If you have different number of GPUs, please adjust the `NUM_MACHINES`, `NUM_PROCESSES`, `PER_DEVICE_TRAIN_BATCH_SIZE`, and `GRADIENT_ACCUMULATION_STEPS` accordingly. For example, say, you only have 8 GPUs. The command below has an effective batch size of `NUM_PROCESSES * PER_DEVICE_TRAIN_BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS = 64 * 1 * 2 = 128`. A one node setup can simulate our batch size with `NUM_PROCESSES=8`, `PER_DEVICE_TRAIN_BATCH_SIZE=1`, and `GRADIENT_ACCUMULATION_STEPS=64`.
 
@@ -63,7 +63,7 @@ accelerate launch \
 
 ### Llama-3.1-Tulu-3-70B-SFT Reproduction
 
-This is the exact command which produced [allenai/Llama-3.1-Tulu-3-70B-SFT](https://huggingface.co/allenai/Llama-3.1-Tulu-3-70B-SFT)
+This is (almost) the exact command which produced [allenai/Llama-3.1-Tulu-3-70B-SFT](https://huggingface.co/allenai/Llama-3.1-Tulu-3-70B-SFT)
 
 
 ```bash
@@ -121,7 +121,7 @@ accelerate launch \
 
 ### Llama-3.1-Tulu-3-8B-DPO Reproduction
 
-This is the exact command which produced [allenai/Llama-3.1-Tulu-3-8B-DPO](https://huggingface.co/allenai/Llama-3.1-Tulu-3-8B-DPO)
+This is (almost) the exact command which produced [allenai/Llama-3.1-Tulu-3-8B-DPO](https://huggingface.co/allenai/Llama-3.1-Tulu-3-8B-DPO)
 
 
 ```bash
@@ -170,7 +170,7 @@ accelerate launch \
 
 ### Llama-3.1-Tulu-3-70B-DPO Reproduction
 
-This is the exact command which produced [allenai/Llama-3.1-Tulu-3-70B-DPO](https://huggingface.co/allenai/Llama-3.1-Tulu-3-70B-DPO)
+This is (almost) the exact command which produced [allenai/Llama-3.1-Tulu-3-70B-DPO](https://huggingface.co/allenai/Llama-3.1-Tulu-3-70B-DPO)
 
 
 ```bash
@@ -234,7 +234,7 @@ accelerate launch \
 
 ### Llama-3.1-Tulu-3-8B-RM Reproduction
 
-This is the exact command which produced [allenai/Llama-3.1-Tulu-3-8B-RM](https://huggingface.co/allenai/Llama-3.1-Tulu-3-8B-RM)
+This is (almost) the exact command which produced [allenai/Llama-3.1-Tulu-3-8B-RM](https://huggingface.co/allenai/Llama-3.1-Tulu-3-8B-RM)
 
 
 ```bash
@@ -262,7 +262,7 @@ accelerate launch \
 
 ### Llama-3.1-Tulu-3-8B Reproduction
 
-This is the exact command which produced [allenai/Llama-3.1-Tulu-3-8B](https://huggingface.co/allenai/Llama-3.1-Tulu-3-8B)
+This is (almost) the exact command which produced [allenai/Llama-3.1-Tulu-3-8B](https://huggingface.co/allenai/Llama-3.1-Tulu-3-8B)
 
 
 ```bash
@@ -309,7 +309,7 @@ python open_instruct/ppo_vllm_thread_ray_gtrl.py \
 
 ### Llama-3.1-Tulu-3-70B Reproduction
 
-This is the exact command which produced [allenai/Llama-3.1-Tulu-3-70B](https://huggingface.co/allenai/Llama-3.1-Tulu-3-70B)
+This is (almost) the exact command which produced [allenai/Llama-3.1-Tulu-3-70B](https://huggingface.co/allenai/Llama-3.1-Tulu-3-70B)
 
 Couple of notes:
 * Make sure to modify `configs/beaker_configs/ray_node_setup.sh` in our own cluster setup. The idea is to have the replicas join the main machines via `ray`.
