@@ -48,8 +48,8 @@ First, let's generate configurations for `birr` (assuming your JSONL files in a 
 ```sh
 python3 -m scripts.synth_pref.generate_responses \
     --name myprompts \
-    --source_file "path/to/myprompts/*.jsonl" \
-    --target_dir "path/to/outputs/" \
+    --source_file "example/generate_responses_in/*.jsonl" \
+    --target_dir "example/generate_responses_out/" \
     --batch_size 128
 ```
 
@@ -66,7 +66,7 @@ From there, you can create a preference annotation mix that samples four (4) res
 ```sh
 python3 -m scripts.synth_pref.create_annotation_mix \
     --name myprompts \
-    --input_dir path/to/birr/output/ \
+    --input_dir example/generate_responses_out/ \
     --output_dir path/to/annotation/output \
     --prompt_template ultrafeedback
 ```
