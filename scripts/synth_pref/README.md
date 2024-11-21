@@ -110,6 +110,8 @@ python3 -m scripts.synth_pref.annotate_preferences \
 
 If all files are done and downloaded, you can start parsing the preferences to obtain the final preference dataset:
 
-```
-
+```sh
+python3 -m scripts.synth_pref.parse_preferences \
+    --input_dir path/to/openai/outputs/ \
+    --output_path path/to/final/preference.yaml
 ```
