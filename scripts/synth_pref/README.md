@@ -14,11 +14,17 @@ You need to install specific dependencies for this pipeline:
 
 ```sh
 python3 -m venv venv
+source venv/bin/activate
 pip install -r scripts/synth_pref/requirements.txt
 ```
 
-We also use the open-source Batch Inference Runtime (birr) tool to handle all calls to VLLM.
-It is currently included in this repository as a submodule.
+We also use the open-source [Batch Inference Runtime (birr) tool](https://github.com/allenai/birr) to handle all calls to VLLM.
+In your current directory, run the following:
+
+```sh
+git clone git@github.com:allenai/birr.git
+git checkout 72e1c14
+```
 
 ## How-to-use
 
