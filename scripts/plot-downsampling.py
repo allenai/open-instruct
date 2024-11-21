@@ -1,12 +1,12 @@
 benchmark_data = {
     "Avg.": {
         "eval_setting": "",
-        "sft_5": 56.6,
-        "sft_10": 57.0,
-        "sft_25": 57.7,
-        "sft_50": 58.1,
-        "sft_75": 58.6,
-        "sft_full": 59.1
+        "sft_5": 57.69,
+        "sft_10": 58.06,
+        "sft_25": 58.64,
+        "sft_50": 59.18,
+        "sft_75": 59.57,
+        "sft_full": 60.08
     },
     "MMLU": {
         "eval_setting": "5 shot",
@@ -35,6 +35,7 @@ benchmark_data = {
         "sft_75": 29.6,
         "sft_full": 29.3
     },
+    # TODO: BBH IS NOT UP TO DATE!!!
     "BigBenchHard": {
         "eval_setting": "3 shot, CoT",
         "sft_5": 67.5,
@@ -109,12 +110,12 @@ benchmark_data = {
     },
     "Safety": {
         "eval_setting": "",
-        "sft_5": 75.3,
-        "sft_10": 77.8,
-        "sft_25": 79.9,
-        "sft_50": 79.1,
-        "sft_75": 80.2,
-        "sft_full": 80.2
+        "sft_5": 89.8,
+        "sft_10": 90.9,
+        "sft_25": 92.3,
+        "sft_50": 92.6,
+        "sft_75": 92.8,
+        "sft_full": 93.1
     }
 }
 
@@ -124,68 +125,99 @@ import numpy as np
 # Create x-axis values (SFT percentages)
 x_values = [5, 10, 25, 50, 75, 100]  # 100 represents full SFT
 
-# Create figure and axis with a larger size
-plt.figure(figsize=(12, 8))
+# # Create figure and axis with a larger size
+# plt.figure(figsize=(12, 8))
 
-# Color palette for different lines
-colors = plt.cm.tab20(np.linspace(0, 1, len(benchmark_data)))
+# # Color palette for different lines
+# colors = plt.cm.tab20(np.linspace(0, 1, len(benchmark_data)))
 
-# Plot each benchmark
-for (benchmark, data), color in zip(benchmark_data.items(), colors):
-    if benchmark != "Avg.":  # Skip the average for now
-        y_values = [
-            data["sft_5"],
-            data["sft_10"],
-            data["sft_25"],
-            data["sft_50"],
-            data["sft_75"],
-            data["sft_full"]
-        ]
-        plt.plot(x_values, y_values, marker='o', label=benchmark, color=color, linewidth=2)
+# # Plot each benchmark
+# for (benchmark, data), color in zip(benchmark_data.items(), colors):
+#     if benchmark != "Avg.":  # Skip the average for now
+#         y_values = [
+#             data["sft_5"],
+#             data["sft_10"],
+#             data["sft_25"],
+#             data["sft_50"],
+#             data["sft_75"],
+#             data["sft_full"]
+#         ]
+#         plt.plot(x_values, y_values, marker='o', label=benchmark, color=color, linewidth=2)
 
-# Add the average line with higher emphasis
-avg_values = [
-    benchmark_data["Avg."]["sft_5"],
-    benchmark_data["Avg."]["sft_10"],
-    benchmark_data["Avg."]["sft_25"],
-    benchmark_data["Avg."]["sft_50"],
-    benchmark_data["Avg."]["sft_75"],
-    benchmark_data["Avg."]["sft_full"]
-]
-plt.plot(x_values, avg_values, 'k--', label='Average', linewidth=3, marker='s')
+# # Add the average line with higher emphasis
+# avg_values = [
+#     benchmark_data["Avg."]["sft_5"],
+#     benchmark_data["Avg."]["sft_10"],
+#     benchmark_data["Avg."]["sft_25"],
+#     benchmark_data["Avg."]["sft_50"],
+#     benchmark_data["Avg."]["sft_75"],
+#     benchmark_data["Avg."]["sft_full"]
+# ]
+# plt.plot(x_values, avg_values, 'k--', label='Average', linewidth=3, marker='s')
 
-# Customize the plot
-plt.xlabel('SFT Percentage', fontsize=12)
-plt.ylabel('Performance', fontsize=12)
-plt.title('Benchmark Performance Across Different SFT Percentages', fontsize=14)
-plt.grid(True, linestyle='--', alpha=0.7)
-plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=10)
+# # Customize the plot
+# plt.xlabel('SFT Training Data Size', fontsize=12)
+# plt.ylabel('Performance', fontsize=12)
+# plt.title('Benchmark Performance Across Different SFT Percentages', fontsize=14)
+# plt.grid(True, linestyle='--', alpha=0.7)
+# plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=10)
 
-# Set x-axis ticks
-plt.xticks(x_values)
+# # Set x-axis ticks
+# plt.xticks(x_values)
 
-# Adjust layout to prevent label cutoff
-plt.tight_layout()
+# # Adjust layout to prevent label cutoff
+# plt.tight_layout()
 
-# Show the plot
-plt.show()
+# # Show the plot
+# plt.show()
 
 # Optional: Create a second plot focusing on specific benchmarks of interest
-plt.figure(figsize=(12, 8))
+# plt.figure(figsize=(20, 8))
 
-# Define specific benchmarks and their colors
-plot_config = {
-    'Avg.': '#0a3235',         # Black for average
-    'TruthfulQA': '#b11bE8',   # Coral red
-    'HumanEval+': '#f0529c',   # Turquoise
-    'Safety': '#105257',       # Light blue
-    'GSM8K': '#0fcb8c'         # Sage green
-}
+# Define benchmarks and SFT percentages
+benchmarks = [
+    'Avg.',
+    'GSM8K',
+    'HumanEval+',
+    'Safety',
+    'TruthfulQA',
+]
+sft_percentages = ['5%', '10%', '25%', '50%', '75%', '100%']
+# colors = ['#0A2B35', '#0fcb8c', '#105257', '#f0529c', '#838383', '#0a3235']  # One color for each percentage
+colors = [
+    '#FAC4DD',  # 10%
+    '#F8ADD0',  # 20%
+    '#F697C3',  # 40%
+    '#F480B6',  # 60%
+    '#F269A9',  # 80%
+    '#F0529C',  # 100% - original pink
+]
 
-# Plot each benchmark with its specified color
-for benchmark, color in plot_config.items():
+colors = [
+    "#E7EEEE",  # RGB(231, 238, 238)
+    "#CEDCDD",  # RGB(206, 220, 221)
+    "#B7CBCC",  # RGB(183, 203, 204)
+    "#9FB9BB",  # RGB(159, 185, 187)
+    "#88A8AB",  # RGB(136, 168, 171)
+    "#F0529C", # PINK
+    "#6E979A",  # RGB(110, 151, 154)
+    "#588689",  # RGB(88, 134, 137)
+    "#3F7478",  # RGB(63, 116, 120)
+    "#105257",  # RGB(16, 82, 87)
+    "#0A3235",  # RGB(10, 50, 53)
+]
+
+# Set up the plot
+fig, ax = plt.subplots(figsize=(20, 8))
+
+# Width of bars and positions
+width = 0.12
+n_percentages = len(sft_percentages)
+
+# Create bars for each benchmark
+for i, benchmark in enumerate(benchmarks):
     data = benchmark_data[benchmark]
-    y_values = [
+    values = [
         data["sft_5"],
         data["sft_10"],
         data["sft_25"],
@@ -193,27 +225,85 @@ for benchmark, color in plot_config.items():
         data["sft_75"],
         data["sft_full"]
     ]
-    # Make average line dashed and thicker
-    if benchmark == 'Avg.':
-        plt.plot(x_values, y_values, '--', marker='s', label=benchmark, 
-                color=color, linewidth=3)
-    else:
-        plt.plot(x_values, y_values, marker='o', label=benchmark, 
-                color=color, linewidth=2)
+    
+    # Calculate positions for this benchmark's group of bars
+    x = i
+    for j in range(n_percentages):
+        bar_position = x - (n_percentages-1)*width/2 + j*width
+        bar = ax.bar(bar_position, values[j], width, 
+                    label=sft_percentages[j] if i == 0 else "", 
+                    color=colors[j],
+                    edgecolor="black")
+        
+        # Add value labels on top of bars
+        # ax.text(bar_position, values[j], f'{values[j]:.1f}', ha='center', va='bottom', fontsize=8)
 
-# Customize the focused plot
-plt.xlabel('SFT Percentage', fontsize=12)
-plt.ylabel('Performance', fontsize=12)
-# plt.title('Selected Benchmark Performance Trends', fontsize=14)
-plt.grid(True, linestyle='--', alpha=0.7)
-plt.legend(fontsize=10)
-plt.xticks(x_values)
+# Customize the plot
+# ax.set_xlabel('Benchmarks', fontsize=14)
+ax.set_ylabel('Performance', fontsize=18)
+plt.tick_params(axis='y', labelsize=18)
+# ax.set_title('Performance by Benchmark and SFT Percentage', fontsize=14)
 
-# Adjust layout
-plt.tight_layout()
+# Set x-axis ticks and labels
+ax.set_xticks(range(len(benchmarks)))
+ax.set_xticklabels(benchmarks, ha="center", fontsize=18)
 
-# Show the plot
-# plt.show()
+ax.spines[["right", "top"]].set_visible(False)
 
-plt.savefig('downsampling.pdf', bbox_inches='tight', dpi=300)
-plt.close()
+# Add legend
+# ax.legend(title='SFT Sample Size', loc='center', bbox_to_anchor=(0.885, 0.8))
+
+# Add grid
+# ax.grid(True, linestyle='--', alpha=0.3, axis='y')
+
+# Adjust layout to accommodate legend
+# plt.subplots_adjust(right=0.85)
+
+# Save and show the plot
+plt.savefig('downsampling_bars.pdf', bbox_inches='tight', dpi=300)
+plt.show()
+
+# # Define specific benchmarks and their colors
+# plot_config = {
+#     'Avg.': '#0a3235',         # Black for average
+#     'TruthfulQA': '#b11bE8',   # Coral red
+#     'HumanEval+': '#f0529c',   # Turquoise
+#     'Safety': '#105257',       # Light blue
+#     'GSM8K': '#0fcb8c'         # Sage green
+# }
+
+# # Plot each benchmark with its specified color
+# for benchmark, color in plot_config.items():
+#     data = benchmark_data[benchmark]
+#     y_values = [
+#         data["sft_5"],
+#         data["sft_10"],
+#         data["sft_25"],
+#         data["sft_50"],
+#         data["sft_75"],
+#         data["sft_full"]
+#     ]
+#     # Make average line dashed and thicker
+#     if benchmark == 'Avg.':
+#         plt.plot(x_values, y_values, '--', marker='s', label=benchmark, 
+#                 color=color, linewidth=3)
+#     else:
+#         plt.plot(x_values, y_values, marker='o', label=benchmark, 
+#                 color=color, linewidth=2)
+
+# # Customize the focused plot
+# plt.xlabel('SFT Percentage', fontsize=12)
+# plt.ylabel('Performance', fontsize=12)
+# # plt.title('Selected Benchmark Performance Trends', fontsize=14)
+# plt.grid(True, linestyle='--', alpha=0.7)
+# plt.legend(fontsize=10)
+# plt.xticks(x_values)
+
+# # Adjust layout
+# plt.tight_layout()
+
+# # Show the plot
+# # plt.show()
+
+# plt.savefig('downsampling.pdf', bbox_inches='tight', dpi=300)
+# plt.close()
