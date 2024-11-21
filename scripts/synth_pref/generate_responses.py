@@ -1,12 +1,11 @@
 import argparse
 import logging
-import subprocess
 import sys
 from pathlib import Path
 
 import yaml
 from dotenv import load_dotenv
-from synth_pref.utils.model_configs import MODELS
+from scripts.synth_pref.utils.model_configs import MODELS
 from tqdm import tqdm
 
 logging.basicConfig(
@@ -21,7 +20,7 @@ load_dotenv()
 
 def get_args():
     # fmt: off
-    parser = argparse.ArgumentPraser("Generate responses for a set of prompts given a model.")
+    parser = argparse.ArgumentParser("Generate responses for a set of prompts given a model.")
     parser.add_argument("-n", "--name", type=str, required=True, help="Name of the dataset for ID purposes.")
     parser.add_argument("-f", "--source_file", nargs="+", required=True, help="Directory that contains the JSONL files you need to generate responses for.")
     parser.add_argument("--target_dir", type=Path, required=True, help="Directory to save the output inference results.")
@@ -35,7 +34,7 @@ def get_args():
 
 def main():
     args = get_args()
-    model_names = list(MODEL.keys())
+    model_names = list(MODELS.keys())
     if args.include_model:
         model_names = [model for model in model_names if model in args.include_model]
     if args.ignore_model:

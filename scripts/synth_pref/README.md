@@ -17,4 +17,21 @@ python3 -m venv venv
 pip install -r scripts/synth_pref/requirements.txt
 ```
 
+We also use the open-source Batch Inference Runtime (birr) tool to handle all calls to VLLM.
+It is currently included in this repository as a submodule.
+
 ## How-to-use
+
+### Dataset preparation for prompts
+
+First, you need to prepare your prompts in a JSONL file with the following schema:
+
+```
+{"text": "Your text", **metadata}
+```
+
+Ideally, it is preferable to have multiple JSONL files with at most 250-500 rows each in a single directory so that `birr` can manage the queue more effectively.
+
+### Response generation
+
+First, let's generate configurations for `birr`:

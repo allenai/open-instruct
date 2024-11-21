@@ -1,3 +1,5 @@
+from typing import Any
+
 default_generation_params = {
     "temperature": 1,
     "top_p": 1,
