@@ -67,7 +67,7 @@ From there, you can create a preference annotation mix that samples four (4) res
 python3 -m scripts.synth_pref.create_annotation_mix \
     --name myprompts \
     --input_dir example/generate_responses_out/ \
-    --output_dir path/to/annotation/output \
+    --output_dir example/create_annotation_mix_out/ \
     --prompt_template ultrafeedback
 ```
 
@@ -88,8 +88,8 @@ Then, let's convert the annotation mix to the format desired by the Batch API:
 ```sh
 python3 -m scripts.synth_pref.annotate_preferences \
     --model gpt-4o-2024-08-06 \
-    --input_path path/to/the/annotation_mix.jsonl
-    --output_dir path/to/converted/output.jsonl
+    --input_path create_annotation_mix_out/
+    --output_dir create_annotation_mix_out/batch_openai
     --rows_per_shard 10000
 ```
 
@@ -99,7 +99,7 @@ Then, we can send the annotations to OpenAI now:
 ```sh
 python3 -m scripts.synth_pref.annotate_preferences \
     --model gpt-4o-2024-08-06 \
-    --input_dir path/to/converted/files.jsonl
+    --input_dir create_annotation_mix_out/batch_openai/
     --output_dir target_dir
 ```
 
@@ -110,14 +110,14 @@ You can poll the file to see if they're done and it will automatically download 
 ```sh
 python3 -m scripts.synth_pref.annotate_preferences \
     --model gpt-4o-2024-08-06 \
-    --batch_report path/to/batch_infer_openai_results.csv
-    --output_dir target_dir
+    --batch_report create_annotation_mix_out/batch_infer_openai_results.csv
+    --output_dir create_annotation_mix_out/batch_results/
 ```
 
 If all files are done and downloaded, you can start parsing the preferences to obtain the final preference dataset:
 
 ```sh
 python3 -m scripts.synth_pref.parse_preferences \
-    --input_dir path/to/openai/outputs/ \
-    --output_path path/to/final/preference.yaml
+    --input_dir create_annotation_mix_out/batch_results \
+    --output_path final_preference_dataset.yaml
 ```
