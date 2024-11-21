@@ -12,8 +12,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from tqdm import tqdm
 
-from synth_pref.utils.openai_api import format_for_openai_batch
-from synth_pref.utils.ultrafeedback_template import system_prompt
+from scripts.synth_pref.utils.openai_api import format_for_openai_batch
+from scripts.synth_pref.utils.ultrafeedback_template import system_prompt
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",

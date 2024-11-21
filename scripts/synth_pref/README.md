@@ -69,3 +69,47 @@ If you want to create a subset of on-policy data, you can pass a model name in `
 This will ensure that one of the responses is from that on-policy checkpoint, while the other response will be sampled from the remaining.
 
 ### Preference annotation
+
+Once you've created the annotation mix, you can now perform LLM-as-a-judge!
+We use OpenAI's Batch API to query large sets of prompts, so first set your token:
+
+```sh
+export OPENAI_API_KEY=<your key>
+```
+
+Then, let's convert the annotation mix to the format desired by the Batch API:
+
+```sh
+python3 -m scripts.synth_pref.annotate_preferences \
+    --model gpt-4o-2024-08-06 \
+    --input_path path/to/the/annotation_mix.jsonl
+    --output_dir path/to/converted/output.jsonl
+    --rows_per_shard 10000
+```
+
+This command will shard our annotation mix to `n` files with `10000` rows to fit OpenAI's file limits.
+Then, we can send the annotations to OpenAI now:
+
+```sh
+python3 -m scripts.synth_pref.annotate_preferences \
+    --model gpt-4o-2024-08-06 \
+    --input_dir path/to/converted/files.jsonl
+    --output_dir target_dir
+```
+
+This part may take some time, in the typical OpenAI API, the maximum wait time is 24 hours.
+In addition, this command will save a `batch_infer_openai_results.csv` that keeps track of which file and which batch was sent to the server.
+You can poll the file to see if they're done and it will automatically download the results via:
+
+```sh
+python3 -m scripts.synth_pref.annotate_preferences \
+    --model gpt-4o-2024-08-06 \
+    --batch_report path/to/batch_infer_openai_results.csv
+    --output_dir target_dir
+```
+
+If all files are done and downloaded, you can start parsing the preferences to obtain the final preference dataset:
+
+```
+
+```

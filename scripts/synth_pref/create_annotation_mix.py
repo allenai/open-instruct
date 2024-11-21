@@ -8,8 +8,9 @@ from typing import Optional
 
 import pandas as pd
 from jinja2 import BaseLoader, Environment
-from scripts.synth_pref.utils.ultrafeedback_template import user_prompts
 from tqdm import tqdm
+
+from scripts.synth_pref.utils.ultrafeedback_template import user_prompts
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",

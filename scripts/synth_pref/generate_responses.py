@@ -5,8 +5,9 @@ from pathlib import Path
 
 import yaml
 from dotenv import load_dotenv
-from scripts.synth_pref.utils.model_configs import MODELS
 from tqdm import tqdm
+
+from scripts.synth_pref.utils.model_configs import MODELS
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
