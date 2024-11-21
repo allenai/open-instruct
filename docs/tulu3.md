@@ -7,10 +7,7 @@ This document details the commands and configs to reproduce the tulu3 models.
 
 ### Llama-3.1-Tulu-3-8B-SFT Reproduction
 
-Below is (almost) the exact command which produced [Llama-3.1-Tulu-3-8B-SFT](https://huggingface.co/allenai/Llama-3.1-Tulu-3-8B-SFT). In our setup we ran this command on 8 machines with 64 gpus in total. 
-
-If you have different number of GPUs, please adjust the `NUM_MACHINES`, `NUM_PROCESSES`, `PER_DEVICE_TRAIN_BATCH_SIZE`, and `GRADIENT_ACCUMULATION_STEPS` accordingly. For example, say, you only have 8 GPUs. The command below has an effective batch size of `NUM_PROCESSES * PER_DEVICE_TRAIN_BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS = 64 * 1 * 2 = 128`. A one node setup can simulate our batch size with `NUM_PROCESSES=8`, `PER_DEVICE_TRAIN_BATCH_SIZE=1`, and `GRADIENT_ACCUMULATION_STEPS=64`.
-
+Below is (almost) the exact command which produced [Llama-3.1-Tulu-3-8B-SFT](https://huggingface.co/allenai/Llama-3.1-Tulu-3-8B-SFT). We deployed the command across 8 machines, each equipped with 8 NVIDIA H100 GPUs, for a total of 64 GPUs in the our setup.
 
 ```bash
 # modify the following `MACHINE_RANK`, `MAIN_PROCESS_IP`,
@@ -54,11 +51,13 @@ accelerate launch \
     --dataset_mixer_list allenai/tulu-v.3.9-mix-preview-noncommercial 1.0 \
     --checkpointing_steps epoch \
     --dataset_mix_dir output/sft_8b \
-    --exp_name L3.1-8B-v3.9-nc-fixed-2 \
+    --exp_name tulu-3-8b-sft \
     --seed 123
 # For Ai2 internal members, this was the experiment URL: https://beaker.org/ex/01JBNTPW8TKG09B2XR832YB5S8
 ```
 
+> [!NOTE]  
+> If you have different number of GPUs, please adjust the `NUM_MACHINES`, `NUM_PROCESSES`, `PER_DEVICE_TRAIN_BATCH_SIZE`, and `GRADIENT_ACCUMULATION_STEPS` accordingly. For example, say, you only have 8 GPUs. The command below has an effective batch size of `NUM_PROCESSES * PER_DEVICE_TRAIN_BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS = 64 * 1 * 2 = 128`. A one node setup can simulate our batch size with `NUM_PROCESSES=8`, `PER_DEVICE_TRAIN_BATCH_SIZE=1`, and `GRADIENT_ACCUMULATION_STEPS=64`.
 
 
 ### Llama-3.1-Tulu-3-70B-SFT Reproduction
@@ -110,7 +109,7 @@ accelerate launch \
     --checkpointing_steps 1000 \
     --keep_last_n_checkpoints 20 \
     --gradient_checkpointing \
-    --exp_name L3.1-70B-v3.9-nc-2e-6-2_ep-fixed-3 \
+    --exp_name tulu-3-70b-sft \
     --seed 456
 # For Ai2 internal members, this was the experiment URL: https://beaker.org/ex/01JC5J4R80M18XQTDH47JSFRJY/
 ```
@@ -162,7 +161,7 @@ accelerate launch \
     --dpo_loss_type dpo_norm \
     --dpo_beta 5 \
     --checkpointing_steps 1000 \
-    --exp_name valpy_dpo_7b_v3.9_best_ifpersonafae
+    --exp_name tulu-3-8b-dpo
 # For Ai2 internal members, this was the experiment URL: https://beaker.org/ex/01JCRXP0AR5312S8MD3XGCN0J7/
 ```
 
@@ -224,7 +223,7 @@ accelerate launch \
     --dpo_loss_type dpo_norm \
     --dpo_beta 5 \
     --checkpointing_steps epoch \
-    --exp_name valpy_dpo_70b_best_jacobnew
+    --exp_name tulu-3-70b-dpo
 # For Ai2 internal members, this was the experiment URL: https://beaker.org/ex/01JCSAYYHQYF9QDQDCV6KJ53M9/
 ```
 
@@ -267,7 +266,7 @@ This is (almost) the exact command which produced [allenai/Llama-3.1-Tulu-3-8B](
 
 ```bash
 python open_instruct/ppo_vllm_thread_ray_gtrl.py \
-    --exp_name gsm_math_if_valpy_best_and_if_avg_8b_beta0.05 \
+    --exp_name tulu-3-8b-rlvr \
     --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
     --dataset_train_splits train \
     --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ground_truth": 1.0}' \
@@ -326,7 +325,7 @@ source configs/beaker_configs/ray_node_setup.sh && python open_instruct/ppo_vllm
     --max_prompt_token_length 2048 \
     --response_length 2048 \
     --model_name_or_path allenai/Llama-3.1-Tulu-3-70B-DPO \
-    --exp_name 70B_ppo_1116_mix_best_jacob_val_0.07_wr_0.1_lr_1e-7_seed_8 \
+    --exp_name tulu-3-70b-rlvr \
     --reward_model_path allenai/Llama-3.1-Tulu-3-8B-RM \
     --beta 0.07 \
     --warmup_ratio 0.1 \

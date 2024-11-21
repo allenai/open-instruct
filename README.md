@@ -201,12 +201,6 @@ The license we use for V1 models released (along with the base model licenses) c
 V2 models are licensed under the [low-risk AI2 ImpACT license](https://allenai.org/licenses/impact-lr). See [here](https://allenai.org/impact-license) for more details.
 
 
-## Version history
-
-
-4/26/2024: Tulu 1/2 results used an ealier version of Open Instruct with a pinned version of Transformers. If you are looking to replicate these results, refer to [this commit or older](https://github.com/allenai/open-instruct/commit/f3424591638ed63b31d5869abd867932c359c1ed).
-
-
 ## Citation
 
 If you used this repository or our models, please cite our work:
