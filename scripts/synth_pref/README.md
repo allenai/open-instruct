@@ -5,8 +5,9 @@ This pipeline is based on the Ultrafeedback pipeline ([Cui et al., 2023](https:/
 
 Here's an overview of the pipeline (and how each script corresponds to each component):
 
-![](scripts/synth_pref/assets/ufpp_pipeline_v2_normal.png)
-![](scripts/synth_pref/assets/ufpp_pipeline_v2_code.png)
+![](https://github.com/allenai/open-instruct/blob/main/scripts/synth_pref/assets/ufpp_pipeline_v2_normal.png)
+![](https://github.com/allenai/open-instruct/blob/main/scripts/synth_pref/assets/ufpp_pipeline_v2_code.png)
+
 
 ## Setup
 
