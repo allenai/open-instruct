@@ -58,7 +58,7 @@ while [[ "$#" -gt 0 ]]; do
         --model-name) MODEL_NAME="$2"; shift ;;
         --model-location) MODEL_LOCATION="$2"; shift ;;
         --num_gpus) NUM_GPUS="$2"; shift ;;
-        --hf-upload) HF_UPLOAD="true" ;;
+        --upload_to_hf) UPLOAD_TO_HF="$2"; shift ;;
         --revision) REVISION="$2"; shift ;;
         --max-length) MAX_LENGTH="$2"; shift ;;
         --unseen-evals) UNSEEN_EVALS="true" ;;
@@ -83,22 +83,17 @@ fi
 MODEL_NAME_SAFE=${MODEL_NAME//\//_}
 
 # Set defaults for optional arguments
-HF_UPLOAD="${HF_UPLOAD:-false}"
+UPLOAD_TO_HF="${UPLOAD_TO_HF:-allenai/olmo-instruct-evals}"
 MAX_LENGTH="${MAX_LENGTH:-4096}"
 UNSEEN_EVALS="${UNSEEN_EVALS:-false}"
 PRIORITY="${PRIORITY:normal}"
 EVALUATE_ON_WEKA="${EVALUATE_ON_WEKA:-false}"
 
-# Set HF_UPLOAD_ARG if HF_UPLOAD is true
-if [ "$HF_UPLOAD" == "true" ]; then
-    # if UNSEEN_EVALS, save results to a different directory
-    if [ "$UNSEEN_EVALS" == "true" ]; then
-        HF_UPLOAD_ARG="--hf-save-dir allenai/tulu-3-evals-unseen//results/${MODEL_NAME_SAFE}"
-    else
-        HF_UPLOAD_ARG="--hf-save-dir allenai/tulu-3-evals//results/${MODEL_NAME_SAFE}"
-    fi
+# if UNSEEN_EVALS, save results to a different directory
+if [ "$UNSEEN_EVALS" == "true" ]; then
+    HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}-unseen//results/${MODEL_NAME_SAFE}"
 else
-    HF_UPLOAD_ARG=""
+    HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}//results/${MODEL_NAME_SAFE}"
 fi
 
 # Set REVISION if not provided
