@@ -1692,6 +1692,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 --pure_docker_mode \
                 --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
                 --beaker_workload_id {beaker_config.beaker_workload_id} \
+                --upload_to_hf {args.hf_metadata_dataset} \
                 --model_name {args.hf_repo_revision}
             """
             process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
