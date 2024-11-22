@@ -179,7 +179,7 @@ for TASK in "${TASKS[@]}"; do
             ${REVISION_ARG} \
             --cluster ai2/neptune-cirrascale,ai2/saturn-cirrascale,ai2/jupiter-cirrascale-2 \
             --beaker-retries 2 \
-            --beaker-priority "$PRIORITY" --dry-run
+            --beaker-priority "$PRIORITY"
     else
         python oe-eval-internal/oe_eval/launch.py \
         --model "$MODEL_NAME" \
@@ -195,6 +195,6 @@ for TASK in "${TASKS[@]}"; do
         --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key"}' \
         ${REVISION_ARG} \
         --beaker-retries 2 \
-        --beaker-priority "$PRIORITY" --dry-run
+        --beaker-priority "$PRIORITY"
     fi
 done
