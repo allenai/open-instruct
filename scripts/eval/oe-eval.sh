@@ -160,7 +160,7 @@ for TASK in "${TASKS[@]}"; do
     else
         BATCH_SIZE=$BATCH_SIZE_VLLM
         MODEL_TYPE="--model-type vllm"
-        GPU_COUNT=$GPU_COUNT
+        GPU_COUNT="$NUM_GPUS"
     fi
 
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
