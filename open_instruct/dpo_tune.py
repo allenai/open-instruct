@@ -472,7 +472,7 @@ def main(args: FlatArguments):
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
-    args.run_name = f"{args.exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
+    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -1165,6 +1165,7 @@ def main(args: FlatArguments):
                 --pure_docker_mode \
                 --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
                 --beaker_workload_id {beaker_config.beaker_workload_id} \
+                --upload_to_hf {args.hf_metadata_dataset} \
                 --model_name {args.run_name}
             """
             process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)

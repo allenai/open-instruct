@@ -21,6 +21,7 @@ class Args:
     model_name: str
     max_wait_time_for_beaker_dataset_upload_seconds: int = 60 * 30  # 30 minutes
     check_interval_seconds: int = 60
+    upload_to_hf: str = "allenai/tulu-3-evals"
 
 
 def main(args: Args, beaker_runtime_config: BeakerRuntimeConfig):
@@ -40,6 +41,7 @@ def main(args: Args, beaker_runtime_config: BeakerRuntimeConfig):
                 run_oe_eval_experiments=True,
                 run_safety_evaluations=True,
                 skip_oi_evals=True,
+                upload_to_hf=args.upload_to_hf,
             )
             return
         time.sleep(args.check_interval_seconds)
