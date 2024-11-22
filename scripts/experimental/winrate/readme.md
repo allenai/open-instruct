@@ -372,4 +372,31 @@ python measure_agreement_rate.py \
     --input_path csvs/vwxyzjn/ppo_vllm_thread_beta_0.03_episode_126000__allenai_open_instruct_dev_ppo_vllm_thread_beta_0.03_episode_126000__3__1726543993_judged.csv \
     --n -1
 # count: 500, agreement_rate: 58.40%
+
+python -i generate_and_eval.py \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision "ppo_vllm_thread_beta_0.03__3__1732222410" \
+    --n 500
+# preferred
+# response0    263
+# response1    237
+# Name: count, dtype: int64
+# preferred
+# response0    0.526
+# response1    0.474
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=229.416
+python -i generate_and_eval.py \
+    --model_name_or_path allenai/open_instruct_dev \
+    --model_revision "ppo_vllm_thread_no_async_beta_0.03__3__1732222411" \
+    --n 500
+# preferred
+# response0    265
+# response1    235
+# Name: count, dtype: int64
+# preferred
+# response0    0.53
+# response1    0.47
+# Name: proportion, dtype: float64
+# df['model_response_len'].mean()=220.348
 ```
