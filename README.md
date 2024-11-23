@@ -12,7 +12,6 @@ Please see our first paper [How Far Can Camels Go? Exploring the State of Instru
       <img src="assets/images/tulu_logo.png" alt="Tülu (a hybrid camel) represents a suite of LLaMa models that we built by fully-finetuning them on a strong mix of datasets." style="width: 20%; min-width: 200px; display: block; margin: auto;">
 </p>
 
-*Note:* Previous versions of Open Instruct used a pinned version of Transformers for replicating Tulu 1/2 results. If this is your goal, refer to [this commit or older](https://github.com/allenai/open-instruct/commit/f3424591638ed63b31d5869abd867932c359c1ed).
 
 ## News
 
@@ -30,40 +29,145 @@ Please see our first paper [How Far Can Camels Go? Exploring the State of Instru
 
 ## Setup
 
-Installation is lightweight and assumes **one of two installation strategies**. 
-First, installing in a *bare environment* (no Cuda image).
+Our setup mostly follows our [Dockerfile](./Dockerfile), which uses Python 3.10. *Note that Open Instruct is a research codebase and does not guarantee backward compatibility.* We offer two installation strategies:
 
-Before installing, if not in a Docker container with NVCC installed, you should run:
-```
-conda install cuda-nvcc=<ver> -c nvidia
-```
-Then, install `torch==2.3.0` from source.
-
-To run training, evaluation, or inference for our finetuned models, you need to install the required packages by running the following command (after installing pytorch):
-
+* **Local installation**: This is the recommended way to install Open Instruct. You can install the dependencies by running the following commands:
 ```bash
+pip install --upgrade pip "setuptools<70.0.0" wheel 
+# TODO, unpin setuptools when this issue in flash attention is resolved
+pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
+pip install packaging
+pip install flash-attn==2.6.3 --no-build-isolation
 pip install -r requirements.txt
-```
-*Note:* Previous versions of Open Instruct used a pinned version of Transformers for replicating Tulu 2 results. If this is your goal, refer to [this commit or older](https://github.com/allenai/open-instruct/commit/f3424591638ed63b31d5869abd867932c359c1ed).
-
-If you just want the dependencies for the weight diff script, use:
-```bash
-pip install -r weight-diff-requirements.txt
+python -m nltk.downloader punkt
+pip install -e .
 ```
 
-For a second installation strategy, if you'd like to *run experiments within a Docker environment*, you can create one using:
+
+* **Docker installation**: You can also use the Dockerfile to build a Docker image. You can build the image with the following command:
 
 ```bash
-docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 . -t open_instruct
-
+docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 . -t open_instruct_dev
 # if you are interally at AI2, you can create an image like this:
-beaker image create open_instruct -n open_instruct -w ai2/$(whoami)
+beaker image delete $(whoami)/open_instruct_dev 
+beaker image create open_instruct_dev -n open_instruct_dev -w ai2/$(whoami)
 ```
 
-If you are internally at AI2, you can use this pre-built beaker image `hamishivi/open-instruct-eval` (most recent version [here](https://beaker.org/im/01J2CKY81A6N1WG5QS08Y3WNM5/details)). For finetuning, you can use `hamishivi/open-instruct-public` (most recent version [here](https://beaker.org/im/01J2CQFX7076PDHZJR2GB0C3A9/details)). I will try to update these periodically.
+If you are internally at AI2, you may launch experiments using our always-up-to-date auto-built image `nathanl/open_instruct_auto`.
 
 
-For training, you can use the previous image.
+## Training
+
+After having setup the environment, you are ready to launch some experiments. We provide a few examples below. To learn more about how to reproduce the Tulu 3 models, please refer to the [Tulu 3 README](./docs/tulu3.md). The instructions and documentations for Tulu 1 and Tulu 2 are in [Tulu 1 and 2 README](./docs/tulu1_tulu2.md).
+
+### Finetuning
+
+You can run the following commands for getting started:
+
+```bash
+# quick debugging run using 1 GPU
+sh scripts/finetune_with_accelerate_config.sh 1 configs/train_configs/sft/mini.yaml
+# train an 8B tulu3 model using 8 GPU
+sh scripts/finetune_with_accelerate_config.sh 8 configs/train_configs/tulu3/tulu3_sft.yaml
+```
+
+
+### Preference Tuning
+
+```bash
+# quick debugging run using 1 GPU
+sh scripts/dpo_train_with_accelerate_config.sh 1 configs/train_configs/dpo/mini.yaml
+# train an 8B tulu3 model using 8 GPU
+sh scripts/finetune_with_accelerate_config.sh 8 configs/train_configs/tulu3/tulu3_dpo_8b.yaml
+```
+
+
+### RLVR
+
+```bash
+# quick debugging run using 2 GPU (1 for inference, 1 for training)
+# here we are using `HuggingFaceTB/SmolLM2-360M-Instruct`; it's prob not
+# gonna work, but it's easy to test run and print stuff.
+python open_instruct/ppo_vllm_thread_ray_gtrl.py \
+    --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ground_truth": 1.0}' \
+    --dataset_eval_splits test \
+    --max_token_length 2048 \
+    --max_prompt_token_length 2048 \
+    --response_length 2048 \
+    --model_name_or_path HuggingFaceTB/SmolLM2-360M-Instruct \
+    --reward_model_path HuggingFaceTB/SmolLM2-360M-Instruct \
+    --non_stop_penalty \
+    --stop_token eos \
+    --temperature 1.0 \
+    --ground_truths_key ground_truth \
+    --chat_template tulu \
+    --sft_messages_key messages \
+    --learning_rate 3e-7 \
+    --total_episodes 10000 \
+    --penalty_reward_value -10.0 \
+    --deepspeed_stage 3 \
+    --per_device_train_batch_size 2 \
+    --local_rollout_forward_batch_size 2 \
+    --local_mini_batch_size 32 \
+    --local_rollout_batch_size 32 \
+    --num_epochs 1 \
+    --actor_num_gpus_per_node 1 \
+    --vllm_tensor_parallel_size 1 \
+    --beta 0.05 \
+    --apply_verifiable_reward true \
+    --output_dir output/rlvr_1b \
+    --seed 3 \
+    --num_evals 3 \
+    --save_freq 100 \
+    --reward_model_multiplier 0.0 \
+    --gradient_checkpointing \
+    --with_tracking
+
+# train an 8B tulu3 model using 8 GPU (1 for inference, 7 for training)
+python open_instruct/ppo_vllm_thread_ray_gtrl.py \
+    --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ground_truth": 1.0}' \
+    --dataset_eval_splits test \
+    --max_token_length 2048 \
+    --max_prompt_token_length 2048 \
+    --response_length 2048 \
+    --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-DPO \
+    --reward_model_path allenai/Llama-3.1-Tulu-3-8B-RM \
+    --non_stop_penalty \
+    --stop_token eos \
+    --temperature 1.0 \
+    --ground_truths_key ground_truth \
+    --chat_template tulu \
+    --sft_messages_key messages \
+    --learning_rate 3e-7 \
+    --total_episodes 10000000 \
+    --penalty_reward_value -10.0 \
+    --deepspeed_stage 3 \
+    --per_device_train_batch_size 2 \
+    --local_rollout_forward_batch_size 2 \
+    --local_mini_batch_size 32 \
+    --local_rollout_batch_size 32 \
+    --actor_num_gpus_per_node 7 \
+    --vllm_tensor_parallel_size 1 \
+    --beta 0.05 \
+    --apply_verifiable_reward true \
+    --output_dir output/rlvr_8b \
+    --seed 3 \
+    --num_evals 3 \
+    --save_freq 100 \
+    --reward_model_multiplier 0.0 \
+    --gradient_checkpointing \
+    --with_tracking
+```
+
+
+## Contamination checks
+
+We release our scripts for measuring the overlap between instruction tuning datasets and evaluation datasets in `./decontamination`. See the [README](./decontamination/README.md) for more details.
+
 
 ### Developing
 When submitting a PR to this repo, we check the core code in `open_instruct/` for style with the following:
@@ -88,146 +192,6 @@ make quality
 └── Dockerfile                  <- Dockerfile
 ```
 
-## Training
-
-### Dataset preparation
-
-We include a collection of representative instruction datasets in our exploration and are adding new ones to our list. We unify them into the same chatting format. To download and prepare these datasets, simply run the following command:
-
-```bash
-./scripts/data/prepare_train_data.sh
-```
-
-Please check these datasets for licenses and restrictions around their use!
-
-You can also find the processed [Tulu v1](https://huggingface.co/datasets/allenai/tulu-v1-sft-mixture) and [Tulu v2](https://huggingface.co/datasets/allenai/tulu-v2-sft-mixture) SFT datasets on HuggingFace. Note that the train data preparation script will not precisely recreate the Tulu v2 mixture due to randomness in the generation and shifts in data availability - see [this PR](https://github.com/allenai/open-instruct/pull/156) for some details. If you need exactly yhe training data used, the HuggingFace mixture is exactly this - the exact same data used during model training.
-
-### Model preparation
-
-Generally, most huggingface-compatible causal language models should work fine with our codebase, potentially with some adjusting for different tokenizers etc. Some models may require addtional requests to download. E.g., for LLaMa 1 and 2, please consult [the Hugging Face documentation](https://huggingface.co/docs/transformers/model_doc/llama) for requesting access and converting them to a huggingface-compatible format.
-
-### Finetuning
-
-You can use the following command to run instruction tuning (finetuning a pretrained model to follow instructions):
-
-```bash
-./scripts/finetune_with_accelerate.sh
-```
-
-Make sure to adjust `model_name_or_path`, `tokenizer_name`, `train_file`, and `output_dir` to your models / data / setting. By default, this uses `deepspeed` with `accelerate`.
-
-**Note:** If you are looking to replicate the released Tulu 2 models, it may be useful to swap the loss calculation to `--reduce_loss sum`. This uses a sum reduction instead of a mean reduction for loss calculations, and means we weight all tokens evenly when training, better mimicking the larger batch sizes used to train Tulu 2 models. See https://github.com/huggingface/transformers/issues/24725 for more discussion and details. Generally, *you may get better results using the sum reduction if you need to use a lot of gradient accumulation* (including for training Llama 3 models).
-
-### Parameter-Efficient Finetuning
-
-We support [LoRA](https://arxiv.org/abs/2106.09685) finetuning, wherein only a small number of parameters are updated, resulting in faster and cheaper training. For even more efficiency, we also support [QLoRA](https://arxiv.org/abs/2305.14314) finetuning, wherein the non-trained (underlying) model parameters are quantised during 4-bit training. This means you can train a 70b Llama model on a single 80GB A100! Please refer to the respective papers for more details.
-
-Please also note you cannot currently run QLoRA with model parallelism - only data-parallel training is supported, so you cannot train a model that does not fit on one GPU. For LoRA, you can use deepspeed + zero-3 to achieve model parallelism (and FSDP is not currently supported).
-
-Please see `./scripts/finetune_lora_with_accelerate.sh` and `./scripts/finetune_qlora_with_accelerate.sh` for example hyperparameters. We found a larger rank (e.g. 256) and higher learning rate (e.g. 2e-4) worked best. Additionally, we found that QLoRA tended to always achieve similar results to LoRA, while LoRA itself sometimes fell behind full-finetuning, especially in long, complex generation tasks. However, for most purposes, LoRA training essentially matches full-finetuning performance. We recommend merging modules learnt with QLoRA into a dequantised model (run our merge script with the `--qlora` flag).
-
-## DPO Finetuning
-
-For an example of how to fully finetune a model with DPO, see `scripts/dpo_train_with_accelerate.sh`. Note you will require at least 8 80GB A100s to be able to train a 7b size model, and will require more compute for anything larger. We have not tested multi-node training with this script, but it should work.
-
-Our script also supports PEFT training with QLoRA. See `scripts/dpo_train_with_qlora.sh` for an example. We have not trained models with this, so it may require additional hyperparameter tuning to achieve reasonable results.
-
-## Released Checkpoints
-
-Our checkpoints can be found:
-
-- [Here](https://huggingface.co/collections/hamishivi/tulu-v1-suite-655138c3743e6349aaa07d7d) for all Tulu v1 models.
-- [Here](https://huggingface.co/collections/allenai/tulu-v2-suite-6551b56e743e6349aab45101) for all Tulu v2 models.
-- [OLMo 7B SFT](https://huggingface.co/allenai/OLMo-7B-SFT) and [Instruct](https://huggingface.co/allenai/OLMo-7B-Instruct), along with a [2048 sequence length version of Tulu 2](https://huggingface.co/datasets/allenai/tulu-v2-sft-mixture-olmo-2048).
-
-
-### Weight diff script
-
-Our Tulu V1 models were released as weight diffs (due to LLaMa 1 license). We use a slightly modified form of the [Alpaca weight diff script](https://github.com/tatsu-lab/stanford_alpaca/blob/main/weight_diff.py), which runs the same.
-
-To merge a model:
-1. Download the relevant LLaMa model and convert it to Hugging Face format (see above).
-2. Download our repository and install the right dependencies (see above).
-3. Download the model diff you want.
-4. Run the command below:
-
-```bash
-python scripts/weights/weight_diff.py recover --path_raw ${hf_llama_path} --path_tuned ${output_path} --path_diff ${diff_location}
-```
-
-## Evaluation
-
-### Benchmark-based eval
-
-We provide the scripts for running evaluation of Huggingface/OpenAI models on a list of standard benchmarks targeting for the core capabilities of large language models. These benchmakrs include:
-
-- [MMLU](https://github.com/hendrycks/test)
-- [Grade School Math (GSM)](https://github.com/openai/grade-school-math)
-- [MATH](https://github.com/hendrycks/math)
-- [Big-Bench Hard (BBH)](https://github.com/suzgunmirac/BIG-Bench-Hard/tree/main)
-- [TydiQA](https://github.com/google-research-datasets/tydiqa)
-- [Codex HumanEval](https://github.com/openai/human-eval/tree/master)
-- [HumanEval+ and MBPP+](https://github.com/evalplus/evalplus)
-- [IFEval](https://github.com/google-research/google-research/tree/master/instruction_following_eval)
-- [ToxiGen](https://github.com/microsoft/TOXIGEN)
-- [XSTest](https://github.com/paul-rottger/exaggerated-safety/)
-- [TruthfulQA](https://github.com/sylinrl/TruthfulQA)
-- [AlpacaEval 1 and 2](https://github.com/tatsu-lab/alpaca_eval)
-
-We are working on including more promising benchmarks into this list. Please stay tuned!
-
-You can use the following script to download all the evaluation data:
-
-```bash
-./scripts/data/prepare_eval_data.sh
-```
-
-Evaluation scripts for different datasets are put under `./scripts`. For example, you can use the following command to run the MMLU evaluation script:
-
-```bash
-./scripts/eval/mmlu.sh
-```
-
-### Ai2 Internal Evaluation
-
-We provide a script integrated with beaker for use internally at Ai2. For example, to run all the tulu 3 evals with easy uploading:
-```bash
-python scripts/submit_eval_jobs.py \
-      --model_name <model name> \
-      --location <beaker id> \
-      --is_tuned --workspace tulu-3-results \
-      --preemptible \
-      --use_hf_tokenizer_template \
-      --beaker_image nathanl/open_instruct_auto \
-      --upload_to_hf allenai/tulu-3-evals \
-      --run_oe_eval_experiments \
-      --run_safety_evaluations \
-      --skip_oi_evals
-```
-Replace location with your beaker ID, and model name with your model name (note this will affect experiment naming, so make it unique and memorable!). For HF models, use a name with `hf-<model-name>` for the model_name argument, and for location give the HF path (e.g. `meta-llama/Meta-Llama-3-8B-Instruct`). Note this assumes your model has a valid HF tokenizer chat template.
-
-To make this script work you have to clone the [following repository](https://github.com/allenai/oe-eval-internal/tree/main) to the top level directory of the open-instruct repository.
-
-You can additionally run other evaluations in this repository through varied arguments to the script.
-
-You can also upload metadata via the `scripts/add_metadata.py` script. Just run `python scripts/add_metadata.py` and follow the prompts.
-
-If you have used automatic evaluation, you cacn also upload metadata via `python add_metadata_from_wandb.py`. Example usage:
-
-```bash
-# from a wandb url
-python scripts/add_metadata_from_wandb.py --wandb_run_id ai2-llm/open_instruct_internal/runs/fjclmg47
-# or from a hf_revision (the name of the autoeval)
-python scripts/add_metadata_from_wandb.py --hf_repo_revision valpy_dpo_mix_uf_wc_regen_da_sftmix_v4.23___model__42__1725581304
-```
-
-### Human evaluation
-
-We release our human evaluation interface and collected annotations in the `./human_eval` folder. Please see the corresponding [README](./human_eval/README.md) for more details.
-
-## Contamination checks
-
-We release our scripts for measuring the overlap between instruction tuning datasets and evaluation datasets in `./decontamination`. See the [README](./decontamination/README.md) for more details.
 
 ## Licensing
 
@@ -236,6 +200,16 @@ This codebase is licensed under Apache 2.0 as given in [LICENSE](./LICENSE).
 The license we use for V1 models released (along with the base model licenses) can be found in [assets/model_licenses/tulu_license.txt](./assets/model_licenses/tulu_license.txt) - just replace `<MODELNAME>` with the actual model name (i.e., the name on HuggingFace).
 
 V2 models are licensed under the [low-risk AI2 ImpACT license](https://allenai.org/licenses/impact-lr). See [here](https://allenai.org/impact-license) for more details.
+
+
+## Acknowledgements
+
+Open Instruct is a project that benefitd from many open-source projects and libraries. We would like to particularly thank the folloiwng projects:
+
+* [HuggingFace Transformers](https://github.com/huggingface/transformers): We adapted Hugging Face's Trainer for our finetuning scripts.
+* [HuggingFace TRL](https://github.com/huggingface/trl) and [eric-mitchell/direct-preference-optimization](https://github.com/eric-mitchell/direct-preference-optimization): our preference tuning code is adapted from TRL and from Eric Mitchell's DPO code.
+* OpenAI's [lm-human-preferences](https://github.com/openai/lm-human-preferences), [summarize-from-feedback](https://github.com/openai/summarize-from-feedback), and [vwxyzjn/summarize_from_feedback_details](https://github.com/vwxyzjn/summarize_from_feedback_details): Our core PPO code is adapted from OpenAI's original RLHF code and [Huang et al (2024)'s reproduction work](https://openreview.net/forum?id=kHO2ZTa8e3) of OpenAI's summarize from feedback work.
+* [OpenRLHF](https://github.com/OpenRLHF/OpenRLHF): We adapted OpenRLHF's Ray + vLLM distributed code for scaling up PPO RLVR training into the 70B scale.
 
 ## Citation
 

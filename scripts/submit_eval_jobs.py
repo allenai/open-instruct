@@ -601,6 +601,7 @@ for experiment_group in experiment_groups:
 
 # Create an experiment that runs all the eval tasks.
 
+model_name = model_name[:100] # beaker doesn't like names longer than 128 characters, here we save for some headroom.
 if not args.skip_oi_evals:
     experiment_name = f"open_instruct_eval_{model_name}_{today}" 
     d["description"] = experiment_name
@@ -620,7 +621,7 @@ if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
     # if so, run oe-eval. We assume it is cloned in the top-level repo directory.
     oe_eval_cmd = f"scripts/eval/oe-eval.sh --model-name {model_name}"
     if args.upload_to_hf:
-        oe_eval_cmd += " --hf-upload"
+        oe_eval_cmd += f" --upload_to_hf {args.upload_to_hf}"
     ## model location munging: if beaker, use beaker://. If hf, just name
     if model_info[0].startswith("hf-"):
         oe_eval_cmd += f" --model-location {model_info[1]}"
@@ -716,4 +717,3 @@ VLLM_WORKER_MULTIPROC_METHOD=spawn PYTHONPATH=. python evaluation/run_all_genera
 
     cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
     subprocess.Popen(cmd, shell=True)
-    
