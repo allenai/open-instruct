@@ -27,6 +27,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 import gc
 import json
 import logging
@@ -86,7 +87,7 @@ from open_instruct.model_utils import (
     exact_div,
     first_true_indices,
     forward,
-    get_reward_olmo,
+    get_reward,
     print_rich_single_line_metrics,
     print_rich_table,
     push_folder_to_hub,
@@ -95,7 +96,6 @@ from open_instruct.model_utils import (
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
-    check_hf_olmo_availability,
     combine_dataset,
     get_wandb_tags,
     is_beaker_job,
@@ -145,6 +145,8 @@ class Args:
     """Which scheduler to use"""
     warm_up_steps: int = 0
     """Number of warm up steps for the scheduler"""
+    warmup_ratio: float = 0.0
+    """Ratio of warmup steps to total steps (takes precedence over `warm_up_steps`)"""
 
     # various batch sizes
     num_train_epochs: int = 1
@@ -272,6 +274,8 @@ class Args:
     """Whether to launch beaker evaluation jobs after training"""
     try_launch_beaker_eval_jobs_on_weka: bool = False
     """Whether to launch beaker evaluation jobs after training on weka"""
+    oe_eval_tasks: Optional[List[str]] = None
+    """The beaker evaluation tasks to launch"""
     hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
@@ -505,16 +509,6 @@ class RayProcess:
             level=logging.INFO,
             datefmt="%Y-%m-%d %H:%M:%S",
         )
-
-        if check_hf_olmo_availability():
-            # allows AutoModel... to work with not in transformers olmo models
-            import hf_olmo  # noqa
-            from hf_olmo import OLMoTokenizerFast
-            from open_instruct.olmo_adapter.modeling_olmo2 import OLMoForSequenceClassification
-            from open_instruct.olmo_adapter.olmo_new import OlmoNewForCausalLM
-            from vllm.model_executor.models import ModelRegistry
-            AutoModelForSequenceClassification.register(hf_olmo.OLMoConfig, OLMoForSequenceClassification)
-            ModelRegistry.register_model("OLMoForCausalLM", OlmoNewForCausalLM)
         self.world_size = world_size
         self.rank = rank
         self.local_rank = local_rank
@@ -553,7 +547,9 @@ class RayProcess:
 
 @ray.remote(num_gpus=1)
 class PolicyTrainerRayProcess(RayProcess):
-    def from_pretrained(self, args: Args, model_config: ModelConfig, beaker_config: BeakerRuntimeConfig, wandb_url: str):
+    def from_pretrained(
+        self, args: Args, model_config: ModelConfig, beaker_config: BeakerRuntimeConfig, wandb_url: str
+    ):
         self.args = args
         self.model_config = model_config
         self.beaker_config = beaker_config
@@ -597,11 +593,15 @@ class PolicyTrainerRayProcess(RayProcess):
         # optim_params = get_optimizer_grouped_parameters(self.policy, weight_decay)
         # self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
         self.optimizer = torch.optim.AdamW(self.policy.parameters(), lr=args.learning_rate)
+        num_training_steps = args.num_training_steps * args.num_train_epochs * args.num_epochs
+        warm_up_steps = args.warm_up_steps
+        if args.warmup_ratio >= 0.0:
+            warm_up_steps = int(num_training_steps * args.warmup_ratio)
         scheduler = get_scheduler(
             args.lr_scheduler_type,
             optimizer=self.optimizer,
-            num_warmup_steps=args.warm_up_steps,
-            num_training_steps=args.num_training_steps * args.num_train_epochs * args.num_epochs,
+            num_warmup_steps=warm_up_steps,
+            num_training_steps=num_training_steps,
         )
         print(ds_config)
         self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
@@ -633,8 +633,8 @@ class PolicyTrainerRayProcess(RayProcess):
         scheduler = get_scheduler(
             args.lr_scheduler_type,
             optimizer=self.optimizer,
-            num_warmup_steps=args.warm_up_steps,
-            num_training_steps=args.num_training_steps * args.num_train_epochs * args.num_epochs,
+            num_warmup_steps=warm_up_steps,
+            num_training_steps=num_training_steps,
         )
         self.value_model, self.optimizer, _, self.scheduler = deepspeed.initialize(
             model=self.value_model,
@@ -790,7 +790,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             refss.extend(refs)
                         if torch.distributed.get_rank() == 0:
                             torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
-            else: # broadcast each parameter independently
+            else:  # broadcast each parameter independently
                 for name, param in model.named_parameters():
                     count += 1
                     if torch.distributed.get_rank() == 0:
@@ -863,7 +863,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 generation_start_time = time.time()
 
                 outputs = ray.get(
-                    llm.generate.remote(sampling_params=generation_config, prompt_token_ids=g_queries_list, use_tqdm=False)
+                    llm.generate.remote(
+                        sampling_params=generation_config, prompt_token_ids=g_queries_list, use_tqdm=False
+                    )
                 )
                 response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
                 print(f"🔥🔥🔥 Generation time: {time.time() - generation_start_time:.2f} seconds")
@@ -872,7 +874,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 if sample_evaluation_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
                     outputs = ray.get(
                         llm.generate.remote(
-                            prompt_token_ids=sample_evaluation_prompt_token_ids, sampling_params=generation_config, use_tqdm=False
+                            prompt_token_ids=sample_evaluation_prompt_token_ids,
+                            sampling_params=generation_config,
+                            use_tqdm=False,
                         )
                     )
                     # for evaluation, even if we have multiple outputs, we only look at one of them for simplicity
@@ -1043,10 +1047,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Response Processing 2. run reward model on the truncated responses
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
-                    _, score, _ = get_reward_olmo(
+                    _, score, _ = get_reward(
                         self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
-                    full_value, _, _ = get_reward_olmo(
+                    full_value, _, _ = get_reward(
                         self.value_model, query_response, tokenizer.pad_token_id, context_length
                     )
                     value = full_value[:, context_length - 1 : -1].squeeze(-1)
@@ -1157,7 +1161,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         mb_values = values[micro_batch_inds]
                         mb_padding_mask_p1 = padding_mask_p1[micro_batch_inds]
 
-                        vpred_temp = get_reward_olmo(
+                        vpred_temp = get_reward(
                             self.value_model, mb_query_responses, tokenizer.pad_token_id, context_length
                         )
                         vpred_temp = vpred_temp[0]
@@ -1239,6 +1243,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics[14] = ratio_stats.var()
                 local_metrics[15] = ((kl) ** 2 / 2).sum(1).mean()
                 local_metrics[16] = ((-kl).exp() - 1 + kl).sum(1).mean()
+                local_metrics[18] = contain_stop_token.float().mean()
                 # global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
                 local_metrics /= dist.get_world_size()
                 dist.all_reduce(local_metrics, op=dist.ReduceOp.SUM)
@@ -1267,6 +1272,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     "policy/entropy_avg": global_metrics[12],
                     "val/ratio": global_metrics[13],
                     "val/ratio_var": global_metrics[14],
+                    "val/stop_token_rate": global_metrics[18],
                 }
                 if accelerator.is_main_process:
                     print_rich_single_line_metrics(metrics)
@@ -1294,10 +1300,9 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # Ai2 logic: we use /output to store the artifacts of the job, so we
         # make a copy of the model to `/output` in the end.
-        if len(self.beaker_config.beaker_dataset_id_urls) > 0:
-             shutil.copytree(args.output_dir, "/output")
+        if self.rank == 0 and len(self.beaker_config.beaker_dataset_id_urls) > 0:
+            shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
         print("finished training")
-
 
     def save_model(self, output_dir: str) -> None:
         if self.rank == 0:
@@ -1386,28 +1391,31 @@ class PolicyTrainerRayProcess(RayProcess):
                     "results/" + leaderboard_name,  # to match what the auto-evals name as.
                 )
 
-            if args.try_launch_beaker_eval_jobs and len(beaker_config.beaker_dataset_id_urls) > 0:
-                command = f"""\
-                    python scripts/submit_eval_jobs.py \
-                        --model_name {leaderboard_name} \
-                        --location {step_dir} \
-                        --cluster ai2/saturn-cirrascale \
-                        --is_tuned \
-                        --workspace "tulu-3-results" \
-                        --preemptible \
-                        --use_hf_tokenizer_template \
-                        --beaker_image "nathanl/open_instruct_auto" \
-                        --upload_to_hf allenai/tulu-3-evals \
-                        --run_oe_eval_experiments \
-                        --run_safety_evaluations \
-                        --skip_oi_evals
-                """
-                print(f"Launching eval jobs with command: {command}")
-                process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                stdout, stderr = process.communicate()
-                print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
-                print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
-                print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+            command = f"""\
+python scripts/submit_eval_jobs.py \
+    --model_name {leaderboard_name} \
+    --location {step_dir} \
+    --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
+    --is_tuned \
+    --workspace "tulu-3-results" \
+    --priority high \
+    --preemptible \
+    --use_hf_tokenizer_template \
+    --beaker_image "nathanl/open_instruct_auto" \
+    --upload_to_hf allenai/tulu-3-evals \
+    --run_oe_eval_experiments \
+    --evaluate_on_weka \
+    --run_safety_evaluations \
+    --skip_oi_evals"""
+            if args.oe_eval_tasks is not None:
+                command += f" --oe_eval_tasks {','.join(args.oe_eval_tasks)}"
+            print(f"Launching eval jobs with command: {command}")
+            process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = process.communicate()
+            print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
+            print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
+            print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+
 
 def kill_ray_cluster_if_a_worker_dies(object_refs: List[Any], stop_event: threading.Event):
     while True:
@@ -1513,10 +1521,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     )
 
     # create a tokenizer (pad from right)
-    if check_hf_olmo_availability():
-        # allows AutoModel... to work with not in transformers olmo models
-        import hf_olmo  # noqa
-        from hf_olmo import OLMoTokenizerFast
     config = AutoConfig.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision)
     tokenizer = AutoTokenizer.from_pretrained(
         model_config.model_name_or_path, revision=model_config.model_revision, padding_side="right"
@@ -1530,11 +1534,22 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     # create the dataset
     dataset_dict = DatasetDict()
     dataset_processor = SFTDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
+    if len(args.dataset_train_splits) != len(args.dataset_mixer_dict) and len(args.dataset_train_splits) == 1:
+        args.dataset_train_splits = [args.dataset_train_splits[0]] * len(args.dataset_mixer_dict)
+        print(
+            f"Dataset splits not provided for all datasets. Using the same {args.dataset_train_splits[0]} split for all datasets."
+        )
+    if len(args.dataset_eval_splits) != len(args.dataset_eval_mixer_dict) and len(args.dataset_eval_splits) == 1:
+        args.dataset_eval_splits = [args.dataset_eval_splits[0]] * len(args.dataset_eval_mixer_dict)
+        print(
+            f"Dataset splits not provided for all datasets. Using the same {args.dataset_eval_splits[0]} split for all datasets."
+        )
     train_dataset = combine_dataset(
         args.dataset_mixer_dict,
         splits=args.dataset_train_splits,
         columns_to_keep=[dataset_config.sft_messages_key],
     )
+    print("train_dataset", len(train_dataset))
     if dataset_config.sanity_check:
         train_dataset = train_dataset.select(
             range(0, min(len(train_dataset), dataset_config.sanity_check_max_samples))
@@ -1578,7 +1593,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         args.actor_num_gpus_per_node,
     )
     wandb_url = wandb.run.get_url() if args.with_tracking else None
-    inits.extend(model.from_pretrained.remote(args, model_config, beaker_config, wandb_url) for model in policy_group.models)
+    inits.extend(
+        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url) for model in policy_group.models
+    )
     max_len = dataset_config.max_prompt_token_length + args.response_length
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
@@ -1634,7 +1651,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             if args.with_tracking:
                 wandb.log({"sample_completions": wandb.Table(dataframe=df)})
             else:
-                print_rich_table(df)
+                print_rich_table(df.iloc[:1])
     ray.get(refs)
 
     # save model
@@ -1675,6 +1692,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 --pure_docker_mode \
                 --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
                 --beaker_workload_id {beaker_config.beaker_workload_id} \
+                --upload_to_hf {args.hf_metadata_dataset} \
                 --model_name {args.hf_repo_revision}
             """
             process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -1686,6 +1704,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     accelerator = Namespace()
     accelerator.is_main_process = True  # hack
     if args.push_to_hub:
+        print("Pushing model to hub")
         push_folder_to_hub(
             accelerator,
             args.output_dir,

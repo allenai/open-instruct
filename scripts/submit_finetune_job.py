@@ -25,8 +25,7 @@ def main():
     parser.add_argument("--num_nodes", type=int, default=1, help="Number of nodes to use")
     parser.add_argument("--image", type=str, default="nathanl/open_instruct_auto", help="Beaker image to use.")
     parser.add_argument("--workspace", type=str, default="ai2/tulu-2-improvements", help="Beaker workspace to use.")
-    parser.add_argument("--mount_on_weka", type=str, default=None, help="Mount a Weka directory to the job")
-    parser.add_argument("--weka_mount_path", type=str, default="/adapt-data", help="Path to mount the Weka directory")
+    parser.add_argument("--datasets", nargs='+', help="List of datasets to mount in form <beaker_id>:<mount_path>")
     # allow unknown args from CLI, use this to modify loaded config in bash scripts for sweeping
     # Note, can only override args in --config passed (not default FlatArguments class in open_instruct/utils.py)
     
@@ -168,7 +167,7 @@ def main():
     d['tasks'][0]['arguments'][0] = new_arguments
 
     # name and description
-    exp_name = f"open_instruct_finetune_{model_name}_{now}"[:128]
+    exp_name = f"open_instruct_finetune_{model_name}_{now}"
     d['description'] = exp_name
     d['tasks'][0]['name'] = exp_name
 
@@ -200,6 +199,117 @@ def main():
                     "value": "INFO",
                 },
             ]
+        elif args.cluster == "ai2/augusta-google-1":
+            d['tasks'][0]['envVars'] += [
+                {
+                    "name":"LD_LIBRARY_PATH",
+                    "value": r"/var/lib/tcpxo/lib64:${LD_LIBRARY_PATH}",
+                },
+                {
+                    "name":"NCCL_CROSS_NIC",
+                    "value": "0",
+                },
+                {
+                    "name":"NCCL_ALGO",
+                    "value": "Ring,Tree",
+                },
+                {
+                    "name":"NCCL_PROTO",
+                    "value": "Simple",
+                },
+                {
+                    "name":"NCCL_MIN_NCHANNELS",
+                    "value": "4",
+                },
+                {
+                    "name":"NCCL_P2P_NET_CHUNKSIZE",
+                    "value": "524288",
+                },
+                {
+                    "name":"NCCL_P2P_PCI_CHUNKSIZE",
+                    "value": "524288",
+                },
+                {
+                    "name":"NCCL_P2P_NVL_CHUNKSIZE",
+                    "value": "1048576",
+                },
+                {
+                    "name":"NCCL_FASTRAK_NUM_FLOWS",
+                    "value": "2",
+                },
+                {
+                    "name":"NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL",
+                    "value": "0",
+                },
+                {
+                    "name":"NCCL_BUFFSIZE",
+                    "value": "8388608",
+                },
+                {
+                    "name":"NCCL_FASTRAK_USE_SNAP",
+                    "value": "1",
+                },
+                {
+                    "name":"CUDA_VISIBLE_DEVICES",
+                    "value": "0,1,2,3,4,5,6,7",
+                },
+                {
+                    "name":"NCCL_NET_GDR_LEVEL",
+                    "value": "PIX",
+                },
+                {
+                    "name":"NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING",
+                    "value": "0",
+                },
+                {
+                    "name":"NCCL_TUNER_PLUGIN",
+                    "value": "libnccl-tuner.so",
+                },
+                {
+                    "name":"NCCL_TUNER_CONFIG_PATH",
+                    "value": "/var/lib/tcpxo/lib64/a3plus_tuner_config.textproto",
+                },
+                {
+                    "name":"NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE",
+                    "value": "/var/lib/tcpxo/lib64/a3plus_guest_config.textproto",
+                },
+                {
+                    "name":"NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS",
+                    "value": "600000",
+                },
+                {
+                    "name":"NCCL_NVLS_ENABLE",
+                    "value": "0",
+                },
+                {
+                    "name":"NCCL_DEBUG",
+                    "value": "WARN",
+                },
+                {
+                    "name":"NCCL_FASTRAK_CTRL_DEV",
+                    "value": "enp0s12",
+                },
+                {
+                    "name":"NCCL_FASTRAK_IFNAME",
+                    "value": "enp6s0,enp7s0,enp13s0,enp14s0,enp134s0,enp135s0,enp141s0,enp142s0",
+                },
+                {
+                    "name":"NCCL_SOCKET_IFNAME",
+                    "value": "enp0s12",
+                },
+                {
+                    "name":"NCCL_USE_SNAP",
+                    "value": "1",
+                },
+                {
+                    "name":"NCCL_FASTRAK_USE_LLCM",
+                    "value": "1",
+                },
+                {
+                    "name":"NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY",
+                    "value": "/dev/aperture_devices",
+                },
+            ]
 
     # WANDB settings
     for env in d['tasks'][0]['envVars']:
@@ -223,14 +333,17 @@ def main():
     d['tasks'][0]['envVars'].append({
         'name': 'WANDB_API_KEY', 'secret': f"{beaker_whoami}_WANDB_API_KEY"
     })
-    
-    # Weka setting
-    if args.mount_on_weka:
-        if d['tasks'][0].get('datasets') is None:
+
+    # mount datasets
+    if args.datasets:
+        if not d['tasks'][0].get('datasets'):
             d['tasks'][0]['datasets'] = []
-        d['tasks'][0]['datasets'].append({
-            'mountPath': f"{args.weka_mount_path}", 'source': {'weka': f"{args.mount_on_weka}"}
-        })
+        for dataset in args.datasets:
+            beaker_id, mount_path = dataset.split(':')
+            d['tasks'][0]['datasets'].append({
+                'mountPath': mount_path,
+                'source': { 'beaker': beaker_id }
+            })
 
     # optionally, print to debug config
     print(d)

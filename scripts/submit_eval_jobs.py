@@ -63,8 +63,32 @@ def adjust_gpus(task_spec, experiment_group, model_name, gpu_multiplier):
 
     
 ########################################
-
 # Launcher
+
+NFS_CLUSTERS = [
+    "ai2/allennlp-cirrascale",
+    "ai2/aristo-cirrascale",
+    "ai2/climate-cirrascale",
+    "ai2/general-cirrascale",
+    "ai2/general-cirrascale-a5000",
+    "ai2/mosaic-cirrascale",
+    "ai2/mosaic-cirrascale-a100",
+    "ai2/pluto-cirrascale",
+    "ai2/prior-cirrascale",
+    "ai2/s2-cirrascale",
+    "ai2/s2-cirrascale-l40",
+]
+
+WEKA_CLUSTERS = [
+    "ai2/jupiter-cirrascale-2",
+    "ai2/saturn-cirrascale",
+    "ai2/neptune-cirrascale",
+    "ai2/allennlp-elara-cirrascale",
+]
+GCP_CLUSTERS = [
+    "ai2/augusta-google-1"
+]
+
 
 today = date.today().strftime("%m%d%Y")
 
@@ -102,6 +126,10 @@ parser.add_argument("--run_oe_eval_experiments", action="store_true", help="Run 
 parser.add_argument("--run_safety_evaluations", action="store_true", help="Run the OE safety evaluations too.")
 parser.add_argument("--skip_oi_evals", action="store_true", help="Don't run open instruct evals.")
 parser.add_argument("--oe_eval_max_length", type=int, default=4096, help="Max length for OE eval.")
+parser.add_argument("--oe_eval_unseen_evals", action="store_true", help="Run unseen task evals instead of dev task evals on OE Eval.")
+parser.add_argument("--use_alternate_safety_image", type=str, default=None, help="Use a different image for safety eval.")
+parser.add_argument("--evaluate_on_weka", action="store_true", help="Evaluate OE eval on Beaker.")
+parser.add_argument("--oe_eval_tasks", type=str, default=None, help="Evaluate OE eval on Beaker.")
 args = parser.parse_args()
 
 
@@ -121,11 +149,25 @@ d1['tasks'][0]['context']['preemptible'] = args.preemptible
 d1['tasks'][0]['resources']['gpuCount'] = 1
 
 # remove nfs if asked or jupiter in cluster list.
-nfs_available = True
-if args.no_nfs or any(["jupiter" in c for c in cluster]):
-    # remove the NFS dataset - last element in the list.
-    d1['tasks'][0]['datasets'] = d1['tasks'][0]['datasets'][:-1]
-    nfs_available = False
+nfs_available = False
+weka_available = False
+if all(c in NFS_CLUSTERS for c in cluster):
+    d1['tasks'][0]['datasets'].append({
+        'mountPath': "/net/nfs.cirrascale",
+        "source": {
+            "hostPath": "/net/nfs.cirrascale"
+        }
+    })
+    nfs_available = True
+elif all(c in WEKA_CLUSTERS for c in cluster):
+    d1['tasks'][0]['datasets'].append({
+        'mountPath': "/weka/oe-adapt-default",
+        "source": {
+            "weka": "oe-adapt-default"
+        }
+    })
+    weka_available = True
+
 
 # Use a different image if requested.
 if args.beaker_image is not None:
@@ -462,7 +504,7 @@ for experiment_group in experiment_groups:
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", f"--model_name_or_path {model_info[1]} --hf_revision {args.hf_revision}")]
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", f"--tokenizer_name_or_path {model_info[1]}")]
     elif model_info[1].startswith("/"):  # if it's a local model, load it from the local directory
-        assert nfs_available, "NFS is required for path-based models."  # to be safe.
+        assert nfs_available or weka_available, "NFS / Weka is required for path-based models."  # to be safe.
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", f"--model_name_or_path {model_info[1]}")]
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", f"--tokenizer_name_or_path {model_info[1]}")]
     else:  # if it's a beaker model, mount the beaker dataset to `/model`
@@ -559,6 +601,7 @@ for experiment_group in experiment_groups:
 
 # Create an experiment that runs all the eval tasks.
 
+model_name = model_name[:100] # beaker doesn't like names longer than 128 characters, here we save for some headroom.
 if not args.skip_oi_evals:
     experiment_name = f"open_instruct_eval_{model_name}_{today}" 
     d["description"] = experiment_name
@@ -574,18 +617,24 @@ if not args.skip_oi_evals:
     cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
     subprocess.Popen(cmd, shell=True)
 
-if args.run_oe_eval_experiments:
+if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
     # if so, run oe-eval. We assume it is cloned in the top-level repo directory.
     oe_eval_cmd = f"scripts/eval/oe-eval.sh --model-name {model_name}"
     if args.upload_to_hf:
-        oe_eval_cmd += " --hf-upload"
+        oe_eval_cmd += f" --upload_to_hf {args.upload_to_hf}"
     ## model location munging: if beaker, use beaker://. If hf, just name
     if model_info[0].startswith("hf-"):
+        oe_eval_cmd += f" --model-location {model_info[1]}"
+    elif model_info[1].startswith("/"):
         oe_eval_cmd += f" --model-location {model_info[1]}"
     else:
         oe_eval_cmd += f" --model-location beaker://{model_info[1]}"
     if args.hf_revision:
         oe_eval_cmd += f" --revision {args.hf_revision}"
+    if args.evaluate_on_weka:
+        oe_eval_cmd += " --evaluate_on_weka"
+    if args.oe_eval_tasks:
+        oe_eval_cmd += f" --tasks {args.oe_eval_tasks}"
     # add string with number of gpus
     num_gpus = task_spec['resources']['gpuCount']
     # if num_gpus > 1, double it again for oe-eval configs
@@ -597,6 +646,10 @@ if args.run_oe_eval_experiments:
     oe_eval_cmd += f" --num_gpus {num_gpus}"
     if args.oe_eval_max_length:
         oe_eval_cmd += f" --max-length {args.oe_eval_max_length}"
+    if args.oe_eval_unseen_evals:
+        oe_eval_cmd += " --unseen-evals"
+    # add priority
+    oe_eval_cmd += f" --priority {args.priority}"
     print(f"Running OE eval with command: {oe_eval_cmd}")
     subprocess.Popen(oe_eval_cmd, shell=True)
 
@@ -604,9 +657,12 @@ if args.run_oe_eval_experiments:
 if args.run_safety_evaluations:
     # just take the original spec we had, modify it for safety eval.
     experiment_name = f"oi_safety_{model_name}"
+    experiment_name = experiment_name.replace('β', '').replace(r"{", "").replace(r"}", "") # hack: remove characters beaker doesn't like
     d["description"] = experiment_name
     # specific image for safety eval
     d["tasks"][0]["image"]["beaker"] = "hamishivi/open-safety"
+    if args.use_alternate_safety_image:
+        d["tasks"][0]["image"]["beaker"] = args.use_alternate_safety_image
     d["tasks"] = [d["tasks"][0]]
     task_spec = d["tasks"][0]
     task_spec["name"] = experiment_name
@@ -622,7 +678,7 @@ VLLM_WORKER_MULTIPROC_METHOD=spawn PYTHONPATH=. python evaluation/run_all_genera
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", f"--model_name_or_path {model_info[1]} --hf_revision {args.hf_revision}")]
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", f"--tokenizer_name_or_path {model_info[1]}")]
     elif model_info[1].startswith("/"):  # if it's a local model, load it from the local directory
-        assert nfs_available, "NFS is required for path-based models."  # to be safe.
+        assert nfs_available or weka_available, "NFS / Weka is required for path-based models."  # to be safe.
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path "+model_info[1])]
     else:  # if it's a beaker model, mount the beaker dataset to `/model`
@@ -637,6 +693,8 @@ VLLM_WORKER_MULTIPROC_METHOD=spawn PYTHONPATH=. python evaluation/run_all_genera
 
     # add gpu information.
     # we just assume you want to use all the gpus for one task at a time
+    if "70B" in model_info[0]:
+        task_spec['resources']['gpuCount'] = 8
     num_gpus = task_spec['resources']['gpuCount']
     task_spec["arguments"][0]+= f" --min_gpus_per_task {num_gpus}"
 
@@ -659,4 +717,3 @@ VLLM_WORKER_MULTIPROC_METHOD=spawn PYTHONPATH=. python evaluation/run_all_genera
 
     cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
     subprocess.Popen(cmd, shell=True)
-    
