@@ -207,9 +207,9 @@ V2 models are licensed under the [low-risk AI2 ImpACT license](https://allenai.o
 Open Instruct is a project that benefitd from many open-source projects and libraries. We would like to particularly thank the folloiwng projects:
 
 * [HuggingFace Transformers](https://github.com/huggingface/transformers): We adapted Hugging Face's Trainer for our finetuning scripts.
-* [HuggingFace TRL](https://github.com/huggingface/trl) and https://github.com/eric-mitchell/direct-preference-optimization: our preference tuning code is adapted from TRL and from Eric Mitchell's DPO code.
-* OpenAI's https://github.com/openai/lm-human-preferences and https://github.com/openai/summarize-from-feedback: Our core PPO code is adapted from OpenAI's original RLHF code.
-* [OpenRLHF](https://github.com/OpenRLHF/OpenRLHF): We adapted OpenRLHF's Ray + vLLM distributed code into our for scaling up PPO RLVR training into the 70B scale.
+* [HuggingFace TRL](https://github.com/huggingface/trl) and [eric-mitchell/direct-preference-optimization](https://github.com/eric-mitchell/direct-preference-optimization): our preference tuning code is adapted from TRL and from Eric Mitchell's DPO code.
+* OpenAI's [lm-human-preferences](https://github.com/openai/lm-human-preferences), [summarize-from-feedback](https://github.com/openai/summarize-from-feedback), and [vwxyzjn/summarize_from_feedback_details](https://github.com/vwxyzjn/summarize_from_feedback_details): Our core PPO code is adapted from OpenAI's original RLHF code and [Huang et al (2024)'s reproduction work](https://openreview.net/forum?id=kHO2ZTa8e3) of OpenAI's summarize from feedback work.
+* [OpenRLHF](https://github.com/OpenRLHF/OpenRLHF): We adapted OpenRLHF's Ray + vLLM distributed code for scaling up PPO RLVR training into the 70B scale.
 
 ## Citation
 
