@@ -90,6 +90,18 @@ def main():
                     "name": "NCCL_DEBUG",
                     "value": "INFO",
                 },
+                {
+                    "name": "HF_HOME",
+                    "value": "/weka/oe-adapt-default/allennlp/.cache/huggingface",
+                },
+                {
+                    "name": "HF_DATASETS_CACHE",
+                    "value": "/weka/oe-adapt-default/allennlp/.cache/huggingface",
+                },
+                {
+                    "name": "HF_HUB_CACHE",
+                    "value": "/weka/oe-adapt-default/allennlp/.cache/hub",
+                },
             ]
         elif args.cluster == "ai2/pluto-cirrascale":
             d1['tasks'][0]['envVars'] += [
