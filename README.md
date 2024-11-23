@@ -202,6 +202,15 @@ The license we use for V1 models released (along with the base model licenses) c
 V2 models are licensed under the [low-risk AI2 ImpACT license](https://allenai.org/licenses/impact-lr). See [here](https://allenai.org/impact-license) for more details.
 
 
+## Acknowledgements
+
+Open Instruct is a project that benefitd from many open-source projects and libraries. We would like to particularly thank the folloiwng projects:
+
+* [HuggingFace Transformers](https://github.com/huggingface/transformers): We adapted Hugging Face's Trainer for our finetuning scripts.
+* [HuggingFace TRL](https://github.com/huggingface/trl) and https://github.com/eric-mitchell/direct-preference-optimization: our preference tuning code is adapted from TRL and from Eric Mitchell's DPO code.
+* OpenAI's https://github.com/openai/lm-human-preferences and https://github.com/openai/summarize-from-feedback: Our core PPO code is adapted from OpenAI's original RLHF code.
+* [OpenRLHF](https://github.com/OpenRLHF/OpenRLHF): We adapted OpenRLHF's Ray + vLLM distributed code into our for scaling up PPO RLVR training into the 70B scale.
+
 ## Citation
 
 If you used this repository or our models, please cite our work:
