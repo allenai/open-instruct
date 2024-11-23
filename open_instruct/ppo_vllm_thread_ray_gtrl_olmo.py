@@ -99,7 +99,6 @@ from open_instruct.model_utils import (
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
-    check_hf_olmo_availability,
     combine_dataset,
     get_wandb_tags,
     is_beaker_job,
@@ -149,6 +148,8 @@ class Args:
     """Which scheduler to use"""
     warm_up_steps: int = 0
     """Number of warm up steps for the scheduler"""
+    warmup_ratio: float = 0.0
+    """Ratio of warmup steps to total steps (takes precedence over `warm_up_steps`)"""
 
     # various batch sizes
     num_train_epochs: int = 1
@@ -523,25 +524,8 @@ class RayProcess:
         )
 
         # olmo 1124; pip install git+https://github.com/vwxyzjn/transformers.git@olmo1124_classification
-        from vllm.model_executor.models import ModelRegistry
         from transformers.models.olmo_1124.modeling_olmo_1124 import Olmo1124ForSequenceClassification, Olmo1124Config
         AutoModelForSequenceClassification.register(Olmo1124Config, Olmo1124ForSequenceClassification)
-        from open_instruct.olmo_adapter.olmo_1124_vllm import OlmoNewForCausalLM
-        ModelRegistry.register_model("Olmo1124ForCausalLM", OlmoNewForCausalLM)
-        
-        # # hf_olmo
-        # import hf_olmo  # noqa
-        # from open_instruct.olmo_adapter.modeling_olmo2 import OLMoForSequenceClassification
-        # AutoModelForSequenceClassification.register(hf_olmo.OLMoConfig, OLMoForSequenceClassification)
-        # from open_instruct.olmo_adapter.olmo_new import OlmoNewForCausalLM
-        # ModelRegistry.register_model("OLMoForCausalLM", OlmoNewForCausalLM)
-        
-        # other hf olmo
-        from open_instruct.olmo_adapter.modeling_olmo3 import OlmoForSequenceClassification
-        from open_instruct.olmo_adapter.modeling_olmoe3 import OlmoeForSequenceClassification
-        from transformers import OlmoConfig, OlmoeConfig
-        AutoModelForSequenceClassification.register(OlmoConfig, OlmoForSequenceClassification)
-        AutoModelForSequenceClassification.register(OlmoeConfig, OlmoeForSequenceClassification)
         self.world_size = world_size
         self.rank = rank
         self.local_rank = local_rank
@@ -626,11 +610,15 @@ class PolicyTrainerRayProcess(RayProcess):
         # optim_params = get_optimizer_grouped_parameters(self.policy, weight_decay)
         # self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
         self.optimizer = torch.optim.AdamW(self.policy.parameters(), lr=args.learning_rate)
+        num_training_steps = args.num_training_steps * args.num_train_epochs * args.num_epochs
+        warm_up_steps = args.warm_up_steps
+        if args.warmup_ratio >= 0.0:
+            warm_up_steps = int(num_training_steps * args.warmup_ratio)
         scheduler = get_scheduler(
             args.lr_scheduler_type,
             optimizer=self.optimizer,
-            num_warmup_steps=args.warm_up_steps,
-            num_training_steps=args.num_training_steps * args.num_train_epochs * args.num_epochs,
+            num_warmup_steps=warm_up_steps,
+            num_training_steps=num_training_steps,
         )
         print(ds_config)
         self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
@@ -664,8 +652,8 @@ class PolicyTrainerRayProcess(RayProcess):
         scheduler = get_scheduler(
             args.lr_scheduler_type,
             optimizer=self.optimizer,
-            num_warmup_steps=args.warm_up_steps,
-            num_training_steps=args.num_training_steps * args.num_train_epochs * args.num_epochs,
+            num_warmup_steps=warm_up_steps,
+            num_training_steps=num_training_steps,
         )
         self.value_model, self.optimizer, _, self.scheduler = deepspeed.initialize(
             model=self.value_model,
@@ -1108,8 +1096,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     _, score, _ = get_reward(
                         self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                     )
-                    if self.rank == 0 and i == 0:
-                        print(postprocessed_query_response[0].tolist(), tokenizer.decode(postprocessed_query_response[0]))
+                    # if self.rank == 0 and i == 0:
+                    #     print(postprocessed_query_response[0].tolist(), tokenizer.decode(postprocessed_query_response[0]))
                     if args.reward_model_multiplier != 1.0:
                         score *= args.reward_model_multiplier
                     # also apply verifiable reward
@@ -1330,6 +1318,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics[15] = ((kl) ** 2 / 2).sum(1).mean()
                 local_metrics[16] = ((-kl).exp() - 1 + kl).sum(1).mean()
                 local_metrics[17] = verifiable_correct_rate
+                local_metrics[18] = contain_stop_token.float().mean()
                 # global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
                 local_metrics /= dist.get_world_size()
                 dist.all_reduce(local_metrics, op=dist.ReduceOp.SUM)
@@ -1359,6 +1348,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     "val/ratio": global_metrics[13],
                     "val/ratio_var": global_metrics[14],
                     "objective/verifiable_correct_rate": global_metrics[17],
+                    "val/stop_token_rate": global_metrics[18],
                 }
                 if accelerator.is_main_process:
                     print_rich_single_line_metrics(metrics)
@@ -1481,9 +1471,10 @@ class PolicyTrainerRayProcess(RayProcess):
 python scripts/submit_eval_jobs.py \
     --model_name {leaderboard_name} \
     --location {step_dir} \
-    --cluster ai2/saturn-cirrascale \
+    --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
     --is_tuned \
     --workspace "tulu-3-results" \
+    --priority high \
     --preemptible \
     --use_hf_tokenizer_template \
     --beaker_image "nathanl/open_instruct_auto" \
@@ -1606,19 +1597,19 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     )
 
     # create a tokenizer (pad from right)
-    if check_hf_olmo_availability():
-        # allows AutoModel... to work with not in transformers olmo models
-        import hf_olmo  # noqa
-        from hf_olmo import OLMoTokenizerFast
+    # if check_hf_olmo_availability():
+    #     # allows AutoModel... to work with not in transformers olmo models
+    #     import hf_olmo  # noqa
+    #     from hf_olmo import OLMoTokenizerFast
     config = AutoConfig.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision)
     tokenizer = AutoTokenizer.from_pretrained(
         model_config.model_name_or_path, revision=model_config.model_revision, padding_side="right"
     )
-    if check_hf_olmo_availability():
-        print("Using exsiting tokenier chat template...")
-        pass
-    else:
-        tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
+    # if check_hf_olmo_availability():
+    #     print("Using exsiting tokenier chat template...")
+    #     pass
+    # else:
+    #     tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
     # if config.architectures == "LlamaForCausalLM" and config.bos_token_id == 128000:
     #     tokenizer.pad_token_id = 128002  # <|reserved_special_token_0|>
     # elif check_hf_olmo_availability() and isinstance(tokenizer, OLMoTokenizerFast):
@@ -1811,6 +1802,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 --pure_docker_mode \
                 --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
                 --beaker_workload_id {beaker_config.beaker_workload_id} \
+                --upload_to_hf {args.hf_metadata_dataset} \
                 --model_name {args.hf_repo_revision}
             """
             process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
