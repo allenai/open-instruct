@@ -23,22 +23,8 @@ python mason.py \
     --budget ai2/allennlp \
     --gpus 0 -- python scripts/cache_hf.py \
     --model_name_or_path allenai/open_instruct_dev \
-    --model_revision olmo1124_13b_4k_finetune_epoch_2_lr_4e-6_loss_type_sum___weka_oe-training-default_ai2-llm_checkpoints_OLMo-medium_peteish13-anneal-from-596057-300B-legal-whammy-2-soup_step35773_olmo1124__42__1732223410 \
-    --dataset_mixer_list  \
-        ai2-adapt-dev/sft_v3.9_used_off_policy 1.0 \
-        ai2-adapt-dev/sft_v3.9_used_on_policy_small_8b_ckpt 1.0 \
-        ai2-adapt-dev/WildChat-prefs-280824-uf-pipeline-regen-v3.9 1.0 \
-        ai2-adapt-dev/Llama-3.1-if_taxonomy_tulu-uf-pipeline-regen-v3.9 1.0 \
-        ai2-adapt-dev/wildchat_v3.9_used_on_policy_small_8b_ckpt 1.0 \
-        ai2-adapt-dev/ultrafeedback-cleaned-regen-v3.9-8b-sft 1.0 \
-        ai2-adapt-dev/tulu_v3.9_wildjailbreak_decontaminated_50k 1.0 \
-        ai2-adapt-dev/WildChat-prefs-280824_olmo2_7b 1.0 \
-        ai2-adapt-dev/wildchat_v3.9_p0_olmo2_7b 1.0 \
-        ai2-adapt-dev/DaringAnteater-prefs_olmo2_7b 1.0 \
-        ai2-adapt-dev/sft_v3.9_if_taxonomy_olmo2_7b 1.0 \
-        ai2-adapt-dev/wildchat_v3.9_p1_olmo2_7b 1.0 \
-        ai2-adapt-dev/sft_v3.9_p0_olmo2_7b 1.0 \
-        ai2-adapt-dev/sft_v3.9_p1_olmo2_7b 1.0
+    --model_revision olmo1124_13b_4k_finetune_epoch_2_7.5e-06__42__1732416565 \
+    --dataset_mixer_list ai2-adapt-dev/WildChat-prefs-280824_olmo2_7b 1.0 ai2-adapt-dev/sft_v3.9_if_taxonomy_olmo2_7b 1.0 ai2-adapt-dev/sft_v3.9_p0_olmo2_7b 1.0 ai2-adapt-dev/sft_v3.9_p1_olmo2_7b 1.0 ai2-adapt-dev/ultrafeedback_cleaned_olmo2_7b 1.0 allenai/tulu-3-pref-personas-instruction-following 1.0
 """
 
 
@@ -66,16 +52,16 @@ def main(args: Args):
     elif args.dataset_mixer_list is not None:
         for i in range(0, len(args.dataset_mixer_list), 2):
             snapshot_download(args.dataset_mixer_list[i], repo_type="dataset")
-    else:
-        data_files = {}
-        dataset_args = {}
-        if args.train_file is not None:
-            data_files["train"] = args.train_file
-        raw_datasets = load_dataset(
-            "json",
-            data_files=data_files,
-            **dataset_args,
-        )
+    # else:
+    #     data_files = {}
+    #     dataset_args = {}
+    #     if args.train_file is not None:
+    #         data_files["train"] = args.train_file
+    #     raw_datasets = load_dataset(
+    #         "json",
+    #         data_files=data_files,
+    #         **dataset_args,
+    #     )
     # we don't tokenize the dataset here for simplicity, but we should at some point.
         
     if args.model_name_or_path is not None:
