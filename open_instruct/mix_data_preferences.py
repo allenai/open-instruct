@@ -37,7 +37,7 @@ def main():
         configs=args.dataset_config_name,
         splits=["train"],
         save_data_dir=args.dataset_mix_dir,  # location where dataset is saved as json
-        columns_to_keep=["chosen", "rejected"],
+        columns_to_keep=["chosen", "rejected", "chosen_model", "rejected_model"],
         keep_ids=True,
         add_source_col=True,
     )

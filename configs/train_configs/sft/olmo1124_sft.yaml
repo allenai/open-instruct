@@ -6,10 +6,10 @@ dataset_mixer:
     # General datasets:
     ai2-adapt-dev/oasst1_converted: 1.0 # 7132 # all
     ai2-adapt-dev/flan_v2_converted: 1.0 # 89982 # all
-    ai2-adapt-dev/tulu_hard_coded_repeated_10: 1.0 # 240 # all
+    # ai2-adapt-dev/tulu_hard_coded_repeated_10: 1.0 # 240 # all
     ai2-adapt-dev/no_robots_converted: 1.0 # 9500 # all
-    # ai2-adapt-dev/tulu_v3.9_wildchat_100k: 1.0
-    ai2-adapt-dev/tulu_v3.9_wildchat_100k_english: 1.0
+    ai2-adapt-dev/tulu_v3.9_wildchat_100k: 1.0
+    # ai2-adapt-dev/tulu_v3.9_wildchat_100k_english: 1.0
 
     # Math datasets:
     ai2-adapt-dev/personahub_math_v5_regen_149960: 1.0 # 149960 # all
@@ -33,7 +33,7 @@ dataset_mixer:
     # Specialty datasets:
     ai2-adapt-dev/tulu_v3.9_sciriff_10k: 1.0
     ai2-adapt-dev/tulu_v3.9_table_gpt_5k: 1.0
-    # ai2-adapt-dev/tulu_v3.9_aya_100k: 1.0
+    ai2-adapt-dev/tulu_v3.9_aya_100k: 1.0
 
 max_seq_length: 4096
 preprocessing_num_workers: 128
