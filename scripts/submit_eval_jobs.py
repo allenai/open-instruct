@@ -660,7 +660,7 @@ if args.run_safety_evaluations:
     experiment_name = experiment_name.replace('β', '').replace(r"{", "").replace(r"}", "") # hack: remove characters beaker doesn't like
     d["description"] = experiment_name
     # specific image for safety eval
-    d["tasks"][0]["image"]["beaker"] = "hamishivi/open-safety"
+    d["tasks"][0]["image"]["beaker"] = "hamishivi/open_safety_1124"
     if args.use_alternate_safety_image:
         d["tasks"][0]["image"]["beaker"] = args.use_alternate_safety_image
     d["tasks"] = [d["tasks"][0]]

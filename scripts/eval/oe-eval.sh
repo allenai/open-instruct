@@ -105,18 +105,18 @@ fi
 
 # Define default tasks if no custom tasks provided
 DEFAULT_TASKS=(
-    "gsm8k::tulu"
-    "bbh:cot::tulu"
-    "drop::llama3"
+    # "gsm8k::tulu"
+    # "bbh:cot::tulu"
+    # "drop::llama3"
     "minerva_math::tulu"
-    "codex_humaneval::tulu"
-    "codex_humanevalplus::tulu"
-    "ifeval::tulu"
-    "popqa::tulu"
-    "mmlu:mc::tulu"
-    "mmlu:cot::summarize"
-    "alpaca_eval_v2::tulu"
-    "truthfulqa::tulu"
+    # "codex_humaneval::tulu"
+    # "codex_humanevalplus::tulu"
+    # "ifeval::tulu"
+    # "popqa::tulu"
+    # "mmlu:mc::tulu"
+    # "mmlu:cot::summarize"
+    # "alpaca_eval_v2::tulu"
+    # "truthfulqa::tulu"
 )
 UNSEEN_TASKS=(
     "agi_eval_english:0shot_cot::tulu3"
