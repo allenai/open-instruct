@@ -1478,7 +1478,7 @@ python scripts/submit_eval_jobs.py \
     --preemptible \
     --use_hf_tokenizer_template \
     --beaker_image "nathanl/open_instruct_auto" \
-    --upload_to_hf allenai/tulu-3-evals \
+    --upload_to_hf {args.hf_metadata_dataset} \
     --run_oe_eval_experiments \
     --evaluate_on_weka \
     --run_safety_evaluations \

@@ -56,6 +56,8 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
 )
 
+from transformers.models.olmo_1124.modeling_olmo_1124 import Olmo1124ForSequenceClassification, Olmo1124Config
+AutoModelForSequenceClassification.register(Olmo1124Config, Olmo1124ForSequenceClassification)
 api = HfApi()
 
 
