@@ -1,4 +1,3 @@
-
 import os
 import json
 import yaml
@@ -8,7 +7,7 @@ from tqdm import tqdm
 import spacy
 import torch
 from transformers import AutoModel, AutoTokenizer
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 from elasticsearch import Elasticsearch
 
 SPACY_MODEL = spacy.load("en_core_web_lg")
@@ -243,6 +242,11 @@ def main():
         ("tatsu-lab/alpaca_eval", None, "eval", ["instruction"], None),
         ("lukaemon/bbh", None, "test", ["input"], None),
         ("truthfulqa/truthful_qa", "generation", "validation", ["question"], None),
+        ("allenai/wildguardmix", "wildguardtest", "test", ["prompt"], None),
+        ("allenai/wildjailbreak", "eval", "train", ["adversarial"], None),
+        ("allenai/tulu-3-trustllm-jailbreaktrigger-eval", None, "test", ["prompt"], None),
+        ("allenai/tulu-3-harmbench-eval", None, "test", ["Behavior"], None),
+        ("allenai/tulu-3-do-anything-now-eval", None, "test", ["prompt"], None),
         # Test evals
         ("TIGER-Lab/MMLU-Pro", None, "test", ["question"], None),
         ("Idavidrein/gpqa", "gpqa_extended", "train", ["Question"], None),
@@ -342,11 +346,11 @@ def main():
                     continue
                 num_kept += 1
                 decontaminated_dataset.append(datum)
-            output_file_name = os.path.join(args.output_dir, dataset_name.replace("/", "_") + "_decontaminated.jsonl")
-            with open(output_file_name, "w") as outfile:
-                for datum in decontaminated_dataset:
-                    print(json.dumps(datum), file=outfile)
-            print(f"\tWrote {output_file_name}")
+            output_path = os.path.join(args.output_dir, dataset_name.replace("/", "_") + "_decontaminated")
+            parquet_file_name = os.path.join(output_path, "train.parquet")
+            hf_dataset = Dataset.from_list(decontaminated_dataset)
+            hf_dataset.to_parquet(parquet_file_name)
+            print(f"\tWrote parquet files to {output_path}")
             print(f"\tRemoved {num_total - num_kept} train instances.")
             print(f"\tKept {100 * num_kept / num_total:.2f}% of the original data.")
 

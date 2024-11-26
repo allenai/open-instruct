@@ -2,7 +2,11 @@ import json
 import os
 import argparse
 from typing import List, Dict
+"""
+Usage:
+python scripts/data/read_statistics.py --latex data/processed/
 
+"""
 
 def load_dataset_statistics(output_dir: str) -> List[Dict]:
     statistics = []

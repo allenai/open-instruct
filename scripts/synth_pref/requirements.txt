@@ -1,0 +1,11 @@
+datasets
+numpy
+pandas
+python-dotenv
+huggingface_hub
+openai>=1.0.0
+tqdm
+aiohttp
+pyyaml
+tiktoken
+Jinja2

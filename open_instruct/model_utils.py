@@ -39,6 +39,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from open_instruct.utils import retry_on_exception
+from open_instruct.ground_truth_utils import verify_gsm8k_sample, verify_math_sample, verify_ifeval_sample
 
 
 @dataclass
@@ -176,8 +177,8 @@ def get_reward(
     output = lm_backbone(
         input_ids=input_ids,
         attention_mask=attention_mask,
-        position_ids=position_ids,
-        return_dict=True,
+        # position_ids=position_ids,
+        # return_dict=True,
         output_hidden_states=True,
         use_cache=False,  # otherwise mistral-based RM would error out
     )
@@ -206,6 +207,46 @@ def get_reward(
     )
 
 
+def apply_verifiable_reward(
+    query_responses: torch.Tensor, tokenizer, ground_truths: List[str], datasets: List[str], verify_reward : int = 10, answer_extraction_model: Optional[torch.nn.Module] = None, answer_extraction_tokenizer: Optional[PreTrainedTokenizer] = None
+):
+    # decode the responses
+    decoded_responses = tokenizer.batch_decode(query_responses, skip_special_tokens=True)
+    # if we have an answer extraction model, use it to extract the answer from the response
+    if answer_extraction_model is not None:
+        prompt = "Thus, the final answer is:"
+        # add the prompt to the responses
+        decoded_responses = [f"{response} {prompt}" for response in decoded_responses]
+        # extract the answer
+        answer_extraction_inputs = answer_extraction_tokenizer(decoded_responses, return_tensors="pt", padding=True, truncation=True)
+        answer_extraction_outputs = answer_extraction_model(**answer_extraction_inputs)
+        # get the predicted answer
+        decoded_responses = answer_extraction_tokenizer.batch_decode(answer_extraction_outputs.logits.argmax(-1), skip_special_tokens=True)
+    # compare with ground truth.
+    # use same logic as in gsm8k evaluation
+    rewards = []
+    for prediction, ground_truth, dataset in zip(decoded_responses, ground_truths, datasets):
+        verified = False
+        if ground_truth is None:
+            rewards.append(0)
+            continue
+        if dataset.lower() == 'gsm8k':
+            verified = verify_gsm8k_sample(prediction, ground_truth)
+        elif dataset.lower() == 'math':
+            verified = verify_math_sample(prediction, ground_truth)
+        elif dataset.lower() == 'ifeval':
+            verified = verify_ifeval_sample(prediction, ground_truth)
+        # if verified, give reward
+        if verified:
+            print("Applying ground truth reward 🤗")
+            rewards.append(verify_reward)
+        else:
+            rewards.append(0)
+    rewards_tensors = torch.tensor(rewards, device=query_responses.device)
+    # return rewards and count of times we applied reward
+    return rewards_tensors, (rewards_tensors > 0).sum().float().view(-1)
+
+
 def forward(
     model: torch.nn.Module,
     query_responses: torch.Tensor,
@@ -225,12 +266,12 @@ def forward(
             The output of the model, including hidden states.
     """
     attention_mask = query_responses != pad_token_id
-    position_ids = attention_mask.cumsum(1) - attention_mask.long()
+    # position_ids = attention_mask.cumsum(1) - attention_mask.long()
     input_ids = torch.masked_fill(query_responses, ~attention_mask, 0)
     return model(
         input_ids=input_ids,
         attention_mask=attention_mask,
-        position_ids=position_ids,
+        # # position_ids=position_ids,
         return_dict=True,
         output_hidden_states=True,
     )

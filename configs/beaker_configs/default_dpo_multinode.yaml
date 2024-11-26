@@ -1,0 +1,73 @@
+version: v2
+description: open-instruct-finetune-multinode
+budget: ai2/oe-adapt
+tasks:
+  - name: open-instruct-finetune-multinode
+    replicas: 4
+    leaderSelection: true
+    hostNetworking: true
+    propagateFailure: true
+    propagatePreemption: true
+    synchronizedStartTimeout: 60m
+    image:
+      beaker: nathanl/open_instruct_auto
+    command: [
+      '/bin/sh', '-c'
+    ]
+    arguments: ['
+        unset CUDA_LAUNCH_BLOCKING && PYTHONPATH="/stage:$PYTHONPATH" accelerate launch
+        --mixed_precision bf16
+        --num_machines 4
+        --num_processes 32
+        --machine_rank $BEAKER_REPLICA_RANK
+        --main_process_ip $BEAKER_LEADER_REPLICA_HOSTNAME
+        --main_process_port 29400
+        --use_deepspeed
+        --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf
+        --deepspeed_multinode_launcher standard
+        open_instruct/dpo_tune_cache.py
+        --model_name_or_path /hf_llama_models
+        --use_flash_attn
+        --max_seq_length 4096
+        --preprocessing_num_workers 16
+        --per_device_train_batch_size 1
+        --gradient_accumulation_steps 4
+        --learning_rate 5e-7
+        --lr_scheduler_type linear
+        --warmup_ratio 0.1
+        --weight_decay 0.
+        --num_train_epochs 3
+        --output_dir /output/
+        --with_tracking
+        --report_to tensorboard
+        --logging_steps 1
+    ']
+    envVars:
+      - name: CUDA_DEVICE_ORDER
+        value: PCI_BUS_ID
+      - name: TRANSFORMERS_CACHE
+        value: ./cache/
+      # - name: WANDB_API_KEY
+      #   secret: WANDB_API_KEY
+      - name: WANDB_PROJECT
+        value: open-instruct
+      - name: WANDB_WATCH
+        value: false
+      - name: WANDB_LOG_MODEL
+        value: false
+      - name: WANDB_DISABLED
+        value: true
+      # - name: HF_TOKEN
+      #   secret: HF_TOKEN
+    datasets:
+      - mountPath: /oe-adapt-default
+        source:
+          weka: oe-adapt-default
+    result:
+      path: /output
+    resources:
+      gpuCount: 8
+    context:
+      cluster: ai2/allennlp-cirrascale
+      priority: high
+      preemptible: false

@@ -74,6 +74,146 @@ def main():
     d1['tasks'][0]['context']['preemptible'] = args.preemptible # True requried for Jupiter/Pluto
     d1['tasks'][0]['resources']['gpuCount'] = args.num_gpus
 
+    # add cluster-specific env vars
+    if args.num_nodes > 1:
+        if args.cluster == "ai2/jupiter-cirrascale-2":
+            d1['tasks'][0]['envVars'] += [
+                {
+                    "name": "NCCL_SOCKET_IFNAME",
+                    "value": "ib",
+                },
+                {
+                    "name": "NCCL_IB_HCA",
+                    "value": "^=mlx5_bond_0",
+                },
+                {
+                    "name": "NCCL_DEBUG",
+                    "value": "INFO",
+                },
+            ]
+        elif args.cluster == "ai2/pluto-cirrascale":
+            d1['tasks'][0]['envVars'] += [
+                {
+                    "name": "NCCL_IB_HCA",
+                    "value": "^=mlx5_1,mlx5_2",
+                },
+                {
+                    "name": "NCCL_DEBUG",
+                    "value": "INFO",
+                },
+            ]
+        elif args.cluster == "ai2/augusta-google-1":
+            d1['tasks'][0]['envVars'] += [
+                {
+                    "name":"LD_LIBRARY_PATH",
+                    "value": r"/var/lib/tcpxo/lib64:${LD_LIBRARY_PATH}",
+                },
+                {
+                    "name":"NCCL_CROSS_NIC",
+                    "value": "0",
+                },
+                {
+                    "name":"NCCL_ALGO",
+                    "value": "Ring,Tree",
+                },
+                {
+                    "name":"NCCL_PROTO",
+                    "value": "Simple",
+                },
+                {
+                    "name":"NCCL_MIN_NCHANNELS",
+                    "value": "4",
+                },
+                {
+                    "name":"NCCL_P2P_NET_CHUNKSIZE",
+                    "value": "524288",
+                },
+                {
+                    "name":"NCCL_P2P_PCI_CHUNKSIZE",
+                    "value": "524288",
+                },
+                {
+                    "name":"NCCL_P2P_NVL_CHUNKSIZE",
+                    "value": "1048576",
+                },
+                {
+                    "name":"NCCL_FASTRAK_NUM_FLOWS",
+                    "value": "2",
+                },
+                {
+                    "name":"NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL",
+                    "value": "0",
+                },
+                {
+                    "name":"NCCL_BUFFSIZE",
+                    "value": "8388608",
+                },
+                {
+                    "name":"NCCL_FASTRAK_USE_SNAP",
+                    "value": "1",
+                },
+                {
+                    "name":"CUDA_VISIBLE_DEVICES",
+                    "value": "0,1,2,3,4,5,6,7",
+                },
+                {
+                    "name":"NCCL_NET_GDR_LEVEL",
+                    "value": "PIX",
+                },
+                {
+                    "name":"NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING",
+                    "value": "0",
+                },
+                {
+                    "name":"NCCL_TUNER_PLUGIN",
+                    "value": "libnccl-tuner.so",
+                },
+                {
+                    "name":"NCCL_TUNER_CONFIG_PATH",
+                    "value": "/var/lib/tcpxo/lib64/a3plus_tuner_config.textproto",
+                },
+                {
+                    "name":"NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE",
+                    "value": "/var/lib/tcpxo/lib64/a3plus_guest_config.textproto",
+                },
+                {
+                    "name":"NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS",
+                    "value": "600000",
+                },
+                {
+                    "name":"NCCL_NVLS_ENABLE",
+                    "value": "0",
+                },
+                {
+                    "name":"NCCL_DEBUG",
+                    "value": "WARN",
+                },
+                {
+                    "name":"NCCL_FASTRAK_CTRL_DEV",
+                    "value": "enp0s12",
+                },
+                {
+                    "name":"NCCL_FASTRAK_IFNAME",
+                    "value": "enp6s0,enp7s0,enp13s0,enp14s0,enp134s0,enp135s0,enp141s0,enp142s0",
+                },
+                {
+                    "name":"NCCL_SOCKET_IFNAME",
+                    "value": "enp0s12",
+                },
+                {
+                    "name":"NCCL_USE_SNAP",
+                    "value": "1",
+                },
+                {
+                    "name":"NCCL_FASTRAK_USE_LLCM",
+                    "value": "1",
+                },
+                {
+                    "name":"NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY",
+                    "value": "/dev/aperture_devices",
+                },
+            ]
+
     # modify here for different set of experiments
     experiment_group = "dataset_comparison"
     wandb_project = "open_instruct"
@@ -103,7 +243,7 @@ def main():
         cmd_parts = shlex.split(original_command)
 
         # Find the index of open_instruct/dpo_tune.py
-        script_index = cmd_parts.index('open_instruct/dpo_tune.py')
+        script_index = cmd_parts.index('open_instruct/dpo_tune_cache.py')
 
         # Find the index of 'accelerate launch'
         pre_index = cmd_parts.index('launch')
@@ -130,7 +270,7 @@ def main():
             if value is not True:
                 new_cmd_parts.append(str(value))
         # add python job + post args
-        new_cmd_parts.append('open_instruct/dpo_tune.py')
+        new_cmd_parts.append('open_instruct/dpo_tune_cache.py')
         for key, value in cmd_dict.items():
             if key == "dataset_mixer":
                 key = "dataset_mixer_list"

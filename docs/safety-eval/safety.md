@@ -9,7 +9,7 @@ This should be the most relevant thing for internal Ai2 users of open-instruct. 
 An example command would be:
 ```bash
 python scripts/submit_eval_jobs.py \
-      --model_name <model name> \
+    --model_name <model name> \
       --location <beaker id> \
       --is_tuned --workspace tulu-3-results \
       --preemptible \
@@ -19,6 +19,8 @@ python scripts/submit_eval_jobs.py \
       --run_oe_eval_experiments \
       --run_safety_evaluations
 ```
+
+Use the `--use_alternate_safety_image` to change the safety image, for example: `--use_alternate_safety_image hamishivi/safety_eval_olmo`.
 
 ## Running on an interactive session
 

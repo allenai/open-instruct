@@ -39,6 +39,7 @@ def main():
         save_data_dir=args.dataset_mix_dir,  # location where dataset is saved as json
         columns_to_keep=["messages"],
         keep_ids=True,
+        add_source_col=True,
     )
 
     # print first 5 samples of dataset
