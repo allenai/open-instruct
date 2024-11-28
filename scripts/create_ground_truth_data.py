@@ -231,3 +231,22 @@ for sample in tqdm(metamathqa_dataset):
 random.shuffle(new_data)
 dataset = Dataset.from_list(new_data)
 dataset.push_to_hub("ai2-adapt-dev/numinamath_cot_ground_truth_one_turn")
+
+# flan data!
+# for this, lets load from our 90k flan sample used for tulu
+flan_dataset = load_dataset("ai2-adapt-dev/flan_v2_converted", split="train")
+new_data = []
+# prompt to encourage cot response.
+flan_cot_prompt = "\n\nShow your work and conclude with the exact phrasing \"Therefore, the final answer is [answer].\" where [answer] is just the final number or expression that solves the problem."
+for sample in tqdm(flan_dataset):
+    question = sample["inputs"].strip() + flan_cot_prompt
+    response = sample["targets"]
+    # lets use multi-turn cot prompt instead
+    new_data.append({
+        "messages": [{"role": "user", "content":  question}],
+        "ground_truth": response,
+        "dataset": "FLAN"  # new setup!
+    })
+random.shuffle(new_data)
+dataset = Dataset.from_list(new_data)
+dataset.push_to_hub("ai2-adapt-dev/flanv2_ground_truth_90k")

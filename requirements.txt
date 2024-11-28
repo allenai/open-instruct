@@ -48,3 +48,5 @@ beaker-py
 litellm
 matplotlib
 ray
+# for gtrl with flan
+rouge-score

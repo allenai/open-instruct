@@ -93,7 +93,7 @@ RUN pip install flash-attn==2.6.3 --no-build-isolation
 RUN pip install -r requirements.txt
 
 # NLTK download
-RUN python -m nltk.downloader punkt
+RUN python -m nltk.downloader punkt wordnet
 COPY open_instruct open_instruct
 COPY oe-eval-internal oe-eval-internal
 

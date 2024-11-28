@@ -7,6 +7,10 @@ import json
 import string
 from open_instruct.math_utils import last_boxed_only_string, remove_boxed, get_unnormalized_answer, normalize_final_answer, is_equiv, hendrycks_is_equiv
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
+from nltk.translate.bleu_score import sentence_bleu
+from nltk.translate.meteor_score import meteor_score
+from rouge_score import rouge_scorer
+
 
 
 def verify_gsm8k_sample(model_output, ground_truth_answer):
@@ -137,16 +141,34 @@ def normalize_answer(s):
 
 
 def verify_flan_sample(model_output, ground_truth_answer):
-    # Flan! we will just use... exact match with some basic cleaning, after extracting the answer.
-    answer_string = model_output.split("The answer is: ")[-1].strip()
-    return normalize_answer(answer_string) == normalize_answer(ground_truth_answer)
+    """
+    Verify flan! just average bleu, rouge-l, and meteor scores.
+    """
+    model_output = model_output.split("<|assistant|>\n")[-1].strip()
+    # only take stuff after "the answer is" if possible
+    # otherwise just take full output
+    if "therefore, the final answer is" in model_output.lower():
+        model_output = model_output.split("Therefore, the final answer is")[-1].strip()
+    # Tokenize inputs
+    model_tokens = model_output.split()
+    ground_truth_tokens = ground_truth_answer.split()
+    # BLEU Score
+    bleu = sentence_bleu([ground_truth_tokens], model_tokens)
+    # METEOR Score
+    meteor = meteor_score([ground_truth_tokens], model_tokens)
+    # ROUGE-L Score
+    scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=True)
+    rouge_scores = scorer.score(ground_truth_answer, model_output)
+    rouge_l = rouge_scores["rougeL"].fmeasure
+    # Average the scores
+    return sum([bleu, meteor, rouge_l]) / 3
 
 
 # debug code
 if __name__ == "__main__":
     from datasets import load_dataset
-    ds = load_dataset("ai2-adapt-dev/prompts_with_constraints_for_ground_truth")
-    test_model_output = "<|assistant|>\nThe answer is $\\boxed{3.14}$"
+    ds = load_dataset("ai2-adapt-dev/flanv2_ground_truth_90k")
+    test_model_output = "<|assistant|>\nTherefore, the final answer is a painful experience."
     for sample in ds['train']:
         print(sample)
-        verify_ifeval_sample(test_model_output, sample['ground_truth'])
+        print(verify_flan_sample(test_model_output, sample['ground_truth']))
