@@ -239,7 +239,8 @@ class Args:
     reward_model_multiplier: float = 1.0
     """the reward model multiplier, for down/upscaling the reward model output"""
     answer_extraction_model: str = None
-
+    """Whether to use an explicit reward model"""
+    use_reward_model: bool = False
     # async setting
     async_mode: bool = True
     """Whether to run the generation in async mode which learns from the second latest policy like Cleanba (https://arxiv.org/abs/2310.00036)"""
@@ -690,15 +691,17 @@ class PolicyTrainerRayProcess(RayProcess):
         self.ref_policy.eval()
 
         # reward model
-        self.reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
-            args.reward_model_path,
-            revision=args.reward_model_revision,
-            num_labels=1,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-            use_cache=False,
-        )
-        disable_dropout_in_model(self.reward_model)
+        if args.use_reward_model:
+            assert args.apply_verifiable_reward, "When `use_reward_model` is False, `apply_verifiable_reward` must be True."
+            self.reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
+                args.reward_model_path,
+                revision=args.reward_model_revision,
+                num_labels=1,
+                torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2",
+                use_cache=False,
+            )
+            disable_dropout_in_model(self.reward_model)
         ds_config = get_eval_ds_config(
             offload=False,
             stage=args.deepspeed_stage,
@@ -1089,11 +1092,14 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Response Processing 2. run reward model on the truncated responses
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
-                    _, score, _ = get_reward(
-                        self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
-                    )
-                    if args.reward_model_multiplier != 1.0:
-                        score *= args.reward_model_multiplier
+                    score = torch.zeros(query.shape[0], device=query.device)
+                    if args.use_reward_model:
+                        _, score, _ = get_reward(
+                            self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
+                        )
+                        if args.reward_model_multiplier != 1.0:
+                            score *= args.reward_model_multiplier
+
                     # also apply verifiable reward
                     if args.apply_verifiable_reward:
                         # we need to batch the gt to match query.
