@@ -702,15 +702,15 @@ class PolicyTrainerRayProcess(RayProcess):
                 use_cache=False,
             )
             disable_dropout_in_model(self.reward_model)
-        ds_config = get_eval_ds_config(
-            offload=False,
-            stage=args.deepspeed_stage,
-            bf16=True,
-        )
-        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-        ds_config["train_batch_size"] = args.mini_batch_size
-        self.reward_model, *_ = deepspeed.initialize(model=self.reward_model, config=ds_config)
-        self.reward_model.eval()
+            ds_config = get_eval_ds_config(
+                offload=False,
+                stage=args.deepspeed_stage,
+                bf16=True,
+            )
+            ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
+            ds_config["train_batch_size"] = args.mini_batch_size
+            self.reward_model, *_ = deepspeed.initialize(model=self.reward_model, config=ds_config)
+            self.reward_model.eval()
 
     def get_vocab_size(self):
         return self.policy.config.vocab_size
