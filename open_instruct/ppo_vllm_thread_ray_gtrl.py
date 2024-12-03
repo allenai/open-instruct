@@ -1097,8 +1097,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         _, score, _ = get_reward(
                             self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                         )
-                        if args.reward_model_multiplier != 1.0:
-                            score *= args.reward_model_multiplier
+                        score *= args.reward_model_multiplier
 
                     # also apply verifiable reward
                     if args.apply_verifiable_reward:
