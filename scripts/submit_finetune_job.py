@@ -169,7 +169,7 @@ def main():
     # name and description
     exp_name = f"open_instruct_finetune_{model_name}_{now}"[:128]
     d['description'] = exp_name
-    d['tasks'][0]['name'] = exp_name
+    d['tasks'][0]['name'] = exp_name[:128]
 
     # add cluster-specific env vars
     if args.num_nodes > 1:
