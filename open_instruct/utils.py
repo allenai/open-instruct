@@ -320,6 +320,11 @@ def get_datasets(
                 source_col = [ds] * len(dataset)
                 dataset = dataset.add_column("source", source_col)
 
+            # for cols in columns_to_keep, if one is not present, add "None" to the column
+            for col in columns_to_keep:
+                if col not in dataset.column_names:
+                    dataset = dataset.add_column(col, [None] * len(dataset))
+
             # add tag to the dataset corresponding to where it was sourced from, for
             if "train" in split:
                 raw_train_datasets.append(dataset)
