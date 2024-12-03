@@ -78,7 +78,7 @@ sh scripts/finetune_with_accelerate_config.sh 8 configs/train_configs/tulu3/tulu
 # quick debugging run using 1 GPU
 sh scripts/dpo_train_with_accelerate_config.sh 1 configs/train_configs/dpo/mini.yaml
 # train an 8B tulu3 model using 8 GPU
-sh scripts/finetune_with_accelerate_config.sh 8 configs/train_configs/tulu3/tulu3_dpo_8b.yaml
+sh scripts/dpo_train_with_accelerate_config.sh 8 configs/train_configs/tulu3/tulu3_dpo_8b.yaml
 ```
 
 
