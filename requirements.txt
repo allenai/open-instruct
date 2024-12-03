@@ -48,3 +48,6 @@ beaker-py
 litellm
 matplotlib
 ray
+# for data decontamination
+elasticsearch==8.6.2
+spacy==3.7.6
