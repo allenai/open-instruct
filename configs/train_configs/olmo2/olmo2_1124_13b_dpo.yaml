@@ -4,7 +4,7 @@ gradient_checkpointing: true
 dataset_mixer:
     allenai/olmo-2-1124-13b-preference-mix: 1.0
 tokenizer_name: allenai/OLMo-2-1124-13B-SFT
-use_slow_tokenizer: true
+use_slow_tokenizer: false
 max_seq_length: 2048
 preprocessing_num_workers: 16
 per_device_train_batch_size: 1
