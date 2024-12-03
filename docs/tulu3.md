@@ -56,9 +56,18 @@ accelerate launch \
 # For Ai2 internal members, this was the experiment URL: https://beaker.org/ex/01JBNTPW8TKG09B2XR832YB5S8
 ```
 
-> [!NOTE]  
-> If you have different number of GPUs, please adjust the `NUM_MACHINES`, `NUM_PROCESSES`, `PER_DEVICE_TRAIN_BATCH_SIZE`, and `GRADIENT_ACCUMULATION_STEPS` accordingly. For example, say, you only have 8 GPUs. The command below has an effective batch size of `NUM_PROCESSES * PER_DEVICE_TRAIN_BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS = 64 * 1 * 2 = 128`. A one node setup can simulate our batch size with `NUM_PROCESSES=8`, `PER_DEVICE_TRAIN_BATCH_SIZE=1`, and `GRADIENT_ACCUMULATION_STEPS=64`.
-
+> [!NOTE]
+> If you have different number of GPUs, please adjust the `NUM_MACHINES`, `NUM_PROCESSES`, `PER_DEVICE_TRAIN_BATCH_SIZE`, and `GRADIENT_ACCUMULATION_STEPS` accordingly to reproduce the same effective batch size.
+> The effective batch size is calculated by multiplying:
+> - Number of GPUs / processes (NUM_PROCESSES)
+> - Train batch size per GPU (PER_DEVICE_TRAIN_BATCH_SIZE) 
+> - Gradient accumulation steps (GRADIENT_ACCUMULATION_STEPS)
+> so we have
+> ```
+> 64 GPUs: 64 * 1 * 2 = 128 # from the example above
+> 8 GPUs:   8 * 1 * 16 = 128 # if you only 
+> ```
+> You can achieve the same effective batch size with fewer GPUs by increasing gradient accumulation steps proportionally (e.g., `NUM_PROCESSES=8, PER_DEVICE_TRAIN_BATCH_SIZE=1, and GRADIENT_ACCUMULATION_STEPS=16`)
 
 ### Llama-3.1-Tulu-3-70B-SFT Reproduction
 
