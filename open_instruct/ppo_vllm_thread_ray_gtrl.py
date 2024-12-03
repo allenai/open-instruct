@@ -1098,8 +1098,6 @@ class PolicyTrainerRayProcess(RayProcess):
                             self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                         )
                         score *= args.reward_model_multiplier
-
-                    # also apply verifiable reward
                     if args.apply_verifiable_reward:
                         # we need to batch the gt to match query.
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
