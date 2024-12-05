@@ -15,7 +15,7 @@ tasks:
       '/bin/sh', '-c'
     ]
     arguments: ['
-        unset CUDA_LAUNCH_BLOCKING && PYTHONPATH="/stage:$PYTHONPATH" pip install git+https://github.com/vwxyzjn/transformers.git@olmo1124_classification && accelerate launch
+        unset CUDA_LAUNCH_BLOCKING && PYTHONPATH="/stage:$PYTHONPATH" pip install git+https://github.com/vwxyzjn/transformers.git@olmo2-classification && accelerate launch
         --mixed_precision bf16
         --num_machines 4
         --num_processes 32
@@ -59,10 +59,10 @@ tasks:
         value: true
       # - name: HF_TOKEN
       #   secret: HF_TOKEN
-    datasets:
-      - mountPath: /weka/oe-adapt-default
-        source:
-          weka: oe-adapt-default
+    # datasets:
+    #   - mountPath: /oe-adapt-default
+    #     source:
+    #       weka: oe-adapt-default
     result:
       path: /output
     resources:

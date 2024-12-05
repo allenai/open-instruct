@@ -1,7 +1,7 @@
 model_name_or_path: allenai/OLMo-2-1124-13B
 use_flash_attn: true
 tokenizer_name: allenai/OLMo-2-1124-13B
-use_slow_tokenizer: true
+use_slow_tokenizer: false
 dataset_mixer:
     allenai/tulu-3-sft-olmo-2-mixture: 1.0
 
