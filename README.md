@@ -215,6 +215,7 @@ Open Instruct is a project that benefitd from many open-source projects and libr
 
 If you used this repository or our models, please cite our work:
 
+Tulu 1:
 ```bibtex
 @misc{wang2023far,
    title={How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources}, 
@@ -226,6 +227,7 @@ If you used this repository or our models, please cite our work:
 }
 ```
 
+Tulu 2:
 ```bibtex
 @misc{ivison2023camels,
       title={Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2}, 
@@ -237,6 +239,7 @@ If you used this repository or our models, please cite our work:
 }
 ```
 
+Tulu 2.5:
 ```bibtex
 @misc{ivison2024unpacking,
       title={Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback}, 
@@ -247,3 +250,13 @@ If you used this repository or our models, please cite our work:
       primaryClass={cs.CL},
 }
 ```
+
+Tulu 3:
+@article{lambert2024tulu3,
+  title = {Tülu 3: Pushing Frontiers in Open Language Model Post-Training},
+  author = {
+    Nathan Lambert and Jacob Morrison and Valentina Pyatkin and Shengyi Huang and Hamish Ivison and Faeze Brahman and Lester James V. Miranda and Alisa Liu and Nouha Dziri and Shane Lyu and Yuling Gu and Saumya Malik and Victoria Graf and Jena D. Hwang and Jiangjiang Yang and Ronan Le Bras and Oyvind Tafjord and Chris Wilhelm and Luca Soldaini and Noah A. Smith and Yizhong Wang and Pradeep Dasigi and Hannaneh Hajishirzi
+  },
+  year = {2024},
+  email = {tulu@allenai.org}
+}
