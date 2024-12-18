@@ -3,10 +3,10 @@ This code is partially borrowed and adapted from: https://github.com/tencent-ail
 
 Example commands:
 # generate 20 if prompts: 
-python openai_generation_if_prompts.py --model "gpt-4o" --start_index 0 --end_index 20 --output_path if_prompts.jsonl --openai_key Z --org_id YYY --dataset ./data/persona.jsonl --template instruction_following
+python persona_driven_generate_ifdata.py --model "gpt-4o" --start_index 0 --end_index 20 --output_path if_prompts.jsonl --openai_key Z --org_id YYY --dataset ./data/persona.jsonl --template instruction_following
 
 # generate 20 IF responses
-python openai_generation_if_prompts.py --model "gpt-4o" --start_index 0 --end_index 20 --output_path if_solutions.jsonl --openai_key Z --org_id YYY --dataset if_prompts.jsonl --template instruction_following_solution
+python persona_driven_generate_ifdata.py --model "gpt-4o" --start_index 0 --end_index 20 --output_path if_solutions.jsonl --openai_key Z --org_id YYY --dataset if_prompts.jsonl --template instruction_following_solution
 """
 
 import argparse

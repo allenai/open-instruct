@@ -1,25 +1,27 @@
-To start make sure you have your openai and anthropic API keys and have installed the libraries listed in `requirements.txt`:
+To start make sure you have your OpenAI and Anthropic API keys and have installed the libraries listed in `requirements.txt`:
 
 ```
 pip install -r requirements.txt
 ```
 
-This folder contains code to synthetically generate data (both prompts and responses) for target skill using a (persona-driven approach)[https://arxiv.org/pdf/2406.20094]:
+This folder contains code to synthetically generate data (both prompts and responses) for target skill using a [persona-driven approach](https://arxiv.org/pdf/2406.20094):
 
-1- Precide Instruction Following:
+
+**1- Precide Instruction Following:**
 
 ```
 # Generate Instruction Following prompts
-python openai_generation_if_prompts.py --model "gpt-4o" --start_index 0 --end_index <SAMPLE_SIZE> --output_path if_prompts.jsonl --openai_key Z --org_id YYY --dataset ./data/persona.jsonl --template instruction_following
+python persona_driven_generate_ifdata.py --model "gpt-4o" --start_index 0 --end_index <SAMPLE_SIZE> --output_path if_prompts.jsonl --openai_key Z --org_id YYY --dataset ./data/persona.jsonl --template instruction_following
 
 # Generate Responses
-python openai_generation_if_prompts.py --model "gpt-4o" --start_index 0 --end_index <SAMPLE_SIZE> --output_path if_solutions.jsonl --openai_key Z --org_id YYY --dataset if_prompts.jsonl --template instruction_following_solution
+python persona_driven_generate_ifdata.py --model "gpt-4o" --start_index 0 --end_index <SAMPLE_SIZE> --output_path if_solutions.jsonl --openai_key Z --org_id YYY --dataset if_prompts.jsonl --template instruction_following_solution
 
 # Rewrite prompts to form Rejected Response (used for Presona-IF DPO data)
-python openai_generation_if_prompts.py --model "gpt-4o" --start_index 0 --end_index <SAMPLE_SIZE> --output_path if_solutions.jsonl --openai_key Z --org_id YYY --dataset if_prompts.jsonl --template rewrite_if_prompt
+python persona_driven_generate_ifdata.py --model "gpt-4o" --start_index 0 --end_index <SAMPLE_SIZE> --output_path if_solutions.jsonl --openai_key Z --org_id YYY --dataset if_prompts.jsonl --template rewrite_if_prompt
 ```
 
-2- Math World Problems
+
+**2- Math World Problems**
 ```
 # Generate math word problems
 python persona_driven_generate_math_code.py --model "gpt-4o" --end_index <SAMPLE_SIZE> --output_path <MATH_PROBLEMS> --openai_key XXX --org_id YYY --dataset ./data/persona.jsonl --template math
@@ -30,16 +32,17 @@ python persona_driven_generate_math_code.py --model "gpt-4o" --end_index <SAMPLE
 Note that you can change `--template` to any of `['grade_math', 'math_int_algebra']` to generate other types of math data.
 
 
-3- Code (python)
+
+**3- Code (python)**
 ```
 # Generate python problems
 
-# Generate code
 python persona_driven_generate_math_code.py --model "gpt-4o" --start_index 0 --end_index <SAMPLE_SIZE> --output_path <PYTHON_PROBLEMS> --openai_key XXX --org_id YYY --dataset ./data/persona.jsonl --template code 
-# example for 10 code soltuions
+
+# Generate python code
 python persona_driven_generate_math_code.py --org_name anthropic --model 'claude-3-5-sonnet-20240620' --start_index 0 --end_index <SAMPLE_SIZE> --output_path <OUTPUT_CODE> --openai_key XXX --org_id YYY --dataset <PYTHON_PROBLEMS> --template code_solution 
 ```
-Note that we used 'claude-3-5-sonnet-20240620' to generate python codes.
+Note that we used `claude-3-5-sonnet-20240620` to generate python codes.
 
 
 Generated prompts and solutions are all saved in the `messages` format ready for supervised finetunig. 
