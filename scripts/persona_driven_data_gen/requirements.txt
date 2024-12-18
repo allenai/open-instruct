@@ -1,0 +1,3 @@
+anthropic
+openai==0.28
+tenacity
