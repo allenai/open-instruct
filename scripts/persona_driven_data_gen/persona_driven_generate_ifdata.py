@@ -3,7 +3,7 @@ This code is partially borrowed and adapted from: https://github.com/tencent-ail
 
 Example commands:
 # generate 20 if prompts: 
-python persona_driven_generate_ifdata.py --model "gpt-4o" --start_index 0 --end_index 20 --output_path if_prompts.jsonl --openai_key Z --org_id YYY --dataset ./data/persona.jsonl --template instruction_following
+python persona_driven_generate_ifdata.py --model "gpt-4o" --start_index 0 --end_index 20 --output_path if_prompts.jsonl --openai_key Z --org_id YYY --dataset ai2-adapt-dev/personahub_personas --template instruction_following
 
 # generate 20 IF responses
 python persona_driven_generate_ifdata.py --model "gpt-4o" --start_index 0 --end_index 20 --output_path if_solutions.jsonl --openai_key Z --org_id YYY --dataset if_prompts.jsonl --template instruction_following_solution
@@ -84,7 +84,7 @@ def main(args):
     if args.dataset.endswith(".jsonl"):
         persona_dataset = load_dataset("json", data_files=args.dataset)['train']
     else:
-        persona_dataset = load_dataset(args.dataset, "math")['train']
+        persona_dataset = load_dataset(args.dataset)['train']
 
     if args.sanity_check > 0:
         persona_dataset = persona_dataset.select(range(0, args.sanity_check))
