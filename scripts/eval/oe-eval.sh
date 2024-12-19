@@ -106,7 +106,7 @@ fi
 # Define default tasks if no custom tasks provided
 DEFAULT_TASKS=(
     "gsm8k::tulu"
-    "bbh:cot::tulu"
+    "bbh:cot-v1::tulu"
     "drop::llama3"
     "minerva_math::tulu"
     "codex_humaneval::tulu"
