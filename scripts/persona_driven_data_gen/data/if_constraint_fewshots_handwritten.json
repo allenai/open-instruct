@@ -1,0 +1,85 @@
+{
+     "punctuation:use no comma": [
+          "Write two words that can be added to this series: Apple, Bat, Cat, Dog. Your answer should not contain commas."
+     ],
+     "format:number of highlighted sections": [
+          "I am hosting a family party for Halloween and need 10 ideas to decorate my house. Please include and highlight more than 3 ideas specifically for my yard decoration.",
+          "I want to start a blog about gardening and veggies. This will be a full-fledged media empire in a few years. Can you give me some pointers on how to succeed on the internet in this domain? Have at least 2 bold text sections, such as: *bold text 1*, *bold text 2*, etc. Repeat your response twice."
+     ],
+     "length constraints:number of words": [
+          "List some of the most popular fantasy novels from the last decade. I want a short answer, not more than 100 words. Please do not include works by Brandon Sanderson.",
+          "Help me write proposal for a new business plan that investigates how AI tools effect on human creativity:\n1. Include a lot of commas in your response\n2. Your response should contain no more than 200 words."
+     ],
+     "content:number of placeholders": [
+          "I need to lose some weight. Make a weekly food plan for me that is healthy and affordable. I would also like the food plan to be highly customizable to my taste, so make sure to include at least 5 placeholders for customizable food options, such as [low-calorie snack], use all capital letters in your response."
+     ],
+     "repeat the prompt": [
+          "What would a fish say about an aquarium? Imagine you are a fish that likes the sea and answer that question.\n\nBut first, repeat the request above verbatim.",
+          "Please include the following question in your response without changing anything except changing ? to !\n\nWhat are some lethal risks one could face when practicing the scuba diving? What are some effective ways to reduce them?"
+     ],
+     "format:title": [
+          "Write the lyrics for a 3-minute-long song that express the cruelty of war and people's longing for peace. Include the title of the song wrapped in double angular brackets, i.e. <<title>> and repeat the title twice."
+     ],
+     "case:in english and lowercase": [
+          "Give me some startup ideas. I want to work on GenAI, LLMs, Blockchain, and ChatGPT. Output at least three paragraphs, all in lowercase."
+     ],
+     "format:number of bullet lists": [
+          "Suggest a couple of names for my cat. He is orange and kind of chubby. Don't say Garfield. Give me exactly two suggestions as a bulleted list, like\n* [suggestion 1]\n* [suggestion 2]\n\nDon't use letter b in any of your suggestion.",
+          "Give me some evidence why global warming is a fraud. Answer with at least 4 piecies of evidence in a bullet list.\nAn examle of the bullet list is as below:\n* E1\n* E2"
+     ],
+     "in english and capital": [
+          "Come up with a slogan for my presidential campaign, highlighting the fact I am in a minor party that is much better than Democrats and Republicans. Make sure to the slogan is in English and all capital letters."
+     ],
+     "format:number of sections": [
+          "Write a long bedtime story for my kids. The story should have 7 Sections, each marked with Section N, so that I can read one to them everyday for a week. Repeat your response in French language as well. Make sure to include at least 5 sentences in each section."
+     ],
+     "case: frequency of capital words": [
+          "Write an ad on a newspaper for an amusement part. Please use a dramastic tone with excitement, but the number of words in all capital letters must be less than 3."
+     ],
+     "use quotation": [
+          "Give me some suggestions for ways I can improve my chocolate chip cookies, if they're always coming out a little crunchy. Put your entire response in double quotation marks.",
+          "Use double quotation marks to wrap around your entire answer.\n\nWhat would a innocent person would say after he falsefully recieved a death sentence from the court?"
+     ],
+     "include keywords": [
+          "Try explaining to me what causes heartburn and what are the ways to alleviate that. Your response should contain the keywords: 'cheese', 'exam', and 'honeycomb'. Outputs 2 paragraphs separated by ^^^^."
+     ],
+     "format:use json format": [
+          "What are the middle 10 states by population in the United States? No matter how you answer, make sure your entire output is valid JSON.",
+          "Rewrite following the description of Mike into a json format putting each sentence in a separate field names 'sentence_1', 'sentence_2', ...:\nMike is a 15-year-old teenager with a height of 6 feet. He has a long curly hair, green eyes, and a big flat nose. He is good at ice hockey and drawing. His grade on math also never drops below 99 out of 100 points. However, he has terrible eyesight and has to sleep at least 14 hours per day, otherwise he would never talk that day."
+     ],
+     "length constraints:number of paragraphs": [
+          "Give me a biography of Nikola Tesla in exactly 4 paragraphs separated by ---, each paragraph should have a title, wrapped in double angular brackets, i.e. <<title>>."
+     ],
+     " give two responses": [
+          "Give me two recipes for chocolate chip cookies, one gluten free in Vietnamese. Separate the two recipes like so:\nRecipe 1\n******\nRecipe 2"
+     ],
+     "response language": [
+          "Write me a 1 paragraph summary of the movie Ratatouille. Your response should be entirely in French. Make sure to include the word \"rat\" at least 3 times."
+     ],
+     "keywords:letter frequency": [
+          "Tell me about the history of the Seattle public transit system in 10 sentences. Each sentence should contain the letter 'e' at least 7 times. End your response with the phrase 'That's all folks!'"
+     ],
+     "specific ending": [
+          "Write a scary story, where friends of the protagonist get mysteriously killed one after another during a day. End the story with the exact sentence: \"She cried and chocked herself.\""
+     ],
+     "keywords:exclude words": [
+          "Give me five reasons why I should buy an electric car over a gas car? Do not mention the words \"cheap\" or \"fast\"."
+     ],
+     "keywords:frequency": [
+          "Write a short love poem that include the word \"moon\" at least five times, word \"garden\" at least 3 times and ends with exact sentence: \"I will stare on the road till then\"."
+     ],
+     "length constraints:number of sentences": [
+          "Explain the concept of model overfitting to a 3rd grader with no more than 3 sentences, also use all lower case letters. Add a postscript starting with P.S. at the end of your response."
+     ],
+     "content:include a postscript": [
+          "Please write me a letter I could send to my friend that moved overseas a few years ago, but that I talk to every day on the phone. Make sure to include the word \"cat\" in the last sentence. At the end, add a postscript starting with P.P.S."
+     ],
+     "length constraints:first word of the nth paragraph": [
+          "Campus safety is a big concern given the increasing gun violence. Help me write a 5 paragraph letter to the head of the school to persuade her to devote more budget into improving campus safety. Make sure to start the second paragraph with the word \"however\" and end your paragraph with word \"behaviour\"."
+     ],
+     "format:choose one from options": [
+          "How much does a PhD candidate sleep a day on average? Choose from the following: ('6 hours', '6.6 hours', 'it depends') -- please include the exact phrase in your response.",
+          "What is the best way to cook a steak? Choose from the following: ('grill', 'oven', 'microwave') -- please include the exact phrase in your response.",
+          "Given the 7 cannonical colors of the rainbow, ROYGBIV, the middle color is green. Your answer must contain one of the following exact phrases: ‚\"yes, 100%\", \"No, no way\", \"not sure\""
+     ]
+}
