@@ -760,11 +760,11 @@ class PolicyTrainerRayProcess(RayProcess):
             world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
             backend = args.vllm_sync_backend
             # https://github.com/OpenRLHF/OpenRLHF/issues/313
-            if vllm.__version__ > "0.4.2" and os.getenv("NCCL_P2P_DISABLE", "0") == "0":
-                backend = "gloo"
-                print(
-                    "Warning: using --vllm_sync_backend=gloo for vLLM version > 0.4.2 (or export NCCL_P2P_DISABLE=1)"
-                )
+            # if vllm.__version__ > "0.4.2" and os.getenv("NCCL_P2P_DISABLE", "0") == "0":
+            #     backend = "gloo"
+            #     print(
+            #         "Warning: using --vllm_sync_backend=gloo for vLLM version > 0.4.2 (or export NCCL_P2P_DISABLE=1)"
+            #     )
             refs = [
                 engine.init_process_group.remote(
                     master_address,
@@ -998,10 +998,10 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 start_time = time.time()
                 broadcast_to_vllm()
-                print(
-                    f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds"
-                )
                 if accelerator.is_main_process:
+                    print(
+                        f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds"
+                    )
                     param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
             else:
                 if training_step != 1:
@@ -1019,10 +1019,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     datasets_next = data[DATASET_SOURCE_KEY]
                     start_time = time.time()
                     broadcast_to_vllm()
-                    print(
-                        f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds"
-                    )
                     if accelerator.is_main_process:
+                        print(
+                            f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds"
+                        )
                         param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
                     queries = queries_next
                     ground_truths = ground_truths_next
@@ -1612,11 +1612,11 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         print(
             f"Dataset splits not provided for all datasets. Using the same {args.dataset_train_splits[0]} split for all datasets."
         )
-    if len(args.dataset_eval_splits) != len(args.dataset_eval_mixer_dict) and len(args.dataset_eval_splits) == 1:
-        args.dataset_eval_splits = [args.dataset_eval_splits[0]] * len(args.dataset_eval_mixer_dict)
-        print(
-            f"Dataset splits not provided for all datasets. Using the same {args.dataset_eval_splits[0]} split for all datasets."
-        )
+    # if len(args.dataset_eval_splits) != len(args.dataset_eval_mixer_dict) and len(args.dataset_eval_splits) == 1:
+    #     args.dataset_eval_splits = [args.dataset_eval_splits[0]] * len(args.dataset_eval_mixer_dict)
+    #     print(
+    #         f"Dataset splits not provided for all datasets. Using the same {args.dataset_eval_splits[0]} split for all datasets."
+    #     )
     train_dataset = combine_dataset(
         args.dataset_mixer_dict,
         splits=args.dataset_train_splits,

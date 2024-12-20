@@ -47,10 +47,12 @@ pip install -e .
 * **Docker installation**: You can also use the Dockerfile to build a Docker image. You can build the image with the following command:
 
 ```bash
-docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 . -t open_instruct_dev
+docker build . -t open_instruct_uv
 # if you are interally at AI2, you can create an image like this:
-beaker image delete $(whoami)/open_instruct_dev 
-beaker image create open_instruct_dev -n open_instruct_dev -w ai2/$(whoami)
+beaker image delete costah/open_instruct_uv 
+beaker image create open_instruct_uv -n open_instruct_uv -w ai2/costah
+# Optionally, you can build the base "cache" image with
+
 ```
 
 If you are internally at AI2, you may launch experiments using our always-up-to-date auto-built image `nathanl/open_instruct_auto`.
