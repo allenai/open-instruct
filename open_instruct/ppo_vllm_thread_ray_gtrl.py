@@ -251,6 +251,8 @@ class Args:
     """number of vLLM Engines, set to 0 to disable vLLM"""
     vllm_tensor_parallel_size: int = 1
     """tensor parallel size of vLLM Engine for multi-GPU inference"""
+    vllm_enforce_eager: bool = False
+    """whether to enforce eager mode for vLLM -- slow inference but needed for multi-node"""
     vllm_sync_backend: str = "nccl"
     """DeepSpeed -> vLLM weight sync backend"""
     enable_prefix_caching: bool = False
@@ -1683,6 +1685,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
+        args.vllm_enforce_eager,
         model_config.model_name_or_path,
         model_config.model_revision,
         args.seed,

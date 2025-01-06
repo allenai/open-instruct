@@ -192,6 +192,7 @@ class LLMRayActor:
 def create_vllm_engines(
     num_engines: int,
     tensor_parallel_size: int,
+    enforce_eager: bool,
     pretrain: str,
     revision: str,
     seed: int,
@@ -224,6 +225,7 @@ def create_vllm_engines(
                 tokenizer_revision=revision,
                 trust_remote_code=True,
                 tensor_parallel_size=tensor_parallel_size,
+                enforce_eager=enforce_eager,
                 dtype="bfloat16",
                 seed=seed + i,
                 enable_prefix_caching=enable_prefix_caching,
