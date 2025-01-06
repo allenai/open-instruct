@@ -251,6 +251,8 @@ class Args:
     """number of vLLM Engines, set to 0 to disable vLLM"""
     vllm_tensor_parallel_size: int = 1
     """tensor parallel size of vLLM Engine for multi-GPU inference"""
+    vllm_pipeline_parallel_size: int = 1
+    """pipeline parallel size of vLLM Engine for multi-GPU inference"""
     vllm_sync_backend: str = "nccl"
     """DeepSpeed -> vLLM weight sync backend"""
     enable_prefix_caching: bool = False
@@ -753,23 +755,24 @@ class PolicyTrainerRayProcess(RayProcess):
             with socket.socket() as sock:
                 sock.bind(("", 0))
                 master_port = sock.getsockname()[1]
-            vllm_num_engines, vllm_tensor_parallel_size = (
+            vllm_num_engines, vllm_tensor_parallel_size, vllm_pipeline_parallel_size = (
                 args.vllm_num_engines,
                 args.vllm_tensor_parallel_size,
+                args.vllm_pipeline_parallel_size,
             )
-            world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
+            world_size = vllm_num_engines * vllm_tensor_parallel_size * vllm_pipeline_parallel_size + 1
             backend = args.vllm_sync_backend
             # https://github.com/OpenRLHF/OpenRLHF/issues/313
-            if vllm.__version__ > "0.4.2" and os.getenv("NCCL_P2P_DISABLE", "0") == "0":
-                backend = "gloo"
-                print(
-                    "Warning: using --vllm_sync_backend=gloo for vLLM version > 0.4.2 (or export NCCL_P2P_DISABLE=1)"
-                )
+            # if vllm.__version__ > "0.4.2" and os.getenv("NCCL_P2P_DISABLE", "0") == "0":
+            #     backend = "gloo"
+            #     print(
+            #         "Warning: using --vllm_sync_backend=gloo for vLLM version > 0.4.2 (or export NCCL_P2P_DISABLE=1)"
+            #     )
             refs = [
                 engine.init_process_group.remote(
                     master_address,
                     master_port,
-                    i * vllm_tensor_parallel_size + 1,
+                    i * vllm_tensor_parallel_size * vllm_pipeline_parallel_size + 1,
                     world_size,
                     "openrlhf",
                     backend=backend,
@@ -1683,6 +1686,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
+        args.vllm_pipeline_parallel_size,
         model_config.model_name_or_path,
         model_config.model_revision,
         args.seed,

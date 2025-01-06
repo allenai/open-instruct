@@ -192,6 +192,7 @@ class LLMRayActor:
 def create_vllm_engines(
     num_engines: int,
     tensor_parallel_size: int,
+    pipeline_parallel_size: int,
     pretrain: str,
     revision: str,
     seed: int,
@@ -205,7 +206,7 @@ def create_vllm_engines(
         scheduling_strategy = None
 
         if tensor_parallel_size > 1:
-            bundles = [{"GPU": 1, "CPU": 1}] * tensor_parallel_size
+            bundles = [{"GPU": 1, "CPU": 1}] * tensor_parallel_size * pipeline_parallel_size
             pg = placement_group(bundles)
             ray.get(pg.ready())
 
@@ -224,6 +225,7 @@ def create_vllm_engines(
                 tokenizer_revision=revision,
                 trust_remote_code=True,
                 tensor_parallel_size=tensor_parallel_size,
+                pipeline_parallel_size=pipeline_parallel_size,
                 dtype="bfloat16",
                 seed=seed + i,
                 enable_prefix_caching=enable_prefix_caching,
