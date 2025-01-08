@@ -490,9 +490,6 @@ def main(args: FlatArguments):
 
     if is_beaker_job():
         beaker_config = maybe_get_beaker_config()
-        # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
-        if len(beaker_config.beaker_dataset_id_urls) > 0:
-            args.output_dir = "/output"
 
     accelerator_log_kwargs = {}
 
