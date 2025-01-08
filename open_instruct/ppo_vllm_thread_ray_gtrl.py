@@ -148,6 +148,8 @@ class Args:
     """Which scheduler to use"""
     warm_up_steps: int = 0
     """Number of warm up steps for the scheduler"""
+    warmup_ratio: float = 0.0
+    """Ratio of warmup steps to total steps (takes precedence over `warm_up_steps`)"""
 
     # various batch sizes
     num_train_epochs: int = 1
@@ -604,11 +606,15 @@ class PolicyTrainerRayProcess(RayProcess):
         # optim_params = get_optimizer_grouped_parameters(self.policy, weight_decay)
         # self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
         self.optimizer = torch.optim.AdamW(self.policy.parameters(), lr=args.learning_rate)
+        num_training_steps = args.num_training_steps * args.num_train_epochs * args.num_epochs
+        warm_up_steps = args.warm_up_steps
+        if args.warmup_ratio >= 0.0:
+            warm_up_steps = int(num_training_steps * args.warmup_ratio)
         scheduler = get_scheduler(
             args.lr_scheduler_type,
             optimizer=self.optimizer,
-            num_warmup_steps=args.warm_up_steps,
-            num_training_steps=args.num_training_steps * args.num_train_epochs * args.num_epochs,
+            num_warmup_steps=warm_up_steps,
+            num_training_steps=num_training_steps,
         )
         print(ds_config)
         self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
@@ -642,8 +648,8 @@ class PolicyTrainerRayProcess(RayProcess):
         scheduler = get_scheduler(
             args.lr_scheduler_type,
             optimizer=self.optimizer,
-            num_warmup_steps=args.warm_up_steps,
-            num_training_steps=args.num_training_steps * args.num_train_epochs * args.num_epochs,
+            num_warmup_steps=warm_up_steps,
+            num_training_steps=num_training_steps,
         )
         self.value_model, self.optimizer, _, self.scheduler = deepspeed.initialize(
             model=self.value_model,
@@ -1306,6 +1312,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics[15] = ((kl) ** 2 / 2).sum(1).mean()
                 local_metrics[16] = ((-kl).exp() - 1 + kl).sum(1).mean()
                 local_metrics[17] = verifiable_correct_rate
+                local_metrics[18] = contain_stop_token.float().mean()
                 # global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
                 local_metrics /= dist.get_world_size()
                 dist.all_reduce(local_metrics, op=dist.ReduceOp.SUM)
@@ -1335,6 +1342,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     "val/ratio": global_metrics[13],
                     "val/ratio_var": global_metrics[14],
                     "objective/verifiable_correct_rate": global_metrics[17],
+                    "val/stop_token_rate": global_metrics[18],
                 }
                 if accelerator.is_main_process:
                     print_rich_single_line_metrics(metrics)
@@ -1362,7 +1370,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # Ai2 logic: we use /output to store the artifacts of the job, so we
         # make a copy of the model to `/output` in the end.
-        if self.rank == 0 and len(self.beaker_config.beaker_dataset_id_urls) > 0:
+        if self.rank == 0 and len(self.beaker_config.beaker_dataset_id_urls) > 0 and args.output_dir != "/output":
             shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
         print("finished training")
 
@@ -1457,13 +1465,14 @@ class PolicyTrainerRayProcess(RayProcess):
 python scripts/submit_eval_jobs.py \
     --model_name {leaderboard_name} \
     --location {step_dir} \
-    --cluster ai2/saturn-cirrascale \
+    --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
     --is_tuned \
     --workspace "tulu-3-results" \
+    --priority high \
     --preemptible \
     --use_hf_tokenizer_template \
     --beaker_image "nathanl/open_instruct_auto" \
-    --upload_to_hf allenai/tulu-3-evals \
+    --upload_to_hf {args.hf_metadata_dataset} \
     --run_oe_eval_experiments \
     --evaluate_on_weka \
     --run_safety_evaluations \
@@ -1763,6 +1772,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 --pure_docker_mode \
                 --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
                 --beaker_workload_id {beaker_config.beaker_workload_id} \
+                --upload_to_hf {args.hf_metadata_dataset} \
                 --model_name {args.hf_repo_revision}
             """
             process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
