@@ -4,8 +4,9 @@ This repo serves as an open effort on instruction-tuning and post-training popul
 
 1. Code for finetuning language models with latest techniques and instruction datasets in a unified format.
 2. Code for DPO, preference finetuning and reinforcement learning with verifiable rewards (RLVR).
-3. Code for running standard evaluation on a range of benchmarks, targeting for differnt capabilities of these language models (now in conjunction with [OLMES](https://github.com/allenai/olmes)).
-4. Checkpoints or other useful artifacts that we build in our exploration.
+3. Checkpoints or other useful artifacts that we build in our exploration.
+
+We also support some evaluations natively in the codebase, but these are now unmaintained and instead we suggest using [OLMES](https://github.com/allenai/olmes), which we used for TÜLU 3.
 
 The lastest details on open post-training are found in [TÜLU 3: Pushing Frontiers in Open Language Model Post-Training](https://arxiv.org/abs/2411.15124).
 
