@@ -478,10 +478,12 @@ def main():
 
     beaker_secrets = [secret.name for secret in beaker_client.workspace.secrets()]
     whoami = beaker_client.account.whoami().name
+    max_retries = 3
     experiment_spec = beaker.ExperimentSpec(
         description=args.description,
         tasks=[make_task_spec(args, command, i, beaker_secrets, whoami, args.resumable) for i, command in enumerate(commands)],
         budget=args.budget,
+        retry=beaker.RetrySpec(allowed_task_retries=max_retries)
     )
 
     exp = beaker_client.experiment.create(spec=experiment_spec)
