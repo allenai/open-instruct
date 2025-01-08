@@ -524,8 +524,8 @@ class RayProcess:
         )
 
         # olmo 1124; pip install git+https://github.com/vwxyzjn/transformers.git@olmo1124_classification
-        from transformers.models.olmo_1124.modeling_olmo_1124 import Olmo1124ForSequenceClassification, Olmo1124Config
-        AutoModelForSequenceClassification.register(Olmo1124Config, Olmo1124ForSequenceClassification)
+        from transformers.models.olmo2.modeling_olmo2 import Olmo2ForSequenceClassification, Olmo2Config
+        AutoModelForSequenceClassification.register(Olmo2Config, Olmo2ForSequenceClassification)
         self.world_size = world_size
         self.rank = rank
         self.local_rank = local_rank

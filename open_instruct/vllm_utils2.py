@@ -134,6 +134,7 @@ class LLMRayActor:
         from vllm.model_executor.models import ModelRegistry
         from open_instruct.olmo_adapter.olmo_1124_vllm import OlmoNewForCausalLM
         ModelRegistry.register_model("Olmo1124ForCausalLM", OlmoNewForCausalLM)
+        ModelRegistry.register_model("Olmo2ForCausalLM", OlmoNewForCausalLM)
         
         self.__version__ = vllm.__version__
         assert self.__version__ >= "0.4.1", "OpenRLHF only supports vLLM >= 0.4.1"
