@@ -59,6 +59,12 @@ pip install -e .
 python -m nltk.downloader punkt
 ```
 
+* **Local installation with uv (preview)**: We are experimenting with using [uv](https://docs.astral.sh/uv/). You can install via
+```bash
+uv sync
+uv sync --extra compile # to install flash attention
+```
+
 
 * **Docker installation**: You can also use the Dockerfile to build a Docker image. You can build the image with the following command:
 
@@ -68,8 +74,22 @@ docker build . -t open_instruct_dev
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 beaker image delete $beaker_user/open_instruct_dev 
 beaker image create open_instruct_dev -n open_instruct_dev -w ai2/$beaker_user
-# Optionally, you can build the base "cache" image with
+```
 
+Optionally you can build the base image with the following command:
+
+```bash
+docker build -f Dockerfile.base -t open_instruct_base .
+```
+
+* **Docker with uv**: You can also use the Dockerfile to build a Docker image with uv. You can build the image with the following command:
+
+```bash
+docker build -f Dockerfile.uv -t open_instruct_dev_uv .
+# if you are interally at AI2, you can create an image like this:
+beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
+beaker image delete $beaker_user/open_instruct_dev_uv 
+beaker image create open_instruct_dev_uv -n open_instruct_dev_uv -w ai2/$beaker_user
 ```
 
 If you are internally at AI2, you may launch experiments using our always-up-to-date auto-built image `nathanl/open_instruct_auto`.

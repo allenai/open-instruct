@@ -29,7 +29,6 @@ RUN pip install packaging
 RUN pip install flash-attn==2.7.2.post1 --no-build-isolation
 COPY requirements.txt .
 RUN pip install -r requirements.txt
-RUN pip install -e .
 RUN python -m nltk.downloader punkt
 
 COPY open_instruct open_instruct

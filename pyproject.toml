@@ -12,6 +12,7 @@ dependencies = [
     "deepspeed>=0.16.0",
     "hf-transfer>=0.1.8",
     "matplotlib>=3.9.3",
+    "nltk>=3.9.1",
     "numpy<2",
     "packaging>=24.2",
     "peft>=0.13.2",
