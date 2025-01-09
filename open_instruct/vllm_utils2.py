@@ -35,7 +35,6 @@ from torch.distributed.distributed_c10d import (
 )
 from vllm.worker.worker import Worker
 
-
 # Copy from pytorch to allow creating multiple main groups.
 # https://github.com/pytorch/pytorch/blob/main/torch/distributed/distributed_c10d.py
 def init_process_group(
@@ -131,7 +130,12 @@ class WorkerWrap(Worker):
 class LLMRayActor:
     def __init__(self, *args, **kwargs):
         import vllm
-
+        
+        from vllm.model_executor.models import ModelRegistry
+        from open_instruct.olmo_adapter.olmo_1124_vllm import OlmoNewForCausalLM
+        ModelRegistry.register_model("Olmo1124ForCausalLM", OlmoNewForCausalLM)
+        ModelRegistry.register_model("Olmo2ForCausalLM", OlmoNewForCausalLM)
+        
         self.__version__ = vllm.__version__
         assert self.__version__ >= "0.4.1", "OpenRLHF only supports vLLM >= 0.4.1"
 

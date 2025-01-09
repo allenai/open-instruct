@@ -67,6 +67,7 @@ from open_instruct.finetune import encode_sft_example
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.utils import (
     ArgumentParserPlus,
+    check_hf_olmo_availability,
     clean_last_n_checkpoints,
     get_datasets,
     get_last_checkpoint_path,
@@ -469,6 +470,12 @@ def prepare_deepspeed(accelerator, model):
 
 
 def main(args: FlatArguments):
+    # try to import OLMo for automodel
+    if check_hf_olmo_availability():
+        # allows AutoModel... to work with not in transformers olmo models
+        import hf_olmo  # noqa
+        from hf_olmo import OLMoTokenizerFast
+
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
@@ -673,7 +680,9 @@ def main(args: FlatArguments):
             0,
             1,
         ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
-    elif isinstance(tokenizer, GPTNeoXTokenizerFast):
+    elif isinstance(tokenizer, GPTNeoXTokenizerFast) or (
+        check_hf_olmo_availability() and isinstance(tokenizer, OLMoTokenizerFast)
+    ):
         # OLMo newer models use this tokenizer
         if tokenizer.bos_token is None:
             tokenizer.bos_token = tokenizer.eos_token

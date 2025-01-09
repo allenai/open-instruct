@@ -345,6 +345,14 @@ def main():
     d['tasks'][0]['envVars'].append({
         'name': 'WANDB_API_KEY', 'secret': f"{beaker_whoami}_WANDB_API_KEY"
     })
+    
+    # Weka setting
+    if args.mount_on_weka:
+        if d['tasks'][0].get('datasets') is None:
+            d['tasks'][0]['datasets'] = []
+        d['tasks'][0]['datasets'].append({
+            'mountPath': f"{args.weka_mount_path}", 'source': {'weka': f"{args.mount_on_weka}"}
+        })
 
     # mount datasets
     if args.datasets:

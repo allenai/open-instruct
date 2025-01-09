@@ -251,8 +251,6 @@ class Args:
     """number of vLLM Engines, set to 0 to disable vLLM"""
     vllm_tensor_parallel_size: int = 1
     """tensor parallel size of vLLM Engine for multi-GPU inference"""
-    vllm_enforce_eager: bool = False
-    """whether to enforce eager mode for vLLM -- slow inference but needed for multi-node"""
     vllm_sync_backend: str = "nccl"
     """DeepSpeed -> vLLM weight sync backend"""
     enable_prefix_caching: bool = False
@@ -524,6 +522,10 @@ class RayProcess:
             level=logging.INFO,
             datefmt="%Y-%m-%d %H:%M:%S",
         )
+
+        # olmo 1124; pip install git+https://github.com/vwxyzjn/transformers.git@olmo1124_classification
+        from transformers.models.olmo2.modeling_olmo2 import Olmo2ForSequenceClassification, Olmo2Config
+        AutoModelForSequenceClassification.register(Olmo2Config, Olmo2ForSequenceClassification)
         self.world_size = world_size
         self.rank = rank
         self.local_rank = local_rank
@@ -692,27 +694,24 @@ class PolicyTrainerRayProcess(RayProcess):
         self.ref_policy.eval()
 
         # reward model
-        if args.reward_model_multiplier:
-            self.reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
-                args.reward_model_path,
-                revision=args.reward_model_revision,
-                num_labels=1,
-                torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2",
-                use_cache=False,
-            )
-            disable_dropout_in_model(self.reward_model)
-            ds_config = get_eval_ds_config(
-                offload=False,
-                stage=args.deepspeed_stage,
-                bf16=True,
-            )
-            ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-            ds_config["train_batch_size"] = args.mini_batch_size
-            self.reward_model, *_ = deepspeed.initialize(model=self.reward_model, config=ds_config)
-            self.reward_model.eval()
-
-        assert args.reward_model_multiplier or args.apply_verifiable_reward, "Either `reward_model_multiplier` must be non-zero or `apply_verifiable_reward` must be True."
+        self.reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
+            args.reward_model_path,
+            revision=args.reward_model_revision,
+            num_labels=1,
+            torch_dtype=torch.bfloat16,
+            attn_implementation="flash_attention_2",
+            use_cache=False,
+        )
+        disable_dropout_in_model(self.reward_model)
+        ds_config = get_eval_ds_config(
+            offload=False,
+            stage=args.deepspeed_stage,
+            bf16=True,
+        )
+        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
+        ds_config["train_batch_size"] = args.mini_batch_size
+        self.reward_model, *_ = deepspeed.initialize(model=self.reward_model, config=ds_config)
+        self.reward_model.eval()
 
     def get_vocab_size(self):
         return self.policy.config.vocab_size
@@ -1094,12 +1093,14 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Response Processing 2. run reward model on the truncated responses
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
-                    score = torch.zeros(query.shape[0], device=query.device)
-                    if args.reward_model_multiplier:
-                        _, score, _ = get_reward(
-                            self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
-                        )
+                    _, score, _ = get_reward(
+                        self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
+                    )
+                    # if self.rank == 0 and i == 0:
+                    #     print(postprocessed_query_response[0].tolist(), tokenizer.decode(postprocessed_query_response[0]))
+                    if args.reward_model_multiplier != 1.0:
                         score *= args.reward_model_multiplier
+                    # also apply verifiable reward
                     if args.apply_verifiable_reward:
                         # we need to batch the gt to match query.
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
@@ -1596,15 +1597,39 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     )
 
     # create a tokenizer (pad from right)
+    # if check_hf_olmo_availability():
+    #     # allows AutoModel... to work with not in transformers olmo models
+    #     import hf_olmo  # noqa
+    #     from hf_olmo import OLMoTokenizerFast
     config = AutoConfig.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision)
     tokenizer = AutoTokenizer.from_pretrained(
         model_config.model_name_or_path, revision=model_config.model_revision, padding_side="right"
     )
-    if config.architectures == "LlamaForCausalLM" and config.bos_token_id == 128000:
-        tokenizer.pad_token_id = 128002  # <|reserved_special_token_0|>
-    else:
-        tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
-    tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
+    # if check_hf_olmo_availability():
+    #     print("Using exsiting tokenier chat template...")
+    #     pass
+    # else:
+    #     tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
+    # if config.architectures == "LlamaForCausalLM" and config.bos_token_id == 128000:
+    #     tokenizer.pad_token_id = 128002  # <|reserved_special_token_0|>
+    # elif check_hf_olmo_availability() and isinstance(tokenizer, OLMoTokenizerFast):
+    #     # OLMo newer models use this tokenizer
+    #     breakpoint()
+    #     if tokenizer.bos_token is None:
+    #         tokenizer.bos_token = tokenizer.eos_token
+    #         assert (
+    #             args.add_bos
+    #         ), "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
+    #     # else, pythia / other models
+    #     else:
+    #         num_added_tokens = tokenizer.add_special_tokens(
+    #             {
+    #                 "pad_token": "<pad>",
+    #             }
+    #         )
+    #         assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
+    # else:
+    #     tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
 
     # create the dataset
     dataset_dict = DatasetDict()
@@ -1685,7 +1710,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
-        args.vllm_enforce_eager,
         model_config.model_name_or_path,
         model_config.model_revision,
         args.seed,

@@ -5,7 +5,7 @@
 #
 # Read through the rest of the comments in this file to figure out how it works, and what else
 # you need to change.
-name: build_open_instruct
+name: build_open_instruct_olmo
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -18,9 +18,9 @@ on:
     paths:
       - 'open_instruct/**'
       - '!open_instruct/README.md'
-      - 'requirements.txt'
-      - 'Dockerfile'
-      - '.github/workflows/push-image.yml'
+      - 'requirements-olmo.txt'
+      - 'Dockerfile.olmo'
+      - '.github/workflows/push-image-olmo.yml'
       # Note, add .olmo dockerfile + requirements if adding auto build to those
     branches: [main]
   # pull_request: # note, comment this out for running on every push
@@ -29,9 +29,8 @@ on:
   #   paths:
   #     - 'open_instruct/**'
   #     - '!open_instruct/README.md'
-  #     - 'requirements.txt'
-  #     - 'Dockerfile'
-  #     - '.github/workflows/push-image.yml'
+  #     - 'requirements-olmo.txt'
+  #     - 'Dockerfile.olmo'
   workflow_dispatch:  # This allows us to manually trigger a build through the GitHub UI.
 
 env:
@@ -60,24 +59,23 @@ jobs:
       # big images fail, trying this
       - name: Delete huge unnecessary tools folder
         run: rm -rf /opt/hostedtoolcache /usr/share/dotnet "$AGENT_TOOLSDIRECTORY"
-  
+
       - name: Build image
         run: |
           docker build \
               --build-arg BUILDKIT_INLINE_CACHE=1 \
               --build-arg CUDA=12.1.0 --build-arg \
               TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 \
-              -t open_instruct
+              -f Dockerfile.olmo . \
+              -t open_instruct_olmo
               
-
       - name: Check image
         run: |
-          docker run --rm open_instruct
-
+          docker run --rm open_instruct_olmo
       - name: Push image
         # if: github.event_name != 'pull_request'
         uses: ./.github/actions/push
         with:
-          image: open_instruct  # this is the tag of the image we just built in the previous step
-          beaker: open_instruct_auto  # this is the name of the image on Beaker
+          image: open_instruct_olmo  # this is the tag of the image we just built in the previous step
+          beaker: open_instruct_olmo_auto  # this is the name of the image on Beaker
           latest: true  # this flag says we should also push this as the 'latest' version to GHCR

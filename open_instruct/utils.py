@@ -14,6 +14,7 @@
 
 import dataclasses
 import functools
+import importlib
 import json
 import logging
 import os
@@ -51,6 +52,40 @@ https://github.com/allenai/open-instruct/blob/98ccfb460ae4fb98140783b6cf54241926
 
 Commented out Args not currently used
 """
+
+
+# ----------------------------------------------------------------------------
+# Import utilities
+def check_hf_olmo_availability(return_version: bool = False) -> Union[dict, bool]:
+    pkg_name = "hf_olmo"
+
+    # Check if the package spec exists
+    package_exists = importlib.util.find_spec(pkg_name) is not None
+    package_version = "N/A"
+
+    if package_exists:
+        try:
+            # Primary method to get the package version
+            package_version = importlib.metadata.version(pkg_name)
+        except importlib.metadata.PackageNotFoundError:
+            # Fallback method
+            try:
+                package = importlib.import_module(pkg_name)
+                package_version = getattr(package, "__version__", "N/A")
+            except ImportError:
+                package_exists = False
+                package_version = "N/A"
+
+    if return_version:
+        return {
+            "available": package_exists,
+            "version": package_version,
+            "python_version": sys.version,
+            "os": os.name,
+            "platform": sys.platform,
+        }
+    else:
+        return package_exists
 
 
 # ----------------------------------------------------------------------------

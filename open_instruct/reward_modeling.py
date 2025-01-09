@@ -47,6 +47,7 @@ from open_instruct.model_utils import (
 from open_instruct.reward_modeling_eval import evaluate
 from open_instruct.utils import (
     ArgumentParserPlus,
+    check_hf_olmo_availability,
     combine_dataset,
     get_wandb_tags,
     is_beaker_job,
@@ -55,6 +56,8 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
 )
 
+from transformers.models.olmo_1124.modeling_olmo_1124 import Olmo1124ForSequenceClassification, Olmo1124Config
+AutoModelForSequenceClassification.register(Olmo1124Config, Olmo1124ForSequenceClassification)
 api = HfApi()
 
 
@@ -195,6 +198,12 @@ def layer_init(layer: nn.Module, std: float):
 
 
 def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
+    if check_hf_olmo_availability():
+        # allows AutoModel... to work with not in transformers olmo models
+        import hf_olmo  # noqa
+        from hf_olmo import OLMoTokenizerFast
+        from open_instruct.olmo_adapter.modeling_olmo2 import OLMoForSequenceClassification
+        AutoModelForSequenceClassification.register(hf_olmo.OLMoConfig, OLMoForSequenceClassification)
     accelerator = calculate_runtime_args_and_accelerator(args, model_config)
     local_seed = args.seed + accelerator.process_index
 
