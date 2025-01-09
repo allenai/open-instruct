@@ -22,6 +22,7 @@ import logging
 import math
 import os
 import random
+import shutil
 import subprocess
 import time
 from copy import deepcopy
@@ -365,6 +366,8 @@ class FlatArguments:
         default=0.001,
         metadata={"help": "Weight for load balancing loss if applicable."},
     )
+    try_auto_save_to_beaker: bool = True
+    """Whether to try to save the model to Beaker dataset `/output` after training"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: Optional[str] = None
@@ -487,9 +490,6 @@ def main(args: FlatArguments):
 
     if is_beaker_job():
         beaker_config = maybe_get_beaker_config()
-        # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
-        if len(beaker_config.beaker_dataset_id_urls) > 0:
-            args.output_dir = "/output"
 
     accelerator_log_kwargs = {}
 
@@ -1118,6 +1118,9 @@ def main(args: FlatArguments):
     # remove all checkpoints to save space
     if accelerator.is_local_main_process:
         clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
+
+    if args.try_auto_save_to_beaker and accelerator.is_main_process == 0 and len(beaker_config.beaker_dataset_id_urls) > 0 and args.output_dir != "/output":
+        shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
 
     if is_beaker_job() and accelerator.is_main_process:
         # dpo script only supports these two options right now for datasets

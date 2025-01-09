@@ -274,6 +274,8 @@ class Args:
     """Whether to launch beaker evaluation jobs after training"""
     try_launch_beaker_eval_jobs_on_weka: bool = False
     """Whether to launch beaker evaluation jobs after training on weka"""
+    try_auto_save_to_beaker: bool = True
+    """Whether to try to save the model to Beaker dataset `/output` after training"""
     oe_eval_tasks: Optional[List[str]] = None
     """The beaker evaluation tasks to launch"""
     hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
@@ -1300,7 +1302,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # Ai2 logic: we use /output to store the artifacts of the job, so we
         # make a copy of the model to `/output` in the end.
-        if self.rank == 0 and len(self.beaker_config.beaker_dataset_id_urls) > 0:
+        if args.try_auto_save_to_beaker and self.rank == 0 and len(self.beaker_config.beaker_dataset_id_urls) > 0 and args.output_dir != "/output":
             shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
         print("finished training")
 
