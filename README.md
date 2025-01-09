@@ -63,10 +63,11 @@ python -m nltk.downloader punkt
 * **Docker installation**: You can also use the Dockerfile to build a Docker image. You can build the image with the following command:
 
 ```bash
-docker build . -t open_instruct_uv
+docker build . -t open_instruct_dev
 # if you are interally at AI2, you can create an image like this:
-beaker image delete costah/open_instruct_uv 
-beaker image create open_instruct_uv -n open_instruct_uv -w ai2/costah
+beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
+beaker image delete $beaker_user/open_instruct_dev 
+beaker image create open_instruct_dev -n open_instruct_dev -w ai2/$beaker_user
 # Optionally, you can build the base "cache" image with
 
 ```

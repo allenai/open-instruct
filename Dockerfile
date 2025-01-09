@@ -23,11 +23,11 @@ WORKDIR /stage/
 
 # TODO When updating flash-attn or torch in the future, make sure to update the version in the requirements.txt file. 
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
-COPY requirements.txt .
 RUN pip install --upgrade pip "setuptools<70.0.0" wheel 
 RUN pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
 RUN pip install packaging
 RUN pip install flash-attn==2.7.2.post1 --no-build-isolation
+COPY requirements.txt .
 RUN pip install -r requirements.txt
 RUN pip install -e .
 RUN python -m nltk.downloader punkt

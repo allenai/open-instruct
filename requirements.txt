@@ -102,7 +102,7 @@ nvidia-ml-py==12.560.30
 nvidia-nccl-cu12==2.21.5
 nvidia-nvjitlink-cu12==12.6.85
 nvidia-nvtx-cu12==12.1.105
--e file:///weka/oe-adapt-default/costah/open-instruct-uv
+# -e file:///weka/oe-adapt-default/costah/open-instruct-uv
 openai==1.59.5
 opencensus==0.11.4
 opencensus-context==0.1.3
