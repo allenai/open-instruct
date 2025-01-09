@@ -79,7 +79,7 @@ beaker image create open_instruct_dev -n open_instruct_dev -w ai2/$beaker_user
 Optionally you can build the base image with the following command:
 
 ```bash
-docker build -f Dockerfile.base -t open_instruct_base .
+docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 -f  Dockerfile.base . -t cuda-no-conda:12.1-cudnn8-dev-ubuntu20.04
 ```
 
 * **Docker with uv**: You can also use the Dockerfile to build a Docker image with uv. You can build the image with the following command:
