@@ -48,6 +48,7 @@ def get_args():
         help="Beaker clusters on which the job could be run.",
         required=True,
     )
+    parser.add_argument("--max_retries", type=int, help="Number of retries", default=1)
     parser.add_argument("--budget", type=str, help="Budget to use.", required=True)
     parser.add_argument("--gpus", type=int, help="Number of gpus", default=0)
     parser.add_argument("--num_nodes", type=int, help="Number of nodes", default=1)
@@ -482,6 +483,7 @@ def main():
         description=args.description,
         tasks=[make_task_spec(args, command, i, beaker_secrets, whoami, args.resumable) for i, command in enumerate(commands)],
         budget=args.budget,
+        retry=beaker.RetrySpec(allowed_task_retries=args.max_retries)
     )
 
     exp = beaker_client.experiment.create(spec=experiment_spec)

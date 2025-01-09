@@ -22,9 +22,9 @@ python mason.py \
     --preemptible \
     --budget ai2/allennlp \
     --gpus 0 -- python scripts/cache_hf.py \
-    --model_name_or_path allenai/open_instruct_dev \
-    --model_revision olmo1124_13b_4k_finetune_epoch_2_7.5e-06__42__1732416565 \
-    --dataset_mixer_list ai2-adapt-dev/WildChat-prefs-280824_olmo2_7b 1.0 ai2-adapt-dev/sft_v3.9_if_taxonomy_olmo2_7b 1.0 ai2-adapt-dev/sft_v3.9_p0_olmo2_7b 1.0 ai2-adapt-dev/sft_v3.9_p1_olmo2_7b 1.0 ai2-adapt-dev/ultrafeedback_cleaned_olmo2_7b 1.0 allenai/tulu-3-pref-personas-instruction-following 1.0
+    --model_name_or_path "allenai/Llama-3.1-Tulu-3-8B-DPO" \
+    --model_revision "1208_dpo_13b_tune8e-7__allenai_open_instruct_dev__8__1733807565" \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0
 """
 
 

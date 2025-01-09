@@ -1,3 +1,31 @@
+# Job submissions
+
+This document details some best practices when submitting jobs in our cluster.
+
+## Caching on Weka (Ai2-specific)
+
+Most of our cluster comes with shared file systems (e.g., [WEKA](https://beaker-docs.apps.allenai.org/)). To avoid downloading the same models hundreds and thousands of times, we should cache the models ande datasets in the shared file system. This can be done via
+
+```bash
+python mason.py \
+    --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale ai2/neptune-cirrascale --image nathanl/open_instruct_auto --pure_docker_mode \
+    --workspace ai2/tulu-3-dev \
+    --priority normal \
+    --preemptible \
+    --budget ai2/allennlp \
+    --gpus 0 -- python scripts/cache_hf.py \
+    --model_name_or_path "allenai/Llama-3.1-Tulu-3-8B-DPO" \
+    --model_revision "1208_dpo_13b_tune8e-7__allenai_open_instruct_dev__8__1733807565" \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0
+```
+
+`mason.py` is our job submission script. It takes in the command after `--` and runs it in the specified clusters. During the job submission, it automatically tries to setup a shared Hugging Face cache with environment variables. For example, it sets
+* `HF_HOME=/weka/oe-adapt-default/allennlp/.cache/huggingface`. 
+* `HF_DATASETS_CACHE=/weka/oe-adapt-default/allennlp/.cache/huggingface`
+* `HF_HUB_CACHE=/weka/oe-adapt-default/allennlp/.cache/hub`
+
+As a result, the `allenai/Llama-3.1-Tulu-3-8B-DPO` and `allenai/RLVR-GSM-MATH-IF-Mixed-Constraints` will be cached in the shared file system.
+
 ### Ai2 Internal Evaluation
 
 We provide a script integrated with beaker for use internally at Ai2. For example, to run all the tulu 3 evals with easy uploading:

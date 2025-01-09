@@ -1,3 +1,63 @@
+all_mmlu_tasks=(
+    "mmlu_abstract_algebra"
+    "mmlu_anatomy"
+    "mmlu_astronomy"
+    "mmlu_business_ethics"
+    "mmlu_clinical_knowledge"
+    "mmlu_college_biology"
+    "mmlu_college_chemistry"
+    "mmlu_college_computer_science"
+    "mmlu_college_mathematics"
+    "mmlu_college_medicine"
+    "mmlu_college_physics"
+    "mmlu_computer_security"
+    "mmlu_conceptual_physics"
+    "mmlu_econometrics"
+    "mmlu_electrical_engineering"
+    "mmlu_elementary_mathematics"
+    "mmlu_formal_logic"
+    "mmlu_global_facts"
+    "mmlu_high_school_biology"
+    "mmlu_high_school_chemistry"
+    "mmlu_high_school_computer_science"
+    "mmlu_high_school_european_history"
+    "mmlu_high_school_geography"
+    "mmlu_high_school_government_and_politics"
+    "mmlu_high_school_macroeconomics"
+    "mmlu_high_school_mathematics"
+    "mmlu_high_school_microeconomics"
+    "mmlu_high_school_physics"
+    "mmlu_high_school_psychology"
+    "mmlu_high_school_statistics"
+    "mmlu_high_school_us_history"
+    "mmlu_high_school_world_history"
+    "mmlu_human_aging"
+    "mmlu_human_sexuality"
+    "mmlu_international_law"
+    "mmlu_jurisprudence"
+    "mmlu_logical_fallacies"
+    "mmlu_machine_learning"
+    "mmlu_management"
+    "mmlu_marketing"
+    "mmlu_medical_genetics"
+    "mmlu_miscellaneous"
+    "mmlu_moral_disputes"
+    "mmlu_moral_scenarios"
+    "mmlu_nutrition"
+    "mmlu_philosophy"
+    "mmlu_prehistory"
+    "mmlu_professional_accounting"
+    "mmlu_professional_law"
+    "mmlu_professional_medicine"
+    "mmlu_professional_psychology"
+    "mmlu_public_relations"
+    "mmlu_security_studies"
+    "mmlu_sociology"
+    "mmlu_us_foreign_policy"
+    "mmlu_virology"
+    "mmlu_world_religions"
+)
+
 #!/bin/bash
 
 set -ex
@@ -58,7 +118,7 @@ while [[ "$#" -gt 0 ]]; do
         --model-name) MODEL_NAME="$2"; shift ;;
         --model-location) MODEL_LOCATION="$2"; shift ;;
         --num_gpus) NUM_GPUS="$2"; shift ;;
-        --upload_to_hf) UPLOAD_TO_HF="$2"; shift ;;
+        --hf-upload) HF_UPLOAD="true" ;;
         --revision) REVISION="$2"; shift ;;
         --max-length) MAX_LENGTH="$2"; shift ;;
         --unseen-evals) UNSEEN_EVALS="true" ;;
@@ -83,17 +143,22 @@ fi
 MODEL_NAME_SAFE=${MODEL_NAME//\//_}
 
 # Set defaults for optional arguments
-UPLOAD_TO_HF="${UPLOAD_TO_HF:-allenai/olmo-instruct-evals}"
+HF_UPLOAD="${HF_UPLOAD:-false}"
 MAX_LENGTH="${MAX_LENGTH:-4096}"
 UNSEEN_EVALS="${UNSEEN_EVALS:-false}"
 PRIORITY="${PRIORITY:normal}"
 EVALUATE_ON_WEKA="${EVALUATE_ON_WEKA:-false}"
 
-# if UNSEEN_EVALS, save results to a different directory
-if [ "$UNSEEN_EVALS" == "true" ]; then
-    HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}-unseen//results/${MODEL_NAME_SAFE}"
+# Set HF_UPLOAD_ARG if HF_UPLOAD is true
+if [ "$HF_UPLOAD" == "true" ]; then
+    # if UNSEEN_EVALS, save results to a different directory
+    if [ "$UNSEEN_EVALS" == "true" ]; then
+        HF_UPLOAD_ARG="--hf-save-dir allenai/tulu-3-evals-unseen//results/${MODEL_NAME_SAFE}"
+    else
+        HF_UPLOAD_ARG="--hf-save-dir allenai/tulu-3-evals//results/${MODEL_NAME_SAFE}"
+    fi
 else
-    HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}//results/${MODEL_NAME_SAFE}"
+    HF_UPLOAD_ARG=""
 fi
 
 # Set REVISION if not provided
@@ -106,7 +171,7 @@ fi
 # Define default tasks if no custom tasks provided
 DEFAULT_TASKS=(
     "gsm8k::tulu"
-    "bbh:cot-v1::tulu"
+    "bbh:cot::tulu"
     "drop::llama3"
     "minerva_math::tulu"
     "codex_humaneval::tulu"
@@ -146,17 +211,12 @@ GPU_COUNT="$NUM_GPUS"
 GPU_COUNT_OTHER=$((NUM_GPUS * 2))
 MODEL_TYPE_OTHER=""
 
-for TASK in "${TASKS[@]}"; do
+for TASK in "${all_mmlu_tasks[@]}"; do
+    TASK="${TASK}:mc::tulu"
     # mmlu and truthfulqa need different batch sizes and gpu counts because they are multiple choice and we cannot use vllm.
-    if [[ "$TASK" == "mmlu:mc::tulu" || "$TASK" == "truthfulqa::tulu" ]]; then
-        BATCH_SIZE=$BATCH_SIZE_OTHER
-        GPU_COUNT=$GPU_COUNT_OTHER
-        MODEL_TYPE=$MODEL_TYPE_OTHER
-    else
-        BATCH_SIZE=$BATCH_SIZE_VLLM
-        MODEL_TYPE="--model-type vllm"
-        GPU_COUNT="$NUM_GPUS"
-    fi
+    BATCH_SIZE=$BATCH_SIZE_OTHER
+    GPU_COUNT=$GPU_COUNT_OTHER
+    MODEL_TYPE=$MODEL_TYPE_OTHER
 
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
         python oe-eval-internal/oe_eval/launch.py \
@@ -169,7 +229,7 @@ for TASK in "${TASKS[@]}"; do
             --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
-            --beaker-image "costah/oe-eval-olmo1124-12022024" \
+            --beaker-image "costah/oe-eval-olmo1124-11142024" \
             --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default"}' \
             ${REVISION_ARG} \
             --cluster ai2/neptune-cirrascale,ai2/saturn-cirrascale,ai2/jupiter-cirrascale-2 \
@@ -186,7 +246,7 @@ for TASK in "${TASKS[@]}"; do
         --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
         ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT" \
-        --beaker-image "costah/oe-eval-olmo1124-12022024" \
+        --beaker-image "costah/oe-eval-olmo1124-11142024" \
         --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key"}' \
         ${REVISION_ARG} \
         --beaker-retries 2 \
