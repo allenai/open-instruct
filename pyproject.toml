@@ -48,7 +48,7 @@ explicit = true
 
 # flash-attn related setups
 [project.optional-dependencies]
-compile = ["flash-attn>=2.7.0.post2"]
+compile = ["flash-attn>=2.7.2.post1"]
 
 [tool.uv]
 python-preference = "only-managed"
@@ -56,7 +56,7 @@ no-build-isolation-package = ["flash-attn"]
 
 [[tool.uv.dependency-metadata]]
 name = "flash-attn"
-version = "2.7.0.post2"
+version = "2.7.2.post1"
 requires-dist = ["torch", "setuptools"]
 
 [dependency-groups]
