@@ -31,7 +31,7 @@ import datasets
 import deepspeed
 import torch
 import transformers
-from accelerate import Accelerator
+from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.logging import get_logger
 from accelerate.utils import InitProcessGroupKwargs, set_seed
 from datasets import load_dataset
@@ -483,10 +483,11 @@ def main(args: FlatArguments):
 
     # if you get timeouts (e.g. due to long tokenization) increase this.
     timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
+    dataloader_config = DataLoaderConfiguration(use_seedable_sampler=True)
 
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        use_seedable_sampler=True,
+        dataloader_config=dataloader_config,
         **accelerator_log_kwargs,
         kwargs_handlers=[timeout_kwargs],
     )

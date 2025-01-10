@@ -1,0 +1,80 @@
+# Run the following command to build `ghcr.io/allenai/oi-cuda-no-conda:12.1-cudnn8-dev-ubuntu20.04`
+# docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 -f  Dockerfile.base . -t cuda-no-conda:12.1-cudnn8-dev-ubuntu20.04
+
+ARG CUDA
+ARG DIST
+ARG TARGET
+FROM --platform=linux/amd64 nvidia/cuda:${CUDA}-${TARGET}-${DIST}
+
+ARG DEBIAN_FRONTEND="noninteractive"
+ENV TZ="America/Los_Angeles"
+
+# Install base tools.
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    git \
+    jq \
+    language-pack-en \
+    make \
+    man-db \
+    manpages \
+    manpages-dev \
+    manpages-posix \
+    manpages-posix-dev \
+    sudo \
+    unzip \
+    vim \
+    wget \
+    fish \
+    parallel \
+    iputils-ping \
+    htop \
+    emacs \
+    zsh \
+    rsync \
+    tmux
+
+# This ensures the dynamic linker (or NVIDIA's container runtime, I'm not sure)
+# puts the right NVIDIA things in the right place (that THOR requires).
+ENV NVIDIA_DRIVER_CAPABILITIES=graphics,utility,compute
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+
+# Ensure users can modify their container environment.
+RUN echo '%users ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# Make the base image friendlier for interactive workloads. This makes things like the man command
+# work.
+RUN yes | unminimize
+
+# Install MLNX OFED user-space drivers
+# See https://docs.nvidia.com/networking/pages/releaseview.action?pageId=15049785#Howto:DeployRDMAacceleratedDockercontaineroverInfiniBandfabric.-Dockerfile
+ENV MOFED_VER 24.01-0.3.3.1
+ENV OS_VER ubuntu20.04
+ENV PLATFORM x86_64
+RUN wget --quiet https://content.mellanox.com/ofed/MLNX_OFED-${MOFED_VER}/MLNX_OFED_LINUX-${MOFED_VER}-${OS_VER}-${PLATFORM}.tgz && \
+    tar -xvf MLNX_OFED_LINUX-${MOFED_VER}-${OS_VER}-${PLATFORM}.tgz && \
+    MLNX_OFED_LINUX-${MOFED_VER}-${OS_VER}-${PLATFORM}/mlnxofedinstall --basic --user-space-only --without-fw-update -q && \
+    rm -rf MLNX_OFED_LINUX-${MOFED_VER}-${OS_VER}-${PLATFORM} && \
+    rm MLNX_OFED_LINUX-${MOFED_VER}-${OS_VER}-${PLATFORM}.tgz
+
+# Install Docker CLI. Version matches Beaker on-premise servers.
+RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-20.10.21.tgz -o docker.tgz \
+    && sudo tar xzvf docker.tgz --strip 1 -C /usr/local/bin docker/docker \
+    && rm docker.tgz
+
+# Install Beaker
+ARG BEAKER_VERSION
+RUN curl --silent \
+    --connect-timeout 5 \
+    --max-time 10 \
+    --retry 5 \
+    --retry-delay 0 \
+    --retry-max-time 40 \
+    --output beaker.tar.gz \
+    "https://beaker.org/api/v3/release/cli?os=linux&arch=amd64&version=${BEAKER_VERSION}" \
+    && tar -zxf beaker.tar.gz -C /usr/local/bin/ ./beaker \
+    && rm beaker.tar.gz
+
+# The -l flag makes bash act as a login shell and load /etc/profile, etc.
+ENTRYPOINT ["bash", "-l"]
