@@ -1120,7 +1120,7 @@ def main(args: FlatArguments):
     if accelerator.is_local_main_process:
         clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
 
-    if args.try_auto_save_to_beaker and accelerator.is_main_process == 0 and len(beaker_config.beaker_dataset_id_urls) > 0 and args.output_dir != "/output":
+    if args.try_auto_save_to_beaker and accelerator.is_main_process and len(beaker_config.beaker_dataset_id_urls) > 0 and args.output_dir != "/output":
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
 
     if is_beaker_job() and accelerator.is_main_process:
