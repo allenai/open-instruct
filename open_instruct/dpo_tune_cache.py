@@ -36,7 +36,7 @@ import torch
 import torch.utils
 import torch.utils.data
 import transformers
-from accelerate import Accelerator
+from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.logging import get_logger
 from accelerate.utils import InitProcessGroupKwargs, set_seed
 from datasets import load_dataset
@@ -513,10 +513,11 @@ def main(args: FlatArguments):
 
     # if you get timeouts (e.g. due to long tokenization) increase this.
     timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
+    dataloader_config = DataLoaderConfiguration(use_seedable_sampler=True)
 
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        use_seedable_sampler=True,
+        dataloader_config=dataloader_config,
         **accelerator_log_kwargs,
         kwargs_handlers=[timeout_kwargs],
     )
@@ -1139,7 +1140,7 @@ def main(args: FlatArguments):
     if accelerator.is_local_main_process:
         clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
 
-    if args.try_auto_save_to_beaker and accelerator.is_main_process == 0 and len(beaker_config.beaker_dataset_id_urls) > 0 and args.output_dir != "/output":
+    if args.try_auto_save_to_beaker and accelerator.is_main_process and len(beaker_config.beaker_dataset_id_urls) > 0 and args.output_dir != "/output":
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
 
     if is_beaker_job() and accelerator.is_main_process:
