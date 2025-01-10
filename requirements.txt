@@ -26,7 +26,7 @@ compressed-tensors==0.8.1
 contourpy==1.3.1
 cycler==0.12.1
 datasets==3.2.0
-deepspeed==0.16.2
+deepspeed==0.15.4
 depyf==0.18.0
 dill==0.3.8
 diskcache==5.6.3
@@ -104,7 +104,7 @@ nvidia-ml-py==12.560.30
 nvidia-nccl-cu12==2.21.5
 nvidia-nvjitlink-cu12==12.6.85
 nvidia-nvtx-cu12==12.1.105
-# -e file:///weka/oe-adapt-default/costah/open-instruct-uv
+# -e file:///weka/oe-adapt-default/costah/open-instruct3
 openai==1.59.5
 opencensus==0.11.4
 opencensus-context==0.1.3

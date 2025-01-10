@@ -515,10 +515,9 @@ wheels = [
 
 [[package]]
 name = "deepspeed"
-version = "0.16.2"
+version = "0.15.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "einops" },
     { name = "hjson" },
     { name = "msgpack" },
     { name = "ninja" },
@@ -531,7 +530,7 @@ dependencies = [
     { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "sys_platform != 'darwin'" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d6/79/49cdf7d168b9ddcefeec6fda7a094a98bb48b046d56c7f4b2e092124534f/deepspeed-0.16.2.tar.gz", hash = "sha256:a5b45fdefae65ab48aa30873d3c4d6ec85993eee232aa3a088087c9b88b22281", size = 1426901 }
+sdist = { url = "https://files.pythonhosted.org/packages/34/c5/dfa824defc1919289a00cbb722aee92cee85ce1e11f7349779235dbe4810/deepspeed-0.15.4.tar.gz", hash = "sha256:60e7c044b7fc386cdad1206212d22b6963ea551f656ed51f7cb34b299459bf2c", size = 1403058 }
 
 [[package]]
 name = "depyf"
@@ -1717,7 +1716,7 @@ requires-dist = [
     { name = "antlr4-python3-runtime", specifier = "==4.11" },
     { name = "bitsandbytes", specifier = ">=0.44.1" },
     { name = "datasets", specifier = ">=3.1.0" },
-    { name = "deepspeed", specifier = ">=0.16.0" },
+    { name = "deepspeed", specifier = "==0.15.4" },
     { name = "flash-attn", marker = "extra == 'compile'", specifier = ">=2.7.2.post1" },
     { name = "hf-transfer", specifier = ">=0.1.8" },
     { name = "matplotlib", specifier = ">=3.9.3" },
