@@ -874,46 +874,6 @@ def maybe_use_ai2_hf_entity() -> Optional[str]:
         return None
 
 
-def submit_beaker_eval_jobs(
-    model_name: str,
-    location: str,
-    hf_repo_revision: str = "",
-    workspace: str = "tulu-3-results",
-    beaker_image: str = "nathanl/open_instruct_auto",
-    upload_to_hf: str = "allenai/tulu-3-evals",
-    run_oe_eval_experiments: bool = False,
-    run_safety_evaluations: bool = False,
-    skip_oi_evals: bool = False,
-) -> None:
-    command = f"""
-    python scripts/submit_eval_jobs.py \
-        --model_name {model_name} \
-        --location {location} \
-        --is_tuned \
-        --workspace {workspace} \
-        --preemptible \
-        --use_hf_tokenizer_template \
-        --beaker_image {beaker_image} \
-    """
-    if len(hf_repo_revision) > 0:
-        command += f" --hf_revision {hf_repo_revision}"
-    if len(upload_to_hf) > 0:
-        command += f" --upload_to_hf {upload_to_hf}"
-    if run_oe_eval_experiments:
-        command += " --run_oe_eval_experiments"
-    if run_safety_evaluations:
-        command += " --run_safety_evaluations"
-    if skip_oi_evals:
-        command += " --skip_oi_evals"
-
-    process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
-
-    print(f"Beaker evaluation jobs: Stdout:\n{stdout.decode()}")
-    print(f"Beaker evaluation jobs: Stderr:\n{stderr.decode()}")
-    print(f"Beaker evaluation jobs: process return code: {process.returncode}")
-
-
 @retry_on_exception()
 def upload_metadata_to_hf(
     metadata_dict,

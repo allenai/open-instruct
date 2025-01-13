@@ -130,6 +130,8 @@ parser.add_argument("--oe_eval_unseen_evals", action="store_true", help="Run uns
 parser.add_argument("--use_alternate_safety_image", type=str, default=None, help="Use a different image for safety eval.")
 parser.add_argument("--evaluate_on_weka", action="store_true", help="Evaluate OE eval on Beaker.")
 parser.add_argument("--oe_eval_tasks", type=str, default=None, help="Evaluate OE eval on Beaker.")
+parser.add_argument("--step", type=int, default=None, help="Step number for postgresql logging.")
+parser.add_argument("--run_id", type=str, default=None, help="A unique run ID for postgresql logging.")
 args = parser.parse_args()
 
 
@@ -635,6 +637,10 @@ if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
         oe_eval_cmd += " --evaluate_on_weka"
     if args.oe_eval_tasks:
         oe_eval_cmd += f" --tasks {args.oe_eval_tasks}"
+    if args.run_id:
+        oe_eval_cmd += f" --run-id {args.run_id}"
+    if args.step:
+        oe_eval_cmd += f" --step {args.step}"
     # add string with number of gpus
     num_gpus = task_spec['resources']['gpuCount']
     # if num_gpus > 1, double it again for oe-eval configs

@@ -65,6 +65,8 @@ while [[ "$#" -gt 0 ]]; do
         --priority) PRIORITY="$2"; shift ;;
         --tasks) CUSTOM_TASKS="$2"; shift ;;
         --evaluate_on_weka) EVALUATE_ON_WEKA="true" ;;
+        --step) STEP="$2"; shift ;;
+        --run-id) RUN_ID="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -88,6 +90,15 @@ MAX_LENGTH="${MAX_LENGTH:-4096}"
 UNSEEN_EVALS="${UNSEEN_EVALS:-false}"
 PRIORITY="${PRIORITY:normal}"
 EVALUATE_ON_WEKA="${EVALUATE_ON_WEKA:-false}"
+RUN_ID="${RUN_ID:-}"
+STEP="${STEP:-}"
+DATALAKE_ARGS=""
+if [[ -n "$RUN_ID" ]]; then
+    DATALAKE_ARGS+="run_id=$RUN_ID"
+fi
+if [[ -n "$STEP" ]]; then
+    DATALAKE_ARGS+=",step=$STEP"
+fi
 
 # if UNSEEN_EVALS, save results to a different directory
 if [ "$UNSEEN_EVALS" == "true" ]; then
@@ -174,7 +185,9 @@ for TASK in "${TASKS[@]}"; do
             ${REVISION_ARG} \
             --cluster ai2/neptune-cirrascale,ai2/saturn-cirrascale,ai2/jupiter-cirrascale-2 \
             --beaker-retries 2 \
-            --beaker-priority "$PRIORITY"
+            --beaker-priority "$PRIORITY" \
+            --push-datalake \
+            --datalake-tags "$DATALAKE_ARGS"
     else
         python oe-eval-internal/oe_eval/launch.py \
         --model "$MODEL_NAME" \
@@ -190,6 +203,8 @@ for TASK in "${TASKS[@]}"; do
         --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key"}' \
         ${REVISION_ARG} \
         --beaker-retries 2 \
-        --beaker-priority "$PRIORITY"
+        --beaker-priority "$PRIORITY" \
+        --push-datalake \
+        --datalake-tags "$DATALAKE_ARGS"
     fi
 done
