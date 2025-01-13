@@ -49,8 +49,7 @@ def main(args: Args, beaker_runtime_config: BeakerRuntimeConfig):
                 --skip_oi_evals \
                 --run_safety_evaluations \
                 --run_oe_eval_experiments \
-                --upload_to_hf {args.upload_to_hf}
-            """
+                --upload_to_hf {args.upload_to_hf}"""
             if args.run_id:
                 command += f" --run_id {args.run_id}"
 
