@@ -180,7 +180,6 @@ for TASK in "${TASKS[@]}"; do
             --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
-            --beaker-image "01JH9RAAZQXKNNDHYTN2DPNPKN" \
             --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default"}' \
             ${REVISION_ARG} \
             --cluster ai2/neptune-cirrascale,ai2/saturn-cirrascale,ai2/jupiter-cirrascale-2 \
@@ -199,7 +198,6 @@ for TASK in "${TASKS[@]}"; do
         --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
         ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT" \
-        --beaker-image "01JH9RAAZQXKNNDHYTN2DPNPKN" \
         --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key"}' \
         ${REVISION_ARG} \
         --beaker-retries 2 \
