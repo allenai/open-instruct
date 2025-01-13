@@ -165,5 +165,67 @@ def parse_openai(
     return pref_df
 
 
+def get_rating(resp: dict[str, Any]) -> str:
+    def _parse_number(s: str) -> int:
+        try:
+            int(s)
+        except ValueError:
+            return -1
+        else:
+            return int(s)
+
+    num_ratings = []
+    for r in resp:
+        str_rating = r["Rating"]
+        num_ratings.append(_parse_number(str_rating))
+    return num_ratings
+
+
+def compute_mean_rating(row: dict[str, Any]) -> list[str]:
+    def _vmeans(data: list[list[int]]) -> Optional[list[float]]:
+        try:
+            array = np.array(data, dtype=float)
+            return list(np.nanmean(array, axis=0))
+        except ValueError:
+            # Handle jagged lists by padding with NaN
+            max_len = max(len(row) for row in data)
+            padded = [row + [np.nan] * (max_len - len(row)) for row in data]
+            array = np.array(padded, dtype=float)
+            return list(np.nanmean(array, axis=0))
+
+    rating_matrix = []
+    for aspect in aspects:
+        rating_matrix.append(row[f"{aspect}_ratings"])
+    return _vmeans(rating_matrix)
+
+
+def binarize_pref(row):
+    ratings = row["mean_ratings"][:4]
+    chosen_idx = int(np.argmax(ratings))
+    if len(ratings) == 1:
+        logging.warning(f"Potential parse error for instance id: {row['id']}")
+        rejected_idx = chosen_idx
+    else:
+        rejected_idx = int(
+            np.random.choice([i for i in range(len(ratings)) if i != chosen_idx], 1)
+        )
+
+    try:
+        data = {
+            "chosen_text": row["completions"][chosen_idx],
+            "rejected_text": row["completions"][rejected_idx],
+            "chosen_rating": row["mean_ratings"][chosen_idx],
+            "rejected_rating": row["mean_ratings"][rejected_idx],
+        }
+        if "models" in row:
+            data["chosen_model"] = row["models"][chosen_idx]
+            data["rejected_model"] = row["models"][rejected_idx]
+
+        return pd.Series(data)
+
+    except Exception:
+        return None
+
+
 if __name__ == "__main__":
     main()
