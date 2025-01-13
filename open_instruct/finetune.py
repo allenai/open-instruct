@@ -1034,7 +1034,12 @@ def main(args: FlatArguments):
     if accelerator.is_local_main_process:
         clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
 
-    if args.try_auto_save_to_beaker and accelerator.is_main_process and len(beaker_config.beaker_dataset_id_urls) > 0 and args.output_dir != "/output":
+    if (
+        args.try_auto_save_to_beaker
+        and accelerator.is_main_process
+        and len(beaker_config.beaker_dataset_id_urls) > 0
+        and args.output_dir != "/output"
+    ):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
 
     if is_beaker_job() and accelerator.is_main_process:
@@ -1074,7 +1079,7 @@ def main(args: FlatArguments):
         if args.try_launch_beaker_eval_jobs:
             command = f"""\
             python mason.py  \
-                --cluster ai2/allennlp-cirrascale ai2/pluto-cirrascale ai2/neptune-cirrascale ai2/saturn-cirrascale ai2/jupiter-cirrascale-2 \
+                --cluster ai2/ganymede-cirrascale ai2/ceres-cirrascale ai2/neptune-cirrascale ai2/saturn-cirrascale ai2/jupiter-cirrascale-2 \
                 --priority low \
                 --preemptible \
                 --budget ai2/allennlp \
@@ -1084,7 +1089,8 @@ def main(args: FlatArguments):
                 --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
                 --beaker_workload_id {beaker_config.beaker_workload_id} \
                 --upload_to_hf {args.hf_metadata_dataset} \
-                --model_name {args.run_name}
+                --model_name {args.run_name} \
+                --run_id {wandb_tracker.run.get_url()}
             """
             process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = process.communicate()
