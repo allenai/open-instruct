@@ -1452,7 +1452,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # Ai2 specific logic
         if is_beaker_job() and self.rank == 0:
             if training_step is not None:
-                leaderboard_name = f"{args.hf_repo_revision}"
+                leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
             else:
                 leaderboard_name = args.hf_repo_revision
             if args.hf_metadata_dataset:
@@ -1486,8 +1486,10 @@ python scripts/submit_eval_jobs.py \
     --preemptible \
     --use_hf_tokenizer_template \
     --beaker_image "nathanl/open_instruct_auto" \
+    --upload_to_hf allenai/tulu-3-evals \
     --run_oe_eval_experiments \
     --evaluate_on_weka \
+    --run_safety_evaluations \
     --run_id {wandb_url} \
     --step {training_step} \
     --skip_oi_evals"""
