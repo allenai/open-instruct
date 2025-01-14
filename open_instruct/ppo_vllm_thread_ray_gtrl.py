@@ -42,7 +42,8 @@ from argparse import Namespace
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
-os.environ["NCCL_CUMEM_ENABLE"]="0"
+
+os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 
 import deepspeed
 import numpy as np
