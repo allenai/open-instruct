@@ -53,7 +53,6 @@ import torch.distributed as dist
 import torch.nn.functional as F
 import torch.utils
 import torch.utils.data
-import vllm
 from datasets import Dataset, DatasetDict
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from huggingface_hub import HfApi
@@ -1414,6 +1413,8 @@ python scripts/submit_eval_jobs.py \
     --run_oe_eval_experiments \
     --evaluate_on_weka \
     --run_safety_evaluations \
+    --run_id {wandb_url} \
+    --step {training_step} \
     --skip_oi_evals"""
             if args.oe_eval_tasks is not None:
                 command += f" --oe_eval_tasks {','.join(args.oe_eval_tasks)}"
