@@ -43,6 +43,8 @@ from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
 
+os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
+
 import deepspeed
 import numpy as np
 import pandas as pd
@@ -52,7 +54,6 @@ import torch.distributed as dist
 import torch.nn.functional as F
 import torch.utils
 import torch.utils.data
-import vllm
 from datasets import Dataset, DatasetDict
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from huggingface_hub import HfApi
@@ -744,11 +745,11 @@ class PolicyTrainerRayProcess(RayProcess):
             world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
             backend = args.vllm_sync_backend
             # https://github.com/OpenRLHF/OpenRLHF/issues/313
-            if vllm.__version__ > "0.4.2" and os.getenv("NCCL_P2P_DISABLE", "0") == "0":
-                backend = "gloo"
-                print(
-                    "Warning: using --vllm_sync_backend=gloo for vLLM version > 0.4.2 (or export NCCL_P2P_DISABLE=1)"
-                )
+            # if vllm.__version__ > "0.4.2" and os.getenv("NCCL_P2P_DISABLE", "0") == "0":
+            #     backend = "gloo"
+            #     print(
+            #         "Warning: using --vllm_sync_backend=gloo for vLLM version > 0.4.2 (or export NCCL_P2P_DISABLE=1)"
+            #     )
             refs = [
                 engine.init_process_group.remote(
                     master_address,
@@ -967,10 +968,10 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 start_time = time.time()
                 broadcast_to_vllm()
-                print(
-                    f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds"
-                )
                 if accelerator.is_main_process:
+                    print(
+                        f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds"
+                    )
                     param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
             else:
                 if training_step != 1:
@@ -986,10 +987,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
                     start_time = time.time()
                     broadcast_to_vllm()
-                    print(
-                        f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds"
-                    )
                     if accelerator.is_main_process:
+                        print(
+                            f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds"
+                        )
                         param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
                     queries = queries_next
 
@@ -1302,7 +1303,12 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # Ai2 logic: we use /output to store the artifacts of the job, so we
         # make a copy of the model to `/output` in the end.
-        if args.try_auto_save_to_beaker and self.rank == 0 and len(self.beaker_config.beaker_dataset_id_urls) > 0 and args.output_dir != "/output":
+        if (
+            args.try_auto_save_to_beaker
+            and self.rank == 0
+            and len(self.beaker_config.beaker_dataset_id_urls) > 0
+            and args.output_dir != "/output"
+        ):
             shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
         print("finished training")
 
@@ -1408,6 +1414,8 @@ python scripts/submit_eval_jobs.py \
     --run_oe_eval_experiments \
     --evaluate_on_weka \
     --run_safety_evaluations \
+    --run_id {wandb_url} \
+    --step {training_step} \
     --skip_oi_evals"""
             if args.oe_eval_tasks is not None:
                 command += f" --oe_eval_tasks {','.join(args.oe_eval_tasks)}"
