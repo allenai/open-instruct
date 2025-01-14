@@ -42,6 +42,7 @@ from argparse import Namespace
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
+os.environ["NCCL_CUMEM_ENABLE"]="0"
 
 import deepspeed
 import numpy as np
@@ -52,7 +53,6 @@ import torch.distributed as dist
 import torch.nn.functional as F
 import torch.utils
 import torch.utils.data
-import vllm
 from datasets import Dataset, DatasetDict
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from huggingface_hub import HfApi
@@ -714,7 +714,9 @@ class PolicyTrainerRayProcess(RayProcess):
             self.reward_model, *_ = deepspeed.initialize(model=self.reward_model, config=ds_config)
             self.reward_model.eval()
 
-        assert args.reward_model_multiplier or args.apply_verifiable_reward, "Either `reward_model_multiplier` must be non-zero or `apply_verifiable_reward` must be True."
+        assert (
+            args.reward_model_multiplier or args.apply_verifiable_reward
+        ), "Either `reward_model_multiplier` must be non-zero or `apply_verifiable_reward` must be True."
 
     def get_vocab_size(self):
         return self.policy.config.vocab_size
@@ -1377,7 +1379,12 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # Ai2 logic: we use /output to store the artifacts of the job, so we
         # make a copy of the model to `/output` in the end.
-        if args.try_auto_save_to_beaker and self.rank == 0 and len(self.beaker_config.beaker_dataset_id_urls) > 0 and args.output_dir != "/output":
+        if (
+            args.try_auto_save_to_beaker
+            and self.rank == 0
+            and len(self.beaker_config.beaker_dataset_id_urls) > 0
+            and args.output_dir != "/output"
+        ):
             shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
         print("finished training")
 
@@ -1445,7 +1452,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # Ai2 specific logic
         if is_beaker_job() and self.rank == 0:
             if training_step is not None:
-                leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
+                leaderboard_name = f"{args.hf_repo_revision}"
             else:
                 leaderboard_name = args.hf_repo_revision
             if args.hf_metadata_dataset:
@@ -1479,10 +1486,10 @@ python scripts/submit_eval_jobs.py \
     --preemptible \
     --use_hf_tokenizer_template \
     --beaker_image "nathanl/open_instruct_auto" \
-    --upload_to_hf allenai/tulu-3-evals \
     --run_oe_eval_experiments \
     --evaluate_on_weka \
-    --run_safety_evaluations \
+    --run_id {wandb_url} \
+    --step {training_step} \
     --skip_oi_evals"""
             if args.oe_eval_tasks is not None:
                 command += f" --oe_eval_tasks {','.join(args.oe_eval_tasks)}"
