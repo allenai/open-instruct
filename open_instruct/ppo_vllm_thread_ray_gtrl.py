@@ -1606,7 +1606,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         tokenizer.pad_token_id = 128002  # <|reserved_special_token_0|>
     else:
         tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
-    tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
+    if dataset_config.chat_template is not None:
+        tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
 
     # create the dataset
     dataset_dict = DatasetDict()

@@ -159,7 +159,7 @@ FILTER_EXAMPLE_PER_SECOND_PER_CPU = 1130
 @dataclass
 class DatasetConfig:
     # dataset specs
-    chat_template: str = "simple_chat"
+    chat_template: Optional[str] = None
 
     # columns names for preference dataset
     preference_chosen_key: str = "chosen"
@@ -206,8 +206,8 @@ class DatasetConfig:
             self.num_proc = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count())))
             self.load_from_cache_file = True
 
-        if self.chat_template not in CHAT_TEMPLATES:
-            raise ValueError(f"chat_template must be one of {list(CHAT_TEMPLATES.keys())}")
+        if self.chat_template is not None and self.chat_template not in CHAT_TEMPLATES:
+            raise ValueError(f"chat_template must None or one of {list(CHAT_TEMPLATES.keys())}")
 
 
 def get_num_proc(dataset_len: int, num_available_cpus: int, example_per_second_per_cpu) -> int:
