@@ -1225,6 +1225,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     mini_batch_end = mini_batch_start + args.local_mini_batch_size
                     mini_batch_inds = b_inds[mini_batch_start:mini_batch_end]
                     gradient_accumulation_idx = 0
+                    # NOTE: deepspeed handles gradient accumulation automatically; see https://github.com/microsoft/DeepSpeed/issues/758#issuecomment-801580724
                     for micro_batch_start in range(0, args.local_mini_batch_size, args.per_device_train_batch_size):
                         # print("micro batch start", micro_batch_start, self.rank)
                         micro_batch_end = micro_batch_start + args.per_device_train_batch_size
