@@ -1307,7 +1307,7 @@ class PolicyTrainerRayProcess(RayProcess):
             args.try_auto_save_to_beaker
             and self.rank == 0
             and len(self.beaker_config.beaker_dataset_id_urls) > 0
-            and args.output_dir != "/output"
+            and args.output_dir.rstrip("/") != "/output"
         ):
             shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
         print("finished training")
