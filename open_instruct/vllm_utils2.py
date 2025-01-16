@@ -154,7 +154,7 @@ class LLMRayActor:
             # thanks OPENRLHF!
             if vllm.__version__ > "0.6.4.post1":
                 # https://github.com/vllm-project/vllm/pull/10555
-                kwargs["worker_cls"] = "openrlhf.trainer.ray.vllm_worker_wrap.WorkerWrap"
+                kwargs["worker_cls"] = "open_instruct.vllm_utils2.WorkerWrap"
             else:
                 RayWorkerWrapperPath = vllm.executor.ray_utils
 
