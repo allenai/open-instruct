@@ -62,7 +62,7 @@ def init_process_group(
         backend = Backend("undefined")
 
     if timeout is None:
-        timeout = timedelta(seconds=3600)
+        timeout = default_pg_timeout
 
     # backward compatible API
     if store is None:
@@ -151,13 +151,20 @@ class LLMRayActor:
             else:
                 RayWorkerWrapperPath = vllm.engine.ray_utils
 
-            class RayWorkerWrapper(RayWorkerWrapperPath.RayWorkerWrapper):
-                def __init__(self, *args, **kwargs) -> None:
-                    kwargs["worker_module_name"] = "open_instruct.vllm_utils2"
-                    kwargs["worker_class_name"] = "WorkerWrap"
-                    super().__init__(*args, **kwargs)
+            # thanks OPENRLHF!
+            if vllm.__version__ > "0.6.4.post1":
+                # https://github.com/vllm-project/vllm/pull/10555
+                kwargs["worker_cls"] = "openrlhf.trainer.ray.vllm_worker_wrap.WorkerWrap"
+            else:
+                RayWorkerWrapperPath = vllm.executor.ray_utils
 
-            RayWorkerWrapperPath.RayWorkerWrapper = RayWorkerWrapper
+                class RayWorkerWrapper(RayWorkerWrapperPath.RayWorkerWrapper):
+                    def __init__(self, *args, **kwargs) -> None:
+                        kwargs["worker_module_name"] = "open_instruct.vllm_utils2"
+                        kwargs["worker_class_name"] = "WorkerWrap"
+                        super().__init__(*args, **kwargs)
+
+                RayWorkerWrapperPath.RayWorkerWrapper = RayWorkerWrapper
 
         self.llm = vllm.LLM(*args, **kwargs)
 
