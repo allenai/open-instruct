@@ -457,6 +457,7 @@ def main(args: FlatArguments):
         tc,
         args.max_seq_length,
     )
+    train_dataset.shuffle(seed=args.seed)
 
     # Load pretrained model and tokenizer
     if args.config_name:
