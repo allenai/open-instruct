@@ -25,6 +25,8 @@
 # * `max_seq_length` in SFT
 # * `max_length`, `max_target_length` in RM / DPO,
 # * `max_prompt_length` in DPO
+
+# TODO: note that tokenizer doesn't change but model name does change. Should be mindful of this.
 """
 This file contains the utility to transform and cache datasets with different configurations.
 The main things we are looking for are:
@@ -501,11 +503,11 @@ class DatasetTransformationCache:
         transformed_datasets = []
         for dc in dcs:
             dataset = get_dataset_v1(dc, tc)
-            # Add id column if not present
-            if "id" not in dataset.column_names:
-                base_name = dc.dataset_name.split("/")[-1]
-                id_col = [f"{base_name}-{i}" for i in range(len(dataset))]
-                dataset = dataset.add_column("id", id_col)
+            # # Add id column if not present
+            # if "id" not in dataset.column_names:
+            #     base_name = dc.dataset_name.split("/")[-1]
+            #     id_col = [f"{base_name}-{i}" for i in range(len(dataset))]
+            #     dataset = dataset.add_column("id", id_col)
             transformed_datasets.append(dataset)
         
         # Combine datasets
