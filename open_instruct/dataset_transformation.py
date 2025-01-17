@@ -542,6 +542,10 @@ def get_cached_dataset_tulu(dataset_mixer_list: List[str], tc: TokenizerConfigV1
     for i in range(0, len(dataset_mixer_list), 2):
         dataset_name = dataset_mixer_list[i]
         frac_or_num_samples = dataset_mixer_list[i + 1]
+        if "." in frac_or_num_samples:
+            frac_or_num_samples = float(frac_or_num_samples)
+        else:
+            frac_or_num_samples = int(frac_or_num_samples)
         
         dataset_config = DatasetConfigV1(
             dataset_name=dataset_name,
