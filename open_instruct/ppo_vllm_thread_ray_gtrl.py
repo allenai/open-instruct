@@ -284,6 +284,8 @@ class Args:
     """Where to save the model"""
     checkpoint_output_dir: Optional[str] = None
     """Where to save the model checkpoints in case of preemption"""
+    save_value_model: bool = False
+    """Whether to save the value model along with the policy model"""
 
     # Ai2 specific settings
     try_launch_beaker_eval_jobs: bool = True
@@ -1371,13 +1373,19 @@ class PolicyTrainerRayProcess(RayProcess):
                 step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
                 os.makedirs(step_dir, exist_ok=True)
                 print(f"Saving model at step {training_step} to {step_dir}")
-                self.save_model(step_dir)
+                self.save_model(self.model, step_dir)
                 if args.try_launch_beaker_eval_jobs_on_weka:
                     self.launch_ai2_evals_on_weka(step_dir, training_step)
+                if args.save_value_model:
+                    value_dir = os.path.join(step_dir, "value_model")
+                    self.save_model(self.value_model, step_dir)
         print(f"Saving final model at step {training_step} to {args.output_dir}")
-        self.save_model(args.output_dir)
+        self.save_model(self.model, args.output_dir)
         if args.try_launch_beaker_eval_jobs_on_weka:
             self.launch_ai2_evals_on_weka(args.output_dir)
+        if args.save_value_model:
+            value_dir = os.path.join(args.output_dir, "value_model")
+            self.save_model(self.value_model, value_dir)
 
         # Ai2 logic: we use /output to store the artifacts of the job, so we
         # make a copy of the model to `/output` in the end.
@@ -1390,12 +1398,11 @@ class PolicyTrainerRayProcess(RayProcess):
             shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
         print("finished training")
 
-    def save_model(self, output_dir: str) -> None:
+    def save_model(self, model_to_save: PreTrainedModel, output_dir: str) -> None:
         if self.rank == 0:
             os.makedirs(output_dir, exist_ok=True)
 
         # save model weights for ZeRO2/3
-        model_to_save = self.model
         if hasattr(model_to_save, "module"):
             model_to_save = model_to_save.module
 
