@@ -432,7 +432,7 @@ TRANSFORM_FNS = {
     "sft_filter_v1": (sft_filter_v1, "filter"),
     "sft_tulu_tokenize_and_truncate_v1": (sft_tulu_tokenize_and_truncate_v1, "map"),
     "sft_tulu_filter_v1": (sft_tulu_filter_v1, "filter"),
-    "preference_tokenize_v1": (preference_tokenize_v1, "map", TOKENIZED_PREFERENCE_DATASET_KEYS),
+    "preference_tokenize_v1": (preference_tokenize_v1, "map"),
     "preference_filter_v1": (preference_filter_v1, "filter"),
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1, "map"),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
