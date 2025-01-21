@@ -440,14 +440,14 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
                 return i
         return -1
     
-    idx = find_list_idx(full_command, "open_instruct/finetune1.py")
-    if idx != -1:
-        # then try executing the same full_command with 
-        caching_command = "python " + " ".join(full_command[idx:]) + " --cache_dataset_only"
-        print(f"📦📦📦 Running the caching full_command: {caching_command}")
-        os.system(caching_command)
-        print("✅✅✅ Finished running the caching full_command")
-    
+    for file in ["open_instruct/finetune1.py", "open_instruct/dpo_tune_cache1.py"]:
+        idx = find_list_idx(full_command, file)
+        if idx != -1:
+            # then try executing the same full_command with 
+            caching_command = "python " + " ".join(full_command[idx:]) + " --cache_dataset_only"
+            print(f"📦📦📦 Running the caching full_command: {caching_command}")
+            os.system(caching_command)
+            print("✅✅✅ Finished running the caching full_command")
 
     if not args.pure_docker_mode:
         setup_commands += f"cd {os.getcwd()} && "
