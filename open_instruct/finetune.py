@@ -53,7 +53,7 @@ from transformers import (
     get_scheduler,
 )
 
-from open_instruct.dataset_processor import CHAT_TEMPLATES
+from open_instruct.dataset_transformation import CHAT_TEMPLATES, TokenizerConfig, get_cached_dataset_tulu_sft
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -338,6 +338,8 @@ class FlatArguments:
         default=0.5,
         metadata={"help": "Weight for load balancing loss if applicable."},
     )
+    cache_dataset_only: bool = False
+    """Immediately exit after caching the dataset"""
     try_auto_save_to_beaker: bool = True
     """Whether to try to save the model to Beaker dataset `/output` after training"""
     push_to_hub: bool = True
@@ -380,79 +382,6 @@ class FlatArguments:
             raise ValueError("Cannot provide two dataset selection mechanisms.")
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
-
-
-def encode_sft_example(example, tokenizer, max_seq_length):
-    """
-    This function encodes a single example into a format that can be used for sft training.
-    Here, we assume each example has a 'messages' field. Each message in it is a dict with 'role' and 'content' fields.
-    We use the `apply_chat_template` function from the tokenizer to tokenize the messages and prepare the input and label tensors.
-    """
-    messages = example["messages"]
-    if len(messages) == 0:
-        raise ValueError("messages field is empty.")
-    input_ids = tokenizer.apply_chat_template(
-        conversation=messages,
-        tokenize=True,
-        return_tensors="pt",
-        padding=False,
-        truncation=True,
-        max_length=max_seq_length,
-        add_generation_prompt=False,
-    )
-    labels = input_ids.clone()
-    # mask the non-assistant part for avoiding loss
-    for message_idx, message in enumerate(messages):
-        if message["role"] != "assistant":
-            # we calculate the start index of this non-assistant message
-            if message_idx == 0:
-                message_start_idx = 0
-            else:
-                message_start_idx = tokenizer.apply_chat_template(
-                    conversation=messages[:message_idx],  # here marks the end of the previous messages
-                    tokenize=True,
-                    return_tensors="pt",
-                    padding=False,
-                    truncation=True,
-                    max_length=max_seq_length,
-                    add_generation_prompt=False,
-                ).shape[1]
-            # next, we calculate the end index of this non-assistant message
-            if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
-                # for intermediate messages that follow with an assistant message, we need to
-                # set `add_generation_prompt=True` to avoid the assistant generation prefix being included in the loss
-                # (e.g., `<|assistant|>`)
-                message_end_idx = tokenizer.apply_chat_template(
-                    conversation=messages[: message_idx + 1],
-                    tokenize=True,
-                    return_tensors="pt",
-                    padding=False,
-                    truncation=True,
-                    max_length=max_seq_length,
-                    add_generation_prompt=True,
-                ).shape[1]
-            else:
-                # for the last message or the message that doesn't follow with an assistant message,
-                # we don't need to add the assistant generation prefix
-                message_end_idx = tokenizer.apply_chat_template(
-                    conversation=messages[: message_idx + 1],
-                    tokenize=True,
-                    return_tensors="pt",
-                    padding=False,
-                    truncation=True,
-                    max_length=max_seq_length,
-                    add_generation_prompt=False,
-                ).shape[1]
-            # set the label to -100 for the non-assistant part
-            labels[:, message_start_idx:message_end_idx] = -100
-            if max_seq_length and message_end_idx >= max_seq_length:
-                break
-    attention_mask = torch.ones_like(input_ids)
-    return {
-        "input_ids": input_ids.flatten(),
-        "labels": labels.flatten(),
-        "attention_mask": attention_mask.flatten(),
-    }
 
 
 def main(args: FlatArguments):
@@ -515,41 +444,35 @@ def main(args: FlatArguments):
 
     accelerator.wait_for_everyone()
 
-    if args.dataset_name is not None:
-        # Downloading and loading a dataset from the hub.
-        raw_datasets = load_dataset(
-            args.dataset_name,
-            args.dataset_config_name,
-        )
-    elif args.dataset_mixer is not None:
-        # mixing datasets via config
-        raw_datasets = get_datasets(
-            args.dataset_mixer,
-            configs=args.dataset_config_name,
-            splits=["train"],
-            save_data_dir=args.dataset_mix_dir if accelerator.is_main_process else None,
-            columns_to_keep=["messages"],
-        )
-    elif args.dataset_mixer_list is not None:
-        # mixing datasets via config
-        raw_datasets = get_datasets(
+    tokenizer_revision = args.model_revision if args.tokenizer_revision is None else args.tokenizer_revision
+    tokenizer_name = args.tokenizer_name if args.tokenizer_name is not None else args.model_name_or_path
+    if tokenizer_revision != args.model_revision:
+        # Warn user if tokenizer and model use different revisions; this is an unusual
+        # use case.
+        warning = f"""Requested tokenizer revision `{tokenizer_revision}` is different
+                   from the model revision `{args.model_revision}`."""
+        logger.warning(warning)
+    tc = TokenizerConfig(
+        model_name_or_path=tokenizer_name,
+        revision=args.model_revision,
+        use_fast=not args.use_slow_tokenizer,
+        chat_template_name=args.chat_template_name,
+        add_bos=args.add_bos,
+    )
+    tokenizer = tc.tokenizer
+    if args.dataset_mixer is not None:
+        args.dataset_mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
+    with accelerator.main_process_first():
+        train_dataset = get_cached_dataset_tulu_sft(
             args.dataset_mixer_list,
-            configs=args.dataset_config_name,
-            splits=["train"],
-            save_data_dir=args.dataset_mix_dir if accelerator.is_main_process else None,
-            columns_to_keep=["messages"],
+            tc,
+            args.max_seq_length,
         )
-    else:
-        data_files = {}
-        dataset_args = {}
-        if args.train_file is not None:
-            data_files["train"] = args.train_file
-        raw_datasets = load_dataset(
-            "json",
-            data_files=data_files,
-            **dataset_args,
-        )
-
+        train_dataset.shuffle(seed=args.seed)
+        train_dataset.set_format(type="pt")
+    if args.cache_dataset_only:
+        return
+    
     # Load pretrained model and tokenizer
     if args.config_name:
         config = AutoConfig.from_pretrained(
@@ -566,34 +489,6 @@ def main(args: FlatArguments):
     else:
         raise ValueError(
             "You are instantiating a new config instance from scratch. This is not supported by this script."
-        )
-
-    tokenizer_revision = args.model_revision if args.tokenizer_revision is None else args.tokenizer_revision
-    if tokenizer_revision != args.model_revision:
-        # Warn user if tokenizer and model use different revisions; this is an unusual
-        # use case.
-        warning = f"""Requested tokenizer revision `{tokenizer_revision}` is different
-                   from the model revision `{args.model_revision}`."""
-        logger.warning(warning)
-
-    if args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(
-            args.tokenizer_name,
-            revision=tokenizer_revision,
-            trust_remote_code=args.trust_remote_code,
-            use_fast=not args.use_slow_tokenizer,
-        )
-    elif args.model_name_or_path:
-        tokenizer = AutoTokenizer.from_pretrained(
-            args.model_name_or_path,
-            revision=tokenizer_revision,
-            trust_remote_code=args.trust_remote_code,
-            use_fast=not args.use_slow_tokenizer,
-        )
-    else:
-        raise ValueError(
-            "You are instantiating a new tokenizer from scratch. This is not supported by this script."
-            "You can do it from another script, save it, and load it from here, using --tokenizer_name."
         )
 
     if args.model_name_or_path:
@@ -632,42 +527,6 @@ def main(args: FlatArguments):
         logger.info("Training new model from scratch")
         model = AutoModelForCausalLM.from_config(config)
 
-    # no default pad token for llama!
-    # here we add all special tokens again, because the default ones are not in the special_tokens_map
-    if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
-        num_added_tokens = tokenizer.add_special_tokens(
-            {
-                "bos_token": "<s>",
-                "eos_token": "</s>",
-                "unk_token": "<unk>",
-                "pad_token": "<pad>",
-            }
-        )
-        assert num_added_tokens in [
-            0,
-            1,
-        ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
-    elif isinstance(tokenizer, GPTNeoXTokenizerFast):
-        # OLMo newer models use this tokenizer
-        if tokenizer.bos_token is None:
-            tokenizer.bos_token = tokenizer.eos_token
-            assert (
-                args.add_bos
-            ), "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
-        # else, pythia / other models
-        else:
-            num_added_tokens = tokenizer.add_special_tokens(
-                {
-                    "pad_token": "<pad>",
-                }
-            )
-            assert num_added_tokens == 1, "GPTNeoXTokenizer should only add one special token - the pad_token."
-    elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
-        num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
-    elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast) and tokenizer.pad_token is None:
-        num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
-        assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
-
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
     # gather deepspeed to get "real" embedding size
@@ -682,27 +541,6 @@ def main(args: FlatArguments):
     embeddings = model.get_input_embeddings()
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
         embedding_size = embeddings.weight.shape[0]
-
-    # set the tokenizer chat template to the training format
-    # this will be used for encoding the training examples
-    # and saved together with the tokenizer to be used later.
-    if args.chat_template_name in CHAT_TEMPLATES:
-        tokenizer.chat_template = CHAT_TEMPLATES[args.chat_template_name]
-    else:
-        try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(args.chat_template_name).chat_template
-        except Exception:
-            raise ValueError(f"Could not find chat template for {args.chat_template_name}.")
-
-    if args.add_bos:
-        if tokenizer.chat_template.startswith("{{ bos_token }}") or (
-            tokenizer.bos_token is not None and tokenizer.chat_template.startswith(tokenizer.bos_token)
-        ):
-            raise ValueError(
-                "You specified add_bos=True, but the chat template already has a bos_token at the beginning."
-            )
-        # also add bos in the chat template if not already there
-        tokenizer.chat_template = "{{ bos_token }}" + tokenizer.chat_template
 
     if args.use_lora:
         if args.use_qlora:
@@ -721,31 +559,6 @@ def main(args: FlatArguments):
         model.print_trainable_parameters()
     elif args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
-
-    train_dataset = raw_datasets["train"]
-    # debugging tool for fewer samples
-    if args.max_train_samples is not None:
-        max_train_samples = min(len(train_dataset), args.max_train_samples)
-        logger.info(f"Limiting training samples to {max_train_samples} from {len(train_dataset)}.")
-        train_dataset = train_dataset.select(range(max_train_samples))
-
-    with accelerator.main_process_first():
-        train_dataset = train_dataset.map(
-            partial(encode_sft_example, tokenizer=tokenizer, max_seq_length=args.max_seq_length),
-            batched=False,
-            num_proc=args.preprocessing_num_workers,
-            load_from_cache_file=not args.overwrite_cache,
-            remove_columns=[
-                name for name in train_dataset.column_names if name not in ["input_ids", "labels", "attention_mask"]
-            ],
-            desc="Tokenizing and reformatting instruction data",
-        )
-        train_dataset.set_format(type="pt")
-        train_dataset = train_dataset.filter(lambda example: (example["labels"] != -100).any())
-
-    # Log a few random samples from the training set:
-    for index in random.sample(range(len(train_dataset)), 3):
-        logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
 
     # DataLoaders creation:
     train_dataloader = DataLoader(
@@ -888,7 +701,6 @@ def main(args: FlatArguments):
     print(f"Starting from epoch {starting_epoch} and step {completed_steps}.")
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
-
     local_total_tokens = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
     total_token_including_padding = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
     start_time = time.time()
@@ -909,6 +721,7 @@ def main(args: FlatArguments):
                 if args.load_balancing_loss:
                     outputs = model(**batch, use_cache=False, output_router_logits=True)
                 else:
+                    # TODO: we have calculated the mean loss here anyway, so doubling the calculation
                     outputs = model(**batch, use_cache=False)
                 if args.reduce_loss == "mean":
                     loss = outputs.loss
@@ -1002,7 +815,7 @@ def main(args: FlatArguments):
                             os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w"
                         ) as f:
                             f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-                        if accelerator.is_local_main_process:
+                        if accelerator.is_local_main_process: # TODO: in mason local model this is gonna error out if using something like output/test; because mason used the same shared file ssytem.
                             clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
                         accelerator.wait_for_everyone()
 
