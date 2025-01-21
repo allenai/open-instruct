@@ -57,8 +57,7 @@ from transformers import (
     get_scheduler,
 )
 
-from open_instruct.dataset_processor import CHAT_TEMPLATES
-from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu_preference
+from open_instruct.dataset_transformation import CHAT_TEMPLATES, TokenizerConfig, get_cached_dataset_tulu_preference
 from open_instruct.dpo_utils import (
     DataCollatorForSeq2SeqDPO,
     concatenated_forward,
@@ -373,6 +372,8 @@ class FlatArguments:
         default=0.001,
         metadata={"help": "Weight for load balancing loss if applicable."},
     )
+    cache_dataset_only: bool = False
+    """Immediately exit after caching the dataset"""
     concatenated_forward: bool = True
     """Whether to concatenate chosen and rejected for DPO training; True is good but you can set to False for saving memory."""
     try_auto_save_to_beaker: bool = True
@@ -537,13 +538,16 @@ def main(args: FlatArguments):
         add_bos=args.add_bos,
     )
     tokenizer = tc.tokenizer
-    train_dataset = get_cached_dataset_tulu_preference(
-        args.dataset_mixer_list,
-        tc,
-        args.max_seq_length,
-    )
-    train_dataset.shuffle(seed=args.seed)
-    train_dataset.set_format(type="pt")
+    with accelerator.main_process_first():
+        train_dataset = get_cached_dataset_tulu_preference(
+            args.dataset_mixer_list,
+            tc,
+            args.max_seq_length,
+        )
+        train_dataset.shuffle(seed=args.seed)
+        train_dataset.set_format(type="pt")
+    if args.cache_dataset_only:
+        return
 
     # Load pretrained model and tokenizer
     if args.config_name:
@@ -629,20 +633,6 @@ def main(args: FlatArguments):
         model.print_trainable_parameters()
     elif args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
-
-    # # Preprocessing the datasets.
-    # if "prompt" in raw_datasets["train"].column_names and "completion" in raw_datasets["train"].column_names:
-    #     raise ValueError("Sorry, prompt-completion format is not supported for DPO training.")
-    # elif "chosen" in raw_datasets["train"].column_names and "rejected" in raw_datasets["train"].column_names:
-    #     encode_function = partial(
-    #         encode_dpo_example,
-    #         tokenizer=tokenizer,
-    #         max_seq_length=args.max_seq_length,
-    #     )
-    # else:
-    #     raise ValueError("You need to have 'chosen' and 'rejected in your column names.")
-
-    # train_dataset = raw_datasets["train"]
 
     # debugging tool for fewer samples
     if args.max_train_samples is not None:

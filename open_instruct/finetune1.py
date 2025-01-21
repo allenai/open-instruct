@@ -53,8 +53,7 @@ from transformers import (
     get_scheduler,
 )
 
-from open_instruct.dataset_processor import CHAT_TEMPLATES
-from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu_sft
+from open_instruct.dataset_transformation import CHAT_TEMPLATES, TokenizerConfig, get_cached_dataset_tulu_sft
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -339,6 +338,8 @@ class FlatArguments:
         default=0.5,
         metadata={"help": "Weight for load balancing loss if applicable."},
     )
+    cache_dataset_only: bool = False
+    """Immediately exit after caching the dataset"""
     try_auto_save_to_beaker: bool = True
     """Whether to try to save the model to Beaker dataset `/output` after training"""
     push_to_hub: bool = True
@@ -459,14 +460,17 @@ def main(args: FlatArguments):
         add_bos=args.add_bos,
     )
     tokenizer = tc.tokenizer
-    train_dataset = get_cached_dataset_tulu_sft(
-        args.dataset_mixer_list,
-        tc,
-        args.max_seq_length,
-    )
-    train_dataset.shuffle(seed=args.seed)
-    train_dataset.set_format(type="pt")
-
+    with accelerator.main_process_first():
+        train_dataset = get_cached_dataset_tulu_sft(
+            args.dataset_mixer_list,
+            tc,
+            args.max_seq_length,
+        )
+        train_dataset.shuffle(seed=args.seed)
+        train_dataset.set_format(type="pt")
+    if args.cache_dataset_only:
+        return
+    
     # Load pretrained model and tokenizer
     if args.config_name:
         config = AutoConfig.from_pretrained(

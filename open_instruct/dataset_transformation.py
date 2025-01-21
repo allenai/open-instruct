@@ -63,8 +63,6 @@ from transformers.utils.hub import cached_file, extract_commit_hash
 from datasets import Dataset, load_dataset, concatenate_datasets
 from huggingface_hub import HfApi, revision_exists
 
-from open_instruct.dataset_processor import CHAT_TEMPLATES
-
 
 # ----------------------------------------------------------------------------
 # Utilities
@@ -95,6 +93,75 @@ def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
 
 # ----------------------------------------------------------------------------
 # Tokenization
+# Chat templates
+# flake8: noqa
+# note we added `{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}`
+# because we want the template to not output eos_token if `add_generation_prompt=True`
+CHAT_TEMPLATES = {
+    "simple_concat_with_space": (
+        "{% for message in messages %}"
+        "{{ ' ' if not loop.first else '' }}"
+        "{{ message['content'] }}"
+        "{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}"
+        "{% endfor %}"
+    ),
+    "simple_concat_with_new_line": (
+        "{% for message in messages %}"
+        "{{ '\n' if not loop.first else '' }}"
+        "{{ message['content'] }}"
+        "{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}"
+        "{% endfor %}"
+    ),
+    "simple_chat": (
+        "{% for message in messages %}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['role'].capitalize() + ': ' + message['content'] }}"
+        "{% if loop.last and not add_generation_prompt %}{{ eos_token }}{% endif %}"
+        "{% endfor %}"
+    ),
+    "assistant_message_only": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'assistant' %}"
+        "{{ message['content'] }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "zephyr": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'user' %}"
+        "{{ '<|user|>\n' + message['content'] + eos_token + '\n' }}"
+        "{% elif message['role'] == 'system' %}"
+        "{{ '<|system|>\n' + message['content'] + eos_token + '\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|assistant|>\n'  + message['content'] + eos_token + '\n' }}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|assistant|>\n' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "tulu": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|system|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'user' %}"
+        "{{ '<|user|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{% if not loop.last %}"
+        "{{ '<|assistant|>\n'  + message['content'] + eos_token + '\n' }}"
+        "{% else %}"
+        "{{ '<|assistant|>\n'  + message['content'] + eos_token }}"
+        "{% endif %}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|assistant|>\n' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+}
+# flake8: noqa
+
+
 def get_tokenizer_simple_v1(tc: 'TokenizerConfig'):
     tokenizer = AutoTokenizer.from_pretrained(
         tc.model_name_or_path,
