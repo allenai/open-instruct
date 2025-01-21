@@ -58,7 +58,7 @@ from transformers import (
 )
 
 from open_instruct.dataset_processor import CHAT_TEMPLATES
-from open_instruct.dataset_transformation import TokenizerConfigV1, get_cached_dataset_tulu_preference
+from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu_preference
 from open_instruct.dpo_utils import (
     DataCollatorForSeq2SeqDPO,
     concatenated_forward,
@@ -67,12 +67,10 @@ from open_instruct.dpo_utils import (
     simpo_loss,
     wpo_loss,
 )
-from open_instruct.finetune import encode_sft_example
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.utils import (
     ArgumentParserPlus,
     clean_last_n_checkpoints,
-    get_datasets,
     get_last_checkpoint_path,
     get_wandb_tags,
     is_beaker_job,
@@ -531,7 +529,7 @@ def main(args: FlatArguments):
         warning = f"""Requested tokenizer revision `{tokenizer_revision}` is different
                    from the model revision `{args.model_revision}`."""
         logger.warning(warning)
-    tc = TokenizerConfigV1(
+    tc = TokenizerConfig(
         model_name_or_path=tokenizer_name,
         revision=args.model_revision,
         use_fast=not args.use_slow_tokenizer,

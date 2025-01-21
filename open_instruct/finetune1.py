@@ -54,7 +54,7 @@ from transformers import (
 )
 
 from open_instruct.dataset_processor import CHAT_TEMPLATES
-from open_instruct.dataset_transformation import TokenizerConfigV1, get_cached_dataset_tulu_sft
+from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu_sft
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -451,7 +451,7 @@ def main(args: FlatArguments):
         warning = f"""Requested tokenizer revision `{tokenizer_revision}` is different
                    from the model revision `{args.model_revision}`."""
         logger.warning(warning)
-    tc = TokenizerConfigV1(
+    tc = TokenizerConfig(
         model_name_or_path=tokenizer_name,
         revision=args.model_revision,
         use_fast=not args.use_slow_tokenizer,
