@@ -385,6 +385,7 @@ class FlatArguments:
 
 
 def main(args: FlatArguments):
+    breakpoint()
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
@@ -460,6 +461,8 @@ def main(args: FlatArguments):
         add_bos=args.add_bos,
     )
     tokenizer = tc.tokenizer
+    if args.dataset_mixer is not None:
+        args.dataset_mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
     with accelerator.main_process_first():
         train_dataset = get_cached_dataset_tulu_sft(
             args.dataset_mixer_list,

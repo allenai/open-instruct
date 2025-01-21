@@ -538,6 +538,8 @@ def main(args: FlatArguments):
         add_bos=args.add_bos,
     )
     tokenizer = tc.tokenizer
+    if args.dataset_mixer is not None:
+        args.dataset_mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
     with accelerator.main_process_first():
         train_dataset = get_cached_dataset_tulu_preference(
             args.dataset_mixer_list,
