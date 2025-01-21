@@ -412,7 +412,7 @@ def get_datasets(beaker_datasets, cluster: List[str]):
     return res
 
 
-def make_task_spec(args, command, i, beaker_secrets, whoami, resumable: bool):
+def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami: str, resumable: bool):
     # special logic to deal with escape like
     # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
     # we need to wrap the json string with single quote
@@ -427,6 +427,28 @@ def make_task_spec(args, command, i, beaker_secrets, whoami, resumable: bool):
         "git config --global safe.directory '*' && " # fix the permission issue with git
         "umask 000 && " # fix the permission issue with the cache folder
     )
+    
+    # HACK: Cache dataset logic:
+    # Here we basically try to run the tokenization full_command locally before running it on beaker
+    # We could in theory submit a cpu only job to beaker to do this, but that requires setting up
+    # dependency jobs somehow. Since tokenization is like ~5 minutes, we can just run it locally.
+    # Once it's cached, we don't need to cache it again.
+    
+    def find_list_idx(lst: List[str], item: str):
+        for i in range(len(lst)):
+            if item == lst[i]:
+                return i
+        return -1
+    
+    idx = find_list_idx(full_command, "open_instruct/finetune1.py")
+    if idx != -1:
+        # then try executing the same full_command with 
+        caching_command = "python " + " ".join(full_command[idx:]) + " --cache_dataset_only"
+        print(f"📦📦📦 Running the caching full_command: {caching_command}")
+        os.system(caching_command)
+        print("✅✅✅ Finished running the caching full_command")
+    
+
     if not args.pure_docker_mode:
         setup_commands += f"cd {os.getcwd()} && "
 
