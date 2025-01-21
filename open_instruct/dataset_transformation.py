@@ -196,7 +196,7 @@ class TokenizerConfig:
 # ----------------------------------------------------------------------------
 # Dataset Transformation
 # SFT dataset
-SFT_MESSAGE_KEY = "messages"
+DEFAULT_SFT_MESSAGE_KEY = "messages"
 INPUT_IDS_KEY = "input_ids"
 ATTENTION_MASK_KEY = "attention_mask"
 LABELS_KEY = "labels"
@@ -238,35 +238,35 @@ TOKENIZED_PREFERENCE_DATASET_KEYS = [
 
 
 # TODO: allow passing in sft_message key, so we can train on "chosen" of pref dataset.
-def sft_tokenize_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
-    if len(row[SFT_MESSAGE_KEY]) == 1:
-        prompt = row[SFT_MESSAGE_KEY]
+def sft_tokenize_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_message_key: str = DEFAULT_SFT_MESSAGE_KEY):
+    if len(row[sft_message_key]) == 1:
+        prompt = row[sft_message_key]
     else:
-        prompt = row[SFT_MESSAGE_KEY][:-1]
+        prompt = row[sft_message_key][:-1]
     
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
         add_generation_prompt=True,
     )
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[SFT_MESSAGE_KEY])
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_message_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
     return row
     
 
-def sft_tokenize_mask_out_prompt_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
+def sft_tokenize_mask_out_prompt_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_message_key: str = DEFAULT_SFT_MESSAGE_KEY):
     """mask out the prompt tokens by manipulating labels"""
-    if len(row[SFT_MESSAGE_KEY]) == 1:
-        prompt = row[SFT_MESSAGE_KEY]
+    if len(row[sft_message_key]) == 1:
+        prompt = row[sft_message_key]
     else:
-        prompt = row[SFT_MESSAGE_KEY][:-1]
+        prompt = row[sft_message_key][:-1]
     
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
         add_generation_prompt=True,
     )
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[SFT_MESSAGE_KEY])
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_message_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     labels[: len(row[INPUT_IDS_PROMPT_KEY])] = [-100] * len(row[INPUT_IDS_PROMPT_KEY])
@@ -409,8 +409,8 @@ def preference_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: Pre
     if len(rejected_messages) == 0:
         raise ValueError("rejected messages field is empty.")
 
-    chosen_encoded = sft_tulu_tokenize_and_truncate_v1({SFT_MESSAGE_KEY: chosen_messages}, tokenizer, max_seq_length)
-    rejected_encoded = sft_tulu_tokenize_and_truncate_v1({SFT_MESSAGE_KEY: rejected_messages}, tokenizer, max_seq_length)
+    chosen_encoded = sft_tulu_tokenize_and_truncate_v1({DEFAULT_SFT_MESSAGE_KEY: chosen_messages}, tokenizer, max_seq_length)
+    rejected_encoded = sft_tulu_tokenize_and_truncate_v1({DEFAULT_SFT_MESSAGE_KEY: rejected_messages}, tokenizer, max_seq_length)
 
     return {
         CHOSEN_INPUT_IDS_KEY: chosen_encoded["input_ids"],
