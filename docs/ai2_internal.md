@@ -26,7 +26,7 @@ beaker secret write -w ai2/tulu-2-improvements "${beaker_whoami}_HF_TOKEN" xxxx
 * `HF_HUB_CACHE=/weka/oe-adapt-default/allennlp/.cache/hub`
 
 
-You can run things like below for a quick spin.
+You can run things like below for a quick spin. This example just starts a beaker job to print the Python version in your beaker image.
 
 ```bash
 python mason.py \
@@ -40,6 +40,7 @@ python mason.py \
 
 ### Supervised Fine-tuning (SFT):
 
+Otherwise, the `mason.py` command can be used to launch all of our other training jobs.
 ```bash
 python mason.py \
     --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale \
