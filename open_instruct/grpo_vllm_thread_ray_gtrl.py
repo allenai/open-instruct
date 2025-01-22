@@ -1101,7 +1101,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 del (logprob, ref_logprob, score)
                 gc.collect()
                 torch.cuda.empty_cache()
- 
+
                 # Response Processing 3. filter response. Ensure that the sample contains stop_token_id
                 # responses not passing that filter will receive a low (fixed) score
                 # only query humans on responses that pass that filter
