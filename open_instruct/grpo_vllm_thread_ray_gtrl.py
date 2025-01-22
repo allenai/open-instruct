@@ -1128,6 +1128,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 std_grouped_rewards = std_grouped_rewards.repeat_interleave(args.number_samples_per_prompt, dim=0)
                 advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
 
+                # for logging
+                reward_mean = mean_grouped_rewards
+                reward_std = std_grouped_rewards
+
                 # 4. compute rewards
                 kl1 = logprobs - ref_logprobs
                 kl2 = (kl1) ** 2 / 2
