@@ -1119,7 +1119,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 padding_mask = response_idxs > sequence_lengths.unsqueeze(1)
                 logprobs = torch.masked_fill(logprobs, padding_mask, INVALID_LOGPROB)
                 ref_logprobs = torch.masked_fill(ref_logprobs, padding_mask, INVALID_LOGPROB)
-                sequence_lengths_p1 = sequence_lengths + 1
 
                 # MAIN GRPO CHANGE: compute group rewards instead of value model output
                 mean_grouped_rewards = scores.view(-1, args.number_samples_per_prompt).mean(dim=-1)
@@ -1142,16 +1141,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     kl = kl2
                 elif args.kl_estimator == "kl3":
                     kl = kl3
-                # if self.rank==0:
-                #     print(f"{logprobs[0][:40]=}, {ref_logprobs[0][:40]=}, {kl.sum(1)=}")
-                non_score_reward = -args.beta * kl
-                non_score_reward_sum = non_score_reward.sum(1)
-                rlhf_reward = scores + non_score_reward_sum
-                rewards = non_score_reward.clone()
-                actual_start = torch.arange(rewards.size(0), device=rewards.device)
-                actual_end = torch.where(sequence_lengths_p1 < rewards.size(1), sequence_lengths_p1, sequence_lengths)
-                rewards[[actual_start, actual_end]] += scores
-                # print(f"get reward stuff finished 3")
 
             # print('training starts')
             # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
@@ -1186,6 +1175,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         pg_losses2 = -mb_advantage[:, None] * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
                         pg_loss_max = torch.max(pg_losses, pg_losses2)
                         pg_loss = masked_mean(pg_loss_max, ~padding_mask[micro_batch_inds])
+                        # grpo change: directly subtract KL in loss (add)
+                        pg_loss = pg_loss + (args.beta * kl[micro_batch_inds]).mean()
                         loss = pg_loss
                         self.model.backward(loss)
                         # print("backward loss", self.rank, "micro batch start", micro_batch_start)
