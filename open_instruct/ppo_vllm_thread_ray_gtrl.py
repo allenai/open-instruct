@@ -632,6 +632,9 @@ class PolicyTrainerRayProcess(RayProcess):
         self.model.train()
 
         # value model
+        from open_instruct.olmo_adapter import Olmo2Config, Olmo2ForSequenceClassification, OlmoeConfig, OlmoeForSequenceClassification
+        AutoModelForSequenceClassification.register(Olmo2Config, Olmo2ForSequenceClassification)
+        AutoModelForSequenceClassification.register(OlmoeConfig, OlmoeForSequenceClassification)
         self.value_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
             args.reward_model_path,
             revision=args.reward_model_revision,
@@ -668,7 +671,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # reference model
         ds_config = get_eval_ds_config(
             offload=False,
-            stage=args.deepspeed_stage,
+            stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
             bf16=True,
         )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
@@ -707,7 +710,7 @@ class PolicyTrainerRayProcess(RayProcess):
             disable_dropout_in_model(self.reward_model)
             ds_config = get_eval_ds_config(
                 offload=False,
-                stage=args.deepspeed_stage,
+                stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
                 bf16=True,
             )
             ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
