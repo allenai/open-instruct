@@ -1,6 +1,7 @@
 export CURRENT_DATETIME=$(python -c "import datetime; import pytz; print(datetime.datetime.now(pytz.timezone('America/Los_Angeles')).strftime('%m%d%y_%H%M%S'))")
 export PYTHONPATH=$REPO_PATH
 export PATH="/root/.local/bin:$PATH"
+export NCCL_CUMEM_ENABLE=0
 
 
 echo CURRENT_DATETIME=$CURRENT_DATETIME

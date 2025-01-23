@@ -195,6 +195,9 @@ def layer_init(layer: nn.Module, std: float):
 
 
 def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
+    from open_instruct.olmo_adapter import Olmo2Config, Olmo2ForSequenceClassification, OlmoeConfig, OlmoeForSequenceClassification
+    AutoModelForSequenceClassification.register(Olmo2Config, Olmo2ForSequenceClassification)
+    AutoModelForSequenceClassification.register(OlmoeConfig, OlmoeForSequenceClassification)
     accelerator = calculate_runtime_args_and_accelerator(args, model_config)
     local_seed = args.seed + accelerator.process_index
 
@@ -241,7 +244,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         tokenizer.pad_token_id = 128002  # <|reserved_special_token_0|>
     else:
         tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
-    tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
+    if dataset_config.chat_template is not None:
+        tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
 
     # create the dataset
     dataset_dict = DatasetDict()
