@@ -43,7 +43,7 @@ python mason.py \
 Otherwise, the `mason.py` command can be used to launch all of our other training jobs.
 ```bash
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale \
+    --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-3-dev \
     --priority normal \
     --preemptible \
@@ -55,7 +55,7 @@ python mason.py \
     --use_deepspeed \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
-    open_instruct/finetune1.py \
+    open_instruct/finetune.py \
     --model_name_or_path meta-llama/Llama-3.1-8B \
     --tokenizer_name meta-llama/Llama-3.1-8B \
     --use_slow_tokenizer \
@@ -124,7 +124,7 @@ When you inspect the job, it's going to have the following outputs, meaning the 
 
 ```bash
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale \
+    --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-3-dev \
     --priority normal \
     --preemptible \
