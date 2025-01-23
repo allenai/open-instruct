@@ -673,6 +673,8 @@ class PolicyTrainerRayProcess(RayProcess):
         # reference model
         ds_config = get_eval_ds_config(
             offload=False,
+            # inference model only has stage 3 (sharding) or stage 0 (no sharding)
+            # stage 2 is optimizer sharding which doesn't apply to inference
             stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
             bf16=True,
         )
@@ -712,6 +714,8 @@ class PolicyTrainerRayProcess(RayProcess):
             disable_dropout_in_model(self.reward_model)
             ds_config = get_eval_ds_config(
                 offload=False,
+                # inference model only has stage 3 (sharding) or stage 0 (no sharding)
+                # stage 2 is optimizer sharding which doesn't apply to inference
                 stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
                 bf16=True,
             )
