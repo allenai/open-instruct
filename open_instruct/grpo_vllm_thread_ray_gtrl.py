@@ -197,8 +197,6 @@ class Args:
     """the path to the reward model"""
     reward_model_revision: Optional[str] = None
     """the revision of the reward model"""
-    init_value_from_scratch: bool = False
-    """whether to initialize the value model from scratch"""
 
     # generation config
     response_length: int = 53
@@ -225,14 +223,8 @@ class Args:
     """whether to whiten the rewards"""
     cliprange: float = 0.2
     """the clip range"""
-    vf_coef: float = 0.1
-    """the value function coefficient"""
-    cliprange_value: float = 0.2
-    """the clip range for the value function"""
     gamma: float = 1
     """the discount factor"""
-    lam: float = 0.95
-    """the lambda value for GAE"""
     kl_estimator: Literal["kl1", "kl2", "kl3"] = "kl1"
     """the KL estimator to use"""
     apply_verifiable_reward: bool = False
@@ -284,8 +276,6 @@ class Args:
     """Where to save the model"""
     checkpoint_output_dir: Optional[str] = None
     """Where to save the model checkpoints in case of preemption"""
-    save_value_model: bool = False
-    """Whether to save the value model along with the policy model"""
 
     # Ai2 specific settings
     try_launch_beaker_eval_jobs: bool = True
@@ -300,6 +290,7 @@ class Args:
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
     def __post_init__(self):
+        assert self.number_samples_per_prompt > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
         self.dataset_mixer_dict, self.dataset_mixer = process_dataset_mixer(self.dataset_mixer)
         if self.dataset_eval_mixer is not None:
             self.dataset_eval_mixer_dict, self.dataset_eval_mixer = process_dataset_mixer(self.dataset_eval_mixer)
@@ -633,40 +624,6 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         self.model.train()
 
-        # value model
-        self.value_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
-            args.reward_model_path,
-            revision=args.reward_model_revision,
-            num_labels=1,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-            use_cache=False,
-        )
-        if args.init_value_from_scratch:
-            self.value_model.init_weights()  # re-initialize the value model from scratch
-        disable_dropout_in_model(self.value_model)
-        self.value_model.gradient_checkpointing_enable()
-        # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
-        # AdamOptimizer = FusedAdam
-        # weight_decay = 0.0
-        # optim_params = get_optimizer_grouped_parameters(self.value_model, weight_decay)
-        # self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
-        self.optimizer = torch.optim.AdamW(self.value_model.parameters(), lr=args.learning_rate)
-        scheduler = get_scheduler(
-            args.lr_scheduler_type,
-            optimizer=self.optimizer,
-            num_warmup_steps=warm_up_steps,
-            num_training_steps=num_training_steps,
-        )
-        self.value_model, self.optimizer, _, self.scheduler = deepspeed.initialize(
-            model=self.value_model,
-            optimizer=self.optimizer,
-            config=ds_config,
-            lr_scheduler=scheduler,
-            dist_init_required=True,
-        )
-        self.value_model.train()
-
         # reference model
         ds_config = get_eval_ds_config(
             offload=False,
@@ -944,8 +901,8 @@ class PolicyTrainerRayProcess(RayProcess):
         approxkl_stats = torch.zeros(stats_shape, device=device)
         pg_clipfrac_stats = torch.zeros(stats_shape, device=device)
         pg_loss_stats = torch.zeros(stats_shape, device=device)
-        vf_loss_stats = torch.zeros(stats_shape, device=device)
-        vf_clipfrac_stats = torch.zeros(stats_shape, device=device)
+        reward_mean = torch.zeros(stats_shape, device=device)
+        reward_std = torch.zeros(stats_shape, device=device)
         entropy_stats = torch.zeros(stats_shape, device=device)
         ratio_stats = torch.zeros(stats_shape, device=device)
         local_metrics = torch.zeros((20,), device=device)
@@ -1056,7 +1013,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 scores = []
                 verifiable_counts = []
                 sequence_lengths = []
-                values = []
                 if accelerator.is_main_process:
                     g_response_token_ids = response_ids_Q.get()
                     DUMMY_PAD_TOKEN = 0  # we can't use tokenizer.pad_token_id because it's outside vocab and `torch.gather(all_logprob, 2, response.unsqueeze(-1))` will error out
@@ -1123,10 +1079,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         score += verifiable_reward
                     else:
                         verifiable_count = torch.tensor([0.0], device=device).float()
-                    full_value, _, _ = get_reward(
-                        self.value_model, query_response, tokenizer.pad_token_id, context_length
-                    )
-                    value = full_value[:, context_length - 1 : -1].squeeze(-1)
 
                     responses.append(response)
                     postprocessed_responses.append(postprocessed_response)
@@ -1134,7 +1086,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     ref_logprobs.append(ref_logprob)
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
-                    values.append(value)
                     verifiable_counts.append(verifiable_count)
                     # print(f"get reward stuff starts 5")
 
@@ -1146,9 +1097,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 scores = torch.cat(scores, 0)
                 verifiable_counts = torch.cat(verifiable_counts, 0)
                 verifiable_correct_rate = verifiable_counts.sum() / queries.shape[0]
-                values = torch.cat(values, 0)
                 # print(f"get reward stuff finished")
-                del (logprob, ref_logprob, full_value, value, score)
+                del (logprob, ref_logprob, score)
                 gc.collect()
                 torch.cuda.empty_cache()
 
@@ -1169,10 +1119,17 @@ class PolicyTrainerRayProcess(RayProcess):
                 padding_mask = response_idxs > sequence_lengths.unsqueeze(1)
                 logprobs = torch.masked_fill(logprobs, padding_mask, INVALID_LOGPROB)
                 ref_logprobs = torch.masked_fill(ref_logprobs, padding_mask, INVALID_LOGPROB)
-                sequence_lengths_p1 = sequence_lengths + 1
-                padding_mask_p1 = response_idxs > (sequence_lengths_p1.unsqueeze(1))
-                values = torch.masked_fill(values, padding_mask_p1, 0)
-                # print(f"get reward stuff finished 2")
+
+                # MAIN GRPO CHANGE: compute group rewards instead of value model output
+                mean_grouped_rewards = scores.view(-1, args.number_samples_per_prompt).mean(dim=-1)
+                mean_grouped_rewards = mean_grouped_rewards.repeat_interleave(args.number_samples_per_prompt, dim=0)
+                std_grouped_rewards = scores.view(-1, args.number_samples_per_prompt).std(dim=-1)
+                std_grouped_rewards = std_grouped_rewards.repeat_interleave(args.number_samples_per_prompt, dim=0)
+                advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
+
+                # for logging
+                reward_mean = mean_grouped_rewards
+                reward_std = std_grouped_rewards
 
                 # 4. compute rewards
                 kl1 = logprobs - ref_logprobs
@@ -1184,37 +1141,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     kl = kl2
                 elif args.kl_estimator == "kl3":
                     kl = kl3
-                # if self.rank==0:
-                #     print(f"{logprobs[0][:40]=}, {ref_logprobs[0][:40]=}, {kl.sum(1)=}")
+
                 non_score_reward = -args.beta * kl
                 non_score_reward_sum = non_score_reward.sum(1)
                 rlhf_reward = scores + non_score_reward_sum
-                rewards = non_score_reward.clone()
-                actual_start = torch.arange(rewards.size(0), device=rewards.device)
-                actual_end = torch.where(sequence_lengths_p1 < rewards.size(1), sequence_lengths_p1, sequence_lengths)
-                rewards[[actual_start, actual_end]] += scores
-                # print(f"get reward stuff finished 3")
-
-                # 5. whiten rewards
-                if args.whiten_rewards:
-                    rewards = masked_whiten(rewards, mask=~padding_mask_p1, shift_mean=False)
-                    rewards = torch.masked_fill(rewards, padding_mask_p1, 0)
-
-                # print('gae')
-                # 6. compute advantages and returns
-                lastgaelam = 0
-                advantages_reversed = []
-                gen_length = responses.shape[1]
-                for t in reversed(range(gen_length)):
-                    nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
-                    delta = rewards[:, t] + args.gamma * nextvalues - values[:, t]
-                    lastgaelam = delta + args.gamma * args.lam * lastgaelam
-                    advantages_reversed.append(lastgaelam)
-                advantages = torch.stack(advantages_reversed[::-1], axis=1)
-                returns = advantages + values
-                advantages = masked_whiten(advantages, ~padding_mask)
-                advantages = torch.masked_fill(advantages, padding_mask, 0)
-                torch.cuda.empty_cache()
 
             # print('training starts')
             # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
@@ -1236,27 +1166,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         mb_responses = responses[micro_batch_inds]
                         mb_query_responses = query_responses[micro_batch_inds]
                         mb_logprobs = logprobs[micro_batch_inds]
-                        mb_return = returns[micro_batch_inds]
-                        mb_values = values[micro_batch_inds]
-                        mb_padding_mask_p1 = padding_mask_p1[micro_batch_inds]
-
-                        vpred_temp = get_reward(
-                            self.value_model, mb_query_responses, tokenizer.pad_token_id, context_length
-                        )
-                        vpred_temp = vpred_temp[0]
-                        vpred = vpred_temp[:, context_length - 1 : -1].squeeze(-1)
-                        vpred = torch.masked_fill(vpred, mb_padding_mask_p1, 0)
-                        vpredclipped = torch.clamp(
-                            vpred,
-                            mb_values - args.cliprange_value,
-                            mb_values + args.cliprange_value,
-                        )
-                        vf_losses1 = torch.square(vpred - mb_return)
-                        vf_losses2 = torch.square(vpredclipped - mb_return)
-                        vf_loss_max = torch.max(vf_losses1, vf_losses2)
-                        vf_loss = 0.5 * masked_mean(vf_loss_max, ~mb_padding_mask_p1)
-                        self.value_model.backward(vf_loss * args.vf_coef)
-                        self.value_model.step()
 
                         new_logprobs = self.forward(
                             mb_query_responses, mb_responses, tokenizer.pad_token_id, context_length, args.temperature
@@ -1266,10 +1175,12 @@ class PolicyTrainerRayProcess(RayProcess):
                         new_logprobs = torch.masked_fill(new_logprobs, padding_mask[micro_batch_inds], INVALID_LOGPROB)
                         logprobs_diff = new_logprobs - mb_logprobs
                         ratio = torch.exp(logprobs_diff)
-                        pg_losses = -mb_advantage * ratio
-                        pg_losses2 = -mb_advantage * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
+                        pg_losses = -mb_advantage[:, None] * ratio
+                        pg_losses2 = -mb_advantage[:, None] * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
                         pg_loss_max = torch.max(pg_losses, pg_losses2)
                         pg_loss = masked_mean(pg_loss_max, ~padding_mask[micro_batch_inds])
+                        # grpo change: directly subtract KL in loss (add)
+                        pg_loss = pg_loss + (args.beta * kl[micro_batch_inds]).mean()
                         loss = pg_loss
                         self.model.backward(loss)
                         # print("backward loss", self.rank, "micro batch start", micro_batch_start)
@@ -1279,7 +1190,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         with torch.no_grad():
                             # print("waiting for value model step", self.rank, "micro batch start", micro_batch_start)
                             # vf_loss, vf_clipfrac = ray.get(value_model_step_future)
-                            vf_clipfrac = masked_mean((vf_losses2 > vf_losses1).float(), ~mb_padding_mask_p1)
                             pg_clipfrac = masked_mean(
                                 (pg_losses2 > pg_losses).float(), ~padding_mask[micro_batch_inds]
                             )
@@ -1290,17 +1200,13 @@ class PolicyTrainerRayProcess(RayProcess):
                             approxkl_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = approxkl
                             pg_clipfrac_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = pg_clipfrac
                             pg_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = pg_loss
-                            vf_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = vf_loss
-                            vf_clipfrac_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = vf_clipfrac
                             # entropy_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = entropy.mean()
                             ratio_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = ratio.mean()
                         gradient_accumulation_idx += 1
                     minibatch_idx += 1
                     # fmt: off
-                    del mb_advantage, mb_responses, mb_query_responses, mb_logprobs, mb_return, mb_values, mb_padding_mask_p1
+                    del mb_advantage, mb_responses, mb_query_responses, mb_logprobs
                     del new_logprobs, logprobs_diff, ratio, pg_losses, pg_losses2, pg_loss_max, pg_loss, loss
-                    # del vpred_temp, vpred, vpredclipped, vf_losses1, vf_losses2, vf_loss_max
-                    # del vf_loss, vf_clipfrac, pg_clipfrac, approxkl
                     # fmt: on
                     # del everything and empty cache
                     torch.cuda.empty_cache()
@@ -1317,8 +1223,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics[7] = approxkl_stats.mean()
                 local_metrics[8] = pg_clipfrac_stats.mean()
                 local_metrics[9] = pg_loss_stats.mean()
-                local_metrics[10] = vf_loss_stats.mean()
-                local_metrics[11] = vf_clipfrac_stats.mean()
+                local_metrics[10] = reward_mean.mean()
+                local_metrics[11] = reward_std.mean()
                 local_metrics[12] = entropy_stats.mean()
                 local_metrics[13] = ratio_stats.mean()
                 local_metrics[14] = ratio_stats.var()
@@ -1349,8 +1255,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     "policy/approxkl_avg": global_metrics[7],
                     "policy/clipfrac_avg": global_metrics[8],
                     "loss/policy_avg": global_metrics[9],
-                    "loss/value_avg": global_metrics[10],
-                    "val/clipfrac_avg": global_metrics[11],
+                    "objective/scores_mean": global_metrics[10],
+                    "objective/reward_std": global_metrics[11],
                     "policy/entropy_avg": global_metrics[12],
                     "val/ratio": global_metrics[13],
                     "val/ratio_var": global_metrics[14],
@@ -1360,8 +1266,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 if accelerator.is_main_process:
                     print_rich_single_line_metrics(metrics)
                     metrics_queue.put((metrics, episode, df))
-            del (queries, responses, postprocessed_responses, logprobs, ref_logprobs, sequence_lengths, scores, values)
-            del (global_metrics, metrics, kl, non_score_reward, non_score_reward_sum, rlhf_reward)
+            del (queries, responses, postprocessed_responses, logprobs, ref_logprobs, sequence_lengths, scores)
+            del (global_metrics, metrics, kl)
             gc.collect()
             torch.cuda.empty_cache()
             # print(f"finished training {training_step}")
@@ -1376,16 +1282,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.save_model(self.model, step_dir)
                 if args.try_launch_beaker_eval_jobs_on_weka:
                     self.launch_ai2_evals_on_weka(step_dir, training_step)
-                if args.save_value_model:
-                    value_dir = os.path.join(step_dir, "value_model")
-                    self.save_model(self.value_model, step_dir)
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         self.save_model(self.model, args.output_dir)
         if args.try_launch_beaker_eval_jobs_on_weka:
             self.launch_ai2_evals_on_weka(args.output_dir)
-        if args.save_value_model:
-            value_dir = os.path.join(args.output_dir, "value_model")
-            self.save_model(self.value_model, value_dir)
 
         # Ai2 logic: we use /output to store the artifacts of the job, so we
         # make a copy of the model to `/output` in the end.
