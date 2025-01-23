@@ -195,6 +195,9 @@ def layer_init(layer: nn.Module, std: float):
 
 
 def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
+    from open_instruct.olmo_adapter import Olmo2Config, Olmo2ForSequenceClassification, OlmoeConfig, OlmoeForSequenceClassification
+    AutoModelForSequenceClassification.register(Olmo2Config, Olmo2ForSequenceClassification)
+    AutoModelForSequenceClassification.register(OlmoeConfig, OlmoeForSequenceClassification)
     accelerator = calculate_runtime_args_and_accelerator(args, model_config)
     local_seed = args.seed + accelerator.process_index
 
