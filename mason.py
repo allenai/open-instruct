@@ -440,7 +440,7 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
                 return i
         return -1
     if not args.no_auto_dataset_cache:
-        for file in ["open_instruct/finetune1.py", "open_instruct/dpo_tune_cache1.py"]:
+        for file in ["open_instruct/finetune.py", "open_instruct/dpo_tune_cache.py"]:
             idx = find_list_idx(full_command, file)
             if idx != -1:
                 # then try executing the same full_command with 

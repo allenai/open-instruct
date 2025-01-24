@@ -165,14 +165,26 @@ python mason.py \
 ## RLVR:
 
 ```bash
+# make sure to match up the GPUs. E.g.,
+# `--actor_num_gpus_per_node 6 8 8 8`
+# `--vllm_tensor_parallel_size 2`
+# translates to 6 + 2 + 8 + 8 + 8 = 32 GPUs
+# which matches up with `--num_nodes 4 --gpus 8`
+for beta in 0.05; do
+exp_name="0112_ppo_rlvr_${beta}_${RANDOM}"
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale \
+    --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
     --budget ai2/oe-adapt \
-    --gpus 8 -- python open_instruct/ppo_vllm_thread_ray_gtrl.py \
-    --exp_name tulu-3-8b-rlvr \
+    --num_nodes 4 \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl.py \
+    --exp_name $exp_name \
+    --beta $beta \
+    --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/$exp_name \
+    --try_launch_beaker_eval_jobs_on_weka \
+    --try_launch_beaker_eval_jobs False \
     --dataset_mixer '{"allenai/RLVR-GSM-MATH-IF-Mixed-Constraints": 1.0}' \
     --dataset_train_splits train \
     --dataset_eval_mixer '{"allenai/RLVR-GSM-MATH-IF-Mixed-Constraints": 128}' \
@@ -189,27 +201,82 @@ python mason.py \
     --chat_template tulu \
     --sft_messages_key messages \
     --learning_rate 3e-7 \
-    --total_episodes 10000000 \
+    --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
     --per_device_train_batch_size 1 \
     --local_rollout_forward_batch_size 1 \
     --local_mini_batch_size 4 \
     --local_rollout_batch_size 4 \
-    --actor_num_gpus_per_node 6 \
+    --actor_num_gpus_per_node 6 8 8 8 \
     --vllm_tensor_parallel_size 2 \
     --vllm_enforce_eager \
-    --beta 0.05 \
     --apply_verifiable_reward true \
-    --output_dir /weka/oe-adapt-default/costah/models/tulu-3-8b-rlvr/test \
     --seed 3 \
-    --num_evals 3 \
-    --save_freq 2 \
+    --num_evals 1000 \
+    --save_freq 40 \
     --reward_model_multiplier 0.0 \
     --gradient_checkpointing \
-    --try_launch_beaker_eval_jobs_on_weka \
     --with_tracking
+done
 ```
+
+GRPO:
+```bash
+for beta in 0.0 0.05 0.03; do
+for nspp in 4 8 16; do
+exp_name="0112_grpo_math_zs_${beta}_${nspp}_${RANDOM}"
+python mason.py \
+    --cluster ai2/jupiter-cirrascale-2 \
+    --workspace ai2/tulu-3-dev \
+    --priority high \
+    --preemptible \
+    --num_nodes 4 \
+    --budget ai2/oe-adapt \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& uv run python open_instruct/grpo_vllm_thread_ray_gtrl.py \
+    --exp_name $exp_name \
+    --beta $beta \
+    --local_mini_batch_size 8 \
+    --number_samples_per_prompt $nspp \
+    --output_dir /weka/oe-adapt-default/costah/$exp_name \
+    --dataset_mixer "{\"ai2-adapt-dev/math_ground_truth_zs\": 1.0}" \
+    --dataset_train_splits train \
+    --dataset_eval_mixer "{\"ai2-adapt-dev/math_ground_truth_zs\": 32}" \
+    --dataset_eval_splits train \
+    --max_token_length 2048 \
+    --max_prompt_token_length 2048 \
+    --response_length 4096 \
+    --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-DPO \
+    --non_stop_penalty \
+    --stop_token eos \
+    --temperature 1.0 \
+    --ground_truths_key ground_truth \
+    --chat_template tulu \
+    --sft_messages_key messages \
+    --learning_rate 5e-7 \
+    --total_episodes 1000000 \
+    --penalty_reward_value 0.0 \
+    --deepspeed_stage 3 \
+    --per_device_train_batch_size 2 \
+    --local_rollout_forward_batch_size 2 \
+    --local_rollout_batch_size 8 \
+    --actor_num_gpus_per_node 7 8 8 8 \
+    --num_epochs 1 \
+    --vllm_tensor_parallel_size 1 \
+    --lr_scheduler_type constant \
+    --apply_verifiable_reward true \
+    --seed 1 \
+    --num_evals 1000 \
+    --save_freq 40 \
+    --reward_model_multiplier 0.0 \
+    --no_try_launch_beaker_eval_jobs \
+    --try_launch_beaker_eval_jobs_on_weka \
+    --gradient_checkpointing \
+    --with_tracking
+done
+done
+```
+
 
 
 ### Ai2 Internal Evaluation
