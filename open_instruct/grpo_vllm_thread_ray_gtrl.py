@@ -1063,6 +1063,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 ref_logprobs = []
                 scores = []
                 verifiable_counts = []
+                self_consistency_counts = []
                 sequence_lengths = []
                 if accelerator.is_main_process:
                     g_response_token_ids = response_ids_Q.get()
@@ -1133,9 +1134,20 @@ class PolicyTrainerRayProcess(RayProcess):
                             ground_truth,
                             dataset,
                             verify_reward=args.verification_reward,
-                            self_consistency_consistency=args.self_consistency_consistency
                         )
-                        score += verifiable_reward
+                        self_consistency_reward, self_consistency_count = apply_verifiable_reward(
+                            postprocessed_response,
+                            postprocessed_query_response,
+                            tokenizer,
+                            ground_truth,
+                            dataset,
+                            verify_reward=args.verification_reward,
+                            self_consistency_consistency=True
+                        )
+                        if args.self_consistency_consistency:
+                            score += self_consistency_reward
+                        else:
+                            score += verifiable_reward
                     else:
                         verifiable_count = torch.tensor([0.0], device=device).float()
 
@@ -1149,6 +1161,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
                     verifiable_counts.append(verifiable_count)
+                    self_consistency_counts.append(self_consistency_count)
                     # print(f"get reward stuff starts 5")
 
                 responses = torch.cat(responses, 0)
@@ -1159,6 +1172,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 scores = torch.cat(scores, 0)
                 verifiable_counts = torch.cat(verifiable_counts, 0)
                 verifiable_correct_rate = verifiable_counts.sum() / queries.shape[0]
+                self_consistency_counts = torch.cat(self_consistency_counts, 0)
+                self_consistency_rate = self_consistency_counts.sum() / queries.shape[0]
                 # print(f"get reward stuff finished")
                 del (logprob, ref_logprob, score)
                 gc.collect()
@@ -1306,6 +1321,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics.add("objective/scores_mean", reward_mean.mean())
                 local_metrics.add("objective/reward_std", reward_std.mean())
                 local_metrics.add("objective/verifiable_correct_rate", verifiable_correct_rate)
+                local_metrics.add('objective/self_consistency_rate', self_consistency_rate)
                 local_metrics.add("loss/policy_avg", pg_loss_stats.mean())
                 local_metrics.add("loss/policy_avg", loss_stats.mean())
                 local_metrics.add("policy/approxkl_avg", approxkl_stats.mean())
