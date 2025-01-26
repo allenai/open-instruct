@@ -40,6 +40,8 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from open_instruct.ground_truth_utils import (
+    compare_gsm8k_answer,
+    extract_gsm8k_answer,
     verify_gsm8k_sample,
     verify_ifeval_sample,
     verify_math_sample,
@@ -232,31 +234,71 @@ def apply_verifiable_reward(
     ground_truths: List[str],
     datasets: List[str],
     verify_reward: int = 10,
+    self_consistency: bool = False,
 ):
     # decode the responses
     decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
-    # for now, below is not used. but keeping it around in case we need it.
+    # if we have an answer extraction model, use it to extract the answer from the response
     decoded_query_responses = tokenizer.batch_decode(query_responses, skip_special_tokens=True)  # noqa: F841
-    # compare with ground truth.
-    rewards = []
-    for prediction, ground_truth, dataset in zip(decoded_responses, ground_truths, datasets):
-        verified = False
-        if ground_truth is None:
-            logger.warning("No ground truth provided for a sample, applying 0 reward.")
-            rewards.append(0)
-            continue
-        if dataset.lower() == "gsm8k":
-            verified = verify_gsm8k_sample(prediction, ground_truth)
-        elif dataset.lower() == "math":
-            verified = verify_math_sample(prediction, ground_truth)
-        elif dataset.lower() == "ifeval":
-            verified = verify_ifeval_sample(prediction, ground_truth)
-        # if verified, give reward
-        if verified:
-            logger.info("Applying ground truth reward 🤗")
-            rewards.append(verify_reward)
-        else:
-            rewards.append(0)
+    if self_consistency:
+        rewards = []
+
+        # 1) extract answers from every model
+        answers = []
+        for prediction, ground_truth, dataset in zip(decoded_responses, ground_truths, datasets):
+            verified = False
+            if ground_truth is None:
+                continue
+            if dataset.lower() != "gsm8k":
+                extracted_answer = extract_gsm8k_answer(prediction)
+            else:
+                raise RuntimeError(f'Dataset "{dataset}" not supported for self consistency consistency')
+            answers.append(extracted_answer)
+
+        # 2) find the answer with the highest agreement between all answers
+        most_frequent_answer = max(answers, key=lambda x: sum(1 for y in answers if compare_gsm8k_answer(x, y)))
+
+        # 3) only reward answers with agreeemnt with the self-consistency answer
+        for answer, ground_truth, dataset in zip(answers, ground_truths, datasets):
+            verified = False
+            if ground_truth is None:
+                rewards.append(0)
+                continue
+            if dataset.lower() != "gsm8k":
+                verified = compare_gsm8k_answer(answer, most_frequent_answer)
+            else:
+                raise RuntimeError(f'Dataset "{dataset}" not supported for self consistency consistency')
+
+            if verified:
+                print("Applying self self consistency reward 💅✨")
+                rewards.append(verify_reward)
+            else:
+                rewards.append(0)
+
+        print(answers)
+        print(most_frequent_answer)
+        print(rewards)
+    else:
+        # compare with ground truth.
+        # use same logic as in gsm8k evaluation
+        rewards = []
+        for prediction, ground_truth, dataset in zip(decoded_responses, ground_truths, datasets):
+            verified = False
+            if ground_truth is None:
+                rewards.append(0)
+                continue
+            if dataset.lower() == "gsm8k":
+                verified = verify_gsm8k_sample(prediction, ground_truth)
+            elif dataset.lower() == "math":
+                verified = verify_math_sample(prediction, ground_truth)
+            elif dataset.lower() == "ifeval":
+                verified = verify_ifeval_sample(prediction, ground_truth)
+            # if verified, give reward
+            if verified:
+                logger.info("Applying ground truth reward 🤗")
+                rewards.append(verify_reward)
+            else:
+                rewards.append(0)
     rewards_tensors = torch.tensor(rewards, device=query_responses.device)
     # return rewards and count of times we applied reward
     return rewards_tensors, (rewards_tensors > 0).sum().float().view(-1)

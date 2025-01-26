@@ -432,6 +432,10 @@ def get_datasets(beaker_datasets, cluster: List[str]):
                 source=beaker.DataSource(weka="oe-training-default"),
                 mount_path="/weka/oe-training-default",
             ),
+            beaker.DataMount(
+                source=beaker.DataSource(weka="oe-eval-default"),
+                mount_path="/weka/oe-eval-default",
+            ),
         ]
     for beaker_dataset in beaker_datasets:
         to_append = beaker.DataMount(

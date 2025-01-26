@@ -18,7 +18,8 @@ from open_instruct.math_utils import (
 )
 
 
-def verify_gsm8k_sample(model_output, ground_truth_answer):
+def extract_gsm8k_answer(model_output):
+    model_output = model_output.split("<|assistant|>\n")[-1].strip()
     # gsm is easy: extract numbers, and then just compare last number with answer.
     # matches how we do eval.
     predictions = None
@@ -29,7 +30,17 @@ def verify_gsm8k_sample(model_output, ground_truth_answer):
         predictions = numbers[-1]
     else:
         predictions = response
-    return str(predictions).lower() == str(ground_truth_answer).lower()
+    return str(predictions).lower()
+
+
+def compare_gsm8k_answer(answerA, answerB):
+    return answerA == answerB
+
+
+def verify_gsm8k_sample(model_output, ground_truth_answer):
+    predictions = extract_gsm8k_answer(model_output)
+    ground_truth_answer = str(ground_truth_answer).lower()
+    return compare_gsm8k_answer(predictions, ground_truth_answer)
 
 
 def verify_math_sample(model_output, ground_truth_answer):
