@@ -259,10 +259,8 @@ def apply_verifiable_reward(
 
         # 1) extract answers from every model
         answers = []
-        for prediction, ground_truth, dataset in zip(decoded_responses, ground_truths, datasets):
+        for prediction, dataset in zip(decoded_responses, datasets):
             verified = False
-            if ground_truth is None:
-                continue
             extracted_answer = extractor_func(prediction)
             answers.append(extracted_answer)
 
@@ -279,9 +277,9 @@ def apply_verifiable_reward(
         most_frequent_answer = ans_id_map[most_frequent_answer_id] if most_frequent_answer_id is not None else None
 
         # 3) only reward answers with agreeemnt with the self-consistency answer
-        for answer, ground_truth, dataset in zip(answers, ground_truths, datasets):
+        for answer, dataset in zip(answers, datasets):
             verified = False
-            if ground_truth is None or most_frequent_answer is None:
+            if most_frequent_answer is None:
                 rewards.append(0)
                 continue
             verified = comparator_func(answer, most_frequent_answer)
@@ -291,9 +289,9 @@ def apply_verifiable_reward(
             else:
                 rewards.append(0)
 
-            print(answers)
-            print(most_frequent_answer)
-            print(rewards)
+        print(answers)
+        print(most_frequent_answer)
+        print(rewards)
     else:
         # compare with ground truth.
         # use same logic as in gsm8k evaluation
