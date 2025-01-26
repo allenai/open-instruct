@@ -44,6 +44,8 @@ from open_instruct.ground_truth_utils import (
     extract_gsm8k_answer,
     verify_gsm8k_sample,
     verify_ifeval_sample,
+    extract_math_answer,
+    compare_math_answer,
     verify_math_sample,
 )
 from open_instruct.utils import retry_on_exception
@@ -234,14 +236,26 @@ def apply_verifiable_reward(
     ground_truths: List[str],
     datasets: List[str],
     verify_reward: int = 10,
-    self_consistency: bool = False,
+    self_consistency_consistency: bool = False,
 ):
     # decode the responses
     decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
     # if we have an answer extraction model, use it to extract the answer from the response
     decoded_query_responses = tokenizer.batch_decode(query_responses, skip_special_tokens=True)  # noqa: F841
-    if self_consistency:
+    if self_consistency_consistency:
         rewards = []
+
+        assert all(dataset == datasets[0] for dataset in datasets), "All datasets must be the same for now"
+        dataset = datasets[0]
+
+        if dataset.lower() == "gsm8k":
+            extractor_func = extract_gsm8k_answer
+            comparator_func = compare_gsm8k_answer
+        elif dataset.lower() == "math":
+            extractor_func = extract_math_answer
+            comparator_func = compare_math_answer
+        else:
+            raise RuntimeError(f'Dataset "{dataset}" not supported for self consistency consistency')
 
         # 1) extract answers from every model
         answers = []
@@ -249,35 +263,37 @@ def apply_verifiable_reward(
             verified = False
             if ground_truth is None:
                 continue
-            if dataset.lower() != "gsm8k":
-                extracted_answer = extract_gsm8k_answer(prediction)
-            else:
-                raise RuntimeError(f'Dataset "{dataset}" not supported for self consistency consistency')
+            extracted_answer = extractor_func(prediction)
             answers.append(extracted_answer)
 
         # 2) find the answer with the highest agreement between all answers
-        most_frequent_answer = max(answers, key=lambda x: sum(1 for y in answers if compare_gsm8k_answer(x, y)))
+        ans_id_map = {hash(str(ans)): ans for ans in answers}  # use object hashes
+        frequencies = {hash(str(ans_i)): sum(comparator_func(ans_i, ans_j) for ans_j in answers) for ans_i in answers}
+        # get the max frequency among all items
+        max_frequency = max(frequencies.values(), default=0)
+        # get any item with the max frequency
+        most_frequent_items = [ans_i for ans_i, freq in frequencies.items() if freq == max_frequency]
+        # if there are ties, give no reward
+        most_frequent_answer_id = most_frequent_items[0] if len(most_frequent_items) == 1 else None
+        # get object of answer
+        most_frequent_answer = ans_id_map[most_frequent_answer_id] if most_frequent_answer_id is not None else None
 
         # 3) only reward answers with agreeemnt with the self-consistency answer
         for answer, ground_truth, dataset in zip(answers, ground_truths, datasets):
             verified = False
-            if ground_truth is None:
+            if ground_truth is None or most_frequent_answer is None:
                 rewards.append(0)
                 continue
-            if dataset.lower() != "gsm8k":
-                verified = compare_gsm8k_answer(answer, most_frequent_answer)
-            else:
-                raise RuntimeError(f'Dataset "{dataset}" not supported for self consistency consistency')
-
+            verified = comparator_func(answer, most_frequent_answer)
             if verified:
                 print("Applying self self consistency reward 💅✨")
                 rewards.append(verify_reward)
             else:
                 rewards.append(0)
 
-        print(answers)
-        print(most_frequent_answer)
-        print(rewards)
+            print(answers)
+            print(most_frequent_answer)
+            print(rewards)
     else:
         # compare with ground truth.
         # use same logic as in gsm8k evaluation

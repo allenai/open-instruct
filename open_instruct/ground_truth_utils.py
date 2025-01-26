@@ -43,7 +43,8 @@ def verify_gsm8k_sample(model_output, ground_truth_answer):
     return compare_gsm8k_answer(predictions, ground_truth_answer)
 
 
-def verify_math_sample(model_output, ground_truth_answer):
+def extract_math_answer(model_output):
+    model_output = model_output.split("<|assistant|>\n")[-1].strip()
     raw_answer = model_output
     # for math, more complex. We will try a few different ways to extract the answer.
     # this roughly follows 'flex em' in oe-eval-internal
@@ -71,16 +72,35 @@ def verify_math_sample(model_output, ground_truth_answer):
     # otherwise, just take the full output. Probably wont work, bit of a yolo.
     if len(all_answers) == 0:
         all_answers.append(normalize_final_answer(model_output))
-    # now, compare all answers to ground truth.
+    return all_answers
+
+
+def compare_math_answer(all_answerA, all_answerB):
+    # Enforce answers are lists
+    if not isinstance(all_answerA, list):
+        all_answerA = [all_answerA]
+    if not isinstance(all_answerA, list):
+        all_answerB = [all_answerB]
+
+    # Find any match between any element in either list
     matched = False
-    for answer in all_answers:
-        if is_equiv(answer, ground_truth_answer):
-            matched = True
-            break
-        elif hendrycks_is_equiv(answer, ground_truth_answer):
-            matched = True
-            break
+    for answerA in all_answerA:
+        for answerB in all_answerB:
+            if is_equiv(answerA, answerB):
+                matched = True
+                break
+            elif hendrycks_is_equiv(answerA, answerB):
+                matched = True
+                break
+
     # if we got any match, we are good.
+    return matched
+
+
+def verify_math_sample(model_output, ground_truth_answer):
+    all_answers = extract_math_answer(model_output)
+    # now, compare all answers to ground truth.
+    matched = compare_math_answer(all_answers, ground_truth_answer)
     return matched
 
 
