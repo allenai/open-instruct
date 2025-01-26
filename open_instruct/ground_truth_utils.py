@@ -79,7 +79,7 @@ def compare_math_answer(all_answerA, all_answerB):
     # Enforce answers are lists
     if not isinstance(all_answerA, list):
         all_answerA = [all_answerA]
-    if not isinstance(all_answerA, list):
+    if not isinstance(all_answerB, list):
         all_answerB = [all_answerB]
 
     # Find any match between any element in either list
