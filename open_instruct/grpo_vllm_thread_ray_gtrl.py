@@ -215,6 +215,8 @@ class Args:
     stop_strings: List[str] = None
     """List of strings that stop the generation when they are generated.
     The returned output will not contain the stop strings."""
+    self_consistency_consistency: bool = False
+    """whether to use self-consistency-consistency"""
     eval_max_length: int = 4096  # max generation length for evaluation
 
     # online PPO specific args
@@ -1117,6 +1119,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             ground_truth,
                             dataset,
                             verify_reward=args.verification_reward,
+                            self_consistency_consistency=args.self_consistency_consistency
                         )
                         score += verifiable_reward
                     else:
