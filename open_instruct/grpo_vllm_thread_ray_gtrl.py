@@ -1133,11 +1133,14 @@ class PolicyTrainerRayProcess(RayProcess):
                             self_consistency_consistency=True
                         )
                         if args.self_consistency_consistency:
+                            print("Applying self consistency consistency reward 💅✨")
                             score += self_consistency_reward
                         else:
+                            print("Applying ground truth reward 🤗")
                             score += verifiable_reward
                     else:
                         verifiable_count = torch.tensor([0.0], device=device).float()
+                        self_consistency_count = torch.tensor([0.0], device=device).float()
 
                     responses.append(response)
                     postprocessed_responses.append(postprocessed_response)

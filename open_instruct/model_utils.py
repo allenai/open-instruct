@@ -284,14 +284,13 @@ def apply_verifiable_reward(
                 continue
             verified = comparator_func(answer, most_frequent_answer)
             if verified:
-                print("Applying self self consistency reward 💅✨")
                 rewards.append(verify_reward)
             else:
                 rewards.append(0)
 
-        print(answers)
-        print(most_frequent_answer)
-        print(rewards)
+        # print(answers)
+        # print(most_frequent_answer)
+        # print(rewards)
     else:
         # compare with ground truth.
         # use same logic as in gsm8k evaluation
@@ -313,6 +312,10 @@ def apply_verifiable_reward(
                 rewards.append(verify_reward)
             else:
                 rewards.append(0)
+
+        # print(decoded_responses)
+        # print(ground_truths)
+        # print(rewards)
     rewards_tensors = torch.tensor(rewards, device=query_responses.device)
     # return rewards and count of times we applied reward
     return rewards_tensors, (rewards_tensors > 0).sum().float().view(-1)
