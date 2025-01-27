@@ -38,6 +38,32 @@ python mason.py \
     --gpus 1 -- which python
 ```
 
+
+### Caching model (Weka-only)
+
+You can run the following command to cache models to the share Hugging Face cache. We recommend this for weka (shared filesystem) users because otherwise your jobs would 1) waste time downloading the model while GPU is idle and 2) risk potential download failures.
+
+```bash
+python mason.py \
+    --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale ai2/neptune-cirrascale --image nathanl/open_instruct_auto --pure_docker_mode \
+    --workspace ai2/tulu-3-dev \
+    --priority normal \
+    --preemptible \
+    --budget ai2/allennlp \
+    --gpus 0 -- python scripts/cache_hf.py \
+    --model_name_or_path "allenai/open_instruct_dev" \
+    --model_revision "reward_modeling__1__1737836233"
+```
+
+If you have the weka environment setup you can also just run
+
+```bash
+python scripts/cache_hf.py \
+    --model_name_or_path "allenai/open_instruct_dev" \
+    --model_revision "reward_modeling__1__1737836233"
+```
+
+
 ### Supervised Fine-tuning (SFT):
 
 Otherwise, the `mason.py` command can be used to launch all of our other training jobs.
@@ -84,7 +110,7 @@ python mason.py \
 Note that during job submission, we will try to tokenize and cache the dataset so we are not running these CPU-heavy workloads in GPU jobs. Specifically, `mason.py` will parse out `python` command you are running and attempts to run it with `--cache_dataset_only` flag. For example, you will see output like
 
 ```bash
-📦📦📦 Running the caching full_command: python open_instruct/dpo_tune_cache1.py --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-SFT --use_flash_attn --tokenizer_name allenai/Llama-3.1-Tulu-3-8B-SFT --max_seq_length 2048 --preprocessing_num_workers 16 --per_device_train_batch_size 1 --gradient_accumulation_steps 16 --learning_rate 5e-07 --lr_scheduler_type linear --warmup_ratio 0.1 --weight_decay 0.0 --num_train_epochs 1 --output_dir output/dpo_8b --with_tracking --report_to wandb --logging_steps 1 --model_revision main --gradient_checkpointing --dataset_mixer_list allenai/llama-3.1-tulu-3-8b-preference-mixture 1.0 --use_slow_tokenizer --use_lora False --dpo_loss_type dpo_norm --dpo_beta 5 --exp_name tulu-3-8b-dpo --cache_dataset_only
+📦📦📦 Running the caching full_command: python open_instruct/dpo_tune_cache.py --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-SFT --use_flash_attn --tokenizer_name allenai/Llama-3.1-Tulu-3-8B-SFT --max_seq_length 2048 --preprocessing_num_workers 16 --per_device_train_batch_size 1 --gradient_accumulation_steps 16 --learning_rate 5e-07 --lr_scheduler_type linear --warmup_ratio 0.1 --weight_decay 0.0 --num_train_epochs 1 --output_dir output/dpo_8b --with_tracking --report_to wandb --logging_steps 1 --model_revision main --gradient_checkpointing --dataset_mixer_list allenai/llama-3.1-tulu-3-8b-preference-mixture 1.0 --use_slow_tokenizer --use_lora False --dpo_loss_type dpo_norm --dpo_beta 5 --exp_name tulu-3-8b-dpo --cache_dataset_only
 [2025-01-21 09:58:09,342] [WARNING] [real_accelerator.py:162:get_accelerator] Setting accelerator to CPU. If you have GPU or other accelerator, we were unable to detect it.
 [2025-01-21 09:58:09,354] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cpu (auto detect)
 Failed to get Beaker experiment: b'Error: experiment "01JD3WCQYTBPE195GVWPVMDHVV" not found\n\n'
@@ -103,7 +129,7 @@ Creating parquet from Arrow format: 100%|█████████████
 Kicked off Beaker job. https://beaker.org/ex/01JJ50D88M757GZD14W9CNN7NT
 ```
 
-It would be most helpful if you run the `mason.py` command on a vscode session with access to weka, that way, the dataset is also automatically downloaded to `HF_HOME`, etc.
+It would be most helpful if you run the `mason.py` command on a vscode session with access to weka, that way, the dataset is also automatically downloaded to the shared `HF_HOME` on weka, etc.
 
 When you inspect the job, it's going to have the following outputs, meaning the cached dataset is found and used:
 
@@ -136,7 +162,7 @@ python mason.py \
     --use_deepspeed \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
-    open_instruct/dpo_tune_cache1.py \
+    open_instruct/dpo_tune_cache.py \
     --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-SFT \
     --use_flash_attn \
     --tokenizer_name allenai/Llama-3.1-Tulu-3-8B-SFT \
