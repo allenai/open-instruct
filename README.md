@@ -105,9 +105,9 @@ You can run the following commands for getting started:
 
 ```bash
 # quick debugging run using 1 GPU
-sh scripts/train/finetune/mini.sh
+bash scripts/train/finetune/mini.sh
 # train an 8B tulu3 model using 8 GPU
-sh scripts/train/finetune/tulu_finetune_mix.sh
+bash scripts/train/finetune/tulu_finetune_mix.sh
 ```
 
 
@@ -115,9 +115,9 @@ sh scripts/train/finetune/tulu_finetune_mix.sh
 
 ```bash
 # quick debugging run using 1 GPU
-sh scripts/train/dpo/mini.sh
+bash scripts/train/dpo/mini.sh
 # train an 8B tulu3 model using 8 GPU
-sh scripts/train/dpo/tulu_preference_mix.sh
+bash scripts/train/dpo/tulu_preference_mix.sh
 ```
 
 
@@ -127,9 +127,9 @@ sh scripts/train/dpo/tulu_preference_mix.sh
 # quick debugging run using 2 GPU (1 for inference, 1 for training)
 # here we are using `HuggingFaceTB/SmolLM2-360M-Instruct`; it's prob not
 # gonna work, but it's easy to test run and print stuff.
-sh scripts/train/rlvr/mini.sh
+bash scripts/train/rlvr/mini.sh
 # train an 8B tulu3 model using 8 GPU (1 for inference, 7 for training)
-sh scripts/train/rlvr/tulu_rlvr.sh
+bash scripts/train/rlvr/tulu_rlvr.sh
 ```
 
 
