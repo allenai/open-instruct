@@ -300,7 +300,6 @@ class Args:
 
     def __post_init__(self):
         assert self.number_samples_per_prompt > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
-
         if self.self_consistency_consistency:
             assert self.number_samples_per_prompt == self.local_rollout_forward_batch_size, "You need to be able to compare all answers with all other answers at each step!"
     #     self.dataset_mixer_dict, self.dataset_mixer = process_dataset_mixer(self.dataset_mixer)
@@ -1059,6 +1058,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 context_length = queries.shape[1]
                 responses = []
                 postprocessed_responses = []
+                postprocessed_query_responses = []
                 logprobs = []
                 ref_logprobs = []
                 scores = []
@@ -1088,8 +1088,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     format_scores = torch.tensor(
                         soft_format_reward_func(decoded_response, args.r1_style_format_reward), device=device
                     )
+                
+                # Process all queries to get initial scores
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
-                    # print(f"get reward stuff starts {i=}")
                     query = queries[i : i + args.local_rollout_forward_batch_size]
                     query_response = query_responses[i : i + args.local_rollout_forward_batch_size]
                     response = query_response[:, context_length:]
@@ -1117,16 +1118,32 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Response Processing 2. run reward model on the truncated responses
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
-                    score = torch.zeros(query.shape[0], device=query.device)
-                    if args.reward_model_multiplier:
-                        _, score, _ = get_reward(
-                            self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
-                        )
-                        score *= args.reward_model_multiplier
+
+                    responses.append(response)
+                    postprocessed_query_responses.append(postprocessed_query_response)
+                    postprocessed_responses.append(postprocessed_response)
+                    logprobs.append(logprob)
+                    ref_logprobs.append(ref_logprob)
+                    sequence_lengths.append(sequence_length)
+
+                postprocessed_query_responses = torch.cat(postprocessed_query_responses, dim=0)
+                postprocessed_responses = torch.cat(postprocessed_responses, dim=0)
+
+                # Apply verifiable rewards in batches of local_rollout_batch_size
+                for i in range(0, queries.shape[0], args.number_samples_per_prompt): 
+                    postprocessed_query_response = postprocessed_query_responses[i : i + args.number_samples_per_prompt]
+                    ground_truth = ground_truths[i : i + args.number_samples_per_prompt]
+                    dataset = datasets[i : i + args.number_samples_per_prompt]
+                    
+                    score = torch.zeros(args.number_samples_per_prompt, device=query.device)
+
+                    # if args.reward_model_multiplier:
+                    #     _, score, _ = get_reward(
+                    #         self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
+                    #     )
+                    #     score *= args.reward_model_multiplier
+
                     if args.apply_verifiable_reward:
-                        # we need to batch the gt to match query.
-                        ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
-                        dataset = datasets[i : i + args.local_rollout_forward_batch_size]
                         verifiable_reward, verifiable_count = apply_verifiable_reward(
                             postprocessed_response,
                             postprocessed_query_response,
@@ -1150,25 +1167,19 @@ class PolicyTrainerRayProcess(RayProcess):
                         else:
                             print("Applying ground truth reward 🤗")
                             score += verifiable_reward
+                            
+                        verifiable_counts.append(verifiable_count)
+                        self_consistency_counts.append(self_consistency_count)
                     else:
-                        verifiable_count = torch.tensor([0.0], device=device).float()
-                        self_consistency_count = torch.tensor([0.0], device=device).float()
+                        verifiable_counts = [torch.tensor([0.0], device=device).float()] * len(responses)
+                        self_consistency_counts = [torch.tensor([0.0], device=device).float()] * len(responses)
 
                     if args.add_r1_style_format_reward:
                         score += format_scores[i : i + args.local_rollout_forward_batch_size]
 
-                    responses.append(response)
-                    postprocessed_responses.append(postprocessed_response)
-                    logprobs.append(logprob)
-                    ref_logprobs.append(ref_logprob)
-                    sequence_lengths.append(sequence_length)
                     scores.append(score)
-                    verifiable_counts.append(verifiable_count)
-                    self_consistency_counts.append(self_consistency_count)
-                    # print(f"get reward stuff starts 5")
 
                 responses = torch.cat(responses, 0)
-                postprocessed_responses = torch.cat(postprocessed_responses, 0)
                 logprobs = torch.cat(logprobs, 0)
                 ref_logprobs = torch.cat(ref_logprobs, 0)
                 sequence_lengths = torch.cat(sequence_lengths, 0)
