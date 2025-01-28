@@ -857,6 +857,7 @@ def main(args: FlatArguments):
     if (
         args.try_auto_save_to_beaker
         and accelerator.is_main_process
+        and is_beaker_job()
         and len(beaker_config.beaker_dataset_id_urls) > 0
         and args.output_dir.rstrip("/") != "/output"
     ):
