@@ -545,6 +545,7 @@ def main(args: FlatArguments):
             args.dataset_mixer_list,
             tc,
             args.max_seq_length,
+            args.hf_entity,
         )
         train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
