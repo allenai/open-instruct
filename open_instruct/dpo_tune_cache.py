@@ -27,7 +27,6 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
-from functools import partial
 from typing import Callable, List, Optional, Union
 
 import datasets
@@ -39,7 +38,6 @@ import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
 from accelerate.logging import get_logger
 from accelerate.utils import InitProcessGroupKwargs, set_seed
-from datasets import load_dataset
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from torch.utils.data import DataLoader
@@ -47,13 +45,7 @@ from tqdm.auto import tqdm
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
-    AutoTokenizer,
     BitsAndBytesConfig,
-    GPT2Tokenizer,
-    GPTNeoXTokenizerFast,
-    LlamaTokenizer,
-    LlamaTokenizerFast,
-    OPTForCausalLM,
     get_scheduler,
 )
 
