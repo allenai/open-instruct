@@ -53,7 +53,11 @@ from transformers import (
     get_scheduler,
 )
 
-from open_instruct.dataset_transformation import CHAT_TEMPLATES, TokenizerConfig, get_cached_dataset_tulu_sft
+from open_instruct.dataset_transformation import (
+    CHAT_TEMPLATES,
+    TokenizerConfig,
+    get_cached_dataset_tulu_sft,
+)
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -473,7 +477,7 @@ def main(args: FlatArguments):
         train_dataset.set_format(type="pt")
     if args.cache_dataset_only:
         return
-    
+
     # Load pretrained model and tokenizer
     if args.config_name:
         config = AutoConfig.from_pretrained(
@@ -816,7 +820,9 @@ def main(args: FlatArguments):
                             os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w"
                         ) as f:
                             f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
-                        if accelerator.is_local_main_process: # TODO: in mason local model this is gonna error out if using something like output/test; because mason used the same shared file ssytem.
+                        if (
+                            accelerator.is_local_main_process
+                        ):  # TODO: in mason local model this is gonna error out if using something like output/test; because mason used the same shared file ssytem.
                             clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
                         accelerator.wait_for_everyone()
 

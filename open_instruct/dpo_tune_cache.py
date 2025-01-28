@@ -57,7 +57,11 @@ from transformers import (
     get_scheduler,
 )
 
-from open_instruct.dataset_transformation import CHAT_TEMPLATES, TokenizerConfig, get_cached_dataset_tulu_preference
+from open_instruct.dataset_transformation import (
+    CHAT_TEMPLATES,
+    TokenizerConfig,
+    get_cached_dataset_tulu_preference,
+)
 from open_instruct.dpo_utils import (
     DataCollatorForSeq2SeqDPO,
     concatenated_forward,
@@ -419,7 +423,6 @@ class FlatArguments:
 
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
-
 
 
 def get_cache_ref_logprobs(

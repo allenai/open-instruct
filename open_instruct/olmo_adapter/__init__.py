@@ -2,10 +2,18 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 from torch import nn
-from torch.nn import MSELoss, CrossEntropyLoss, BCEWithLogitsLoss
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers.modeling_outputs import SequenceClassifierOutputWithPast
-from transformers.models.olmo2.modeling_olmo2 import Olmo2Config, Olmo2Model, Olmo2PreTrainedModel
-from transformers.models.olmoe.modeling_olmoe import OlmoeConfig, OlmoeModel, OlmoePreTrainedModel
+from transformers.models.olmo2.modeling_olmo2 import (
+    Olmo2Config,
+    Olmo2Model,
+    Olmo2PreTrainedModel,
+)
+from transformers.models.olmoe.modeling_olmoe import (
+    OlmoeConfig,
+    OlmoeModel,
+    OlmoePreTrainedModel,
+)
 
 
 class Olmo2ForSequenceClassification(Olmo2PreTrainedModel):
@@ -36,7 +44,7 @@ class Olmo2ForSequenceClassification(Olmo2PreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-    ) -> Union[Tuple, 'SequenceClassifierOutputWithPast']:
+    ) -> Union[Tuple, "SequenceClassifierOutputWithPast"]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
             Labels for computing the sequence classification/regression loss. Indices should be in `[0, ...,
@@ -116,7 +124,7 @@ class Olmo2ForSequenceClassification(Olmo2PreTrainedModel):
 
 
 class OlmoeForSequenceClassification(OlmoePreTrainedModel):
-    def __init__(self, config: Olmo2Config):
+    def __init__(self, config: OlmoeConfig):
         super().__init__(config)
         self.num_labels = config.num_labels
         self.model = OlmoeModel(config)
