@@ -105,8 +105,9 @@ def get_args():
     parser.add_argument(
         "--resumable", action="store_true", help="If given, make the job resumable"
     )
-
-
+    parser.add_argument(
+        "--no_auto_dataset_cache", action="store_true", help="If given, don't cache the dataset automatically"
+    )
     # Split up the mason args from the Python args.
     mason_args, command_args = parser.parse_known_args()
     commands = parse_commands(command_args)
@@ -412,7 +413,7 @@ def get_datasets(beaker_datasets, cluster: List[str]):
     return res
 
 
-def make_task_spec(args, command, i, beaker_secrets, whoami, resumable: bool):
+def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami: str, resumable: bool):
     # special logic to deal with escape like
     # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
     # we need to wrap the json string with single quote
@@ -427,6 +428,27 @@ def make_task_spec(args, command, i, beaker_secrets, whoami, resumable: bool):
         "git config --global safe.directory '*' && " # fix the permission issue with git
         "umask 000 && " # fix the permission issue with the cache folder
     )
+    
+    # HACK: Cache dataset logic:
+    # Here we basically try to run the tokenization full_command locally before running it on beaker
+    # We could in theory submit a cpu only job to beaker to do this, but that requires setting up
+    # dependency jobs somehow. Since tokenization is like ~5 minutes, we can just run it locally.
+    # Once it's cached, we don't need to cache it again.
+    def find_list_idx(lst: List[str], item: str):
+        for i in range(len(lst)):
+            if item == lst[i]:
+                return i
+        return -1
+    if not args.no_auto_dataset_cache:
+        for file in ["open_instruct/finetune.py", "open_instruct/dpo_tune_cache.py"]:
+            idx = find_list_idx(full_command, file)
+            if idx != -1:
+                # then try executing the same full_command with 
+                caching_command = "python " + " ".join(full_command[idx:]) + " --cache_dataset_only"
+                print(f"📦📦📦 Running the caching full_command: {caching_command}")
+                os.system(caching_command)
+                print("✅✅✅ Finished running the caching full_command")
+
     if not args.pure_docker_mode:
         setup_commands += f"cd {os.getcwd()} && "
 

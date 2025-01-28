@@ -22,9 +22,8 @@ python mason.py \
     --preemptible \
     --budget ai2/allennlp \
     --gpus 0 -- python scripts/cache_hf.py \
-    --model_name_or_path "allenai/Llama-3.1-Tulu-3-8B-DPO" \
-    --model_revision "1208_dpo_13b_tune8e-7__allenai_open_instruct_dev__8__1733807565" \
-    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0
+    --model_name_or_path "allenai/open_instruct_dev" \
+    --model_revision "reward_modeling__1__1737836233" \
 """
 
 
