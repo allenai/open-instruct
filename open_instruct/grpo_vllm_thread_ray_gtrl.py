@@ -898,6 +898,7 @@ class PolicyTrainerRayProcess(RayProcess):
             args.num_mini_batches * args.number_samples_per_prompt,
             args.gradient_accumulation_steps,
         )
+        non_score_reward_sum_stats = torch.zeros(stats_shape, device=device)
         approxkl_stats = torch.zeros(stats_shape, device=device)
         pg_clipfrac_stats = torch.zeros(stats_shape, device=device)
         pg_loss_stats = torch.zeros(stats_shape, device=device)
@@ -1131,20 +1132,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 reward_mean = mean_grouped_rewards
                 reward_std = std_grouped_rewards
 
-                # 4. compute rewards
-                kl1 = logprobs - ref_logprobs
-                kl2 = (kl1) ** 2 / 2
-                kl3 = (-kl1).exp() - 1 + kl1
-                if args.kl_estimator == "kl1":
-                    kl = kl1
-                elif args.kl_estimator == "kl2":
-                    kl = kl2
-                elif args.kl_estimator == "kl3":
-                    kl = kl3
-
-                non_score_reward = -args.beta * kl
-                non_score_reward_sum = non_score_reward.sum(1)
-                rlhf_reward = scores + non_score_reward_sum
 
             # print('training starts')
             # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
@@ -1180,7 +1167,20 @@ class PolicyTrainerRayProcess(RayProcess):
                         pg_loss_max = torch.max(pg_losses, pg_losses2)
                         pg_loss = masked_mean(pg_loss_max, ~padding_mask[micro_batch_inds])
                         # grpo change: directly subtract KL in loss (add)
-                        pg_loss = pg_loss + (args.beta * kl[micro_batch_inds]).mean()
+
+                        # kl loss should be computed without torch.no_grad()
+                        kl1 = new_logprobs - ref_logprobs
+                        kl2 = (kl1) ** 2 / 2
+                        kl3 = (-kl1).exp() - 1 + kl1
+                        if args.kl_estimator == "kl1":
+                            kl = kl1
+                        elif args.kl_estimator == "kl2":
+                            kl = kl2
+                        elif args.kl_estimator == "kl3":
+                            kl = kl3
+
+
+                        pg_loss = pg_loss + (args.beta * kl).mean()
                         loss = pg_loss
                         self.model.backward(loss)
                         # print("backward loss", self.rank, "micro batch start", micro_batch_start)
@@ -1196,6 +1196,10 @@ class PolicyTrainerRayProcess(RayProcess):
                             # print("value model stepped", self.rank, "micro batch start", micro_batch_start)
                             # prob_dist = torch.nn.functional.softmax(logits, dim=-1)
                             # entropy = torch.logsumexp(logits, dim=-1) - torch.sum(prob_dist * logits, dim=-1)
+                            non_score_reward = -args.beta * kl
+                            non_score_reward_sum = non_score_reward.sum(1).mean()
+                            non_score_reward_sum_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = non_score_reward_sum
+                            # print("step finished", self.rank, "micro batch start", micro_batch_start)
                             approxkl = 0.5 * (logprobs_diff**2).mean()
                             approxkl_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = approxkl
                             pg_clipfrac_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = pg_clipfrac
@@ -1217,8 +1221,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics[1] = (responses == args.stop_token_id).sum().float().mean()
                 local_metrics[2] = kl.sum(1).mean()
                 local_metrics[3] = (-logprobs).sum(1).mean()
-                local_metrics[4] = non_score_reward_sum.mean()
-                local_metrics[5] = rlhf_reward.mean()
+                local_metrics[4] = non_score_reward_sum_stats.mean()
+                local_metrics[5] = scores.mean() + non_score_reward_sum_stats.mean()
                 local_metrics[6] = scores.mean()
                 local_metrics[7] = approxkl_stats.mean()
                 local_metrics[8] = pg_clipfrac_stats.mean()
