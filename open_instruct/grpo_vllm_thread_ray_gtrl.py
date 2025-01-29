@@ -1169,7 +1169,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         # grpo change: directly subtract KL in loss (add)
 
                         # kl loss should be computed without torch.no_grad()
-                        kl1 = new_logprobs - ref_logprobs
+                        kl1 = new_logprobs - ref_logprobs[micro_batch_inds]
                         kl2 = (kl1) ** 2 / 2
                         kl3 = (-kl1).exp() - 1 + kl1
                         if args.kl_estimator == "kl1":
