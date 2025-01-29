@@ -910,7 +910,7 @@ class PolicyTrainerRayProcess(RayProcess):
         reward_std = torch.zeros(stats_shape, device=device)
         entropy_stats = torch.zeros(stats_shape, device=device)
         ratio_stats = torch.zeros(stats_shape, device=device)
-        local_metrics = torch.zeros((20,), device=device)
+        local_metrics = torch.zeros((32,), device=device)
         episode = args.rollout_batch_size * (resume_training_step - 1)
 
         # training loop
