@@ -903,6 +903,7 @@ class PolicyTrainerRayProcess(RayProcess):
             args.gradient_accumulation_steps,
         )
         non_score_reward_sum_stats = torch.zeros(stats_shape, device=device)
+        kl_stats = torch.zeros((args.local_rollout_batch_size * args.number_samples_per_prompt), device=device)
         approxkl_stats = torch.zeros(stats_shape, device=device)
         pg_clipfrac_stats = torch.zeros(stats_shape, device=device)
         pg_loss_stats = torch.zeros(stats_shape, device=device)
@@ -967,11 +968,12 @@ class PolicyTrainerRayProcess(RayProcess):
                     ground_truths_next = data[GROUND_TRUTHS_KEY]
                     datasets_next = data[DATASET_SOURCE_KEY]
 
-                start_time = time.time()
+                start_time = time.perf_counter()
+                # torch.cuda.synchronize() # this could make the measurement more accurate
                 broadcast_to_vllm()
                 if accelerator.is_main_process:
                     print(
-                        f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds"
+                        f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.perf_counter() - start_time:.2f} seconds"
                     )
                     param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
             else:
@@ -1156,6 +1158,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         mb_responses = responses[micro_batch_inds]
                         mb_query_responses = query_responses[micro_batch_inds]
                         mb_logprobs = logprobs[micro_batch_inds]
+                        mb_reflogprobs = ref_logprobs[micro_batch_inds]
 
                         new_logprobs = self.forward(
                             mb_query_responses, mb_responses, tokenizer.pad_token_id, context_length, args.temperature
@@ -1170,14 +1173,12 @@ class PolicyTrainerRayProcess(RayProcess):
                             ratio, 1.0 - args.cliprange, 1.0 + args.cliprange
                         )
                         pg_loss_max = torch.max(pg_losses, pg_losses2)
-                        pg_loss = masked_mean(pg_loss_max, ~padding_mask[micro_batch_inds])
-                        # grpo change: directly subtract KL in loss (add)
 
                         # recalculate kl: difference from PPO because we want the KL loss
                         # to backpropagate through the model
                         # TODO: we potentially need to clip this kl loss in case some logits
                         # exploded, but more on it later.
-                        kl1 = new_logprobs - ref_logprobs[micro_batch_inds]
+                        kl1 = new_logprobs - mb_reflogprobs
                         kl2 = (kl1) ** 2 / 2
                         kl3 = (-kl1).exp() - 1 + kl1
                         if args.kl_estimator == "kl1":
@@ -1186,8 +1187,12 @@ class PolicyTrainerRayProcess(RayProcess):
                             kl = kl2
                         elif args.kl_estimator == "kl3":
                             kl = kl3
-
-                        pg_loss = pg_loss + (args.beta * kl).mean()
+                        
+                        if epoch_idx == 0:
+                            kl_stats[micro_batch_inds] = kl.sum(1).float()
+                        
+                        # grpo change: directly subtract KL in loss (add)
+                        pg_loss = masked_mean(pg_loss_max + (args.beta * kl), ~padding_mask[micro_batch_inds])
                         loss = pg_loss
                         self.model.backward(loss)
                         # print("backward loss", self.rank, "micro batch start", micro_batch_start)
@@ -1227,7 +1232,7 @@ class PolicyTrainerRayProcess(RayProcess):
             with torch.no_grad():
                 local_metrics[0] = sequence_lengths.float().mean()
                 local_metrics[1] = (responses == args.stop_token_id).sum().float().mean()
-                local_metrics[2] = kl.sum(1).mean()
+                local_metrics[2] = kl_stats.mean()
                 local_metrics[3] = (-logprobs).sum(1).mean()
                 local_metrics[4] = non_score_reward_sum_stats.mean()
                 local_metrics[5] = scores.mean() + non_score_reward_sum_stats.mean()
@@ -1412,10 +1417,9 @@ python scripts/submit_eval_jobs.py \
     --preemptible \
     --use_hf_tokenizer_template \
     --beaker_image "nathanl/open_instruct_auto" \
-    --upload_to_hf allenai/tulu-3-evals \
     --run_oe_eval_experiments \
     --evaluate_on_weka \
-    --run_safety_evaluations \
+    --oe_eval_tasks gsm8k::tulu,minerva_math::tulu \
     --run_id {wandb_url} \
     --step {training_step} \
     --skip_oi_evals"""
