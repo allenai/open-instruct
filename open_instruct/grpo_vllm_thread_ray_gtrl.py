@@ -225,7 +225,7 @@ class Args:
     """the clip range"""
     gamma: float = 1
     """the discount factor"""
-    kl_estimator: Literal["kl1", "kl2", "kl3"] = "kl1"
+    kl_estimator: Literal["kl1", "kl2", "kl3", "kl4"] = "kl3"
     """the KL estimator to use"""
     apply_verifiable_reward: bool = False
     """whether to apply verifiable reward"""
@@ -485,6 +485,34 @@ def masked_whiten(values: torch.Tensor, mask: torch.Tensor, shift_mean: bool = T
 
 def remove_padding(sequences, pad_token_id):
     return [[inneritem for inneritem in item if inneritem != pad_token_id] for item in sequences]
+
+
+class MetricsTracker:
+    """A simple class to prellocate all metrics in an array
+    so we can do only one allreduce operation to get the metrics mean"""
+
+    def __init__(self, max_metrics: int = 32, device: torch.device = torch.device("cuda")):
+        self.metrics = torch.zeros(max_metrics, device=device)
+        self.names2idx = {}
+        self.current_idx = 0
+        self.max_metrics = max_metrics
+
+    def add(self, name: str, value: torch.tensor):
+        if name not in self.names2idx:
+            if self.current_idx >= self.max_metrics:
+                raise ValueError(f"Exceeded maximum number of metrics ({self.max_metrics})")
+            self.names2idx[name] = self.current_idx
+            self.current_idx += 1
+
+        self.metrics[self.names2idx[name]] = value
+        return self
+
+    def get_reduced_metrics(self) -> dict[str, float]:
+        self.metrics /= dist.get_world_size()
+        dist.all_reduce(self.metrics, op=dist.ReduceOp.SUM)
+        # convert to list so to avoid multiple .item() torch calls
+        reduced_metrics = self.metrics.tolist()
+        return {name: reduced_metrics[idx] for name, idx in self.names2idx.items()}
 
 
 class ShufflingIterator:
@@ -903,14 +931,20 @@ class PolicyTrainerRayProcess(RayProcess):
             args.gradient_accumulation_steps,
         )
         non_score_reward_sum_stats = torch.zeros(stats_shape, device=device)
+        kl1_stats = torch.zeros((args.local_rollout_batch_size * args.number_samples_per_prompt), device=device)
+        kl2_stats = torch.zeros((args.local_rollout_batch_size * args.number_samples_per_prompt), device=device)
+        kl3_stats = torch.zeros((args.local_rollout_batch_size * args.number_samples_per_prompt), device=device)
+        kl4_stats = torch.zeros((args.local_rollout_batch_size * args.number_samples_per_prompt), device=device)
         approxkl_stats = torch.zeros(stats_shape, device=device)
         pg_clipfrac_stats = torch.zeros(stats_shape, device=device)
         pg_loss_stats = torch.zeros(stats_shape, device=device)
+        loss_stats = torch.zeros(stats_shape, device=device)
         reward_mean = torch.zeros(stats_shape, device=device)
         reward_std = torch.zeros(stats_shape, device=device)
         entropy_stats = torch.zeros(stats_shape, device=device)
         ratio_stats = torch.zeros(stats_shape, device=device)
-        local_metrics = torch.zeros((32,), device=device)
+        # local_metrics = torch.zeros((32,), device=device)
+        local_metrics = MetricsTracker(max_metrics=32, device=device)
         episode = args.rollout_batch_size * (resume_training_step - 1)
 
         # training loop
@@ -967,11 +1001,12 @@ class PolicyTrainerRayProcess(RayProcess):
                     ground_truths_next = data[GROUND_TRUTHS_KEY]
                     datasets_next = data[DATASET_SOURCE_KEY]
 
-                start_time = time.time()
+                start_time = time.perf_counter()
+                # torch.cuda.synchronize() # this could make the measurement more accurate
                 broadcast_to_vllm()
                 if accelerator.is_main_process:
                     print(
-                        f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds"
+                        f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.perf_counter() - start_time:.2f} seconds"
                     )
                     param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
             else:
@@ -1156,6 +1191,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         mb_responses = responses[micro_batch_inds]
                         mb_query_responses = query_responses[micro_batch_inds]
                         mb_logprobs = logprobs[micro_batch_inds]
+                        mb_reflogprobs = ref_logprobs[micro_batch_inds]
 
                         new_logprobs = self.forward(
                             mb_query_responses, mb_responses, tokenizer.pad_token_id, context_length, args.temperature
@@ -1170,25 +1206,32 @@ class PolicyTrainerRayProcess(RayProcess):
                             ratio, 1.0 - args.cliprange, 1.0 + args.cliprange
                         )
                         pg_loss_max = torch.max(pg_losses, pg_losses2)
-                        pg_loss = masked_mean(pg_loss_max, ~padding_mask[micro_batch_inds])
-                        # grpo change: directly subtract KL in loss (add)
 
-                        # recalculate kl: difference from PPO because we want the KL loss
-                        # to backpropagate through the model
-                        # TODO: we potentially need to clip this kl loss in case some logits
-                        # exploded, but more on it later.
-                        kl1 = new_logprobs - ref_logprobs[micro_batch_inds]
-                        kl2 = (kl1) ** 2 / 2
-                        kl3 = (-kl1).exp() - 1 + kl1
+                        # Here we recalculate kl: we want the KL loss to backpropagate through the model
+                        # We also clamp the KL loss to avoid numerical instability
+                        # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
+                        ref_logprobs_diff = (new_logprobs - mb_reflogprobs).clamp(-40.0, 40.0)
+                        kl1 = ref_logprobs_diff
+                        kl2 = (ref_logprobs_diff) ** 2 / 2
+                        kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff  # this is more numerically stable
+                        kl4 = ratio * ref_logprobs_diff
                         if args.kl_estimator == "kl1":
                             kl = kl1
                         elif args.kl_estimator == "kl2":
                             kl = kl2
                         elif args.kl_estimator == "kl3":
                             kl = kl3
+                        elif args.kl_estimator == "kl4":
+                            kl = kl4
 
-                        pg_loss = pg_loss + (args.beta * kl).mean()
-                        loss = pg_loss
+                        if epoch_idx == 0:
+                            kl1_stats[micro_batch_inds] = kl1.sum(1).float()
+                            kl2_stats[micro_batch_inds] = kl2.sum(1).float()
+                            kl3_stats[micro_batch_inds] = kl3.sum(1).float()
+                            kl4_stats[micro_batch_inds] = kl4.sum(1).float()
+
+                        # grpo change: directly subtract KL in loss (add)
+                        loss = masked_mean(pg_loss_max + (args.beta * kl), ~padding_mask[micro_batch_inds])
                         self.model.backward(loss)
                         # print("backward loss", self.rank, "micro batch start", micro_batch_start)
                         # print("trying to step", self.rank, "micro batch start", micro_batch_start)
@@ -1211,45 +1254,47 @@ class PolicyTrainerRayProcess(RayProcess):
                             approxkl = 0.5 * (logprobs_diff**2).mean()
                             approxkl_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = approxkl
                             pg_clipfrac_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = pg_clipfrac
-                            pg_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = pg_loss
+                            pg_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = masked_mean(
+                                pg_loss_max, ~padding_mask[micro_batch_inds]
+                            )
+                            loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = loss
                             # entropy_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = entropy.mean()
                             ratio_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = ratio.mean()
                         gradient_accumulation_idx += 1
                     minibatch_idx += 1
                     # fmt: off
                     del mb_advantage, mb_responses, mb_query_responses, mb_logprobs
-                    del new_logprobs, logprobs_diff, ratio, pg_losses, pg_losses2, pg_loss_max, pg_loss, loss
+                    del new_logprobs, logprobs_diff, ratio, pg_losses, pg_losses2, pg_loss_max, loss
                     # fmt: on
                     # del everything and empty cache
                     torch.cuda.empty_cache()
                 del b_inds, mini_batch_inds
             # print("start metrics")
             with torch.no_grad():
-                local_metrics[0] = sequence_lengths.float().mean()
-                local_metrics[1] = (responses == args.stop_token_id).sum().float().mean()
-                local_metrics[2] = kl.sum(1).mean()
-                local_metrics[3] = (-logprobs).sum(1).mean()
-                local_metrics[4] = non_score_reward_sum_stats.mean()
-                local_metrics[5] = scores.mean() + non_score_reward_sum_stats.mean()
-                local_metrics[6] = scores.mean()
-                local_metrics[7] = approxkl_stats.mean()
-                local_metrics[8] = pg_clipfrac_stats.mean()
-                local_metrics[9] = pg_loss_stats.mean()
-                local_metrics[10] = reward_mean.mean()
-                local_metrics[11] = reward_std.mean()
-                local_metrics[12] = entropy_stats.mean()
-                local_metrics[13] = ratio_stats.mean()
-                local_metrics[14] = ratio_stats.var()
-                local_metrics[15] = ((kl) ** 2 / 2).sum(1).mean()
-                local_metrics[16] = ((-kl).exp() - 1 + kl).sum(1).mean()
-                local_metrics[17] = verifiable_correct_rate
-                local_metrics[18] = contain_stop_token.float().mean()
-                local_metrics[19] = sequence_lengths.float().min()
-                local_metrics[20] = sequence_lengths.float().max()
-                # global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
-                local_metrics /= dist.get_world_size()
-                dist.all_reduce(local_metrics, op=dist.ReduceOp.SUM)
-                global_metrics = local_metrics.tolist()
+                local_metrics.add("val/sequence_lengths", sequence_lengths.float().mean())
+                local_metrics.add("val/sequence_lengths_min", sequence_lengths.float().min())
+                local_metrics.add("val/sequence_lengths_max", sequence_lengths.float().max())
+                local_metrics.add("val/num_stop_token_ids", (responses == args.stop_token_id).sum().float().mean())
+                local_metrics.add("objective/kl", kl1_stats.mean())
+                local_metrics.add("objective/kl2", kl2_stats.mean())
+                local_metrics.add("objective/kl3", kl3_stats.mean())
+                local_metrics.add("objective/kl4", kl4_stats.mean())
+                local_metrics.add("objective/entropy", (-logprobs).sum(1).mean())
+                local_metrics.add("objective/non_score_reward", non_score_reward_sum_stats.mean())
+                local_metrics.add("objective/rlhf_reward", scores.mean() + non_score_reward_sum_stats.mean())
+                local_metrics.add("objective/scores", scores.mean())
+                local_metrics.add("objective/scores_mean", reward_mean.mean())
+                local_metrics.add("objective/reward_std", reward_std.mean())
+                local_metrics.add("objective/verifiable_correct_rate", verifiable_correct_rate)
+                local_metrics.add("loss/policy_avg", pg_loss_stats.mean())
+                local_metrics.add("loss/policy_avg", loss_stats.mean())
+                local_metrics.add("policy/approxkl_avg", approxkl_stats.mean())
+                local_metrics.add("policy/clipfrac_avg", pg_clipfrac_stats.mean())
+                local_metrics.add("policy/entropy_avg", entropy_stats.mean())
+                local_metrics.add("val/ratio", ratio_stats.mean())
+                local_metrics.add("val/ratio_var", ratio_stats.var())
+                local_metrics.add("val/stop_token_rate", contain_stop_token.float().mean())
+
                 metrics = {
                     "episode": episode,
                     "training_step": training_step,
@@ -1257,33 +1302,13 @@ class PolicyTrainerRayProcess(RayProcess):
                     "epoch": episode / len(train_dataset),
                     "time/from_scratch": time.time() - start_time,
                     "time/training": time.time() - training_time_start,
-                    "val/sequence_lengths": global_metrics[0],
-                    "val/sequence_lengths_min": global_metrics[19],
-                    "val/sequence_lengths_max": global_metrics[20],
-                    "val/num_stop_token_ids": global_metrics[1],
-                    "objective/kl": global_metrics[2],
-                    "objective/kl2": global_metrics[15],
-                    "objective/kl3": global_metrics[16],
-                    "objective/entropy": global_metrics[3],
-                    "objective/non_score_reward": global_metrics[4],
-                    "objective/rlhf_reward": global_metrics[5],
-                    "objective/scores": global_metrics[6],
-                    "policy/approxkl_avg": global_metrics[7],
-                    "policy/clipfrac_avg": global_metrics[8],
-                    "loss/policy_avg": global_metrics[9],
-                    "objective/scores_mean": global_metrics[10],
-                    "objective/reward_std": global_metrics[11],
-                    "policy/entropy_avg": global_metrics[12],
-                    "val/ratio": global_metrics[13],
-                    "val/ratio_var": global_metrics[14],
-                    "objective/verifiable_correct_rate": global_metrics[17],
-                    "val/stop_token_rate": global_metrics[18],
+                    **local_metrics.get_reduced_metrics(),
                 }
                 if accelerator.is_main_process:
                     print_rich_single_line_metrics(metrics)
                     metrics_queue.put((metrics, episode, df))
             del (queries, responses, postprocessed_responses, logprobs, ref_logprobs, sequence_lengths, scores)
-            del (global_metrics, metrics, kl)
+            del (metrics, kl)
             gc.collect()
             torch.cuda.empty_cache()
             # print(f"finished training {training_step}")
@@ -1412,10 +1437,9 @@ python scripts/submit_eval_jobs.py \
     --preemptible \
     --use_hf_tokenizer_template \
     --beaker_image "nathanl/open_instruct_auto" \
-    --upload_to_hf allenai/tulu-3-evals \
     --run_oe_eval_experiments \
     --evaluate_on_weka \
-    --run_safety_evaluations \
+    --oe_eval_tasks gsm8k::tulu,minerva_math::tulu \
     --run_id {wandb_url} \
     --step {training_step} \
     --skip_oi_evals"""
