@@ -490,19 +490,20 @@ def remove_padding(sequences, pad_token_id):
 class MetricsTracker:
     """A simple class to prellocate all metrics in an array
     so we can do only one allreduce operation to get the metrics mean"""
+
     def __init__(self, max_metrics: int = 32, device: torch.device = torch.device("cuda")):
         self.metrics = torch.zeros(max_metrics, device=device)
         self.names2idx = {}
         self.current_idx = 0
         self.max_metrics = max_metrics
-    
+
     def add(self, name: str, value: torch.tensor):
         if name not in self.names2idx:
             if self.current_idx >= self.max_metrics:
                 raise ValueError(f"Exceeded maximum number of metrics ({self.max_metrics})")
             self.names2idx[name] = self.current_idx
             self.current_idx += 1
-        
+
         self.metrics[self.names2idx[name]] = value
         return self
 
@@ -512,7 +513,6 @@ class MetricsTracker:
         # convert to list so to avoid multiple .item() torch calls
         reduced_metrics = self.metrics.tolist()
         return {name: reduced_metrics[idx] for name, idx in self.names2idx.items()}
-
 
 
 class ShufflingIterator:
@@ -1213,7 +1213,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         ref_logprobs_diff = (new_logprobs - mb_reflogprobs).clamp(-40.0, 40.0)
                         kl1 = ref_logprobs_diff
                         kl2 = (ref_logprobs_diff) ** 2 / 2
-                        kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff # this is more numerically stable
+                        kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff  # this is more numerically stable
                         kl4 = ratio * ref_logprobs_diff
                         if args.kl_estimator == "kl1":
                             kl = kl1
@@ -1229,7 +1229,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             kl2_stats[micro_batch_inds] = kl2.sum(1).float()
                             kl3_stats[micro_batch_inds] = kl3.sum(1).float()
                             kl4_stats[micro_batch_inds] = kl4.sum(1).float()
-                        
+
                         # grpo change: directly subtract KL in loss (add)
                         loss = masked_mean(pg_loss_max + (args.beta * kl), ~padding_mask[micro_batch_inds])
                         self.model.backward(loss)
@@ -1254,7 +1254,9 @@ class PolicyTrainerRayProcess(RayProcess):
                             approxkl = 0.5 * (logprobs_diff**2).mean()
                             approxkl_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = approxkl
                             pg_clipfrac_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = pg_clipfrac
-                            pg_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = masked_mean(pg_loss_max, ~padding_mask[micro_batch_inds])
+                            pg_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = masked_mean(
+                                pg_loss_max, ~padding_mask[micro_batch_inds]
+                            )
                             loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = loss
                             # entropy_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = entropy.mean()
                             ratio_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = ratio.mean()
