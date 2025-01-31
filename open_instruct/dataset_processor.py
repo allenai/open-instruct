@@ -156,7 +156,15 @@ CHAT_TEMPLATES = {
         "The reasoning process and answer are enclosed within <think> </think>"
         "and <answer> </answer> tags, respectively,"
         "i.e., <think> reasoning process here </think>"
-        "<answer> answer here </answer>. User: prompt. Assistant:"
+        "<answer> answer here </answer>."
+        "\n\n"
+        "{% for message in messages %}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['role'].capitalize() + ': ' + message['content'] + '\n' }}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ 'Assistant:' }}"
+        "{% endif %}"
+        "{% endfor %}"
     ),
 }
 # flake8: noqa
