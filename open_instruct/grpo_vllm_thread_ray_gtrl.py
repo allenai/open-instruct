@@ -42,6 +42,7 @@ from argparse import Namespace
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
+from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_rlvr
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 
@@ -54,7 +55,7 @@ import torch.distributed as dist
 import torch.nn.functional as F
 import torch.utils
 import torch.utils.data
-from datasets import Dataset, DatasetDict
+from datasets import Dataset
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from huggingface_hub import HfApi
 from ray.util.placement_group import PlacementGroup, placement_group
@@ -63,7 +64,6 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
 from transformers import (
-    AutoConfig,
     AutoModelForCausalLM,
     AutoModelForSequenceClassification,
     AutoTokenizer,
@@ -75,12 +75,10 @@ from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
 from open_instruct.dataset_processor import (
-    CHAT_TEMPLATES,
     DATASET_SOURCE_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     DatasetConfig,
-    SFTGroundTruthDatasetProcessor,
     SimpleGenerateCollatorWithGroundTruth,
     visualize_token,
 )
@@ -117,18 +115,14 @@ INVALID_LOGPROB = 1.0
 @dataclass
 class Args:
     # required dataset args
-    dataset_mixer: str = None
-    """A dictionary of datasets (local or HF) to sample from."""
-    dataset_train_splits: List[str] = None
+    dataset_mixer_list: List[str] = None
+    """A list of datasets (local or HF) to sample from."""
+    dataset_mixer_eval_list: List[str] = None
+    """A list of datasets (local or HF) to sample from for evaluation."""
+    dataset_mixer_list_splits: List[str] = None
     """The dataset splits to use for training"""
-    dataset_eval_mixer: Optional[str] = None
-    """A dictionary of datasets (local or HF) to sample from for evaluation"""
-    dataset_eval_splits: Optional[List[str]] = None
+    dataset_mixer_eval_list_splits: Optional[List[str]] = None
     """The dataset splits to use for evaluation"""
-    dataset_mixer_dict: Optional[dict] = None
-    """The dataset mixer as a dictionary"""
-    dataset_eval_mixer_dict: Optional[dict] = None
-    """The dataset eval mixer as a dictionary"""
 
     # common args
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -276,6 +270,8 @@ class Args:
     """Where to save the model"""
     checkpoint_output_dir: Optional[str] = None
     """Where to save the model checkpoints in case of preemption"""
+    cache_dataset_only: bool = False
+    """Immediately exit after caching the dataset"""
 
     # Ai2 specific settings
     try_launch_beaker_eval_jobs: bool = True
@@ -291,9 +287,9 @@ class Args:
 
     def __post_init__(self):
         assert self.number_samples_per_prompt > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
-        self.dataset_mixer_dict, self.dataset_mixer = process_dataset_mixer(self.dataset_mixer)
-        if self.dataset_eval_mixer is not None:
-            self.dataset_eval_mixer_dict, self.dataset_eval_mixer = process_dataset_mixer(self.dataset_eval_mixer)
+    #     self.dataset_mixer_dict, self.dataset_mixer = process_dataset_mixer(self.dataset_mixer)
+    #     if self.dataset_eval_mixer is not None:
+    #         self.dataset_eval_mixer_dict, self.dataset_eval_mixer = process_dataset_mixer(self.dataset_eval_mixer)
 
 
 def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
@@ -943,7 +939,6 @@ class PolicyTrainerRayProcess(RayProcess):
         reward_std = torch.zeros(stats_shape, device=device)
         entropy_stats = torch.zeros(stats_shape, device=device)
         ratio_stats = torch.zeros(stats_shape, device=device)
-        # local_metrics = torch.zeros((32,), device=device)
         local_metrics = MetricsTracker(max_metrics=32, device=device)
         episode = args.rollout_batch_size * (resume_training_step - 1)
 
@@ -1437,9 +1432,8 @@ python scripts/submit_eval_jobs.py \
     --preemptible \
     --use_hf_tokenizer_template \
     --beaker_image "nathanl/open_instruct_auto" \
-    --run_oe_eval_experiments \
-    --evaluate_on_weka \
     --oe_eval_tasks gsm8k::tulu,minerva_math::tulu \
+    --evaluate_on_weka \
     --run_id {wandb_url} \
     --step {training_step} \
     --skip_oi_evals"""
@@ -1556,76 +1550,52 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    # create a tokenizer (pad from right)
-    config = AutoConfig.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision)
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_config.model_name_or_path, revision=model_config.model_revision, padding_side="right"
-    )
-    if config.architectures == "LlamaForCausalLM" and config.bos_token_id == 128000:
-        tokenizer.pad_token_id = 128002  # <|reserved_special_token_0|>
-    else:
-        tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
-    if dataset_config.chat_template is not None:
-        tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
 
-    # create the dataset
-    dataset_dict = DatasetDict()
-    dataset_processor = SFTGroundTruthDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
-    if len(args.dataset_train_splits) != len(args.dataset_mixer_dict) and len(args.dataset_train_splits) == 1:
-        args.dataset_train_splits = [args.dataset_train_splits[0]] * len(args.dataset_mixer_dict)
-        print(
-            f"Dataset splits not provided for all datasets. Using the same {args.dataset_train_splits[0]} split for all datasets."
-        )
-    # if len(args.dataset_eval_splits) != len(args.dataset_eval_mixer_dict) and len(args.dataset_eval_splits) == 1:
-    #     args.dataset_eval_splits = [args.dataset_eval_splits[0]] * len(args.dataset_eval_mixer_dict)
-    #     print(
-    #         f"Dataset splits not provided for all datasets. Using the same {args.dataset_eval_splits[0]} split for all datasets."
-    #     )
-    train_dataset = combine_dataset(
-        args.dataset_mixer_dict,
-        splits=args.dataset_train_splits,
-        columns_to_keep=[
-            dataset_config.sft_messages_key,
-            dataset_config.ground_truths_key,
-            dataset_config.dataset_source_key,
-        ],
+    tokenizer_revision = model_config.model_revision if model_config.tokenizer_revision is None else model_config.tokenizer_revision
+    tokenizer_name = model_config.tokenizer_name if model_config.tokenizer_name is not None else model_config.model_name_or_path
+    if tokenizer_revision != model_config.model_revision:
+        # Warn user if tokenizer and model use different revisions; this is an unusual
+        # use case.
+        warning = f"""Requested tokenizer revision `{tokenizer_revision}` is different
+                   from the model revision `{model_config.model_revision}`."""
+        print(warning)
+    tc = TokenizerConfig(
+        model_name_or_path=tokenizer_name,
+        revision=model_config.model_revision,
+        use_fast=not model_config.use_slow_tokenizer,
+        chat_template_name=model_config.chat_template_name,
+        add_bos=model_config.add_bos,
     )
-    if dataset_config.sanity_check:
-        train_dataset = train_dataset.select(
-            range(0, min(len(train_dataset), dataset_config.sanity_check_max_samples))
-        )
-    train_dataset = dataset_processor.tokenize(train_dataset)
-    train_dataset = dataset_processor.filter(train_dataset, need_contain_labels=False)
-    dataset_dict["train"] = train_dataset
+    tokenizer = tc.tokenizer
+    train_dataset = get_cached_dataset_rlvr(
+        args.dataset_mixer_list,
+        args.dataset_mixer_list_splits,
+        tc,
+        dataset_config.max_prompt_token_length,
+        dataset_config.max_token_length,
+        args.hf_entity,
+    )
+    train_dataset.shuffle(seed=args.seed)
     eval_dataset = None
-    if args.dataset_eval_mixer is not None:
-        eval_dataset = combine_dataset(
-            args.dataset_eval_mixer_dict,
-            splits=args.dataset_eval_splits,
-            columns_to_keep=[
-                dataset_config.sft_messages_key,
-                dataset_config.ground_truths_key,
-                dataset_config.dataset_source_key,
-            ],
+    if args.dataset_mixer_eval_list is not None:
+        eval_dataset = get_cached_dataset_rlvr(
+            args.dataset_mixer_eval_list,
+            args.dataset_mixer_eval_list_splits,
+            tc,
+            dataset_config.max_prompt_token_length,
+            dataset_config.max_token_length,
+            args.hf_entity,
         )
-        if dataset_config.sanity_check:
-            eval_dataset = eval_dataset.select(
-                range(0, min(len(eval_dataset), dataset_config.sanity_check_max_samples))
-            )
-        eval_dataset = dataset_processor.tokenize(eval_dataset)
-        eval_dataset = dataset_processor.filter(eval_dataset, need_contain_labels=False)
-        dataset_dict["eval"] = eval_dataset
+        eval_dataset.shuffle(seed=args.seed)
+    if args.cache_dataset_only:
+        return
+
     data_collator = SimpleGenerateCollatorWithGroundTruth(pad_token_id=tokenizer.pad_token_id)
 
     # some more runtime logging
     pprint([args, dataset_config, model_config])
     visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
-    if args.with_tracking:
-        # upload the visualized token length
-        dataset_processor.get_token_length_visualization(
-            dataset_dict, save_path=f"runs/{args.run_name}/token_length.png"
-        )
-        wandb.log({"token_length": wandb.Image(f"runs/{args.run_name}/token_length.png")})
+    breakpoint()
 
     # create the model and optimizer
     pg = None
