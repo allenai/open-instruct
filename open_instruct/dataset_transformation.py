@@ -164,13 +164,13 @@ CHAT_TEMPLATES = {
         "{% endfor %}"
     ),
     "r1_simple_chat": (
-        "A conversation between User and Assistant."
-        "The user asks a question, and the Assistant solves it."
+        "A conversation between User and Assistant. "
+        "The user asks a question, and the Assistant solves it. "
         "The assistant first thinks about the reasoning process in"
-        "the mind and then provides the user with the answer."
+        "the mind and then provides the user with the answer. "
         "The reasoning process and answer are enclosed within <think> </think>"
-        "and <answer> </answer> tags, respectively,"
-        "i.e., <think> reasoning process here </think>"
+        "and <answer> </answer> tags, respectively, "
+        "i.e., <think> reasoning process here </think> "
         "<answer> answer here </answer>."
         "\n\n"
         "{% for message in messages %}"
