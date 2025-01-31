@@ -52,6 +52,16 @@ class ModelConfig:
     """The model checkpoint for weights initialization."""
     model_revision: Optional[str] = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
+    tokenizer_name: Optional[str] = None
+    """The tokenizer checkpoint for weights initialization. (by default the model_name_or_path is used)"""
+    tokenizer_revision: Optional[str] = None
+    """The specific tokenizer version to use (can be a branch name, tag name or commit id)."""
+    use_slow_tokenizer: bool = False
+    """Whether to use the slow tokenizer or not."""
+    add_bos: bool = False
+    """Whether to add the BOS token to the input."""
+    chat_template_name: Optional[str] = None
+    """The chat template for the tokenizer."""
     trust_remote_code: bool = False
     """Trust remote code when loading a model."""
     torch_dtype: Optional[str] = None
