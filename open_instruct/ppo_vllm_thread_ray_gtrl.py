@@ -1598,10 +1598,6 @@ class ModelGroup:
 
 
 def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
-    if args.cpu_only:
-        args.actor_num_gpus_per_node = [0]
-        args.world_size = args.num_cpu_workers
-        args.vllm_num_engines = 0
     calculate_runtime_args(args, model_config)
 
     # set up experiment tracking and seeds
@@ -1727,7 +1723,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         args.seed,
         args.enable_prefix_caching,
         max_len,
-        args.vllm_gpu_memory_utilization,
     )
 
     metrics_queue = RayQueue()
