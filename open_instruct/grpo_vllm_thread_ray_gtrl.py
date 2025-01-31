@@ -209,6 +209,9 @@ class Args:
     """whether to penalize responses that do not contain `stop_token_id`"""
     number_samples_per_prompt: int = 1
     """the number of samples to generate per prompt, useful for easy-star"""
+    stop_strings: List[str] = None
+    """List of strings that stop the generation when they are generated.
+    The returned output will not contain the stop strings."""
 
     # online PPO specific args
     beta: float = 0.05
@@ -843,6 +846,7 @@ class PolicyTrainerRayProcess(RayProcess):
             max_tokens=args.response_length,
             include_stop_str_in_output=True,
             n=args.number_samples_per_prompt,
+            stop=args.stop_strings,
         )
         # print("setup async queues")
         param_prompt_Q = None
@@ -1595,7 +1599,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     # some more runtime logging
     pprint([args, dataset_config, model_config])
     visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
-    breakpoint()
 
     # create the model and optimizer
     pg = None
