@@ -177,7 +177,7 @@ CHAT_TEMPLATES = {
         "{{ '\n\n' if not loop.first else '' }}"
         "{{ message['role'].capitalize() + ': ' + message['content'] + '\n' }}"
         "{% if loop.last and add_generation_prompt %}"
-        "{{ 'Assistant:\n' }}"
+        "{{ 'Assistant:' }}"
         "{% endif %}"
         "{% endfor %}"
     ),
