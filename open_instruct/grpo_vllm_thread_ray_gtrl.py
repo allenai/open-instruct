@@ -1209,7 +1209,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                         # Here we recalculate kl: we want the KL loss to backpropagate through the model
                         # We also clamp the KL loss to avoid numerical instability
-                        # https://chatgpt.com/c/679c4aa5-a558-8011-a1de-142381105e56
+                        # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
                         ref_logprobs_diff = (new_logprobs - mb_reflogprobs).clamp(-40.0, 40.0)
                         kl1 = ref_logprobs_diff
                         kl2 = (ref_logprobs_diff) ** 2 / 2
