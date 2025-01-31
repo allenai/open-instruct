@@ -215,6 +215,9 @@ class Args:
     """whether to penalize responses that do not contain `stop_token_id`"""
     number_samples_per_prompt: int = 1
     """the number of samples to generate per prompt, useful for easy-star"""
+    stop_strings: List[str] = None
+    """List of strings that stop the generation when they are generated.
+    The returned output will not contain the stop strings."""
 
     # online PPO specific args
     beta: float = 0.05
@@ -231,7 +234,8 @@ class Args:
     """whether to apply verifiable reward"""
     reward_model_multiplier: float = 1.0
     """the reward model multiplier, for down/upscaling the reward model output"""
-    answer_extraction_model: str = None
+    verification_reward: float = 10.0
+    """the reward value for verifiable responses"""
 
     # async setting
     async_mode: bool = True
@@ -819,6 +823,7 @@ class PolicyTrainerRayProcess(RayProcess):
             max_tokens=args.response_length,
             include_stop_str_in_output=True,
             n=args.number_samples_per_prompt,
+            stop=args.stop_strings,
         )
         # print("setup async queues")
         param_prompt_Q = None
@@ -1073,13 +1078,12 @@ class PolicyTrainerRayProcess(RayProcess):
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
                         verifiable_reward, verifiable_count = apply_verifiable_reward(
+                            postprocessed_response,
                             postprocessed_query_response,
                             tokenizer,
                             ground_truth,
                             dataset,
-                            verify_reward=10,
-                            answer_extraction_model=answer_extraction_model,
-                            answer_extraction_tokenizer=answer_extraction_tokenizer,
+                            verify_reward=args.verification_reward,
                         )
                         score += verifiable_reward
                     else:

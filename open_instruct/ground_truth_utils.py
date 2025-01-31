@@ -10,7 +10,6 @@ from open_instruct.if_functions import IF_FUNCTIONS_MAP
 
 
 def verify_gsm8k_sample(model_output, ground_truth_answer):
-    model_output = model_output.split("<|assistant|>\n")[-1].strip()
     # gsm is easy: extract numbers, and then just compare last number with answer.
     # matches how we do eval.
     predictions = None
@@ -25,7 +24,6 @@ def verify_gsm8k_sample(model_output, ground_truth_answer):
 
 
 def verify_math_sample(model_output, ground_truth_answer):
-    model_output = model_output.split("<|assistant|>\n")[-1].strip()
     raw_answer = model_output
     # for math, more complex. We will try a few different ways to extract the answer.
     # this roughly follows 'flex em' in oe-eval-internal
@@ -67,7 +65,6 @@ def verify_math_sample(model_output, ground_truth_answer):
 
 
 def verify_strict_math_sample(model_output, ground_truth_answer):
-    model_output = model_output.split("<|assistant|>\n")[-1].strip()
     raw_answer = model_output
     # just trying minerva format.
     all_answers = []
@@ -92,7 +89,6 @@ def verify_strict_math_sample(model_output, ground_truth_answer):
 
 
 def verify_ifeval_sample(model_output, constraint):
-    model_output = model_output.split("<|assistant|>\n")[-1].strip()
     # TODO: just pass in final answer. this should be fine for other evals too.
     answer = model_output.split("<|assistant|>\n")[-1].strip()
     if isinstance(constraint, str):

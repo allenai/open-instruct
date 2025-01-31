@@ -217,6 +217,9 @@ class Args:
     """whether to penalize responses that do not contain `stop_token_id`"""
     number_samples_per_prompt: int = 1
     """the number of samples to generate per prompt, useful for easy-star"""
+    stop_strings: List[str] = None
+    """List of strings that stop the generation when they are generated.
+    The returned output will not contain the stop strings."""
 
     # online PPO specific args
     beta: float = 0.05
@@ -239,7 +242,8 @@ class Args:
     """whether to apply verifiable reward"""
     reward_model_multiplier: float = 1.0
     """the reward model multiplier, for down/upscaling the reward model output"""
-    answer_extraction_model: str = None
+    verification_reward: float = 10.0
+    """the reward value for verifiable responses"""
 
     # async setting
     async_mode: bool = True
@@ -1119,13 +1123,12 @@ class PolicyTrainerRayProcess(RayProcess):
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
                         verifiable_reward, verifiable_count = apply_verifiable_reward(
+                            postprocessed_response,
                             postprocessed_query_response,
                             tokenizer,
                             ground_truth,
                             dataset,
-                            verify_reward=10,
-                            answer_extraction_model=answer_extraction_model,
-                            answer_extraction_tokenizer=answer_extraction_tokenizer,
+                            verify_reward=args.verification_reward,
                         )
                         score += verifiable_reward
                     else:
@@ -1595,6 +1598,10 @@ class ModelGroup:
 
 
 def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
+    if args.cpu_only:
+        args.actor_num_gpus_per_node = [0]
+        args.world_size = args.num_cpu_workers
+        args.vllm_num_engines = 0
     calculate_runtime_args(args, model_config)
 
     # set up experiment tracking and seeds
@@ -1720,6 +1727,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         args.seed,
         args.enable_prefix_caching,
         max_len,
+        args.vllm_gpu_memory_utilization,
     )
 
     metrics_queue = RayQueue()
