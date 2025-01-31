@@ -698,14 +698,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     episode = args.batch_size * (resume_training_step - 1)
     model.train()
 
-    # setup extraction model. For now keep on CPU?
-    if args.answer_extraction_model:
-        answer_extraction_model = AutoModelForCausalLM.from_pretrained(args.answer_extraction_model)
-        answer_extraction_tokenizer = AutoTokenizer.from_pretrained(args.answer_extraction_model)
-    else:
-        answer_extraction_model = None
-        answer_extraction_tokenizer = None
-
     # training loop
     start_time = time.time()
     data = next(iter_dataloader)

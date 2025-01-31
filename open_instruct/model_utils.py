@@ -49,6 +49,7 @@ from open_instruct.utils import retry_on_exception
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class ModelConfig:
     model_name_or_path: Optional[str] = None
@@ -225,7 +226,7 @@ def apply_verifiable_reward(
     # decode the responses
     decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
     # for now, below is not used. but keeping it around in case we need it.
-    decoded_query_responses = tokenizer.batch_decode(query_responses, skip_special_tokens=True)
+    decoded_query_responses = tokenizer.batch_decode(query_responses, skip_special_tokens=True)  # noqa: F841
     # compare with ground truth.
     rewards = []
     for prediction, ground_truth, dataset in zip(decoded_responses, ground_truths, datasets):

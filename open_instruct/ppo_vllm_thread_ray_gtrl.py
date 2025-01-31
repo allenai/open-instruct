@@ -977,8 +977,6 @@ class PolicyTrainerRayProcess(RayProcess):
         if accelerator.is_main_process:
             param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
 
-        answer_extraction_model = None
-        answer_extraction_tokenizer = None
         # for _ in range(1, resume_training_step):  # we didn't store scheduler state
         #     scheduler.step()
 
