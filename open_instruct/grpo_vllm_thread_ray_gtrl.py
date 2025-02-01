@@ -42,7 +42,11 @@ from argparse import Namespace
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
-from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_rlvr
+
+from open_instruct.dataset_transformation import (
+    TokenizerConfig,
+    get_cached_dataset_rlvr,
+)
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 
@@ -98,7 +102,6 @@ from open_instruct.model_utils import (
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
-    combine_dataset,
     get_wandb_tags,
     is_beaker_job,
     maybe_get_beaker_config,
@@ -290,6 +293,7 @@ class Args:
 
     def __post_init__(self):
         assert self.number_samples_per_prompt > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
+
     #     self.dataset_mixer_dict, self.dataset_mixer = process_dataset_mixer(self.dataset_mixer)
     #     if self.dataset_eval_mixer is not None:
     #         self.dataset_eval_mixer_dict, self.dataset_eval_mixer = process_dataset_mixer(self.dataset_eval_mixer)
@@ -1552,9 +1556,12 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-
-    tokenizer_revision = model_config.model_revision if model_config.tokenizer_revision is None else model_config.tokenizer_revision
-    tokenizer_name = model_config.tokenizer_name if model_config.tokenizer_name is not None else model_config.model_name_or_path
+    tokenizer_revision = (
+        model_config.model_revision if model_config.tokenizer_revision is None else model_config.tokenizer_revision
+    )
+    tokenizer_name = (
+        model_config.tokenizer_name if model_config.tokenizer_name is not None else model_config.model_name_or_path
+    )
     if tokenizer_revision != model_config.model_revision:
         # Warn user if tokenizer and model use different revisions; this is an unusual
         # use case.

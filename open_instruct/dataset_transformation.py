@@ -551,7 +551,13 @@ def preference_tulu_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenize
     return any(x != -100 for x in row[CHOSEN_LABELS_KEY]) and any(x != -100 for x in row[REJECTED_LABELS_KEY])
 
 
-def rlvr_tokenize_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY, ground_truths_key: str = GROUND_TRUTHS_KEY, dataset_source_key: str = DATASET_SOURCE_KEY):
+def rlvr_tokenize_v1(
+    row: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
+    ground_truths_key: str = GROUND_TRUTHS_KEY,
+    dataset_source_key: str = DATASET_SOURCE_KEY,
+):
     if len(row[sft_messages_key]) == 1:
         prompt = row[sft_messages_key]
     else:
@@ -568,7 +574,14 @@ def rlvr_tokenize_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_me
     row[DATASET_SOURCE_KEY] = row[dataset_source_key]
     return row
 
-def rlvr_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, need_contain_labels: bool = True, max_prompt_token_length: Optional[int] = None, max_token_length: Optional[int] = None):
+
+def rlvr_filter_v1(
+    row: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    need_contain_labels: bool = True,
+    max_prompt_token_length: Optional[int] = None,
+    max_token_length: Optional[int] = None,
+):
     max_prompt_token_length_ok = True
     if max_prompt_token_length is not None:
         max_prompt_token_length_ok = len(row[INPUT_IDS_PROMPT_KEY]) <= max_prompt_token_length
@@ -578,9 +591,8 @@ def rlvr_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, need_con
         max_token_length_ok = len(row[INPUT_IDS_KEY]) <= max_token_length
 
     contain_some_labels = any(x != -100 for x in row[LABELS_KEY])
-    return (
-        max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
-    )
+    return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
+
 
 TRANSFORM_FNS = {
     "sft_tokenize_v1": (sft_tokenize_v1, "map"),
@@ -819,7 +831,12 @@ def get_cached_dataset_tulu_preference(
 
 
 def get_cached_dataset_rlvr(
-    dataset_mixer_list: List[str], dataset_mixer_list_splits: List[str], tc: TokenizerConfig, max_token_length: Optional[int] = None, max_prompt_token_length: Optional[int] = None, hf_entity: Optional[str] = None
+    dataset_mixer_list: List[str],
+    dataset_mixer_list_splits: List[str],
+    tc: TokenizerConfig,
+    max_token_length: Optional[int] = None,
+    max_prompt_token_length: Optional[int] = None,
+    hf_entity: Optional[str] = None,
 ) -> Dataset:
     if len(dataset_mixer_list_splits) == 1:
         print("by default, we will use the same split for all datasets")
