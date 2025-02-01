@@ -163,6 +163,7 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    # template is taken from https://arxiv.org/abs/2501.12948.
     "r1_simple_chat": (
         "A conversation between User and Assistant. "
         "The user asks a question, and the Assistant solves it. "
