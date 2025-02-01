@@ -1408,7 +1408,7 @@ class PolicyTrainerRayProcess(RayProcess):
             else:
                 leaderboard_name = args.hf_repo_revision
             if args.hf_metadata_dataset:
-                dataset_list = list(args.dataset_mixer_dict.keys())
+                dataset_list = args.dataset_mixer_list
                 # mainly just focussing here on what would be useful for the leaderboard.
                 # wandb will have even more useful information.
                 metadata_blob = {
@@ -1687,7 +1687,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     # Ai2 specific logic
     if is_beaker_job():
         if args.hf_metadata_dataset:
-            dataset_list = list(args.dataset_mixer_dict.keys())
+            dataset_list = args.dataset_mixer_list
             # mainly just focussing here on what would be useful for the leaderboard.
             # wandb will have even more useful information.
             metadata_blob = {
