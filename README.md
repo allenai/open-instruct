@@ -128,6 +128,8 @@ bash scripts/train/dpo/tulu_preference_mix.sh
 # here we are using `HuggingFaceTB/SmolLM2-360M-Instruct`; it's prob not
 # gonna work, but it's easy to test run and print stuff.
 bash scripts/train/rlvr/mini.sh
+bash scripts/train/rlvr/grpo_mini.sh
+
 # train an 8B tulu3 model using 8 GPU (1 for inference, 7 for training)
 bash scripts/train/rlvr/tulu_rlvr.sh
 ```

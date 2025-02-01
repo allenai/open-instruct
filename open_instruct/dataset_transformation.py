@@ -163,6 +163,25 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    # template is taken from https://arxiv.org/abs/2501.12948.
+    "r1_simple_chat": (
+        "A conversation between User and Assistant. "
+        "The user asks a question, and the Assistant solves it. "
+        "The assistant first thinks about the reasoning process in "
+        "the mind and then provides the user with the answer. "
+        "The reasoning process and answer are enclosed within <think> </think> "
+        "and <answer> </answer> tags, respectively, "
+        "i.e., <think> reasoning process here </think> "
+        "<answer> answer here </answer>."
+        "\n\n"
+        "{% for message in messages %}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['role'].capitalize() + ': ' + message['content'] + '\n' }}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ 'Assistant:' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
 }
 # flake8: noqa
 
@@ -277,7 +296,7 @@ class TokenizerConfig:
 # ----------------------------------------------------------------------------
 # Dataset Transformation
 # SFT dataset
-DEFAULT_SFT_MESSAGE_KEY = "messages"
+DEFAULT_SFT_MESSAGES_KEY = "messages"
 INPUT_IDS_KEY = "input_ids"
 ATTENTION_MASK_KEY = "attention_mask"
 LABELS_KEY = "labels"
@@ -319,18 +338,18 @@ TOKENIZED_PREFERENCE_DATASET_KEYS = [
 
 # TODO: allow passing in sft_message key, so we can train on "chosen" of pref dataset.
 def sft_tokenize_v1(
-    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_message_key: str = DEFAULT_SFT_MESSAGE_KEY
+    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
 ):
-    if len(row[sft_message_key]) == 1:
-        prompt = row[sft_message_key]
+    if len(row[sft_messages_key]) == 1:
+        prompt = row[sft_messages_key]
     else:
-        prompt = row[sft_message_key][:-1]
+        prompt = row[sft_messages_key][:-1]
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
         add_generation_prompt=True,
     )
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_message_key])
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
@@ -338,19 +357,19 @@ def sft_tokenize_v1(
 
 
 def sft_tokenize_mask_out_prompt_v1(
-    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_message_key: str = DEFAULT_SFT_MESSAGE_KEY
+    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
 ):
     """mask out the prompt tokens by manipulating labels"""
-    if len(row[sft_message_key]) == 1:
-        prompt = row[sft_message_key]
+    if len(row[sft_messages_key]) == 1:
+        prompt = row[sft_messages_key]
     else:
-        prompt = row[sft_message_key][:-1]
+        prompt = row[sft_messages_key][:-1]
 
     row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
         prompt,
         add_generation_prompt=True,
     )
-    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_message_key])
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     labels[: len(row[INPUT_IDS_PROMPT_KEY])] = [-100] * len(row[INPUT_IDS_PROMPT_KEY])
@@ -512,10 +531,10 @@ def preference_tulu_tokenize_and_truncate_v1(
         raise ValueError("rejected messages field is empty.")
 
     chosen_encoded = sft_tulu_tokenize_and_truncate_v1(
-        {DEFAULT_SFT_MESSAGE_KEY: chosen_messages}, tokenizer, max_seq_length
+        {DEFAULT_SFT_MESSAGES_KEY: chosen_messages}, tokenizer, max_seq_length
     )
     rejected_encoded = sft_tulu_tokenize_and_truncate_v1(
-        {DEFAULT_SFT_MESSAGE_KEY: rejected_messages}, tokenizer, max_seq_length
+        {DEFAULT_SFT_MESSAGES_KEY: rejected_messages}, tokenizer, max_seq_length
     )
 
     return {
@@ -532,6 +551,49 @@ def preference_tulu_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenize
     return any(x != -100 for x in row[CHOSEN_LABELS_KEY]) and any(x != -100 for x in row[REJECTED_LABELS_KEY])
 
 
+def rlvr_tokenize_v1(
+    row: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
+    ground_truths_key: str = GROUND_TRUTHS_KEY,
+    dataset_source_key: str = DATASET_SOURCE_KEY,
+):
+    if len(row[sft_messages_key]) == 1:
+        prompt = row[sft_messages_key]
+    else:
+        prompt = row[sft_messages_key][:-1]
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
+        prompt,
+        add_generation_prompt=True,
+    )
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
+    row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
+    labels = copy.deepcopy(row[INPUT_IDS_KEY])
+    row[LABELS_KEY] = labels
+    row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
+    row[DATASET_SOURCE_KEY] = row[dataset_source_key]
+    return row
+
+
+def rlvr_filter_v1(
+    row: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    need_contain_labels: bool = True,
+    max_prompt_token_length: Optional[int] = None,
+    max_token_length: Optional[int] = None,
+):
+    max_prompt_token_length_ok = True
+    if max_prompt_token_length is not None:
+        max_prompt_token_length_ok = len(row[INPUT_IDS_PROMPT_KEY]) <= max_prompt_token_length
+
+    max_token_length_ok = True
+    if max_token_length is not None:
+        max_token_length_ok = len(row[INPUT_IDS_KEY]) <= max_token_length
+
+    contain_some_labels = any(x != -100 for x in row[LABELS_KEY])
+    return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
+
+
 TRANSFORM_FNS = {
     "sft_tokenize_v1": (sft_tokenize_v1, "map"),
     "sft_tokenize_mask_out_prompt_v1": (sft_tokenize_mask_out_prompt_v1, "map"),
@@ -542,6 +604,8 @@ TRANSFORM_FNS = {
     "preference_filter_v1": (preference_filter_v1, "filter"),
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1, "map"),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
+    "rlvr_tokenize_v1": (rlvr_tokenize_v1, "map"),
+    "rlvr_filter_v1": (rlvr_filter_v1, "filter"),
 }
 
 
@@ -753,6 +817,49 @@ def get_cached_dataset_tulu_preference(
                 "preference_tulu_tokenize_and_truncate_v1": {
                     "max_seq_length": max_seq_length,
                     "target_columns": TOKENIZED_PREFERENCE_DATASET_KEYS,
+                }
+            },
+        )
+        if frac_or_num_samples > 1.0:
+            new_range = int(frac_or_num_samples)
+        else:
+            new_range = int(frac_or_num_samples * len(dataset_config.dataset))
+        dataset_config.update_range(new_range)
+        dcs.append(dataset_config)
+    cache = DatasetTransformationCache(hf_entity=hf_entity)
+    return cache.load_or_transform_dataset(dcs, tc)
+
+
+def get_cached_dataset_rlvr(
+    dataset_mixer_list: List[str],
+    dataset_mixer_list_splits: List[str],
+    tc: TokenizerConfig,
+    max_token_length: Optional[int] = None,
+    max_prompt_token_length: Optional[int] = None,
+    hf_entity: Optional[str] = None,
+) -> Dataset:
+    if len(dataset_mixer_list_splits) == 1:
+        print("by default, we will use the same split for all datasets")
+        dataset_mixer_list_splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
+    dcs = []
+    assert len(dataset_mixer_list) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer_list}"
+    for i in range(0, len(dataset_mixer_list), 2):
+        dataset_name = dataset_mixer_list[i]
+        frac_or_num_samples = dataset_mixer_list[i + 1]
+        if "." in frac_or_num_samples:
+            frac_or_num_samples = float(frac_or_num_samples)
+        else:
+            frac_or_num_samples = int(frac_or_num_samples)
+
+        dataset_config = DatasetConfig(
+            dataset_name=dataset_name,
+            dataset_split=dataset_mixer_list_splits[i],
+            dataset_revision="main",
+            transform_fn=["rlvr_tokenize_v1", "rlvr_filter_v1"],
+            transform_fn_args={
+                "rlvr_filter_v1": {
+                    "max_token_length": max_token_length,
+                    "max_prompt_token_length": max_prompt_token_length,
                 }
             },
         )
