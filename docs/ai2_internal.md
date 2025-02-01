@@ -72,6 +72,7 @@ python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-3-dev \
     --priority normal \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
     --num_nodes 4 \
     --budget ai2/oe-adapt \
@@ -100,7 +101,7 @@ python mason.py \
     --logging_steps 1 \
     --reduce_loss sum \
     --model_revision main \
-    --dataset_mixer_list allenai/tulu-3-sft-mixture 100 \
+    --dataset_mixer_list allenai/tulu-3-sft-mixture 1.0 \
     --dataset_mix_dir output/sft_8b \
     --exp_name tulu-3-8b-sft \
     --seed 123
@@ -153,6 +154,7 @@ python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-3-dev \
     --priority normal \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
     --num_nodes 4 \
     --budget ai2/oe-adapt \
