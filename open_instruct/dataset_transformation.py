@@ -166,9 +166,9 @@ CHAT_TEMPLATES = {
     "r1_simple_chat": (
         "A conversation between User and Assistant. "
         "The user asks a question, and the Assistant solves it. "
-        "The assistant first thinks about the reasoning process in"
+        "The assistant first thinks about the reasoning process in "
         "the mind and then provides the user with the answer. "
-        "The reasoning process and answer are enclosed within <think> </think>"
+        "The reasoning process and answer are enclosed within <think> </think> "
         "and <answer> </answer> tags, respectively, "
         "i.e., <think> reasoning process here </think> "
         "<answer> answer here </answer>."
@@ -684,11 +684,11 @@ class DatasetTransformationCache:
         config_hash = self.compute_config_hash(dcs, tc)
         repo_name = f"{self.hf_entity}/dataset-mix-cached"
 
-        # # Check if the revision exists
-        # if revision_exists(repo_name, config_hash, repo_type="dataset"):
-        #     print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{config_hash}")
-        #     # Use the split from the first dataset config as default
-        #     return load_dataset(repo_name, split=dcs[0].dataset_split, revision=config_hash)
+        # Check if the revision exists
+        if revision_exists(repo_name, config_hash, repo_type="dataset"):
+            print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{config_hash}")
+            # Use the split from the first dataset config as default
+            return load_dataset(repo_name, split=dcs[0].dataset_split, revision=config_hash)
 
         print(f"Cache not found, transforming datasets...")
 
