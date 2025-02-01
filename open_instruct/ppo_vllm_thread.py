@@ -177,6 +177,9 @@ class Args:
     """whether to penalize responses that do not contain `stop_token_id`"""
     number_samples_per_prompt: int = 1
     """the number of samples to generate per prompt, useful for easy-star"""
+    stop_strings: List[str] = None
+    """List of strings that stop the generation when they are generated.
+    The returned output will not contain the stop strings."""
 
     # online PPO specific args
     beta: float = 0.05
@@ -199,7 +202,8 @@ class Args:
     """whether to apply verifiable reward"""
     reward_model_multiplier: float = 1.0
     """the reward model multiplier, for down/upscaling the reward model output"""
-    answer_extraction_model: str = None
+    verification_reward: float = 10.0
+    """the reward value for verifiable responses"""
 
     # vLLM settings. NOTE: currently we need to place the vLLM model on a separate GPU
     # for generation to work properly because vLLM would pre-alocate the memory.
@@ -467,7 +471,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         tokenizer.pad_token_id = 128002  # <|reserved_special_token_0|>
     else:
         tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
-    tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
+    if dataset_config.chat_template is not None:
+        tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
 
     # create the dataset
     dataset_dict = DatasetDict()
@@ -693,14 +698,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     episode = args.batch_size * (resume_training_step - 1)
     model.train()
 
-    # setup extraction model. For now keep on CPU?
-    if args.answer_extraction_model:
-        answer_extraction_model = AutoModelForCausalLM.from_pretrained(args.answer_extraction_model)
-        answer_extraction_tokenizer = AutoTokenizer.from_pretrained(args.answer_extraction_model)
-    else:
-        answer_extraction_model = None
-        answer_extraction_tokenizer = None
-
     # training loop
     start_time = time.time()
     data = next(iter_dataloader)
@@ -833,13 +830,12 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
                         verifiable_reward, verifiable_count = apply_verifiable_reward(
+                            postprocessed_response,
                             postprocessed_query_response,
                             tokenizer,
                             ground_truth,
                             dataset,
-                            verify_reward=10,
-                            answer_extraction_model=answer_extraction_model,
-                            answer_extraction_tokenizer=answer_extraction_tokenizer,
+                            verify_reward=args.verification_reward,
                         )
                         score += verifiable_reward
                     else:
