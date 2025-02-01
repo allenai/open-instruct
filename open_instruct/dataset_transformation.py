@@ -247,9 +247,9 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
         tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
     else:
         try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.chat_template_name).chat_template
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.model_name_or_path).chat_template
         except Exception:
-            raise ValueError(f"Could not find chat template for {tc.chat_template_name}.")
+            raise ValueError(f"Could not find chat template for {tc.model_name_or_path}.")
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
