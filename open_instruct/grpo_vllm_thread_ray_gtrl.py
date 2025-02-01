@@ -1222,13 +1222,6 @@ class PolicyTrainerRayProcess(RayProcess):
                             kl = kl3
                         elif args.kl_estimator == "kl4":
                             kl = kl4
-
-                        if epoch_idx == 0:
-                            kl1_stats[micro_batch_inds] = kl1.sum(1).float()
-                            kl2_stats[micro_batch_inds] = kl2.sum(1).float()
-                            kl3_stats[micro_batch_inds] = kl3.sum(1).float()
-                            kl4_stats[micro_batch_inds] = kl4.sum(1).float()
-
                         # grpo change: directly subtract KL in loss (add)
                         loss = masked_mean(pg_loss_max + (args.beta * kl), ~padding_mask[micro_batch_inds])
                         self.model.backward(loss)
@@ -1237,6 +1230,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model.step()
                         # print("step", self.rank, "micro batch start", micro_batch_start)
                         with torch.no_grad():
+                            if epoch_idx == 0:
+                                kl1_stats[micro_batch_inds] = kl1.sum(1).float()
+                                kl2_stats[micro_batch_inds] = kl2.sum(1).float()
+                                kl3_stats[micro_batch_inds] = kl3.sum(1).float()
+                                kl4_stats[micro_batch_inds] = kl4.sum(1).float()
                             # print("waiting for value model step", self.rank, "micro batch start", micro_batch_start)
                             # vf_loss, vf_clipfrac = ray.get(value_model_step_future)
                             pg_clipfrac = masked_mean(
@@ -1262,8 +1260,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         gradient_accumulation_idx += 1
                     minibatch_idx += 1
                     # fmt: off
-                    del mb_advantage, mb_responses, mb_query_responses, mb_logprobs
-                    del new_logprobs, logprobs_diff, ratio, pg_losses, pg_losses2, pg_loss_max, loss
+                    del mb_advantage, mb_responses, mb_query_responses, mb_logprobs, mb_reflogprobs
+                    del new_logprobs, logprobs_diff, ratio, pg_losses, pg_losses2, pg_loss_max, loss, ref_logprobs_diff, kl1, kl2, kl3, kl4
                     # fmt: on
                     # del everything and empty cache
                     torch.cuda.empty_cache()
