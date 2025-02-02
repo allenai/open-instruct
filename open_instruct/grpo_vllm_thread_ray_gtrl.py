@@ -1436,7 +1436,7 @@ python scripts/submit_eval_jobs.py \
     --preemptible \
     --use_hf_tokenizer_template \
     --beaker_image "nathanl/open_instruct_auto" \
-    --oe_eval_tasks gsm8k::tulu,minerva_math::tulu \
+    --run_oe_eval_experiments \
     --evaluate_on_weka \
     --run_id {wandb_url} \
     --step {training_step} \
