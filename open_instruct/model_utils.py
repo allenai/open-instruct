@@ -254,6 +254,12 @@ def apply_verifiable_reward(
         elif dataset.lower() == "math":
             extractor_func = extract_math_answer
             comparator_func = compare_math_answer
+        elif dataset.lower() == "hle":
+            extractor_func = extract_math_answer
+            comparator_func = compare_math_answer
+        elif dataset.lower() == "gpqa":
+            extractor_func = extract_math_answer
+            comparator_func = compare_math_answer
         else:
             raise RuntimeError(f'Dataset "{dataset}" not supported for self consistency consistency')
 
@@ -264,9 +270,18 @@ def apply_verifiable_reward(
             extracted_answer = extractor_func(prediction)
             answers.append(extracted_answer)
 
+        def is_degenerate(all_answers):
+            if not isinstance(all_answers, list): all_answers = [all_answers]
+            if any(a == '' for a in all_answers):
+                return True
+            if any(a == 'Your answer' for a in all_answers):
+                return True
+            return False
+
         # 2) find the answer with the highest agreement between all answers
         ans_id_map = {hash(str(ans)): ans for ans in answers}  # use object hashes
-        frequencies = {hash(str(ans_i)): sum(comparator_func(ans_i, ans_j) for ans_j in answers) for ans_i in answers}
+        # compare pairs of answers to get frequency, do not count empty strings as equivalent
+        frequencies = {hash(str(ans_i)): sum((comparator_func(ans_i, ans_j) if not is_degenerate(ans_j) and not is_degenerate(ans_i) else False) for ans_j in answers) for ans_i in answers}
         # get the max frequency among all items
         max_frequency = max(frequencies.values(), default=0)
         # get any item with the max frequency
@@ -287,10 +302,8 @@ def apply_verifiable_reward(
                 rewards.append(verify_reward)
             else:
                 rewards.append(0)
-
-        # print(answers)
-        # print(most_frequent_answer)
-        # print(rewards)
+        
+        print(f'Extracted answers -> {answers} ({most_frequent_answer}) -> {rewards}')
     else:
         # compare with ground truth.
         # use same logic as in gsm8k evaluation
@@ -306,6 +319,13 @@ def apply_verifiable_reward(
                 verified = verify_math_sample(prediction, ground_truth)
             elif dataset.lower() == "ifeval":
                 verified = verify_ifeval_sample(prediction, ground_truth)
+            elif dataset.lower() == "hle":
+                verified = verify_math_sample(prediction, ground_truth)
+            elif dataset.lower() == "gpqa":
+                verified = verify_math_sample(prediction, ground_truth)
+            else:
+                raise RuntimeError(f'Dataset "{dataset}" not supported for verifiable rewards')
+
             # if verified, give reward
             if verified:
                 logger.info("Applying ground truth reward 🤗")
