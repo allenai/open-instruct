@@ -1132,6 +1132,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     #     score *= args.reward_model_multiplier
 
                     if args.apply_verifiable_reward:
+                        start = time.time()
                         verifiable_reward, verifiable_count = apply_verifiable_reward(
                             postprocessed_response,
                             postprocessed_query_response,
@@ -1149,6 +1150,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             verify_reward=args.verification_reward,
                             self_consistency_consistency=True
                         )
+                        print(f"Execution time: {((time.time() - start) / 60):.2f} min for result {postprocessed_query_response.shape}")
                         if args.self_consistency_consistency:
                             print("Applying self consistency consistency reward 💅✨")
                             score += self_consistency_reward
