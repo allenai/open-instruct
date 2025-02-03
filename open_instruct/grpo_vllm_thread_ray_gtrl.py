@@ -1439,8 +1439,9 @@ python scripts/submit_eval_jobs.py \
     --run_oe_eval_experiments \
     --evaluate_on_weka \
     --run_id {wandb_url} \
-    --step {training_step} \
     --skip_oi_evals"""
+            if training_step is not None:
+                command += f" --step {training_step}"
             if args.oe_eval_tasks is not None:
                 command += f" --oe_eval_tasks {','.join(args.oe_eval_tasks)}"
             print(f"Launching eval jobs with command: {command}")
