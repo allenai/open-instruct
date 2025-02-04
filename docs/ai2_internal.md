@@ -321,6 +321,38 @@ We have some example dev scripts on the whole process in the `docs/archived_dev_
 * docs/archived_dev_scripts/olmo2_1124.sh (the commands used to produce [OLMo 2 1124](https://huggingface.co/collections/allenai/olmo-2-674117b93ab84e98afc72edc))
 * docs/archived_dev_scripts/olmoe_0125.sh (the commands used to produce [OLMoE 0125](https://huggingface.co/collections/allenai/olmoe-0125-67992134f9ebea0a941706ca))
 
+### Generating on-policy preferences
+
+The best way to generate on-policy preference data using our internal infrastructure is via the [scaling-preferences](https://github.com/allenai/scaling-preferences) repository, the documentation is found in the README.
+
+First, clone the repository:
+
+```sh
+git clone git@github.com:allenai/scaling-preferences.git
+cd scaling-preferences
+python -m venv venv
+source venv/bin/activate 
+pip install -r requirements.txt
+export MISE_PATH=mise
+export WORKDIR="."
+cd mise; pip install -e .
+cd $WORKDIR;
+```
+
+You need to store all the prompts as JSONL files (one prompt per line) in S3 using this format:
+
+```python
+{"text": "My prompt.", **some_other_metadata}
+```
+
+We already have a collection of prompts from different datasets in `s3://ai2-ljm-dev/prompts/{dataset_name}`.
+There are three main steps for generating on-policy preferences.
+You can follow the runbook in the README of the `scaling-preferences` repo (and it's recommended to treat that as your working directory), but as a running example, we'll provide you how you can replicate the OLMo2 on-policy preferences.
+
+1. **Generating responses** (`docs/archived_dev_scripts/onpolicy_generate_responses.sh`): we call several LMs and obtain their responses.
+2. **Perform LLM-as-judge** (`docs/archived_dev_scripts/onpolicy_llm_judge.sh`): we submit the updated prompts to either the Azure or OpenAI API
+3. **Parse preferences** (`docs/archived_dev_scripts/onpolicy_parse_preferences.sh`): we download the raw judgments from GPT, and then we parse the preferences.
+
 
 ### Ai2 Internal Evaluation
 
