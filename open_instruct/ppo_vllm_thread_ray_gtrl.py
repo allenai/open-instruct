@@ -220,6 +220,7 @@ class Args:
     stop_strings: List[str] = None
     """List of strings that stop the generation when they are generated.
     The returned output will not contain the stop strings."""
+    eval_max_length: int = 4096  # max generation length for evaluation
 
     # online PPO specific args
     beta: float = 0.05
@@ -1510,7 +1511,10 @@ python scripts/submit_eval_jobs.py \
     --run_safety_evaluations \
     --run_id {wandb_url} \
     --step {training_step} \
+    --oe_eval_max_length {args.eval_max_length} \
     --skip_oi_evals"""
+            if training_step is not None:
+                command += f" --step {training_step}"
             if args.oe_eval_tasks is not None:
                 command += f" --oe_eval_tasks {','.join(args.oe_eval_tasks)}"
             print(f"Launching eval jobs with command: {command}")
