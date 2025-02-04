@@ -14,11 +14,13 @@ SPLITS=(
 )
 
 for split in "${SPLITS[@]}"; do
-    python mason.py \
-        --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
+    python3 mason.py \
+        --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale ai2/jupiter-cirrascale-2 \
         --image nathanl/open_instruct_auto --pure_docker_mode \
         --priority normal \
-        --budget ai2/ljm-oe-adapt \
+        --budget ai2/oe-adapt \
+        --workspace ai2/ljm-oe-adapt \
+        --description "RM training: $split" \
         --gpus 2 -- accelerate launch --config_file configs/ds_configs/deepspeed_zero3.yaml \
         open_instruct/reward_modeling.py \
         --dataset_mixer '{"ljvmiranda921/helpsteer2-pref-samples": 1.0}' \
@@ -35,6 +37,11 @@ for split in "${SPLITS[@]}"; do
         --output_dir models/rm/rm_qwen2_7b \
         --gradient_checkpointing \
         --push_to_hub \
+        --hf_entity "ljvmiranda921" \
+        --hf_repo_id "helpsteer2-qwen-rms" \
+        --hf_repo_revision $split \
+        --wandb_project_name "hybrid-pref" \
+        --wandb_entity "ai2-llm" \
         --with_tracking
 done
 
