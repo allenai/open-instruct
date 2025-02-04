@@ -38,6 +38,8 @@ tasks:
         secret: openai_api_key
       - name: HF_TOKEN
         secret: HF_TOKEN
+      - name: VLLM_ALLOW_LONG_MAX_MODEL_LEN
+        value: 1
     datasets:
       - mountPath: /data/
         source:

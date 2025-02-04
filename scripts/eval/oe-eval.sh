@@ -178,9 +178,10 @@ for TASK in "${TASKS[@]}"; do
             $MODEL_TYPE \
             --batch-size "$BATCH_SIZE" \
             --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
+            --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false } }' \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
-            --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default"}' \
+            --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1"}' \
             ${REVISION_ARG} \
             --cluster ai2/neptune-cirrascale,ai2/saturn-cirrascale,ai2/jupiter-cirrascale-2 \
             --beaker-retries 2 \
@@ -196,9 +197,10 @@ for TASK in "${TASKS[@]}"; do
         $MODEL_TYPE \
         --batch-size "$BATCH_SIZE" \
         --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
+        --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false } }' \
         ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT" \
-        --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key"}' \
+        --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1"}' \
         ${REVISION_ARG} \
         --beaker-retries 2 \
         --beaker-priority "$PRIORITY" \
