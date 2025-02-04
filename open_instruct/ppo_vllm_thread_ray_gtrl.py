@@ -1510,7 +1510,6 @@ python scripts/submit_eval_jobs.py \
     --evaluate_on_weka \
     --run_safety_evaluations \
     --run_id {wandb_url} \
-    --step {training_step} \
     --oe_eval_max_length {args.eval_max_length} \
     --skip_oi_evals"""
             if training_step is not None:
