@@ -316,7 +316,7 @@ For post-training, we often need to train the models throughout all 3 stages. Th
 4. Use the best DPO (and RM) to train an RLVR model.
 
 
-We have some example dev scripts on the whole process in 
+We have some example dev scripts on the whole process in the `docs/archived_dev_scripts` directory. Note that these scripts are not cleaned up like [docs/tulu3.md](docs/tulu3.md), but they are useful for reference.
 
 * docs/archived_dev_scripts/olmo2_1124.sh (the commands used to produce [OLMo 2 1124](https://huggingface.co/collections/allenai/olmo-2-674117b93ab84e98afc72edc))
 * docs/archived_dev_scripts/olmoe_0125.sh (the commands used to produce [OLMoE 0125](https://huggingface.co/collections/allenai/olmoe-0125-67992134f9ebea0a941706ca))
