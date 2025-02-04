@@ -178,7 +178,7 @@ for TASK in "${TASKS[@]}"; do
             $MODEL_TYPE \
             --batch-size "$BATCH_SIZE" \
             --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
-            --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH} } }'
+            --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false } }' \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
             --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default"}' \
@@ -197,7 +197,7 @@ for TASK in "${TASKS[@]}"; do
         $MODEL_TYPE \
         --batch-size "$BATCH_SIZE" \
         --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
-        --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH} } }'
+        --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false } }' \
         ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT" \
         --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key"}' \
