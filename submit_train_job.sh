@@ -15,7 +15,7 @@ SPLITS=(
 
 for split in "${SPLITS[@]}"; do
     python3 mason.py \
-        --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale ai2/jupiter-cirrascale-2 \
+        --cluster ai2/saturn-cirrascale ai2/jupiter-cirrascale-2 \
         --image nathanl/open_instruct_auto --pure_docker_mode \
         --priority normal \
         --budget ai2/oe-adapt \
@@ -24,7 +24,9 @@ for split in "${SPLITS[@]}"; do
         --gpus 1 -- python open_instruct/reward_modeling.py \
         --dataset_mixer '{"ljvmiranda921/helpsteer2-pref-samples": 1.0}' \
         --dataset_train_splits $split \
-        --model_name_or_path Qwen/Qwen2.5-7B \
+        --dataset_eval_mixer '{"ljvmiranda921/helpsteer2-pref-samples": 1.0}' \
+        --dataset_eval_splits $split \
+        --model_name_or_path Qwen/Qwen2.5-1.5B \
         --chat_template tulu \
         --learning_rate 3e-6 \
         --per_device_train_batch_size 16 \
@@ -40,6 +42,8 @@ for split in "${SPLITS[@]}"; do
         --hf_repo_id "helpsteer2-qwen-rms" \
         --hf_repo_revision $split \
         --wandb_project_name "hybrid-pref" \
+        --exp_name "rm_$split" \
+        --run_name "rm_$split" \
         --wandb_entity "ai2-llm" \
         --with_tracking
 done
