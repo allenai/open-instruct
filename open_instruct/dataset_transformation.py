@@ -182,6 +182,24 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    "r1_simple_chat_prepend_think": (
+        "A conversation between User and Assistant. "
+        "The user asks a question, and the Assistant solves it. "
+        "The assistant first thinks about the reasoning process in "
+        "the mind and then provides the user with the answer. "
+        "The reasoning process and answer are enclosed within <think> </think> "
+        "and <answer> </answer> tags, respectively, "
+        "i.e., <think> reasoning process here </think> "
+        "<answer> answer here </answer>."
+        "\n\n"
+        "{% for message in messages %}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['role'].capitalize() + ': ' + message['content'] + '\n' }}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ 'Assistant: <think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
 }
 # flake8: noqa
 
