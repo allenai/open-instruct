@@ -47,7 +47,7 @@ from open_instruct.dataset_transformation import (
     TokenizerConfig,
     get_cached_dataset_rlvr,
 )
-from open_instruct.ground_truth_utils import strict_format_reward_func
+from open_instruct.ground_truth_utils import soft_format_reward_func
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 
@@ -1077,7 +1077,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 
                 if args.add_r1_style_format_reward:
                     decoded_response = tokenizer.batch_decode(local_vllm_responses)
-                    format_scores = torch.tensor(strict_format_reward_func(decoded_response), device=device)
+                    format_scores = torch.tensor(soft_format_reward_func(decoded_response), device=device)
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
                     # print(f"get reward stuff starts {i=}")
                     query = queries[i : i + args.local_rollout_forward_batch_size]
