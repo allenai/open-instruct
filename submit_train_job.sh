@@ -1,5 +1,5 @@
 SPLITS=(
-    # "human_datamodel_counts_7000_ID__03242bb1814b48978f32cfa8090308e2__SWAPS_2169"
+    "human_datamodel_counts_7000_ID__03242bb1814b48978f32cfa8090308e2__SWAPS_2169"
     "human_datamodel_counts_7000_ID__12210931507643a7b7eed73e878eae1f__SWAPS_6507"
     "human_datamodel_counts_7000_ID__3e2014f53dba499cbdac39fda22e24a5__SWAPS_4338"
     "human_datamodel_counts_7000_ID__5d3de9a4893b4a0ab79234af754954e1__SWAPS_2169"
@@ -11,18 +11,18 @@ SPLITS=(
     "human_datamodel_counts_7000_ID__c8d950699ce94fbc86b71eef9e1f5b52__SWAPS_4338"
     "human_datamodel_counts_7000_ID__ca3ec66db56a41d48b94cfc1f2242657__SWAPS_2169"
     "human_datamodel_counts_7000_ID__e6316c853a4d4974ab0eaa5c27571d5c__SWAPS_2169"
-    # "hs2p_human_SWAPS_6766_SEED_42"
-    # "hs2p_human_75_SWAPS_4938_SEED_42"
-    # "hs2p_human_50_SWAPS_3060_SEED_42"
-    # "hs2p_human_25_SWAPS_1433_SEED_42"
-    # "hs2p_gpt4_SWAPS_0_SEED_42"
-    # "hs2p_random_SWAPS_3031_SEED_42"
-    # "hs2p_human_SWAPS_6766_SEED_10010"
-    # "hs2p_human_75_SWAPS_4899_SEED_10010"
-    # "hs2p_human_50_SWAPS_3062_SEED_10010"
-    # "hs2p_human_25_SWAPS_1467_SEED_10010"
-    # "hs2p_gpt4_SWAPS_0_SEED_10010"
-    # "hs2p_random_SWAPS_3050_SEED_10010"
+    "hs2p_human_SWAPS_6766_SEED_42"
+    "hs2p_human_75_SWAPS_4938_SEED_42"
+    "hs2p_human_50_SWAPS_3060_SEED_42"
+    "hs2p_human_25_SWAPS_1433_SEED_42"
+    "hs2p_gpt4_SWAPS_0_SEED_42"
+    "hs2p_random_SWAPS_3031_SEED_42"
+    "hs2p_human_SWAPS_6766_SEED_10010"
+    "hs2p_human_75_SWAPS_4899_SEED_10010"
+    "hs2p_human_50_SWAPS_3062_SEED_10010"
+    "hs2p_human_25_SWAPS_1467_SEED_10010"
+    "hs2p_gpt4_SWAPS_0_SEED_10010"
+    "hs2p_random_SWAPS_3050_SEED_10010"
 )
 
 for split in "${SPLITS[@]}"; do
@@ -60,7 +60,7 @@ for split in "${SPLITS[@]}"; do
     python3 mason.py \
         --cluster ai2/saturn-cirrascale ai2/jupiter-cirrascale-2 \
         --image nathanl/open_instruct_auto --pure_docker_mode \
-        --priority urgent \
+        --priority high \
         --workspace ai2/tulu-3-dev \
         --budget ai2/oe-adapt \
         --gpus 8 -- accelerate launch --config_file configs/ds_configs/deepspeed_zero3.yaml \
@@ -89,6 +89,6 @@ for split in "${SPLITS[@]}"; do
         --with_tracking
 
     echo "Sleeping....($split is done)"
-    sleep 1200  # Sleep for 20 minutes (1200 seconds)
+    sleep 1500  # Sleep for 25 minutes (1500 seconds)
 done
 
