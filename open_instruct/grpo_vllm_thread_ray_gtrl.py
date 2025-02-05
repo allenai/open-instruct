@@ -1304,7 +1304,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics.add("val/ratio", ratio_stats.mean())
                 local_metrics.add("val/ratio_var", ratio_stats.var())
                 local_metrics.add("val/stop_token_rate", contain_stop_token.float().mean())
-                local_metrics.add("val/format_scores", format_scores.float().mean())
+                if args.add_r1_style_format_reward:
+                    local_metrics.add("val/format_scores", format_scores.float().mean())
 
                 metrics = {
                     "episode": episode,
