@@ -138,8 +138,122 @@ def verify_flan_sample(model_output, ground_truth_answer):
     return normalize_answer(answer_string) == normalize_answer(ground_truth_answer)
 
 
+def strict_format_reward_func(responses: list[str]) -> list[float]:
+    """Reward function that checks if the completion has a specific format.
+    Credit goes to https://gist.github.com/willccbb/4676755236bb08cab5f4e54a0475d6fb#file-grpo_demo-py-L73"""
+    pattern = r"^<think>\n.*?\n</think>\n<answer>\n.*?\n</answer>\n$"
+    matches = [re.match(pattern, r, re.DOTALL) for r in responses] 
+    return [1.0 if match else 0.0 for match in matches]
+
+def test_basic_valid():
+    response = """<think>
+The sky is blue
+</think>
+<answer>
+Blue
+</answer>
+"""
+    result = strict_format_reward_func([response])
+    assert result == [1.0], f"Basic valid case failed, got {result}"
+    print("✓ Basic valid case passed")
+
+def test_multiline_think():
+    response = """<think>
+The sky is blue because of Rayleigh scattering
+This is a second line of think
+And here's a third line
+</think>
+<answer>
+Blue
+</answer>
+"""
+    result = strict_format_reward_func([response])
+    assert result == [1.0], f"Multiline think failed, got {result}"
+    print("✓ Multiline think passed")
+
+def test_multiline_answer():
+    response = """<think>
+The sky is blue
+</think>
+<answer>
+Blue
+And also sometimes lighter blue
+And even white when cloudy
+</answer>
+"""
+    result = strict_format_reward_func([response])
+    assert result == [1.0], f"Multiline answer failed, got {result}"
+    print("✓ Multiline answer passed")
+
+def test_no_newlines():
+    response = "<think>The sky is blue</think><answer>Blue</answer>"
+    result = strict_format_reward_func([response])
+    assert result == [0.0], f"No newlines case failed, got {result}"
+    print("✓ No newlines case passed")
+
+def test_missing_final_newline():
+    response = """<think>
+The sky is blue
+</think>
+<answer>
+Blue
+</answer>"""  # No final newline
+    result = strict_format_reward_func([response])
+    assert result == [0.0], f"Missing final newline failed, got {result}"
+    print("✓ Missing final newline passed")
+
+def test_extra_content():
+    response = """Extra content
+<think>
+The sky is blue
+</think>
+<answer>
+Blue
+</answer>
+"""
+    result = strict_format_reward_func([response])
+    assert result == [0.0], f"Extra content case failed, got {result}"
+    print("✓ Extra content case passed")
+
+def test_wrong_order():
+    response = """<answer>
+Blue
+</answer>
+<think>
+The sky is blue
+</think>
+"""
+    result = strict_format_reward_func([response])
+    assert result == [0.0], f"Wrong order case failed, got {result}"
+    print("✓ Wrong order case passed")
+
+def test_multiple_responses():
+    valid = """<think>
+First think
+</think>
+<answer>
+First answer
+</answer>
+"""
+    invalid = "Invalid format"
+    
+    result = strict_format_reward_func([valid, invalid])
+    assert result == [1.0, 0.0], f"Multiple responses failed, got {result}"
+    print("✓ Multiple responses passed")
+
+
 # debug code
 if __name__ == "__main__":
+    print("Running tests...")
+    test_basic_valid()
+    test_multiline_think()
+    test_multiline_answer()
+    test_no_newlines()
+    test_missing_final_newline()
+    test_extra_content()
+    test_wrong_order()
+    test_multiple_responses()
+    print("\nAll tests passed!")
     from datasets import load_dataset
     ds = load_dataset("ai2-adapt-dev/prompts_with_constraints_for_ground_truth")
     test_model_output = "<|assistant|>\nThe answer is $\\boxed{3.14}$"
