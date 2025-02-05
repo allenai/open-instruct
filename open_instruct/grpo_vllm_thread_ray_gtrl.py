@@ -50,6 +50,16 @@ from open_instruct.dataset_transformation import (
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 
+# 16K sequence length will delay and fail
+os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "12000"
+os.environ["TORCH_NCCL_ENABLE_MONITORING"] = "0"
+os.environ["NCCL_HEARTBEAT_TIMEOUT_SEC"] = "12000"
+os.environ["NCCL_ENABLE_MONITORING"] = "0"
+
+# Increase NCCL timeout to prevent premature failures
+os.environ["NCCL_BLOCKING_WAIT"] = "1"
+os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+
 import deepspeed
 import numpy as np
 import pandas as pd
@@ -297,8 +307,8 @@ class Args:
 
     def __post_init__(self):
         assert self.number_samples_per_prompt > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
-        if self.self_consistency_consistency:
-            assert self.number_samples_per_prompt == self.local_rollout_forward_batch_size, "You need to be able to compare all answers with all other answers at each step!"
+        # if self.self_consistency_consistency:
+        #     assert self.number_samples_per_prompt == self.local_rollout_forward_batch_size, "You need to be able to compare all answers with all other answers at each step!"
     #     self.dataset_mixer_dict, self.dataset_mixer = process_dataset_mixer(self.dataset_mixer)
     #     if self.dataset_eval_mixer is not None:
     #         self.dataset_eval_mixer_dict, self.dataset_eval_mixer = process_dataset_mixer(self.dataset_eval_mixer)
