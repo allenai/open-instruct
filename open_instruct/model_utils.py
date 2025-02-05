@@ -260,6 +260,9 @@ def apply_verifiable_reward(
         elif dataset.lower() == "gpqa":
             extractor_func = extract_math_answer
             comparator_func = compare_math_answer
+        elif dataset.lower() == "aime":
+            extractor_func = extract_math_answer
+            comparator_func = compare_math_answer
         else:
             raise RuntimeError(f'Dataset "{dataset}" not supported for self consistency consistency')
 
@@ -322,6 +325,8 @@ def apply_verifiable_reward(
             elif dataset.lower() == "hle":
                 verified = verify_math_sample(prediction, ground_truth)
             elif dataset.lower() == "gpqa":
+                verified = verify_math_sample(prediction, ground_truth)
+            elif dataset.lower() == "aime":
                 verified = verify_math_sample(prediction, ground_truth)
             else:
                 raise RuntimeError(f'Dataset "{dataset}" not supported for verifiable rewards')

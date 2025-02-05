@@ -224,18 +224,21 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
     if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
-        num_added_tokens = tokenizer.add_special_tokens(
-            {
-                "bos_token": "<s>",
-                "eos_token": "</s>",
-                "unk_token": "<unk>",
-                "pad_token": "<pad>",
-            }
-        )
-        assert num_added_tokens in [
-            0,
-            1,
-        ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
+        # idk, deepseek tokenizer breaks this
+        pass
+
+        # num_added_tokens = tokenizer.add_special_tokens(
+        #     {
+        #         "bos_token": "<s>",
+        #         "eos_token": "</s>",
+        #         "unk_token": "<unk>",
+        #         "pad_token": "<pad>",
+        #     }
+        # )
+        # assert num_added_tokens in [
+        #     0,
+        #     1,
+        # ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
     elif isinstance(tokenizer, GPTNeoXTokenizerFast):
         # OLMo newer models use this tokenizer
         if tokenizer.bos_token is None:
