@@ -624,12 +624,22 @@ class DatasetConfig:
     dataset_commit_hash: Optional[str] = None
 
     def __post_init__(self):
-        self.dataset_commit_hash = get_commit_hash(self.dataset_name, self.dataset_revision, "README.md", "dataset")
-        self.dataset = load_dataset(
-            self.dataset_name,
-            split=self.dataset_split,
-            revision=self.dataset_revision,
-        )
+        # if the file exists locally, use the local file
+        if os.path.exists(self.dataset_name) and self.dataset_name.endswith('.jsonl'):
+            assert self.dataset_split is "train", "Only train split is supported for local jsonl files."
+            self.dataset = load_dataset(
+                "json",
+                data_files=self.dataset_name,
+                split=self.dataset_split,
+            )
+        else:
+            # commit hash only works for hf datasets
+            self.dataset_commit_hash = get_commit_hash(self.dataset_name, self.dataset_revision, "README.md", "dataset")
+            self.dataset = load_dataset(
+                self.dataset_name,
+                split=self.dataset_split,
+                revision=self.dataset_revision,
+            )
         if self.dataset_range is None:
             dataset_range = len(self.dataset)
             self.update_range(dataset_range)
@@ -761,7 +771,10 @@ def get_cached_dataset(dcs: List[DatasetConfig], tc: TokenizerConfig, hf_entity:
 
 
 def get_cached_dataset_tulu_sft(
-    dataset_mixer_list: List[str], tc: TokenizerConfig, max_seq_length: int, hf_entity: Optional[str] = None
+    dataset_mixer_list: List[str],
+    tc: TokenizerConfig,
+    max_seq_length: int,
+    hf_entity: Optional[str] = None,
 ) -> Dataset:
     dcs = []
     assert len(dataset_mixer_list) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer_list}"
