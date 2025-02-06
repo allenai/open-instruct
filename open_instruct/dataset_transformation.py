@@ -624,7 +624,6 @@ class DatasetConfig:
     dataset_commit_hash: Optional[str] = None
 
     def __post_init__(self):
-        self.dataset_commit_hash = get_commit_hash(self.dataset_name, self.dataset_revision, "README.md", "dataset")
         # if the file exists locally, use the local file
         if os.path.exists(self.dataset_name) and self.dataset_name.endswith('.jsonl'):
             assert self.dataset_split is "train", "Only train split is supported for local jsonl files."
@@ -634,6 +633,8 @@ class DatasetConfig:
                 split=self.dataset_split,
             )
         else:
+            # commit hash only works for hf datasets
+            self.dataset_commit_hash = get_commit_hash(self.dataset_name, self.dataset_revision, "README.md", "dataset")
             self.dataset = load_dataset(
                 self.dataset_name,
                 split=self.dataset_split,
