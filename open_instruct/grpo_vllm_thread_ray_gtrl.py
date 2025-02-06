@@ -1063,7 +1063,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 sequence_lengths = []
                 if accelerator.is_main_process:
                     g_response_token_ids = response_ids_Q.get()
-                    DUMMY_PAD_TOKEN = args.stop_token_id # we can't use tokenizer.pad_token_id because it's outside vocab and `torch.gather(all_logprob, 2, response.unsqueeze(-1))` will error out
+                    DUMMY_PAD_TOKEN = (
+                        args.stop_token_id
+                    )  # we can't use tokenizer.pad_token_id because it's outside vocab and `torch.gather(all_logprob, 2, response.unsqueeze(-1))` will error out
                     g_padded_response_ids = [
                         response + [DUMMY_PAD_TOKEN] * (args.response_length - len(response))
                         for response in g_response_token_ids
@@ -1076,10 +1078,12 @@ class PolicyTrainerRayProcess(RayProcess):
                 ]
                 # print(f"{local_vllm_responses.shape=}, {local_vllm_responses=}")
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
-                
+
                 if args.add_r1_style_format_reward:
                     decoded_response = tokenizer.batch_decode(local_vllm_responses)
-                    format_scores = torch.tensor(soft_format_reward_func(decoded_response, args.r1_style_format_reward), device=device)
+                    format_scores = torch.tensor(
+                        soft_format_reward_func(decoded_response, args.r1_style_format_reward), device=device
+                    )
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
                     # print(f"get reward stuff starts {i=}")
                     query = queries[i : i + args.local_rollout_forward_batch_size]
@@ -1130,7 +1134,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         score += verifiable_reward
                     else:
                         verifiable_count = torch.tensor([0.0], device=device).float()
-                    
+
                     if args.add_r1_style_format_reward:
                         score += format_scores[i : i + args.local_rollout_forward_batch_size]
 
