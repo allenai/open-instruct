@@ -1063,7 +1063,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 sequence_lengths = []
                 if accelerator.is_main_process:
                     g_response_token_ids = response_ids_Q.get()
-                    DUMMY_PAD_TOKEN = 0  # we can't use tokenizer.pad_token_id because it's outside vocab and `torch.gather(all_logprob, 2, response.unsqueeze(-1))` will error out
+                    DUMMY_PAD_TOKEN = args.stop_token_id # we can't use tokenizer.pad_token_id because it's outside vocab and `torch.gather(all_logprob, 2, response.unsqueeze(-1))` will error out
                     g_padded_response_ids = [
                         response + [DUMMY_PAD_TOKEN] * (args.response_length - len(response))
                         for response in g_response_token_ids
@@ -1152,6 +1152,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 verifiable_counts = torch.cat(verifiable_counts, 0)
                 verifiable_correct_rate = verifiable_counts.sum() / queries.shape[0]
                 # print(f"get reward stuff finished")
+                if self.rank == 0:
+                    print(f"{sequence_lengths=}")
+                    print(f"{postprocessed_responses[0]=}")
+                    print(f"{tokenizer.decode(postprocessed_responses[0])=}")
                 del (logprob, ref_logprob, score)
                 gc.collect()
                 torch.cuda.empty_cache()
