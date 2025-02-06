@@ -137,19 +137,11 @@ def verify_flan_sample(model_output, ground_truth_answer):
     answer_string = model_output.split("The answer is: ")[-1].strip()
     return normalize_answer(answer_string) == normalize_answer(ground_truth_answer)
 
-def soft_format_reward_func(responses: list[str]) -> list[float]:
+def soft_format_reward_func(responses: list[str], reward_scale: float = 1.0) -> list[float]:
     """Reward function that checks if the completion has a specific format."""
     pattern = r".*?</think>\s*<answer>.*?</answer>"
     matches = [re.match(pattern, r, re.DOTALL) for r in responses] 
-    return [0.5 if match else 0.0 for match in matches]
-
-def strict_format_reward_func(responses: list[str]) -> list[float]:
-    """Reward function that checks if the completion has a specific format.
-    Credit goes to https://gist.github.com/willccbb/4676755236bb08cab5f4e54a0475d6fb#file-grpo_demo-py-L73"""
-    pattern = r"^<think>\n.*?\n</think>\n<answer>\n.*?\n</answer>\n$"
-    matches = [re.match(pattern, r, re.DOTALL) for r in responses] 
-    return [1.0 if match else 0.0 for match in matches]
-
+    return [reward_scale if match else 0.0 for match in matches]
 
 # debug code
 if __name__ == "__main__":

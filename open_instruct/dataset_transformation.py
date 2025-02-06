@@ -182,7 +182,7 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
-    "r1_simple_chat_prepend_think": (
+    "r1_simple_chat_postpend_think": (
         "A conversation between User and Assistant. "
         "The user asks a question, and the Assistant solves it. "
         "The assistant first thinks about the reasoning process in "

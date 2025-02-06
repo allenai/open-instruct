@@ -237,6 +237,8 @@ class Args:
     """the reward value for verifiable responses"""
     add_r1_style_format_reward: bool = False
     """whether to add the R1 style format reward"""
+    r1_style_format_reward: float = 1.0
+    """the reward value for R1 style format reward"""
 
     # async setting
     async_mode: bool = True
@@ -1077,7 +1079,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 
                 if args.add_r1_style_format_reward:
                     decoded_response = tokenizer.batch_decode(local_vllm_responses)
-                    format_scores = torch.tensor(soft_format_reward_func(decoded_response), device=device)
+                    format_scores = torch.tensor(soft_format_reward_func(decoded_response, args.r1_style_format_reward), device=device)
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
                     # print(f"get reward stuff starts {i=}")
                     query = queries[i : i + args.local_rollout_forward_batch_size]
