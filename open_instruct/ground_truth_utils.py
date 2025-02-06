@@ -1,12 +1,21 @@
-'''
+"""
 Collection of 'ground truth rewards' for different datasets/tasks.
 Used to give feedback to the model based on the ground truth answer.
-'''
-import re
+"""
+
 import json
+import re
 import string
-from open_instruct.math_utils import last_boxed_only_string, remove_boxed, get_unnormalized_answer, normalize_final_answer, is_equiv, hendrycks_is_equiv
+
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
+from open_instruct.math_utils import (
+    get_unnormalized_answer,
+    hendrycks_is_equiv,
+    is_equiv,
+    last_boxed_only_string,
+    normalize_final_answer,
+    remove_boxed,
+)
 
 
 def verify_gsm8k_sample(model_output, ground_truth_answer):
@@ -138,11 +147,19 @@ def verify_flan_sample(model_output, ground_truth_answer):
     return normalize_answer(answer_string) == normalize_answer(ground_truth_answer)
 
 
+def soft_format_reward_func(responses: list[str], reward_scale: float = 1.0) -> list[float]:
+    """Reward function that checks if the completion has a specific format."""
+    pattern = r".*?</think>\s*<answer>.*?</answer>"
+    matches = [re.match(pattern, r, re.DOTALL) for r in responses]
+    return [reward_scale if match else 0.0 for match in matches]
+
+
 # debug code
 if __name__ == "__main__":
     from datasets import load_dataset
+
     ds = load_dataset("ai2-adapt-dev/prompts_with_constraints_for_ground_truth")
     test_model_output = "<|assistant|>\nThe answer is $\\boxed{3.14}$"
-    for sample in ds['train']:
+    for sample in ds["train"]:
         print(sample)
-        verify_ifeval_sample(test_model_output, sample['ground_truth'])
+        verify_ifeval_sample(test_model_output, sample["ground_truth"])

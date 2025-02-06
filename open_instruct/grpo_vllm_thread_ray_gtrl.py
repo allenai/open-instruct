@@ -47,6 +47,7 @@ from open_instruct.dataset_transformation import (
     TokenizerConfig,
     get_cached_dataset_rlvr,
 )
+from open_instruct.ground_truth_utils import soft_format_reward_func
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 
@@ -234,6 +235,10 @@ class Args:
     """the reward model multiplier, for down/upscaling the reward model output"""
     verification_reward: float = 10.0
     """the reward value for verifiable responses"""
+    add_r1_style_format_reward: bool = False
+    """whether to add the R1 style format reward"""
+    r1_style_format_reward: float = 1.0
+    """the reward value for R1 style format reward"""
 
     # async setting
     async_mode: bool = True
@@ -1058,7 +1063,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 sequence_lengths = []
                 if accelerator.is_main_process:
                     g_response_token_ids = response_ids_Q.get()
-                    DUMMY_PAD_TOKEN = 0  # we can't use tokenizer.pad_token_id because it's outside vocab and `torch.gather(all_logprob, 2, response.unsqueeze(-1))` will error out
+                    DUMMY_PAD_TOKEN = (
+                        args.stop_token_id
+                    )  # we can't use tokenizer.pad_token_id because it's outside vocab and `torch.gather(all_logprob, 2, response.unsqueeze(-1))` will error out
                     g_padded_response_ids = [
                         response + [DUMMY_PAD_TOKEN] * (args.response_length - len(response))
                         for response in g_response_token_ids
@@ -1071,6 +1078,12 @@ class PolicyTrainerRayProcess(RayProcess):
                 ]
                 # print(f"{local_vllm_responses.shape=}, {local_vllm_responses=}")
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
+
+                if args.add_r1_style_format_reward:
+                    decoded_response = tokenizer.batch_decode(local_vllm_responses)
+                    format_scores = torch.tensor(
+                        soft_format_reward_func(decoded_response, args.r1_style_format_reward), device=device
+                    )
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
                     # print(f"get reward stuff starts {i=}")
                     query = queries[i : i + args.local_rollout_forward_batch_size]
@@ -1122,6 +1135,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     else:
                         verifiable_count = torch.tensor([0.0], device=device).float()
 
+                    if args.add_r1_style_format_reward:
+                        score += format_scores[i : i + args.local_rollout_forward_batch_size]
+
                     responses.append(response)
                     postprocessed_responses.append(postprocessed_response)
                     logprobs.append(logprob)
@@ -1140,6 +1156,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 verifiable_counts = torch.cat(verifiable_counts, 0)
                 verifiable_correct_rate = verifiable_counts.sum() / queries.shape[0]
                 # print(f"get reward stuff finished")
+                if self.rank == 0:
+                    print(f"{sequence_lengths=}")
+                    print(f"{postprocessed_responses[0]=}")
+                    print(f"{tokenizer.decode(postprocessed_responses[0])=}")
                 del (logprob, ref_logprob, score)
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -1294,6 +1314,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics.add("val/ratio", ratio_stats.mean())
                 local_metrics.add("val/ratio_var", ratio_stats.var())
                 local_metrics.add("val/stop_token_rate", contain_stop_token.float().mean())
+                if args.add_r1_style_format_reward:
+                    local_metrics.add("val/format_scores", format_scores.float().mean())
 
                 metrics = {
                     "episode": episode,
