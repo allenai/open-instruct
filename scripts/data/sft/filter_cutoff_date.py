@@ -62,55 +62,76 @@ def main():
     parser.add_argument("--dataset", type=str, default="allenai/tulu-3-sft-mixture")
     parser.add_argument("--column", type=str, default="messages")
     parser.add_argument("--num_proc", type=int, default=16)
+    parser.add_argument("--split", type=str, default="train")
+    parser.add_argument("--push_to_hf", action="store_true", default=False)
     args = parser.parse_args()
 
     dataset = load_dataset(args.dataset)
     
-    for split_name, split_data in dataset.items():
-        print(f"\nProcessing split: {split_name}")
-        print(f"Number of examples in split: {len(split_data)}")
-        
-        # Add new features including cutoff_matches
-        new_features = split_data.features.copy()
-        new_features["cutoff_matches"] = Sequence(Value("string"))
-        new_features["id"] = Value("string")
-        new_features["source"] = Value("string")
-        
-        # Process examples with the new features
-        processed = split_data.map(
-            lambda ex: process_example(ex, column=args.column),
-            num_proc=args.num_proc,
-            desc="Extracting cutoff matches",
-            features=new_features
-        )
-        
-        # Filter examples with matches
-        filtered = processed.filter(
-            lambda ex: bool(ex["cutoff_matches"]),
-            num_proc=args.num_proc,
-            desc="Filtering examples with cutoff mentions"
-        )
-        
-        # Collect all matches
-        all_matches = [match for ex in filtered for match in ex["cutoff_matches"]]
-        
-        # print ids and counter of sources
-        sources = {}
-        for ex in filtered:
-            source = ex["source"]
-            if source not in sources:
-                sources[source] = 0
-            sources[source] += 1
-        print(f"\nSources and counts:")
-        for source, count in sources.items():
-            print(f"- {source}: {count}")
+    split_name = args.split
+    split_data = dataset[split_name]
+    print(f"\nProcessing split: {split_name}")
+    print(f"Number of examples in split: {len(split_data)}")
+    
+    # Add new features including cutoff_matches
+    new_features = split_data.features.copy()
+    new_features["cutoff_matches"] = Sequence(Value("string"))
+    new_features["id"] = Value("string")
+    new_features["source"] = Value("string")
+    
+    # Process examples with the new features
+    processed = split_data.map(
+        lambda ex: process_example(ex, column=args.column),
+        num_proc=args.num_proc,
+        desc="Extracting cutoff matches",
+        features=new_features
+    )
+    
+    # Filter examples with matches
+    filtered = processed.filter(
+        lambda ex: bool(ex["cutoff_matches"]),
+        num_proc=args.num_proc,
+        desc="Filtering examples with cutoff mentions"
+    )
+    
+    # Collect all matches
+    all_matches = [match for ex in filtered for match in ex["cutoff_matches"]]
+    
+    # print ids and counter of sources
+    sources = {}
+    for ex in filtered:
+        source = ex["source"]
+        if source not in sources:
+            sources[source] = 0
+        sources[source] += 1
+    print(f"\nSources and counts:")
+    for source, count in sources.items():
+        print(f"- {source}: {count}")
 
-        print(f"\nFound {len(filtered)} examples with cutoff mentions")
-        print(f"Total mentions: {len(all_matches)}")
-        if all_matches:
-            print("\nExample matches:")
-            for match in all_matches[:10]:
-                print(f"- {match}")
+    print(f"\nFound {len(filtered)} examples with cutoff mentions")
+    print(f"Total mentions: {len(all_matches)}")
+    if all_matches:
+        print("\nExample matches:")
+        for match in all_matches[:10]:
+            print(f"- {match}")
+
+    # remove entries in processed if id in ids of filtered
+    remove_ids = [ex["id"] for ex in filtered]
+    print(f"Removing {len(remove_ids)} examples from processed")
+    processed = processed.filter(
+        lambda ex: ex["id"] not in remove_ids,
+        num_proc=args.num_proc,
+        desc="Filtering processed examples"
+    )
+    print(f"Number of examples in processed after filtering: {len(processed)}")
+    print(f"Number of examples in orig dataset: {len(split_data)}")
+
+    # Save the filtered dataset if specified
+    if args.push_to_hf:
+        new_name = args.dataset + "-filter-datecutoff"
+        # remove column "cutoff_matches"
+        processed = processed.remove_columns(["cutoff_matches"])
+        processed.push_to_hub(new_name)
 
                 
 
