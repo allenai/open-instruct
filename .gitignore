@@ -147,3 +147,6 @@ dmypy.json
 .idea/
 .vscode
 .DS_Store
+
+*.csv
+eval/eval_samples/*

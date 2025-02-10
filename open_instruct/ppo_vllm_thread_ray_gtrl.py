@@ -113,7 +113,6 @@ from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
 api = HfApi()
 INVALID_LOGPROB = 1.0
 
-
 @dataclass
 class Args:
     # required dataset args
@@ -271,11 +270,11 @@ class Args:
     # wandb and HF tracking configs
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "open_instruct_internal"
+    wandb_project_name: str = "open_instruct_rlvr"
     """The wandb's project name"""
     wandb_entity: Optional[str] = None
     """The entity (team) of wandb's project"""
-    push_to_hub: bool = True
+    push_to_hub: bool = False
     """Whether to upload the saved model to huggingface"""
     hf_entity: Optional[str] = None
     """The user or org name of the model repository from the Hugging Face Hub"""
@@ -325,13 +324,15 @@ def calculate_runtime_args(args: Args, model_config: ModelConfig):
     """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
     # accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
     # args.world_size = accelerator.num_processes
-    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    if not args.run_name:
+        args.run_name = f"{args.exp_name}_{model_config.model_name_or_path}"
     args.gradient_accumulation_steps = exact_div(
         args.local_mini_batch_size,
         args.per_device_train_batch_size,
         "`local_mini_batch_size` must be a multiple of `per_device_train_batch_size`",
     )
     args.world_size = sum(args.actor_num_gpus_per_node)
+    print(f"world_size: {args.world_size}")
     args.micro_batch_size = int(args.per_device_train_batch_size * args.world_size)
     args.rollout_batch_size = int(args.local_rollout_batch_size * args.world_size)
     args.mini_batch_size = int(args.local_mini_batch_size * args.world_size)
@@ -910,8 +911,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
                 print(f"🔥🔥🔥 Generation time: {time.time() - generation_start_time:.2f} seconds")
                 response_ids_Q.put(response_ids)
-
-                if sample_evaluation_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
+                
+                if sample_evaluation_prompt_token_ids is not None and sample_evaluation_prompt_token_ids != [] and (training_step - 1) % eval_freq == 0:
                     outputs = ray.get(
                         llm.generate.remote(
                             prompt_token_ids=sample_evaluation_prompt_token_ids,
@@ -1279,8 +1280,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         pg_losses2 = -mb_advantage * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
                         pg_loss_max = torch.max(pg_losses, pg_losses2)
                         pg_loss = masked_mean(pg_loss_max, ~padding_mask[micro_batch_inds])
-                        loss = pg_loss
-                        self.model.backward(loss)
+                        self.model.backward(pg_loss)
                         # print("backward loss", self.rank, "micro batch start", micro_batch_start)
                         # print("trying to step", self.rank, "micro batch start", micro_batch_start)
                         self.model.step()
@@ -1307,7 +1307,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     minibatch_idx += 1
                     # fmt: off
                     del mb_advantage, mb_responses, mb_query_responses, mb_logprobs, mb_return, mb_values, mb_padding_mask_p1
-                    del new_logprobs, logprobs_diff, ratio, pg_losses, pg_losses2, pg_loss_max, pg_loss, loss
+                    del new_logprobs, logprobs_diff, ratio, pg_losses, pg_losses2, pg_loss_max, pg_loss
                     # del vpred_temp, vpred, vpredclipped, vf_losses1, vf_losses2, vf_loss_max
                     # del vf_loss, vf_clipfrac, pg_clipfrac, approxkl
                     # fmt: on
@@ -1380,14 +1380,15 @@ class PolicyTrainerRayProcess(RayProcess):
                 checkpoint_dir = f"{args.output_dir}_checkpoints"
                 os.makedirs(checkpoint_dir, exist_ok=True)
                 step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-                os.makedirs(step_dir, exist_ok=True)
+                # os.makedirs(step_dir, exist_ok=True)
                 print(f"Saving model at step {training_step} to {step_dir}")
                 self.save_model(self.model, step_dir)
                 if args.try_launch_beaker_eval_jobs_on_weka:
                     self.launch_ai2_evals_on_weka(step_dir, training_step)
                 if args.save_value_model:
                     value_dir = os.path.join(step_dir, "value_model")
-                    self.save_model(self.value_model, step_dir)
+                    os.makedirs(value_dir, exist_ok=True)
+                    self.save_model(self.value_model, value_dir)
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         self.save_model(self.model, args.output_dir)
         if args.try_launch_beaker_eval_jobs_on_weka:
@@ -1700,7 +1701,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # create the model and optimizer
     pg = None
-    bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.actor_num_gpus_per_node]
+    bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 5} for actor_num_gpus in args.actor_num_gpus_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
     ray.get(pg.ready())
 
@@ -1768,7 +1769,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
         if df is not None:
             if args.with_tracking:
-                wandb.log({"sample_completions": wandb.Table(dataframe=df)})
+                wandb.log({f"sample_completions_training_step_{training_step}": wandb.Table(dataframe=df)})
             else:
                 print_rich_table(df.iloc[:1])
     ray.get(refs)
