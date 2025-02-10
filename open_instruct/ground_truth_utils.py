@@ -16,6 +16,7 @@ from open_instruct.math_utils import (
     normalize_final_answer,
     remove_boxed,
 )
+from typing import List, Dict, Any, Optional
 
 
 def verify_gsm8k_sample(model_output, ground_truth_answer):
@@ -154,12 +155,174 @@ def soft_format_reward_func(responses: list[str], reward_scale: float = 1.0) -> 
     return [reward_scale if match else 0.0 for match in matches]
 
 
+def verify_function_sample(model_output: str, ground_truth:str) -> bool:
+    """
+    Verify if model output matches ground truth function calls using multiple extraction methods.
+    Similar to math verification, tries multiple approaches to extract function calls.
+    
+    Args:
+        model_output: Raw model response string
+        ground_truth: List of expected function call dictionaries
+    
+    Returns:
+        bool: True if any extraction method matches ground truth
+    """
+    all_extracted_calls = []
+    ground_truth = json.loads(ground_truth)
+    # Method 1: Extract from code blocks with ```
+    code_blocks = re.findall(r"```(?:json)?\n?(.*?)```", model_output, re.DOTALL)
+    for block in code_blocks:
+        try:
+            parsed = json.loads(block.strip())
+            if isinstance(parsed, list):
+                all_extracted_calls.append(parsed)
+        except json.JSONDecodeError:
+            continue
+            
+    # Method 2: Extract from XML-style function_calls tags
+    function_calls_blocks = re.findall(
+        r"<function_calls>\s*(.*?)\s*</function_calls>",
+        model_output,
+        re.DOTALL
+    )
+    for block in function_calls_blocks:
+        # Remove any embedded code blocks if present
+        block = re.sub(r"```(?:json)?\n?(.*?)```", r"\1", block, flags=re.DOTALL)
+        try:
+            parsed = json.loads(block.strip())
+            if isinstance(parsed, list):
+                all_extracted_calls.append(parsed)
+        except json.JSONDecodeError:
+            continue
+            
+    # Method 3: Look for direct JSON array in the text
+    try:
+        # Find text that looks like a JSON array
+        json_arrays = re.findall(r"\[\s*{.*?}\s*\]", model_output, re.DOTALL)
+        for array in json_arrays:
+            try:
+                parsed = json.loads(array)
+                if isinstance(parsed, list):
+                    all_extracted_calls.append(parsed)
+            except json.JSONDecodeError:
+                continue
+    except Exception:
+        pass
+        
+    # Method 4: Try parsing the entire output as JSON (last resort)
+    try:
+        parsed = json.loads(model_output.strip())
+        if isinstance(parsed, list):
+            all_extracted_calls.append(parsed)
+    except json.JSONDecodeError:
+        pass
+        
+    # Compare each extracted call list with ground truth
+    for calls in all_extracted_calls:
+        if is_function_calls_equivalent(calls, ground_truth):
+            return True
+            
+    return False
+
+def is_function_calls_equivalent(
+    actual_calls: List[Dict[str, Any]],
+    expected_calls: List[Dict[str, Any]]
+) -> bool:
+    """
+    Check if two lists of function calls are equivalent.
+    
+    Args:
+        actual_calls: List of actual function calls
+        expected_calls: List of expected function calls
+    
+    Returns:
+        bool: True if calls are equivalent
+    """
+    if len(actual_calls) != len(expected_calls):
+        return False
+        
+    for actual, expected in zip(actual_calls, expected_calls):
+        # Check basic structure
+        if not isinstance(actual, dict) or not isinstance(expected, dict):
+            return False
+            
+        # Check required fields
+        if "name" not in actual or "arguments" not in actual:
+            return False
+            
+        # Compare function names
+        if actual["name"] != expected["name"]:
+            return False
+            
+        # Compare arguments
+        actual_args = actual["arguments"]
+        expected_args = expected["arguments"]
+        
+        if not isinstance(actual_args, dict) or not isinstance(expected_args, dict):
+            return False
+            
+        # Check if all expected arguments are present with correct values
+        for key, value in expected_args.items():
+            if key not in actual_args or actual_args[key] != value:
+                return False
+                
+    return True
+
+# Example usage
+def test_verifier():
+    ground_truth = """[
+        {"name": "live_giveaways_by_type", "arguments": {"type": "beta"}},
+        {"name": "live_giveaways_by_type", "arguments": {"type": "game"}}
+    ]"""
+    
+    test_cases = [
+        # Case 1: Perfect match with code blocks
+        '''```json
+        [
+            {"name": "live_giveaways_by_type", "arguments": {"type": "beta"}},
+            {"name": "live_giveaways_by_type", "arguments": {"type": "game"}}
+        ]
+        ```''',
+        
+        # Case 2: XML tags with nested code blocks
+        '''<thinking>We need to check both beta and game giveaways.</thinking>
+        <function_calls>
+        ```
+        [
+            {"name": "live_giveaways_by_type", "arguments": {"type": "beta"}},
+            {"name": "live_giveaways_by_type", "arguments": {"type": "game"}}
+        ]
+        ```
+        </function_calls>''',
+        
+        # Case 3: Direct JSON in text
+        '''Here are the function calls: [
+            {"name": "live_giveaways_by_type", "arguments": {"type": "beta"}},
+            {"name": "live_giveaways_by_type", "arguments": {"type": "game"}}
+        ]''',
+        
+        # Case 4: Invalid format
+        '''No valid JSON here'''
+    ]
+    
+    for i, test_case in enumerate(test_cases, 1):
+        result = verify_function_sample(test_case, ground_truth)
+        print(f"\nTest case {i}:")
+        print(f"Matched: {result}")
+        print(f"Input: {test_case[:100]}...")
+
+
+
+
 # debug code
 if __name__ == "__main__":
     from datasets import load_dataset
-
+    print(test_verifier())
     ds = load_dataset("ai2-adapt-dev/prompts_with_constraints_for_ground_truth")
     test_model_output = "<|assistant|>\nThe answer is $\\boxed{3.14}$"
     for sample in ds["train"]:
         print(sample)
         verify_ifeval_sample(test_model_output, sample["ground_truth"])
+        
+
+
