@@ -72,6 +72,7 @@ python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-3-dev \
     --priority normal \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
     --num_nodes 4 \
     --budget ai2/oe-adapt \
@@ -100,7 +101,7 @@ python mason.py \
     --logging_steps 1 \
     --reduce_loss sum \
     --model_revision main \
-    --dataset_mixer_list allenai/tulu-3-sft-mixture 100 \
+    --dataset_mixer_list allenai/tulu-3-sft-mixture 1.0 \
     --dataset_mix_dir output/sft_8b \
     --exp_name tulu-3-8b-sft \
     --seed 123
@@ -153,6 +154,7 @@ python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-3-dev \
     --priority normal \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
     --num_nodes 4 \
     --budget ai2/oe-adapt \
@@ -303,6 +305,21 @@ done
 done
 ```
 
+
+### End-to-end Model Training
+
+For post-training, we often need to train the models throughout all 3 stages. The rough steps are as follows:
+
+1. Run a sweep of SFT training and use the internal leaderboard https://huggingface.co/spaces/allenai/oe-eval-leaderboard to select the best model.
+2. Run a sweep of DPO training and select the best model.
+3. Based on the best DPO model, use its dataset to train an RM.
+4. Use the best DPO (and RM) to train an RLVR model.
+
+
+We have some example dev scripts on the whole process in the `docs/archived_dev_scripts` directory. Note that these scripts are not cleaned up like [docs/tulu3.md](docs/tulu3.md), but they are useful for reference.
+
+* docs/archived_dev_scripts/olmo2_1124.sh (the commands used to produce [OLMo 2 1124](https://huggingface.co/collections/allenai/olmo-2-674117b93ab84e98afc72edc))
+* docs/archived_dev_scripts/olmoe_0125.sh (the commands used to produce [OLMoE 0125](https://huggingface.co/collections/allenai/olmoe-0125-67992134f9ebea0a941706ca))
 
 
 ### Ai2 Internal Evaluation

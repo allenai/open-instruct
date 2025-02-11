@@ -1,18 +1,18 @@
-python open_instruct/ppo_vllm_thread_ray_gtrl.py \
-    --dataset_mixer '{"allenai/RLVR-GSM": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"allenai/RLVR-GSM": 1.0}' \
-    --dataset_eval_splits test \
+python open_instruct/grpo_vllm_thread_ray_gtrl.py \
+    --dataset_mixer_list allenai/RLVR-GSM 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM 1.0 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 1023 \
     --max_prompt_token_length 1024 \
     --response_length 1024 \
+    --number_samples_per_prompt 4 \
     --model_name_or_path HuggingFaceTB/SmolLM-135M-Instruct \
-    --reward_model_path HuggingFaceTB/SmolLM-135M-Instruct \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
     --ground_truths_key ground_truth \
-    --chat_template tulu \
+    --chat_template_name tulu \
     --sft_messages_key messages \
     --learning_rate 3e-7 \
     --total_episodes 10000 \

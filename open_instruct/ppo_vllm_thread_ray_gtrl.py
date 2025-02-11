@@ -216,6 +216,10 @@ class Args:
     """whether to penalize responses that do not contain `stop_token_id`"""
     number_samples_per_prompt: int = 1
     """the number of samples to generate per prompt, useful for easy-star"""
+    stop_strings: List[str] = None
+    """List of strings that stop the generation when they are generated.
+    The returned output will not contain the stop strings."""
+    eval_max_length: int = 4096  # max generation length for evaluation
 
     # online PPO specific args
     beta: float = 0.05
@@ -238,7 +242,8 @@ class Args:
     """whether to apply verifiable reward"""
     reward_model_multiplier: float = 1.0
     """the reward model multiplier, for down/upscaling the reward model output"""
-    answer_extraction_model: str = None
+    verification_reward: float = 10.0
+    """the reward value for verifiable responses"""
 
     # async setting
     async_mode: bool = True
@@ -974,8 +979,6 @@ class PolicyTrainerRayProcess(RayProcess):
         if accelerator.is_main_process:
             param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
 
-        answer_extraction_model = None
-        answer_extraction_tokenizer = None
         # for _ in range(1, resume_training_step):  # we didn't store scheduler state
         #     scheduler.step()
 
@@ -1120,13 +1123,12 @@ class PolicyTrainerRayProcess(RayProcess):
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
                         verifiable_reward, verifiable_count = apply_verifiable_reward(
+                            postprocessed_response,
                             postprocessed_query_response,
                             tokenizer,
                             ground_truth,
                             dataset,
-                            verify_reward=10,
-                            answer_extraction_model=answer_extraction_model,
-                            answer_extraction_tokenizer=answer_extraction_tokenizer,
+                            verify_reward=args.verification_reward,
                         )
                         score += verifiable_reward
                     else:
@@ -1509,8 +1511,10 @@ python scripts/submit_eval_jobs.py \
     --evaluate_on_weka \
     --run_safety_evaluations \
     --run_id {wandb_url} \
-    --step {training_step} \
+    --oe_eval_max_length {args.eval_max_length} \
     --skip_oi_evals"""
+            if training_step is not None:
+                command += f" --step {training_step}"
             if args.oe_eval_tasks is not None:
                 command += f" --oe_eval_tasks {','.join(args.oe_eval_tasks)}"
             print(f"Launching eval jobs with command: {command}")

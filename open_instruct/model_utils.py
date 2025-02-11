@@ -19,6 +19,7 @@ from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple, Union
+import logging
 
 try:
     import deepspeed
@@ -47,12 +48,25 @@ from open_instruct.ground_truth_utils import (
 from open_instruct.utils import retry_on_exception
 
 
+logger = logging.getLogger(__name__)
+
+
 @dataclass
 class ModelConfig:
     model_name_or_path: Optional[str] = None
     """The model checkpoint for weights initialization."""
     model_revision: Optional[str] = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
+    tokenizer_name: Optional[str] = None
+    """The tokenizer checkpoint for weights initialization. (by default the model_name_or_path is used)"""
+    tokenizer_revision: Optional[str] = None
+    """The specific tokenizer version to use (can be a branch name, tag name or commit id)."""
+    use_slow_tokenizer: bool = False
+    """Whether to use the slow tokenizer or not."""
+    add_bos: bool = False
+    """Whether to add the BOS token to the input."""
+    chat_template_name: Optional[str] = None
+    """The chat template for the tokenizer."""
     trust_remote_code: bool = False
     """Trust remote code when loading a model."""
     torch_dtype: Optional[str] = None
@@ -213,36 +227,23 @@ def get_reward(
 
 
 def apply_verifiable_reward(
+    responses: torch.Tensor,
     query_responses: torch.Tensor,
     tokenizer,
     ground_truths: List[str],
     datasets: List[str],
     verify_reward: int = 10,
-    answer_extraction_model: Optional[torch.nn.Module] = None,
-    answer_extraction_tokenizer: Optional[PreTrainedTokenizer] = None,
 ):
     # decode the responses
-    decoded_responses = tokenizer.batch_decode(query_responses, skip_special_tokens=True)
-    # if we have an answer extraction model, use it to extract the answer from the response
-    if answer_extraction_model is not None:
-        prompt = "Thus, the final answer is:"
-        # add the prompt to the responses
-        decoded_responses = [f"{response} {prompt}" for response in decoded_responses]
-        # extract the answer
-        answer_extraction_inputs = answer_extraction_tokenizer(
-            decoded_responses, return_tensors="pt", padding=True, truncation=True
-        )
-        answer_extraction_outputs = answer_extraction_model(**answer_extraction_inputs)
-        # get the predicted answer
-        decoded_responses = answer_extraction_tokenizer.batch_decode(
-            answer_extraction_outputs.logits.argmax(-1), skip_special_tokens=True
-        )
+    decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
+    # for now, below is not used. but keeping it around in case we need it.
+    decoded_query_responses = tokenizer.batch_decode(query_responses, skip_special_tokens=True)  # noqa: F841
     # compare with ground truth.
-    # use same logic as in gsm8k evaluation
     rewards = []
     for prediction, ground_truth, dataset in zip(decoded_responses, ground_truths, datasets):
         verified = False
         if ground_truth is None:
+            logger.warning("No ground truth provided for a sample, applying 0 reward.")
             rewards.append(0)
             continue
         if dataset.lower() == "gsm8k":
@@ -255,7 +256,7 @@ def apply_verifiable_reward(
             verified = verify_opencode_sample(prediction, ground_truth)
         # if verified, give reward
         if verified:
-            print("Applying ground truth reward 🤗")
+            logger.info("Applying ground truth reward 🤗")
             rewards.append(verify_reward)
         else:
             rewards.append(0)

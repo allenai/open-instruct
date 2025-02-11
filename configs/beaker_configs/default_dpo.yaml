@@ -14,7 +14,7 @@ tasks:
       --num_processes 4
       --use_deepspeed
       --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf
-      open_instruct/dpo_tune.py
+      open_instruct/dpo_tune_cache.py
       --model_name_or_path /hf_llama_models
       --use_flash_attn
       --max_seq_length 4096

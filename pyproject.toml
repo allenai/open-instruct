@@ -21,7 +21,7 @@ dependencies = [
     "torch>=2.5.1",
     "transformers>=4.46.3",
     "vllm>=0.6.4.post1",
-    "wandb>=0.18.7",
+    "wandb==0.18.1",
 ]
 
 [build-system]

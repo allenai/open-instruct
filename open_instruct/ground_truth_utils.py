@@ -1,17 +1,25 @@
-'''
+"""
 Collection of 'ground truth rewards' for different datasets/tasks.
 Used to give feedback to the model based on the ground truth answer.
-'''
-import re
+"""
+
 import json
+import re
 import string
 from open_instruct.math_utils import last_boxed_only_string, remove_boxed, get_unnormalized_answer, normalize_final_answer, is_equiv, hendrycks_is_equiv
 from open_instruct.code_utils import run_test_cases, format_function_code
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
+from open_instruct.math_utils import (
+    get_unnormalized_answer,
+    hendrycks_is_equiv,
+    is_equiv,
+    last_boxed_only_string,
+    normalize_final_answer,
+    remove_boxed,
+)
 
 
 def verify_gsm8k_sample(model_output, ground_truth_answer):
-    model_output = model_output.split("<|assistant|>\n")[-1].strip()
     # gsm is easy: extract numbers, and then just compare last number with answer.
     # matches how we do eval.
     predictions = None
@@ -26,7 +34,6 @@ def verify_gsm8k_sample(model_output, ground_truth_answer):
 
 
 def verify_math_sample(model_output, ground_truth_answer):
-    model_output = model_output.split("<|assistant|>\n")[-1].strip()
     raw_answer = model_output
     # for math, more complex. We will try a few different ways to extract the answer.
     # this roughly follows 'flex em' in oe-eval-internal
@@ -68,7 +75,6 @@ def verify_math_sample(model_output, ground_truth_answer):
 
 
 def verify_strict_math_sample(model_output, ground_truth_answer):
-    model_output = model_output.split("<|assistant|>\n")[-1].strip()
     raw_answer = model_output
     # just trying minerva format.
     all_answers = []
@@ -93,7 +99,6 @@ def verify_strict_math_sample(model_output, ground_truth_answer):
 
 
 def verify_ifeval_sample(model_output, constraint):
-    model_output = model_output.split("<|assistant|>\n")[-1].strip()
     # TODO: just pass in final answer. this should be fine for other evals too.
     answer = model_output.split("<|assistant|>\n")[-1].strip()
     if isinstance(constraint, str):
@@ -152,8 +157,9 @@ def verify_opencode_sample(function_str, test_cases):
 # debug code
 if __name__ == "__main__":
     from datasets import load_dataset
+
     ds = load_dataset("ai2-adapt-dev/prompts_with_constraints_for_ground_truth")
     test_model_output = "<|assistant|>\nThe answer is $\\boxed{3.14}$"
-    for sample in ds['train']:
+    for sample in ds["train"]:
         print(sample)
-        verify_ifeval_sample(test_model_output, sample['ground_truth'])
+        verify_ifeval_sample(test_model_output, sample["ground_truth"])
