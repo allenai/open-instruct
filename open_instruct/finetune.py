@@ -463,7 +463,7 @@ def main(args: FlatArguments):
             args.max_seq_length,
             args.hf_entity,
         )
-        train_dataset.shuffle(seed=args.seed)
+        train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
     if args.cache_dataset_only:
         return

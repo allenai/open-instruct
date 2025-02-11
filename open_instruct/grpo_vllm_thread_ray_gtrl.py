@@ -151,8 +151,6 @@ class Args:
     """Ratio of warmup steps to total steps (takes precedence over `warm_up_steps`)"""
 
     # various batch sizes
-    num_train_epochs: int = 1
-    """Number of epochs to train"""
     gradient_accumulation_steps: Optional[int] = None
     """The number of gradient accumulation steps"""
     per_device_train_batch_size: Optional[int] = 1
@@ -331,6 +329,7 @@ def calculate_runtime_args(args: Args, model_config: ModelConfig):
     args.micro_batch_size = int(args.per_device_train_batch_size * args.world_size)
     args.rollout_batch_size = int(args.local_rollout_batch_size * args.world_size)
     args.mini_batch_size = int(args.local_mini_batch_size * args.world_size)
+    args.num_mini_batches = exact_div((args.rollout_batch_size * args.number_samples_per_prompt), args.mini_batch_size)
     args.num_training_steps = args.total_episodes // (args.rollout_batch_size * args.number_samples_per_prompt)
     args.eval_freq = max(1, args.num_training_steps // args.num_evals)
     # PPO logic: do checks and set up dataloader batch size
@@ -642,15 +641,15 @@ class PolicyTrainerRayProcess(RayProcess):
         # optim_params = get_optimizer_grouped_parameters(self.policy, weight_decay)
         # self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
         self.optimizer = torch.optim.AdamW(self.policy.parameters(), lr=args.learning_rate)
-        num_training_steps = args.num_training_steps * args.num_train_epochs * args.num_epochs
+        num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
         if args.warmup_ratio >= 0.0:
-            warm_up_steps = int(num_training_steps * args.warmup_ratio)
+            warm_up_steps = int(num_scheduler_steps * args.warmup_ratio)
         scheduler = get_scheduler(
             args.lr_scheduler_type,
             optimizer=self.optimizer,
             num_warmup_steps=warm_up_steps,
-            num_training_steps=num_training_steps,
+            num_training_steps=num_scheduler_steps,
         )
         print(ds_config)
         self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
@@ -1156,10 +1155,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 verifiable_counts = torch.cat(verifiable_counts, 0)
                 verifiable_correct_rate = verifiable_counts.sum() / queries.shape[0]
                 # print(f"get reward stuff finished")
-                if self.rank == 0:
-                    print(f"{sequence_lengths=}")
-                    print(f"{postprocessed_responses[0]=}")
-                    print(f"{tokenizer.decode(postprocessed_responses[0])=}")
                 del (logprob, ref_logprob, score)
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -1607,7 +1602,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         dataset_config.max_token_length,
         args.hf_entity,
     )
-    train_dataset.shuffle(seed=args.seed)
+    train_dataset = train_dataset.shuffle(seed=args.seed)
     eval_dataset = None
     if args.dataset_mixer_eval_list is not None:
         eval_dataset = get_cached_dataset_rlvr(
@@ -1618,7 +1613,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             dataset_config.max_token_length,
             args.hf_entity,
         )
-        eval_dataset.shuffle(seed=args.seed)
+        eval_dataset = eval_dataset.shuffle(seed=args.seed)
     if args.cache_dataset_only:
         return
 
