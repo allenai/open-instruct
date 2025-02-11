@@ -1,62 +1,83 @@
-from datasets import load_dataset, concatenate_datasets
+import ast
+import random
+from datasets import load_dataset, concatenate_datasets, Dataset
 import copy
 import httpx
 import asyncio
-from open_instruct.ground_truth_utils import verify_gsm8k_sample
+import os
+import json
+from open_instruct.ground_truth_utils import verify_gsm8k_sample, verify_math_sample
 
-semaphore = asyncio.Semaphore(100)
 
+semaphore1 = asyncio.Semaphore(500)
+semaphore2 = asyncio.Semaphore(500)
 
 async def call_hosted_model(messages, model, model_url, llm_config):
+    headers = {"Content-Type": "application/json"}
+    payload = copy.deepcopy(llm_config)
+    payload["stream"] = False
+    payload["messages"] = messages
+    payload["model"] = model
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            url=model_url,
+            headers=headers,
+            json=payload,
+            timeout=240,
+        )
+    try:
+        model_output = response.json()["choices"][0]["message"]["content"]
+    except:
+        import pdb
+        pdb.set_trace()
+
+    return model_output
+
+
+async def rate_limited_call_hosted_model(messages, model, model_url, llm_config, semaphore):
     async with semaphore:
-        headers = {"Content-Type": "application/json"}
-        payload = copy.deepcopy(llm_config)
-        payload["stream"] = False
-        payload["messages"] = messages
-        payload["model"] = model
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url=model_url,
-                headers=headers,
-                json=payload,
-                timeout=120,
-            )
-        try:
-            model_output = response.json()["choices"][0]["message"]["content"]
-        except:
-            import pdb
-            pdb.set_trace()
-    
-        return model_output
+        return await call_hosted_model(messages, model, model_url, llm_config)
 
 
-async def main(model):
+async def main(model, dataset, dataset_name, semaphore):
     tasks = []
     
     for i, data in enumerate(dataset):
 
+        # if "translated_messages" in data:
+        #     messages = ast.literal_eval(data["translated_messages"])
+        # else:
         messages = data["translated_messages"]
-        if messages is None:
-            messages = data["messages"]
-        task = asyncio.create_task(call_hosted_model(messages, model["model"], model["model_url"], llm_config))
+        task = asyncio.create_task(rate_limited_call_hosted_model(messages, model["model"], model["model_url"], llm_config, semaphore))
         tasks.append(task)
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
+    verification_results = []
+    positive_samples = []
+    negative_samples = []
+    
     for i, result in enumerate(results):
         if isinstance(result, Exception):
             print(f"Error for sample {i}: {result}")
             continue
-        if i < NUM_SAMPLES:
-            import pdb
-            pdb.set_trace()
-            accuracy_count["hindi"][model["model"].split("/")[-1]].append(verify_gsm8k_sample(result, dataset[i]["ground_truth"]))
-        elif i < 2*NUM_SAMPLES:
-            accuracy_count["punjabi"][model["model"].split("/")[-1]].append(verify_gsm8k_sample(result, dataset[i]["ground_truth"]))
-        # elif i < 3*NUM_SAMPLES:
-        #     accuracy_count["tamil"][model["model"].split("/")[-1]].append(verify_gsm8k_sample(result, dataset[i]["ground_truth"]))
+
+        if dataset_name == "gsm":
+            verification_result = verify_gsm8k_sample(result, dataset[i]["ground_truth"])
+        elif dataset_name == "math":
+            verification_result = verify_math_sample(result, dataset[i]["ground_truth"])
         else:
-            accuracy_count["english"][model["model"].split("/")[-1]].append(verify_gsm8k_sample(result, dataset[i]["ground_truth"]))
+            raise ValueError(f"Invalid dataset name: {dataset_name}")
+        
+        verification_results.append(verification_result)
+
+        if verification_result:
+            positive_samples.append(dataset[i])
+        else:
+            negative_samples.append(dataset[i])
+
+    return verification_results, positive_samples, negative_samples
+            
 
 
 if __name__ == "__main__":
@@ -65,40 +86,66 @@ if __name__ == "__main__":
         "temperature": 0.1,
     }
 
-    NUM_SAMPLES = 1
-
-    hindi_dataset = load_dataset("sarvam/RLVR-GSM-Hindi").shuffle(seed=42)["train"].select(range(NUM_SAMPLES))
-    punjabi_dataset = load_dataset("sarvam/RLVR-GSM-Punjabi").shuffle(seed=42)["train"].select(range(NUM_SAMPLES))
-    # tamil_dataset = load_dataset("sarvam/RLVR-GSM-Tamil").shuffle(seed=42)["train"].select(range(NUM_SAMPLES))
-    english_dataset = load_dataset("allenai/RLVR-GSM").shuffle(seed=42)["train"].select(range(NUM_SAMPLES))
-
-    dataset = concatenate_datasets([hindi_dataset, punjabi_dataset, english_dataset])
-
     models = [
+        # {
+        #     "model": "/home/tanay_sarvam_ai/open-instruct/checkpoints/rlvr_llama3_8b_indic_gsm_checkpoints/step_200",
+        #     "model_url": "http://10.67.27.1:8069/v1/chat/completions",
+        # },
+        # {
+        #     "model": "meta-llama/Llama-3.1-8B-Instruct",
+        #     "model_url": "http://10.67.27.15:8070/v1/chat/completions",
+        # },
         {
-            "model": "/home/tanay_sarvam_ai/Meta-Llama-3.1-8B-Instruct",
-            "model_url": "http://10.67.27.10:8062/v1/chat/completions",
-        },
-        {
-            "model": "/home/tanay_sarvam_ai/open-instruct/checkpoints/rlvr_llama3_8b_hi_pa_gsm",
-            "model_url": "http://10.67.27.7:8063/v1/chat/completions",
+            "model": "meta-llama/Llama-3.3-70B-Instruct",
+            "model_url": "http://10.67.27.4:8071/v1/chat/completions",
         },
     ]
 
-    accuracy_count = {"english": {"Meta-Llama-3.1-8B-Instruct": [], "rlvr_llama3_8b_hi_pa_gsm": []}, "hindi": {"Meta-Llama-3.1-8B-Instruct": [], "rlvr_llama3_8b_hi_pa_gsm": []}, "punjabi": {"Meta-Llama-3.1-8B-Instruct": [], "rlvr_llama3_8b_hi_pa_gsm": []}}
-
-    for model in models:
-        asyncio.run(main(model))
-        
-    # Calculate final scores by summing over lists
-    final_scores = {}
-    for lang in accuracy_count:
-        final_scores[lang] = {}
-        for model in accuracy_count[lang]:
-            if len(accuracy_count[lang][model]) == 0:
-                final_scores[lang][model] = 0
-            else:
-                final_scores[lang][model] = sum(accuracy_count[lang][model])/len(accuracy_count[lang][model])
+    NUM_SAMPLES = 10
     
-    print("Raw accuracy counts:", accuracy_count)
-    print("\nFinal scores:", final_scores)
+    # for language in ["Hindi", "Punjabi", "Tamil", "Gujarati", "Telugu", "Kannada", "Malayalam", "Bengali", "Marathi", "Odia", "English"]:
+        
+    #     dataset_path = f"../datasets/local_data/translations_math_{language}.csv"
+
+    #     if language == "English":
+    #         dataset = load_dataset("allenai/RLVR-MATH").shuffle(seed=42)["train"].select(range(NUM_SAMPLES))
+    #     elif os.path.exists(dataset_path):
+    #         dataset = load_dataset("csv", data_files=dataset_path).shuffle(seed=42)["train"].select(range(NUM_SAMPLES)) 
+    #     else:
+    #         print(f"Dataset {dataset_path} does not exist")
+    #         continue
+
+    gsm_dataset = load_dataset("sarvam/RLVR-GSM-Indic").shuffle(seed=42)["train"]
+    math_dataset = load_dataset("sarvam/RLVR-MATH-Indic").shuffle(seed=42)["train"]
+    datasets = {"gsm": gsm_dataset, "math": math_dataset}
+    
+    combined_data_positive = []
+    combined_data_negative = []
+    
+    for dataset_name, dataset in datasets.items():
+        if dataset_name == "gsm":
+            semaphore = semaphore1
+        else:
+            semaphore = semaphore2
+        verification_results, positive_samples, negative_samples = asyncio.run(main(models[0], dataset, dataset_name, semaphore))
+        if len(verification_results) > 0:
+            print(f"Accuracy: {sum(verification_results)/len(verification_results)} for {len(verification_results)} samples")
+        else:
+            print(f"No accurate samples for {models[0]['model']}")
+
+        combined_data_positive.extend(positive_samples)
+        combined_data_negative.extend(negative_samples)
+
+    random.shuffle(combined_data_positive)
+    random.shuffle(combined_data_negative)
+    positive_samples_dataset = Dataset.from_list(combined_data_positive[:int(0.25*len(combined_data_negative))])
+    negative_samples_dataset = Dataset.from_list(combined_data_negative)
+    # Save both positive and negative samples datasets
+
+    positive_samples_dataset.save_to_disk("/data/open-instruct/datasets/pass_samples_gsm_math")
+    negative_samples_dataset.save_to_disk("/data/open-instruct/datasets/fail_samples_gsm_math")
+
+    if len(positive_samples_dataset) and len(negative_samples_dataset):
+        combined_data = concatenate_datasets([positive_samples_dataset, negative_samples_dataset])
+        combined_data.push_to_hub("sarvam/RLVR-Indic-MATH-GSM", token="")
+    

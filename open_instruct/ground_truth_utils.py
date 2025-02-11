@@ -6,6 +6,7 @@ import re
 import json
 import string
 from open_instruct.math_utils import last_boxed_only_string, remove_boxed, get_unnormalized_answer, normalize_final_answer, is_equiv, hendrycks_is_equiv
+from open_instruct.code_utils import run_test_cases, format_function_code
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 
 
@@ -140,6 +141,12 @@ def verify_flan_sample(model_output, ground_truth_answer):
     # Flan! we will just use... exact match with some basic cleaning, after extracting the answer.
     answer_string = model_output.split("The answer is: ")[-1].strip()
     return normalize_answer(answer_string) == normalize_answer(ground_truth_answer)
+
+
+def verify_opencode_sample(function_str, test_cases):
+    
+    function_str = format_function_code(function_str)
+    return run_test_cases(function_str, test_cases)
 
 
 # debug code

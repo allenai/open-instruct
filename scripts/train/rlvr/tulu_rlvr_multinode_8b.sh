@@ -8,8 +8,8 @@ pip install -e .
 huggingface-cli whoami
 
 python open_instruct/ppo_vllm_thread_ray_gtrl.py \
-    --dataset_mixer '{"sarvam/RLVR-GSM-Indic": 1.0}' \
-    --run_name rlvr_llama3_8b_indic_gsm \
+    --dataset_mixer '{"sarvam/RLVR-GSM-Indic": 1.0, "sarvam/RLVR-MATH-Indic": 1.0}' \
+    --run_name rlvr_llama3_8b_indic_gsm_math \
     --dataset_train_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
@@ -33,7 +33,7 @@ python open_instruct/ppo_vllm_thread_ray_gtrl.py \
     --vllm_tensor_parallel_size 2 \
     --beta 0.05 \
     --apply_verifiable_reward true \
-    --output_dir /data/open-instruct/checkpoints/rlvr_llama3_8b_indic_gsm \
+    --output_dir /data/open-instruct/checkpoints/rlvr_llama3_8b_indic_gsm_math \
     --seed 3 \
     --num_evals 3 \
     --save_freq 25 \
