@@ -527,7 +527,7 @@ def main(args: FlatArguments):
         logger.warning(warning)
     tc = TokenizerConfig(
         model_name_or_path=tokenizer_name,
-        revision=args.model_revision,
+        revision=tokenizer_revision,
         use_fast=not args.use_slow_tokenizer,
         chat_template_name=args.chat_template_name,
         add_bos=args.add_bos,
