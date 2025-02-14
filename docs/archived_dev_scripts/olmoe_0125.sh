@@ -399,7 +399,7 @@ python mason.py \
     --dataset_mixer_list allenai/RLVR-GSM 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list allenai/RLVR-GSM 16 \
-    --dataset_mixer_eval_list_splits test \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -452,7 +452,7 @@ python mason.py \
     --dataset_mixer_list allenai/RLVR-GSM 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list allenai/RLVR-GSM 16 \
-    --dataset_mixer_eval_list_splits test \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -505,7 +505,7 @@ python mason.py \
     --dataset_mixer_list allenai/RLVR-GSM 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list allenai/RLVR-GSM 16 \
-    --dataset_mixer_eval_list_splits test \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
