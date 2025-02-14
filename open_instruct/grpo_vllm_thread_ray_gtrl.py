@@ -299,10 +299,6 @@ class Args:
     def __post_init__(self):
         assert self.number_samples_per_prompt > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
 
-    #     self.dataset_mixer_dict, self.dataset_mixer = process_dataset_mixer(self.dataset_mixer)
-    #     if self.dataset_eval_mixer is not None:
-    #         self.dataset_eval_mixer_dict, self.dataset_eval_mixer = process_dataset_mixer(self.dataset_eval_mixer)
-
 
 def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
     # if passed through cli: convert the dataset mixers to dictionaries
@@ -494,7 +490,6 @@ def masked_whiten(values: torch.Tensor, mask: torch.Tensor, shift_mean: bool = T
 
 def remove_padding(sequences, pad_token_id):
     return [[inneritem for inneritem in item if inneritem != pad_token_id] for item in sequences]
-
 
 class MetricsTracker:
     """A simple class to prellocate all metrics in an array

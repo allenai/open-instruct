@@ -151,8 +151,6 @@ class Args:
     """Ratio of warmup steps to total steps (takes precedence over `warm_up_steps`)"""
 
     # various batch sizes
-    num_train_epochs: int = 1
-    """Number of epochs to train"""
     gradient_accumulation_steps: Optional[int] = None
     """The number of gradient accumulation steps"""
     per_device_train_batch_size: Optional[int] = 1
@@ -291,6 +289,8 @@ class Args:
     """Where to save the model"""
     checkpoint_output_dir: Optional[str] = None
     """Where to save the model checkpoints in case of preemption"""
+    cache_dataset_only: bool = False
+    """Immediately exit after caching the dataset"""
     save_value_model: bool = False
     """Whether to save the value model along with the policy model"""
 
