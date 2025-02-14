@@ -222,7 +222,7 @@ Tulu 2.5:
 ```
 
 Tulu 3:
-```
+```bibtex
 @article{lambert2024tulu3,
   title = {Tülu 3: Pushing Frontiers in Open Language Model Post-Training},
   author = {
