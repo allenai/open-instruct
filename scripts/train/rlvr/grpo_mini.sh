@@ -33,5 +33,8 @@ python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --save_freq 100 \
     --reward_model_multiplier 0.0 \
     --gradient_checkpointing \
+    --single_gpu_mode \
+    --vllm_sync_backend gloo \
+    --vllm_gpu_memory_utilization 0.5 \
     --vllm_enforce_eager \
-    --with_tracking
+    # --with_tracking
