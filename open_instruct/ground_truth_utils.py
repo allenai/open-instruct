@@ -6,7 +6,9 @@ Used to give feedback to the model based on the ground truth answer.
 import json
 import re
 import string
+from typing import List
 
+from open_instruct.code_utils import get_successful_tests_fast
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.math_utils import (
     get_unnormalized_answer,
@@ -119,6 +121,30 @@ def verify_ifeval_sample(model_output, constraint):
     return func(answer, **non_none_args)
 
 
+def extract_python_code(model_output: str) -> str:
+    """Extract the first code block between ``` markers from the model output."""
+    # Find content between ``` markers
+    pattern = r"```(?:python)?(.*?)```"
+    matches = re.findall(pattern, model_output, re.DOTALL)
+    
+    if not matches:
+        return model_output
+        
+    # Return the first match, stripped of whitespace
+    return matches[0].strip()
+
+
+def verify_ace_coder_sample(model_output, tests: List[str], max_execution_time: float = 1.0):
+    """First extract the python code from the model output, then run it against the test cases. See example below.
+    """
+    # Extract the python code from the model output
+    python_code = extract_python_code(model_output)
+    # Run the python code against the test cases
+    passes = get_successful_tests_fast(python_code, tests, max_execution_time)
+    pass_rate = sum(passes) / len(passes)
+    return pass_rate
+
+
 def normalize_answer(s):
     """
     Lower text and remove punctuation, articles and extra whitespace.
@@ -163,3 +189,13 @@ if __name__ == "__main__":
     for sample in ds["train"]:
         print(sample)
         verify_ifeval_sample(test_model_output, sample["ground_truth"])
+
+
+    test_model_output = "<|assistant|>\nHere is a python code that solves the problem: ```python\ndef add(a, b):\n    return a + b\n```"
+    test_cases = [
+        "assert add(1, 2) == 3",
+        "assert add(-1, 1) == 0",
+        "assert add(0, 0) == 1" # This test will fail but just for testing
+    ]
+    print(verify_ace_coder_sample(test_model_output, test_cases))
+
