@@ -124,9 +124,9 @@ bash scripts/train/dpo/tulu_preference_mix.sh
 ### Reinforcement Learning with Verifiable Rewards (RLVR)
 
 ```bash
-# quick debugging run using 2 GPU (1 for inference, 1 for training)
-# here we are using `HuggingFaceTB/SmolLM2-360M-Instruct`; it's prob not
-# gonna work, but it's easy to test run and print stuff.
+# quick debugging run using 1 GPU (0.5 for inference, 0.5 for training)
+# here we are using `HuggingFaceTB/SmolLM-135M-Instruct`; it's prob not
+# gonna train good models, but it's easy to test run and print stuff.
 bash scripts/train/rlvr/mini.sh
 bash scripts/train/rlvr/grpo_mini.sh
 
