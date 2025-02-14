@@ -241,10 +241,10 @@ python mason.py \
     --save_freq 60 \
     --try_launch_beaker_eval_jobs_on_weka \
     --hf_metadata_dataset allenai/olmo-instruct-evals \
-    --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -300,10 +300,10 @@ python mason.py \
     --save_freq 60 \
     --try_launch_beaker_eval_jobs_on_weka \
     --hf_metadata_dataset allenai/olmo-instruct-evals \
-    --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -474,10 +474,10 @@ python mason.py \
     --save_freq 60 \
     --try_launch_beaker_eval_jobs_on_weka \
     --hf_metadata_dataset allenai/olmo-instruct-evals \
-    --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -590,10 +590,10 @@ python mason.py \
     --save_freq 60 \
     --try_launch_beaker_eval_jobs_on_weka \
     --hf_metadata_dataset allenai/olmo-instruct-evals \
-    --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -649,10 +649,10 @@ python mason.py \
     --save_freq 60 \
     --try_launch_beaker_eval_jobs_on_weka \
     --hf_metadata_dataset allenai/olmo-instruct-evals \
-    --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -707,10 +707,10 @@ python mason.py \
     --save_freq 60 \
     --try_launch_beaker_eval_jobs_on_weka \
     --hf_metadata_dataset allenai/olmo-instruct-evals \
-    --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \

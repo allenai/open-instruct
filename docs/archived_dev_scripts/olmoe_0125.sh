@@ -396,10 +396,10 @@ python mason.py \
     --output_dir /weka/oe-adapt-default/allennlp/costah/models/olmoe1b0119/$exp_name \
     --try_launch_beaker_eval_jobs_on_weka \
     --try_launch_beaker_eval_jobs False \
-    --dataset_mixer '{"allenai/RLVR-GSM": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"allenai/RLVR-GSM": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -449,10 +449,10 @@ python mason.py \
     --output_dir /weka/oe-adapt-default/allennlp/costah/models/olmoe1b0119/$exp_name \
     --try_launch_beaker_eval_jobs_on_weka \
     --try_launch_beaker_eval_jobs False \
-    --dataset_mixer '{"allenai/RLVR-GSM": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"allenai/RLVR-GSM": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -502,10 +502,10 @@ python mason.py \
     --output_dir /weka/oe-adapt-default/allennlp/costah/models/olmoe1b0119/$exp_name \
     --try_launch_beaker_eval_jobs_on_weka \
     --try_launch_beaker_eval_jobs False \
-    --dataset_mixer '{"allenai/RLVR-GSM": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"allenai/RLVR-GSM": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -556,10 +556,10 @@ python mason.py \
     --output_dir /weka/oe-adapt-default/allennlp/costah/models/olmoe1b0119/$exp_name \
     --try_launch_beaker_eval_jobs_on_weka \
     --try_launch_beaker_eval_jobs False \
-    --dataset_mixer '{"allenai/RLVR-GSM-MATH-IF-Mixed-Constraints": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"allenai/RLVR-GSM-MATH-IF-Mixed-Constraints": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
