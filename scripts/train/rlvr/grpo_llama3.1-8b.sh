@@ -1,3 +1,4 @@
+exp_name=grpo_llama3.1-8b_${RANDOM}
 python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --exp_name $exp_name \
     --output_dir /weka/oe-adapt-default/costah/models/$exp_name \
