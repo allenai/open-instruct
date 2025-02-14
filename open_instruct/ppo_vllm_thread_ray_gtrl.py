@@ -307,7 +307,6 @@ class Args:
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
 
-
 def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
     # if passed through cli: convert the dataset mixers to dictionaries
     if isinstance(value, str):
@@ -498,6 +497,7 @@ def masked_whiten(values: torch.Tensor, mask: torch.Tensor, shift_mean: bool = T
 
 def remove_padding(sequences, pad_token_id):
     return [[inneritem for inneritem in item if inneritem != pad_token_id] for item in sequences]
+
 
 class MetricsTracker:
     """A simple class to prellocate all metrics in an array
