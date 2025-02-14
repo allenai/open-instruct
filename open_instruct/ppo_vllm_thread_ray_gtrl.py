@@ -253,6 +253,12 @@ class Args:
     # ray
     actor_num_gpus_per_node: List[int] = field(default_factory=lambda: [1])
     """number of gpus per node for actor"""
+    num_gpus_per_actor: float = 1.
+    """number of gpus per actor"""
+    num_cpus_per_actor: float = 1.
+    """number of cpus per actor"""
+    collocate_vllm_and_actor: bool = False
+    """whether to collocate vLLM and actor on the same node"""
     vllm_num_engines: int = 1
     """number of vLLM Engines, set to 0 to disable vLLM"""
     vllm_tensor_parallel_size: int = 1
@@ -1571,12 +1577,14 @@ class ModelGroup:
         pg: PlacementGroup,
         ray_process_cls: RayProcess,
         num_gpus_per_node: List[int],
+        num_gpus_per_actor: float,
+        num_cpus_per_actor: float,
     ):
         self.pg = pg
         self.ray_process_cls = ray_process_cls
         self.num_gpus_per_node = num_gpus_per_node
-        self.num_gpus_per_actor = 1
-        self.num_cpus_per_actor = 4
+        self.num_gpus_per_actor = num_gpus_per_actor
+        self.num_cpus_per_actor = num_cpus_per_actor
         self.models = []
         world_size = sum(self.num_gpus_per_node)
         master_policy = ray_process_cls.options(
@@ -1709,6 +1717,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         pg,
         PolicyTrainerRayProcess,
         args.actor_num_gpus_per_node,
+        args.num_gpus_per_actor,
+        args.num_cpus_per_actor,
     )
     wandb_url = wandb.run.get_url() if args.with_tracking else None
     inits.extend(
@@ -1724,6 +1734,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         args.seed,
         args.enable_prefix_caching,
         max_len,
+        args.collocate_vllm_and_actor,
+        pg=pg if args.collocate_vllm_and_actor else None,
     )
 
     metrics_queue = RayQueue()

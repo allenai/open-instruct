@@ -206,15 +206,20 @@ def create_vllm_engines(
     seed: int,
     enable_prefix_caching: bool,
     max_model_len: int,
+    collocate_vllm_and_actor: bool = False,
+    pg: Optional[ray.util.placement_group] = None,
 ):
     vllm_engines = []
     for i in range(num_engines):
         # When tensor_parallel_size=1, vLLM init model in LLMEngine directly, assign 1 GPU for it.
         num_gpus = int(tensor_parallel_size == 1)
         scheduling_strategy = None
-
-        if tensor_parallel_size > 1:
-            bundles = [{"GPU": 1, "CPU": 1}] * tensor_parallel_size
+        if pg is not None:
+            scheduling_strategy = PlacementGroupSchedulingStrategy(
+                placement_group=pg, placement_group_capture_child_tasks=True
+            )
+        elif tensor_parallel_size > 1:
+            bundles = [{"GPU": 1, "CPU": 4}] * tensor_parallel_size
             pg = placement_group(bundles)
             ray.get(pg.ready())
 
@@ -224,8 +229,8 @@ def create_vllm_engines(
         print(f"vllm: {num_gpus=}, {num_engines=}")
         vllm_engines.append(
             LLMRayActor.options(
-                num_cpus=1,
-                num_gpus=num_gpus,
+                num_cpus=4,
+                num_gpus=0.5 if collocate_vllm_and_actor else num_gpus,
                 scheduling_strategy=scheduling_strategy,
             ).remote(
                 pretrain,
