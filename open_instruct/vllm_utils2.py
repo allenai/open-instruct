@@ -206,7 +206,7 @@ def create_vllm_engines(
     seed: int,
     enable_prefix_caching: bool,
     max_model_len: int,
-    collocate_vllm_and_actor: bool = False,
+    single_gpu_mode: bool = False,
     pg: Optional[ray.util.placement_group] = None,
 ):
     vllm_engines = []
@@ -230,7 +230,7 @@ def create_vllm_engines(
         vllm_engines.append(
             LLMRayActor.options(
                 num_cpus=4,
-                num_gpus=0.5 if collocate_vllm_and_actor else num_gpus,
+                num_gpus=0.48 if single_gpu_mode else num_gpus,
                 scheduling_strategy=scheduling_strategy,
             ).remote(
                 pretrain,
