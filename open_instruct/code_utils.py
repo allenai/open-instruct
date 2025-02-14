@@ -327,3 +327,9 @@ for i in range(9999999999999999999):
         tests=ds[i]["test_cases"],
     )
     print(test_case_status)
+
+    test_case_status = get_successful_tests_fast(
+        program='\ndef add(a, b):\n    return a + b\n',
+        tests=['assert add(1, 2) == 3', 'assert add(-1, 1) == 0', 'assert add(0, 0) == 1'],
+    )
+    print(test_case_status)
