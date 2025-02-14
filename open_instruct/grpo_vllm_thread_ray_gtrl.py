@@ -245,6 +245,8 @@ class Args:
     # ray
     actor_num_gpus_per_node: List[int] = field(default_factory=lambda: [1])
     """number of gpus per node for actor"""
+    single_gpu_mode: bool = False
+    """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
     vllm_num_engines: int = 1
     """number of vLLM Engines, set to 0 to disable vLLM"""
     vllm_tensor_parallel_size: int = 1
@@ -253,6 +255,8 @@ class Args:
     """whether to enforce eager mode for vLLM -- slow inference but needed for multi-node"""
     vllm_sync_backend: str = "nccl"
     """DeepSpeed -> vLLM weight sync backend"""
+    vllm_gpu_memory_utilization: float = 0.9
+    """vLLM GPU memory utilization"""
     enable_prefix_caching: bool = False
     """whether to enable prefix caching"""
     deepspeed_stage: int = 0
@@ -1492,11 +1496,12 @@ class ModelGroup:
         pg: PlacementGroup,
         ray_process_cls: RayProcess,
         num_gpus_per_node: List[int],
+        single_gpu_mode: bool,
     ):
         self.pg = pg
         self.ray_process_cls = ray_process_cls
         self.num_gpus_per_node = num_gpus_per_node
-        self.num_gpus_per_actor = 1
+        self.num_gpus_per_actor = 0.48 if single_gpu_mode else 1
         self.num_cpus_per_actor = 4
         self.models = []
         world_size = sum(self.num_gpus_per_node)
@@ -1630,6 +1635,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         pg,
         PolicyTrainerRayProcess,
         args.actor_num_gpus_per_node,
+        args.single_gpu_mode,
     )
     wandb_url = wandb.run.get_url() if args.with_tracking else None
     inits.extend(
@@ -1645,6 +1651,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         args.seed,
         args.enable_prefix_caching,
         max_len,
+        args.vllm_gpu_memory_utilization,
+        args.single_gpu_mode,
+        pg=pg if args.single_gpu_mode else None,
     )
 
     metrics_queue = RayQueue()
