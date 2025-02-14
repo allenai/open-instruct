@@ -262,10 +262,10 @@ This is (almost) the exact command which produced [allenai/Llama-3.1-Tulu-3-8B](
 ```bash
 python open_instruct/ppo_vllm_thread_ray_gtrl.py \
     --exp_name tulu-3-8b-rlvr \
-    --dataset_mixer '{"allenai/RLVR-GSM-MATH-IF-Mixed-Constraints": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"allenai/RLVR-GSM-MATH-IF-Mixed-Constraints": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
