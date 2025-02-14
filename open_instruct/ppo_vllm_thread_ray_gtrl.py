@@ -253,12 +253,8 @@ class Args:
     # ray
     actor_num_gpus_per_node: List[int] = field(default_factory=lambda: [1])
     """number of gpus per node for actor"""
-    num_gpus_per_actor: float = 1.
-    """number of gpus per actor"""
-    num_cpus_per_actor: float = 1.
-    """number of cpus per actor"""
     single_gpu_mode: bool = False
-    """whether to collocate vLLM and actor on the same node"""
+    """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
     vllm_num_engines: int = 1
     """number of vLLM Engines, set to 0 to disable vLLM"""
     vllm_tensor_parallel_size: int = 1
