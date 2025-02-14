@@ -491,6 +491,7 @@ def masked_whiten(values: torch.Tensor, mask: torch.Tensor, shift_mean: bool = T
 def remove_padding(sequences, pad_token_id):
     return [[inneritem for inneritem in item if inneritem != pad_token_id] for item in sequences]
 
+
 class MetricsTracker:
     """A simple class to prellocate all metrics in an array
     so we can do only one allreduce operation to get the metrics mean"""
