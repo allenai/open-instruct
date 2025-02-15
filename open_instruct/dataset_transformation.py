@@ -729,7 +729,7 @@ class DatasetTransformationCache:
         if revision_exists(repo_name, config_hash, repo_type="dataset"):
             print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{config_hash}")
             # Use the split from the first dataset config as default
-            return load_dataset(repo_name, split=dcs[0].dataset_split, revision=config_hash)
+            return load_dataset(repo_name, split='train', revision=config_hash)
 
         print(f"Cache not found, transforming datasets...")
 
