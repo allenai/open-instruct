@@ -260,7 +260,7 @@ python mason.py \
     --stop_token eos \
     --temperature 1.0 \
     --ground_truths_key ground_truth \
-    --chat_template tulu \
+    --chat_template_name tulu \
     --sft_messages_key messages \
     --learning_rate 3e-7 \
     --total_episodes 200000 \
@@ -313,7 +313,7 @@ python mason.py \
     --stop_token eos \
     --temperature 1.0 \
     --ground_truths_key ground_truth \
-    --chat_template tulu \
+    --chat_template_name tulu \
     --sft_messages_key messages \
     --learning_rate 5e-7 \
     --total_episodes 1000000 \
