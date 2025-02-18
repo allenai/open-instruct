@@ -292,8 +292,8 @@ def get_tokenizer_tulu_v2(tc: "TokenizerConfig"):
     )
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
-    # only add if the pad token is not present already.
-    if tokenizer.pad_token_id is None:
+    # only add if the pad token is not present already, or if the current one is set to eos_token_id.
+    if tokenizer.pad_token_id is None or tokenizer.pad_token_id == tokenizer.eos_token_id:
         if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
             num_added_tokens = tokenizer.add_special_tokens(
                 {
@@ -325,6 +325,8 @@ def get_tokenizer_tulu_v2(tc: "TokenizerConfig"):
         elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast) and tokenizer.pad_token is None:
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
             assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
+    
+    assert tokenizer.pad_token_id != tokenizer.eos_token_id, "pad token and eos token matching causes issues in our setup."
 
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
