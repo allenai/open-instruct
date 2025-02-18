@@ -190,14 +190,47 @@ python mason.py \
     --exp_name tulu-3-8b-dpo
 ```
 
+
+## RM:
+
+```bash
+python mason.py \
+    --cluster ai2/jupiter-cirrascale-2 \
+    --workspace ai2/tulu-3-dev \
+    --priority high \
+    --preemptible \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
+    --budget ai2/oe-adapt \
+    --num_nodes 4 \
+    --gpus 8 -- accelerate launch \
+    --config_file configs/ds_configs/deepspeed_zero3.yaml open_instruct/reward_modeling.py \
+    --dataset_mixer '{"allenai/llama-3.1-tulu-3-8b-preference-mixture": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"allenai/ultrafeedback_binarized_cleaned": 1.0}' \
+    --dataset_eval_splits test_prefs \
+    --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-SFT \
+    --chat_template tulu \
+    --learning_rate 3e-6 \
+    --per_device_train_batch_size 1 \
+    --per_device_eval_batch_size 1 \
+    --gradient_accumulation_steps 32 \
+    --max_token_length 2048 \
+    --max_prompt_token_length 2048 \
+    --num_train_epochs 1 \
+    --output_dir output/rm_8b \
+    --gradient_checkpointing \
+    --push_to_hub \
+    --with_tracking
+```
+
 ## RLVR:
 
 ```bash
 # make sure to match up the GPUs. E.g.,
-# `--actor_num_gpus_per_node 6 8 8 8`
+# `--actor_num_gpus_per_node 6 8`
 # `--vllm_tensor_parallel_size 2`
-# translates to 6 + 2 + 8 + 8 + 8 = 32 GPUs
-# which matches up with `--num_nodes 4 --gpus 8`
+# translates to 6 + 2 + 8 = 16 GPUs
+# which matches up with `--num_nodes 2 --gpus 8`
 for beta in 0.05; do
 exp_name="0112_ppo_rlvr_${beta}_${RANDOM}"
 python mason.py \
@@ -205,18 +238,19 @@ python mason.py \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
     --budget ai2/oe-adapt \
-    --num_nodes 4 \
+    --num_nodes 2 \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl.py \
     --exp_name $exp_name \
     --beta $beta \
     --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/$exp_name \
     --try_launch_beaker_eval_jobs_on_weka \
     --try_launch_beaker_eval_jobs False \
-    --dataset_mixer '{"allenai/RLVR-GSM-MATH-IF-Mixed-Constraints": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"allenai/RLVR-GSM-MATH-IF-Mixed-Constraints": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -226,7 +260,7 @@ python mason.py \
     --stop_token eos \
     --temperature 1.0 \
     --ground_truths_key ground_truth \
-    --chat_template tulu \
+    --chat_template_name tulu \
     --sft_messages_key messages \
     --learning_rate 3e-7 \
     --total_episodes 200000 \
@@ -236,7 +270,7 @@ python mason.py \
     --local_rollout_forward_batch_size 1 \
     --local_mini_batch_size 4 \
     --local_rollout_batch_size 4 \
-    --actor_num_gpus_per_node 6 8 8 8 \
+    --actor_num_gpus_per_node 6 8 \
     --vllm_tensor_parallel_size 2 \
     --vllm_enforce_eager \
     --apply_verifiable_reward true \
@@ -279,7 +313,7 @@ python mason.py \
     --stop_token eos \
     --temperature 1.0 \
     --ground_truths_key ground_truth \
-    --chat_template tulu \
+    --chat_template_name tulu \
     --sft_messages_key messages \
     --learning_rate 5e-7 \
     --total_episodes 1000000 \

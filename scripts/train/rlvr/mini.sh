@@ -1,8 +1,8 @@
 python open_instruct/ppo_vllm_thread_ray_gtrl.py \
-    --dataset_mixer '{"allenai/RLVR-GSM": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"allenai/RLVR-GSM": 1.0}' \
-    --dataset_eval_splits test \
+    --dataset_mixer_list allenai/RLVR-GSM 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 1023 \
     --max_prompt_token_length 1024 \
     --response_length 1024 \
@@ -12,7 +12,7 @@ python open_instruct/ppo_vllm_thread_ray_gtrl.py \
     --stop_token eos \
     --temperature 1.0 \
     --ground_truths_key ground_truth \
-    --chat_template tulu \
+    --chat_template_name tulu \
     --sft_messages_key messages \
     --learning_rate 3e-7 \
     --total_episodes 10000 \
@@ -33,5 +33,8 @@ python open_instruct/ppo_vllm_thread_ray_gtrl.py \
     --save_freq 100 \
     --reward_model_multiplier 0.0 \
     --gradient_checkpointing \
+    --single_gpu_mode \
+    --vllm_sync_backend gloo \
+    --vllm_gpu_memory_utilization 0.5 \
     --vllm_enforce_eager \
     --with_tracking
