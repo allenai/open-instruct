@@ -223,40 +223,39 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
     )
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
-    if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
-        num_added_tokens = tokenizer.add_special_tokens(
-            {
-                "bos_token": "<s>",
-                "eos_token": "</s>",
-                "unk_token": "<unk>",
-                "pad_token": "<pad>",
-            }
-        )
-        assert num_added_tokens in [
-            0,
-            1,
-        ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
-    elif isinstance(tokenizer, GPTNeoXTokenizerFast):
-        # OLMo newer models use this tokenizer
-        if tokenizer.bos_token is None:
-            tokenizer.bos_token = tokenizer.eos_token
-            assert tc.add_bos, "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
-        # else, pythia / other models
-        else:
+    # only add if the pad token is not present already.
+    if tokenizer.pad_token_id is None:
+        if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
             num_added_tokens = tokenizer.add_special_tokens(
                 {
                     "pad_token": "<pad>",
                 }
             )
-            assert (
-                num_added_tokens <= 1
-            ), "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
-    # NOTE: (Costa) I just commented the `OPTForCausalLM` because we are not likely to use it.
-    # elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
-    #     num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
-    elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast) and tokenizer.pad_token is None:
-        num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
-        assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
+            assert num_added_tokens in [
+                0,
+                1,
+            ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
+        elif isinstance(tokenizer, GPTNeoXTokenizerFast):
+            # OLMo newer models use this tokenizer
+            if tokenizer.bos_token is None:
+                tokenizer.bos_token = tokenizer.eos_token
+                assert tc.add_bos, "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
+            # else, pythia / other models
+            else:
+                num_added_tokens = tokenizer.add_special_tokens(
+                    {
+                        "pad_token": "<pad>",
+                    }
+                )
+                assert (
+                    num_added_tokens <= 1
+                ), "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
+        # NOTE: (Costa) I just commented the `OPTForCausalLM` because we are not likely to use it.
+        # elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
+        #     num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
+        elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast) and tokenizer.pad_token is None:
+            num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
+            assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
 
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
