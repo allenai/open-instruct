@@ -352,7 +352,7 @@ def get_tokenizer_tulu_v2(tc: "TokenizerConfig"):
 
 GET_TOKENIZER_FN = {
     "get_tokenizer_simple_v1": get_tokenizer_simple_v1,
-    "get_tokenizer_tulu_v1": get_tokenizer_tulu_v1,
+    "get_tokenizer_tulu_v1": get_tokenizer_tulu_v1,  # old version, see https://github.com/allenai/open-instruct/pull/570
     "get_tokenizer_tulu_v2": get_tokenizer_tulu_v2,
 }
 
