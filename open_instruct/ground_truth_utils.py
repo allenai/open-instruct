@@ -8,6 +8,8 @@ import re
 import string
 from typing import List
 
+import requests
+
 from open_instruct.code_utils import get_successful_tests_fast
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.math_utils import (
@@ -139,8 +141,24 @@ def verify_ace_coder_sample(model_output, tests: List[str], max_execution_time: 
     """
     # Extract the python code from the model output
     python_code = extract_python_code(model_output)
-    # Run the python code against the test cases
-    passes = get_successful_tests_fast(python_code, tests, max_execution_time)
+
+
+    # local execution is bad (causes checkpoint saving to fail because it disables `os.mkdir`)
+    # so we use the API instead.
+    # passes = get_successful_tests_fast(python_code, tests, max_execution_time)
+
+    # API endpoint
+    url = "http://phobos-cs-aus-453.reviz.ai2.in:8000/test_program"
+
+    # Test data
+    payload = {
+        "program": python_code,
+        "tests": tests,
+        "max_execution_time": 1.0
+    }
+
+    response = requests.post(url, json=payload)
+    passes = response.json()["results"]
     pass_rate = sum(passes) / len(passes)
     return pass_rate
 
