@@ -969,6 +969,7 @@ class PolicyTrainerRayProcess(RayProcess):
         ground_truths_next = data[GROUND_TRUTHS_KEY]
         datasets_next = data[DATASET_SOURCE_KEY]
         if accelerator.is_main_process:
+            learning_traces = []
             param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
 
         # for _ in range(1, resume_training_step):  # we didn't store scheduler state
@@ -1071,6 +1072,11 @@ class PolicyTrainerRayProcess(RayProcess):
                     ]
                     g_padded_response_ids = torch.tensor(g_padded_response_ids, device=device)
                     g_vllm_responses[:] = g_padded_response_ids
+                    current_reasnoning_traces = {
+                        "queries": remove_padding(global_queries, tokenizer.pad_token_id),
+                        "responses": g_response_token_ids,
+                    }
+
                 dist.broadcast(g_vllm_responses, src=0)
                 local_vllm_responses = g_vllm_responses[
                     accelerator.process_index * queries.shape[0] : (accelerator.process_index + 1) * queries.shape[0]
@@ -1158,6 +1164,11 @@ class PolicyTrainerRayProcess(RayProcess):
                 del (logprob, ref_logprob, score)
                 gc.collect()
                 torch.cuda.empty_cache()
+
+                global_scores = dist.all_gather(scores)
+                if accelerator.is_main_process:
+                    current_reasnoning_traces["scores"] = global_scores
+                    learning_traces.append(current_reasnoning_traces)
 
                 # Response Processing 3. filter response. Ensure that the sample contains stop_token_id
                 # responses not passing that filter will receive a low (fixed) score
@@ -1340,6 +1351,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.save_model(self.model, step_dir)
                 if args.try_launch_beaker_eval_jobs_on_weka:
                     self.launch_ai2_evals_on_weka(step_dir, training_step)
+                # save `learning_traces`
+                with open(os.path.join(step_dir, "learning_traces.json"), "w") as f:
+                    json.dump(learning_traces, f)
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         self.save_model(self.model, args.output_dir)
         if args.try_launch_beaker_eval_jobs_on_weka:
