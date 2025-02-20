@@ -31,6 +31,7 @@
 import gc
 import json
 import logging
+import math
 import os
 import random
 import shutil
@@ -858,6 +859,14 @@ class PolicyTrainerRayProcess(RayProcess):
             n=args.number_samples_per_prompt,
             stop=args.stop_strings,
         )
+        evaluation_generation_config = SamplingParams(
+            temperature=0.001,
+            top_p=1.0,
+            max_tokens=args.response_length,
+            include_stop_str_in_output=True,
+            n=1,  # since we are doing greedy sampling, don't need to generate more
+            stop=args.stop_strings,
+        )
         # print("setup async queues")
         param_prompt_Q = None
         response_ids_Q = None
@@ -880,34 +889,42 @@ class PolicyTrainerRayProcess(RayProcess):
             eval_freq: int,
             resume_training_step: int,
         ):
-            llm = vllm_engines[0]
+            def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
+                # Split queries between engines
+                queries_per_engine = math.ceil(len(prompts) / len(vllm_engines))
+                split_queries = [
+                    prompts[i : i + queries_per_engine] for i in range(0, len(prompts), queries_per_engine)
+                ]
+                # Generate responses in parallel across engines
+                futures = [
+                    vllm_engine.generate.remote(
+                        sampling_params=sampling_params, prompt_token_ids=queries, use_tqdm=False
+                    )
+                    for vllm_engine, queries in zip(vllm_engines, split_queries)
+                ]
+                # Gather all responses
+                all_outputs = ray.get(futures)
+                response_ids = []
+                for outputs in all_outputs:
+                    response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
+                return response_ids
+
             for training_step in range(resume_training_step, num_training_steps + 1):
                 items = param_prompt_Q.get()
                 if items is None:
                     break
-                unwrapped_model, g_queries_list = items
-                # if unwrapped_model is not None:
-                generation_start_time = time.time()
+                _, g_queries_list = items
 
-                outputs = ray.get(
-                    llm.generate.remote(
-                        sampling_params=generation_config, prompt_token_ids=g_queries_list, use_tqdm=False
-                    )
-                )
-                response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
+                generation_start_time = time.time()
+                response_ids = generate_with_engines(g_queries_list, generation_config)
                 print(f"🔥🔥🔥 Generation time: {time.time() - generation_start_time:.2f} seconds")
                 response_ids_Q.put(response_ids)
 
+                # Evaluate the model
                 if sample_evaluation_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-                    outputs = ray.get(
-                        llm.generate.remote(
-                            prompt_token_ids=sample_evaluation_prompt_token_ids,
-                            sampling_params=generation_config,
-                            use_tqdm=False,
-                        )
+                    response_ids = generate_with_engines(
+                        sample_evaluation_prompt_token_ids, evaluation_generation_config
                     )
-                    # for evaluation, even if we have multiple outputs, we only look at one of them for simplicity
-                    response_ids = [list(output.outputs[0].token_ids) for output in outputs]
                     evaluation_Q.put(response_ids)
 
         resume_training_step = 1
