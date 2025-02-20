@@ -283,7 +283,7 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
     return tokenizer
 
 
-def get_tokenizer_tulu_v2(tc: "TokenizerConfig"):
+def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
     tokenizer = AutoTokenizer.from_pretrained(
         tc.model_name_or_path,
         revision=tc.revision,
@@ -295,11 +295,7 @@ def get_tokenizer_tulu_v2(tc: "TokenizerConfig"):
     # only add if the pad token is not present already, or if the current one is set to eos_token_id.
     if tokenizer.pad_token_id is None or tokenizer.pad_token_id == tokenizer.eos_token_id:
         if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
-            num_added_tokens = tokenizer.add_special_tokens(
-                {
-                    "pad_token": "<pad>",
-                }
-            )
+            num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
             assert num_added_tokens in [
                 0,
                 1,
@@ -308,7 +304,9 @@ def get_tokenizer_tulu_v2(tc: "TokenizerConfig"):
             # OLMo newer models use this tokenizer
             if tokenizer.bos_token is None:
                 tokenizer.bos_token = tokenizer.eos_token
-                assert tc.add_bos, "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
+                assert (
+                    tc.add_bos
+                ), "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
             # else, pythia / other models
             else:
                 num_added_tokens = tokenizer.add_special_tokens(
@@ -322,11 +320,13 @@ def get_tokenizer_tulu_v2(tc: "TokenizerConfig"):
         # NOTE: (Costa) I just commented the `OPTForCausalLM` because we are not likely to use it.
         # elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
         #     num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
-        elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast) and tokenizer.pad_token is None:
+        elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast):
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
             assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
-    
-    assert tokenizer.pad_token_id != tokenizer.eos_token_id, "pad token and eos token matching causes issues in our setup."
+
+    assert (
+        tokenizer.pad_token_id != tokenizer.eos_token_id
+    ), "pad token and eos token matching causes issues in our setup."
 
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
@@ -355,7 +355,7 @@ def get_tokenizer_tulu_v2(tc: "TokenizerConfig"):
 GET_TOKENIZER_FN = {
     "get_tokenizer_simple_v1": get_tokenizer_simple_v1,
     "get_tokenizer_tulu_v1": get_tokenizer_tulu_v1,  # old version, see https://github.com/allenai/open-instruct/pull/570
-    "get_tokenizer_tulu_v2": get_tokenizer_tulu_v2,
+    "get_tokenizer_tulu_v2_1": get_tokenizer_tulu_v2_1,
 }
 
 
@@ -367,7 +367,7 @@ class TokenizerConfig:
     use_fast: bool = True
     chat_template_name: Optional[str] = None  # TODO: should I give an option to force override?
     add_bos: bool = False
-    get_tokenizer_fn: str = "get_tokenizer_tulu_v2"
+    get_tokenizer_fn: str = "get_tokenizer_tulu_v2_1"
 
     # for tracking purposes
     tokenizer_commit_hash: Optional[str] = None
@@ -714,8 +714,8 @@ class DatasetConfig:
 
     def __post_init__(self):
         # if the file exists locally, use the local file
-        if os.path.exists(self.dataset_name) and self.dataset_name.endswith('.jsonl'):
-            assert self.dataset_split is "train", "Only train split is supported for local jsonl files."
+        if os.path.exists(self.dataset_name) and self.dataset_name.endswith(".jsonl"):
+            assert self.dataset_split == "train", "Only train split is supported for local jsonl files."
             self.dataset = load_dataset(
                 "json",
                 data_files=self.dataset_name,
@@ -723,7 +723,9 @@ class DatasetConfig:
             )
         else:
             # commit hash only works for hf datasets
-            self.dataset_commit_hash = get_commit_hash(self.dataset_name, self.dataset_revision, "README.md", "dataset")
+            self.dataset_commit_hash = get_commit_hash(
+                self.dataset_name, self.dataset_revision, "README.md", "dataset"
+            )
             self.dataset = load_dataset(
                 self.dataset_name,
                 split=self.dataset_split,

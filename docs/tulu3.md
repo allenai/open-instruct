@@ -222,6 +222,57 @@ accelerate launch \
 # For Ai2 internal members, this was the experiment URL: https://beaker.org/ex/01JCSAYYHQYF9QDQDCV6KJ53M9/
 ```
 
+### Llama-3.1-Tulu-3-405B-DPO Reproduction
+
+This is (almost) the exact command which produced [allenai/Llama-3.1-Tulu-3-405B-DPO](https://huggingface.co/allenai/Llama-3.1-Tulu-3-405B-DPO)
+
+
+```bash
+# modify the following `MACHINE_RANK`, `MAIN_PROCESS_IP`,
+# `NUM_MACHINES`, `NUM_PROCESSES`, `PER_DEVICE_TRAIN_BATCH_SIZE`,
+# `GRADIENT_ACCUMULATION_STEPS` according to your setup
+MACHINE_RANK=0
+MAIN_PROCESS_IP=localhost
+NUM_MACHINES=8
+NUM_PROCESSES=64
+PER_DEVICE_TRAIN_BATCH_SIZE=1
+GRADIENT_ACCUMULATION_STEPS=2
+accelerate launch --mixed_precision bf16 \
+    --num_machines 32 \
+    --num_processes 256 \
+    --machine_rank $BEAKER_REPLICA_RANK \
+    --main_process_ip $BEAKER_LEADER_REPLICA_HOSTNAME \
+    --main_process_port 29400 \
+    --use_deepspeed \
+    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
+    --deepspeed_multinode_launcher standard open_instruct/dpo_tune_cache.py \
+    --model_name_or_path allenai/Llama-3.1-Tulu-3-405B-SFT \
+    --tokenizer_name allenai/Llama-3.1-Tulu-3-70B-SFT \
+    --use_flash_attn \
+    --max_seq_length 2048 \
+    --preprocessing_num_workers 16 \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 1 \
+    --learning_rate 2e-07 \
+    --lr_scheduler_type linear \
+    --warmup_ratio 0.1 \
+    --weight_decay 0.0 \
+    --num_train_epochs 1 \
+    --output_dir output_405b \
+    --with_tracking \
+    --report_to wandb \
+    --logging_steps 1 \
+    --model_revision main \
+    --gradient_checkpointing \
+    --dataset_mixer_list ai2-adapt-dev/405b_preference_mix 1.0 \
+    --use_slow_tokenizer \
+    --use_lora False \
+    --dpo_loss_type dpo_norm \
+    --dpo_beta 5 \
+    --checkpointing_steps 1000
+# For Ai2 internal members, this was the experiment URL: https://beaker.org/ex/01JJ4QRZ31SH79AHVM6WWDVJB4/
+```
+
 
 ## RLVR
 
@@ -353,6 +404,68 @@ source configs/beaker_configs/ray_node_setup.sh && python open_instruct/ppo_vllm
 # For Ai2 internal members, this was the experiment URL: https://beaker.org/ex/01JD3YEM4XGH2F2H10Y49GK441/
 ```
 
+### Llama-3.1-Tulu-3-405B Reproduction
+
+This is (almost) the exact command which produced [allenai/Llama-3.1-Tulu-3-405B](https://huggingface.co/allenai/Llama-3.1-Tulu-3-405B)
+
+Couple of notes:
+* We had to set `TORCH_NCCL_ENABLE_MONITORING=0` to turn off NCCL heartbeat monitoring and avoid timeouts. Feel free to remove this.
+* Make sure to modify `configs/beaker_configs/ray_node_setup.sh` in our own cluster setup. The idea is to have the replicas join the main machines via `ray`.
+* Here the effective batch size is `sum(actor_num_gpus_per_node) * local_mini_batch_size = 40 * 16 = 640`. If you have less GPUs, you can adjust `actor_num_gpus_per_node` and `local_mini_batch_size` accordingly.
+
+```bash
+TORCH_NCCL_ENABLE_MONITORING=0 python mason.py \
+    --cluster ai2/jupiter-cirrascale-2 --pure_docker_mode \
+    --workspace ai2/tulu-3-dev \
+    --priority urgent \
+    --preemptible \
+    --num_nodes 32 \
+    --image nathanl/open_instruct_auto \
+    --budget ai2/oe-adapt \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& TORCH_DISTRIBUTED_DEBUG=DETAIL python open_instruct/ppo_vllm_thread_ray_gtrl.py \
+    --dataset_mixer_list allenai/RLVR-MATH 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-MATH 128 \
+    --dataset_mixer_eval_list_splits train \
+    --max_token_length 2048 \
+    --max_prompt_token_length 2048 \
+    --response_length 1024 \
+    --model_name_or_path /weka/oe-adapt-default/hamishi/405b_dpo_v4 \
+    --exp_name "405b_rlvr_math_only_8b_valu_on_v4" \
+    --reward_model_path allenai/Llama-3.1-Tulu-3-8B-RM \
+    --beta 0.05 \
+    --output_dir "/weka/oe-adapt-default/hamishi/405b_rlvr_math_only_8b_valu_on_v4" \
+    --non_stop_penalty \
+    --stop_token eos \
+    --temperature 1.0 \
+    --ground_truths_key ground_truth \
+    --chat_template tulu \
+    --sft_messages_key messages \
+    --learning_rate 1e-7 \
+    --total_episodes 400000 \
+    --num_epochs 4 \
+    --penalty_reward_value -10.0 \
+    --deepspeed_stage 3 \
+    --per_device_train_batch_size 1 \
+    --local_rollout_forward_batch_size 1 \
+    --local_mini_batch_size 8 \
+    --local_rollout_batch_size 8 \
+    --actor_num_gpus_per_node 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 8 \
+    --vllm_num_engines 1 \
+    --vllm_tensor_parallel_size 16 \
+    --vllm_enforce_eager true \
+    --apply_verifiable_reward true \
+    --reward_model_multiplier 0.0 \
+    --no_gather_whole_model \
+    --seed 3 \
+    --num_evals 3 \
+    --no_try_launch_beaker_eval_jobs \
+    --save_freq 25 \
+    --try_launch_beaker_eval_jobs_on_weka \
+    --gradient_checkpointing \
+    --with_tracking
+# For Ai2 internal members, this was the experiment URL: https://beaker.org/ex/01JJA31S20XAFR82YPFKSMMYZV/
+```
 
 
 ### (NEW) Llama-3.1-Tulu-3.1-8B Reproduction
