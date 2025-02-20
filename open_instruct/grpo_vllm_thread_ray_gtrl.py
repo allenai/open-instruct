@@ -859,6 +859,14 @@ class PolicyTrainerRayProcess(RayProcess):
             n=args.number_samples_per_prompt,
             stop=args.stop_strings,
         )
+        evaluation_generation_config = SamplingParams(
+            temperature=0.001,
+            top_p=1.0,
+            max_tokens=args.response_length,
+            include_stop_str_in_output=True,
+            n=1,  # since we are doing greedy sampling, don't need to generate more
+            stop=args.stop_strings,
+        )
         # print("setup async queues")
         param_prompt_Q = None
         response_ids_Q = None
@@ -914,7 +922,9 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 # Evaluate the model
                 if sample_evaluation_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-                    response_ids = generate_with_engines(sample_evaluation_prompt_token_ids, generation_config)
+                    response_ids = generate_with_engines(
+                        sample_evaluation_prompt_token_ids, evaluation_generation_config
+                    )
                     evaluation_Q.put(response_ids)
 
         resume_training_step = 1
