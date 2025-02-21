@@ -156,7 +156,7 @@ def soft_format_reward_func(responses: list[str], reward_scale: float = 1.0) -> 
 
 def verify_max_length_sample(tokenized_response: list[int], max_length: int) -> list[float]:
     """Reward function that checks if the completion has a specific length."""
-    return 1.0 if len(tokenized_response) <= max_length else 0.0
+    return 1.0 if len(tokenized_response) <= int(max_length) else 0.0
 
 
 # debug code
