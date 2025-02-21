@@ -12,7 +12,7 @@ Usage example:
 python scripts/data/filtering_and_updates/update_subsets.py \
     --base_ds allenai/tulu-3-sft-olmo-2-mixture-filter-datecutoff \
     --remove_sources ai2-adapt-dev/personahub_math_v5_regen_149960 allenai/tulu-3-sft-personas-math-grade \
-    --add_ds allenai/tulu-3-sft-personas-math-filtered allenai/tulu-3-sft-personas-math-filtered \
+    --add_ds allenai/tulu-3-sft-personas-math-filtered allenai/tulu-3-sft-personas-math-grade-filtered \
     --remove_keys prompt dataset \
     --push_to_hub \
     --repo_id allenai/tulu-3-sft-olmo-2-mixture-0225
