@@ -249,7 +249,6 @@ def apply_verifiable_reward(
             verified = False
             if ground_truth is None:
                 logger.warning("No ground truth provided for a sample, applying 0 reward.")
-                rewards.append(0)
                 continue
             if ds.lower() == "gsm8k":
                 verified = verify_gsm8k_sample(prediction, gt)
