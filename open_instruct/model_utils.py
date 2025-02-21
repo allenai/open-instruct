@@ -43,6 +43,7 @@ from open_instruct.ground_truth_utils import (
     verify_gsm8k_sample,
     verify_ifeval_sample,
     verify_math_sample,
+    verify_max_length_sample,
 )
 from open_instruct.utils import retry_on_exception
 
@@ -239,24 +240,30 @@ def apply_verifiable_reward(
     decoded_query_responses = tokenizer.batch_decode(query_responses, skip_special_tokens=True)  # noqa: F841
     # compare with ground truth.
     rewards = []
-    for prediction, ground_truth, dataset in zip(decoded_responses, ground_truths, datasets):
-        verified = False
-        if ground_truth is None:
-            logger.warning("No ground truth provided for a sample, applying 0 reward.")
-            rewards.append(0)
-            continue
-        if dataset.lower() == "gsm8k":
-            verified = verify_gsm8k_sample(prediction, ground_truth)
-        elif dataset.lower() == "math":
-            verified = verify_math_sample(prediction, ground_truth)
-        elif dataset.lower() == "ifeval":
-            verified = verify_ifeval_sample(prediction, ground_truth)
-        # if verified, give reward
-        if verified:
-            logger.info("Applying ground truth reward 🤗")
-            rewards.append(verify_reward)
-        else:
-            rewards.append(0)
+    for tok_prediction, prediction, ground_truth, dataset in zip(responses, decoded_responses, ground_truths, datasets):
+        # allow multiple ground truths and datasets for a single response
+        ground_truth_list = ground_truth.split("<sep>")  # special token to sep here
+        dataset_list = dataset.split(",") # comma since this is just list of strings
+        for gt, ds in zip(ground_truth_list, dataset_list):
+            reward = 0
+            verified = False
+            if ground_truth is None:
+                logger.warning("No ground truth provided for a sample, applying 0 reward.")
+                rewards.append(0)
+                continue
+            if ds.lower() == "gsm8k":
+                verified = verify_gsm8k_sample(prediction, gt)
+            elif ds.lower() == "math":
+                verified = verify_math_sample(prediction, gt)
+            elif ds.lower() == "ifeval":
+                verified = verify_ifeval_sample(prediction, gt)
+            elif ds.lower() == "max_length":
+                verified = verify_max_length_sample(tok_prediction, gt)
+            # if verified, give reward
+            if verified:
+                logger.info("Applying ground truth reward 🤗")
+                reward += verify_reward
+        rewards.append(reward)
     rewards_tensors = torch.tensor(rewards, device=query_responses.device)
     # return rewards and count of times we applied reward
     return rewards_tensors, (rewards_tensors > 0).sum().float().view(-1)
