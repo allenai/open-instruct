@@ -240,13 +240,15 @@ def apply_verifiable_reward(
     decoded_query_responses = tokenizer.batch_decode(query_responses, skip_special_tokens=True)  # noqa: F841
     # compare with ground truth.
     rewards = []
+    verify_reward_original = verify_reward
     for tok_prediction, prediction, ground_truth, dataset in zip(responses, decoded_responses, ground_truths, datasets):
         # allow multiple ground truths and datasets for a single response
         ground_truth_list = ground_truth.split("<sep>")  # special token to sep here
         dataset_list = dataset.split(",") # comma since this is just list of strings
+        reward = 0
         for gt, ds in zip(ground_truth_list, dataset_list):
-            reward = 0
             verified = False
+            verify_reward = verify_reward_original
             if ground_truth is None:
                 logger.warning("No ground truth provided for a sample, applying 0 reward.")
                 continue
