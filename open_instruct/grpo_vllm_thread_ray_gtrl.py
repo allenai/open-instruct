@@ -1222,9 +1222,7 @@ class PolicyTrainerRayProcess(RayProcess):
             for epoch_idx in range(args.num_epochs):
                 b_inds = np.random.permutation(args.local_total_prompts)
                 minibatch_idx = 0
-                for mini_batch_start in range(
-                    0, args.local_rollout_batch_size * args.number_samples_per_prompt, args.local_mini_batch_size
-                ):
+                for mini_batch_start in range(0, args.local_total_prompts, args.local_mini_batch_size):
                     mini_batch_end = mini_batch_start + args.local_mini_batch_size
                     mini_batch_inds = b_inds[mini_batch_start:mini_batch_end]
                     gradient_accumulation_idx = 0

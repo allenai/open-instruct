@@ -1131,7 +1131,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 verifiable_counts = []
                 sequence_lengths = []
                 values = []
-                if accelerator.is_main_process:
+                if self.rank == 0:
                     g_response_token_ids = response_ids_Q.get()
                     DUMMY_PAD_TOKEN = (
                         args.stop_token_id
