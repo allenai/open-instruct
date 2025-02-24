@@ -531,16 +531,17 @@ class MetricsTracker:
 
 class Timer:
     """A context manager for timing code blocks"""
+
     def __init__(self, description: str, noop: int = 0):
         self.description = description
         self.noop = noop
-        
+
     def __enter__(self):
         if self.noop:
             return
         self.start_time = time.perf_counter()
         return self
-        
+
     def __exit__(self, type, value, traceback):
         if self.noop:
             return
@@ -754,7 +755,6 @@ class PolicyTrainerRayProcess(RayProcess):
             args.reward_model_multiplier or args.apply_verifiable_reward
         ), "Either `reward_model_multiplier` must be non-zero or `apply_verifiable_reward` must be True."
 
-
     def forward(
         self,
         model: PreTrainedModel,
@@ -949,7 +949,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     break
                 _, g_queries_list = items
 
-                with Timer(f"🔥🔥🔥 Generation time", noop=self.rank != 0):
+                with Timer("🔥🔥🔥 Generation time", noop=self.rank != 0):
                     response_ids = generate_with_engines(g_queries_list, generation_config)
                 response_ids_Q.put(response_ids)
 
@@ -1128,7 +1128,12 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Get reference model logprob
                     ref_logprob = self.forward(
-                        self.ref_policy, query_response, response, tokenizer.pad_token_id, context_length, args.temperature
+                        self.ref_policy,
+                        query_response,
+                        response,
+                        tokenizer.pad_token_id,
+                        context_length,
+                        args.temperature,
                     )
                     torch.cuda.empty_cache()
 
@@ -1234,7 +1239,12 @@ class PolicyTrainerRayProcess(RayProcess):
                         mb_reflogprobs = ref_logprobs[micro_batch_inds]
 
                         new_logprobs = self.forward(
-                            self.model, mb_query_responses, mb_responses, tokenizer.pad_token_id, context_length, args.temperature
+                            self.model,
+                            mb_query_responses,
+                            mb_responses,
+                            tokenizer.pad_token_id,
+                            context_length,
+                            args.temperature,
                         )
                         new_logprobs = torch.masked_fill(new_logprobs, padding_mask[micro_batch_inds], INVALID_LOGPROB)
                         if epoch_idx == 0:
