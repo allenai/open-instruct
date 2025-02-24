@@ -650,7 +650,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.optimizer = torch.optim.AdamW(self.policy.parameters(), lr=args.learning_rate)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
-        if args.warmup_ratio >= 0.0:
+        if args.warmup_ratio > 0.0:
             warm_up_steps = int(num_scheduler_steps * args.warmup_ratio)
         scheduler = get_scheduler(
             args.lr_scheduler_type,
