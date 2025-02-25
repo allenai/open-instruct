@@ -27,6 +27,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""
+ppo2.py is a modified version of ppo_vllm_thread_ray_gtrl.py. The main difference is that
+it uses async model by default and add KL to the loss directly instead of using the
+KL penalty term in the rewards.
+"""
 
 import gc
 import json
@@ -80,7 +85,6 @@ from transformers import (
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 from peft import PeftModel, get_peft_model_state_dict
-
 
 from open_instruct.dataset_processor import (
     DATASET_SOURCE_KEY,
@@ -197,6 +201,8 @@ class Args:
     """the path to the reward model"""
     reward_model_revision: Optional[str] = None
     """the revision of the reward model"""
+    init_value_from_scratch: bool = False
+    """whether to initialize the value model from scratch"""
 
     # generation config
     response_length: int = 53
@@ -227,9 +233,15 @@ class Args:
     """whether to whiten the rewards"""
     cliprange: float = 0.2
     """the clip range"""
+    vf_coef: float = 0.1
+    """the value function coefficient"""
+    cliprange_value: float = 0.2
+    """the clip range for the value function"""
     gamma: float = 1
     """the discount factor"""
-    kl_estimator: Literal["kl1", "kl2", "kl3", "kl4"] = "kl3"
+    lam: float = 1.0
+    """the lambda value for GAE (default to 1 per https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero/blob/main/ORZ_paper.pdf)"""
+    kl_estimator: Literal["kl1", "kl2", "kl3"] = "kl1"
     """the KL estimator to use"""
     apply_verifiable_reward: bool = False
     """whether to apply verifiable reward"""
@@ -291,6 +303,8 @@ class Args:
     """Where to save the model checkpoints in case of preemption"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
+    save_value_model: bool = False
+    """Whether to save the value model along with the policy model"""
 
     # Ai2 specific settings
     try_launch_beaker_eval_jobs: bool = True
@@ -303,9 +317,6 @@ class Args:
     """The beaker evaluation tasks to launch"""
     hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
-
-    def __post_init__(self):
-        assert self.number_samples_per_prompt > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
 
 
 def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
@@ -689,6 +700,49 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         self.model.train()
 
+        # value model
+        from open_instruct.olmo_adapter import (
+            Olmo2Config,
+            Olmo2ForSequenceClassification,
+            OlmoeConfig,
+            OlmoeForSequenceClassification,
+        )
+
+        AutoModelForSequenceClassification.register(Olmo2Config, Olmo2ForSequenceClassification)
+        AutoModelForSequenceClassification.register(OlmoeConfig, OlmoeForSequenceClassification)
+        self.value_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
+            args.reward_model_path,
+            revision=args.reward_model_revision,
+            num_labels=1,
+            torch_dtype=torch.bfloat16,
+            attn_implementation="flash_attention_2",
+            use_cache=False,
+        )
+        if args.init_value_from_scratch:
+            self.value_model.init_weights()  # re-initialize the value model from scratch
+        disable_dropout_in_model(self.value_model)
+        self.value_model.gradient_checkpointing_enable()
+        # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
+        # AdamOptimizer = FusedAdam
+        # weight_decay = 0.0
+        # optim_params = get_optimizer_grouped_parameters(self.value_model, weight_decay)
+        # self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
+        self.optimizer = torch.optim.AdamW(self.value_model.parameters(), lr=args.learning_rate)
+        scheduler = get_scheduler(
+            args.lr_scheduler_type,
+            optimizer=self.optimizer,
+            num_warmup_steps=warm_up_steps,
+            num_training_steps=num_scheduler_steps,
+        )
+        self.value_model, self.optimizer, _, self.scheduler = deepspeed.initialize(
+            model=self.value_model,
+            optimizer=self.optimizer,
+            config=ds_config,
+            lr_scheduler=scheduler,
+            dist_init_required=True,
+        )
+        self.value_model.train()
+
         # reference model
         ds_config = get_eval_ds_config(
             offload=False,
@@ -997,9 +1051,8 @@ class PolicyTrainerRayProcess(RayProcess):
         approxkl_stats = torch.zeros(stats_shape, device=device)
         pg_clipfrac_stats = torch.zeros(stats_shape, device=device)
         pg_loss_stats = torch.zeros(stats_shape, device=device)
-        loss_stats = torch.zeros(stats_shape, device=device)
-        reward_mean = torch.zeros(stats_shape, device=device)
-        reward_std = torch.zeros(stats_shape, device=device)
+        vf_loss_stats = torch.zeros(stats_shape, device=device)
+        vf_clipfrac_stats = torch.zeros(stats_shape, device=device)
         entropy_stats = torch.zeros(stats_shape, device=device)
         ratio_stats = torch.zeros(stats_shape, device=device)
         local_metrics = MetricsTracker(max_metrics=32, device=device)
@@ -1043,44 +1096,22 @@ class PolicyTrainerRayProcess(RayProcess):
                 except Empty:
                     print("🙈 Evaluation responses not received")
 
-            # (optionally) evaluate the model
-            if args.async_mode:
-                if training_step != 1:
-                    global_data = next(iter_dataloader)
-                    data = data_collator(
-                        global_data[
-                            self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size
-                        ]
-                    )
-                    global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
-                    queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
-                    ground_truths_next = data[GROUND_TRUTHS_KEY]
-                    datasets_next = data[DATASET_SOURCE_KEY]
-                    with Timer("🔥🔥🔥 Loading weights using shared memory", noop=self.rank != 0):
-                        broadcast_to_vllm()
-                if self.rank == 0:
-                    param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
-            else:
-                if training_step != 1:
-                    # NOTE: important: the indent here is different for sync mode
-                    # we also set to use `queries = queries_next` immediately
-                    global_data = next(iter_dataloader)
-                    data = data_collator(
-                        global_data[
-                            self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size
-                        ]
-                    )
-                    global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
-                    queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
-                    ground_truths_next = data[GROUND_TRUTHS_KEY]
-                    datasets_next = data[DATASET_SOURCE_KEY]
-                    with Timer("🔥🔥🔥 Loading weights using shared memory", noop=self.rank != 0):
-                        broadcast_to_vllm()
-                    if self.rank == 0:
-                        param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
-                    queries = queries_next
-                    ground_truths = ground_truths_next
-                    datasets = datasets_next
+            # async mode implementation
+            if training_step != 1:
+                global_data = next(iter_dataloader)
+                data = data_collator(
+                    global_data[
+                        self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size
+                    ]
+                )
+                global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
+                queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
+                ground_truths_next = data[GROUND_TRUTHS_KEY]
+                datasets_next = data[DATASET_SOURCE_KEY]
+                with Timer("🔥🔥🔥 Loading weights using shared memory", noop=self.rank != 0):
+                    broadcast_to_vllm()
+            if self.rank == 0:
+                param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
 
             torch.cuda.empty_cache()
             # if we generate multiple samples per prompt, we need to repeat the queries and ground truths
@@ -1099,6 +1130,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 scores = []
                 verifiable_counts = []
                 sequence_lengths = []
+                values = []
                 if self.rank == 0:
                     g_response_token_ids = response_ids_Q.get()
                     DUMMY_PAD_TOKEN = (
@@ -1171,11 +1203,17 @@ class PolicyTrainerRayProcess(RayProcess):
                     if args.add_r1_style_format_reward:
                         score += format_scores[i : i + args.local_rollout_forward_batch_size]
 
+                    full_value, _, _ = get_reward(
+                        self.value_model, query_response, tokenizer.pad_token_id, context_length
+                    )
+                    value = full_value[:, context_length - 1 : -1].squeeze(-1)
+
                     responses.append(response)
                     postprocessed_responses.append(postprocessed_response)
                     ref_logprobs.append(ref_logprob)
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
+                    values.append(value)
                     verifiable_counts.append(verifiable_count)
 
                 responses = torch.cat(responses, 0)
@@ -1185,7 +1223,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 scores = torch.cat(scores, 0)
                 verifiable_counts = torch.cat(verifiable_counts, 0)
                 verifiable_correct_rate = verifiable_counts.sum() / queries.shape[0]
-                del (ref_logprob, score)
+                values = torch.cat(values, 0)
+                del (ref_logprob, full_value, value, score)
                 gc.collect()
                 torch.cuda.empty_cache()
 
@@ -1205,17 +1244,35 @@ class PolicyTrainerRayProcess(RayProcess):
                 response_idxs = torch.arange(responses.shape[1], device=responses.device).repeat(responses.shape[0], 1)
                 padding_mask = response_idxs > sequence_lengths.unsqueeze(1)
                 ref_logprobs = torch.masked_fill(ref_logprobs, padding_mask, INVALID_LOGPROB)
+                sequence_lengths_p1 = sequence_lengths + 1
+                padding_mask_p1 = response_idxs > (sequence_lengths_p1.unsqueeze(1))
+                values = torch.masked_fill(values, padding_mask_p1, 0)
 
-                # MAIN GRPO CHANGE: compute group rewards instead of value model output
-                mean_grouped_rewards = scores.view(-1, args.number_samples_per_prompt).mean(dim=-1)
-                mean_grouped_rewards = mean_grouped_rewards.repeat_interleave(args.number_samples_per_prompt, dim=0)
-                std_grouped_rewards = scores.view(-1, args.number_samples_per_prompt).std(dim=-1)
-                std_grouped_rewards = std_grouped_rewards.repeat_interleave(args.number_samples_per_prompt, dim=0)
-                advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
+                # 4. compute rewards
+                rewards = torch.zeros_like(ref_logprobs)
+                actual_start = torch.arange(rewards.size(0), device=rewards.device)
+                actual_end = torch.where(sequence_lengths_p1 < rewards.size(1), sequence_lengths_p1, sequence_lengths)
+                rewards[[actual_start, actual_end]] += scores
 
-                # for logging
-                reward_mean = mean_grouped_rewards
-                reward_std = std_grouped_rewards
+                # 5. whiten rewards
+                if args.whiten_rewards:
+                    rewards = masked_whiten(rewards, mask=~padding_mask_p1, shift_mean=False)
+                    rewards = torch.masked_fill(rewards, padding_mask_p1, 0)
+
+                # 6. compute advantages and returns
+                lastgaelam = 0
+                advantages_reversed = []
+                gen_length = responses.shape[1]
+                for t in reversed(range(gen_length)):
+                    nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
+                    delta = rewards[:, t] + args.gamma * nextvalues - values[:, t]
+                    lastgaelam = delta + args.gamma * args.lam * lastgaelam
+                    advantages_reversed.append(lastgaelam)
+                advantages = torch.stack(advantages_reversed[::-1], axis=1)
+                returns = advantages + values
+                advantages = masked_whiten(advantages, ~padding_mask)
+                advantages = torch.masked_fill(advantages, padding_mask, 0)
+                torch.cuda.empty_cache()
 
             # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
             old_logprobs = torch.zeros_like(ref_logprobs)
@@ -1235,6 +1292,27 @@ class PolicyTrainerRayProcess(RayProcess):
                         mb_responses = responses[micro_batch_inds]
                         mb_query_responses = query_responses[micro_batch_inds]
                         mb_reflogprobs = ref_logprobs[micro_batch_inds]
+                        mb_return = returns[micro_batch_inds]
+                        mb_values = values[micro_batch_inds]
+                        mb_padding_mask_p1 = padding_mask_p1[micro_batch_inds]
+
+                        vpred_temp = get_reward(
+                            self.value_model, mb_query_responses, tokenizer.pad_token_id, context_length
+                        )
+                        vpred_temp = vpred_temp[0]
+                        vpred = vpred_temp[:, context_length - 1 : -1].squeeze(-1)
+                        vpred = torch.masked_fill(vpred, mb_padding_mask_p1, 0)
+                        vpredclipped = torch.clamp(
+                            vpred,
+                            mb_values - args.cliprange_value,
+                            mb_values + args.cliprange_value,
+                        )
+                        vf_losses1 = torch.square(vpred - mb_return)
+                        vf_losses2 = torch.square(vpredclipped - mb_return)
+                        vf_loss_max = torch.max(vf_losses1, vf_losses2)
+                        vf_loss = 0.5 * masked_mean(vf_loss_max, ~mb_padding_mask_p1)
+                        self.value_model.backward(vf_loss * args.vf_coef)
+                        self.value_model.step()
 
                         new_logprobs = self.forward(
                             self.model,
@@ -1252,10 +1330,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         mb_logprobs = old_logprobs[micro_batch_inds]
                         logprobs_diff = new_logprobs - mb_logprobs
                         ratio = torch.exp(logprobs_diff)
-                        pg_losses = -mb_advantage[:, None] * ratio
-                        pg_losses2 = -mb_advantage[:, None] * torch.clamp(
-                            ratio, 1.0 - args.cliprange, 1.0 + args.cliprange
-                        )
+                        pg_losses = -mb_advantage * ratio
+                        pg_losses2 = -mb_advantage * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
                         pg_loss_max = torch.max(pg_losses, pg_losses2)
 
                         # Here we recalculate kl: we want the KL loss to backpropagate through the model
@@ -1274,7 +1350,8 @@ class PolicyTrainerRayProcess(RayProcess):
                             kl = kl3
                         elif args.kl_estimator == "kl4":
                             kl = kl4
-                        # grpo change: directly subtract KL in loss (add)
+
+                        # directly apply the KL loss (like GRPO)
                         loss = masked_mean(pg_loss_max + (args.beta * kl), ~padding_mask[micro_batch_inds])
                         self.model.backward(loss)
                         self.model.step()
@@ -1284,6 +1361,7 @@ class PolicyTrainerRayProcess(RayProcess):
                                 kl2_stats[micro_batch_inds] = kl2.sum(1).float()
                                 kl3_stats[micro_batch_inds] = kl3.sum(1).float()
                                 # don't need to keep track of kl4 because it's the same as kl1 numerically
+                            vf_clipfrac = masked_mean((vf_losses2 > vf_losses1).float(), ~mb_padding_mask_p1)
                             pg_clipfrac = masked_mean(
                                 (pg_losses2 > pg_losses).float(), ~padding_mask[micro_batch_inds]
                             )
@@ -1297,13 +1375,14 @@ class PolicyTrainerRayProcess(RayProcess):
                             pg_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = masked_mean(
                                 pg_loss_max, ~padding_mask[micro_batch_inds]
                             )
-                            loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = loss
+                            vf_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = vf_loss
+                            vf_clipfrac_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = vf_clipfrac
                             ratio_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = ratio.mean()
                         gradient_accumulation_idx += 1
                     minibatch_idx += 1
                     # fmt: off
-                    del mb_advantage, mb_responses, mb_query_responses, mb_logprobs, mb_reflogprobs
-                    del new_logprobs, logprobs_diff, ratio, pg_losses, pg_losses2, pg_loss_max, loss, ref_logprobs_diff, kl1, kl2, kl3, kl4
+                    del mb_advantage, mb_responses, mb_query_responses, mb_logprobs, mb_return, mb_values, mb_padding_mask_p1
+                    del new_logprobs, logprobs_diff, ratio, pg_losses, pg_losses2, pg_loss_max, loss
                     # fmt: on
                     # del everything and empty cache
                     torch.cuda.empty_cache()
@@ -1320,13 +1399,12 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics.add("objective/non_score_reward", non_score_reward_sum_stats.mean())
                 local_metrics.add("objective/rlhf_reward", scores.mean() + non_score_reward_sum_stats.mean())
                 local_metrics.add("objective/scores", scores.mean())
-                local_metrics.add("objective/scores_mean", reward_mean.mean())
-                local_metrics.add("objective/reward_std", reward_std.mean())
                 local_metrics.add("objective/verifiable_correct_rate", verifiable_correct_rate)
                 local_metrics.add("loss/policy_avg", pg_loss_stats.mean())
-                local_metrics.add("loss/policy_avg", loss_stats.mean())
+                local_metrics.add("loss/value_avg", vf_loss_stats.mean())
                 local_metrics.add("policy/approxkl_avg", approxkl_stats.mean())
                 local_metrics.add("policy/clipfrac_avg", pg_clipfrac_stats.mean())
+                local_metrics.add("val/clipfrac_avg", vf_clipfrac_stats.mean())
                 local_metrics.add("policy/entropy_avg", entropy_stats.mean())
                 local_metrics.add("val/ratio", ratio_stats.mean())
                 local_metrics.add("val/ratio_var", ratio_stats.var())
@@ -1343,13 +1421,14 @@ class PolicyTrainerRayProcess(RayProcess):
                     "time/training": time.time() - training_time_start,
                     **local_metrics.get_reduced_metrics(),
                 }
-                if self.rank == 0:
+                if accelerator.is_main_process:
                     print_rich_single_line_metrics(metrics)
                     metrics_queue.put((metrics, episode, df))
-            del (queries, responses, postprocessed_responses, ref_logprobs, sequence_lengths, scores)
+            del (queries, responses, postprocessed_responses, ref_logprobs, sequence_lengths, scores, values)
             del (metrics, kl, non_score_reward)
             gc.collect()
             torch.cuda.empty_cache()
+            # print(f"finished training {training_step}")
 
             # save steps
             if args.save_freq > 0 and training_step % args.save_freq == 0:
@@ -1361,10 +1440,16 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.save_model(self.model, step_dir)
                 if args.try_launch_beaker_eval_jobs_on_weka:
                     self.launch_ai2_evals_on_weka(step_dir, training_step)
+                if args.save_value_model:
+                    value_dir = os.path.join(step_dir, "value_model")
+                    self.save_model(self.value_model, step_dir)
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         self.save_model(self.model, args.output_dir)
         if args.try_launch_beaker_eval_jobs_on_weka:
             self.launch_ai2_evals_on_weka(args.output_dir)
+        if args.save_value_model:
+            value_dir = os.path.join(args.output_dir, "value_model")
+            self.save_model(self.value_model, value_dir)
 
         # Ai2 logic: we use /output to store the artifacts of the job, so we
         # make a copy of the model to `/output` in the end.

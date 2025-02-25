@@ -125,9 +125,9 @@ bash scripts/train/dpo/tulu_preference_mix.sh
 
 ```bash
 # quick debugging run using 1 GPU (0.5 for inference, 0.5 for training)
-# here we are using `HuggingFaceTB/SmolLM-135M-Instruct`; it's prob not
-# gonna train good models, but it's easy to test run and print stuff.
-bash scripts/train/rlvr/mini.sh
+# here we are using a small model, so it's prob not gonna train good models, but it's easy to test run and print stuff.
+bash scripts/train/rlvr/ppo_mini.sh
+bash scripts/train/rlvr/ppo2_mini.sh # experimental support (ppo2 adds kl to loss directly instead of using KL penalty in rewards)
 bash scripts/train/rlvr/grpo_mini.sh
 
 # train an 8B tulu3 model using 8 GPU (1 for inference, 7 for training)

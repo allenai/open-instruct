@@ -1,13 +1,13 @@
-python open_instruct/ppo_vllm_thread_ray_gtrl.py \
-    --dataset_mixer_list allenai/RLVR-GSM 1.0 \
+python open_instruct/ppo2.py \
+    --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list allenai/RLVR-GSM 16 \
+    --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 1023 \
-    --max_prompt_token_length 1024 \
-    --response_length 1024 \
-    --model_name_or_path HuggingFaceTB/SmolLM-135M-Instruct \
-    --reward_model_path HuggingFaceTB/SmolLM-135M-Instruct \
+    --max_token_length 512 \
+    --max_prompt_token_length 512 \
+    --response_length 512 \
+    --model_name_or_path EleutherAI/pythia-14m \
+    --reward_model_path EleutherAI/pythia-14m \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
@@ -37,4 +37,4 @@ python open_instruct/ppo_vllm_thread_ray_gtrl.py \
     --vllm_sync_backend gloo \
     --vllm_gpu_memory_utilization 0.5 \
     --vllm_enforce_eager \
-    --with_tracking
+    # --with_tracking
