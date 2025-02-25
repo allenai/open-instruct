@@ -987,7 +987,7 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         stats_shape = (
             args.num_epochs,
-            args.num_mini_batches * args.number_samples_per_prompt,
+            args.num_mini_batches,
             args.gradient_accumulation_steps,
         )
         non_score_reward_sum_stats = torch.zeros(stats_shape, device=device)

@@ -1,5 +1,5 @@
 exp_name="base_grpo_${RANDOM}"
-python open_instruct/grpo_vllm_thread_ray_gtrl1.py \
+python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --exp_name $exp_name \
     --output_dir /weka/oe-adapt-default/costah/models/$exp_name \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \
