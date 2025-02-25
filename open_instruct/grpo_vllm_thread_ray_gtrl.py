@@ -894,7 +894,7 @@ class PolicyTrainerRayProcess(RayProcess):
             stop=args.stop_strings,
         )
         evaluation_generation_config = SamplingParams(
-            temperature=0.001,
+            temperature=0.0,
             top_p=1.0,
             max_tokens=args.response_length,
             include_stop_str_in_output=True,
