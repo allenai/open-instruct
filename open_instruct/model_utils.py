@@ -15,11 +15,11 @@
 
 
 import itertools
+import logging
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple, Union
-import logging
 
 try:
     import deepspeed
@@ -43,9 +43,9 @@ from open_instruct.ground_truth_utils import (
     verify_gsm8k_sample,
     verify_ifeval_sample,
     verify_math_sample,
+    verify_ace_coder_sample,
 )
 from open_instruct.utils import retry_on_exception
-
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +251,8 @@ def apply_verifiable_reward(
             verified = verify_math_sample(prediction, ground_truth)
         elif dataset.lower() == "ifeval":
             verified = verify_ifeval_sample(prediction, ground_truth)
+        elif dataset.lower() == "ace_coder":
+            verified = verify_ace_coder_sample(prediction, ground_truth)
         # if verified, give reward
         if verified:
             logger.info("Applying ground truth reward 🤗")
