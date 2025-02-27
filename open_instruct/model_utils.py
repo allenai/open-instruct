@@ -436,6 +436,8 @@ def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.T
 
     The compiled version of this opration avoids the (significant) memory overhead of
     allocating a new (batch_size, seq_len, vocab_size) tensor to store the logprobs.
+    
+    See https://github.com/allenai/open-instruct/pull/584
     """
     logprobs = logits.log_softmax(dim=-1)
     return torch.gather(logprobs, dim=-1, index=index.unsqueeze(-1)).squeeze(-1)
