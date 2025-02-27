@@ -429,6 +429,18 @@ def save_with_accelerate(
     # customize model card (TODO (Costa): this can be prettier)
 
 
+@torch.compile(dynamic=True)
+def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
+    """
+    torch compiled version of the common `log_softmax -> gather` operation.
+
+    The compiled version of this opration avoids the (significant) memory overhead of
+    allocating a new (batch_size, seq_len, vocab_size) tensor to store the logprobs.
+    """
+    logprobs = logits.log_softmax(dim=-1)
+    return torch.gather(logprobs, dim=-1, index=index.unsqueeze(-1)).squeeze(-1)
+
+
 @retry_on_exception()
 def push_folder_to_hub(
     accelerator: Accelerator,
