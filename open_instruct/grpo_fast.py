@@ -1457,7 +1457,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             )
         
         B = len(packed_sequences.query_responses) // args.world_size # essentially doing `drop_last=True`, which is fine.
-        print(f"Number of training examples per device: {B=}")
+        print(f"Number of training examples per device: {B=}, packing efficiency: {B / len(responses)=}")
         if B == 0:
             print("🤡 After packing, there is not enough data to train")
             continue
@@ -1517,14 +1517,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         packed_advantage[j] = global_advantages_lst[packed_response_mask[j] - 1]
                 packed_advantages.append(packed_advantage)
             packed_sequences.advantages = packed_advantages
-
-        print(f"{len(packed_sequences.query_responses)=}")
-        print(f"{len(packed_sequences.response_masks)=}")
         print("-"*100)
 
         # ------------------------------------------------------------------------------------------------
         # Train the model
-
         with Timer(f"🗡️ Training"):
             reduced_metricss = ray.get([
                 policy_group.models[i].train.remote(
@@ -1538,10 +1534,14 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             ])
 
             reduced_metrics = reduced_metricss[0] # it's the same for all workers
+            sequence_lengths = np.array([len(response) for response in responses])
             metrics = {
                 "episode": episode,
                 "training_step": training_step,
                 "scores": np.array(scores).mean(),
+                "val/sequence_lengths": sequence_lengths.mean(),
+                "val/sequence_lengths_min": sequence_lengths.min(),
+                "val/sequence_lengths_max": sequence_lengths.max(),
                 # "lr": self.scheduler.get_last_lr()[0],
                 "epoch": episode / len(train_dataset),
                 **reduced_metrics,
