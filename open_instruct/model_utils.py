@@ -15,11 +15,11 @@
 
 
 import itertools
+import logging
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple, Union
-import logging
 
 try:
     import deepspeed
@@ -32,20 +32,18 @@ import transformers
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
 from huggingface_hub import HfApi
-from rich import print as rprint
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-from torch.nn.parallel.distributed import DistributedDataParallel
-from transformers import PreTrainedModel, PreTrainedTokenizer
-
 from open_instruct.ground_truth_utils import (
     verify_gsm8k_sample,
     verify_ifeval_sample,
     verify_math_sample,
 )
 from open_instruct.utils import retry_on_exception
-
+from rich import print as rprint
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from torch.nn.parallel.distributed import DistributedDataParallel
+from transformers import PreTrainedModel, PreTrainedTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -427,6 +425,20 @@ def save_with_accelerate(
     if accelerator.is_main_process:
         tokenizer.save_pretrained(output_dir)
     # customize model card (TODO (Costa): this can be prettier)
+
+
+@torch.compile(dynamic=True)
+def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
+    """
+    torch compiled version of the common `log_softmax -> gather` operation.
+
+    The compiled version of this opration avoids the (significant) memory overhead of
+    allocating a new (batch_size, seq_len, vocab_size) tensor to store the logprobs.
+
+    See https://github.com/allenai/open-instruct/pull/584
+    """
+    logprobs = logits.log_softmax(dim=-1)
+    return torch.gather(logprobs, dim=-1, index=index.unsqueeze(-1)).squeeze(-1)
 
 
 @retry_on_exception()

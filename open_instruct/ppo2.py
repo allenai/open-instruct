@@ -63,7 +63,6 @@ import pandas as pd
 import ray
 import torch
 import torch.distributed as dist
-import torch.nn.functional as F
 import torch.utils
 import torch.utils.data
 from datasets import Dataset
@@ -101,6 +100,7 @@ from open_instruct.model_utils import (
     exact_div,
     first_true_indices,
     get_reward,
+    log_softmax_and_gather,
     print_rich_single_line_metrics,
     print_rich_table,
     push_folder_to_hub,
@@ -829,8 +829,7 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         logits = output.logits[:, context_length - 1 : -1]
         logits /= temperature + 1e-7
-        all_logprob = F.log_softmax(logits, dim=-1)
-        logprob = torch.gather(all_logprob, 2, response.unsqueeze(-1)).squeeze(-1)
+        logprob = log_softmax_and_gather(logits, response)
         return logprob
 
     def train(
