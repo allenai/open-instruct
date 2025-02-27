@@ -573,11 +573,12 @@ for g in range(1, ITER + 1):
     if async_mode:
         if g != 1:
             next_queries = next(generator)
-        param_and_query_Q.put((agent.param, queries))
+        param_and_query_Q.put((agent.param, next_queries))
     else:
         if g != 1:
             next_queries = next(generator)
             param_and_query_Q.put((agent.param, next_queries)) # note the indent here is different
+            queries = next_queries
     _, data = data_Q.get()
     old_param = agent.param
     agent.learn(data)
@@ -586,20 +587,37 @@ for g in range(1, ITER + 1):
 actor_thread.join()
 ```
 ```
+# async_mode = True
 [actor] generating data π_1 -> p_1 D_π_1
 [actor] generating data π_1 -> p_1 D_π_1
---[leaner] get π_1 ->  p_1 D_π_1 -> π_2, time: 2.0022709369659424
-[actor] generating data π_2 -> p_1 D_π_2
---[leaner] get π_2 ->  p_1 D_π_1 -> π_3, time: 3.003502607345581
-[actor] generating data π_3 -> p_2 D_π_3
---[leaner] get π_3 ->  p_2 D_π_2 -> π_4, time: 4.004725933074951
-[actor] generating data π_4 -> p_3 D_π_4
---[leaner] get π_4 ->  p_3 D_π_3 -> π_5, time: 5.005916118621826
-[actor] generating data π_5 -> p_4 D_π_5
---[leaner] get π_5 ->  p_4 D_π_4 -> π_6, time: 6.007085800170898
-[actor] generating data π_6 -> p_5 D_π_6
---[leaner] get π_6 ->  p_5 D_π_5 -> π_7, time: 7.007669448852539
---[leaner] get π_7 ->  p_6 D_π_6 -> π_8, time: 8.009439706802368
+--[leaner] get π_1 ->  p_1 D_π_1 -> π_2, time: 2.0003671646118164
+[actor] generating data π_2 -> p_2 D_π_2
+--[leaner] get π_2 ->  p_1 D_π_1 -> π_3, time: 3.0012056827545166
+[actor] generating data π_3 -> p_3 D_π_3
+--[leaner] get π_3 ->  p_2 D_π_2 -> π_4, time: 4.001934766769409
+[actor] generating data π_4 -> p_4 D_π_4
+--[leaner] get π_4 ->  p_3 D_π_3 -> π_5, time: 5.002779722213745
+[actor] generating data π_5 -> p_5 D_π_5
+--[leaner] get π_5 ->  p_4 D_π_4 -> π_6, time: 6.003664970397949
+[actor] generating data π_6 -> p_6 D_π_6
+--[leaner] get π_6 ->  p_5 D_π_5 -> π_7, time: 7.004390716552734
+--[leaner] get π_7 ->  p_6 D_π_6 -> π_8, time: 8.00534439086914
+
+# async_mode = False
+[actor] generating data π_1 -> p_1 D_π_1
+--[leaner] get π_1 ->  p_1 D_π_1 -> π_2, time: 2.000866174697876
+[actor] generating data π_2 -> p_2 D_π_2
+--[leaner] get π_2 ->  p_2 D_π_2 -> π_3, time: 4.002583980560303
+[actor] generating data π_3 -> p_3 D_π_3
+--[leaner] get π_3 ->  p_3 D_π_3 -> π_4, time: 6.003793239593506
+[actor] generating data π_4 -> p_4 D_π_4
+--[leaner] get π_4 ->  p_4 D_π_4 -> π_5, time: 8.005346775054932
+[actor] generating data π_5 -> p_5 D_π_5
+--[leaner] get π_5 ->  p_5 D_π_5 -> π_6, time: 10.00696587562561
+[actor] generating data π_6 -> p_6 D_π_6
+--[leaner] get π_6 ->  p_6 D_π_6 -> π_7, time: 12.00776195526123
+[actor] generating data π_7 -> p_7 D_π_7
+--[leaner] get π_7 ->  p_7 D_π_7 -> π_8, time: 14.009297132492065
 ```
 
 
