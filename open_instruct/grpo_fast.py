@@ -1458,9 +1458,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         
         B = len(packed_sequences.query_responses) // args.world_size # essentially doing `drop_last=True`, which is fine.
         print(f"Number of training examples per device: {B=}")
-        print(f"{len(responses)=}")
         if B == 0:
-            print("🙈 Not enough data to train")
+            print("🤡 After packing, there is not enough data to train")
             continue
         
         with Timer(f"🔥 Decoding responses", noop=True):
@@ -1510,8 +1509,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             )
             global_advantages_lst = global_advantages.tolist()
             packed_advantages = []
-            print(f"{len(global_advantages_lst)=}")
-            print(f"{[max(packed_sequences.response_masks[i]) for i in range(len(packed_sequences.response_masks))]=}")
             for i in range(len(packed_sequences.response_masks)):
                 packed_response_mask = packed_sequences.response_masks[i]
                 packed_advantage = torch.zeros_like(packed_response_mask, dtype=torch.float32)
