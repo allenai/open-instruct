@@ -1,4 +1,4 @@
-python open_instruct/grpo_vllm_thread_ray_gtrl.py \
+python open_instruct/ppo_vllm_thread_ray_gtrl.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \
@@ -7,7 +7,7 @@ python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --max_prompt_token_length 512 \
     --response_length 512 \
     --model_name_or_path EleutherAI/pythia-14m \
-    --number_samples_per_prompt 4 \
+    --reward_model_path EleutherAI/pythia-14m \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \

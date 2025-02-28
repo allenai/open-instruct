@@ -50,6 +50,7 @@ from open_instruct.model_utils import (
     first_true_indices,
     forward,
     get_reward,
+    log_softmax_and_gather,
     prepare_deepspeed,
     print_rich_single_line_metrics,
     print_rich_table,
@@ -698,9 +699,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     ref_output = forward(ref_model, query_response, tokenizer.pad_token_id)
                     ref_logits = ref_output.logits[:, context_length - 1 : -1]
                     ref_logits /= args.temperature + 1e-7
-                    ref_all_logprob = F.log_softmax(ref_logits, dim=-1)
-                    ref_logprob = torch.gather(ref_all_logprob, 2, response.unsqueeze(-1)).squeeze(-1)
-                    del ref_output, ref_logits, ref_all_logprob
+                    ref_logprob = log_softmax_and_gather(ref_logits, response)
+                    del ref_output, ref_logits
                     torch.cuda.empty_cache()
 
                     # Response Processing 1. truncate response after the first occurrence of `stop_token_id`
@@ -800,10 +800,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         # chosen
                         chosen_logits = chosen_logits[:, context_length - 1 : -1]
                         chosen_logits /= args.temperature + 1e-7
-                        chosen_all_logprobs = F.log_softmax(chosen_logits, dim=-1)
-                        chosen_logprobs = torch.gather(chosen_all_logprobs, 2, chosen_responses.unsqueeze(-1)).squeeze(
-                            -1
-                        )
+                        chosen_logprobs = log_softmax_and_gather(chosen_logits, chosen_responses)
                         chosen_logprobs = torch.masked_fill(
                             chosen_logprobs, padding_mask[chosen_mb_inds], INVALID_LOGPROB
                         )
@@ -814,10 +811,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         # rejected
                         rejected_logits = rejected_logits[:, context_length - 1 : -1]
                         rejected_logits /= args.temperature + 1e-7
-                        rejected_all_logprobs = F.log_softmax(rejected_logits, dim=-1)
-                        rejected_logprobs = torch.gather(
-                            rejected_all_logprobs, 2, rejected_responses.unsqueeze(-1)
-                        ).squeeze(-1)
+                        rejected_logprobs = log_softmax_and_gather(rejected_logits, rejected_responses)
                         rejected_logprobs = torch.masked_fill(
                             rejected_logprobs, padding_mask[rejected_mb_inds], INVALID_LOGPROB
                         )
@@ -847,11 +841,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                                 response = concat_query_responses[:, context_length:]
                                 logits = concat_output.logits[:, context_length - 1 : -1]
                                 logits /= args.temperature + 1e-7
-                                all_logprob = F.log_softmax(logits, dim=-1)
-                                logprob = torch.gather(all_logprob, 2, response.unsqueeze(-1)).squeeze(-1)
+                                logprob = log_softmax_and_gather(logits, response)
                                 logprob = torch.masked_fill(logprob, padding_mask[concat_mb_inds], INVALID_LOGPROB)
                                 logprobs.append(logprob)
-                                del all_logprob
                             chosen_rewards = args.beta * (chosen_logprobs_sum - chosen_ref_logprobs_sum)
                             rejected_rewards = args.beta * (rejected_logprobs_sum - rejected_ref_logprobs_sum)
                             loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = loss

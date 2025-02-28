@@ -27,6 +27,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""
+ppo2.py is a modified version of ppo_vllm_thread_ray_gtrl.py. The main difference is that
+it uses async model by default and add KL to the loss directly instead of using the
+KL penalty term in the rewards.
+"""
 
 import gc
 import json
@@ -79,7 +84,6 @@ from transformers import (
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 from peft import PeftModel, get_peft_model_state_dict
-
 
 from open_instruct.dataset_processor import (
     DATASET_SOURCE_KEY,
@@ -235,8 +239,8 @@ class Args:
     """the clip range for the value function"""
     gamma: float = 1
     """the discount factor"""
-    lam: float = 0.95
-    """the lambda value for GAE"""
+    lam: float = 1.0
+    """the lambda value for GAE (default to 1 per https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero/blob/main/ORZ_paper.pdf)"""
     kl_estimator: Literal["kl1", "kl2", "kl3"] = "kl1"
     """the KL estimator to use"""
     apply_verifiable_reward: bool = False
@@ -1039,6 +1043,10 @@ class PolicyTrainerRayProcess(RayProcess):
             args.num_mini_batches,
             args.gradient_accumulation_steps,
         )
+        non_score_reward_sum_stats = torch.zeros(stats_shape, device=device)
+        kl1_stats = torch.zeros((args.local_total_prompts), device=device)
+        kl2_stats = torch.zeros((args.local_total_prompts), device=device)
+        kl3_stats = torch.zeros((args.local_total_prompts), device=device)
         approxkl_stats = torch.zeros(stats_shape, device=device)
         pg_clipfrac_stats = torch.zeros(stats_shape, device=device)
         pg_loss_stats = torch.zeros(stats_shape, device=device)
@@ -1087,44 +1095,22 @@ class PolicyTrainerRayProcess(RayProcess):
                 except Empty:
                     print("🙈 Evaluation responses not received")
 
-            # (optionally) evaluate the model
-            if args.async_mode:
-                if training_step != 1:
-                    global_data = next(iter_dataloader)
-                    data = data_collator(
-                        global_data[
-                            self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size
-                        ]
-                    )
-                    global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
-                    queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
-                    ground_truths_next = data[GROUND_TRUTHS_KEY]
-                    datasets_next = data[DATASET_SOURCE_KEY]
-                    with Timer("🔥🔥🔥 Loading weights using shared memory", noop=self.rank != 0):
-                        broadcast_to_vllm()
-                if self.rank == 0:
-                    param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
-            else:
-                if training_step != 1:
-                    # NOTE: important: the indent here is different for sync mode
-                    # we also set to use `queries = queries_next` immediately
-                    global_data = next(iter_dataloader)
-                    data = data_collator(
-                        global_data[
-                            self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size
-                        ]
-                    )
-                    global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
-                    queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
-                    ground_truths_next = data[GROUND_TRUTHS_KEY]
-                    datasets_next = data[DATASET_SOURCE_KEY]
-                    with Timer("🔥🔥🔥 Loading weights using shared memory", noop=self.rank != 0):
-                        broadcast_to_vllm()
-                    if self.rank == 0:
-                        param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
-                    queries = queries_next
-                    ground_truths = ground_truths_next
-                    datasets = datasets_next
+            # async mode implementation
+            if training_step != 1:
+                global_data = next(iter_dataloader)
+                data = data_collator(
+                    global_data[
+                        self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size
+                    ]
+                )
+                global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
+                queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
+                ground_truths_next = data[GROUND_TRUTHS_KEY]
+                datasets_next = data[DATASET_SOURCE_KEY]
+                with Timer("🔥🔥🔥 Loading weights using shared memory", noop=self.rank != 0):
+                    broadcast_to_vllm()
+            if self.rank == 0:
+                param_prompt_Q.put((None, remove_padding(global_queries, tokenizer.pad_token_id)))
 
             torch.cuda.empty_cache()
             # if we generate multiple samples per prompt, we need to repeat the queries and ground truths
@@ -1139,7 +1125,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 context_length = queries.shape[1]
                 responses = []
                 postprocessed_responses = []
-                logprobs = []
                 ref_logprobs = []
                 scores = []
                 verifiable_counts = []
@@ -1171,12 +1156,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     query = queries[i : i + args.local_rollout_forward_batch_size]
                     query_response = query_responses[i : i + args.local_rollout_forward_batch_size]
                     response = query_response[:, context_length:]
-
-                    # Get policy model logprob
-                    logprob = self.forward(
-                        self.model, query_response, response, tokenizer.pad_token_id, context_length, args.temperature
-                    )
-                    torch.cuda.empty_cache()
 
                     # Get reference model logprob
                     ref_logprob = self.forward(
@@ -1230,7 +1209,6 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     responses.append(response)
                     postprocessed_responses.append(postprocessed_response)
-                    logprobs.append(logprob)
                     ref_logprobs.append(ref_logprob)
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
@@ -1239,14 +1217,13 @@ class PolicyTrainerRayProcess(RayProcess):
 
                 responses = torch.cat(responses, 0)
                 postprocessed_responses = torch.cat(postprocessed_responses, 0)
-                logprobs = torch.cat(logprobs, 0)
                 ref_logprobs = torch.cat(ref_logprobs, 0)
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
                 verifiable_counts = torch.cat(verifiable_counts, 0)
                 verifiable_correct_rate = verifiable_counts.sum() / queries.shape[0]
                 values = torch.cat(values, 0)
-                del (logprob, ref_logprob, full_value, value, score)
+                del (ref_logprob, full_value, value, score)
                 gc.collect()
                 torch.cuda.empty_cache()
 
@@ -1265,26 +1242,13 @@ class PolicyTrainerRayProcess(RayProcess):
                 # be very careful with `padding_mask_p1`; see https://excalidraw.com/#json=LWnzG4w2k5DjF_EOL_xPt,e2w3a-hFJ_gX5vOfeyXGTw
                 response_idxs = torch.arange(responses.shape[1], device=responses.device).repeat(responses.shape[0], 1)
                 padding_mask = response_idxs > sequence_lengths.unsqueeze(1)
-                logprobs = torch.masked_fill(logprobs, padding_mask, INVALID_LOGPROB)
                 ref_logprobs = torch.masked_fill(ref_logprobs, padding_mask, INVALID_LOGPROB)
                 sequence_lengths_p1 = sequence_lengths + 1
                 padding_mask_p1 = response_idxs > (sequence_lengths_p1.unsqueeze(1))
                 values = torch.masked_fill(values, padding_mask_p1, 0)
 
                 # 4. compute rewards
-                kl1 = logprobs - ref_logprobs
-                kl2 = (kl1) ** 2 / 2
-                kl3 = (-kl1).exp() - 1 + kl1
-                if args.kl_estimator == "kl1":
-                    kl = kl1
-                elif args.kl_estimator == "kl2":
-                    kl = kl2
-                elif args.kl_estimator == "kl3":
-                    kl = kl3
-                non_score_reward = -args.beta * kl
-                non_score_reward_sum = non_score_reward.sum(1)
-                rlhf_reward = scores + non_score_reward_sum
-                rewards = non_score_reward.clone()
+                rewards = torch.zeros_like(ref_logprobs)
                 actual_start = torch.arange(rewards.size(0), device=rewards.device)
                 actual_end = torch.where(sequence_lengths_p1 < rewards.size(1), sequence_lengths_p1, sequence_lengths)
                 rewards[[actual_start, actual_end]] += scores
@@ -1310,6 +1274,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 torch.cuda.empty_cache()
 
             # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
+            old_logprobs = torch.zeros_like(ref_logprobs)
             for epoch_idx in range(args.num_epochs):
                 b_inds = np.random.permutation(args.local_total_prompts)
                 minibatch_idx = 0
@@ -1325,7 +1290,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         mb_advantage = advantages[micro_batch_inds]
                         mb_responses = responses[micro_batch_inds]
                         mb_query_responses = query_responses[micro_batch_inds]
-                        mb_logprobs = logprobs[micro_batch_inds]
+                        mb_reflogprobs = ref_logprobs[micro_batch_inds]
                         mb_return = returns[micro_batch_inds]
                         mb_values = values[micro_batch_inds]
                         mb_padding_mask_p1 = padding_mask_p1[micro_batch_inds]
@@ -1357,36 +1322,66 @@ class PolicyTrainerRayProcess(RayProcess):
                             args.temperature,
                         )
                         new_logprobs = torch.masked_fill(new_logprobs, padding_mask[micro_batch_inds], INVALID_LOGPROB)
+                        if epoch_idx == 0:
+                            # .detach() is important here. See the following blog post for more details:
+                            # https://costa.sh/blog-understanding-why-there-isn't-a-log-probability-in-trpo-and-ppo's-objective
+                            old_logprobs[micro_batch_inds] = new_logprobs.detach()
+                        mb_logprobs = old_logprobs[micro_batch_inds]
                         logprobs_diff = new_logprobs - mb_logprobs
                         ratio = torch.exp(logprobs_diff)
                         pg_losses = -mb_advantage * ratio
                         pg_losses2 = -mb_advantage * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
                         pg_loss_max = torch.max(pg_losses, pg_losses2)
-                        pg_loss = masked_mean(pg_loss_max, ~padding_mask[micro_batch_inds])
-                        loss = pg_loss
+
+                        # Here we recalculate kl: we want the KL loss to backpropagate through the model
+                        # We also clamp the KL loss to avoid numerical instability
+                        # https://chatgpt.com/share/679d0ed9-8f48-8011-926e-e274b15ae8ae
+                        ref_logprobs_diff = (new_logprobs - mb_reflogprobs).clamp(-40.0, 40.0)
+                        kl1 = ref_logprobs_diff
+                        kl2 = (ref_logprobs_diff) ** 2 / 2
+                        kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff  # this is more numerically stable
+                        kl4 = ratio * ref_logprobs_diff
+                        if args.kl_estimator == "kl1":
+                            kl = kl1
+                        elif args.kl_estimator == "kl2":
+                            kl = kl2
+                        elif args.kl_estimator == "kl3":
+                            kl = kl3
+                        elif args.kl_estimator == "kl4":
+                            kl = kl4
+
+                        # directly apply the KL loss (like GRPO)
+                        loss = masked_mean(pg_loss_max + (args.beta * kl), ~padding_mask[micro_batch_inds])
                         self.model.backward(loss)
                         self.model.step()
                         with torch.no_grad():
+                            if epoch_idx == 0:
+                                kl1_stats[micro_batch_inds] = kl1.sum(1).float()
+                                kl2_stats[micro_batch_inds] = kl2.sum(1).float()
+                                kl3_stats[micro_batch_inds] = kl3.sum(1).float()
+                                # don't need to keep track of kl4 because it's the same as kl1 numerically
                             vf_clipfrac = masked_mean((vf_losses2 > vf_losses1).float(), ~mb_padding_mask_p1)
                             pg_clipfrac = masked_mean(
                                 (pg_losses2 > pg_losses).float(), ~padding_mask[micro_batch_inds]
                             )
-                            # print("value model stepped", self.rank, "micro batch start", micro_batch_start)
-                            # prob_dist = torch.nn.functional.softmax(logits, dim=-1)
-                            # entropy = torch.logsumexp(logits, dim=-1) - torch.sum(prob_dist * logits, dim=-1)
+                            non_score_reward = -args.beta * kl
+                            non_score_reward_sum_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = (
+                                non_score_reward.sum(1).mean()
+                            )
                             approxkl = 0.5 * (logprobs_diff**2).mean()
                             approxkl_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = approxkl
                             pg_clipfrac_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = pg_clipfrac
-                            pg_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = pg_loss
+                            pg_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = masked_mean(
+                                pg_loss_max, ~padding_mask[micro_batch_inds]
+                            )
                             vf_loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = vf_loss
                             vf_clipfrac_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = vf_clipfrac
-                            # entropy_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = entropy.mean()
                             ratio_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = ratio.mean()
                         gradient_accumulation_idx += 1
                     minibatch_idx += 1
                     # fmt: off
                     del mb_advantage, mb_responses, mb_query_responses, mb_logprobs, mb_return, mb_values, mb_padding_mask_p1
-                    del new_logprobs, logprobs_diff, ratio, pg_losses, pg_losses2, pg_loss_max, pg_loss, loss
+                    del new_logprobs, logprobs_diff, ratio, pg_losses, pg_losses2, pg_loss_max, loss
                     # fmt: on
                     # del everything and empty cache
                     torch.cuda.empty_cache()
@@ -1396,12 +1391,12 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics.add("val/sequence_lengths_min", sequence_lengths.float().min())
                 local_metrics.add("val/sequence_lengths_max", sequence_lengths.float().max())
                 local_metrics.add("val/num_stop_token_ids", (responses == args.stop_token_id).sum().float().mean())
-                local_metrics.add("objective/kl", kl.sum(1).mean())
-                local_metrics.add("objective/kl2", (kl**2 / 2).sum(1).mean())
-                local_metrics.add("objective/kl3", ((-kl).exp() - 1 + kl).sum(1).mean())
-                local_metrics.add("objective/entropy", (-logprobs).sum(1).mean())
-                local_metrics.add("objective/non_score_reward", non_score_reward_sum.mean())
-                local_metrics.add("objective/rlhf_reward", rlhf_reward.mean())
+                local_metrics.add("objective/kl", kl1_stats.mean())
+                local_metrics.add("objective/kl2", kl2_stats.mean())
+                local_metrics.add("objective/kl3", kl3_stats.mean())
+                local_metrics.add("objective/entropy", (-old_logprobs).sum(1).mean())
+                local_metrics.add("objective/non_score_reward", non_score_reward_sum_stats.mean())
+                local_metrics.add("objective/rlhf_reward", scores.mean() + non_score_reward_sum_stats.mean())
                 local_metrics.add("objective/scores", scores.mean())
                 local_metrics.add("objective/verifiable_correct_rate", verifiable_correct_rate)
                 local_metrics.add("loss/policy_avg", pg_loss_stats.mean())
@@ -1425,13 +1420,14 @@ class PolicyTrainerRayProcess(RayProcess):
                     "time/training": time.time() - training_time_start,
                     **local_metrics.get_reduced_metrics(),
                 }
-                if self.rank == 0:
+                if accelerator.is_main_process:
                     print_rich_single_line_metrics(metrics)
                     metrics_queue.put((metrics, episode, df))
-            del (queries, responses, postprocessed_responses, logprobs, ref_logprobs, sequence_lengths, scores, values)
-            del (metrics, kl, non_score_reward, non_score_reward_sum, rlhf_reward)
+            del (queries, responses, postprocessed_responses, ref_logprobs, sequence_lengths, scores, values)
+            del (metrics, kl, non_score_reward)
             gc.collect()
             torch.cuda.empty_cache()
+            # print(f"finished training {training_step}")
 
             # save steps
             if args.save_freq > 0 and training_step % args.save_freq == 0:

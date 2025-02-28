@@ -62,6 +62,13 @@ def get_args():
         help="Beaker clusters on which the job could be run.",
         required=True,
     )
+    parser.add_argument(
+        "--hostname",
+        type=str,
+        nargs="+",
+        help="Beaker hostname on which the job could be run.",
+        default=None
+    )
     parser.add_argument("--max_retries", type=int, help="Number of retries", default=1)
     parser.add_argument("--budget", type=str, help="Budget to use.", required=True)
     parser.add_argument("--gpus", type=int, help="Number of gpus", default=0)
@@ -280,6 +287,24 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
     # if all cluster is in gcp we add the following env
 
     elif all(c in GCP_CLUSTERS for c in cluster):
+        env_vars.extend([
+            beaker.EnvVar(
+                name="HF_HOME",
+                value="/filestore/.cache/huggingface",
+            ),
+            beaker.EnvVar(
+                name="HF_DATASETS_CACHE",
+                value="/filestore/.cache/huggingface",
+            ),
+            beaker.EnvVar(
+                name="HF_HUB_CACHE",
+                value="/filestore/.cache/hub",
+            ),
+            beaker.EnvVar(
+                name="HF_HUB_ENABLE_HF_TRANSFER",
+                value="1",
+            ),
+        ])
         if num_nodes > 1:
             env_vars.extend([
                 beaker.EnvVar(
@@ -433,6 +458,13 @@ def get_datasets(beaker_datasets, cluster: List[str]):
                 mount_path="/weka/oe-training-default",
             ),
         ]
+    elif all(c in GCP_CLUSTERS for c in cluster):
+        res = [
+            beaker.DataMount(
+                source=beaker.DataSource(host_path="/mnt/filestore_1"),
+                mount_path="/filestore",
+            ),
+        ]
     for beaker_dataset in beaker_datasets:
         to_append = beaker.DataMount(
             source=beaker.DataSource(beaker=beaker_dataset["beaker"]),
@@ -499,7 +531,10 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
     full_command = setup_commands + join_full_command
     print(f"{full_command=}")
 
-
+    if args.hostname is not None:
+        constraints = beaker.Constraints(hostname=args.hostname)
+    else:
+        constraints = beaker.Constraints(cluster=args.cluster)
     spec = beaker.TaskSpec(
         name=f"{args.task_name}__{i}",
         image=beaker.ImageSource(beaker=args.image),
@@ -509,7 +544,7 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
         datasets=get_datasets(args.beaker_datasets, args.cluster),
         context=beaker.TaskContext(priority=beaker.Priority(args.priority),
                                    preemptible=args.preemptible),
-        constraints=beaker.Constraints(cluster=args.cluster),
+        constraints=constraints,
         env_vars=get_env_vars(args.pure_docker_mode, args.cluster, beaker_secrets, 
                             whoami, resumable, args.num_nodes, args.env),
         resources=beaker.TaskResources(gpu_count=args.gpus),
