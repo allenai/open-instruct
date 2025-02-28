@@ -36,7 +36,7 @@ from open_instruct.ground_truth_utils import (
     verify_gsm8k_sample,
     verify_ifeval_sample,
     verify_math_sample,
-    verify_max_length_sample,
+    verify_max_length_sample_cosine,
 )
 from open_instruct.utils import retry_on_exception
 from rich import print as rprint
@@ -257,7 +257,7 @@ def apply_verifiable_reward(
             elif ds.lower() == "ifeval":
                 verified = verify_ifeval_sample(prediction, gt)
             elif ds.lower() == "max_length":
-                verified = verify_max_length_sample(tok_prediction, gt)
+                verified = verify_max_length_sample_cosine(tok_prediction, gt)
                 verify_reward = verify_reward / 2  # reduce the reward for max_length
             # if verified, give reward
             if verified:

@@ -7,6 +7,8 @@ import json
 import re
 import string
 
+import numpy as np
+
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.math_utils import (
     get_unnormalized_answer,
@@ -159,12 +161,37 @@ def verify_max_length_sample(tokenized_response: list[int], max_length: int) -> 
     return 1.0 if len(tokenized_response) <= int(max_length) else 0.0
 
 
+def verify_max_length_sample_cosine(x, max_length, tolerance_ratio=0.1):
+    """
+    Compute a cosine-shaped reward for a tokenized response length x.
+    
+    The reward peaks at 1.0 when x equals max_length. For differences up to
+    tolerance (tolerance_ratio * max_length), the reward decays as:
+        reward = 0.5 * (cos(pi * diff / tolerance) + 1)
+    For differences greater than tolerance, the reward is 0.
+    
+    Args:
+        x (int or np.array): Tokenized response length(s).
+        max_length (int): Target token length.
+        tolerance_ratio (float): Fraction of max_length defining the non-zero reward band.
+        
+    Returns:
+        np.array: Cosine-shaped reward, between 0 and 1.
+    """
+    tolerance = max_length * tolerance_ratio
+    diff = np.abs(x - max_length)
+    reward = np.where(diff <= tolerance,
+                      0.5 * (np.cos(np.pi * diff / tolerance) + 1),
+                      0.0)
+    return reward
+
+
 # debug code
 if __name__ == "__main__":
     from datasets import load_dataset
 
-    ds = load_dataset("ai2-adapt-dev/prompts_with_constraints_for_ground_truth")
+    ds = load_dataset("ai2-adapt-dev/eurus2_ground_truth_with_random_max_length")
     test_model_output = "<|assistant|>\nThe answer is $\\boxed{3.14}$"
     for sample in ds["train"]:
         print(sample)
-        verify_ifeval_sample(test_model_output, sample["ground_truth"])
+        print(verify_max_length_sample(test_model_output, sample["ground_truth"].split("<sep>")[-1]))
