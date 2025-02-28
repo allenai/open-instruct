@@ -161,7 +161,7 @@ def verify_max_length_sample(tokenized_response: list[int], max_length: int) -> 
     return 1.0 if len(tokenized_response) <= int(max_length) else 0.0
 
 
-def verify_max_length_sample_cosine(x, max_length, tolerance_ratio=0.1):
+def verify_max_length_sample_cosine(tokenized_response: list[int], max_length: int, tolerance_ratio: float =0.1):
     """
     Compute a cosine-shaped reward for a tokenized response length x.
     
@@ -178,6 +178,7 @@ def verify_max_length_sample_cosine(x, max_length, tolerance_ratio=0.1):
     Returns:
         np.array: Cosine-shaped reward, between 0 and 1.
     """
+    x = len(tokenized_response)
     tolerance = max_length * tolerance_ratio
     diff = np.abs(x - max_length)
     reward = np.where(diff <= tolerance,

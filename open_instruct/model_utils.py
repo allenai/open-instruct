@@ -257,8 +257,8 @@ def apply_verifiable_reward(
             elif ds.lower() == "ifeval":
                 verified = verify_ifeval_sample(prediction, gt)
             elif ds.lower() == "max_length":
-                verified = verify_max_length_sample_cosine(tok_prediction, gt)
-                verify_reward = verify_reward / 2  # reduce the reward for max_length
+                verified_score = verify_max_length_sample_cosine(tok_prediction, gt)
+                verify_reward = (verify_reward_original / 2) * verified_score
             # if verified, give reward
             if verified:
                 logger.info("Applying ground truth reward 🤗")
