@@ -855,6 +855,7 @@ class PolicyTrainerRayProcess(RayProcess):
         packed_advantages: torch.Tensor,
         packed_response_masks: torch.Tensor,
         pad_token_id: int,
+        accumulation_steps: int,
     ):
         args = self.args
         # Shuffle the batch and collate the data
@@ -864,8 +865,8 @@ class PolicyTrainerRayProcess(RayProcess):
         collated_position_ids = []
         collated_response_masks = []
         collated_advantages = []
-        for i in range(0, len(packed_query_responses), args.local_rollout_forward_batch_size):
-            micro_range = b_inds[i:i+args.local_rollout_forward_batch_size]
+        for i in range(0, len(packed_query_responses), args.per_device_train_batch_size):
+            micro_range = b_inds[i:i+args.per_device_train_batch_size]
             collated_query_responses.append(collate_fn([packed_query_responses[idx] for idx in micro_range], pad_token_id))
             collated_attention_masks.append(collate_fn([packed_attention_masks[idx] for idx in micro_range], 0))
             collated_position_ids.append(collate_fn([packed_position_ids[idx] for idx in micro_range], 0))
@@ -874,8 +875,8 @@ class PolicyTrainerRayProcess(RayProcess):
         to_device_inplace(collated_query_responses, self.device)
         to_device_inplace(collated_attention_masks, self.device)
         to_device_inplace(collated_position_ids, self.device)
-        to_device_inplace(collated_response_masks, self.device)
         to_device_inplace(collated_advantages, self.device)
+        to_device_inplace(collated_response_masks, self.device)
 
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
@@ -896,9 +897,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:].bool(), INVALID_LOGPROB)
                     collated_ref_logprobs.append(ref_logprob)
                     torch.cuda.empty_cache()
-
+        local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
-        with Timer("Loss calculation", noop = self.rank != 0 ):
+        with Timer("[Training Processes] Loss calculation", noop = self.rank != 0 ):
             old_logprobs = [None for _ in range(len(collated_query_responses))]
             kl1_stats = []
             kl2_stats = []
@@ -956,8 +957,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         kl = kl4
                     # grpo change: directly subtract KL in loss (add)
                     loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks[:, 1:].bool())
+                    loss = loss / accumulation_steps
                     self.model.backward(loss)
-                    self.model.step()
+                    if (local_step + 1) % accumulation_steps == 0:
+                        self.model.step()
+                    local_step += 1
                     with torch.no_grad():
                         kl1_stats.append(kl1.mean(1).float())
                         kl2_stats.append(kl2.mean(1).float())
@@ -1300,7 +1304,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         n=args.number_samples_per_prompt,
         stop=args.stop_strings,
     )
-    evaluation_generation_config = SamplingParams(
+    eval_generation_config = SamplingParams(
         temperature=0.001,
         top_p=1.0,
         max_tokens=args.response_length,
@@ -1320,7 +1324,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         response_ids_Q: Queue,
         param_prompt_Q: Queue,
         num_training_steps: int,
-        sample_evaluation_prompt_token_ids: Optional[List[int]],
+        eval_prompt_token_ids: Optional[List[int]],
         evaluation_Q: Queue,
         eval_freq: int,
         resume_training_step: int = 1,
@@ -1356,15 +1360,15 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             response_ids_Q.put(response_ids)
 
             # Evaluate the model
-            if sample_evaluation_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
+            if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
                 response_ids = generate_with_engines(
-                    sample_evaluation_prompt_token_ids, evaluation_generation_config
+                    eval_prompt_token_ids, eval_generation_config
                 )
                 evaluation_Q.put(response_ids)
     
-    sample_evaluation_prompt_token_ids = None
+    eval_prompt_token_ids = None
     if eval_dataset is not None:
-        sample_evaluation_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
+        eval_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
     resume_training_step = 1
     thread = threading.Thread(
         target=vllm_generate,
@@ -1373,14 +1377,14 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             response_ids_Q,
             param_prompt_Q,
             args.num_training_steps,
-            sample_evaluation_prompt_token_ids,
+            eval_prompt_token_ids,
             evaluation_Q,
             args.eval_freq,
             resume_training_step,
         ),
     )
     thread.start()
-    print("vllm generate thread starts")
+    print("======== ✅ vllm generate thread starts =========")
 
     data_next = train_dataset[next(iter_dataloader)]
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
@@ -1402,9 +1406,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         # Optionally evaluate the model
         try:
             evaluation_responses = evaluation_Q.get(timeout=0.01)
-            print("📊 Evaluation responses received")
+            print("[Main Thread] 📊 Evaluation responses received")
             table = {}
-            table["prompt"] = tokenizer.batch_decode(sample_evaluation_prompt_token_ids)
+            table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
             table["response"] = tokenizer.batch_decode(evaluation_responses)
             table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
             df = pd.DataFrame(table)
@@ -1414,7 +1418,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 print_rich_table(df.iloc[:1])
             del table
         except Empty:
-            print("🙈 Evaluation responses not received")
+            print("[Main Thread] 🙈 Evaluation responses not received")
 
         # ------------------------------------------------------------------------------------------------
         # Sync weights and send the next batch of prompts to vLLM
@@ -1464,7 +1468,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         if B == 0:
             print("🤡 After packing, there is not enough data to train")
             continue
-        
+
         total_tokens += sum(len(seq) for seq in packed_sequences.query_responses)
 
         with Timer(f"🔥 Decoding responses", noop=True):
@@ -1526,6 +1530,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         # ------------------------------------------------------------------------------------------------
         # Train the model
         with Timer(f"🗡️ Training"):
+            print(f"Accumulation steps: {B // args.num_mini_batches=}")
             reduced_metricss = ray.get([
                 policy_group.models[i].train.remote(
                     packed_query_responses=packed_sequences.query_responses[B * i : B * (i + 1)],
@@ -1534,6 +1539,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     packed_advantages=packed_sequences.advantages[B * i : B * (i + 1)],
                     packed_response_masks=packed_sequences.response_masks[B * i : B * (i + 1)],
                     pad_token_id=tokenizer.pad_token_id,
+                    accumulation_steps=B // args.num_mini_batches,
                 ) for i in range(args.world_size)
             ])
 
@@ -1542,23 +1548,25 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             metrics = {
                 "episode": episode,
                 "training_step": training_step,
-                "scores": np.array(scores).mean(),
+                "objective/scores": np.array(scores).mean(),
                 "val/sequence_lengths": sequence_lengths.mean(),
                 "val/sequence_lengths_min": sequence_lengths.min(),
                 "val/sequence_lengths_max": sequence_lengths.max(),
                 # "lr": self.scheduler.get_last_lr()[0],
+                "val/total_tokens": total_tokens,
                 "epoch": episode / len(train_dataset),
                 "tokens_per_second": total_tokens / (time.time() - start_time),
                 **reduced_metrics,
             }
             if args.apply_verifiable_reward:
-                metrics["verifiable_reward"] = np.array(verifiable_rewards).mean()
+                np_verifiable_rewards = np.array(verifiable_rewards)
+                metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
+                metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
             if args.add_r1_style_format_reward:
-                metrics["format_reward"] = np.array(format_scores).mean()
+                metrics["val/format_scores"] = np.array(format_scores).mean()
             print_rich_single_line_metrics(metrics)
             for key, value in metrics.items():
                 writer.add_scalar(key, value, episode)
-        # breakpoint()
 
     ray.shutdown()
 
