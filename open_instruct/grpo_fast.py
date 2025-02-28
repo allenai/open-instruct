@@ -959,10 +959,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.model.backward(loss)
                     self.model.step()
                     with torch.no_grad():
-                        kl1_stats.append(kl1.sum(1).float())
-                        kl2_stats.append(kl2.sum(1).float())
-                        kl3_stats.append(kl3.sum(1).float())
-                        kl4_stats.append(kl4.sum(1).float())
+                        kl1_stats.append(kl1.mean(1).float())
+                        kl2_stats.append(kl2.mean(1).float())
+                        kl3_stats.append(kl3.mean(1).float())
+                        kl4_stats.append(kl4.mean(1).float())
                         pg_clipfrac_stats.append(masked_mean(
                             (pg_losses2 > pg_losses).float(), mb_response_masks[:, 1:].bool()
                         ))
@@ -971,10 +971,10 @@ class PolicyTrainerRayProcess(RayProcess):
                         ratio_stats.append(ratio.mean())
 
             with torch.no_grad():
-                self.local_metrics.add("objective/kl", torch.stack(kl1_stats).mean())
-                self.local_metrics.add("objective/kl2", torch.stack(kl2_stats).mean())
-                self.local_metrics.add("objective/kl3", torch.stack(kl3_stats).mean())
-                self.local_metrics.add("objective/kl4", torch.stack(kl4_stats).mean())
+                self.local_metrics.add("objective/kl_avg", torch.stack(kl1_stats).mean())
+                self.local_metrics.add("objective/kl2_avg", torch.stack(kl2_stats).mean())
+                self.local_metrics.add("objective/kl3_avg", torch.stack(kl3_stats).mean())
+                self.local_metrics.add("objective/kl4_avg", torch.stack(kl4_stats).mean())
                 self.local_metrics.add("loss/policy_avg", torch.stack(pg_loss_stats).mean())
                 self.local_metrics.add("loss/policy_avg", torch.stack(loss_stats).mean())
                 self.local_metrics.add("policy/clipfrac_avg", torch.stack(pg_clipfrac_stats).mean())
@@ -1390,6 +1390,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     episode = 0
     for training_step in range(resume_training_step, args.num_training_steps + 1):
+        print("-"*100)
         episode += args.rollout_batch_size * args.number_samples_per_prompt  # each sample is an episode
         queries = queries_next
         ground_truths = ground_truths_next
@@ -1457,7 +1458,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             )
         
         B = len(packed_sequences.query_responses) // args.world_size # essentially doing `drop_last=True`, which is fine.
-        print(f"Number of training examples per device: {B=}, packing efficiency: {B / len(responses)=}")
+        print(f"Number of training examples per device: {B=}, packed sequence fraction of original sequences: {len(packed_sequences.query_responses) / len(responses)}")
         if B == 0:
             print("🤡 After packing, there is not enough data to train")
             continue
@@ -1517,7 +1518,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         packed_advantage[j] = global_advantages_lst[packed_response_mask[j] - 1]
                 packed_advantages.append(packed_advantage)
             packed_sequences.advantages = packed_advantages
-        print("-"*100)
 
         # ------------------------------------------------------------------------------------------------
         # Train the model
