@@ -1386,9 +1386,11 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
     datasets_next = data_next[DATASET_SOURCE_KEY]
-    param_prompt_Q.put((None, remove_padding(queries_next, tokenizer.pad_token_id)))
+    param_prompt_Q.put((None, queries_next))
 
     episode = 0
+    total_tokens = 0
+    start_time = time.time()
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         print("-"*100)
         episode += args.rollout_batch_size * args.number_samples_per_prompt  # each sample is an episode
@@ -1463,6 +1465,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             print("🤡 After packing, there is not enough data to train")
             continue
         
+        total_tokens += sum(len(seq) for seq in packed_sequences.query_responses)
+
         with Timer(f"🔥 Decoding responses", noop=True):
             global_decoded_responses = tokenizer.batch_decode(
                 responses, skip_special_tokens=True
@@ -1544,6 +1548,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 "val/sequence_lengths_max": sequence_lengths.max(),
                 # "lr": self.scheduler.get_last_lr()[0],
                 "epoch": episode / len(train_dataset),
+                "tokens_per_second": total_tokens / (time.time() - start_time),
                 **reduced_metrics,
             }
             if args.apply_verifiable_reward:
