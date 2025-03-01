@@ -51,20 +51,6 @@ def main(args: Args):
         api = HfApi()
         if not args.hf_entity:
             args.hf_entity = HfApi().whoami()["name"]
-        repo_id = f"{args.hf_entity}/rlvr_gsm8k_zs"
-        print(f"Pushing dataset to Hub: {repo_id}")
-        dataset.push_to_hub(repo_id)
-        api.upload_file(
-            path_or_fileobj=__file__,
-            path_in_repo="create_dataset.py",
-            repo_type="dataset",
-            repo_id=repo_id,
-        )
-
-    if args.push_to_hub:
-        api = HfApi()
-        if not args.hf_entity:
-            args.hf_entity = HfApi().whoami()["name"]
         repo_id = f"{args.hf_entity}/rlvr_open_reasoner_math"
         print(f"Pushing dataset to Hub: {repo_id}")
         dataset.push_to_hub(repo_id)
