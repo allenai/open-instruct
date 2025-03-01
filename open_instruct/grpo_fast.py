@@ -79,7 +79,7 @@ from transformers import (
     get_scheduler,
 )
 from transformers.integrations import HfDeepSpeedConfig
-from vllm import SamplingParams
+from vllm import SamplingParams, LLM
 
 from open_instruct.dataset_processor import (
     DATASET_SOURCE_KEY,
@@ -757,18 +757,22 @@ class PolicyTrainerRayProcess(RayProcess):
         query_response: torch.LongTensor,
         attention_mask: torch.LongTensor,
         position_ids: torch.LongTensor,
+        pad_token_id: int,
         temperature: float,
     ) -> torch.Tensor:
+        # Replace pad tokens with 0s so that we don't run into index out of bounds errors
+        input_ids = torch.masked_fill(query_response, ~(query_response != pad_token_id), 0)
         # NOTE: the [:-1] and [1:] are because the logits and generated tokens are off by 1 in index
         output = model(
-            input_ids=query_response[:, :-1],
-            attention_mask=attention_mask[:, :-1],
+            input_ids=input_ids[:, :-1],
+            # @vwxyzjn: without clamp, we get index out of bounds errors; TODO: investigate
+            attention_mask=attention_mask[:, :-1].clamp(0, 1),
             position_ids=position_ids[:, :-1],
             return_dict=True,
         )
         logits = output.logits
         logits /= temperature + 1e-7
-        logprob = log_softmax_and_gather(logits, query_response[:, 1:])
+        logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
         return logprob
 
 
@@ -892,6 +896,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         query_response,
                         attention_mask,
                         position_id,
+                        pad_token_id,
                         args.temperature,
                     )
                     ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:].bool(), INVALID_LOGPROB)
@@ -901,14 +906,14 @@ class PolicyTrainerRayProcess(RayProcess):
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop = self.rank != 0 ):
             old_logprobs = [None for _ in range(len(collated_query_responses))]
-            kl1_stats = []
-            kl2_stats = []
-            kl3_stats = []
-            kl4_stats = []
-            pg_clipfrac_stats = []
-            pg_loss_stats = []
-            loss_stats = []
-            ratio_stats = []
+            kl1_stats = torch.zeros(len(collated_query_responses))
+            kl2_stats = torch.zeros(len(collated_query_responses))
+            kl3_stats = torch.zeros(len(collated_query_responses))
+            kl4_stats = torch.zeros(len(collated_query_responses))
+            pg_clipfrac_stats = torch.zeros(len(collated_query_responses))
+            pg_loss_stats = torch.zeros(len(collated_query_responses))
+            loss_stats = torch.zeros(len(collated_query_responses))
+            ratio_stats = torch.zeros(len(collated_query_responses))
             for epoch_idx in range(args.num_epochs):
                 for i in range(len(collated_query_responses)):
                     mb_ref_logprob = collated_ref_logprobs[i]
@@ -918,7 +923,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
                     mb_new_logprobs = self.forward(
-                        self.model, mb_query_responses, mb_attention_mask, mb_position_id, args.temperature
+                        self.model, mb_query_responses, mb_attention_mask, mb_position_id, pad_token_id, args.temperature
                     )
                     mb_new_logprobs = torch.masked_fill(
                         mb_new_logprobs, ~mb_response_masks[:, 1:].bool(), INVALID_LOGPROB
@@ -927,11 +932,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Cache the old logprobs
                     with torch.no_grad():
                         if epoch_idx == 0:
-                            for idx, val in zip(micro_range, mb_new_logprobs):
-                                old_logprobs[idx] = val
-                    mb_old_logprobs = torch.stack([old_logprobs[idx] for idx in micro_range])
+                            old_logprobs[i] = mb_new_logprobs
 
                     # Calculate the policy's loss
+                    mb_old_logprobs = old_logprobs[i]
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
                     ratio = torch.exp(logprobs_diff)
                     pg_losses = -mb_advantages[:, 1:] * ratio
@@ -963,27 +967,28 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model.step()
                     local_step += 1
                     with torch.no_grad():
-                        kl1_stats.append(kl1.mean(1).float())
-                        kl2_stats.append(kl2.mean(1).float())
-                        kl3_stats.append(kl3.mean(1).float())
-                        kl4_stats.append(kl4.mean(1).float())
-                        pg_clipfrac_stats.append(masked_mean(
+                        kl1_stats[i] = kl1.mean().float()
+                        kl2_stats[i] = kl2.mean().float()
+                        kl3_stats[i] = kl3.mean().float()
+                        kl4_stats[i] = kl4.mean().float()
+                        pg_clipfrac_stats[i] = masked_mean(
                             (pg_losses2 > pg_losses).float(), mb_response_masks[:, 1:].bool()
-                        ))
-                        pg_loss_stats.append(masked_mean(pg_loss_max, mb_response_masks[:, 1:].bool()))
-                        loss_stats.append(loss)
-                        ratio_stats.append(ratio.mean())
+                        )
+                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks[:, 1:].bool())
+                        loss_stats[i] = loss
+                        ratio_stats[i] = ratio.mean()
 
             with torch.no_grad():
-                self.local_metrics.add("objective/kl_avg", torch.stack(kl1_stats).mean())
-                self.local_metrics.add("objective/kl2_avg", torch.stack(kl2_stats).mean())
-                self.local_metrics.add("objective/kl3_avg", torch.stack(kl3_stats).mean())
-                self.local_metrics.add("objective/kl4_avg", torch.stack(kl4_stats).mean())
-                self.local_metrics.add("loss/policy_avg", torch.stack(pg_loss_stats).mean())
-                self.local_metrics.add("loss/policy_avg", torch.stack(loss_stats).mean())
-                self.local_metrics.add("policy/clipfrac_avg", torch.stack(pg_clipfrac_stats).mean())
-                self.local_metrics.add("val/ratio", torch.stack(ratio_stats).mean())
-                self.local_metrics.add("val/ratio_var", torch.stack(ratio_stats).var())
+                # breakpoint()
+                self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
+                self.local_metrics.add("objective/kl2_avg", kl2_stats.mean())
+                self.local_metrics.add("objective/kl3_avg", kl3_stats.mean())
+                self.local_metrics.add("objective/kl4_avg", kl4_stats.mean())
+                self.local_metrics.add("loss/policy_avg", pg_loss_stats.mean())
+                self.local_metrics.add("loss/policy_avg", loss_stats.mean())
+                self.local_metrics.add("policy/clipfrac_avg", pg_clipfrac_stats.mean())
+                self.local_metrics.add("val/ratio", ratio_stats.mean())
+                self.local_metrics.add("val/ratio_var", ratio_stats.var())
                 reduced_metrics = self.local_metrics.get_reduced_metrics()
                 return reduced_metrics
 
