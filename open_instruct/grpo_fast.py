@@ -922,13 +922,14 @@ class PolicyTrainerRayProcess(RayProcess):
                     mb_query_responses = collated_query_responses[i]
                     mb_advantages = collated_advantages[i]
                     mb_response_masks = collated_response_masks[i]
+                    mb_response_masks_bool = mb_response_masks[:, 1:].bool()
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
                     mb_new_logprobs = self.forward(
                         self.model, mb_query_responses, mb_attention_mask, mb_position_id, pad_token_id, args.temperature
                     )
                     mb_new_logprobs = torch.masked_fill(
-                        mb_new_logprobs, ~mb_response_masks[:, 1:].bool(), INVALID_LOGPROB
+                        mb_new_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB
                     )
 
                     # Cache the old logprobs
@@ -952,7 +953,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     kl2 = (ref_logprobs_diff) ** 2 / 2
                     kl3 = torch.expm1(-ref_logprobs_diff) + ref_logprobs_diff  # this is more numerically stable
                     kl4 = ratio * ref_logprobs_diff
-                    # TODO: the kl is packed... may need to unpack it for calculating
                     if args.kl_estimator == "kl1":
                         kl = kl1
                     elif args.kl_estimator == "kl2":
@@ -961,24 +961,26 @@ class PolicyTrainerRayProcess(RayProcess):
                         kl = kl3
                     elif args.kl_estimator == "kl4":
                         kl = kl4
+
                     # grpo change: directly subtract KL in loss (add)
-                    loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks[:, 1:].bool())
+                    loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool)
                     loss = loss / accumulation_steps
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
                         self.model.step()
                     local_step += 1
                     with torch.no_grad():
-                        kl1_stats[i] = kl1.mean().float()
-                        kl2_stats[i] = kl2.mean().float()
-                        kl3_stats[i] = kl3.mean().float()
-                        kl4_stats[i] = kl4.mean().float()
+                        # NOTE: in packed implementation, kl calculation are averages over response tokens
+                        kl1_stats[i] = masked_mean(kl1, mb_response_masks_bool).float()
+                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool).float()
+                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool).float()
+                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool).float()
                         pg_clipfrac_stats[i] = masked_mean(
-                            (pg_losses2 > pg_losses).float(), mb_response_masks[:, 1:].bool()
+                            (pg_losses2 > pg_losses).float(), mb_response_masks_bool
                         )
-                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks[:, 1:].bool())
+                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool)
                         loss_stats[i] = loss
-                        ratio_stats[i] = ratio.mean()
+                        ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool)
 
             with torch.no_grad():
                 self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
@@ -1400,8 +1402,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     episode = 0
     total_tokens = 0
-    start_time = time.time()
     for training_step in range(resume_training_step, args.num_training_steps + 1):
+        training_step_start_time = time.time()
         print("-"*100)
         episode += args.rollout_batch_size * args.number_samples_per_prompt  # each sample is an episode
         queries = queries_next
@@ -1474,8 +1476,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         if B == 0:
             print("🤡 After packing, there is not enough data to train")
             continue
-
-        total_tokens += sum(len(seq) for seq in packed_sequences.query_responses)
+        
+        new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
+        total_tokens += new_tokens
 
         with Timer(f"🔥 Decoding responses", noop=True):
             global_decoded_responses = tokenizer.batch_decode(
@@ -1560,7 +1563,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 # "lr": self.scheduler.get_last_lr()[0],
                 "val/total_tokens": total_tokens,
                 "epoch": episode / len(train_dataset),
-                "tokens_per_second": total_tokens / (time.time() - start_time),
+                "tokens_per_second": new_tokens / (time.time() - training_step_start_time),
                 **reduced_metrics,
             }
             if args.apply_verifiable_reward:
