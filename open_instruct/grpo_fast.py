@@ -761,7 +761,8 @@ class PolicyTrainerRayProcess(RayProcess):
         temperature: float,
     ) -> torch.Tensor:
         # Replace pad tokens with 0s so that we don't run into index out of bounds errors
-        input_ids = torch.masked_fill(query_response, ~(query_response != pad_token_id), 0)
+        padding_mask = query_response != pad_token_id
+        input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
         # NOTE: the [:-1] and [1:] are because the logits and generated tokens are off by 1 in index
         output = model(
             input_ids=input_ids[:, :-1],
@@ -859,7 +860,7 @@ class PolicyTrainerRayProcess(RayProcess):
         packed_advantages: torch.Tensor,
         packed_response_masks: torch.Tensor,
         pad_token_id: int,
-        accumulation_steps: int,
+        num_mini_batches: int,
     ):
         args = self.args
         # Shuffle the batch and collate the data
@@ -881,6 +882,7 @@ class PolicyTrainerRayProcess(RayProcess):
         to_device_inplace(collated_position_ids, self.device)
         to_device_inplace(collated_advantages, self.device)
         to_device_inplace(collated_response_masks, self.device)
+        accumulation_steps = len(collated_query_responses) // (num_mini_batches)
 
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
@@ -1534,7 +1536,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         # ------------------------------------------------------------------------------------------------
         # Train the model
         with Timer(f"🗡️ Training"):
-            print(f"Accumulation steps: {B // args.num_mini_batches=}")
             reduced_metricss = ray.get([
                 policy_group.models[i].train.remote(
                     packed_query_responses=packed_sequences.query_responses[B * i : B * (i + 1)],
@@ -1543,7 +1544,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     packed_advantages=packed_sequences.advantages[B * i : B * (i + 1)],
                     packed_response_masks=packed_sequences.response_masks[B * i : B * (i + 1)],
                     pad_token_id=tokenizer.pad_token_id,
-                    accumulation_steps=B // args.num_mini_batches,
+                    num_mini_batches=args.num_mini_batches,
                 ) for i in range(args.world_size)
             ])
 
