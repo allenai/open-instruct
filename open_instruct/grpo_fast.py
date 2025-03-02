@@ -133,6 +133,9 @@ class Args:
     """Seed of the experiment"""
     run_name: Optional[str] = None
     """A unique name of this run"""
+    saved_tokenizer_type: Literal["original", "tokenizer_config"] = "tokenizer_config"
+    """The type of tokenizer to save (original means the unmodified tokenizer directly loaded from .from_pretrained(), 
+    tokenizer_config means the tokenizer obtained via `TokenizerConfig`"""
 
     # optimizer args
     eps: float = 1e-5
@@ -625,9 +628,10 @@ class RayProcess:
 @ray.remote(num_gpus=1)
 class PolicyTrainerRayProcess(RayProcess):
     def from_pretrained(
-        self, args: Args, model_config: ModelConfig, beaker_config: BeakerRuntimeConfig, wandb_url: str
+        self, args: Args, model_config: ModelConfig, beaker_config: BeakerRuntimeConfig, wandb_url: str, tokenizer: PreTrainedTokenizer
     ):
         self.args = args
+        self.modified_tokenizer = tokenizer
         self.model_config = model_config
         self.beaker_config = beaker_config
         self.wandb_url = wandb_url
@@ -854,29 +858,15 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def train(
         self,
-        packed_query_responses: torch.Tensor,
-        packed_attention_masks: torch.Tensor,
-        packed_position_ids: torch.Tensor,
-        packed_advantages: torch.Tensor,
-        packed_response_masks: torch.Tensor,
+        collated_query_responses,
+        collated_attention_masks,
+        collated_position_ids,
+        collated_advantages,
+        collated_response_masks,
         pad_token_id: int,
         num_mini_batches: int,
     ):
         args = self.args
-        # Shuffle the batch and collate the data
-        b_inds = np.random.permutation(len(packed_query_responses))
-        collated_query_responses = []
-        collated_attention_masks = []
-        collated_position_ids = []
-        collated_response_masks = []
-        collated_advantages = []
-        for i in range(0, len(packed_query_responses), args.per_device_train_batch_size):
-            micro_range = b_inds[i:i+args.per_device_train_batch_size]
-            collated_query_responses.append(collate_fn([packed_query_responses[idx] for idx in micro_range], pad_token_id))
-            collated_attention_masks.append(collate_fn([packed_attention_masks[idx] for idx in micro_range], 0))
-            collated_position_ids.append(collate_fn([packed_position_ids[idx] for idx in micro_range], 0))
-            collated_response_masks.append(collate_fn([packed_response_masks[idx] for idx in micro_range], 0))
-            collated_advantages.append(collate_fn([packed_advantages[idx] for idx in micro_range], 0))
         to_device_inplace(collated_query_responses, self.device)
         to_device_inplace(collated_attention_masks, self.device)
         to_device_inplace(collated_position_ids, self.device)
@@ -1046,7 +1036,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
 
             # save tokenizer
-            self.original_tokenizer.save_pretrained(output_dir)
+            if self.args.saved_tokenizer_type == "original":
+                self.original_tokenizer.save_pretrained(output_dir)
+            elif self.args.saved_tokenizer_type == "tokenizer_config":
+                self.modified_tokenizer.save_pretrained(output_dir)
 
     def launch_ai2_evals_on_weka(self, step_dir: str, training_step: Optional[int] = None) -> None:
         """auto eval the metrics as `f"{args.exp_name}_step_{training_step}"` in our leaderboard"""
@@ -1183,6 +1176,156 @@ class ModelGroup:
             self.models.append(worker_policy)
 
 
+def data_preparation_thread(
+    response_ids_Q: Queue,
+    packed_sequences_Q: Queue,
+    queries_prompt_Q: Queue,
+    args: Args,
+    tokenizer: PreTrainedTokenizer,
+    num_training_steps: int,
+    pad_token_id: int,
+):
+    for training_step in range(1, num_training_steps + 1):
+        # Get next batch of prompts and responses
+        items = queries_prompt_Q.get()
+        if items is None:
+            break
+        queries, ground_truths, datasets = items
+
+        # ------------------------------------------------------------------------------------------------
+        # Pack sequences
+        if args.number_samples_per_prompt > 1:
+            queries = [item for item in queries for _ in range(args.number_samples_per_prompt)]
+            ground_truths = [item for item in ground_truths for _ in range(args.number_samples_per_prompt)]
+            datasets = [item for item in datasets for _ in range(args.number_samples_per_prompt)]
+        with Timer(f"🚀 [Data Preparation Thread] Getting response ids"):
+            responses = response_ids_Q.get()
+        with Timer(f"📦 [Data Preparation Thread] Packing sequences"):
+            packed_sequences = pack_sequences(
+                queries=queries,
+                responses=responses,
+                pack_length=args.pack_length,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+            num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
+
+        with Timer(f"🔥 [Data Preparation Thread] Decoding responses", noop=True):
+            global_decoded_responses = tokenizer.batch_decode(
+                responses, skip_special_tokens=True
+            )
+
+        scores = [0] * len(responses)
+        with Timer(f"🧮 [Data Preparation Thread] Calculating scores"):
+            # Calculate scores (format reward)
+            if args.add_r1_style_format_reward:
+                format_scores = soft_format_reward_func(
+                    global_decoded_responses, args.r1_style_format_reward
+                )
+                if len(format_scores) != len(scores):
+                    raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
+                for i in range(len(format_scores)):
+                    scores[i] = format_scores[i] + scores[i]
+
+        with Timer(f"🏆 [Data Preparation Thread] Applying verifiable reward"):
+            # Apply verifiable reward
+            if args.apply_verifiable_reward:
+                verifiable_rewards = apply_verifiable_reward_fast(
+                    global_decoded_responses,
+                    ground_truths,
+                    datasets,
+                    verify_reward=args.verification_reward,
+                )
+                if len(verifiable_rewards) != len(scores):
+                    raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
+                for i in range(len(verifiable_rewards)):
+                    scores[i] = verifiable_rewards[i] + scores[i]
+
+        with Timer("🎆 [Data Preparation Thread] Calculating advantages"):
+            # Calculate advantages
+            scores = np.array(scores)
+            print(f"[Data Preparation Thread] {len(scores)=}")
+            scores_per_prompt = scores.reshape(-1, args.number_samples_per_prompt)
+            global_mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
+            global_mean_grouped_rewards = np.repeat(
+                global_mean_grouped_rewards, args.number_samples_per_prompt, axis=0
+            )
+            global_std_grouped_rewards = scores_per_prompt.std(axis=-1)
+            global_std_grouped_rewards = np.repeat(
+                global_std_grouped_rewards, args.number_samples_per_prompt, axis=0
+            )
+            global_advantages = (scores - global_mean_grouped_rewards) / (
+                global_std_grouped_rewards + 1e-8
+            )
+            global_advantages_lst = global_advantages.tolist()
+            packed_advantages = []
+            for i in range(len(packed_sequences.response_masks)):
+                packed_response_mask = packed_sequences.response_masks[i]
+                packed_advantage = torch.zeros_like(packed_response_mask, dtype=torch.float32)
+                for j in range(len(packed_advantage)):
+                    if packed_response_mask[j] >= 1:  # note that response masks are 1-indexed
+                        packed_advantage[j] = global_advantages_lst[packed_response_mask[j] - 1]
+                packed_advantages.append(packed_advantage)
+            packed_sequences.advantages = packed_advantages
+
+        with Timer(f"🔄 [Data Preparation Thread] Prepare collated data for each worker"):
+            B = len(packed_sequences.query_responses) // args.world_size # essentially doing `drop_last=True`, which is fine.
+            collated_data = []
+            for i in range(args.world_size):
+                per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
+                per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
+                per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
+                per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
+                per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
+
+                # Shuffle the batch and collate the data
+                b_inds = np.random.permutation(len(per_device_packed_query_responses))
+                collated_query_responses = []
+                collated_attention_masks = []
+                collated_position_ids = []
+                collated_response_masks = []
+                collated_advantages = []
+                for j in range(0, len(per_device_packed_query_responses), args.per_device_train_batch_size):
+                    micro_range = b_inds[j:j+args.per_device_train_batch_size]
+                    collated_query_responses.append(collate_fn([per_device_packed_query_responses[idx] for idx in micro_range], pad_token_id))
+                    collated_attention_masks.append(collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0))
+                    collated_position_ids.append(collate_fn([per_device_packed_position_ids[idx] for idx in micro_range], 0))
+                    collated_response_masks.append(collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0))
+                    collated_advantages.append(collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0))
+                collated_data.append({
+                    "collated_query_responses": collated_query_responses,
+                    "collated_attention_masks": collated_attention_masks,
+                    "collated_position_ids": collated_position_ids,
+                    "collated_advantages": collated_advantages,
+                    "collated_response_masks": collated_response_masks,
+                })
+
+        # Create a result package with metrics and data
+        sequence_lengths = np.array([len(response) for response in responses])
+        metrics = {
+            "scores": np.array(scores).mean(),
+            "val/sequence_lengths": sequence_lengths.mean(),
+            "val/sequence_lengths_min": sequence_lengths.min(),
+            "val/sequence_lengths_max": sequence_lengths.max(),
+        }
+        if args.apply_verifiable_reward:
+            np_verifiable_rewards = np.array(verifiable_rewards)
+            metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
+            metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
+        if args.add_r1_style_format_reward:
+            metrics["val/format_scores"] = np.array(format_scores).mean()
+
+        # Put the packed sequences and metrics into the output queue
+        packed_sequences_Q.put({
+            "packed_sequences": packed_sequences, # for debugging purposes
+            "collated_data": collated_data,
+            "metrics": metrics,
+            "responses_count": len(responses),
+            "format_scores": format_scores if args.add_r1_style_format_reward else None,
+            "verifiable_rewards": verifiable_rewards if args.apply_verifiable_reward else None,
+            "num_new_tokens": num_new_tokens,
+            "B": B,
+        })
+
 def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     calculate_runtime_args(args, model_config)
 
@@ -1280,7 +1423,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     )
     wandb_url = wandb.run.get_url() if args.with_tracking else None
     inits.extend(
-        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url) for model in policy_group.models
+        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer) for model in policy_group.models
     )
     max_len = dataset_config.max_prompt_token_length + args.response_length
     vllm_engines = create_vllm_engines(
@@ -1313,7 +1456,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         stop=args.stop_strings,
     )
     eval_generation_config = SamplingParams(
-        temperature=0.001,
+        temperature=0.0,
         top_p=1.0,
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
@@ -1326,8 +1469,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     response_ids_Q = Queue(maxsize=1)
     param_prompt_Q = Queue(maxsize=1)
     evaluation_Q = Queue(maxsize=1)
+    packed_sequences_Q = Queue(maxsize=1)
+    queries_prompt_Q = Queue(maxsize=1)
     num_eval_samples = 32
-    def vllm_generate(
+    def vllm_generate_thread(
         generation_config: SamplingParams,
         response_ids_Q: Queue,
         param_prompt_Q: Queue,
@@ -1379,7 +1524,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         eval_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
     resume_training_step = 1
     thread = threading.Thread(
-        target=vllm_generate,
+        target=vllm_generate_thread,
         args=(
             generation_config,
             response_ids_Q,
@@ -1394,6 +1539,22 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     thread.start()
     print("======== ✅ vllm generate thread starts =========")
 
+    packing_thread = threading.Thread(
+        target=data_preparation_thread,
+        args=(
+            response_ids_Q,
+            packed_sequences_Q,
+            queries_prompt_Q,
+            args,
+            tokenizer,
+            args.num_training_steps,
+            0, #tokenizer.pad_token_id,
+        ),
+    )
+    packing_thread.start()
+    print("======== ✅ data preparation thread starts =========")
+
+    # Send initial data to both threads
     data_next = train_dataset[next(iter_dataloader)]
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
@@ -1401,7 +1562,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     param_prompt_Q.put((None, queries_next))
 
     episode = 0
-    total_tokens = 0
+    num_total_tokens = 0
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         training_step_start_time = time.time()
         print("-"*100)
@@ -1409,6 +1570,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         queries = queries_next
         ground_truths = ground_truths_next
         datasets = datasets_next
+        queries_prompt_Q.put((queries, ground_truths, datasets))
 
         # ------------------------------------------------------------------------------------------------
         # Optionally evaluate the model
@@ -1436,8 +1598,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 queries_next = data_next[INPUT_IDS_PROMPT_KEY]
                 ground_truths_next = data_next[GROUND_TRUTHS_KEY]
                 datasets_next = data_next[DATASET_SOURCE_KEY]
-                # torch.cuda.synchronize() # this could make the measurement more accurate
-                with Timer(f"🔄 Loading weights using shared memory"):
+                with Timer(f"[Main Thread] 🔄 Loading weights using shared memory"):
                     ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
             param_prompt_Q.put((None, queries_next))
         else:
@@ -1456,126 +1617,54 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 datasets = datasets_next
 
         # ------------------------------------------------------------------------------------------------
-        # Pack sequences
-        if args.number_samples_per_prompt > 1:
-            queries = [item for item in queries for _ in range(args.number_samples_per_prompt)]
-            ground_truths = [item for item in ground_truths for _ in range(args.number_samples_per_prompt)]
-            datasets = [item for item in datasets for _ in range(args.number_samples_per_prompt)]
-        with Timer(f"🚀 Getting response ids"):
-            responses = response_ids_Q.get()
-        with Timer(f"📦 Packing sequences"):
-            packed_sequences = pack_sequences(
-                queries=queries,
-                responses=responses,
-                pack_length=args.pack_length,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-        
-        B = len(packed_sequences.query_responses) // args.world_size # essentially doing `drop_last=True`, which is fine.
-        print(f"Number of training examples per device: {B=}, packed sequence fraction of original sequences: {len(packed_sequences.query_responses) / len(responses)}")
+        # Get the packed sequences with advantages from the packing thread
+        with Timer(f"[Main Thread] 📦 Getting packed sequences from thread"):
+            packed_data = packed_sequences_Q.get()
+            packed_sequences = packed_data["packed_sequences"]
+            data_thread_metrics = packed_data["metrics"] 
+            B = packed_data["B"]
+            collated_data = packed_data["collated_data"]
+            # format_scores = packed_data["format_scores"]
+            # verifiable_rewards = packed_data["verifiable_rewards"]
+            num_total_tokens += packed_data["num_new_tokens"]
+
+        # Log info about the packed sequences
+        print(f"Number of training examples per device: {B=}, packed sequence fraction of original sequences: {len(packed_sequences.query_responses) / packed_data['responses_count']}")
         if B == 0:
-            print("🤡 After packing, there is not enough data to train")
+            print("[Main Thread] 🤡 After packing, there is not enough data to train")
             continue
-        
-        new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
-        total_tokens += new_tokens
-
-        with Timer(f"🔥 Decoding responses", noop=True):
-            global_decoded_responses = tokenizer.batch_decode(
-                responses, skip_special_tokens=True
-            )
-
-        scores = [0] * len(responses)
-        with Timer(f"🧮 Calculating scores"):
-            # calculate the scores
-            if args.add_r1_style_format_reward:
-                format_scores = soft_format_reward_func(
-                    global_decoded_responses, args.r1_style_format_reward
-                )
-                if len(format_scores) != len(scores):
-                    raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
-                for i in range(len(format_scores)):
-                    scores[i] = format_scores[i] + scores[i]
-
-        with Timer(f"🏆 Applying verifiable reward"):
-            if args.apply_verifiable_reward:
-                verifiable_rewards = apply_verifiable_reward_fast(
-                    global_decoded_responses,
-                    ground_truths,
-                    datasets,
-                    verify_reward=args.verification_reward,
-                )
-                if len(verifiable_rewards) != len(scores):
-                    raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
-                for i in range(len(verifiable_rewards)):
-                    scores[i] = verifiable_rewards[i] + scores[i]
-
-        with Timer("🎆 Calculating advantages"):
-            scores = np.array(scores)
-            print(f"{len(scores)=}")
-            scores_per_prompt = scores.reshape(-1, args.number_samples_per_prompt)
-            global_mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-            global_mean_grouped_rewards = np.repeat(
-                global_mean_grouped_rewards, args.number_samples_per_prompt, axis=0
-            )
-            global_std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            global_std_grouped_rewards = np.repeat(
-                global_std_grouped_rewards, args.number_samples_per_prompt, axis=0
-            )
-            global_advantages = (scores - global_mean_grouped_rewards) / (
-                global_std_grouped_rewards + 1e-8
-            )
-            global_advantages_lst = global_advantages.tolist()
-            packed_advantages = []
-            for i in range(len(packed_sequences.response_masks)):
-                packed_response_mask = packed_sequences.response_masks[i]
-                packed_advantage = torch.zeros_like(packed_response_mask, dtype=torch.float32)
-                for j in range(len(packed_advantage)):
-                    if packed_response_mask[j] >= 1: # note that response masks are 1-indexed
-                        packed_advantage[j] = global_advantages_lst[packed_response_mask[j] - 1]
-                packed_advantages.append(packed_advantage)
-            packed_sequences.advantages = packed_advantages
 
         # ------------------------------------------------------------------------------------------------
         # Train the model
-        with Timer(f"🗡️ Training"):
+        with Timer(f"[Main Thread] 🗡️ Training"):
             reduced_metricss = ray.get([
                 policy_group.models[i].train.remote(
-                    packed_query_responses=packed_sequences.query_responses[B * i : B * (i + 1)],
-                    packed_attention_masks=packed_sequences.attention_masks[B * i : B * (i + 1)],
-                    packed_position_ids=packed_sequences.position_ids[B * i : B * (i + 1)],
-                    packed_advantages=packed_sequences.advantages[B * i : B * (i + 1)],
-                    packed_response_masks=packed_sequences.response_masks[B * i : B * (i + 1)],
+                    **collated_data[i],
                     pad_token_id=tokenizer.pad_token_id,
                     num_mini_batches=args.num_mini_batches,
                 ) for i in range(args.world_size)
             ])
 
             reduced_metrics = reduced_metricss[0] # it's the same for all workers
-            sequence_lengths = np.array([len(response) for response in responses])
             metrics = {
                 "episode": episode,
                 "training_step": training_step,
-                "objective/scores": np.array(scores).mean(),
-                "val/sequence_lengths": sequence_lengths.mean(),
-                "val/sequence_lengths_min": sequence_lengths.min(),
-                "val/sequence_lengths_max": sequence_lengths.max(),
                 # "lr": self.scheduler.get_last_lr()[0],
-                "val/total_tokens": total_tokens,
+                "val/num_total_tokens": num_total_tokens,
                 "epoch": episode / len(train_dataset),
-                "tokens_per_second": new_tokens / (time.time() - training_step_start_time),
+                "tokens_per_second": packed_data["num_new_tokens"] / (time.time() - training_step_start_time),
+                **data_thread_metrics,
                 **reduced_metrics,
             }
-            if args.apply_verifiable_reward:
-                np_verifiable_rewards = np.array(verifiable_rewards)
-                metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
-                metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
-            if args.add_r1_style_format_reward:
-                metrics["val/format_scores"] = np.array(format_scores).mean()
             print_rich_single_line_metrics(metrics)
             for key, value in metrics.items():
                 writer.add_scalar(key, value, episode)
 
+    # Clean up threads
+    param_prompt_Q.put(None)  # Signal to vllm thread to exit
+    queries_prompt_Q.put(None)  # Signal to packing thread to exit
+    thread.join()
+    packing_thread.join()
     ray.shutdown()
 
         #     del (
