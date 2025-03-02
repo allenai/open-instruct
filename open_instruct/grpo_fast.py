@@ -337,6 +337,7 @@ def calculate_runtime_args(args: Args, model_config: ModelConfig):
     args.num_mini_batches = exact_div((args.rollout_batch_size * args.number_samples_per_prompt), args.mini_batch_size)
     args.num_training_steps = args.total_episodes // (args.rollout_batch_size * args.number_samples_per_prompt)
     args.eval_freq = max(1, args.num_training_steps // args.num_evals)
+    args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
     # PPO logic: do checks and set up dataloader batch size
     if args.whiten_rewards:
         assert (
@@ -495,10 +496,6 @@ def masked_whiten(values: torch.Tensor, mask: torch.Tensor, shift_mean: bool = T
     if not shift_mean:
         whitened += mean
     return whitened
-
-
-def remove_padding(sequences, pad_token_id):
-    return [[inneritem for inneritem in item if inneritem != pad_token_id] for item in sequences]
 
 
 class MetricsTracker:
@@ -1101,25 +1098,6 @@ python scripts/submit_eval_jobs.py \
             print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
 
 
-def kill_ray_cluster_if_a_worker_dies(object_refs: List[Any], stop_event: threading.Event):
-    while True:
-        if stop_event.is_set():
-            break
-        for ref in object_refs:
-            try:
-                ray.get(ref, timeout=0.01)
-            except ray.exceptions.GetTimeoutError:
-                pass
-            except Exception as e:
-                print(e)
-                print(f"Actor {ref} died")
-                time.sleep(120)
-                ray.shutdown()
-                os._exit(1)  # Force shutdown the process
-
-        time.sleep(30)
-
-
 class ModelGroup:
     def __init__(
         self,
@@ -1188,8 +1166,6 @@ def data_preparation_thread(
     for training_step in range(1, num_training_steps + 1):
         # Get next batch of prompts and responses
         items = queries_prompt_Q.get()
-        if items is None:
-            break
         queries, ground_truths, datasets = items
 
         # ------------------------------------------------------------------------------------------------
@@ -1637,121 +1613,79 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         # ------------------------------------------------------------------------------------------------
         # Train the model
         with Timer(f"[Main Thread] 🗡️ Training"):
-            reduced_metricss = ray.get([
-                policy_group.models[i].train.remote(
-                    **collated_data[i],
-                    pad_token_id=tokenizer.pad_token_id,
-                    num_mini_batches=args.num_mini_batches,
-                ) for i in range(args.world_size)
+            try:
+                reduced_metricss = ray.get([
+                    policy_group.models[i].train.remote(
+                        **collated_data[i],
+                        pad_token_id=tokenizer.pad_token_id,
+                        num_mini_batches=args.num_mini_batches,
+                    ) for i in range(args.world_size)
+                ])
+
+                reduced_metrics = reduced_metricss[0] # it's the same for all workers
+                metrics = {
+                    "episode": episode,
+                    "training_step": training_step,
+                    # "lr": self.scheduler.get_last_lr()[0],
+                    "val/num_total_tokens": num_total_tokens,
+                    "epoch": episode / len(train_dataset),
+                    "tokens_per_second": packed_data["num_new_tokens"] / (time.time() - training_step_start_time),
+                    **data_thread_metrics,
+                    **reduced_metrics,
+                }
+                print_rich_single_line_metrics(metrics)
+                for key, value in metrics.items():
+                    writer.add_scalar(key, value, episode)
+
+            except Exception as e:
+                print(f"Training error occurred: {str(e)}")
+                ray.shutdown()
+                os._exit(1)
+                raise  # Re-raise the exception after shutdown
+
+            if args.save_freq > 0 and training_step % args.save_freq == 0:
+                with Timer(f"[Main Thread] 🗡️ Saving model"):
+                    checkpoint_dir = f"{args.output_dir}_checkpoints"
+                    os.makedirs(checkpoint_dir, exist_ok=True)
+                    step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
+                    os.makedirs(step_dir, exist_ok=True)
+                    print(f"Saving model at step {training_step} to {step_dir}")
+                    ray.get([
+                        policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)
+                    ])
+                    if args.try_launch_beaker_eval_jobs_on_weka:
+                        ray.get([
+                            policy_group.models[i].launch_ai2_evals_on_weka.remote(step_dir, training_step) for i in range(args.world_size)
+                        ])
+
+    print(f"Saving final model at step {training_step} to {args.output_dir}")
+    with Timer(f"[Main Thread] 🗡️ Saving model"):
+        ray.get([
+            policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)
+        ])
+        if args.try_launch_beaker_eval_jobs_on_weka:
+            ray.get([
+                policy_group.models[i].launch_ai2_evals_on_weka.remote(args.output_dir) for i in range(args.world_size)
             ])
 
-            reduced_metrics = reduced_metricss[0] # it's the same for all workers
-            metrics = {
-                "episode": episode,
-                "training_step": training_step,
-                # "lr": self.scheduler.get_last_lr()[0],
-                "val/num_total_tokens": num_total_tokens,
-                "epoch": episode / len(train_dataset),
-                "tokens_per_second": packed_data["num_new_tokens"] / (time.time() - training_step_start_time),
-                **data_thread_metrics,
-                **reduced_metrics,
-            }
-            print_rich_single_line_metrics(metrics)
-            for key, value in metrics.items():
-                writer.add_scalar(key, value, episode)
-
     # Clean up threads
-    param_prompt_Q.put(None)  # Signal to vllm thread to exit
     queries_prompt_Q.put(None)  # Signal to packing thread to exit
     thread.join()
+    print("======== ✅ vllm generate thread ends =========")
     packing_thread.join()
+    print("======== ✅ data preparation thread ends =========")
     ray.shutdown()
 
-        #     del (
-        #         queries,
-        #         packed_responses,
-        #         packed_query_responses,
-        #         packed_ref_logprobs,
-        #         packed_advantages,
-        #         packed_response_masks,
-        #         reduced_metrics,
-        #     )
-        #     gc.collect()
-        #     torch.cuda.empty_cache()
-
-        #     # save steps
-        #     if args.save_freq > 0 and training_step % args.save_freq == 0:
-        #         checkpoint_dir = f"{args.output_dir}_checkpoints"
-        #         os.makedirs(checkpoint_dir, exist_ok=True)
-        #         step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-        #         os.makedirs(step_dir, exist_ok=True)
-        #         print(f"Saving model at step {training_step} to {step_dir}")
-        #         self.save_model(self.model, step_dir)
-        #         if args.try_launch_beaker_eval_jobs_on_weka:
-        #             self.launch_ai2_evals_on_weka(step_dir, training_step)
-        # print(f"Saving final model at step {training_step} to {args.output_dir}")
-        # self.save_model(self.model, args.output_dir)
-        # if args.try_launch_beaker_eval_jobs_on_weka:
-        #     self.launch_ai2_evals_on_weka(args.output_dir)
-
-        # # Ai2 logic: we use /output to store the artifacts of the job, so we
-        # # make a copy of the model to `/output` in the end.
-        # if (
-        #     args.try_auto_save_to_beaker
-        #     and self.rank == 0
-        #     and is_beaker_job()
-        #     and len(self.beaker_config.beaker_dataset_id_urls) > 0
-        #     and args.output_dir.rstrip("/") != "/output"
-        # ):
-        #     shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
-        # print("finished training")
-    # metrics_queue = RayQueue()
-    # refs = []
-    # for i, policy_model in enumerate(policy_group.models):
-    #     refs.append(
-    #         policy_model.train.remote(
-    #             train_dataset=train_dataset,
-    #             eval_dataset=eval_dataset,
-    #             tokenizer=tokenizer,
-    #             vllm_engines=vllm_engines,
-    #             metrics_queue=metrics_queue,
-    #         )
-    #     )
-
-    # # somtimes a worker dies due to CUDA issues, but the rest of the cluster would just hang
-    # # so we need kill the ray cluster when this happens.
-    # stop_event = threading.Event()
-    # threading.Thread(target=kill_ray_cluster_if_a_worker_dies, args=(refs, stop_event)).start()
-
-    # # train and gather metrics
-    # resume_training_step = 1
-    # for training_step in range(resume_training_step, args.num_training_steps + 1):
-    #     result = metrics_queue.get()
-    #     metrics, episode, df = result
-    #     for key, value in metrics.items():
-    #         writer.add_scalar(key, value, episode)
-
-    #     if df is not None:
-    #         if args.with_tracking:
-    #             wandb.log({"sample_completions": wandb.Table(dataframe=df)})
-    #         else:
-    #             print_rich_table(df.iloc[:1])
-    # ray.get(refs)
-
-    # # save model
-    
-    # stop_event.set()
-
-    # accelerator = Namespace()
-    # accelerator.is_main_process = True  # hack
-    # if args.push_to_hub:
-    #     print("Pushing model to hub")
-    #     push_folder_to_hub(
-    #         accelerator,
-    #         args.output_dir,
-    #         args.hf_repo_id,
-    #         args.hf_repo_revision,
-    #     )
+    accelerator = Namespace()
+    accelerator.is_main_process = True  # hack
+    if args.push_to_hub:
+        print("Pushing model to hub")
+        push_folder_to_hub(
+            accelerator,
+            args.output_dir,
+            args.hf_repo_id,
+            args.hf_repo_revision,
+        )
 
 
 if __name__ == "__main__":
