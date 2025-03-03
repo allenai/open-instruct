@@ -5,8 +5,8 @@ use it for generations.
 
 Usage: 
 
-python scripts/data/gsm8k.py --push_to_hub
-python scripts/data/gsm8k.py --push_to_hub --hf_entity ai2-adapt-dev
+python scripts/data/rlvr/gsm8k_rlvr.py --push_to_hub
+python scripts/data/rlvr/gsm8k_rlvr.py --push_to_hub --hf_entity ai2-adapt-dev
 """
 
 from dataclasses import dataclass
