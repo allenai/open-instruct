@@ -126,6 +126,8 @@ class Args:
     saved_tokenizer_type: Literal["original", "tokenizer_config"] = "tokenizer_config"
     """The type of tokenizer to save (original means the unmodified tokenizer directly loaded from .from_pretrained(),
     tokenizer_config means the tokenizer obtained via `TokenizerConfig`"""
+    ground_truths_key: str = GROUND_TRUTHS_KEY
+    """columns name for the ground truth"""
 
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -1147,7 +1149,7 @@ def data_preparation_thread(
     num_training_steps: int,
     pad_token_id: int,
 ):
-    for training_step in range(1, num_training_steps + 1):
+    for _ in range(1, num_training_steps + 1):
         # Get next batch of prompts and responses
         items = queries_prompt_Q.get()
         queries, ground_truths, datasets = items
