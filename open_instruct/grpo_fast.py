@@ -42,6 +42,8 @@ import socket
 import subprocess
 import threading
 import time
+import traceback
+
 from argparse import Namespace
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
@@ -485,12 +487,16 @@ class MetricsTracker:
         self.metrics[self.names2idx[name]] = value
         return self
 
-    def get_reduced_metrics(self) -> dict[str, float]:
-        self.metrics /= dist.get_world_size()
-        dist.all_reduce(self.metrics, op=dist.ReduceOp.SUM)
-        # convert to list so to avoid multiple .item() torch calls
-        reduced_metrics = self.metrics.tolist()
-        return {name: reduced_metrics[idx] for name, idx in self.names2idx.items()}
+    # def get_reduced_metrics(self) -> dict[str, float]:
+    #     self.metrics /= dist.get_world_size()
+    #     dist.all_reduce(self.metrics, op=dist.ReduceOp.SUM)
+    #     # convert to list so to avoid multiple .item() torch calls
+    #     reduced_metrics = self.metrics.tolist()
+    #     return {name: reduced_metrics[idx] for name, idx in self.names2idx.items()}
+
+    def get_metrics_list(self) -> dict[str, float]:
+        metrics_list = self.metrics.tolist()
+        return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
 
 
 def collate_fn(tensors_list: List[torch.Tensor], pad_token_id: int) -> torch.Tensor:
@@ -953,8 +959,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("policy/clipfrac_avg", pg_clipfrac_stats.mean())
                 self.local_metrics.add("val/ratio", ratio_stats.mean())
                 self.local_metrics.add("val/ratio_var", ratio_stats.var())
-                reduced_metrics = self.local_metrics.get_reduced_metrics()
-                return reduced_metrics
+                self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
+                return self.local_metrics.get_metrics_list()
 
     def save_model(self, output_dir: str) -> None:
         model_to_save = self.model
@@ -1129,6 +1135,50 @@ class ModelGroup:
             self.models.append(worker_policy)
 
 
+def vllm_generate_thread(
+    vllm_engines: List[ray.actor.ActorHandle],
+    generation_config: SamplingParams,
+    eval_generation_config: SamplingParams,
+    response_ids_Q: Queue,
+    param_prompt_Q: Queue,
+    num_training_steps: int,
+    eval_prompt_token_ids: Optional[List[int]],
+    evaluation_Q: Queue,
+    eval_freq: int,
+    resume_training_step: int = 1,
+):
+    def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
+        # Split queries between engines
+        queries_per_engine = (len(prompts) + len(vllm_engines) - 1) // len(vllm_engines)
+        split_queries = [prompts[i : i + queries_per_engine] for i in range(0, len(prompts), queries_per_engine)]
+        # Generate responses in parallel across engines
+        futures = [
+            vllm_engine.generate.remote(sampling_params=sampling_params, prompt_token_ids=queries, use_tqdm=False)
+            for vllm_engine, queries in zip(vllm_engines, split_queries)
+        ]
+        # Gather all responses
+        all_outputs = ray.get(futures)
+        response_ids = []
+        for outputs in all_outputs:
+            response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
+        return response_ids
+
+    for training_step in range(resume_training_step, num_training_steps + 1):
+        items = param_prompt_Q.get()
+        if items is None:
+            break
+        _, g_queries_list = items
+
+        with Timer("🔥 Generation time"):
+            response_ids = generate_with_engines(g_queries_list, generation_config)
+        response_ids_Q.put(response_ids)
+
+        # Evaluate the model
+        if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
+            response_ids = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
+            evaluation_Q.put(response_ids)
+
+
 def data_preparation_thread(
     response_ids_Q: Queue,
     packed_sequences_Q: Queue,
@@ -1136,7 +1186,6 @@ def data_preparation_thread(
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
-    pad_token_id: int,
 ):
     for _ in range(1, num_training_steps + 1):
         # Get next batch of prompts and responses
@@ -1232,7 +1281,7 @@ def data_preparation_thread(
                 for j in range(0, len(per_device_packed_query_responses), args.per_device_train_batch_size):
                     micro_range = b_inds[j : j + args.per_device_train_batch_size]
                     collated_query_responses.append(
-                        collate_fn([per_device_packed_query_responses[idx] for idx in micro_range], pad_token_id)
+                        collate_fn([per_device_packed_query_responses[idx] for idx in micro_range], tokenizer.pad_token_id)
                     )
                     collated_attention_masks.append(
                         collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0)
@@ -1433,47 +1482,6 @@ def main(args: Args, model_config: ModelConfig):
     queries_prompt_Q = Queue(maxsize=1)
     num_eval_samples = 32
 
-    def vllm_generate_thread(
-        generation_config: SamplingParams,
-        response_ids_Q: Queue,
-        param_prompt_Q: Queue,
-        num_training_steps: int,
-        eval_prompt_token_ids: Optional[List[int]],
-        evaluation_Q: Queue,
-        eval_freq: int,
-        resume_training_step: int = 1,
-    ):
-        def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
-            # Split queries between engines
-            queries_per_engine = (len(prompts) + len(vllm_engines) - 1) // len(vllm_engines)
-            split_queries = [prompts[i : i + queries_per_engine] for i in range(0, len(prompts), queries_per_engine)]
-            # Generate responses in parallel across engines
-            futures = [
-                vllm_engine.generate.remote(sampling_params=sampling_params, prompt_token_ids=queries, use_tqdm=False)
-                for vllm_engine, queries in zip(vllm_engines, split_queries)
-            ]
-            # Gather all responses
-            all_outputs = ray.get(futures)
-            response_ids = []
-            for outputs in all_outputs:
-                response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
-            return response_ids
-
-        for training_step in range(resume_training_step, num_training_steps + 1):
-            items = param_prompt_Q.get()
-            if items is None:
-                break
-            _, g_queries_list = items
-
-            with Timer("🔥 Generation time"):
-                response_ids = generate_with_engines(g_queries_list, generation_config)
-            response_ids_Q.put(response_ids)
-
-            # Evaluate the model
-            if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-                response_ids = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
-                evaluation_Q.put(response_ids)
-
     eval_prompt_token_ids = None
     if eval_dataset is not None:
         eval_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
@@ -1481,7 +1489,9 @@ def main(args: Args, model_config: ModelConfig):
     thread = threading.Thread(
         target=vllm_generate_thread,
         args=(
+            vllm_engines,
             generation_config,
+            eval_generation_config,
             response_ids_Q,
             param_prompt_Q,
             args.num_training_steps,
@@ -1503,7 +1513,6 @@ def main(args: Args, model_config: ModelConfig):
             args,
             tokenizer,
             args.num_training_steps,
-            0,  # tokenizer.pad_token_id,
         ),
     )
     packing_thread.start()
@@ -1595,7 +1604,7 @@ def main(args: Args, model_config: ModelConfig):
             # ------------------------------------------------------------------------------------------------
             # Train the model
             with Timer("[Main Thread] 🗡️ Training"):
-                reduced_metricss = ray.get(
+                metrics_list: List[dict[str, float]] = ray.get(
                     [
                         policy_group.models[i].train.remote(
                             **collated_data[i],
@@ -1605,17 +1614,15 @@ def main(args: Args, model_config: ModelConfig):
                         for i in range(args.world_size)
                     ]
                 )
-
-                reduced_metrics = reduced_metricss[0]  # it's the same for all workers
+                average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
                 metrics = {
                     "episode": episode,
                     "training_step": training_step,
-                    # "lr": self.scheduler.get_last_lr()[0],
                     "val/num_total_tokens": num_total_tokens,
                     "epoch": episode / len(train_dataset),
                     "tokens_per_second": packed_data["num_new_tokens"] / (time.time() - training_step_start_time),
                     **data_thread_metrics,
-                    **reduced_metrics,
+                    **average_metrics,
                 }
                 print_rich_single_line_metrics(metrics)
                 for key, value in metrics.items():
@@ -1650,6 +1657,7 @@ def main(args: Args, model_config: ModelConfig):
 
     except Exception as e:
         print(f"Training error occurred: {str(e)}")
+        print(traceback.format_exc())
         ray.shutdown()
         os._exit(1)
         raise  # Re-raise the exception after shutdown
