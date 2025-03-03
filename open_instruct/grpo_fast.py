@@ -1519,6 +1519,7 @@ def main(args: Args, model_config: ModelConfig):
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
     datasets_next = data_next[DATASET_SOURCE_KEY]
+    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
     param_prompt_Q.put((None, queries_next))
 
     episode = 0
@@ -1528,10 +1529,6 @@ def main(args: Args, model_config: ModelConfig):
             training_step_start_time = time.time()
             print("-" * 100)
             episode += args.rollout_batch_size * args.number_samples_per_prompt  # each sample is an episode
-            queries = queries_next
-            ground_truths = ground_truths_next
-            datasets = datasets_next
-            queries_prompt_Q.put((queries, ground_truths, datasets))
 
             # ------------------------------------------------------------------------------------------------
             # Optionally evaluate the model
@@ -1561,6 +1558,7 @@ def main(args: Args, model_config: ModelConfig):
                     datasets_next = data_next[DATASET_SOURCE_KEY]
                     with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
                         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
+                queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
                 param_prompt_Q.put((None, queries_next))
             else:
                 if training_step != 1:
@@ -1572,10 +1570,8 @@ def main(args: Args, model_config: ModelConfig):
                     datasets_next = data_next[DATASET_SOURCE_KEY]
                     with Timer("🔄 Loading weights using shared memory"):
                         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
+                    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
                     param_prompt_Q.put((None, queries_next))
-                    queries = queries_next
-                    ground_truths = ground_truths_next
-                    datasets = datasets_next
 
             # ------------------------------------------------------------------------------------------------
             # Get the packed sequences with advantages from the packing thread
