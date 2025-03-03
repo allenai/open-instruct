@@ -1,11 +1,13 @@
 import time
-from typing import List, Optional, TypeVar, Generic
-import numpy as np
 from dataclasses import dataclass
-from rich.pretty import pprint
+from typing import Generic, List, Optional, TypeVar
+
+import numpy as np
 import torch
+from rich.pretty import pprint
 
 T = TypeVar("T")
+
 
 class Timer:
     """A context manager for timing code blocks"""
@@ -26,6 +28,7 @@ class Timer:
         self.end_time = time.perf_counter()
         self.duration = self.end_time - self.start_time
         print(f"{self.description}: {self.duration} seconds")
+
 
 @dataclass
 class PackedSequences(Generic[T]):
@@ -79,7 +82,6 @@ def pack_sequences(
     packed_seq_lens = []
     cur_data = []
     cur_response_mask = []
-    cur_lengths = []
     cur_num_actions = []
     cur_packed_seq_lens = []
     cur_attention_mask = []
@@ -98,14 +100,12 @@ def pack_sequences(
             num_actions.append(cur_num_actions)
             packed_seq_lens.append(cur_packed_seq_lens)
             cur_data = []
-            cur_lengths = []
             cur_response_mask = []
             cur_attention_mask = []
             cur_num_actions = []
             cur_packed_seq_lens = []
             offset = i
         cur_data.extend(query_response)
-        cur_lengths.append(len(query_response))
         cur_num_actions.append(len(response))
         cur_packed_seq_lens.append(len(query_response))
 
@@ -130,9 +130,10 @@ def pack_sequences(
         packed_seq_lens=[torch.tensor(t) for t in packed_seq_lens],
     )
 
-
+# TODO: still need to whiten the advantages
 def get_test_data():
     from transformers import AutoTokenizer
+
     tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
     tokenizer.add_special_tokens({"pad_token": "<pad>"})
 
@@ -161,20 +162,10 @@ def test_pack_sequences():
     queries, responses, pad_token_id = get_test_data()
     pack_length = 40
     with Timer("pack_sequences"):
-        packed_sequences = pack_sequences(queries=queries, responses=responses, pack_length=pack_length, pad_token_id=pad_token_id)
+        packed_sequences = pack_sequences(
+            queries=queries, responses=responses, pack_length=pack_length, pad_token_id=pad_token_id
+        )
     pprint(packed_sequences)
-
-
-def reset_position_ids(attention_mask):
-    position_ids = torch.zeros_like(attention_mask, dtype=torch.long)
-    for i in range(attention_mask.size(0)):
-        mask = attention_mask[i]
-        seq_num = mask.max().item()
-        for index in range(1, seq_num + 1):
-            sample_mask = mask == index
-            sample_length = sample_mask.sum().item()
-            position_ids[i, sample_mask] = torch.arange(sample_length, device=mask.device)
-    return position_ids
 
 
 def print_diff(actual: torch.Tensor, expected: torch.Tensor):
@@ -182,10 +173,12 @@ def print_diff(actual: torch.Tensor, expected: torch.Tensor):
     rtol = atol / expected
     print(f"{atol.mean()=}, {rtol.mean()=}")
 
+
 @torch.no_grad()
 def test_pack_sequences_logits():
-    from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
     import torch
+    from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
+
     model = AutoModelForCausalLM.from_pretrained(
         "EleutherAI/pythia-14m",
         attn_implementation="eager",
@@ -199,7 +192,9 @@ def test_pack_sequences_logits():
     query_responses = [q + r for q, r in zip(queries, responses)]
     pack_length = 40
     with Timer("pack_sequences"):
-        packed_sequences = pack_sequences(queries=queries, responses=responses, pack_length=pack_length, pad_token_id=pad_token_id)
+        packed_sequences = pack_sequences(
+            queries=queries, responses=responses, pack_length=pack_length, pad_token_id=pad_token_id
+        )
     # NOTE: it's very important to use [:, :-1] here, because the produced tokens's index is shifted by 1
     s = model.forward(
         input_ids=packed_sequences.query_responses[0].unsqueeze(0)[:, :-1],
@@ -207,7 +202,7 @@ def test_pack_sequences_logits():
         position_ids=packed_sequences.position_ids[0].unsqueeze(0)[:, :-1],
     )
     lm_backbone = getattr(value_model, value_model.base_model_prefix)
-    v = lm_backbone(
+    _ = lm_backbone(
         input_ids=packed_sequences.query_responses[0].unsqueeze(0),
         attention_mask=packed_sequences.attention_masks[0].unsqueeze(0),
         position_ids=packed_sequences.position_ids[0].unsqueeze(0),
@@ -221,11 +216,12 @@ def test_pack_sequences_logits():
 
     # apply softmax to get logprobs
     all_logprobs = torch.nn.functional.log_softmax(s.logits, dim=-1)
-    logprobs = torch.gather(all_logprobs, 2, packed_sequences.query_responses[0].unsqueeze(0).unsqueeze(-1)[:, 1:]).squeeze(-1)
+    logprobs = torch.gather(
+        all_logprobs, 2, packed_sequences.query_responses[0].unsqueeze(0).unsqueeze(-1)[:, 1:]
+    ).squeeze(-1)
     logprobs = torch.where(packed_sequences.response_masks[0].unsqueeze(0)[:, 1:] == 0, 1.0, logprobs)
     pprint("logprobs")
     pprint(logprobs)
-
 
     logprobs = []
     for i in range(len(query_responses)):
@@ -237,10 +233,8 @@ def test_pack_sequences_logits():
         )
         all_logprobs = torch.nn.functional.log_softmax(s2.logits, dim=-1)
         logprob = torch.gather(all_logprobs, 2, torch.tensor([query_response]).unsqueeze(-1)[:, 1:]).squeeze(-1)
-        logprobs.append(logprob[:, len(query) - 1:])
+        logprobs.append(logprob[:, len(query) - 1 :])
     pprint(logprobs)
-
-
 
 
 if __name__ == "__main__":

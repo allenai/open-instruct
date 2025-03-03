@@ -55,7 +55,7 @@ The corresponding evals look good as well:
 * `lr`: the current learning rate
 * `epoch`: the fraction or multiple of the epoch (e.g., `2.7` means we have trained on the dataset for 2 epochs and 70% of the third epoch)
 * `objective/kl`: the KL divergence between the current policy and the reference policy (sum of the KL divergence of each response token)
-* `objective/scores`: the scores of the current response, rated by a reward model
+* `objective/scores`: the scores of the current response, rated by a combination of reward model and other rewards (e.g., R1 style format reward, verifiable reward, etc.)
 * `objective/rlhf_reward`: the RLHF reward, which is `objective/scores` - `beta` * `objective/kl`
 * `objective/non_score_reward`: `beta` * `objective/kl`
 * `objective/entropy`: the entropy of the current policy
