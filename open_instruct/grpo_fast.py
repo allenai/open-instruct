@@ -301,17 +301,6 @@ class Args:
         assert self.number_samples_per_prompt > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
 
 
-def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
-    # if passed through cli: convert the dataset mixers to dictionaries
-    if isinstance(value, str):
-        return json.loads(value), value
-    # if passed through yaml: convert the dataset mixers to strings
-    elif isinstance(value, dict):
-        return value, json.dumps(value)
-    else:
-        raise ValueError("Input must be either a string or a dictionary")
-
-
 def calculate_runtime_args(args: Args, model_config: ModelConfig):
     """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
