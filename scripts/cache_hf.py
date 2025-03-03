@@ -31,6 +31,8 @@ python mason.py \
 class Args:
     model_name_or_path: Optional[str] = None
     model_revision: Optional[str] = None
+    tokenizer_name_or_path: Optional[str] = None
+    tokenizer_revision: Optional[str] = None
     dataset_name: Optional[str] = None
     """The name of the dataset to use (via the datasets library)."""
     dataset_mixer: Optional[dict] = None
@@ -65,8 +67,8 @@ def main(args: Args):
         
     if args.model_name_or_path is not None:
         AutoTokenizer.from_pretrained(
-            args.model_name_or_path,
-            revision=args.model_revision,
+            args.tokenizer_name_or_path or args.model_name_or_path,
+            revision=args.tokenizer_revision or args.model_revision,
         )
         AutoModelForCausalLM.from_pretrained(
             args.model_name_or_path,
