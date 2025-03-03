@@ -51,7 +51,7 @@ The corresponding evals look good as well:
 ## Explanation of the logged metrics
 
 
-* `episode`: the global episode number training has gone through (e.g., `3000` means we have trained on 3000 data points already)
+* `episode`: the global episode number training has gone through (e.g., `3000` means we have trained on 3000 data points already -- in the case of RLVR that is prompts, which can repeat)
 * `lr`: the current learning rate
 * `epoch`: the fraction or multiple of the epoch (e.g., `2.7` means we have trained on the dataset for 2 epochs and 70% of the third epoch)
 * `objective/kl`: the KL divergence between the current policy and the reference policy (sum of the KL divergence of each response token)

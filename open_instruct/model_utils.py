@@ -265,6 +265,7 @@ def apply_verifiable_reward_fast(
     datasets: List[str],
     verify_reward: int = 10,
 ):
+    # extra util to `apply_verifiable_reward` where responses are already decoded in batch process (relative to being handled at verification time).
     # compare with ground truth.
     rewards = []
     for prediction, ground_truth, dataset in zip(decoded_responses, ground_truths, datasets):
