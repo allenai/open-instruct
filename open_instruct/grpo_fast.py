@@ -487,20 +487,16 @@ class MetricsTracker:
         self.metrics[self.names2idx[name]] = value
         return self
 
-    # def get_reduced_metrics(self) -> dict[str, float]:
-    #     self.metrics /= dist.get_world_size()
-    #     dist.all_reduce(self.metrics, op=dist.ReduceOp.SUM)
-    #     # convert to list so to avoid multiple .item() torch calls
-    #     reduced_metrics = self.metrics.tolist()
-    #     return {name: reduced_metrics[idx] for name, idx in self.names2idx.items()}
-
     def get_metrics_list(self) -> dict[str, float]:
         metrics_list = self.metrics.tolist()
         return {name: metrics_list[idx] for name, idx in self.names2idx.items()}
 
 
-def collate_fn(tensors_list: List[torch.Tensor], pad_token_id: int) -> torch.Tensor:
-    return torch.nn.utils.rnn.pad_sequence(tensors_list, batch_first=True, padding_value=pad_token_id)
+def collate_fn(tensors_list: List[torch.Tensor], pad_token_id: int, pin_memory: bool = True) -> torch.Tensor:
+    padded_tensor = torch.nn.utils.rnn.pad_sequence(tensors_list, batch_first=True, padding_value=pad_token_id)
+    if pin_memory:
+        padded_tensor = padded_tensor.pin_memory()
+    return padded_tensor
 
 
 def to_device_inplace(tensors_list: List[torch.Tensor], device: torch.device):
