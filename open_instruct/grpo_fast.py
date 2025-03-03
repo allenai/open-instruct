@@ -982,7 +982,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 reduced_metrics = self.local_metrics.get_reduced_metrics()
                 return reduced_metrics
 
-    def save_model(self, model_to_save: PreTrainedModel, output_dir: str) -> None:
+    def save_model(self, output_dir: str) -> None:
+        model_to_save = self.model
         if self.rank == 0:
             os.makedirs(output_dir, exist_ok=True)
 
@@ -1539,81 +1540,81 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     episode = 0
     num_total_tokens = 0
-    for training_step in range(resume_training_step, args.num_training_steps + 1):
-        training_step_start_time = time.time()
-        print("-"*100)
-        episode += args.rollout_batch_size * args.number_samples_per_prompt  # each sample is an episode
-        queries = queries_next
-        ground_truths = ground_truths_next
-        datasets = datasets_next
-        queries_prompt_Q.put((queries, ground_truths, datasets))
+    try:
+        for training_step in range(resume_training_step, args.num_training_steps + 1):
+            training_step_start_time = time.time()
+            print("-"*100)
+            episode += args.rollout_batch_size * args.number_samples_per_prompt  # each sample is an episode
+            queries = queries_next
+            ground_truths = ground_truths_next
+            datasets = datasets_next
+            queries_prompt_Q.put((queries, ground_truths, datasets))
 
-        # ------------------------------------------------------------------------------------------------
-        # Optionally evaluate the model
-        try:
-            evaluation_responses = evaluation_Q.get(timeout=0.01)
-            print("[Main Thread] 📊 Evaluation responses received")
-            table = {}
-            table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
-            table["response"] = tokenizer.batch_decode(evaluation_responses)
-            table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
-            df = pd.DataFrame(table)
-            if args.with_tracking:
-                wandb.log({"sample_completions": wandb.Table(dataframe=df)})
-            else:
-                print_rich_table(df.iloc[:1])
-            del table
-        except Empty:
-            print("[Main Thread] 🙈 Evaluation responses not received")
-
-        # ------------------------------------------------------------------------------------------------
-        # Sync weights and send the next batch of prompts to vLLM
-        if args.async_mode:
-            if training_step != 1:
-                data_next = train_dataset[next(iter_dataloader)]
-                queries_next = data_next[INPUT_IDS_PROMPT_KEY]
-                ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-                datasets_next = data_next[DATASET_SOURCE_KEY]
-                with Timer(f"[Main Thread] 🔄 Loading weights using shared memory"):
-                    ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-            param_prompt_Q.put((None, queries_next))
-        else:
-            if training_step != 1:
-                # NOTE: important: the indent here is different for sync mode
-                # we also set to use `queries = queries_next` immediately
-                data_next = train_dataset[next(iter_dataloader)]
-                queries_next = data_next[INPUT_IDS_PROMPT_KEY]
-                ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-                datasets_next = data_next[DATASET_SOURCE_KEY]
-                with Timer(f"🔄 Loading weights using shared memory"):
-                    ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-                param_prompt_Q.put((None, queries_next))
-                queries = queries_next
-                ground_truths = ground_truths_next
-                datasets = datasets_next
-
-        # ------------------------------------------------------------------------------------------------
-        # Get the packed sequences with advantages from the packing thread
-        with Timer(f"[Main Thread] 📦 Getting packed sequences from thread"):
-            packed_data = packed_sequences_Q.get()
-            packed_sequences = packed_data["packed_sequences"]
-            data_thread_metrics = packed_data["metrics"] 
-            B = packed_data["B"]
-            collated_data = packed_data["collated_data"]
-            # format_scores = packed_data["format_scores"]
-            # verifiable_rewards = packed_data["verifiable_rewards"]
-            num_total_tokens += packed_data["num_new_tokens"]
-
-        # Log info about the packed sequences
-        print(f"Number of training examples per device: {B=}, packed sequence fraction of original sequences: {len(packed_sequences.query_responses) / packed_data['responses_count']}")
-        if B == 0:
-            print("[Main Thread] 🤡 After packing, there is not enough data to train")
-            continue
-
-        # ------------------------------------------------------------------------------------------------
-        # Train the model
-        with Timer(f"[Main Thread] 🗡️ Training"):
+            # ------------------------------------------------------------------------------------------------
+            # Optionally evaluate the model
             try:
+                evaluation_responses = evaluation_Q.get(timeout=0.01)
+                print("[Main Thread] 📊 Evaluation responses received")
+                table = {}
+                table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
+                table["response"] = tokenizer.batch_decode(evaluation_responses)
+                table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
+                df = pd.DataFrame(table)
+                if args.with_tracking:
+                    wandb.log({"sample_completions": wandb.Table(dataframe=df)})
+                else:
+                    print_rich_table(df.iloc[:1])
+                del table
+            except Empty:
+                print("[Main Thread] 🙈 Evaluation responses not received")
+
+            # ------------------------------------------------------------------------------------------------
+            # Sync weights and send the next batch of prompts to vLLM
+            if args.async_mode:
+                if training_step != 1:
+                    data_next = train_dataset[next(iter_dataloader)]
+                    queries_next = data_next[INPUT_IDS_PROMPT_KEY]
+                    ground_truths_next = data_next[GROUND_TRUTHS_KEY]
+                    datasets_next = data_next[DATASET_SOURCE_KEY]
+                    with Timer(f"[Main Thread] 🔄 Loading weights using shared memory"):
+                        ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
+                param_prompt_Q.put((None, queries_next))
+            else:
+                if training_step != 1:
+                    # NOTE: important: the indent here is different for sync mode
+                    # we also set to use `queries = queries_next` immediately
+                    data_next = train_dataset[next(iter_dataloader)]
+                    queries_next = data_next[INPUT_IDS_PROMPT_KEY]
+                    ground_truths_next = data_next[GROUND_TRUTHS_KEY]
+                    datasets_next = data_next[DATASET_SOURCE_KEY]
+                    with Timer(f"🔄 Loading weights using shared memory"):
+                        ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
+                    param_prompt_Q.put((None, queries_next))
+                    queries = queries_next
+                    ground_truths = ground_truths_next
+                    datasets = datasets_next
+
+            # ------------------------------------------------------------------------------------------------
+            # Get the packed sequences with advantages from the packing thread
+            with Timer(f"[Main Thread] 📦 Getting packed sequences from thread"):
+                packed_data = packed_sequences_Q.get()
+                packed_sequences = packed_data["packed_sequences"]
+                data_thread_metrics = packed_data["metrics"] 
+                B = packed_data["B"]
+                collated_data = packed_data["collated_data"]
+                # format_scores = packed_data["format_scores"]
+                # verifiable_rewards = packed_data["verifiable_rewards"]
+                num_total_tokens += packed_data["num_new_tokens"]
+
+            # Log info about the packed sequences
+            print(f"Number of training examples per device: {B=}, packed sequence fraction of original sequences: {len(packed_sequences.query_responses) / packed_data['responses_count']}")
+            if B == 0:
+                print("[Main Thread] 🤡 After packing, there is not enough data to train")
+                continue
+
+            # ------------------------------------------------------------------------------------------------
+            # Train the model
+            with Timer(f"[Main Thread] 🗡️ Training"):
                 reduced_metricss = ray.get([
                     policy_group.models[i].train.remote(
                         **collated_data[i],
@@ -1637,36 +1638,36 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 for key, value in metrics.items():
                     writer.add_scalar(key, value, episode)
 
-            except Exception as e:
-                print(f"Training error occurred: {str(e)}")
-                ray.shutdown()
-                os._exit(1)
-                raise  # Re-raise the exception after shutdown
-
-            if args.save_freq > 0 and training_step % args.save_freq == 0:
-                with Timer(f"[Main Thread] 🗡️ Saving model"):
-                    checkpoint_dir = f"{args.output_dir}_checkpoints"
-                    os.makedirs(checkpoint_dir, exist_ok=True)
-                    step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-                    os.makedirs(step_dir, exist_ok=True)
-                    print(f"Saving model at step {training_step} to {step_dir}")
-                    ray.get([
-                        policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)
-                    ])
-                    if args.try_launch_beaker_eval_jobs_on_weka:
+                if args.save_freq > 0 and training_step % args.save_freq == 0:
+                    with Timer(f"[Main Thread] 🗡️ Saving model"):
+                        checkpoint_dir = f"{args.output_dir}_checkpoints"
+                        os.makedirs(checkpoint_dir, exist_ok=True)
+                        step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
+                        os.makedirs(step_dir, exist_ok=True)
+                        print(f"Saving model at step {training_step} to {step_dir}")
                         ray.get([
-                            policy_group.models[i].launch_ai2_evals_on_weka.remote(step_dir, training_step) for i in range(args.world_size)
+                            policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)
                         ])
+                        if args.try_launch_beaker_eval_jobs_on_weka:
+                            ray.get([
+                                policy_group.models[i].launch_ai2_evals_on_weka.remote(step_dir, training_step) for i in range(args.world_size)
+                            ])
 
-    print(f"Saving final model at step {training_step} to {args.output_dir}")
-    with Timer(f"[Main Thread] 🗡️ Saving model"):
-        ray.get([
-            policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)
-        ])
-        if args.try_launch_beaker_eval_jobs_on_weka:
+        print(f"Saving final model at step {training_step} to {args.output_dir}")
+        with Timer(f"[Main Thread] 🗡️ Saving model"):
             ray.get([
-                policy_group.models[i].launch_ai2_evals_on_weka.remote(args.output_dir) for i in range(args.world_size)
+                policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)
             ])
+            if args.try_launch_beaker_eval_jobs_on_weka:
+                ray.get([
+                    policy_group.models[i].launch_ai2_evals_on_weka.remote(args.output_dir) for i in range(args.world_size)
+                ])
+
+    except Exception as e:
+        print(f"Training error occurred: {str(e)}")
+        ray.shutdown()
+        os._exit(1)
+        raise  # Re-raise the exception after shutdown
 
     # Clean up threads
     queries_prompt_Q.put(None)  # Signal to packing thread to exit
