@@ -141,6 +141,15 @@ def normalize_answer(s):
     return white_space_fix(remove_articles(remove_punc(lower(s))))
 
 
+def verify_string_matcher_sample(model_output, ground_truth_answer):
+    if "<answer>" not in model_output or "</answer>" not in model_output:
+        return False
+    # extract out of answer tag
+    answer_string = model_output.split("<answer>")[-1].split("</answer>")[0]
+    # normalize
+    return normalize_answer(answer_string) == normalize_answer(ground_truth_answer)
+
+
 def verify_flan_sample(model_output, ground_truth_answer):
     # Flan! we will just use... exact match with some basic cleaning, after extracting the answer.
     answer_string = model_output.split("The answer is: ")[-1].strip()
