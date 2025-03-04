@@ -812,6 +812,46 @@ def maybe_get_beaker_config():
     )
 
 
+def launch_ai2_evals_on_weka(
+    path: str,
+    leaderboard_name: str,
+    oe_eval_max_length: int,
+    wandb_url: str,
+    training_step: Optional[int] = None,
+    oe_eval_tasks: Optional[List[str]] = None,
+) -> None:
+    """auto eval the metrics as `f"{args.exp_name}_step_{training_step}"` in our leaderboard"""
+    command = f"""\
+python scripts/submit_eval_jobs.py \
+--model_name {leaderboard_name} \
+--location {path} \
+--cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
+--is_tuned \
+--workspace "tulu-3-results" \
+--priority high \
+--preemptible \
+--use_hf_tokenizer_template \
+--beaker_image "nathanl/open_instruct_auto" \
+--run_oe_eval_experiments \
+--evaluate_on_weka \
+--run_id {wandb_url} \
+--oe_eval_max_length {oe_eval_max_length} \
+--skip_oi_evals"""
+    if training_step is not None:
+        command += f" --step {training_step}"
+    if oe_eval_tasks is not None:
+        command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
+    print(f"Launching eval jobs with command: {command}")
+    process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
+    print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
+    print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+
+# ----------------------------------------------------------------------------
+# HF utilities
+
+
 def retry_on_exception(max_attempts=4, delay=1, backoff=2):
     """
     Retry a function on exception. Useful for HF API calls that may fail due to

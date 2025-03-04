@@ -28,13 +28,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # isort: off
+import json
 import os
+import shutil
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 # isort: on
 
 
-import json
 import logging
 import os
 import random
@@ -43,18 +44,16 @@ import subprocess
 import threading
 import time
 import traceback
-
 from argparse import Namespace
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
-from typing import Iterator, List, Literal, Optional, Tuple
+from typing import Iterator, List, Literal, Optional
 
 import deepspeed
 import numpy as np
 import pandas as pd
 import ray
 import torch
-import torch.distributed as dist
 import torch.utils
 import torch.utils.data
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
@@ -66,7 +65,6 @@ from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
 from transformers import (
     AutoModelForCausalLM,
-    AutoModelForSequenceClassification,
     AutoTokenizer,
     PreTrainedModel,
     PreTrainedTokenizer,
@@ -99,10 +97,10 @@ from open_instruct.utils import (
     BeakerRuntimeConfig,
     get_wandb_tags,
     is_beaker_job,
+    launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
-    upload_metadata_to_hf,
 )
 from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
 
@@ -113,17 +111,17 @@ INVALID_LOGPROB = 1.0
 @dataclass
 class Args:
     # Dataset
-    dataset_mixer_list: List[str] = None
+    dataset_mixer_list: List[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_eval_list: List[str] = None
+    dataset_mixer_eval_list: List[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     """A list of datasets (local or HF) to sample from for evaluation."""
-    dataset_mixer_list_splits: List[str] = None
+    dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
     """The dataset splits to use for training"""
-    dataset_mixer_eval_list_splits: Optional[List[str]] = None
+    dataset_mixer_eval_list_splits: List[str] = field(default_factory=lambda: ["test"])
     """The dataset splits to use for evaluation"""
-    max_token_length: Optional[int] = None
+    max_token_length: int = 512
     """The maximum token length to use for the dataset"""
-    max_prompt_token_length: Optional[int] = None
+    max_prompt_token_length: int = 256
     """The maximum prompt token length to use for the dataset"""
     saved_tokenizer_type: Literal["original", "tokenizer_config"] = "tokenizer_config"
     """The type of tokenizer to save (original means the unmodified tokenizer directly loaded from .from_pretrained(),
@@ -137,11 +135,9 @@ class Args:
     seed: int = 1
     """Seed of the experiment"""
     run_name: Optional[str] = None
-    """A unique name of this run"""
+    """RUNTIME VALUE: A unique name of this run"""
 
     # Optimizer
-    eps: float = 1e-5
-    """The epsilon value for the optimizer"""
     learning_rate: float = 2e-5
     """The initial learning rate for AdamW optimizer."""
     lr_scheduler_type: Literal[
@@ -152,47 +148,39 @@ class Args:
     """Number of warm up steps for the scheduler"""
     warmup_ratio: float = 0.0
     """Ratio of warmup steps to total steps (takes precedence over `warm_up_steps`)"""
+    weight_decay: float = 0.0
+    """Weight decay for AdamW if we apply some."""
+    fused_optimizer: bool = False
+    """Whether to use fused optimizer"""
 
     # Batch sizes
-    per_device_train_batch_size: Optional[int] = 1
+    per_device_train_batch_size: int = 1
     """The forward batch size per device (local_micro_batch_size)"""
-    total_episodes: Optional[int] = 100000
+    total_episodes: int = 100000
     """The total number of episodes in the dataset"""
     world_size: Optional[int] = None
-    """The number of processes (GPUs) to use"""
-    local_rollout_batch_size: int = 64
-    """The number of rollout episodes per iteration per device"""
-    local_total_prompts: Optional[int] = None
-    """The total number of prompts per device"""
-    rollout_batch_size: Optional[int] = None
-    """The number of rollout episodes per iteration"""
+    """RUNTIME VALUE: The number of processes (GPUs) to use"""
     num_training_steps: Optional[int] = None
-    """The number of training_steps to train"""
-    num_evals: int = 4
+    """RUNTIME VALUE: The number of training_steps to train"""
+    num_evals: int = 10
     """The number of evaluations to run throughout training"""
     eval_freq: Optional[int] = None
-    """The frequency of evaluation steps"""
+    """RUNTIME VALUE: The frequency of evaluation steps"""
     save_freq: int = -1
     """How many train steps to save the model"""
 
     # Generation
-    response_length: int = 53
+    response_length: int = 256
     """the length of the response"""
-    stop_token: Optional[Literal["eos", "period"]] = None
-    """the stop token"""
-    stop_token_id: Optional[int] = None
-    """the truncation token id"""
-    min_response_length: int = 0
-    """stop only after this many tokens"""
     temperature: float = 0.7
     """the sampling temperature"""
-    number_samples_per_prompt: int = 1
-    """the number of samples to generate per prompt, useful for easy-star"""
-    stop_strings: List[str] = None
+    num_unique_prompts_rollout: int = 16
+    """The number of unique prompts during rollout"""
+    num_samples_per_prompt_rollout: int = 4
+    """the number of samples to generate per prompt during rollout, useful for easy-star"""
+    stop_strings: Optional[List[str]] = None
     """List of strings that stop the generation when they are generated.
     The returned output will not contain the stop strings."""
-    eval_max_length: int = 4096
-    """the max generation length for evaluation"""
 
     # Algorithm
     async_mode: bool = True
@@ -203,49 +191,38 @@ class Args:
     """Number of minibatches to split a batch into"""
     beta: float = 0.05
     """the beta value of the RLHF objective (KL coefficient)"""
-    whiten_rewards: bool = False
-    """whether to whiten the rewards"""
     cliprange: float = 0.2
     """the clip range"""
-    gamma: float = 1
-    """the discount factor"""
     kl_estimator: Literal["kl1", "kl2", "kl3", "kl4"] = "kl3"
     """the KL estimator to use"""
-    pack_length: int = 4096
+    pack_length: int = 512
     """the length of the pack (you should prob set to the max length of the model)"""
 
     # Reward
     # -- r1 style format reward
+    apply_r1_style_format_reward: bool = False
+    """whether to add the R1 style format reward"""
     r1_style_format_reward: float = 1.0
     """the reward value for R1 style format reward"""
-    add_r1_style_format_reward: bool = False
-    """whether to add the R1 style format reward"""
 
     # -- verifiable reward
-    apply_verifiable_reward: bool = False
+    apply_verifiable_reward: bool = True
     """whether to apply verifiable reward"""
     verification_reward: float = 10.0
     """the reward value for verifiable responses"""
-    
-    # -- reward model
-    reward_model_path: str = "EleutherAI/pythia-160m"
-    """the path to the reward model"""
-    reward_model_revision: Optional[str] = None
-    """the revision of the reward model"""
-    reward_model_multiplier: float = 1.0
-    """the reward model multiplier, for down/upscaling the reward model output"""
 
-    # -- EOS penalty
-    penalty_reward_value: float = -1.0
-    """the reward value for responses that do not contain `stop_token_id`"""
-    non_stop_penalty: bool = False
-    """whether to penalize responses that do not contain `stop_token_id`"""
+    # -- non stop penalty
+    non_stop_penalty: bool = True
+    """whether to penalize responses which did not finish generation"""
+    non_stop_penalty_value: float = 0.0
+    """the reward value for responses which did not finish generation"""
 
     # Ray
-    actor_num_gpus_per_node: List[int] = field(default_factory=lambda: [1])
-    """number of gpus per node for actor"""
     single_gpu_mode: bool = False
     """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
+    num_learners_per_node: List[int] = field(default_factory=lambda: [1])
+    """number of GPU deepspeed learners per node (e.g., --num_learners_per_node 2 4 means 2 learner processes
+    on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
     vllm_num_engines: int = 1
     """number of vLLM Engines, set to 0 to disable vLLM"""
     vllm_tensor_parallel_size: int = 1
@@ -256,14 +233,14 @@ class Args:
     """DeepSpeed -> vLLM weight sync backend"""
     vllm_gpu_memory_utilization: float = 0.9
     """vLLM GPU memory utilization"""
-    enable_prefix_caching: bool = False
+    vllm_enable_prefix_caching: bool = False
     """whether to enable prefix caching"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
 
-    # Wandb and HF tracking
+    # Experiment tracking
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
@@ -282,34 +259,32 @@ class Args:
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     output_dir: Optional[str] = None
     """Where to save the model"""
-    checkpoint_output_dir: Optional[str] = None
-    """Where to save the model checkpoints in case of preemption"""
+    save_traces: bool = False
+    """Whether to save learning data traces"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
 
     # Ai2 specific settings
-    try_launch_beaker_eval_jobs: bool = True
-    """Whether to launch beaker evaluation jobs after training"""
     try_launch_beaker_eval_jobs_on_weka: bool = False
     """Whether to launch beaker evaluation jobs after training on weka"""
     try_auto_save_to_beaker: bool = True
     """Whether to try to save the model to Beaker dataset `/output` after training"""
     oe_eval_tasks: Optional[List[str]] = None
     """The beaker evaluation tasks to launch"""
-    hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
-    """What dataset to upload the metadata to. If unset, don't upload metadata"""
+    oe_eval_max_length: int = 4096
+    """the max generation length for evaluation for oe-eval"""
 
     def __post_init__(self):
-        assert self.number_samples_per_prompt > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
+        assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
+        assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, "At least one reward must be applied!"
+        assert self.pack_length >= self.max_prompt_token_length + self.response_length, "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
 
 
-def calculate_runtime_args(args: Args, model_config: ModelConfig):
+def calculate_runtime_args(args: Args):
     """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
-    args.world_size = sum(args.actor_num_gpus_per_node)
-    args.local_total_prompts = args.local_rollout_batch_size * args.number_samples_per_prompt
-    args.rollout_batch_size = int(args.local_rollout_batch_size * args.world_size)
-    args.num_training_steps = args.total_episodes // (args.rollout_batch_size * args.number_samples_per_prompt)
+    args.world_size = sum(args.num_learners_per_node)
+    args.num_training_steps = args.total_episodes // (args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout)
     args.eval_freq = max(1, args.num_training_steps // args.num_evals)
     args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
 
@@ -402,8 +377,8 @@ def get_eval_ds_config(
 
 
 def get_optimizer_grouped_parameters(
-    model,
-    weight_decay,
+    model: torch.nn.Module,
+    weight_decay: float,
     no_decay_name_list=["bias", "layer_norm.weight", "layernorm.weight", "norm.weight", "ln_f.weight"],
 ):
     optimizer_grouped_parameters = [
@@ -439,38 +414,9 @@ def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[bool] =
         return (values * mask).sum() / mask.sum()
 
 
-def masked_var(values: torch.Tensor, mask: torch.Tensor, unbiased: bool = True) -> torch.Tensor:
-    """Compute variance of tensor with masked values."""
-    mean = masked_mean(values, mask)
-    centered_values = values - mean
-    variance = masked_mean(centered_values**2, mask)
-    if unbiased:
-        mask_sum = mask.sum()
-        if mask_sum == 0:
-            raise ValueError(
-                "The sum of the mask is zero, which can happen when `mini_batch_size=1`;"
-                "try increase the `mini_batch_size` or `gradient_accumulation_steps`"
-            )
-        # note that if mask_sum == 1, then there is a division by zero issue
-        # to avoid it you just need to use a larger minibatch_size
-        bessel_correction = mask_sum / (mask_sum - 1)
-        variance = variance * bessel_correction
-    return variance
-
-
-def masked_whiten(values: torch.Tensor, mask: torch.Tensor, shift_mean: bool = True) -> torch.Tensor:
-    """Whiten values with masked values."""
-    mean, var = masked_mean(values, mask), masked_var(values, mask)
-    whitened = (values - mean) * torch.rsqrt(var + 1e-8)
-    if not shift_mean:
-        whitened += mean
-    return whitened
-
-
 class MetricsTracker:
     """A simple class to prellocate all metrics in an array
     so we can do only one allreduce operation to get the metrics mean"""
-
     def __init__(self, max_metrics: int = 32, device: torch.device = torch.device("cuda")):
         self.metrics = torch.zeros(max_metrics, device=device)
         self.names2idx = {}
@@ -621,7 +567,7 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
-        # Costa: MAGIC: it's actually needed to initialize this `dschf`, so
+        # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
         # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
         # next line instructs transformers to partition the model directly over multiple gpus using
         # deepspeed.zero.Init when model's `from_pretrained` method is called.
@@ -645,13 +591,12 @@ class PolicyTrainerRayProcess(RayProcess):
         self.policy.gradient_checkpointing_enable()
         # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
         # AdamOptimizer = FusedAdam
-        # weight_decay = 0.0
-        # optim_params = get_optimizer_grouped_parameters(self.policy, weight_decay)
+        optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         # self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
-        self.optimizer = torch.optim.AdamW(self.policy.parameters(), lr=args.learning_rate)
+        self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
-        if args.warmup_ratio >= 0.0:
+        if args.warmup_ratio > 0.0:
             warm_up_steps = int(num_scheduler_steps * args.warmup_ratio)
         scheduler = get_scheduler(
             args.lr_scheduler_type,
@@ -659,7 +604,6 @@ class PolicyTrainerRayProcess(RayProcess):
             num_warmup_steps=warm_up_steps,
             num_training_steps=num_scheduler_steps,
         )
-        print(ds_config)
         self.model, self.optimizer, _, self.scheduler = deepspeed.initialize(
             model=self.policy,
             optimizer=self.optimizer,
@@ -679,16 +623,10 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
-        # Costa: MAGIC: it's actually needed to initialize this `dschf`, so
-        # https://huggingface.co/docs/transformers/deepspeed#non-trainer-deepspeed-integration
-        # next line instructs transformers to partition the model directly over multiple gpus using
-        # deepspeed.zero.Init when model's `from_pretrained` method is called.
         if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
             dschf = HfDeepSpeedConfig(ds_config)
         else:
             dschf = None
-        print(f"{dschf=}")
-
         self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
@@ -699,34 +637,6 @@ class PolicyTrainerRayProcess(RayProcess):
         disable_dropout_in_model(self.ref_policy)
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
         self.ref_policy.eval()
-
-        # reward model
-        if args.reward_model_multiplier:
-            self.reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
-                args.reward_model_path,
-                revision=args.reward_model_revision,
-                num_labels=1,
-                torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2",
-                use_cache=False,
-            )
-            disable_dropout_in_model(self.reward_model)
-            ds_config = get_eval_ds_config(
-                offload=False,
-                # inference model only has stage 3 (sharding) or stage 0 (no sharding)
-                # stage 2 is optimizer sharding which doesn't apply to inference
-                stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
-                bf16=True,
-            )
-            ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-            ds_config["gradient_accumulation_steps"] = 1
-            self.reward_model, *_ = deepspeed.initialize(model=self.reward_model, config=ds_config)
-            self.reward_model.eval()
-
-        assert (
-            args.reward_model_multiplier or args.apply_verifiable_reward
-        ), "Either `reward_model_multiplier` must be non-zero or `apply_verifiable_reward` must be True."
-
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
 
     def forward(
@@ -1018,8 +928,6 @@ class PolicyTrainerRayProcess(RayProcess):
     def launch_ai2_evals_on_weka(self, step_dir: str, training_step: Optional[int] = None) -> None:
         """auto eval the metrics as `f"{args.exp_name}_step_{training_step}"` in our leaderboard"""
         args = self.args
-        beaker_config = self.beaker_config
-        model_config = self.model_config
         wandb_url = self.wandb_url
         # Ai2 specific logic
         if is_beaker_job() and self.rank == 0:
@@ -1027,26 +935,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
             else:
                 leaderboard_name = args.hf_repo_revision
-            if args.hf_metadata_dataset:
-                dataset_list = args.dataset_mixer_list
-                # mainly just focussing here on what would be useful for the leaderboard.
-                # wandb will have even more useful information.
-                metadata_blob = {
-                    "model_name": args.exp_name,
-                    "model_type": "ppo",
-                    "datasets": dataset_list,
-                    "base_model": model_config.model_name_or_path,
-                    "wandb_path": wandb_url,
-                    "beaker_experiment": beaker_config.beaker_experiment_url,
-                    "beaker_datasets": beaker_config.beaker_dataset_id_urls,
-                }
-                upload_metadata_to_hf(
-                    metadata_blob,
-                    "metadata.json",
-                    args.hf_metadata_dataset,
-                    "results/" + leaderboard_name,  # to match what the auto-evals name as.
-                )
-
             command = f"""\
 python scripts/submit_eval_jobs.py \
     --model_name {leaderboard_name} \
@@ -1061,7 +949,7 @@ python scripts/submit_eval_jobs.py \
     --run_oe_eval_experiments \
     --evaluate_on_weka \
     --run_id {wandb_url} \
-    --oe_eval_max_length {args.eval_max_length} \
+    --oe_oe_eval_max_length {args.oe_eval_max_length} \
     --skip_oi_evals"""
             if training_step is not None:
                 command += f" --step {training_step}"
@@ -1130,16 +1018,15 @@ class ModelGroup:
             ).remote(world_size, rank, 0, master_addr, master_port)
             self.models.append(worker_policy)
 
-
 def vllm_generate_thread(
     vllm_engines: List[ray.actor.ActorHandle],
     generation_config: SamplingParams,
     eval_generation_config: SamplingParams,
-    response_ids_Q: Queue,
+    inference_results_Q: Queue,
     param_prompt_Q: Queue,
     num_training_steps: int,
     eval_prompt_token_ids: Optional[List[int]],
-    evaluation_Q: Queue,
+    evaluation_inference_results_Q: Queue,
     eval_freq: int,
     resume_training_step: int = 1,
 ):
@@ -1155,9 +1042,11 @@ def vllm_generate_thread(
         # Gather all responses
         all_outputs = ray.get(futures)
         response_ids = []
+        finish_reasons = [] # either "stop" or "length"
         for outputs in all_outputs:
             response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
-        return response_ids
+            finish_reasons.extend([out.finish_reason for output in outputs for out in output.outputs])
+        return response_ids, finish_reasons
 
     for training_step in range(resume_training_step, num_training_steps + 1):
         items = param_prompt_Q.get()
@@ -1166,36 +1055,37 @@ def vllm_generate_thread(
         _, g_queries_list = items
 
         with Timer("🔥 Generation time"):
-            response_ids = generate_with_engines(g_queries_list, generation_config)
-        response_ids_Q.put(response_ids)
+            response_ids, finish_reasons = generate_with_engines(g_queries_list, generation_config)
+        inference_results_Q.put((response_ids, finish_reasons))
 
         # Evaluate the model
         if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-            response_ids = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
-            evaluation_Q.put(response_ids)
+            response_ids, finish_reasons = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
+            evaluation_inference_results_Q.put((response_ids, finish_reasons))
 
 
 def data_preparation_thread(
-    response_ids_Q: Queue,
+    inference_results_Q: Queue,
     packed_sequences_Q: Queue,
     queries_prompt_Q: Queue,
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
 ):
-    for _ in range(1, num_training_steps + 1):
+    for training_step in range(1, num_training_steps + 1):
         # Get next batch of prompts and responses
         items = queries_prompt_Q.get()
         queries, ground_truths, datasets = items
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
-        if args.number_samples_per_prompt > 1:
-            queries = [item for item in queries for _ in range(args.number_samples_per_prompt)]
-            ground_truths = [item for item in ground_truths for _ in range(args.number_samples_per_prompt)]
-            datasets = [item for item in datasets for _ in range(args.number_samples_per_prompt)]
+        if args.num_samples_per_prompt_rollout > 1:
+            queries = [item for item in queries for _ in range(args.num_samples_per_prompt_rollout)]
+            ground_truths = [item for item in ground_truths for _ in range(args.num_samples_per_prompt_rollout)]
+            datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            responses = response_ids_Q.get()
+            responses, finish_reasons = inference_results_Q.get()
+
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
                 queries=queries,
@@ -1211,7 +1101,7 @@ def data_preparation_thread(
         scores = [0] * len(responses)
         with Timer("🧮 [Data Preparation Thread] Calculating scores"):
             # Calculate scores (format reward)
-            if args.add_r1_style_format_reward:
+            if args.apply_r1_style_format_reward:
                 format_scores = soft_format_reward_func(global_decoded_responses, args.r1_style_format_reward)
                 if len(format_scores) != len(scores):
                     raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
@@ -1232,17 +1122,30 @@ def data_preparation_thread(
                 for i in range(len(verifiable_rewards)):
                     scores[i] = verifiable_rewards[i] + scores[i]
 
+
+        with Timer("🦖 [Data Preparation Thread] Applying non stop penalty"):
+            # Apply non stop penalty
+            stop_count = 0
+            assert len(finish_reasons) == len(scores)
+            for i in range(len(finish_reasons)):
+                if finish_reasons[i] == "stop":
+                    stop_count += 1
+                else:
+                    if args.non_stop_penalty:
+                        scores[i] = args.non_stop_penalty_value
+            stop_rate = stop_count / len(finish_reasons)
+
         with Timer("🎆 [Data Preparation Thread] Calculating advantages"):
             # Calculate advantages
             scores = np.array(scores)
             print(f"[Data Preparation Thread] {len(scores)=}")
-            scores_per_prompt = scores.reshape(-1, args.number_samples_per_prompt)
+            scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
             global_mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
             global_mean_grouped_rewards = np.repeat(
-                global_mean_grouped_rewards, args.number_samples_per_prompt, axis=0
+                global_mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0
             )
             global_std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            global_std_grouped_rewards = np.repeat(global_std_grouped_rewards, args.number_samples_per_prompt, axis=0)
+            global_std_grouped_rewards = np.repeat(global_std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
             global_advantages = (scores - global_mean_grouped_rewards) / (global_std_grouped_rewards + 1e-8)
             global_advantages_lst = global_advantages.tolist()
             packed_advantages = []
@@ -1308,13 +1211,30 @@ def data_preparation_thread(
             "val/sequence_lengths": sequence_lengths.mean(),
             "val/sequence_lengths_min": sequence_lengths.min(),
             "val/sequence_lengths_max": sequence_lengths.max(),
+            "val/stop_rate": stop_rate,
         }
         if args.apply_verifiable_reward:
             np_verifiable_rewards = np.array(verifiable_rewards)
             metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
             metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
-        if args.add_r1_style_format_reward:
+        if args.apply_r1_style_format_reward:
             metrics["val/format_scores"] = np.array(format_scores).mean()
+
+        if args.save_traces:
+            traces = {
+                "scores": scores.tolist(),
+                "finish_reasons": finish_reasons,
+                "responses": responses,
+                "queries": queries,
+                "ground_truths": ground_truths,
+                "verifiable_rewards": verifiable_rewards,
+                "format_scores": format_scores,
+                "training_step": training_step,
+            }
+            os.makedirs(args.output_dir, exist_ok=True)
+            with open(f"{args.output_dir}/traces_{args.run_name}.jsonl", "a") as f:
+                json.dump(traces, f)
+                f.write("\n")
 
         # Put the packed sequences and metrics into the output queue
         packed_sequences_Q.put(
@@ -1323,7 +1243,7 @@ def data_preparation_thread(
                 "collated_data": collated_data,
                 "metrics": metrics,
                 "responses_count": len(responses),
-                "format_scores": format_scores if args.add_r1_style_format_reward else None,
+                "format_scores": format_scores if args.apply_r1_style_format_reward else None,
                 "verifiable_rewards": verifiable_rewards if args.apply_verifiable_reward else None,
                 "num_new_tokens": num_new_tokens,
                 "B": B,
@@ -1332,13 +1252,12 @@ def data_preparation_thread(
 
 
 def main(args: Args, model_config: ModelConfig):
-    calculate_runtime_args(args, model_config)
+    calculate_runtime_args(args)
 
     # Setup experiment tracking and seeds
     all_configs = {}
     beaker_config = None
     if is_beaker_job():
-        args.checkpoint_output_dir = os.environ.get("CHECKPOINT_OUTPUT_DIR", None)
         beaker_config = maybe_get_beaker_config()
         all_configs.update(vars(beaker_config))
     all_configs.update(**asdict(args), **asdict(model_config))
@@ -1406,24 +1325,19 @@ def main(args: Args, model_config: ModelConfig):
         return
 
     # Runtime setups and quick logging
-    if args.stop_token:
-        if args.stop_token == "eos":
-            args.stop_token_id = tokenizer.eos_token_id
-        if args.stop_token == "period":
-            args.stop_token_id = tokenizer.encode(".")[0]
     pprint([args, model_config])
     visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
 
     # Create the model and optimizer
     pg = None
-    bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.actor_num_gpus_per_node]
+    bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
     ray.get(pg.ready())
     inits = []
     policy_group = ModelGroup(
         pg,
         PolicyTrainerRayProcess,
-        args.actor_num_gpus_per_node,
+        args.num_learners_per_node,
         args.single_gpu_mode,
     )
     wandb_url = wandb.run.get_url() if args.with_tracking else None
@@ -1439,7 +1353,7 @@ def main(args: Args, model_config: ModelConfig):
         model_config.model_name_or_path,
         model_config.model_revision,
         args.seed,
-        args.enable_prefix_caching,
+        args.vllm_enable_prefix_caching,
         max_len,
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
@@ -1457,7 +1371,7 @@ def main(args: Args, model_config: ModelConfig):
         top_p=1.0,
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
-        n=args.number_samples_per_prompt,
+        n=args.num_samples_per_prompt_rollout,
         stop=args.stop_strings,
     )
     eval_generation_config = SamplingParams(
@@ -1469,18 +1383,20 @@ def main(args: Args, model_config: ModelConfig):
         stop=args.stop_strings,
     )
     train_dataset_idxs = np.arange(len(train_dataset))
-    iter_dataloader = ShufflingIterator(train_dataset_idxs, args.rollout_batch_size, seed=args.seed)
+    iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
 
-    response_ids_Q = Queue(maxsize=1)
+    inference_results_Q = Queue(maxsize=1)
     param_prompt_Q = Queue(maxsize=1)
-    evaluation_Q = Queue(maxsize=1)
+    evaluation_inference_results_Q = Queue(maxsize=1)
     packed_sequences_Q = Queue(maxsize=1)
     queries_prompt_Q = Queue(maxsize=1)
     num_eval_samples = 32
 
     eval_prompt_token_ids = None
+    eval_ground_truths = None
     if eval_dataset is not None:
         eval_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
+        eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
     resume_training_step = 1
     thread = threading.Thread(
         target=vllm_generate_thread,
@@ -1488,11 +1404,11 @@ def main(args: Args, model_config: ModelConfig):
             vllm_engines,
             generation_config,
             eval_generation_config,
-            response_ids_Q,
+            inference_results_Q,
             param_prompt_Q,
             args.num_training_steps,
             eval_prompt_token_ids,
-            evaluation_Q,
+            evaluation_inference_results_Q,
             args.eval_freq,
             resume_training_step,
         ),
@@ -1503,7 +1419,7 @@ def main(args: Args, model_config: ModelConfig):
     packing_thread = threading.Thread(
         target=data_preparation_thread,
         args=(
-            response_ids_Q,
+            inference_results_Q,
             packed_sequences_Q,
             queries_prompt_Q,
             args,
@@ -1528,17 +1444,18 @@ def main(args: Args, model_config: ModelConfig):
         for training_step in range(resume_training_step, args.num_training_steps + 1):
             training_step_start_time = time.time()
             print("-" * 100)
-            episode += args.rollout_batch_size * args.number_samples_per_prompt  # each sample is an episode
+            episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout  # each sample is an episode
 
             # ------------------------------------------------------------------------------------------------
             # Optionally evaluate the model
             try:
-                evaluation_responses = evaluation_Q.get(timeout=0.01)
+                evaluation_responses, _ = evaluation_inference_results_Q.get(timeout=0.01)
                 print("[Main Thread] 📊 Evaluation responses received")
                 table = {}
                 table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
                 table["response"] = tokenizer.batch_decode(evaluation_responses)
                 table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
+                table["ground_truth"] = eval_ground_truths
                 df = pd.DataFrame(table)
                 if args.with_tracking:
                     wandb.log({"sample_completions": wandb.Table(dataframe=df)})
@@ -1628,24 +1545,16 @@ def main(args: Args, model_config: ModelConfig):
                         os.makedirs(step_dir, exist_ok=True)
                         print(f"Saving model at step {training_step} to {step_dir}")
                         ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
-                        if args.try_launch_beaker_eval_jobs_on_weka:
-                            ray.get(
-                                [
-                                    policy_group.models[i].launch_ai2_evals_on_weka.remote(step_dir, training_step)
-                                    for i in range(args.world_size)
-                                ]
-                            )
+                        if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
+                            leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
+                            launch_ai2_evals_on_weka(step_dir, leaderboard_name, args.oe_eval_max_length, wandb_url, training_step, args.oe_eval_tasks)
 
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):
             ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
-            if args.try_launch_beaker_eval_jobs_on_weka:
-                ray.get(
-                    [
-                        policy_group.models[i].launch_ai2_evals_on_weka.remote(args.output_dir)
-                        for i in range(args.world_size)
-                    ]
-                )
+            if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
+                leaderboard_name = args.hf_repo_revision
+                launch_ai2_evals_on_weka(args.output_dir, leaderboard_name, args.oe_eval_max_length, wandb_url, training_step, args.oe_eval_tasks)
 
     except Exception as e:
         print(f"Training error occurred: {str(e)}")
@@ -1661,6 +1570,17 @@ def main(args: Args, model_config: ModelConfig):
     packing_thread.join()
     print("======== ✅ data preparation thread ends =========")
     ray.shutdown()
+
+    # Ai2 logic: we use /output to store the artifacts of the job, so we
+    # make a copy of the model to `/output` in the end.
+    if (
+        args.try_auto_save_to_beaker
+        and is_beaker_job()
+        and len(beaker_config.beaker_dataset_id_urls) > 0
+        and args.output_dir.rstrip("/") != "/output"
+    ):
+        shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
+    print("finished training")
 
     accelerator = Namespace()
     accelerator.is_main_process = True  # hack
