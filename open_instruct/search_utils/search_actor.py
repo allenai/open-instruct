@@ -1,17 +1,3 @@
-# Taken and modified from https://github.com/huggingface/trl
-# Copyright 2024 The AllenAI Team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 import os
 import re
 import requests
@@ -92,7 +78,6 @@ class LLMSearchRayActor:
 
         # See https://github.com/vllm-project/vllm/blob/main/vllm/executor/gpu_executor.py
         if self.use_gpu_executor:
-
             vllm.worker.worker.Worker = WorkerWrap
         else:
             # RayGPUExecutor
@@ -128,16 +113,19 @@ class LLMSearchRayActor:
         sampling_params: Any,
         prompt_token_ids: List[List[int]],
         use_tqdm: bool,
-    ) -> List[List[GenerationOutput]]:
+    ) -> List[CompletionList]:
         max_searches = 5
 
-        # Initialize queries as a list of tuples: (index, decoded query text)
-        queries: List[Tuple[int, str]] = [
-            (i, self.tokenizer.decode(tokens))
-            for i, tokens in enumerate(prompt_token_ids)
-        ]
-        original_queries: Dict[int, str] = {i: q for i, q in queries}
-        finished_queries: Dict[int, str] = {}
+        # Initialize queries as a list of tuples: (prompt_index, current_text)
+        queries: List[Tuple[int, str]] = []
+        original_queries: Dict[int, str] = {}
+        for i, tokens in enumerate(prompt_token_ids):
+            decoded = self.tokenizer.decode(tokens)
+            queries.append((i, decoded))
+            original_queries[i] = decoded
+
+        # Store finished outputs for each prompt index.
+        finished_queries: Dict[int, List[str]] = {}
 
         # Iteratively update queries with snippet responses.
         for _ in range(max_searches):
@@ -148,34 +136,34 @@ class LLMSearchRayActor:
             outputs = self.llm.generate(
                 sampling_params=sampling_params, prompts=query_texts, use_tqdm=use_tqdm
             )
-            updated_queries: List[Tuple[int, str]] = []
-            for (idx, current_text), output in zip(queries, outputs):
-                # Assume each output has at least one result.
-                output_text = output.outputs[0].text
-                snippet_response = process_vllm_output_for_search(output_text)
-                updated_text = current_text + output_text + snippet_response
-                if snippet_response:
-                    # Continue iterating if a snippet was appended.
-                    updated_queries.append((idx, updated_text))
-                else:
-                    # Mark this query as finished if no snippet was added.
-                    finished_queries[idx] = updated_text
-            queries = updated_queries
+            new_queries: List[Tuple[int, str]] = []
+            for (prompt_idx, current_text), comp_list in zip(queries, outputs):
+                # Process each sample output for the prompt
+                for gen_output in comp_list.outputs:
+                    output_text = gen_output.text
+                    snippet_response = process_vllm_output_for_search(output_text)
+                    updated_text = current_text + output_text + snippet_response
+                    if snippet_response:
+                        new_queries.append((prompt_idx, updated_text))
+                    else:
+                        if prompt_idx not in finished_queries:
+                            finished_queries[prompt_idx] = []
+                        finished_queries[prompt_idx].append(updated_text)
+            queries = new_queries
 
         # Postprocess: remove the original prompt from finished outputs.
-        final_texts: List[str] = []
+        generation_outputs: List[CompletionList] = []
         for i in range(len(prompt_token_ids)):
-            full_text = finished_queries.get(i, "")
             original = original_queries.get(i, "")
-            # Remove only the first occurrence of the original prompt.
-            final_texts.append(full_text.replace(original, "", 1))
+            finished_texts = finished_queries.get(i, [])
+            outputs_list: List[GenerationOutput] = []
+            for text in finished_texts:
+                # Remove only the first occurrence of the original prompt.
+                final_text = text.replace(original, "", 1)
+                tokens = self.tokenizer.encode(final_text)
+                outputs_list.append(GenerationOutput(token_ids=tokens, text=final_text))
+            generation_outputs.append(CompletionList(outputs=outputs_list))
         
-        # Encode final outputs and wrap in GenerationOutput objects.
-        encoded_outputs = [self.tokenizer.encode(text) for text in final_texts]
-        generation_outputs = [
-            CompletionList([GenerationOutput(token_ids=tokens, text=text)])
-            for tokens, text in zip(encoded_outputs, final_texts)
-        ]
         return generation_outputs
     
     def init_process_group(self, master_address, master_port, rank_offset, world_size, group_name, backend):
@@ -201,7 +189,6 @@ class LLMSearchRayActor:
         # https://github.com/vllm-project/vllm/commit/eb6d3c264d0cd8e44dec16bca7947fbe96415ce9#diff-e1ad69e38e033accddfa5480ec808c4740eb39244d1ef51cc3407e20dde8cfd4
         if self.__version__ > "0.4.2":
             self.llm.llm_engine.model_executor.stop_remote_worker_execution_loop()
-
 
 
 # Debugging code
@@ -237,7 +224,7 @@ if __name__ == "__main__":
             {
                 "role": "user",
                 "content": (
-                    "How much money, in euros, was the surgeon held responsible for Stella Obasanjo\'s death ordered to pay her son? "
+                    "How much money, in euros, was the surgeon held responsible for Stella Obasanjo's death ordered to pay her son? "
                     "Search the web by wrapping a query in query tags like so: <query>{query}</query> "
                     "Then, based on the snippet, provide the answer, or another query if you need."
                 ),
