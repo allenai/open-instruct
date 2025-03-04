@@ -112,7 +112,8 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     upload_metadata_to_hf,
 )
-from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
+from open_instruct.vllm_utils2 import LLMRayActor, create_vllm_engines, init_process_group
+from open_instruct.search_utils.search_actor import LLMSearchRayActor
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -303,6 +304,10 @@ class Args:
     """The beaker evaluation tasks to launch"""
     hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
+
+    # rl-rag settings
+    use_search_actor: bool = False
+    """Whether to use the search actor for RL-RAG"""
 
     def __post_init__(self):
         assert self.number_samples_per_prompt > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
@@ -1673,6 +1678,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
+        ray_actor_class=LLMSearchRayActor if args.use_search_actor else LLMRayActor,
     )
 
     metrics_queue = RayQueue()

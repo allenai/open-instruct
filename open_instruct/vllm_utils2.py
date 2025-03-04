@@ -209,6 +209,7 @@ def create_vllm_engines(
     vllm_gpu_memory_utilization: float = 0.9,
     single_gpu_mode: bool = False,
     pg: Optional[ray.util.placement_group] = None,
+    ray_actor_class: Any = LLMRayActor,
 ):
     vllm_engines = []
     for i in range(num_engines):
@@ -229,7 +230,7 @@ def create_vllm_engines(
             )
         print(f"vllm: {num_gpus=}, {num_engines=}")
         vllm_engines.append(
-            LLMRayActor.options(
+            ray_actor_class.options(
                 num_cpus=4,
                 num_gpus=0.48 if single_gpu_mode else num_gpus,
                 scheduling_strategy=scheduling_strategy,
