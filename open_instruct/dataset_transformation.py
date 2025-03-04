@@ -819,7 +819,7 @@ class DatasetTransformationCache:
         transformed_datasets = DatasetDict(transformed_datasets)
 
         # Push to hub with config hash as revision
-        combined_dataset.push_to_hub(
+        transformed_datasets.push_to_hub(
             repo_name,
             private=True,
             revision=config_hash,
