@@ -183,7 +183,7 @@ class LLMSearchRayActor:
         encoded_outputs = [self.tokenizer.encode(text) for text in final_texts]
         # recreate the outputs based on the original `n` value
         generation_outputs = []
-        for i in range(0, len(encoded_outputs), step=original_n):
+        for i in range(0, len(encoded_outputs), original_n):
             start, stop = i * original_n, (i + 1) * original_n
             generation_outputs.append(
                 [
