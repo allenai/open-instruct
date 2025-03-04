@@ -76,6 +76,9 @@ class GenerationOutput:
     token_ids: List[int]
     text: str
 
+@dataclass
+class CompletionList:
+    outputs: List[GenerationOutput]
 
 @ray.remote
 class LLMSearchRayActor:
@@ -170,7 +173,7 @@ class LLMSearchRayActor:
         # Encode final outputs and wrap in GenerationOutput objects.
         encoded_outputs = [self.tokenizer.encode(text) for text in final_texts]
         generation_outputs = [
-            [GenerationOutput(token_ids=tokens, text=text)]
+            CompletionList([GenerationOutput(token_ids=tokens, text=text)])
             for tokens, text in zip(encoded_outputs, final_texts)
         ]
         return generation_outputs
