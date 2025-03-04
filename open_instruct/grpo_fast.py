@@ -212,7 +212,7 @@ class Args:
     """the reward value for verifiable responses"""
 
     # -- non stop penalty
-    non_stop_penalty: bool = True
+    non_stop_penalty: bool = False
     """whether to penalize responses which did not finish generation"""
     non_stop_penalty_value: float = 0.0
     """the reward value for responses which did not finish generation"""
@@ -1440,9 +1440,9 @@ def main(args: Args, model_config: ModelConfig):
 
     episode = 0
     num_total_tokens = 0
+    start_time = time.time()
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
-            training_step_start_time = time.time()
             print("-" * 100)
             episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout  # each sample is an episode
 
@@ -1529,7 +1529,7 @@ def main(args: Args, model_config: ModelConfig):
                     "training_step": training_step,
                     "val/num_total_tokens": num_total_tokens,
                     "epoch": episode / len(train_dataset),
-                    "tokens_per_second": packed_data["num_new_tokens"] / (time.time() - training_step_start_time),
+                    "tokens_per_second": num_total_tokens / (time.time() - start_time),
                     **data_thread_metrics,
                     **average_metrics,
                 }
