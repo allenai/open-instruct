@@ -275,6 +275,8 @@ class Args:
     """the max generation length for evaluation for oe-eval"""
 
     def __post_init__(self):
+        if self.single_gpu_mode:
+            self.vllm_gpu_memory_utilization = 0.3
         assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
         assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, "At least one reward must be applied!"
         assert self.pack_length >= self.max_prompt_token_length + self.response_length, "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
