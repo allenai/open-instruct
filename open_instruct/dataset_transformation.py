@@ -50,7 +50,7 @@ from typing import Any, Dict, List, Optional
 
 import torch
 import transformers
-from datasets import Dataset, concatenate_datasets, load_dataset
+from datasets import Dataset, concatenate_datasets, load_dataset, DatasetDict
 from huggingface_hub import HfApi, ModelCard, revision_exists
 from rich.console import Console
 from rich.text import Text
@@ -807,13 +807,16 @@ class DatasetTransformationCache:
         print(f"Cache not found, transforming datasets...")
 
         # Transform each dataset
-        transformed_datasets = []
+        transformed_datasets = {}
         for dc in dcs:
             dataset = get_dataset_v1(dc, tc)
-            transformed_datasets.append(dataset)
+            split = dc.dataset_split
+            if split in transformed_datasets:
+                transformed_datasets[split] = concatenate_datasets([transformed_datasets[split], dataset])
+            else:
+                transformed_datasets[split] = dataset
 
-        # Combine datasets
-        combined_dataset = concatenate_datasets(transformed_datasets)
+        transformed_datasets = DatasetDict(transformed_datasets)
 
         # Push to hub with config hash as revision
         combined_dataset.push_to_hub(
