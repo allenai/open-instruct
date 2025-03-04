@@ -186,10 +186,10 @@ class LLMSearchRayActor:
         for i in range(0, len(encoded_outputs), original_n):
             start, stop = i * original_n, (i + 1) * original_n
             generation_outputs.append(
-                [
+                CompletionList([
                     GenerationOutput(token_ids=tokens, text=text)
                     for tokens, text in zip(encoded_outputs[start:stop], final_texts[start:stop])
-                ]
+                ])
             )
         return generation_outputs
     
