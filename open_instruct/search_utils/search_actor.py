@@ -184,7 +184,7 @@ class LLMSearchRayActor:
         # recreate the outputs based on the original `n` value
         generation_outputs = []
         for i in range(0, len(encoded_outputs), original_n):
-            start, stop = i * original_n, (i + 1) * original_n
+            start, stop = i, i + original_n
             generation_outputs.append(
                 CompletionList([
                     GenerationOutput(token_ids=tokens, text=text)
