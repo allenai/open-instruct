@@ -5,7 +5,7 @@ python open_instruct/grpo_fast.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \
-    --dataset_mixer_eval_list_splits test \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 512 \
     --max_prompt_token_length 256 \
     --response_length 256 \
