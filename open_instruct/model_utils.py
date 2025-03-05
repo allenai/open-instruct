@@ -32,7 +32,7 @@ import transformers
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
 from huggingface_hub import HfApi
-from open_instruct.ground_truth_utils import REWARD_FN_MAPPING, REWARD_WEIGHTS
+from open_instruct.ground_truth_utils import REWARD_FN_MAPPING
 from open_instruct.utils import retry_on_exception
 from rich import print as rprint
 from rich.console import Console
