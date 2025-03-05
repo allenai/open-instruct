@@ -9,7 +9,7 @@ python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
     --number_samples_per_prompt 4 \
-    --model_name_or_path Qwen/Qwen2.5-Math-7B  \
+    --model_name_or_path Qwen/Qwen2.5-Math-7B \
     --stop_strings '"</answer>"' \
     --add_r1_style_format_reward \
     --non_stop_penalty False \
@@ -17,7 +17,7 @@ python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --penalty_reward_value 0.0 \
     --temperature 0.7 \
     --ground_truths_key ground_truth \
-    --chat_template_name  r1_simple_chat_postpend_think \
+    --chat_template_name r1_simple_chat_postpend_think \
     --sft_messages_key messages \
     --learning_rate 3e-7 \
     --total_episodes 1000000 \
