@@ -259,6 +259,7 @@ def apply_verifiable_reward(
             elif ds.lower() == "max_length":
                 verified_score = reward_up_to_max(tok_prediction, gt)
                 verify_reward = (verify_reward_original / 2) * verified_score
+                verified = True
             # if verified, give reward
             if verified:
                 logger.info("Applying ground truth reward 🤗")
