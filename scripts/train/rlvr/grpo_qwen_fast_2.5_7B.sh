@@ -10,13 +10,12 @@ python mason.py \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name $exp_name \
     --beta 0.0 \
-    --number_samples_per_prompt 16 \
+    --num_unique_prompts_rollout 64 \
+    --num_samples_per_prompt_rollout 16 \
     --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/$exp_name \
     --oe_eval_tasks minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning \
     --save_freq 40 \
-    --no_try_launch_beaker_eval_jobs \
     --try_launch_beaker_eval_jobs_on_weka \
-    --local_rollout_batch_size 8 \
     --kl_estimator kl3 \
     --learning_rate 5e-7 \
     --dataset_mixer_list ai2-adapt-dev/math_ground_truth_zs 1.0 \
@@ -29,25 +28,25 @@ python mason.py \
     --pack_length 4096 \
     --model_name_or_path Qwen/Qwen2.5-7B \
     --stop_strings '"</answer>"' \
-    --add_r1_style_format_reward \
+    --apply_r1_style_format_reward True \
+    --apply_verifiable_reward True \
+    --non_stop_penalty True \
+    --non_stop_penalty_value 0.0 \
     --chat_template_name r1_simple_chat_postpend_think \
-    --non_stop_penalty False \
-    --stop_token eos \
+    --oe_eval_tasks minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning \
+    --oe_eval_max_length 8192 \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --total_episodes 1000000 \
-    --penalty_reward_value 0.0 \
     --deepspeed_stage 2 \
     --per_device_train_batch_size 1 \
     --num_mini_batches 1 \
-    --actor_num_gpus_per_node 6 \
+    --num_learners_per_node 6 \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
     --vllm_num_engines 10 \
     --lr_scheduler_type linear \
     --apply_verifiable_reward true \
     --seed 1 \
-    --num_evals 1 \
-    --reward_model_multiplier 0.0 \
+    --num_evals 100 \
     --gradient_checkpointing \
     --with_tracking
