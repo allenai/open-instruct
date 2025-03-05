@@ -47,7 +47,7 @@ import traceback
 from argparse import Namespace
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
-from typing import Iterator, List, Literal, Optional
+from typing import Callable, Iterator, List, Literal, Optional
 
 import deepspeed
 import numpy as np
@@ -1067,6 +1067,7 @@ def vllm_generate_thread(
 
 
 def data_preparation_thread(
+    reward_fn: Callable,
     inference_results_Q: Queue,
     packed_sequences_Q: Queue,
     queries_prompt_Q: Queue,
@@ -1101,44 +1102,11 @@ def data_preparation_thread(
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
-            global_decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
-
-        scores = [0] * len(responses)
-        with Timer("🧮 [Data Preparation Thread] Calculating scores"):
-            # Calculate scores (format reward)
-            if args.apply_r1_style_format_reward:
-                format_scores = soft_format_reward_func(global_decoded_responses, args.r1_style_format_reward)
-                if len(format_scores) != len(scores):
-                    raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
-                for i in range(len(format_scores)):
-                    scores[i] = format_scores[i] + scores[i]
-
-        with Timer("🏆 [Data Preparation Thread] Applying verifiable reward"):
-            # Apply verifiable reward
-            if args.apply_verifiable_reward:
-                verifiable_rewards = apply_verifiable_reward_fast(
-                    global_decoded_responses,
-                    ground_truths,
-                    datasets,
-                    verify_reward=args.verification_reward,
-                )
-                if len(verifiable_rewards) != len(scores):
-                    raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
-                for i in range(len(verifiable_rewards)):
-                    scores[i] = verifiable_rewards[i] + scores[i]
-
-
-        with Timer("🦖 [Data Preparation Thread] Applying non stop penalty"):
-            # Apply non stop penalty
-            stop_count = 0
-            assert len(finish_reasons) == len(scores)
-            for i in range(len(finish_reasons)):
-                if finish_reasons[i] == "stop":
-                    stop_count += 1
-                else:
-                    if args.non_stop_penalty:
-                        scores[i] = args.non_stop_penalty_value
-            stop_rate = stop_count / len(finish_reasons)
+            decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
+            stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
+        
+        with Timer("💰 [Data Preparation Thread] Calculating rewards"):
+            scores, reward_metrics = reward_fn(decoded_responses, ground_truths, datasets, finish_reasons)
 
         with Timer("🎆 [Data Preparation Thread] Calculating advantages"):
             # Calculate advantages
@@ -1217,13 +1185,8 @@ def data_preparation_thread(
             "val/sequence_lengths_min": sequence_lengths.min(),
             "val/sequence_lengths_max": sequence_lengths.max(),
             "val/stop_rate": stop_rate,
+            **reward_metrics,
         }
-        if args.apply_verifiable_reward:
-            np_verifiable_rewards = np.array(verifiable_rewards)
-            metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
-            metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
-        if args.apply_r1_style_format_reward:
-            metrics["val/format_scores"] = np.array(format_scores).mean()
 
         if args.save_traces:
             traces = {
@@ -1232,9 +1195,9 @@ def data_preparation_thread(
                 "responses": responses,
                 "queries": queries,
                 "ground_truths": ground_truths,
-                "verifiable_rewards": verifiable_rewards,
-                "format_scores": format_scores,
+                "datasets": datasets,
                 "training_step": training_step,
+                **reward_metrics
             }
             os.makedirs(args.output_dir, exist_ok=True)
             with open(f"{args.output_dir}/traces_{args.run_name}.jsonl", "a") as f:
@@ -1248,15 +1211,13 @@ def data_preparation_thread(
                 "collated_data": collated_data,
                 "metrics": metrics,
                 "responses_count": len(responses),
-                "format_scores": format_scores if args.apply_r1_style_format_reward else None,
-                "verifiable_rewards": verifiable_rewards if args.apply_verifiable_reward else None,
                 "num_new_tokens": num_new_tokens,
                 "B": B,
             }
         )
 
 
-def main(args: Args, model_config: ModelConfig):
+def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
     calculate_runtime_args(args)
 
     # Setup experiment tracking and seeds
@@ -1424,6 +1385,7 @@ def main(args: Args, model_config: ModelConfig):
     packing_thread = threading.Thread(
         target=data_preparation_thread,
         args=(
+            reward_fn,
             inference_results_Q,
             packed_sequences_Q,
             queries_prompt_Q,
@@ -1503,8 +1465,6 @@ def main(args: Args, model_config: ModelConfig):
                 data_thread_metrics = packed_data["metrics"]
                 B = packed_data["B"]
                 collated_data = packed_data["collated_data"]
-                # format_scores = packed_data["format_scores"]
-                # verifiable_rewards = packed_data["verifiable_rewards"]
                 num_total_tokens += packed_data["num_new_tokens"]
 
             # Log info about the packed sequences
@@ -1569,7 +1529,6 @@ def main(args: Args, model_config: ModelConfig):
         raise  # Re-raise the exception after shutdown
 
     # Clean up threads
-    queries_prompt_Q.put(None)  # Signal to packing thread to exit
     thread.join()
     print("======== ✅ vllm generate thread ends =========")
     packing_thread.join()
@@ -1601,4 +1560,62 @@ def main(args: Args, model_config: ModelConfig):
 
 if __name__ == "__main__":
     parser = ArgumentParserPlus((Args, ModelConfig))
-    main(*parser.parse())
+    args, model_config = parser.parse_args_into_dataclasses()
+    assert isinstance(args, Args)
+    assert isinstance(model_config, ModelConfig)
+
+    def reward_fn(decoded_responses: List[str], ground_truths: List[str], datasets: List[str], finish_reasons: List[str]) -> List[float]:
+        scores = [0] * len(decoded_responses)
+        metrics = {}
+        if args.apply_r1_style_format_reward:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
+                format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
+                if len(format_scores) != len(scores):
+                    raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
+                for i in range(len(format_scores)):
+                    scores[i] = format_scores[i] + scores[i]
+                metrics["val/format_scores"] = np.array(format_scores).mean()
+
+        if args.apply_verifiable_reward:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
+                verifiable_rewards = apply_verifiable_reward_fast(
+                    decoded_responses,
+                    ground_truths,
+                    datasets,
+                    verify_reward=args.verification_reward,
+                )
+                if len(verifiable_rewards) != len(scores):
+                    raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
+                for i in range(len(verifiable_rewards)):
+                    scores[i] = verifiable_rewards[i] + scores[i]
+                np_verifiable_rewards = np.array(verifiable_rewards)
+                metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
+                metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
+
+        if args.non_stop_penalty:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty"):
+                assert len(finish_reasons) == len(scores)
+                for i in range(len(finish_reasons)):
+                    if finish_reasons[i] != "stop":
+                        scores[i] = args.non_stop_penalty_value
+
+        # @nouha: handle multiplication
+        MULTIPLICATION_SCORE = 10.0
+        for i in range(len(decoded_responses)):
+            # extra the string between <answer> and </answer>
+            decoded_response = decoded_responses[i]
+            answer_start = decoded_response.find("<answer>")
+            answer_end = decoded_response.find("</answer>")
+            # normalize the number (e.g., 1,000 -> 1000)
+            try:
+                answer = decoded_response[answer_start:answer_end+len("</answer>")]
+                answer = answer.replace(",", "")
+                if float(answer) == float(ground_truths[i]):
+                    scores[i] += MULTIPLICATION_SCORE
+            except:
+                pass # is ok.
+            metrics["objective/multiplication_score"] = np.array(scores).mean()
+
+        return scores, metrics
+
+    main(args, model_config, reward_fn)
