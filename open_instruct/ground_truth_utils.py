@@ -188,6 +188,26 @@ def verify_max_length_sample_cosine(tokenized_response: list[int], max_length: i
     return reward
 
 
+def reward_up_to_max(tokenized_response: list[int], max_length: int) -> float:
+    """
+    Reward function that linearly rewards tokenized responses for going up to max_length.
+    
+    - If the tokenized response length is less than or equal to max_length,
+      the reward is the fraction of max_length achieved (i.e. len(tokenized_response) / max_length).
+    - If the response exceeds max_length, the reward is 0.
+    
+    Args:
+        tokenized_response (list[int]): The tokenized output.
+        max_length (int): The target token length.
+        
+    Returns:
+        float: The reward value.
+    """
+    actual_length = len(tokenized_response)
+    return actual_length / max_length if actual_length <= max_length else 0.0
+
+
+
 # debug code
 if __name__ == "__main__":
     from datasets import load_dataset
