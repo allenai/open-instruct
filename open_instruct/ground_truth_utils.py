@@ -203,6 +203,7 @@ def reward_up_to_max(tokenized_response: list[int], max_length: int) -> float:
     Returns:
         float: The reward value.
     """
+    max_length = int(max_length)
     actual_length = len(tokenized_response)
     return actual_length / max_length if actual_length <= max_length else 0.0
 
