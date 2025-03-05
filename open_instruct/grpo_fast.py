@@ -217,6 +217,12 @@ class Args:
     non_stop_penalty_value: float = 0.0
     """the reward value for responses which did not finish generation"""
 
+    # -- arithmetic reward
+    apply_arithmetic_reward: bool = False
+    """whether to apply arithmetic reward"""
+    arithmetic_reward: float = 10.0
+    """the reward value for arithmetic responses"""
+
     # Ray
     single_gpu_mode: bool = False
     """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
@@ -1599,22 +1605,23 @@ if __name__ == "__main__":
                     if finish_reasons[i] != "stop":
                         scores[i] = args.non_stop_penalty_value
 
-        # @nouha: handle multiplication
-        MULTIPLICATION_SCORE = 10.0
-        for i in range(len(decoded_responses)):
-            # extra the string between <answer> and </answer>
-            decoded_response = decoded_responses[i]
-            answer_start = decoded_response.find("<answer>")
-            answer_end = decoded_response.find("</answer>")
-            # normalize the number (e.g., 1,000 -> 1000)
-            try:
-                answer = decoded_response[answer_start:answer_end+len("</answer>")]
-                answer = answer.replace(",", "")
-                if float(answer) == float(ground_truths[i]):
-                    scores[i] += MULTIPLICATION_SCORE
-            except:
-                pass # is ok.
-            metrics["objective/multiplication_score"] = np.array(scores).mean()
+        # @nouha: handle arithmetic reward
+        if args.apply_arithmetic_reward:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating arithmetic reward"):
+                for i in range(len(decoded_responses)):
+                    # extra the string between <answer> and </answer>
+                    decoded_response = decoded_responses[i]
+                    answer_start = decoded_response.find("<answer>")
+                    answer_end = decoded_response.find("</answer>")
+                    # normalize the number (e.g., 1,000 -> 1000)
+                    try:
+                        answer = decoded_response[answer_start:answer_end+len("</answer>")]
+                        answer = answer.replace(",", "")
+                        if float(answer) == float(ground_truths[i]):
+                            scores[i] += args.arithmetic_reward
+                    except:
+                        pass # it's ok if things went wrong
+                    metrics["objective/arithmetic_score"] = np.array(scores).mean()
 
         return scores, metrics
 
