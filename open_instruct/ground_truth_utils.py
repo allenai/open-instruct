@@ -1,13 +1,9 @@
-"""
-Collection of 'ground truth rewards' for different datasets/tasks.
-Used to give feedback to the model based on the ground truth answer.
-"""
-
+from abc import ABC, abstractmethod
+from typing import List, Union, Any, Dict
 import json
 import re
 import string
-
-import numpy as np
+import logging
 
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.math_utils import (
@@ -19,202 +15,217 @@ from open_instruct.math_utils import (
     remove_boxed,
 )
 
-
-def verify_gsm8k_sample(model_output, ground_truth_answer):
-    # gsm is easy: extract numbers, and then just compare last number with answer.
-    # matches how we do eval.
-    predictions = None
-    # replace numbers like `x,xxx` with `xxxx`
-    response = re.sub(r"(\d),(\d)", r"\1\2", model_output)
-    numbers = re.findall(r"[-+]?\d*\.\d+|\d+", response)
-    if numbers:
-        predictions = numbers[-1]
-    else:
-        predictions = response
-    return str(predictions).lower() == str(ground_truth_answer).lower()
+logger = logging.getLogger(__name__)
 
 
-def verify_math_sample(model_output, ground_truth_answer):
-    raw_answer = model_output
-    # for math, more complex. We will try a few different ways to extract the answer.
-    # this roughly follows 'flex em' in oe-eval-internal
-    all_answers = []
-    # First, try find answer in \boxed{}.
-    boxed_answer = last_boxed_only_string(raw_answer)
-    if boxed_answer is not None:
-        try:
-            boxed_answer = remove_boxed(boxed_answer)
-        except AssertionError:
-            boxed_answer = None
-    if boxed_answer is not None:
-        all_answers.append(boxed_answer)
-    # Second, try to extract via minerva format.
-    minerva_answer = normalize_final_answer(get_unnormalized_answer(raw_answer))
-    if minerva_answer is not None and minerva_answer != "[invalidanswer]":
-        all_answers.append(minerva_answer)
-    # If nothing still, try to find the last latex-formatted answer
-    if len(all_answers) == 0:
-        dollars = [m.start() for m in re.finditer("\\$", raw_answer)]
-        if len(dollars) > 1:
-            # Add the answer between the second to last and last dollar sign
-            answer = normalize_final_answer(raw_answer[dollars[-2] + 1 : dollars[-1]])
-            all_answers.append(answer)
-    # otherwise, just take the full output. Probably wont work, bit of a yolo.
-    if len(all_answers) == 0:
-        all_answers.append(normalize_final_answer(model_output))
-    # now, compare all answers to ground truth.
-    matched = False
-    for answer in all_answers:
-        if is_equiv(answer, ground_truth_answer):
-            matched = True
-            break
-        elif hendrycks_is_equiv(answer, ground_truth_answer):
-            matched = True
-            break
-    # if we got any match, we are good.
-    return matched
+class VerifierFunction(ABC):
+    """
+    Abstract base class for verifier functions.
+    
+    Each verifier is initialized with a name and a weight (default 1.0).
+    The __call__ method must be implemented by subclasses.
+    """
+    def __init__(self, name: str, weight: float = 1.0) -> None:
+        self.name = name
+        self.weight = weight
+
+    @abstractmethod
+    def __call__(self, tokenized_prediction: List[int], prediction: str, gt: Any) -> Any:
+        """
+        Evaluate the given prediction against the ground truth (or constraint).
+
+        Args:
+            tokenized_prediction (List[int]): Tokenized representation (unused by most verifiers).
+            prediction (str): The model output.
+            gt (Any): The ground truth answer or evaluation constraint.
+
+        Returns:
+            Any: Typically a boolean (pass/fail) or a numeric score.
+        """
+        pass
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(name={self.name}, weight={self.weight})"
 
 
-def verify_strict_math_sample(model_output, ground_truth_answer):
-    raw_answer = model_output
-    # just trying minerva format.
-    all_answers = []
-    # Second, try to extract via minerva format.
-    minerva_answer = normalize_final_answer(get_unnormalized_answer(raw_answer))
-    if minerva_answer is not None and minerva_answer != "[invalidanswer]":
-        all_answers.append(minerva_answer)
-    # otherwise, just take the full output. Probably wont work, bit of a yolo.
-    if len(all_answers) == 0:
-        all_answers.append(normalize_final_answer(model_output))
-    # now, compare all answers to ground truth.
-    matched = False
-    for answer in all_answers:
-        if is_equiv(answer, ground_truth_answer):
-            matched = True
-            break
-        elif hendrycks_is_equiv(answer, ground_truth_answer):
-            matched = True
-            break
-    # if we got any match, we are good.
-    return matched
+class GSM8KVerifier(VerifierFunction):
+    """
+    Verifier for GSM8K tasks that extracts the last number from the prediction 
+    and compares it (case-insensitively) to the ground truth.
+    """
+    def __init__(self) -> None:
+        super().__init__("gsm8k", weight=1.0)
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, gt: str) -> bool:
+        response = re.sub(r"(\d),(\d)", r"\1\2", prediction)
+        numbers = re.findall(r"[-+]?\d*\.\d+|\d+", response)
+        extracted = numbers[-1] if numbers else response
+        return str(extracted).lower() == str(gt).lower()
 
 
-def verify_ifeval_sample(model_output, constraint):
-    # TODO: just pass in final answer. this should be fine for other evals too.
-    answer = model_output.split("<|assistant|>\n")[-1].strip()
-    if isinstance(constraint, str):
-        constraint = json.loads(constraint)
-    if "func_name" not in constraint:
-        print("WARNING: constraint missing func_name")
-        print(constraint)
+class MathVerifier(VerifierFunction):
+    """
+    Verifier for math problems.
+    
+    Attempts several extraction methods (boxed answers, Minerva format,
+    last LaTeX answer) and compares the extracted answers to the ground truth.
+    """
+    def __init__(self) -> None:
+        super().__init__("math", weight=1.0)
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, gt: str) -> bool:
+        raw_answer = prediction
+        all_answers = []
+
+        # Attempt extraction from \boxed{}.
+        boxed_answer = last_boxed_only_string(raw_answer)
+        if boxed_answer is not None:
+            try:
+                boxed_answer = remove_boxed(boxed_answer)
+            except AssertionError:
+                boxed_answer = None
+        if boxed_answer is not None:
+            all_answers.append(boxed_answer)
+
+        # Attempt extraction via Minerva format.
+        minerva_answer = normalize_final_answer(get_unnormalized_answer(raw_answer))
+        if minerva_answer is not None and minerva_answer != "[invalidanswer]":
+            all_answers.append(minerva_answer)
+
+        # Attempt extraction from the last LaTeX-formatted answer.
+        if not all_answers:
+            dollars = [m.start() for m in re.finditer(r"\$", raw_answer)]
+            if len(dollars) > 1:
+                answer = normalize_final_answer(raw_answer[dollars[-2] + 1: dollars[-1]])
+                all_answers.append(answer)
+
+        # Fallback to the full output.
+        if not all_answers:
+            all_answers.append(normalize_final_answer(prediction))
+
+        # Compare each candidate answer to the ground truth.
+        for answer in all_answers:
+            if is_equiv(answer, gt) or hendrycks_is_equiv(answer, gt):
+                return True
         return False
-    # first, parse out the constraint string.
-    func_name = constraint.pop("func_name")
-    # get the function
-    func = IF_FUNCTIONS_MAP[func_name]
-    # now, run the function
-    # pop out any none args
-    non_none_args = {k: v for k, v in constraint.items() if v is not None}
-    # sometimes we have extra args, sometimes not.
-    if len(constraint) == 0:
-        return func(model_output)
-    return func(answer, **non_none_args)
 
 
-def normalize_answer(s):
+class StrictMathVerifier(VerifierFunction):
     """
-    Lower text and remove punctuation, articles and extra whitespace.
-    From https://github.com/huggingface/evaluate/blob/main/metrics/squad/compute_score.py
+    Strict verifier for math problems using only the Minerva format extraction.
     """
+    def __init__(self) -> None:
+        super().__init__("strict_math", weight=1.0)
 
-    def remove_articles(text):
+    def __call__(self, tokenized_prediction: List[int], prediction: str, gt: str) -> bool:
+        raw_answer = prediction
+        all_answers = []
+        minerva_answer = normalize_final_answer(get_unnormalized_answer(raw_answer))
+        if minerva_answer is not None and minerva_answer != "[invalidanswer]":
+            all_answers.append(minerva_answer)
+        if not all_answers:
+            all_answers.append(normalize_final_answer(prediction))
+        for answer in all_answers:
+            if is_equiv(answer, gt) or hendrycks_is_equiv(answer, gt):
+                return True
+        return False
+
+
+class IFEvalVerifier(VerifierFunction):
+    """
+    Verifier for ifeval tasks that delegates evaluation to a function
+    specified in the constraint.
+    
+    The constraint may be a JSON string or a dictionary containing a key
+    'func_name' used to lookup the evaluation function.
+    """
+    def __init__(self) -> None:
+        super().__init__("ifeval", weight=1.0)
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, constraint: Union[str, Dict]) -> bool:
+        answer = prediction.split("<|assistant|>\n")[-1].strip()
+        if isinstance(constraint, str):
+            constraint = json.loads(constraint)
+        if "func_name" not in constraint:
+            logger.warning("Constraint missing 'func_name': %s", constraint)
+            return False
+        func_name = constraint.pop("func_name")
+        func = IF_FUNCTIONS_MAP[func_name]
+        non_none_args = {k: v for k, v in constraint.items() if v is not None}
+        if not constraint:
+            return func(prediction)
+        return func(answer, **non_none_args)
+
+
+def normalize_answer(s: str) -> str:
+    """
+    Normalize the answer by lowercasing, removing punctuation, articles, 
+    and extra whitespace.
+    
+    Based on:
+    https://github.com/huggingface/evaluate/blob/main/metrics/squad/compute_score.py
+    """
+    def remove_articles(text: str) -> str:
         return re.sub(r"\b(a|an|the)\b", " ", text)
 
-    def white_space_fix(text):
+    def white_space_fix(text: str) -> str:
         return " ".join(text.split())
 
-    def remove_punc(text):
-        exclude = set(string.punctuation)
-        return "".join(ch for ch in text if ch not in exclude)
+    def remove_punc(text: str) -> str:
+        return "".join(ch for ch in text if ch not in set(string.punctuation))
 
-    def lower(text):
-        return text.lower()
-
-    return white_space_fix(remove_articles(remove_punc(lower(s))))
+    return white_space_fix(remove_articles(remove_punc(s.lower())))
 
 
-def verify_flan_sample(model_output, ground_truth_answer):
-    # Flan! we will just use... exact match with some basic cleaning, after extracting the answer.
-    answer_string = model_output.split("The answer is: ")[-1].strip()
-    return normalize_answer(answer_string) == normalize_answer(ground_truth_answer)
+class FlanVerifier(VerifierFunction):
+    """
+    Verifier for Flan tasks that extracts the answer after "The answer is:" 
+    and compares it to the ground truth after normalization.
+    """
+    def __init__(self) -> None:
+        super().__init__("flan", weight=1.0)
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, gt: str) -> bool:
+        answer_string = prediction.split("The answer is: ")[-1].strip()
+        return normalize_answer(answer_string) == normalize_answer(gt)
 
 
-def soft_format_reward_func(responses: list[str], reward_scale: float = 1.0) -> list[float]:
-    """Reward function that checks if the completion has a specific format."""
+class MaxLenVerifier(VerifierFunction):
+    """
+    Verifier that checks if the length of the prediction is within the maximum allowed length.
+    
+    The ground truth (gt) is interpreted as the maximum length.
+    """
+    def __init__(self) -> None:
+        super().__init__("max_len", weight=0.5)
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, gt: str) -> bool:
+        max_length = float(gt)
+        return len(tokenized_prediction) <= max_length
+
+
+def get_all_verifiers() -> Dict[str, VerifierFunction]:
+    """
+    Auto-generate a dictionary mapping verifier names to their instances.
+    """
+    verifiers: Dict[str, VerifierFunction] = {}
+    for subclass in VerifierFunction.__subclasses__():
+        instance = subclass()
+        verifiers[instance.name] = instance
+    return verifiers
+
+
+# Auto-generate the mappings.
+REWARD_FN_MAPPING: Dict[str, VerifierFunction] = get_all_verifiers()
+
+
+# special case, we use this outside our general verifier loop.
+def soft_format_reward_func(responses: List[str], reward_scale: float = 1.0) -> List[float]:
+    """
+    Check if the completion has a specific format defined by a pattern.
+    
+    Returns a list of rewards scaled by reward_scale.
+    """
     pattern = r".*?</think>\s*<answer>.*?</answer>"
     matches = [re.match(pattern, r, re.DOTALL) for r in responses]
     return [reward_scale if match else 0.0 for match in matches]
-
-
-def verify_max_length_sample(tokenized_response: list[int], max_length: int) -> list[float]:
-    """Reward function that checks if the completion has a specific length."""
-    return 1.0 if len(tokenized_response) <= int(max_length) else 0.0
-
-
-def verify_max_length_sample_cosine(tokenized_response: list[int], max_length: int, tolerance_ratio: float =0.1):
-    """
-    Compute a cosine-shaped reward for a tokenized response length x.
-    
-    The reward peaks at 1.0 when x equals max_length. For differences up to
-    tolerance (tolerance_ratio * max_length), the reward decays as:
-        reward = 0.5 * (cos(pi * diff / tolerance) + 1)
-    For differences greater than tolerance, the reward is 0.
-    
-    Args:
-        x (int or np.array): Tokenized response length(s).
-        max_length (int): Target token length.
-        tolerance_ratio (float): Fraction of max_length defining the non-zero reward band.
-        
-    Returns:
-        np.array: Cosine-shaped reward, between 0 and 1.
-    """
-    max_length = int(max_length)
-    x = len(tokenized_response)
-    tolerance = max_length * tolerance_ratio
-    diff = np.abs(x - max_length)
-    reward = np.where(diff <= tolerance,
-                      0.5 * (np.cos(np.pi * diff / tolerance) + 1),
-                      0.0)
-    return reward
-
-
-def reward_up_to_max(tokenized_response: list[int], max_length: int) -> float:
-    """
-    Reward function that linearly rewards tokenized responses for going up to max_length.
-    
-    - If the tokenized response length is less than or equal to max_length,
-      the reward is the fraction of max_length achieved (i.e. len(tokenized_response) / max_length).
-    - If the response exceeds max_length, the reward is 0.
-    
-    Args:
-        tokenized_response (list[int]): The tokenized output.
-        max_length (int): The target token length.
-        
-    Returns:
-        float: The reward value.
-    """
-    max_length = int(max_length)
-    actual_length = len(tokenized_response)
-    return actual_length / max_length if actual_length <= max_length else 0.0
-
-
-
-# debug code
-if __name__ == "__main__":
-    from datasets import load_dataset
-
-    ds = load_dataset("ai2-adapt-dev/eurus2_ground_truth_with_random_max_length")
-    test_model_output = "<|assistant|>\nThe answer is $\\boxed{3.14}$"
-    for sample in ds["train"]:
-        print(sample)
-        print(verify_max_length_sample(test_model_output, sample["ground_truth"].split("<sep>")[-1]))

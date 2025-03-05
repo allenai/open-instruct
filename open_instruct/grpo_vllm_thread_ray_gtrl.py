@@ -1098,6 +1098,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 scores = []
                 verifiable_counts = []
                 sequence_lengths = []
+                per_func_reward_counts = {}
+                per_func_reward_totals = {}
+                per_func_reward_nonzero_totals = {}
+                per_func_reward_nonzero_counts = {}
                 if self.rank == 0:
                     g_response_token_ids = response_ids_Q.get()
                     DUMMY_PAD_TOKEN = (
@@ -1155,17 +1159,24 @@ class PolicyTrainerRayProcess(RayProcess):
                         # we need to batch the gt to match query.
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
-                        verifiable_reward, verifiable_count = apply_verifiable_reward(
-                            postprocessed_response,
-                            postprocessed_query_response,
-                            tokenizer,
-                            ground_truth,
-                            dataset,
-                            verify_reward=args.verification_reward,
+                        decoded_response = tokenizer.batch_decode(postprocessed_response)
+                        verifiable_reward, per_func_reward = apply_verifiable_reward(
+                            responses=postprocessed_response,
+                            decoded_responses=decoded_response,
+                            ground_truths=ground_truth,
+                            datasets=dataset,
+                            reward_mult=args.verification_reward,
                         )
+                        verifiable_count = (verifiable_reward > 0).float()
                         score += verifiable_reward
-                    else:
-                        verifiable_count = torch.tensor([0.0], device=device).float()
+                        # record reward for each verifier function sep.
+                        for reward_dict in per_func_reward:
+                            for key, value in reward_dict.items():
+                                per_func_reward_totals[key] = per_func_reward_totals.get(key, 0) + value
+                                per_func_reward_counts[key] = per_func_reward_counts.get(key, 0) + 1
+                                if value != 0:
+                                    per_func_reward_nonzero_totals[key] = per_func_reward_nonzero_totals.get(key, 0) + value
+                                    per_func_reward_nonzero_counts[key] = per_func_reward_nonzero_counts.get(key, 0) + 1
 
                     if args.add_r1_style_format_reward:
                         score += format_scores[i : i + args.local_rollout_forward_batch_size]
@@ -1332,6 +1343,12 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics.add("val/stop_token_rate", contain_stop_token.float().mean())
                 if args.add_r1_style_format_reward:
                     local_metrics.add("val/format_scores", format_scores.float().mean())
+                for key in per_func_reward_totals:
+                    avg_reward = per_func_reward_totals[key] / per_func_reward_counts[key]
+                    local_metrics.add(f"objective/{key}_reward", avg_reward)
+                    if per_func_reward_nonzero_counts.get(key, 0) > 0:
+                        avg_nonzero_reward = per_func_reward_nonzero_totals[key] / per_func_reward_nonzero_counts[key]
+                        local_metrics.add(f"objective/{key}_nonzero_reward", avg_nonzero_reward)
 
                 metrics = {
                     "episode": episode,

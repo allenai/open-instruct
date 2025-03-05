@@ -32,12 +32,7 @@ import transformers
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
 from huggingface_hub import HfApi
-from open_instruct.ground_truth_utils import (
-    verify_gsm8k_sample,
-    verify_ifeval_sample,
-    verify_math_sample,
-    reward_up_to_max,
-)
+from open_instruct.ground_truth_utils import REWARD_FN_MAPPING, REWARD_WEIGHTS
 from open_instruct.utils import retry_on_exception
 from rich import print as rprint
 from rich.console import Console
@@ -225,49 +220,47 @@ def get_reward(
 
 
 def apply_verifiable_reward(
-    responses: torch.Tensor,
-    query_responses: torch.Tensor,
-    tokenizer,
+    responses: List[torch.Tensor],
+    decoded_responses: List[str],
     ground_truths: List[str],
-    datasets: List[str],
-    verify_reward: int = 10,
+    datasets: List[Union[str, List[str]]],
+    reward_mult: int = 10,
 ):
-    # decode the responses
-    decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
-    # for now, below is not used. but keeping it around in case we need it.
-    decoded_query_responses = tokenizer.batch_decode(query_responses, skip_special_tokens=True)  # noqa: F841
-    # compare with ground truth.
     rewards = []
-    verify_reward_original = verify_reward
+    per_func_rewards = []
     for tok_prediction, prediction, ground_truth, dataset in zip(responses, decoded_responses, ground_truths, datasets):
         # allow multiple ground truths and datasets for a single response
-        ground_truth_list = ground_truth.split("<sep>")  # special token to sep here
-        dataset_list = dataset.split(",") # comma since this is just list of strings
+        if isinstance(ground_truth, str):
+            ground_truth_list = [ground_truth]
+        else:
+            ground_truth_list = ground_truth
+        if isinstance(dataset, str):
+            dataset_list = [dataset]
+        else:
+            dataset_list = dataset
+        assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
+        # for now, we just assume rewards are additive, rather than more complex functions.
         reward = 0
+        per_func_reward = {}
         for gt, ds in zip(ground_truth_list, dataset_list):
-            verified = False
-            verify_reward = verify_reward_original
-            if ground_truth is None:
-                logger.warning("No ground truth provided for a sample, applying 0 reward.")
+            reward_func = REWARD_FN_MAPPING.get(ds.lower())()
+            reward_weight = reward_func.weight
+            if reward_func is None:
+                logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
                 continue
-            if ds.lower() == "gsm8k":
-                verified = verify_gsm8k_sample(prediction, gt)
-            elif ds.lower() == "math":
-                verified = verify_math_sample(prediction, gt)
-            elif ds.lower() == "ifeval":
-                verified = verify_ifeval_sample(prediction, gt)
-            elif ds.lower() == "max_length":
-                verified_score = reward_up_to_max(tok_prediction, gt)
-                verify_reward = (verify_reward_original / 2) * verified_score
-                verified = True
-            # if verified, give reward
-            if verified:
-                logger.info("Applying ground truth reward 🤗")
-                reward += verify_reward
+            # compare with ground truth.
+            # sometimes we need the tokenized pred.
+            reward = reward_func(
+                tokenized_prediction=tok_prediction,
+                prediction=prediction,
+                label=gt,
+            )
+            logger.info("Applying ground truth reward 🤗")
+            reward += reward_mult * reward * reward_weight
+            per_func_reward[ds] += reward_mult * reward * reward_weight
         rewards.append(reward)
-    rewards_tensors = torch.tensor(rewards, device=query_responses.device)
-    # return rewards and count of times we applied reward
-    return rewards_tensors, (rewards_tensors > 0).sum().float().view(-1)
+        per_func_rewards.append(per_func_reward)
+    return rewards, per_func_rewards
 
 
 def forward(
