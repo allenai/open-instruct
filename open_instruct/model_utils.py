@@ -250,14 +250,14 @@ def apply_verifiable_reward(
                 continue
             # compare with ground truth.
             # sometimes we need the tokenized pred.
-            reward = reward_func(
+            reward_result = reward_func(
                 tokenized_prediction=tok_prediction,
                 prediction=prediction,
                 label=gt,
             )
             logger.info("Applying ground truth reward 🤗")
-            reward += reward_mult * reward * reward_weight
-            per_func_reward[ds] = per_func_reward.get(ds, 0) + (reward_mult * reward * reward_weight)
+            reward += reward_mult * reward_result * reward_weight
+            per_func_reward[ds] = per_func_reward.get(ds, 0) + (reward_mult * reward_result * reward_weight)
         rewards.append(reward)
         per_func_rewards.append(per_func_reward)
     return rewards, per_func_rewards
