@@ -1351,7 +1351,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     avg_reward = per_func_reward_totals[key] / per_func_reward_counts[key]
                     local_metrics.add(f"objective/{key}_reward", avg_reward)
                 for reward_key, nonzero_count in per_func_reward_nonzero_counts.items():
-                    nonzero_rate = per_func_reward_nonzero_totals[reward_key] / nonzero_count if nonzero_count != 0 else 0
+                    nonzero_rate = nonzero_count / queries.shape[0] if queries.shape[0] != 0 else 0
                     local_metrics.add(f"objective/{reward_key}_reward_nonzero_rate", nonzero_rate)
 
                 metrics = {
