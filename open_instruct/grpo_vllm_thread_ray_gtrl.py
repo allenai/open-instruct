@@ -43,6 +43,7 @@ from argparse import Namespace
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
+from collections import defaultdict
 
 from open_instruct.dataset_transformation import (
     TokenizerConfig,
@@ -1098,9 +1099,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 scores = []
                 verifiable_counts = []
                 sequence_lengths = []
-                per_func_reward_counts = {}
-                per_func_reward_totals = {}
-                per_func_reward_nonzero_counts = {}
+                per_func_scores = defaultdict(list)
+                per_func_counts = defaultdict(list)
                 if self.rank == 0:
                     g_response_token_ids = response_ids_Q.get()
                     DUMMY_PAD_TOKEN = (
@@ -1172,9 +1172,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         # record reward for each verifier function sep.
                         for reward_dict in per_func_reward:
                             for key, value in reward_dict.items():
-                                per_func_reward_totals[key] = per_func_reward_totals.get(key, 0) + value
-                                per_func_reward_counts[key] = per_func_reward_counts.get(key, 0) + 1
-
+                                per_func_scores[key].append(value)
+                                per_func_counts[key].append(value > 0)
                     if args.add_r1_style_format_reward:
                         score += format_scores[i : i + args.local_rollout_forward_batch_size]
 
@@ -1192,8 +1191,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 scores = torch.cat(scores, 0)
                 verifiable_counts = torch.cat(verifiable_counts, 0)
                 verifiable_correct_rate = verifiable_counts.sum() / queries.shape[0]
-                for key, value in per_func_reward_nonzero_counts.items():
-                    per_func_reward_nonzero_rates[key] = per_func_reward_nonzero_totals[key] / value
+                per_func_correct_rate = {}
+                for key, count in per_func_counts.items():
+                    per_func_correct_rate[key] = count.sum() / queries.shape[0]
                 del (ref_logprob, score)
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -1342,12 +1342,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics.add("val/stop_token_rate", contain_stop_token.float().mean())
                 if args.add_r1_style_format_reward:
                     local_metrics.add("val/format_scores", format_scores.float().mean())
-                for key in per_func_reward_totals:
-                    avg_reward = per_func_reward_totals[key] / per_func_reward_counts[key]
-                    local_metrics.add(f"objective/{key}_reward", avg_reward)
-                for reward_key, nonzero_count in per_func_reward_counts.items():
-                    nonzero_rate = per_func_reward_counts[reward_key] / queries.shape[0]
-                    local_metrics.add(f"objective/{reward_key}_nonzero_rate", nonzero_rate)
+                for key, scores in per_func_scores.items():
+                    local_metrics.add(f"objective/{key}_reward", torch.tensor(scores).mean())
+                for key, rate in per_func_correct_rate.items():
+                    local_metrics.add(f"objective/{key}_correct_rate", rate)
 
                 metrics = {
                     "episode": episode,
