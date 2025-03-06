@@ -264,35 +264,6 @@ def apply_verifiable_reward(
         per_func_rewards.append(per_func_reward)
     return rewards, per_func_rewards
 
-def apply_verifiable_reward_fast(
-    decoded_responses: List[str],
-    ground_truths: List[str],
-    datasets: List[str],
-    verify_reward: int = 10,
-):
-    # extra util to `apply_verifiable_reward` where responses are already decoded in batch process (relative to being handled at verification time).
-    # compare with ground truth.
-    rewards = []
-    for prediction, ground_truth, dataset in zip(decoded_responses, ground_truths, datasets):
-        verified = False
-        if ground_truth is None:
-            logger.warning("No ground truth provided for a sample, applying 0 reward.")
-            rewards.append(0)
-            continue
-        if dataset.lower() == "gsm8k":
-            verified = verify_gsm8k_sample(prediction, ground_truth)
-        elif dataset.lower() == "math":
-            verified = verify_math_sample(prediction, ground_truth)
-        elif dataset.lower() == "ifeval":
-            verified = verify_ifeval_sample(prediction, ground_truth)
-        # if verified, give reward
-        if verified:
-            # logger.info("Applying ground truth reward 🤗")
-            rewards.append(verify_reward)
-        else:
-            rewards.append(0)
-    return rewards
-
 
 def forward(
     model: torch.nn.Module,

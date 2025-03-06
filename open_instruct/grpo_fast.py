@@ -84,7 +84,7 @@ from open_instruct.dataset_transformation import (
 from open_instruct.ground_truth_utils import soft_format_reward_func
 from open_instruct.model_utils import (
     ModelConfig,
-    apply_verifiable_reward_fast,
+    apply_verifiable_reward,
     disable_dropout_in_model,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
@@ -1570,7 +1570,13 @@ if __name__ == "__main__":
     assert isinstance(args, Args)
     assert isinstance(model_config, ModelConfig)
 
-    def reward_fn(decoded_responses: List[str], ground_truths: List[str], datasets: List[str], finish_reasons: List[str]) -> List[float]:
+    def reward_fn(
+            responses: List[torch.Tensor],
+            decoded_responses: List[str],
+            ground_truths: List[str],
+            datasets: List[str], 
+            finish_reasons: List[str]
+    ) -> List[float]:
         scores = [0] * len(decoded_responses)
         metrics = {}
         if args.apply_r1_style_format_reward:
@@ -1584,7 +1590,8 @@ if __name__ == "__main__":
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
-                verifiable_rewards = apply_verifiable_reward_fast(
+                verifiable_rewards, per_func_rewards = apply_verifiable_reward(
+                    responses,
                     decoded_responses,
                     ground_truths,
                     datasets,
@@ -1597,6 +1604,10 @@ if __name__ == "__main__":
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
+                for key, value in per_func_rewards.items():
+                    np_func_rewards = np.array(value)
+                    metrics[f"objective/verifiable_reward_{key}"] = np_func_rewards.mean()
+                    metrics[f"objective/verifiable_correct_rate_{key}"] = (np_func_rewards > 0.0).mean()
 
         if args.non_stop_penalty:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty"):
