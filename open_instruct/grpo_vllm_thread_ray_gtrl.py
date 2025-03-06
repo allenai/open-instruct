@@ -1193,7 +1193,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 verifiable_correct_rate = verifiable_counts.sum() / queries.shape[0]
                 per_func_correct_rate = {}
                 for key, count in per_func_counts.items():
-                    per_func_correct_rate[key] = count.sum() / queries.shape[0]
+                    per_func_correct_rate[key] = sum(count) / queries.shape[0]
                 del (ref_logprob, score)
                 gc.collect()
                 torch.cuda.empty_cache()
