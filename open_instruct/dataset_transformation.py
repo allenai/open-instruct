@@ -798,11 +798,14 @@ class DatasetTransformationCache:
         config_hash = self.compute_config_hash(dcs, tc)
         repo_name = f"{self.hf_entity}/dataset-mix-cached"
 
+        # NOTE: the cached dataset is always train split
+        DEFAULT_SPLIT_FOR_CACHED_DATASET = "train"
+
         # Check if the revision exists
         if revision_exists(repo_name, config_hash, repo_type="dataset"):
             print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{config_hash}")
             # Use the split from the first dataset config as default
-            return load_dataset(repo_name, split=dcs[0].dataset_split, revision=config_hash)
+            return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=config_hash)
 
         print(f"Cache not found, transforming datasets...")
 
@@ -853,7 +856,7 @@ This is a cached dataset produced by https://github.com/allenai/open-instruct
 
         # NOTE: Load the dataset again to make sure it's downloaded to the HF cache
         print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{config_hash}")
-        return load_dataset(repo_name, split=dc.dataset_split, revision=config_hash)
+        return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=config_hash)
 
 
 def get_cached_dataset(dcs: List[DatasetConfig], tc: TokenizerConfig, hf_entity: Optional[str] = None) -> Dataset:
