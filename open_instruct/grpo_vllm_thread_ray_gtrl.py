@@ -1101,6 +1101,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 sequence_lengths = []
                 per_func_scores = defaultdict(list)
                 per_func_counts = defaultdict(list)
+                per_ds_counts = defaultdict(list)
                 if self.rank == 0:
                     g_response_token_ids = response_ids_Q.get()
                     DUMMY_PAD_TOKEN = (
@@ -1174,6 +1175,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             for key, value in reward_dict.items():
                                 per_func_scores[key].append(value)
                                 per_func_counts[key].append(value > 0)
+                                per_ds_counts[key].append(1)  # just counting the number of samples
                     if args.add_r1_style_format_reward:
                         score += format_scores[i : i + args.local_rollout_forward_batch_size]
 
@@ -1193,7 +1195,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 verifiable_correct_rate = verifiable_counts.sum() / queries.shape[0]
                 per_func_correct_rate = {}
                 for key, count in per_func_counts.items():
-                    per_func_correct_rate[key] = sum(count) / queries.shape[0]
+                    per_func_correct_rate[key] = sum(count) / sum(per_ds_counts[key])
                 del (ref_logprob, score)
                 gc.collect()
                 torch.cuda.empty_cache()
