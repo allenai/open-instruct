@@ -198,7 +198,7 @@ class MaxLenVerifier(VerifierFunction):
     The ground truth (label) is interpreted as the maximum length.
     """
     def __init__(self) -> None:
-        super().__init__("max_len", weight=0.5)
+        super().__init__("max_length", weight=0.5)
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
         max_length = float(label)
@@ -212,7 +212,7 @@ def get_all_verifiers() -> Dict[str, VerifierFunction]:
     verifiers: Dict[str, VerifierFunction] = {}
     for subclass in VerifierFunction.__subclasses__():
         instance = subclass()
-        verifiers[instance.name] = instance
+        verifiers[instance.name.lower()] = instance
     return verifiers
 
 
