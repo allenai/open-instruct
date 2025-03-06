@@ -1167,6 +1167,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             datasets=dataset,
                             reward_mult=args.verification_reward,
                         )
+                        verifiable_reward = np.array(verifiable_reward)
                         verifiable_count = (verifiable_reward > 0).float()
                         score += verifiable_reward
                         # record reward for each verifier function sep.
