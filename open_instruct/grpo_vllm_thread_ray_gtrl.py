@@ -1102,6 +1102,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 per_func_reward_totals = {}
                 per_func_reward_nonzero_totals = {}
                 per_func_reward_nonzero_counts = {}
+                per_func_reward_nonzero_rates = {}
                 if self.rank == 0:
                     g_response_token_ids = response_ids_Q.get()
                     DUMMY_PAD_TOKEN = (
@@ -1196,6 +1197,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 scores = torch.cat(scores, 0)
                 verifiable_counts = torch.cat(verifiable_counts, 0)
                 verifiable_correct_rate = verifiable_counts.sum() / queries.shape[0]
+                for key, value in per_func_reward_nonzero_counts.items():
+                    per_func_reward_nonzero_rates[key] = per_func_reward_nonzero_totals[key] / value
                 del (ref_logprob, score)
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -1347,9 +1350,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 for key in per_func_reward_totals:
                     avg_reward = per_func_reward_totals[key] / per_func_reward_counts[key]
                     local_metrics.add(f"objective/{key}_reward", avg_reward)
-                    if per_func_reward_nonzero_counts.get(key, 0) > 0:
-                        avg_nonzero_reward = per_func_reward_nonzero_totals[key] / per_func_reward_nonzero_counts[key]
-                        local_metrics.add(f"objective/{key}_nonzero_reward", avg_nonzero_reward)
+                    for key in per_func_reward_nonzero_rates:
+                        local_metrics.add(f"objective/{key}_reward_nonzero_rate", per_func_reward_nonzero_rates[key])
 
                 metrics = {
                     "episode": episode,
