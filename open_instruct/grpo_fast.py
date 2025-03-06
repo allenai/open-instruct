@@ -1608,20 +1608,25 @@ if __name__ == "__main__":
         # @nouha: handle arithmetic reward
         if args.apply_arithmetic_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating arithmetic reward"):
+                arithmetic_rewards = []
                 for i in range(len(decoded_responses)):
-                    # extra the string between <answer> and </answer>
+                    # extract the string between <answer> and </answer>
                     decoded_response = decoded_responses[i]
-                    answer_start = decoded_response.find("<answer>")
+                    answer_start = decoded_response.find("<answer>") + len("<answer>")
                     answer_end = decoded_response.find("</answer>")
                     # normalize the number (e.g., 1,000 -> 1000)
                     try:
-                        answer = decoded_response[answer_start:answer_end+len("</answer>")]
-                        answer = answer.replace(",", "")
+                        answer = decoded_response[answer_start:answer_end]
+                        answer = answer.replace(",", "").strip()
                         if float(answer) == float(ground_truths[i]):
+                            arithmetic_rewards.append(args.arithmetic_reward)
                             scores[i] += args.arithmetic_reward
                     except:
                         pass # it's ok if things went wrong
-                    metrics["objective/arithmetic_score"] = np.array(scores).mean()
+                    finally:
+                        arithmetic_rewards.append(0)
+                metrics["objective/arithmetic_score"] = np.array(arithmetic_rewards).mean()
+                metrics["objective/arithmetic_correct_rate"] = (np.array(arithmetic_rewards) > 0.0).mean()
 
         return scores, metrics
 
