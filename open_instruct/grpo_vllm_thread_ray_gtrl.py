@@ -1351,8 +1351,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     avg_reward = per_func_reward_totals[key] / per_func_reward_counts[key]
                     local_metrics.add(f"objective/{key}_reward", avg_reward)
                 for reward_key, nonzero_count in per_func_reward_nonzero_counts.items():
-                    nonzero_rate = nonzero_count / queries.shape[0] if queries.shape[0] != 0 else 0
-                    local_metrics.add(f"objective/{reward_key}_reward_nonzero_rate", nonzero_rate)
+                    total_count = per_func_reward_counts.get(reward_key, 0)
+                    if total_count > 0:  # Only log if the function was actually used in this batch
+                        nonzero_rate = nonzero_count / total_count
+                        local_metrics.add(f"objective/{reward_key}_reward_nonzero_rate", nonzero_rate)
 
                 metrics = {
                     "episode": episode,
