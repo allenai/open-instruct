@@ -21,10 +21,11 @@ logger = logging.getLogger(__name__)
 class VerifierFunction(ABC):
     """
     Abstract base class for verifier functions.
-    
+
     Each verifier is initialized with a name and a weight (default 1.0).
     The __call__ method must be implemented by subclasses.
     """
+
     def __init__(self, name: str, weight: float = 1.0) -> None:
         self.name = name
         self.weight = weight
@@ -42,7 +43,6 @@ class VerifierFunction(ABC):
         Returns:
             int: Reward score. Can be binary (0/1) or continuous.
         """
-        pass
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(name={self.name}, weight={self.weight})"
@@ -50,9 +50,10 @@ class VerifierFunction(ABC):
 
 class GSM8KVerifier(VerifierFunction):
     """
-    Verifier for GSM8K tasks that extracts the last number from the prediction 
+    Verifier for GSM8K tasks that extracts the last number from the prediction
     and compares it (case-insensitively) to the ground truth.
     """
+
     def __init__(self) -> None:
         super().__init__("gsm8k", weight=1.0)
 
@@ -66,10 +67,11 @@ class GSM8KVerifier(VerifierFunction):
 class MathVerifier(VerifierFunction):
     """
     Verifier for math problems.
-    
+
     Attempts several extraction methods (boxed answers, Minerva format,
     last LaTeX answer) and compares the extracted answers to the ground truth.
     """
+
     def __init__(self) -> None:
         super().__init__("math", weight=1.0)
 
@@ -96,7 +98,7 @@ class MathVerifier(VerifierFunction):
         if not all_answers:
             dollars = [m.start() for m in re.finditer(r"\$", raw_answer)]
             if len(dollars) > 1:
-                answer = normalize_final_answer(raw_answer[dollars[-2] + 1: dollars[-1]])
+                answer = normalize_final_answer(raw_answer[dollars[-2] + 1 : dollars[-1]])
                 all_answers.append(answer)
 
         # Fallback to the full output.
@@ -114,6 +116,7 @@ class StrictMathVerifier(VerifierFunction):
     """
     Strict verifier for math problems using only the Minerva format extraction.
     """
+
     def __init__(self) -> None:
         super().__init__("strict_math", weight=1.0)
 
@@ -135,10 +138,11 @@ class IFEvalVerifier(VerifierFunction):
     """
     Verifier for ifeval tasks that delegates evaluation to a function
     specified in the constraint.
-    
+
     The constraint may be a JSON string or a dictionary containing a key
     'func_name' used to lookup the evaluation function.
     """
+
     def __init__(self) -> None:
         super().__init__("ifeval", weight=1.0)
 
@@ -160,12 +164,13 @@ class IFEvalVerifier(VerifierFunction):
 
 def normalize_answer(s: str) -> str:
     """
-    Normalize the answer by lowercasing, removing punctuation, articles, 
+    Normalize the answer by lowercasing, removing punctuation, articles,
     and extra whitespace.
-    
+
     Based on:
     https://github.com/huggingface/evaluate/blob/main/metrics/squad/compute_score.py
     """
+
     def remove_articles(text: str) -> str:
         return re.sub(r"\b(a|an|the)\b", " ", text)
 
@@ -180,9 +185,10 @@ def normalize_answer(s: str) -> str:
 
 class FlanVerifier(VerifierFunction):
     """
-    Verifier for Flan tasks that extracts the answer after "The answer is:" 
+    Verifier for Flan tasks that extracts the answer after "The answer is:"
     and compares it to the ground truth after normalization.
     """
+
     def __init__(self) -> None:
         super().__init__("flan", weight=1.0)
 
@@ -194,9 +200,10 @@ class FlanVerifier(VerifierFunction):
 class MaxLenVerifier(VerifierFunction):
     """
     Verifier that checks if the length of the prediction is within the maximum allowed length.
-    
+
     The ground truth (label) is interpreted as the maximum length.
     """
+
     def __init__(self) -> None:
         super().__init__("max_length", weight=0.5)
 
@@ -225,7 +232,7 @@ REWARD_FN_MAPPING: Dict[str, VerifierFunction] = get_all_verifiers()
 def soft_format_reward_func(responses: List[str], reward_scale: float = 1.0) -> List[float]:
     """
     Check if the completion has a specific format defined by a pattern.
-    
+
     Returns a list of rewards scaled by reward_scale.
     """
     pattern = r".*?</think>\s*<answer>.*?</answer>"

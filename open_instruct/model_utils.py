@@ -228,7 +228,9 @@ def apply_verifiable_reward(
 ):
     rewards = []
     per_func_rewards = []
-    for tok_prediction, prediction, ground_truth, dataset in zip(responses, decoded_responses, ground_truths, datasets):
+    for tok_prediction, prediction, ground_truth, dataset in zip(
+        responses, decoded_responses, ground_truths, datasets
+    ):
         # allow multiple ground truths and datasets for a single response
         if isinstance(ground_truth, str):
             ground_truth_list = [ground_truth]
