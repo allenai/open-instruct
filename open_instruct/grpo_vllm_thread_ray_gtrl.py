@@ -1100,9 +1100,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 sequence_lengths = []
                 per_func_reward_counts = {}
                 per_func_reward_totals = {}
-                per_func_reward_nonzero_totals = {}
                 per_func_reward_nonzero_counts = {}
-                per_func_reward_nonzero_rates = {}
                 if self.rank == 0:
                     g_response_token_ids = response_ids_Q.get()
                     DUMMY_PAD_TOKEN = (
@@ -1176,9 +1174,6 @@ class PolicyTrainerRayProcess(RayProcess):
                             for key, value in reward_dict.items():
                                 per_func_reward_totals[key] = per_func_reward_totals.get(key, 0) + value
                                 per_func_reward_counts[key] = per_func_reward_counts.get(key, 0) + 1
-                                if value != 0:
-                                    per_func_reward_nonzero_totals[key] = per_func_reward_nonzero_totals.get(key, 0) + value
-                                    per_func_reward_nonzero_counts[key] = per_func_reward_nonzero_counts.get(key, 0) + 1
 
                     if args.add_r1_style_format_reward:
                         score += format_scores[i : i + args.local_rollout_forward_batch_size]
@@ -1350,11 +1345,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 for key in per_func_reward_totals:
                     avg_reward = per_func_reward_totals[key] / per_func_reward_counts[key]
                     local_metrics.add(f"objective/{key}_reward", avg_reward)
-                for reward_key, nonzero_count in per_func_reward_nonzero_counts.items():
-                    total_count = per_func_reward_counts.get(reward_key, 0)
-                    if total_count > 0:  # Only log if the function was actually used in this batch
-                        nonzero_rate = nonzero_count / total_count
-                        local_metrics.add(f"objective/{reward_key}_reward_nonzero_rate", nonzero_rate)
+                for reward_key, nonzero_count in per_func_reward_counts.items():
+                    nonzero_rate = per_func_reward_counts[reward_key] / queries.shape[0]
+                    local_metrics.add(f"objective/{reward_key}_nonzero_rate", nonzero_rate)
 
                 metrics = {
                     "episode": episode,
