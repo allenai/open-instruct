@@ -30,7 +30,7 @@ class VerifierFunction(ABC):
         self.weight = weight
 
     @abstractmethod
-    def __call__(self, tokenized_prediction: List[int], prediction: str, gt: Any) -> Any:
+    def __call__(self, tokenized_prediction: List[int], prediction: str, gt: Any) -> float:
         """
         Evaluate the given prediction against the ground truth (or constraint).
 
@@ -40,7 +40,7 @@ class VerifierFunction(ABC):
             gt (Any): The ground truth answer or evaluation constraint.
 
         Returns:
-            Any: Typically a boolean (pass/fail) or a numeric score.
+            int: Reward score. Can be binary (0/1) or continuous.
         """
         pass
 
@@ -56,11 +56,11 @@ class GSM8KVerifier(VerifierFunction):
     def __init__(self) -> None:
         super().__init__("gsm8k", weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, gt: str) -> bool:
+    def __call__(self, tokenized_prediction: List[int], prediction: str, gt: str) -> float:
         response = re.sub(r"(\d),(\d)", r"\1\2", prediction)
         numbers = re.findall(r"[-+]?\d*\.\d+|\d+", response)
         extracted = numbers[-1] if numbers else response
-        return str(extracted).lower() == str(gt).lower()
+        return float(str(extracted).lower() == str(gt).lower())
 
 
 class MathVerifier(VerifierFunction):
@@ -106,8 +106,8 @@ class MathVerifier(VerifierFunction):
         # Compare each candidate answer to the ground truth.
         for answer in all_answers:
             if is_equiv(answer, gt) or hendrycks_is_equiv(answer, gt):
-                return True
-        return False
+                return 1.0
+        return 0.0
 
 
 class StrictMathVerifier(VerifierFunction):
@@ -127,8 +127,8 @@ class StrictMathVerifier(VerifierFunction):
             all_answers.append(normalize_final_answer(prediction))
         for answer in all_answers:
             if is_equiv(answer, gt) or hendrycks_is_equiv(answer, gt):
-                return True
-        return False
+                return 1.0
+        return 0.0
 
 
 class IFEvalVerifier(VerifierFunction):
@@ -148,13 +148,13 @@ class IFEvalVerifier(VerifierFunction):
             constraint = json.loads(constraint)
         if "func_name" not in constraint:
             logger.warning("Constraint missing 'func_name': %s", constraint)
-            return False
+            return 0.0
         func_name = constraint.pop("func_name")
         func = IF_FUNCTIONS_MAP[func_name]
         non_none_args = {k: v for k, v in constraint.items() if v is not None}
         if not constraint:
             return func(prediction)
-        return func(answer, **non_none_args)
+        return float(func(answer, **non_none_args))
 
 
 def normalize_answer(s: str) -> str:
@@ -187,7 +187,7 @@ class FlanVerifier(VerifierFunction):
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, gt: str) -> bool:
         answer_string = prediction.split("The answer is: ")[-1].strip()
-        return normalize_answer(answer_string) == normalize_answer(gt)
+        return float(normalize_answer(answer_string) == normalize_answer(gt))
 
 
 class MaxLenVerifier(VerifierFunction):
@@ -201,7 +201,7 @@ class MaxLenVerifier(VerifierFunction):
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, gt: str) -> bool:
         max_length = float(gt)
-        return len(tokenized_prediction) <= max_length
+        return float(len(tokenized_prediction) <= max_length)
 
 
 def get_all_verifiers() -> Dict[str, VerifierFunction]:
