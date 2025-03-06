@@ -36,7 +36,7 @@ from open_instruct.ground_truth_utils import (
     verify_gsm8k_sample,
     verify_ifeval_sample,
     verify_math_sample,
-)
+    verify_multiplication_sample)
 from open_instruct.utils import retry_on_exception
 from rich import print as rprint
 from rich.console import Console
@@ -264,9 +264,11 @@ def apply_verifiable_reward_fast(
     ground_truths: List[str],
     datasets: List[str],
     verify_reward: int = 10,
+    multiplication_reward: int = 10,  # New reward for multiplication
 ):
-    # extra util to `apply_verifiable_reward` where responses are already decoded in batch process (relative to being handled at verification time).
-    # compare with ground truth.
+    """
+    Applies verifiable rewards for various datasets, including a new reward for multiplication.
+    """
     rewards = []
     for prediction, ground_truth, dataset in zip(decoded_responses, ground_truths, datasets):
         verified = False
@@ -274,18 +276,23 @@ def apply_verifiable_reward_fast(
             logger.warning("No ground truth provided for a sample, applying 0 reward.")
             rewards.append(0)
             continue
-        if dataset.lower() == "gsm8k":
+
+        dataset_lower = dataset.lower()
+        if dataset_lower == "gsm8k":
             verified = verify_gsm8k_sample(prediction, ground_truth)
-        elif dataset.lower() == "math":
+        elif dataset_lower == "math":
             verified = verify_math_sample(prediction, ground_truth)
-        elif dataset.lower() == "ifeval":
+        elif dataset_lower == "ifeval":
             verified = verify_ifeval_sample(prediction, ground_truth)
-        # if verified, give reward
+        elif dataset_lower == "multiplication":  # New case for multiplication
+            verified = verify_multiplication_sample(prediction, ground_truth)
+
+        # Assign reward if verified
         if verified:
-            # logger.info("Applying ground truth reward 🤗")
-            rewards.append(verify_reward)
+            rewards.append(multiplication_reward if dataset_lower == "multiplication" else verify_reward)
         else:
             rewards.append(0)
+
     return rewards
 
 

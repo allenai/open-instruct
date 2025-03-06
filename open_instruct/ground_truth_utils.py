@@ -119,6 +119,23 @@ def verify_ifeval_sample(model_output, constraint):
     return func(answer, **non_none_args)
 
 
+def verify_multiplication_sample(prediction: str, ground_truth: str) -> bool:
+    """
+    Verifies if the multiplication response is correct.
+    Extracts the answer from the response and compares it with the ground truth.
+    """
+    try:
+        # Extract the string between <answer> and </answer>
+        answer_start = prediction.find("<answer>") + len("<answer>")
+        answer_end = prediction.find("</answer>")
+        extracted_answer = prediction[answer_start:answer_end].replace(",", "").strip()
+
+        # Compare numerical values
+        return float(extracted_answer) == float(ground_truth)
+    except (ValueError, IndexError):
+        return False  # If parsing fails, consider it incorrect
+
+
 def normalize_answer(s):
     """
     Lower text and remove punctuation, articles and extra whitespace.

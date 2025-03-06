@@ -1570,17 +1570,10 @@ if __name__ == "__main__":
     assert isinstance(args, Args)
     assert isinstance(model_config, ModelConfig)
 
+
     def reward_fn(decoded_responses: List[str], ground_truths: List[str], datasets: List[str], finish_reasons: List[str]) -> List[float]:
         scores = [0] * len(decoded_responses)
         metrics = {}
-        if args.apply_r1_style_format_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
-                format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
-                if len(format_scores) != len(scores):
-                    raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
-                for i in range(len(format_scores)):
-                    scores[i] = format_scores[i] + scores[i]
-                metrics["val/format_scores"] = np.array(format_scores).mean()
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
@@ -1589,45 +1582,34 @@ if __name__ == "__main__":
                     ground_truths,
                     datasets,
                     verify_reward=args.verification_reward,
+                    multiplication_reward=args.arithmetic_reward,  # Use the same reward as arithmetic
                 )
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
+
                 for i in range(len(verifiable_rewards)):
-                    scores[i] = verifiable_rewards[i] + scores[i]
+                    scores[i] += verifiable_rewards[i]
+
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
 
+        if args.apply_r1_style_format_reward:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
+                format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
+                if len(format_scores) != len(scores):
+                    raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
+                for i in range(len(format_scores)):
+                    scores[i] += format_scores[i]
+                metrics["val/format_scores"] = np.array(format_scores).mean()
+
         if args.non_stop_penalty:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty"):
-                assert len(finish_reasons) == len(scores)
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🦖 Applying non-stop penalty"):
                 for i in range(len(finish_reasons)):
                     if finish_reasons[i] != "stop":
                         scores[i] = args.non_stop_penalty_value
 
-        # @nouha: handle arithmetic reward
-        if args.apply_arithmetic_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating arithmetic reward"):
-                arithmetic_rewards = []
-                for i in range(len(decoded_responses)):
-                    # extract the string between <answer> and </answer>
-                    decoded_response = decoded_responses[i]
-                    answer_start = decoded_response.find("<answer>") + len("<answer>")
-                    answer_end = decoded_response.find("</answer>")
-                    # normalize the number (e.g., 1,000 -> 1000)
-                    try:
-                        answer = decoded_response[answer_start:answer_end]
-                        answer = answer.replace(",", "").strip()
-                        if float(answer) == float(ground_truths[i]):
-                            arithmetic_rewards.append(args.arithmetic_reward)
-                            scores[i] += args.arithmetic_reward
-                    except:
-                        pass # it's ok if things went wrong
-                    finally:
-                        arithmetic_rewards.append(0)
-                metrics["objective/arithmetic_score"] = np.array(arithmetic_rewards).mean()
-                metrics["objective/arithmetic_correct_rate"] = (np.array(arithmetic_rewards) > 0.0).mean()
+    return scores, metrics
 
-        return scores, metrics
 
     main(args, model_config, reward_fn)
