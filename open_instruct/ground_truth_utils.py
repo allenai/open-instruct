@@ -30,14 +30,14 @@ class VerifierFunction(ABC):
         self.weight = weight
 
     @abstractmethod
-    def __call__(self, tokenized_prediction: List[int], prediction: str, gt: Any) -> float:
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: Any) -> float:
         """
         Evaluate the given prediction against the ground truth (or constraint).
 
         Args:
             tokenized_prediction (List[int]): Tokenized representation (unused by most verifiers).
             prediction (str): The model output.
-            gt (Any): The ground truth answer or evaluation constraint.
+            label (Any): The ground truth answer or evaluation constraint.
 
         Returns:
             int: Reward score. Can be binary (0/1) or continuous.
@@ -56,11 +56,11 @@ class GSM8KVerifier(VerifierFunction):
     def __init__(self) -> None:
         super().__init__("gsm8k", weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, gt: str) -> float:
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> float:
         response = re.sub(r"(\d),(\d)", r"\1\2", prediction)
         numbers = re.findall(r"[-+]?\d*\.\d+|\d+", response)
         extracted = numbers[-1] if numbers else response
-        return float(str(extracted).lower() == str(gt).lower())
+        return float(str(extracted).lower() == str(label).lower())
 
 
 class MathVerifier(VerifierFunction):
@@ -73,7 +73,7 @@ class MathVerifier(VerifierFunction):
     def __init__(self) -> None:
         super().__init__("math", weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, gt: str) -> bool:
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
         raw_answer = prediction
         all_answers = []
 
@@ -105,7 +105,7 @@ class MathVerifier(VerifierFunction):
 
         # Compare each candidate answer to the ground truth.
         for answer in all_answers:
-            if is_equiv(answer, gt) or hendrycks_is_equiv(answer, gt):
+            if is_equiv(answer, label) or hendrycks_is_equiv(answer, label):
                 return 1.0
         return 0.0
 
@@ -117,7 +117,7 @@ class StrictMathVerifier(VerifierFunction):
     def __init__(self) -> None:
         super().__init__("strict_math", weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, gt: str) -> bool:
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
         raw_answer = prediction
         all_answers = []
         minerva_answer = normalize_final_answer(get_unnormalized_answer(raw_answer))
@@ -126,7 +126,7 @@ class StrictMathVerifier(VerifierFunction):
         if not all_answers:
             all_answers.append(normalize_final_answer(prediction))
         for answer in all_answers:
-            if is_equiv(answer, gt) or hendrycks_is_equiv(answer, gt):
+            if is_equiv(answer, label) or hendrycks_is_equiv(answer, label):
                 return 1.0
         return 0.0
 
@@ -142,7 +142,8 @@ class IFEvalVerifier(VerifierFunction):
     def __init__(self) -> None:
         super().__init__("ifeval", weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, constraint: Union[str, Dict]) -> bool:
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict]) -> bool:
+        constraint = label
         answer = prediction.split("<|assistant|>\n")[-1].strip()
         if isinstance(constraint, str):
             constraint = json.loads(constraint)
@@ -185,22 +186,22 @@ class FlanVerifier(VerifierFunction):
     def __init__(self) -> None:
         super().__init__("flan", weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, gt: str) -> bool:
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
         answer_string = prediction.split("The answer is: ")[-1].strip()
-        return float(normalize_answer(answer_string) == normalize_answer(gt))
+        return float(normalize_answer(answer_string) == normalize_answer(label))
 
 
 class MaxLenVerifier(VerifierFunction):
     """
     Verifier that checks if the length of the prediction is within the maximum allowed length.
     
-    The ground truth (gt) is interpreted as the maximum length.
+    The ground truth (label) is interpreted as the maximum length.
     """
     def __init__(self) -> None:
         super().__init__("max_len", weight=0.5)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, gt: str) -> bool:
-        max_length = float(gt)
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
+        max_length = float(label)
         return float(len(tokenized_prediction) <= max_length)
 
 
