@@ -1167,7 +1167,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             datasets=dataset,
                             reward_mult=args.verification_reward,
                         )
-                        verifiable_reward = np.array(verifiable_reward)
+                        verifiable_reward = torch.tensor(verifiable_reward, device=score.device)
                         verifiable_count = (verifiable_reward > 0)
                         score += verifiable_reward
                         # record reward for each verifier function sep.
