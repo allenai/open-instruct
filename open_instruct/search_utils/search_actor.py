@@ -20,38 +20,8 @@ from dataclasses import dataclass
 from typing import List, Dict, Tuple, Any
 
 from open_instruct.vllm_utils2 import WorkerWrap
+from open_instruct.search_utils.semantic_scholar_search_api import semantic_scholar_search_for_query
 
-
-def get_snippets_for_query(query: str) -> List[str]:
-    """
-    Retrieves the first snippet from a web search API for the given query.
-    Raises a ValueError if the API key is missing.
-    """
-    api_key = os.environ.get("YOUCOM_API_KEY")
-    if not api_key:
-        raise ValueError("Missing YOUCOM_API_KEY environment variable.")
-    
-    headers = {"X-API-Key": api_key}
-    params = {"query": query, "num_web_results": 1}
-    try:
-        response = requests.get(
-            "https://api.ydc-index.io/search",
-            params=params,
-            headers=headers,
-            timeout=10  # seconds
-        )
-        response.raise_for_status()
-        data = response.json()
-    except requests.RequestException as e:
-        # Log the error as needed; returning empty list here
-        return []
-    
-    snippets = []
-    for hit in data.get("hits", []):
-        for snippet in hit.get("snippets", []):
-            snippets.append(snippet)
-    # Return only the first snippet if available
-    return snippets[:1]
 
 
 def process_vllm_output_for_search(text: str) -> str:
@@ -64,11 +34,11 @@ def process_vllm_output_for_search(text: str) -> str:
         return ""
     
     query = query_match.group(1).strip()
-    snippets = get_snippets_for_query(query)
-    if not snippets:
-        return ""
+    snippets_str = semantic_scholar_search_for_query(query)
+    if not snippets_str:
+        return "<snippet>Nothing relevant was found.</snippet>"
     
-    return f"<snippet>{snippets[0]}</snippet>"
+    return f"<snippet>{snippets_str}</snippet>"
 
 
 @dataclass
@@ -129,7 +99,7 @@ class LLMSearchRayActor:
         prompt_token_ids: List[List[int]],
         use_tqdm: bool,
     ) -> List[List[GenerationOutput]]:
-        max_searches = 5
+        max_searches = 3
 
         # if num samples > 1, remove from sampling params and instead duplicate prompts.
         original_n = sampling_params.n
@@ -149,7 +119,7 @@ class LLMSearchRayActor:
         finished_queries: Dict[int, str] = {}
 
         # Iteratively update queries with snippet responses.
-        for _ in range(max_searches):
+        for depth_id in range(max_searches):
             if not queries:
                 break
 
@@ -166,6 +136,16 @@ class LLMSearchRayActor:
                 if snippet_response:
                     # Continue iterating if a snippet was appended.
                     updated_queries.append((idx, updated_text))
+                    # If it reached the maximum depth, force it to generate the answer.
+                    if depth_id == max_searches - 1:
+                        updated_text += "You have reached the maximum number times of search. Now generate your answer between tags <answer>{answer}</answer>."
+                        output = self.llm.generate(
+                            sampling_params=sampling_params, prompts=[updated_text], use_tqdm=use_tqdm
+                        )[0]
+                        output_text = output.outputs[0].text
+                        updated_text += output_text
+                        # Mark this query as finished as it has reached the maximum number of searches.
+                        finished_queries[idx] = updated_text
                 else:
                     # Mark this query as finished if no snippet was added.
                     finished_queries[idx] = updated_text
@@ -191,6 +171,7 @@ class LLMSearchRayActor:
                     for tokens, text in zip(encoded_outputs[start:stop], final_texts[start:stop])
                 ])
             )
+        print("🤓 (Debugging) Final actor output: ", final_texts[0])
         return generation_outputs
     
     def init_process_group(self, master_address, master_port, rank_offset, world_size, group_name, backend):
