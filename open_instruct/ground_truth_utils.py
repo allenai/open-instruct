@@ -202,7 +202,8 @@ class MaxLenVerifier(VerifierFunction):
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
         max_length = float(label)
-        return float(len(tokenized_prediction) <= max_length)
+        # linear func that hits 1 at max_length and 0 after
+        return max(0, 1 - (len(prediction) / max_length))
 
 
 def get_all_verifiers() -> Dict[str, VerifierFunction]:
