@@ -1632,11 +1632,18 @@ if __name__ == "__main__":
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
+                # reshuffle around per_func rewards
+                per_func_lists = {}
                 for reward_dict in per_func_rewards:
                     for key, value in reward_dict.items():
-                        np_func_rewards = np.array(value)
-                        metrics[f"objective/verifiable_reward_{key}"] = np_func_rewards.mean()
-                        metrics[f"objective/verifiable_correct_rate_{key}"] = (np_func_rewards > 0.0).mean()
+                        if key not in per_func_lists:
+                            per_func_lists[key] = []
+                        per_func_lists[key].append(value)
+                # log per function rewards
+                for key, value in per_func_lists.items():
+                    np_value = np.array(value)
+                    metrics[f"objective/{key}_reward"] = np_value.mean()
+                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:

@@ -262,8 +262,6 @@ def apply_verifiable_reward(
             per_func_reward[ds] = per_func_reward.get(ds, 0) + (reward_mult * reward_result * reward_weight)
         rewards.append(reward)
         per_func_rewards.append(per_func_reward)
-    # collapse per_func_rewards into a single dict
-    per_func_rewards = {k: sum(d.get(k, 0) for d in per_func_rewards) for k in set().union(*per_func_rewards)}
     return rewards, per_func_rewards
 
 
