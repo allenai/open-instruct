@@ -1148,9 +1148,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     accelerator.process_index * queries.shape[0] : (accelerator.process_index + 1) * queries.shape[0]
                 ]
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
+                decoded_response = tokenizer.batch_decode(local_vllm_responses)
 
                 if args.add_r1_style_format_reward:
-                    decoded_response = tokenizer.batch_decode(local_vllm_responses)
                     format_scores = torch.tensor(
                         soft_format_reward_func(decoded_response, args.r1_style_format_reward), device=device
                     )
@@ -1190,12 +1190,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
                         verifiable_reward, per_func_reward = apply_verifiable_reward(
-                            postprocessed_response,
-                            postprocessed_query_response,
-                            tokenizer,
-                            ground_truth,
-                            dataset,
-                            verify_reward=args.verification_reward,
+                            responses=postprocessed_response,
+                            decoded_responses=decoded_response,
+                            ground_truths=ground_truth,
+                            datasets=dataset,
+                            reward_mult=args.verification_reward,
                         )
                         verifiable_reward = torch.tensor(verifiable_reward, device=score.device)
                         verifiable_count = verifiable_reward > 0
