@@ -210,9 +210,7 @@ def is_equiv(x1: str, x2: str) -> bool:
                 else:
                     return False
             except ValueError:
-                eval_logger.debug(
-                    f"Had some trouble simplifying when comparing {x1} and {x2}"
-                )
+                eval_logger.debug(f"Had some trouble simplifying when comparing {x1} and {x2}")
     except TimeoutError:
         eval_logger.debug(f"Timed out comparing {x1} and {x2}")
         return False
