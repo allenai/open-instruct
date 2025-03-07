@@ -1633,11 +1633,9 @@ if __name__ == "__main__":
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
                 # reshuffle around per_func rewards
-                per_func_lists = {}
+                per_func_lists = defaultdict(list)
                 for reward_dict in per_func_rewards:
                     for key, value in reward_dict.items():
-                        if key not in per_func_lists:
-                            per_func_lists[key] = []
                         per_func_lists[key].append(value)
                 # log per function rewards
                 for key, value in per_func_lists.items():
