@@ -1120,7 +1120,7 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards"):
-            scores, reward_metrics = reward_fn(decoded_responses, ground_truths, datasets, finish_reasons)
+            scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons)
 
         with Timer("🎆 [Data Preparation Thread] Calculating advantages"):
             # Calculate advantages
