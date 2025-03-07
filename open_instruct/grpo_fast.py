@@ -35,6 +35,17 @@ import shutil
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 # isort: on
 
+# import debugpy
+# import ray
+
+# # Attach the debugger before Ray starts
+# debugpy.listen(("0.0.0.0", 5678))  # Listen on port 5678
+# print("Waiting for debugger to attach...")
+# debugpy.wait_for_client()  # Blocks execution until you attach from VS Code
+
+# ray.init()
+
+
 
 import logging
 import os
@@ -1112,6 +1123,7 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
         
         with Timer("💰 [Data Preparation Thread] Calculating rewards"):
+            breakpoint()
             scores, reward_metrics = reward_fn(decoded_responses, ground_truths, datasets, finish_reasons)
 
         with Timer("🎆 [Data Preparation Thread] Calculating advantages"):
@@ -1606,25 +1618,43 @@ if __name__ == "__main__":
                         scores[i] = args.non_stop_penalty_value
 
         # @nouha: handle arithmetic reward
+        import re
         if args.apply_arithmetic_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating arithmetic reward"):
                 arithmetic_rewards = []
+                extraced_numbers = []
                 for i in range(len(decoded_responses)):
                     # extract the string between <answer> and </answer>
                     decoded_response = decoded_responses[i]
-                    answer_start = decoded_response.find("<answer>") + len("<answer>")
-                    answer_end = decoded_response.find("</answer>")
-                    # normalize the number (e.g., 1,000 -> 1000)
-                    try:
-                        answer = decoded_response[answer_start:answer_end]
-                        answer = answer.replace(",", "").strip()
-                        if float(answer) == float(ground_truths[i]):
-                            arithmetic_rewards.append(args.arithmetic_reward)
-                            scores[i] += args.arithmetic_reward
+
+                    try: 
+                        # Extract the string between <answer> and </answer> using regex
+                        match = re.search(r"<answer>\s*(.*?)\s*</answer>", decoded_response)
+                        if match:
+                            answer_text = match.group(1).replace(",", "").strip()
+                            # Extract all numbers from the extracted text
+                            numbers = re.findall(r"\d+", answer_text)
+                            if numbers:
+                                extracted_number = int(numbers[-1])  # Use only the last extracted number
+                                extraced_numbers.append(extracted_number)
+                                if extracted_number == int(ground_truths[i]):
+                                    arithmetic_rewards.append(args.arithmetic_reward)
+                                    scores[i] += args.arithmetic_reward
+                                else:
+                                    arithmetic_rewards.append(0)
+                                    extraced_numbers.append(None)
+                            else:
+                                arithmetic_rewards.append(0)
+                                extraced_numbers.append(None)
+                        else:
+                            arithmetic_rewards.append(0)
+                            extraced_numbers.append(None)
                     except:
-                        pass # it's ok if things went wrong
-                    finally:
                         arithmetic_rewards.append(0)
+                        extraced_numbers.append(None)
+                        pass # it's ok if things went wrong
+
+                breakpoint()
                 metrics["objective/arithmetic_score"] = np.array(arithmetic_rewards).mean()
                 metrics["objective/arithmetic_correct_rate"] = (np.array(arithmetic_rewards) > 0.0).mean()
 
