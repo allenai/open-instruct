@@ -36,7 +36,7 @@ The main things we are looking for are:
     5 minutes to tokenize the dataset. This translates to 32 * 5 * 8 = 1280 minutes = 21 hours of
     wasted H100 time.
     * Sometimes we also launch on places that don't have a shared cache (e.g., GCP), so we would
-    download individual datasets 32 times, and wait for concatenation and tokenization (actually 
+    download individual datasets 32 times, and wait for concatenation and tokenization (actually
     twice because the `with accelerator.main_process_first()` function assumes a shared cache)
 """
 

@@ -32,11 +32,7 @@ import transformers
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
 from huggingface_hub import HfApi
-from open_instruct.ground_truth_utils import (
-    verify_gsm8k_sample,
-    verify_ifeval_sample,
-    verify_math_sample,
-)
+from open_instruct.ground_truth_utils import REWARD_FN_MAPPING
 from open_instruct.utils import retry_on_exception
 from rich import print as rprint
 from rich.console import Console
@@ -224,69 +220,49 @@ def get_reward(
 
 
 def apply_verifiable_reward(
-    responses: torch.Tensor,
-    query_responses: torch.Tensor,
-    tokenizer,
-    ground_truths: List[str],
-    datasets: List[str],
-    verify_reward: int = 10,
-):
-    # decode the responses
-    decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
-    # for now, below is not used. but keeping it around in case we need it.
-    decoded_query_responses = tokenizer.batch_decode(query_responses, skip_special_tokens=True)  # noqa: F841
-    # compare with ground truth.
-    rewards = []
-    for prediction, ground_truth, dataset in zip(decoded_responses, ground_truths, datasets):
-        verified = False
-        if ground_truth is None:
-            logger.warning("No ground truth provided for a sample, applying 0 reward.")
-            rewards.append(0)
-            continue
-        if dataset.lower() == "gsm8k":
-            verified = verify_gsm8k_sample(prediction, ground_truth)
-        elif dataset.lower() == "math":
-            verified = verify_math_sample(prediction, ground_truth)
-        elif dataset.lower() == "ifeval":
-            verified = verify_ifeval_sample(prediction, ground_truth)
-        # if verified, give reward
-        if verified:
-            logger.info("Applying ground truth reward 🤗")
-            rewards.append(verify_reward)
-        else:
-            rewards.append(0)
-    rewards_tensors = torch.tensor(rewards, device=query_responses.device)
-    # return rewards and count of times we applied reward
-    return rewards_tensors, (rewards_tensors > 0).sum().float().view(-1)
-
-def apply_verifiable_reward_fast(
+    responses: List[torch.Tensor],
     decoded_responses: List[str],
     ground_truths: List[str],
-    datasets: List[str],
-    verify_reward: int = 10,
+    datasets: List[Union[str, List[str]]],
+    reward_mult: int = 10,
 ):
-    # extra util to `apply_verifiable_reward` where responses are already decoded in batch process (relative to being handled at verification time).
-    # compare with ground truth.
     rewards = []
-    for prediction, ground_truth, dataset in zip(decoded_responses, ground_truths, datasets):
-        verified = False
-        if ground_truth is None:
-            logger.warning("No ground truth provided for a sample, applying 0 reward.")
-            rewards.append(0)
-            continue
-        if dataset.lower() == "gsm8k":
-            verified = verify_gsm8k_sample(prediction, ground_truth)
-        elif dataset.lower() == "math":
-            verified = verify_math_sample(prediction, ground_truth)
-        elif dataset.lower() == "ifeval":
-            verified = verify_ifeval_sample(prediction, ground_truth)
-        # if verified, give reward
-        if verified:
-            # logger.info("Applying ground truth reward 🤗")
-            rewards.append(verify_reward)
+    per_func_rewards = []
+    for tok_prediction, prediction, ground_truth, dataset in zip(
+        responses, decoded_responses, ground_truths, datasets
+    ):
+        # allow multiple ground truths and datasets for a single response
+        if isinstance(ground_truth, str):
+            ground_truth_list = [ground_truth]
         else:
-            rewards.append(0)
-    return rewards
+            ground_truth_list = ground_truth
+        if isinstance(dataset, str):
+            dataset_list = [dataset]
+        else:
+            dataset_list = dataset
+        assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
+        # for now, we just assume rewards are additive, rather than more complex functions.
+        reward = 0
+        per_func_reward = {}
+        for gt, ds in zip(ground_truth_list, dataset_list):
+            reward_func = REWARD_FN_MAPPING.get(ds.lower())
+            reward_weight = reward_func.weight
+            if reward_func is None:
+                logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
+                continue
+            # compare with ground truth.
+            # sometimes we need the tokenized pred.
+            reward_result = reward_func(
+                tokenized_prediction=tok_prediction,
+                prediction=prediction,
+                label=gt,
+            )
+            logger.info("Applying ground truth reward 🤗")
+            reward += reward_mult * reward_result * reward_weight
+            per_func_reward[ds] = per_func_reward.get(ds, 0) + (reward_mult * reward_result * reward_weight)
+        rewards.append(reward)
+        per_func_rewards.append(per_func_reward)
+    return rewards, per_func_rewards
 
 
 def forward(

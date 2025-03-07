@@ -84,7 +84,7 @@ from open_instruct.dataset_transformation import (
 from open_instruct.ground_truth_utils import soft_format_reward_func
 from open_instruct.model_utils import (
     ModelConfig,
-    apply_verifiable_reward_fast,
+    apply_verifiable_reward,
     disable_dropout_in_model,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
@@ -284,15 +284,21 @@ class Args:
         if self.single_gpu_mode:
             self.vllm_gpu_memory_utilization = 0.3
         assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
-        assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, "At least one reward must be applied!"
-        assert self.pack_length >= self.max_prompt_token_length + self.response_length, "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+        assert (
+            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
+        ), "At least one reward must be applied!"
+        assert (
+            self.pack_length >= self.max_prompt_token_length + self.response_length
+        ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
 
 
 def calculate_runtime_args(args: Args):
     """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.world_size = sum(args.num_learners_per_node)
-    args.num_training_steps = args.total_episodes // (args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout)
+    args.num_training_steps = args.total_episodes // (
+        args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+    )
     args.eval_freq = max(1, args.num_training_steps // args.num_evals)
     args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
 
@@ -425,6 +431,7 @@ def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[bool] =
 class MetricsTracker:
     """A simple class to prellocate all metrics in an array
     so we can do only one allreduce operation to get the metrics mean"""
+
     def __init__(self, max_metrics: int = 32, device: torch.device = torch.device("cuda")):
         self.metrics = torch.zeros(max_metrics, device=device)
         self.names2idx = {}
@@ -1026,6 +1033,7 @@ class ModelGroup:
             ).remote(world_size, rank, 0, master_addr, master_port)
             self.models.append(worker_policy)
 
+
 def vllm_generate_thread(
     vllm_engines: List[ray.actor.ActorHandle],
     generation_config: SamplingParams,
@@ -1050,7 +1058,7 @@ def vllm_generate_thread(
         # Gather all responses
         all_outputs = ray.get(futures)
         response_ids = []
-        finish_reasons = [] # either "stop" or "length"
+        finish_reasons = []  # either "stop" or "length"
         for outputs in all_outputs:
             response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
             finish_reasons.extend([out.finish_reason for output in outputs for out in output.outputs])
@@ -1110,9 +1118,9 @@ def data_preparation_thread(
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
-        
+
         with Timer("💰 [Data Preparation Thread] Calculating rewards"):
-            scores, reward_metrics = reward_fn(decoded_responses, ground_truths, datasets, finish_reasons)
+            scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons)
 
         with Timer("🎆 [Data Preparation Thread] Calculating advantages"):
             # Calculate advantages
@@ -1124,7 +1132,9 @@ def data_preparation_thread(
                 global_mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0
             )
             global_std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            global_std_grouped_rewards = np.repeat(global_std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
+            global_std_grouped_rewards = np.repeat(
+                global_std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0
+            )
             global_advantages = (scores - global_mean_grouped_rewards) / (global_std_grouped_rewards + 1e-8)
             global_advantages_lst = global_advantages.tolist()
             packed_advantages = []
@@ -1159,7 +1169,9 @@ def data_preparation_thread(
                 for j in range(0, len(per_device_packed_query_responses), args.per_device_train_batch_size):
                     micro_range = b_inds[j : j + args.per_device_train_batch_size]
                     collated_query_responses.append(
-                        collate_fn([per_device_packed_query_responses[idx] for idx in micro_range], tokenizer.pad_token_id)
+                        collate_fn(
+                            [per_device_packed_query_responses[idx] for idx in micro_range], tokenizer.pad_token_id
+                        )
                     )
                     collated_attention_masks.append(
                         collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0)
@@ -1203,7 +1215,7 @@ def data_preparation_thread(
                 "ground_truths": ground_truths,
                 "datasets": datasets,
                 "training_step": training_step,
-                **reward_metrics
+                **reward_metrics,
             }
             os.makedirs(args.output_dir, exist_ok=True)
             with open(f"{args.output_dir}/traces_{args.run_name}.jsonl", "a") as f:
@@ -1417,7 +1429,9 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
             print("-" * 100)
-            episode += args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout  # each sample is an episode
+            episode += (
+                args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+            )  # each sample is an episode
 
             # ------------------------------------------------------------------------------------------------
             # Optionally evaluate the model
@@ -1518,14 +1532,28 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
                         ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
                         if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                             leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
-                            launch_ai2_evals_on_weka(step_dir, leaderboard_name, args.oe_eval_max_length, wandb_url, training_step, args.oe_eval_tasks)
+                            launch_ai2_evals_on_weka(
+                                step_dir,
+                                leaderboard_name,
+                                args.oe_eval_max_length,
+                                wandb_url,
+                                training_step,
+                                args.oe_eval_tasks,
+                            )
 
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):
             ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
             if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                 leaderboard_name = args.hf_repo_revision
-                launch_ai2_evals_on_weka(args.output_dir, leaderboard_name, args.oe_eval_max_length, wandb_url, training_step, args.oe_eval_tasks)
+                launch_ai2_evals_on_weka(
+                    args.output_dir,
+                    leaderboard_name,
+                    args.oe_eval_max_length,
+                    wandb_url,
+                    training_step,
+                    args.oe_eval_tasks,
+                )
 
     except Exception as e:
         print(f"Training error occurred: {str(e)}")
@@ -1570,7 +1598,13 @@ if __name__ == "__main__":
     assert isinstance(args, Args)
     assert isinstance(model_config, ModelConfig)
 
-    def reward_fn(decoded_responses: List[str], ground_truths: List[str], datasets: List[str], finish_reasons: List[str]) -> List[float]:
+    def reward_fn(
+        responses: List[torch.Tensor],
+        decoded_responses: List[str],
+        ground_truths: List[str],
+        datasets: List[str],
+        finish_reasons: List[str],
+    ) -> List[float]:
         scores = [0] * len(decoded_responses)
         metrics = {}
         if args.apply_r1_style_format_reward:
@@ -1584,11 +1618,12 @@ if __name__ == "__main__":
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
-                verifiable_rewards = apply_verifiable_reward_fast(
+                verifiable_rewards, per_func_rewards = apply_verifiable_reward(
+                    responses,
                     decoded_responses,
                     ground_truths,
                     datasets,
-                    verify_reward=args.verification_reward,
+                    reward_mult=args.verification_reward,
                 )
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
@@ -1597,7 +1632,18 @@ if __name__ == "__main__":
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
+                # reshuffle around per_func rewards
+                per_func_lists = defaultdict(list)
+                for reward_dict in per_func_rewards:
+                    for key, value in reward_dict.items():
+                        per_func_lists[key].append(value)
+                # log per function rewards
+                for key, value in per_func_lists.items():
+                    np_value = np.array(value)
+                    metrics[f"objective/{key}_reward"] = np_value.mean()
+                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
 
+        # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty"):
                 assert len(finish_reasons) == len(scores)
@@ -1621,10 +1667,9 @@ if __name__ == "__main__":
                         if float(answer) == float(ground_truths[i]):
                             arithmetic_rewards.append(args.arithmetic_reward)
                             scores[i] += args.arithmetic_reward
-                    except:
-                        pass # it's ok if things went wrong
-                    finally:
+                    except:  # noqa
                         arithmetic_rewards.append(0)
+                        pass  # it's ok if things went wrong                        
                 metrics["objective/arithmetic_score"] = np.array(arithmetic_rewards).mean()
                 metrics["objective/arithmetic_correct_rate"] = (np.array(arithmetic_rewards) > 0.0).mean()
 
