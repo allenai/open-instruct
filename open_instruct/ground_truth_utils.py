@@ -1,3 +1,10 @@
+"""
+Collection of 'ground truth rewards' for different datasets/tasks.
+Used to give feedback to the model based on the ground truth answer.
+Add new verifiers by subclassing VerifierFunction and implementing the __call__ method.
+They are then automatically added to the REWARD_FN_MAPPING.
+"""
+
 from abc import ABC, abstractmethod
 from typing import List, Union, Any, Dict
 import json
