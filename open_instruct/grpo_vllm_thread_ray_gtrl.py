@@ -1478,6 +1478,8 @@ python scripts/submit_eval_jobs.py \
     --run_id {wandb_url} \
     --oe_eval_max_length {args.eval_max_length} \
     --skip_oi_evals"""
+            if args.stop_strings is not None:
+                command += f" --stop_strings {','.join(args.stop_strings)}"
             if training_step is not None:
                 command += f" --step {training_step}"
             if args.oe_eval_tasks is not None:
