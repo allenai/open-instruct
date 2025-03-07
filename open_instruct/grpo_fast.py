@@ -1623,7 +1623,7 @@ if __name__ == "__main__":
                     decoded_responses,
                     ground_truths,
                     datasets,
-                    verify_reward=args.verification_reward,
+                    reward_mult=args.verification_reward,
                 )
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
