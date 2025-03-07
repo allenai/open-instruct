@@ -1099,9 +1099,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 scores = []
                 verifiable_counts = []
                 sequence_lengths = []
-                per_func_scores = defaultdict(list)
-                per_func_counts = defaultdict(list)
-                per_ds_counts = defaultdict(list)
+                per_func_rewards = defaultdict(list)
                 if self.rank == 0:
                     g_response_token_ids = response_ids_Q.get()
                     DUMMY_PAD_TOKEN = (
@@ -1170,12 +1168,10 @@ class PolicyTrainerRayProcess(RayProcess):
                         verifiable_reward = torch.tensor(verifiable_reward, device=score.device)
                         verifiable_count = verifiable_reward > 0
                         score += verifiable_reward
-                        # record reward for each verifier function sep.
+                        # For each sample, aggregate each per-function reward into a single dict.
                         for reward_dict in per_func_reward:
                             for key, value in reward_dict.items():
-                                per_func_scores[key].append(value)
-                                per_func_counts[key].append(value > 0)
-                                per_ds_counts[key].append(1)  # just counting the number of samples
+                                per_func_rewards[key].append(value)
                     if args.add_r1_style_format_reward:
                         score += format_scores[i : i + args.local_rollout_forward_batch_size]
 
@@ -1193,9 +1189,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 scores = torch.cat(scores, 0)
                 verifiable_counts = torch.cat(verifiable_counts, 0)
                 verifiable_correct_rate = verifiable_counts.sum() / queries.shape[0]
-                per_func_correct_rate = {}
-                for key, count in per_func_counts.items():
-                    per_func_correct_rate[key] = sum(count) / sum(per_ds_counts[key])
                 del (ref_logprob, score)
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -1344,10 +1337,12 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics.add("val/stop_token_rate", contain_stop_token.float().mean())
                 if args.add_r1_style_format_reward:
                     local_metrics.add("val/format_scores", format_scores.float().mean())
-                for key, scores in per_func_scores.items():
-                    local_metrics.add(f"objective/{key}_reward", torch.tensor(scores).mean())
-                for key, rate in per_func_correct_rate.items():
-                    local_metrics.add(f"objective/{key}_correct_rate", rate)
+                for key, reward_list in per_func_rewards.items():
+                    rewards_tensor = torch.tensor(reward_list, device=device)
+                    # Mean per-function reward
+                    local_metrics.add(f"objective/{key}_reward", rewards_tensor.mean())
+                    # Correct rate: fraction of samples with positive reward
+                    local_metrics.add(f"objective/{key}_correct_rate", (rewards_tensor > 0).float().mean())
 
                 metrics = {
                     "episode": episode,
