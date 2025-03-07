@@ -1668,9 +1668,8 @@ if __name__ == "__main__":
                             arithmetic_rewards.append(args.arithmetic_reward)
                             scores[i] += args.arithmetic_reward
                     except:  # noqa
-                        pass  # it's ok if things went wrong
-                    finally:
                         arithmetic_rewards.append(0)
+                        pass  # it's ok if things went wrong                        
                 metrics["objective/arithmetic_score"] = np.array(arithmetic_rewards).mean()
                 metrics["objective/arithmetic_correct_rate"] = (np.array(arithmetic_rewards) > 0.0).mean()
 
