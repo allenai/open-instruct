@@ -82,14 +82,14 @@ def read_selected_datasets(input_dir, train_files, test_files):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_dir", type=str, default="/weka/oe-adapt-default/nouhad/data/math_data/multiplication", help="Directory containing JSONL files")
-    parser.add_argument("--hf_entity", type=str, default=None, help="Hugging Face entity")
+    parser.add_argument("--hf_entity", type=str, default="ai2-adapt-dev", help="Hugging Face entity")
     args = parser.parse_args()
 
     input_dir = args.input_dir
     # train_files = ["multiplication_1000_train_10x10.jsonl"]
-    train_files = ["multiplication_1000_train_3x3.jsonl", "multiplication_1000_train_4x4.jsonl", "multiplication_1000_train_5x5.jsonl", "multiplication_1000_train_6x6.jsonl", "multiplication_1000_train_7x7.jsonl", "multiplication_1000_train_7x8.jsonl"]
+    train_files = ["multiplication_1000_train_3x3.jsonl", "multiplication_1000_train_4x4.jsonl", "multiplication_1000_train_5x5.jsonl", "multiplication_1000_train_6x6.jsonl", "multiplication_1000_train_7x7.jsonl", "multiplication_1000_train_7x8.jsonl", "multiplication_1000_train_8x8.jsonl", "multiplication_1000_train_9x9.jsonl", "multiplication_1000_train_10x10.jsonl"]
     # test_files = ["multiplication_100_test_2x2.jsonl"]
-    test_files = ["multiplication_100_test_3x3.jsonl ", "multiplication_100_test_4x4.jsonl ", "multiplication_100_test_5x5.jsonl",  "multiplication_100_test_6x6.jsonl", "multiplication_100_test_7x7.jsonl", "multiplication_100_test_7x8.jsonl"]
+    test_files = ["multiplication_100_test_3x3.jsonl ", "multiplication_100_test_4x4.jsonl ", "multiplication_100_test_5x5.jsonl",  "multiplication_100_test_6x6.jsonl", "multiplication_100_test_7x7.jsonl", "multiplication_100_test_7x8.jsonl", "multiplication_100_test_8x8.jsonl", "multiplication_100_test_9x9.jsonl", "multiplication_100_test_10x10.jsonl"]
 
 
     # Read only the selected files
