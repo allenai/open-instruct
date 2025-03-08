@@ -47,7 +47,7 @@ set -ex
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--hf-upload] [--revision REVISION] [--max-length <max_length>] [--unseen-evals] [--priority priority] [--tasks TASKS] [--evaluate_on_weka]"
+    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--unseen-evals] [--priority priority] [--tasks TASKS] [--evaluate_on_weka]"
     echo "TASKS should be a comma-separated list of task specifications (e.g., 'gsm8k::tulu,bbh:cot::tulu')"
     exit 1
 }
@@ -85,7 +85,6 @@ fi
 MODEL_NAME_SAFE=${MODEL_NAME//\//_}
 
 # Set defaults for optional arguments
-UPLOAD_TO_HF="${UPLOAD_TO_HF:-allenai/olmo-instruct-evals}"
 MAX_LENGTH="${MAX_LENGTH:-4096}"
 UNSEEN_EVALS="${UNSEEN_EVALS:-false}"
 PRIORITY="${PRIORITY:normal}"
@@ -100,11 +99,15 @@ if [[ -n "$STEP" ]]; then
     DATALAKE_ARGS+=",step=$STEP"
 fi
 
-# if UNSEEN_EVALS, save results to a different directory
-if [ "$UNSEEN_EVALS" == "true" ]; then
-    HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}-unseen//results/${MODEL_NAME_SAFE}"
+# Set HF_UPLOAD_ARG only if UPLOAD_TO_HF is specified
+if [[ -n "$UPLOAD_TO_HF" ]]; then
+    if [ "$UNSEEN_EVALS" == "true" ]; then
+        HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}-unseen//results/${MODEL_NAME_SAFE}"
+    else
+        HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}//results/${MODEL_NAME_SAFE}"
+    fi
 else
-    HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}//results/${MODEL_NAME_SAFE}"
+    HF_UPLOAD_ARG=""
 fi
 
 # Set REVISION if not provided
