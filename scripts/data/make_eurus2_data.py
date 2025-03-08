@@ -8,11 +8,11 @@ dataset = load_dataset("ai2-adapt-dev/eurus2_ground_truth", split="train")
 
 new_data = []
 for sample in tqdm(dataset):
-    sampled_length = random_gen.sample(range(100, 16384), 1)[0]
+    sampled_length = random_gen.sample(range(100, 8000), 1)[0]
     # add a random length.
     sample['messages'][0]['content'] += f"\nUse no more than {sampled_length} tokens."
-    sample['ground_truth'] = sample['ground_truth'] + "<sep>" + str(sampled_length)
-    sample['dataset'] = "MATH,max_length"
+    sample['ground_truth'] = [sample['ground_truth'], str(sampled_length)]
+    sample['dataset'] = ["MATH", "max_length"]
     new_data.append(sample)
 
 # combine into one dataset and push
