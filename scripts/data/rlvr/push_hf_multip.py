@@ -86,10 +86,10 @@ def main():
     args = parser.parse_args()
 
     input_dir = args.input_dir
-    train_files = ["multiplication_1000_train_10x10.jsonl"]
-    train_files = []
+    # train_files = ["multiplication_1000_train_10x10.jsonl"]
+    train_files = ["multiplication_1000_train_3x3.jsonl", "multiplication_1000_train_4x4.jsonl", "multiplication_1000_train_5x5.jsonl", "multiplication_1000_train_6x6.jsonl", "multiplication_1000_train_7x7.jsonl", "multiplication_1000_train_7x8.jsonl"]
     # test_files = ["multiplication_100_test_2x2.jsonl"]
-    test_files = ["multiplication_100_test_2x2.jsonl", "multiplication_100_test_6x6.jsonl", "multiplication_100_test_12x12.jsonl"]
+    test_files = ["multiplication_100_test_3x3.jsonl ", "multiplication_100_test_4x4.jsonl ", "multiplication_100_test_5x5.jsonl",  "multiplication_100_test_6x6.jsonl", "multiplication_100_test_7x7.jsonl", "multiplication_100_test_7x8.jsonl"]
 
 
     # Read only the selected files
