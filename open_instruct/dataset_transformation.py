@@ -416,6 +416,8 @@ def sft_filter_v1(
 
 def sft_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
+    return last_turn_tulu_tokenize_and_truncate_v1(row, tokenizer, max_seq_length)
+    
     messages = row["messages"]
     if len(messages) == 0:
         raise ValueError("messages field is empty.")
