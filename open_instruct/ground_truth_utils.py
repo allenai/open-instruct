@@ -212,14 +212,14 @@ class MaxLenVerifier(VerifierFunction):
     """
 
     def __init__(self) -> None:
-        super().__init__("max_length", weight=1.0)
+        super().__init__("max_length", weight=-1.0)
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
         max_length = float(label)
         # return absolute difference between the length of the prediction and the max length
         # make sure to disallow negative rewards
         length_diff = abs(len(tokenized_prediction) - max_length)
-        return max(0, 1.0 - (length_diff / max_length))
+        return (1 -  max(0, 1.0 - (length_diff / max_length)))
 
 def get_all_verifiers() -> Dict[str, VerifierFunction]:
     """
