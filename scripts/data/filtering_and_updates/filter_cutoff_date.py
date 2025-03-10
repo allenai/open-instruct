@@ -8,7 +8,7 @@ from datasets import Features, Value, Sequence
 Motivated by: realizing the SFT mix has lots of "as my last update in April 2023" snippets. for next version, we should really template these, so we can add exact cutoff date.
 
 Run with:
-python scripts/data/sft/filter_cutoff_date.py --dataset allenai/tulu-3-sft-mixture --column messages
+python scripts/data/filtering_and_updates/filter_cutoff_date.py --dataset allenai/tulu-3-sft-mixture --column messages
 """
 
 # More permissive pattern to catch variations
@@ -131,7 +131,7 @@ def main():
         new_name = args.dataset + "-filter-datecutoff"
         # remove column "cutoff_matches"
         processed = processed.remove_columns(["cutoff_matches"])
-        processed.push_to_hub(new_name)
+        processed.push_to_hub(new_name, private=True)
 
                 
 

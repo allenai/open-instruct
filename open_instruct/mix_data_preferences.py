@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from open_instruct.dpo_tune import FlatArguments
+from open_instruct.dpo_tune_cache import FlatArguments
 
 # script for mixing and saving data
 from open_instruct.utils import ArgumentParserPlus, get_datasets
