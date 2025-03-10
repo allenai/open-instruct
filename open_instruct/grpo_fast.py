@@ -28,6 +28,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # isort: off
+from collections import defaultdict
 import json
 import os
 import shutil
@@ -1136,15 +1137,15 @@ def data_preparation_thread(
                 global_std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0
             )
             global_advantages = (scores - global_mean_grouped_rewards) / (global_std_grouped_rewards + 1e-8)
-            global_advantages_lst = global_advantages.tolist()
-            packed_advantages = []
-            for i in range(len(packed_sequences.response_masks)):
-                packed_response_mask = packed_sequences.response_masks[i]
-                packed_advantage = torch.zeros_like(packed_response_mask, dtype=torch.float32)
-                for j in range(len(packed_advantage)):
-                    if packed_response_mask[j] >= 1:  # note that response masks are 1-indexed
-                        packed_advantage[j] = global_advantages_lst[packed_response_mask[j] - 1]
-                packed_advantages.append(packed_advantage)
+
+            # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
+            # and each value is the corresponding advantage score: index 0 is set to 0 since response masks start from 1 (1-indexed)
+            lookup_advantages = np.zeros(len(global_advantages) + 1, dtype=np.float32)
+            lookup_advantages[1:] = global_advantages
+            packed_advantages = [
+                torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
+                for packed_mask in packed_sequences.response_masks
+            ]
             packed_sequences.advantages = packed_advantages
 
         with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
@@ -1667,9 +1668,11 @@ if __name__ == "__main__":
                         if float(answer) == float(ground_truths[i]):
                             arithmetic_rewards.append(args.arithmetic_reward)
                             scores[i] += args.arithmetic_reward
+                        else:
+                            arithmetic_rewards.append(0)
                     except:  # noqa
                         arithmetic_rewards.append(0)
-                        pass  # it's ok if things went wrong                        
+                        pass  # it's ok if things went wrong
                 metrics["objective/arithmetic_score"] = np.array(arithmetic_rewards).mean()
                 metrics["objective/arithmetic_correct_rate"] = (np.array(arithmetic_rewards) > 0.0).mean()
 
