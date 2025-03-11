@@ -1,7 +1,7 @@
 [project]
 name = "open-instruct"
 version = "0.1.0"
-description = "Add your description here"
+description = "Train open, instruction-following language models"
 readme = "README.md"
 requires-python = ">=3.10,<3.12"
 dependencies = [
@@ -31,7 +31,7 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 py-modules = ["open_instruct"]
 
-# pytroch related setups
+# pytorch related setups
 [tool.uv.sources]
 torch = [
   { index = "pytorch-cu121", marker = "platform_system != 'Darwin'"},
@@ -50,6 +50,7 @@ explicit = true
 # flash-attn related setups
 [project.optional-dependencies]
 compile = ["flash-attn>=2.7.2.post1"]
+liger = ["liger-kernel>=0.5.4"]
 
 [tool.uv]
 python-preference = "only-managed"

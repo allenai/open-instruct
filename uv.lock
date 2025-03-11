@@ -1,4 +1,5 @@
 version = 1
+revision = 1
 requires-python = ">=3.10, <3.12"
 resolution-markers = [
     "python_version < '0'",
@@ -1146,6 +1147,20 @@ wheels = [
 ]
 
 [[package]]
+name = "liger-kernel"
+version = "0.5.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
+    { name = "torch", version = "2.5.1+cu121", source = { registry = "https://download.pytorch.org/whl/cu121" }, marker = "sys_platform != 'darwin'" },
+    { name = "triton" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d6/96/d4e78c98bbd4c625de5fd999272a8d599652995d7386f01c5e7f5d982f87/liger_kernel-0.5.4.tar.gz", hash = "sha256:06af08e67d053c45ab0e85eff63aa229c4a342b984a8691e4374837f335224e1", size = 3558869 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8a/71/847f737552bb592be60df05fdc2164f1e4022877ca44850f182581721b65/liger_kernel-0.5.4-py3-none-any.whl", hash = "sha256:0f4c56496f694af30de197d308982781863b0a64d7024d4ea57139f4425ef3b2", size = 122851 },
+]
+
+[[package]]
 name = "linkify-it-py"
 version = "2.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1659,7 +1674,6 @@ version = "12.6.85"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9d/d7/c5383e47c7e9bf1c99d5bd2a8c935af2b6d705ad831a7ec5c97db4d82f4f/nvidia_nvjitlink_cu12-12.6.85-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl", hash = "sha256:eedc36df9e88b682efe4309aa16b5b4e78c2407eac59e8c10a6a47535164369a", size = 19744971 },
-    { url = "https://files.pythonhosted.org/packages/31/db/dc71113d441f208cdfe7ae10d4983884e13f464a6252450693365e166dcf/nvidia_nvjitlink_cu12-12.6.85-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:cf4eaa7d4b6b543ffd69d6abfb11efdeb2db48270d94dfd3a452c24150829e41", size = 19270338 },
 ]
 
 [[package]]
@@ -1699,6 +1713,9 @@ dependencies = [
 compile = [
     { name = "flash-attn" },
 ]
+liger = [
+    { name = "liger-kernel" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1719,6 +1736,7 @@ requires-dist = [
     { name = "deepspeed", specifier = "==0.15.4" },
     { name = "flash-attn", marker = "extra == 'compile'", specifier = ">=2.7.2.post1" },
     { name = "hf-transfer", specifier = ">=0.1.8" },
+    { name = "liger-kernel", marker = "extra == 'liger'", specifier = ">=0.5.4" },
     { name = "matplotlib", specifier = ">=3.9.3" },
     { name = "nltk", specifier = ">=3.9.1" },
     { name = "numpy", specifier = "<2" },
@@ -1732,6 +1750,7 @@ requires-dist = [
     { name = "vllm", specifier = ">=0.6.4.post1" },
     { name = "wandb", specifier = "==0.18.1" },
 ]
+provides-extras = ["compile", "liger"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2993,7 +3012,7 @@ name = "triton"
 version = "3.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "filelock", marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
+    { name = "filelock" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/98/29/69aa56dc0b2eb2602b553881e34243475ea2afd9699be042316842788ff5/triton-3.1.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6b0dd10a925263abbe9fa37dcde67a5e9b2383fc269fdf59f5657cac38c5d1d8", size = 209460013 },

@@ -1,5 +1,5 @@
-import re
 import json
+import re
 from typing import List
 
 """
@@ -46,7 +46,8 @@ def verify_keyword_frequency(text, word, N):
 
     # Split text into words and remove punctuation
     import re
-    words = re.findall(r'\b\w+\b', text)
+
+    words = re.findall(r"\b\w+\b", text)
 
     # Count actual occurrences
     actual_count = sum(1 for word in words if word == keyword)
@@ -88,6 +89,7 @@ def validate_forbidden_words(text, forbidden_words):
 
 # Letter Frequency : In your response, the letter {letter} should appear {N} times.
 
+
 def verify_letter_frequency(text: str, letter: str, N: int) -> bool:
     """
     Verifies if a given letter appears exactly the specified number of times in the text.
@@ -116,6 +118,7 @@ def verify_letter_frequency(text: str, letter: str, N: int) -> bool:
 
 
 # Response Language: Your ENTIRE response should be in {language}, no other language is allowed.
+
 
 def validate_response_language(text, language):
     """
@@ -161,16 +164,17 @@ def verify_paragraph_count(text: str, N: int) -> bool:
          verify_paragraph_count(text, 2)
         True
     """
+
     def clean_text(text: str) -> str:
         """Remove extra whitespace and normalize line endings"""
-        return '\n'.join(line.strip() for line in text.splitlines()).strip()
+        return "\n".join(line.strip() for line in text.splitlines()).strip()
 
     # Clean the input text
     text = clean_text(text)
 
     # Split text by markdown divider
     # Add 1 to count since n dividers create n+1 paragraphs
-    paragraphs = text.split('* * *')
+    paragraphs = text.split("* * *")
     actual_count = len(paragraphs)
 
     # Verify each split resulted in non-empty content
@@ -182,6 +186,7 @@ def verify_paragraph_count(text: str, N: int) -> bool:
 
 
 # Number Words: Answer with at least / around / at most {N} words
+
 
 def validate_word_constraint(text: str, N: int, quantifier: str) -> bool:
     """
@@ -229,17 +234,17 @@ def verify_sentence_constraint(text: str, N: int, quantifier: str) -> bool:
         bool: True if the text contains the expected number of sentences, False otherwise
     """
     # Split the text into sentences
-    sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s', text)
+    sentences = re.split(r"(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s", text)
 
     # Count the number of sentences
     actual_count = len(sentences)
 
     # Check if the actual count matches the expected count based on the quantifier
-    if quantifier == 'at least':
+    if quantifier == "at least":
         return actual_count >= N
-    elif quantifier == 'around':
+    elif quantifier == "around":
         return abs(actual_count - N) <= 1
-    elif quantifier == 'at most':
+    elif quantifier == "at most":
         return actual_count <= N
     else:
         return False
@@ -262,7 +267,7 @@ def validate_paragraphs(text, N, first_word, i):
         bool: True if the text meets the paragraph and first word requirements, False otherwise
     """
     # Split the text into paragraphs
-    paragraphs = text.split('\n\n')
+    paragraphs = text.split("\n\n")
 
     # Check if the number of paragraphs is as expected
     if len(paragraphs) != N:
@@ -275,6 +280,7 @@ def validate_paragraphs(text, N, first_word, i):
 
 
 # Postscript: At the end of your response, please explicitly add a postscript starting with {postscript marker}
+
 
 def verify_postscript(text, postscript_marker):
     """
@@ -318,7 +324,7 @@ def validate_placeholders(text: str, N: int) -> tuple[bool, List[str]]:
         (True, ['name', 'item', 'address'])
     """
     # Find all placeholders using regex
-    pattern = r'\[(.*?)\]'
+    pattern = r"\[(.*?)\]"
     placeholders = re.findall(pattern, text)
 
     # Check if the number of placeholders meets the requirement
@@ -342,8 +348,8 @@ def verify_bullet_points(text: str, N: int) -> tuple[bool, str]:
         tuple[bool, str]: (True if constraint is met, explanation message)
     """
     # Split text into lines and count lines starting with * or -
-    lines = text.split('\n')
-    bullet_points = [line.strip() for line in lines if line.strip().startswith(('*', '-'))]
+    lines = text.split("\n")
+    bullet_points = [line.strip() for line in lines if line.strip().startswith(("*", "-"))]
     actual_count = len(bullet_points)
 
     if actual_count == N:
@@ -385,10 +391,11 @@ def validate_highlighted_sections(text: str, N: int) -> bool:
 
 # Multiple Sections: Your response must have {N} sections. Mark the beginning of each section with {section splitter} X.
 
+
 def validate_sections(text: str, N: int, section_splitter: str) -> bool:
     sections = text.split(section_splitter)
     # The first section might not start with the splitter, so we adjust for this
-    if sections[0] == '':
+    if sections[0] == "":
         sections.pop(0)
     if len(sections) == N:
         return True
@@ -417,8 +424,8 @@ def validate_repeat_prompt(text: str, original_prompt: str) -> bool:
 # Two Responses: Give two different responses. Responses and only responses should be separated by 6 asterisk
 # symbols: ******.
 def validate_two_responses(text: str) -> bool:
-    if text.count('******') == 1:
-        response_list = text.split('******')
+    if text.count("******") == 1:
+        response_list = text.split("******")
         first_response = response_list[0].strip()
         second_response = response_list[1].strip()
         if first_response != second_response:
@@ -448,12 +455,12 @@ def validate_lowercase(text: str) -> bool:
 # Frequency of All-capital Words: In your response, words with all capital letters should appear at least / around /
 # at most {N} times.
 def validate_frequency_capital_words(text: str, N: int, quantifier: str) -> bool:
-    words = re.findall(r'\b[A-Z]+\b', text)
-    if quantifier == 'at least':
+    words = re.findall(r"\b[A-Z]+\b", text)
+    if quantifier == "at least":
         return len(words) >= N
-    elif quantifier == 'around':
+    elif quantifier == "around":
         return len(words) == N
-    elif quantifier == 'at most':
+    elif quantifier == "at most":
         return len(words) <= N
     else:
         return False
@@ -478,36 +485,36 @@ def validate_quotation(text: str) -> bool:
 
 # No Commas: In your entire response, refrain from the use of any commas.
 def validate_no_commas(text: str) -> bool:
-    if ',' not in text:
+    if "," not in text:
         return True
     else:
         return False
 
 
 IF_FUNCTIONS_MAP = {
-    'verify_keywords': verify_keywords,
-    'verify_keyword_frequency': verify_keyword_frequency,
-    'validate_forbidden_words': validate_forbidden_words,
-    'verify_letter_frequency': verify_letter_frequency,
-    'validate_response_language': validate_response_language,
-    'verify_paragraph_count': verify_paragraph_count,
-    'validate_word_constraint': validate_word_constraint,
-    'verify_sentence_constraint': verify_sentence_constraint,
-    'validate_paragraphs': validate_paragraphs,
-    'verify_postscript': verify_postscript,
-    'validate_placeholders': validate_placeholders,
-    'verify_bullet_points': verify_bullet_points,
-    'validate_title': validate_title,
-    'validate_choice': validate_choice,
-    'validate_highlighted_sections': validate_highlighted_sections,
-    'validate_sections': validate_sections,
-    'validate_json_format': validate_json_format,
-    'validate_repeat_prompt': validate_repeat_prompt,
-    'validate_two_responses': validate_two_responses,
-    'validate_uppercase': validate_uppercase,
-    'validate_lowercase': validate_lowercase,
-    'validate_frequency_capital_words': validate_frequency_capital_words,
-    'validate_end': validate_end,
-    'validate_quotation': validate_quotation,
-    'validate_no_commas': validate_no_commas
+    "verify_keywords": verify_keywords,
+    "verify_keyword_frequency": verify_keyword_frequency,
+    "validate_forbidden_words": validate_forbidden_words,
+    "verify_letter_frequency": verify_letter_frequency,
+    "validate_response_language": validate_response_language,
+    "verify_paragraph_count": verify_paragraph_count,
+    "validate_word_constraint": validate_word_constraint,
+    "verify_sentence_constraint": verify_sentence_constraint,
+    "validate_paragraphs": validate_paragraphs,
+    "verify_postscript": verify_postscript,
+    "validate_placeholders": validate_placeholders,
+    "verify_bullet_points": verify_bullet_points,
+    "validate_title": validate_title,
+    "validate_choice": validate_choice,
+    "validate_highlighted_sections": validate_highlighted_sections,
+    "validate_sections": validate_sections,
+    "validate_json_format": validate_json_format,
+    "validate_repeat_prompt": validate_repeat_prompt,
+    "validate_two_responses": validate_two_responses,
+    "validate_uppercase": validate_uppercase,
+    "validate_lowercase": validate_lowercase,
+    "validate_frequency_capital_words": validate_frequency_capital_words,
+    "validate_end": validate_end,
+    "validate_quotation": validate_quotation,
+    "validate_no_commas": validate_no_commas,
 }
