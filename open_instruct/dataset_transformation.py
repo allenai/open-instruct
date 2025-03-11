@@ -416,6 +416,7 @@ GROUND_TRUTHS_KEY = "ground_truth"
 DATASET_SOURCE_KEY = "dataset"
 
 TOKENIZED_PREFERENCE_DATASET_KEYS = [
+    INPUT_IDS_PROMPT_KEY,
     CHOSEN_INPUT_IDS_KEY,
     CHOSEN_LABELS_KEY,
     CHOSEN_ATTENTION_MASK_KEY,
@@ -919,13 +920,8 @@ def get_cached_dataset_tulu_preference(
             dataset_name=dataset_name,
             dataset_split="train",
             dataset_revision="main",
-            transform_fn=["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"],
-            transform_fn_args={
-                "preference_tulu_tokenize_and_truncate_v1": {
-                    "max_seq_length": max_seq_length,
-                    "target_columns": TOKENIZED_PREFERENCE_DATASET_KEYS,
-                }
-            },
+            transform_fn=["preference_tokenize_v1", "preference_filter_v1"],
+            transform_fn_args={},
         )
         if frac_or_num_samples > 1.0:
             new_range = int(frac_or_num_samples)

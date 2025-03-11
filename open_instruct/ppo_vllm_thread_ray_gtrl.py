@@ -47,6 +47,7 @@ from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
 from open_instruct.dataset_transformation import (
     TokenizerConfig,
     get_cached_dataset_rlvr,
+    get_cached_dataset_tulu_preference,
 )
 from open_instruct.ground_truth_utils import soft_format_reward_func
 
@@ -1714,12 +1715,12 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     train_dataset = train_dataset.shuffle(seed=args.seed)
     eval_dataset = None
     if args.dataset_mixer_eval_list is not None:
-        eval_dataset = get_cached_dataset_rlvr(
+        eval_dataset = get_cached_dataset_tulu_preference(
             args.dataset_mixer_eval_list,
-            args.dataset_mixer_eval_list_splits,
+            # args.dataset_mixer_eval_list_splits,
             tc,
             dataset_config.max_prompt_token_length,
-            dataset_config.max_token_length,
+            # dataset_config.max_token_length,
             args.hf_entity,
         )
         eval_dataset = eval_dataset.shuffle(seed=args.seed)
