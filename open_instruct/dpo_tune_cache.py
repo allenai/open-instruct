@@ -331,6 +331,10 @@ class FlatArguments:
         default=False,
         metadata={"help": "Turn on gradient checkpointing. Saves memory but slows training."},
     )
+    use_liger_kernel: bool = field(
+        default=False,
+        metadata={"help": "Whether to use LigerKernel for training."},
+    )
     max_train_steps: Optional[int] = field(
         default=None,
         metadata={"help": "If set, overrides the number of training steps. Otherwise, num_train_epochs is used."},
@@ -586,6 +590,22 @@ def main(args: FlatArguments):
                     device_map=device_map,
                     torch_dtype=torch.bfloat16,
                     use_flash_attention_2=True if args.use_flash_attn else False,
+                )
+            elif args.use_liger_kernel:
+                from liger_kernel.transformers import AutoLigerKernelForCausalLM
+
+                # Applies liger-kernel triton kernels *if applicable*
+                # Supported models: https://github.com/linkedin/Liger-Kernel/blob/main/src/liger_kernel/transformers/monkey_patch.py#L948
+                model = AutoLigerKernelForCausalLM.from_pretrained(
+                    args.model_name_or_path,
+                    revision=args.model_revision,
+                    from_tf=bool(".ckpt" in args.model_name_or_path),
+                    config=config,
+                    trust_remote_code=args.trust_remote_code,
+                    low_cpu_mem_usage=args.low_cpu_mem_usage,
+                    use_flash_attention_2=True if args.use_flash_attn else False,
+                    # liger-kernel specific args
+                    fused_linear_cross_entropy=False,  # don't fuse the linear layer with CE loss, since we want logits
                 )
             else:
                 model = AutoModelForCausalLM.from_pretrained(
