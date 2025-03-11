@@ -32,18 +32,19 @@ import transformers
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
 from huggingface_hub import HfApi
-from open_instruct.ground_truth_utils import (
-    verify_gsm8k_sample,
-    verify_ifeval_sample,
-    verify_math_sample,
-)
-from open_instruct.utils import retry_on_exception
 from rich import print as rprint
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
+
+from open_instruct.ground_truth_utils import (
+    verify_gsm8k_sample,
+    verify_ifeval_sample,
+    verify_math_sample,
+)
+from open_instruct.utils import retry_on_exception
 
 logger = logging.getLogger(__name__)
 

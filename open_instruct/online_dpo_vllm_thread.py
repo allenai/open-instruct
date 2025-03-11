@@ -395,10 +395,14 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     dataset_processor = SFTDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
     if len(args.dataset_train_splits) != len(args.dataset_mixer_dict) and len(args.dataset_train_splits) == 1:
         args.dataset_train_splits = [args.dataset_train_splits[0]] * len(args.dataset_mixer_dict)
-        print(f"Dataset splits not provided for all datasets. Using the same {args.dataset_train_splits[0]} split for all datasets.")
+        print(
+            f"Dataset splits not provided for all datasets. Using the same {args.dataset_train_splits[0]} split for all datasets."
+        )
     if len(args.dataset_eval_splits) != len(args.dataset_eval_mixer_dict) and len(args.dataset_eval_splits) == 1:
         args.dataset_eval_splits = [args.dataset_eval_splits[0]] * len(args.dataset_eval_mixer_dict)
-        print(f"Dataset splits not provided for all datasets. Using the same {args.dataset_eval_splits[0]} split for all datasets.")
+        print(
+            f"Dataset splits not provided for all datasets. Using the same {args.dataset_eval_splits[0]} split for all datasets."
+        )
     train_dataset = combine_dataset(
         args.dataset_mixer_dict,
         splits=args.dataset_train_splits,
@@ -686,9 +690,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     g_vllm_responses[:] = g_padded_response_ids
                 broadcast(g_vllm_responses, 0)
                 local_vllm_responses = g_vllm_responses[
-                    accelerator.process_index
-                    * queries.shape[0] : (accelerator.process_index + 1)
-                    * queries.shape[0]
+                    accelerator.process_index * queries.shape[0] : (accelerator.process_index + 1) * queries.shape[0]
                 ]
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):

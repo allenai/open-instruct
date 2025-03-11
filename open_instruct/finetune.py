@@ -85,21 +85,15 @@ class FlatArguments:
     )
     config_name: Optional[str] = field(
         default=None,
-        metadata={
-            "help": "Pretrained config name or path if not the same as model_name"
-        },
+        metadata={"help": "Pretrained config name or path if not the same as model_name"},
     )
     tokenizer_name: Optional[str] = field(
         default=None,
-        metadata={
-            "help": "Pretrained tokenizer name or path if not the same as model_name"
-        },
+        metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"},
     )
     tokenizer_revision: Optional[str] = field(
         default=None,
-        metadata={
-            "help": "The specific model version to use (can be a branch name, tag name or commit id)."
-        },
+        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
     chat_template_name: str = field(
         default="tulu",
@@ -117,15 +111,11 @@ class FlatArguments:
     )
     use_slow_tokenizer: bool = field(
         default=True,
-        metadata={
-            "help": "Whether to use one of the slow tokenizer or not (which is then fast tokenizer)."
-        },
+        metadata={"help": "Whether to use one of the slow tokenizer or not (which is then fast tokenizer)."},
     )
     model_revision: Optional[str] = field(
         default=None,
-        metadata={
-            "help": "The specific model version to use (can be a branch name, tag name or commit id)."
-        },
+        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
     trust_remote_code: bool = field(
         default=False,
@@ -165,9 +155,7 @@ class FlatArguments:
     )
     dataset_config_name: Optional[str] = field(
         default=None,
-        metadata={
-            "help": "The configuration name of the dataset to use (via the datasets library)."
-        },
+        metadata={"help": "The configuration name of the dataset to use (via the datasets library)."},
     )
     train_file: Optional[str] = field(
         default=None,
@@ -208,15 +196,11 @@ class FlatArguments:
     )
     clip_grad_norm: float = field(
         default=-1,
-        metadata={
-            "help": "Clip gradient norm. Not compatible with deepspeed (use deepspeed config instead)."
-        },
+        metadata={"help": "Clip gradient norm. Not compatible with deepspeed (use deepspeed config instead)."},
     )
     gradient_accumulation_steps: int = field(
         default=1,
-        metadata={
-            "help": "Number of updates steps to accumulate before performing a backward/update pass."
-        },
+        metadata={"help": "Number of updates steps to accumulate before performing a backward/update pass."},
     )
     learning_rate: float = field(
         default=2e-5,
@@ -224,9 +208,7 @@ class FlatArguments:
     )
     logging_steps: Optional[int] = field(
         default=None,
-        metadata={
-            "help": "Log the training loss and learning rate every logging_steps steps."
-        },
+        metadata={"help": "Log the training loss and learning rate every logging_steps steps."},
     )
     lora_rank: int = field(
         default=64,
@@ -260,9 +242,7 @@ class FlatArguments:
     )
     output_dir: str = field(
         default="output/",
-        metadata={
-            "help": "The output directory where the model predictions and checkpoints will be written."
-        },
+        metadata={"help": "The output directory where the model predictions and checkpoints will be written."},
     )
     per_device_train_batch_size: int = field(
         default=8,
@@ -270,21 +250,15 @@ class FlatArguments:
     )
     use_lora: bool = field(
         default=False,
-        metadata={
-            "help": "If True, will use LORA (low-rank parameter-efficient training) to train the model."
-        },
+        metadata={"help": "If True, will use LORA (low-rank parameter-efficient training) to train the model."},
     )
     use_qlora: bool = field(
         default=False,
-        metadata={
-            "help": "Use qLoRA training - initializes model in quantized form. Not compatible with deepspeed."
-        },
+        metadata={"help": "Use qLoRA training - initializes model in quantized form. Not compatible with deepspeed."},
     )
     use_8bit_optimizer: bool = field(
         default=False,
-        metadata={
-            "help": "Use 8bit optimizer from bitsandbytes. Not compatible with deepspeed."
-        },
+        metadata={"help": "Use 8bit optimizer from bitsandbytes. Not compatible with deepspeed."},
     )
     warmup_ratio: float = field(
         default=0.03,
@@ -331,15 +305,11 @@ class FlatArguments:
     )
     save_to_hub: Optional[str] = field(
         default=None,
-        metadata={
-            "help": "Save the model to the Hub under this name. E.g allenai/your-model"
-        },
+        metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"},
     )
     gradient_checkpointing: bool = field(
         default=False,
-        metadata={
-            "help": "Turn on gradient checkpointing. Saves memory but slows training."
-        },
+        metadata={"help": "Turn on gradient checkpointing. Saves memory but slows training."},
     )
     use_liger_kernel: bool = field(
         default=False,
@@ -347,9 +317,7 @@ class FlatArguments:
     )
     max_train_steps: Optional[int] = field(
         default=None,
-        metadata={
-            "help": "If set, overrides the number of training steps. Otherwise, num_train_epochs is used."
-        },
+        metadata={"help": "If set, overrides the number of training steps. Otherwise, num_train_epochs is used."},
     )
     seed: int = field(
         default=42,
@@ -369,9 +337,7 @@ class FlatArguments:
     )
     keep_last_n_checkpoints: int = field(
         default=3,
-        metadata={
-            "help": "How many checkpoints to keep in the output directory. -1 for all."
-        },
+        metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
     )
     fused_optimizer: bool = field(
         default=True,
@@ -417,35 +383,22 @@ class FlatArguments:
             and self.dataset_mixer is None
             and self.dataset_mixer_list is None
         ):
-            raise ValueError(
-                "Need either a dataset name, dataset mixer, or a training file."
-            )
+            raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
         else:
             if self.train_file is not None:
                 extension = self.train_file.split(".")[-1]
-                assert extension in ["json", "jsonl"], (
-                    "`train_file` should be a json or a jsonl file."
-                )
+                assert extension in ["json", "jsonl"], "`train_file` should be a json or a jsonl file."
         if (
-            (
-                self.dataset_name is not None
-                and (
-                    self.dataset_mixer is not None
-                    or self.dataset_mixer_list is not None
-                )
-            )
+            (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
             or (self.dataset_name is not None and self.train_file is not None)
             or (
-                (self.dataset_mixer is not None or self.dataset_mixer_list is not None)
-                and self.train_file is not None
+                (self.dataset_mixer is not None or self.dataset_mixer_list is not None) and self.train_file is not None
             )
             or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
-            raise ValueError(
-                "Cannot launch Beaker evaluation jobs without pushing to the Hub."
-            )
+            raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
 
 
 def main(args: FlatArguments):
@@ -463,9 +416,7 @@ def main(args: FlatArguments):
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
         if args.hf_repo_revision is None:
             args.hf_repo_revision = args.run_name
-        args.hf_repo_url = (
-            f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-        )
+        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
 
     if is_beaker_job():
         beaker_config = maybe_get_beaker_config()
@@ -510,16 +461,8 @@ def main(args: FlatArguments):
 
     accelerator.wait_for_everyone()
 
-    tokenizer_revision = (
-        args.model_revision
-        if args.tokenizer_revision is None
-        else args.tokenizer_revision
-    )
-    tokenizer_name = (
-        args.tokenizer_name
-        if args.tokenizer_name is not None
-        else args.model_name_or_path
-    )
+    tokenizer_revision = args.model_revision if args.tokenizer_revision is None else args.tokenizer_revision
+    tokenizer_name = args.tokenizer_name if args.tokenizer_name is not None else args.model_name_or_path
     if tokenizer_revision != args.model_revision:
         # Warn user if tokenizer and model use different revisions; this is an unusual
         # use case.
@@ -535,9 +478,7 @@ def main(args: FlatArguments):
     )
     tokenizer = tc.tokenizer
     if args.dataset_mixer is not None:
-        args.dataset_mixer_list = [
-            item for pair in args.dataset_mixer.items() for item in pair
-        ]
+        args.dataset_mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
     with accelerator.main_process_first():
         train_dataset = get_cached_dataset_tulu_sft(
             args.dataset_mixer_list,
@@ -587,17 +528,13 @@ def main(args: FlatArguments):
                 quantization_config=bnb_config,
                 device_map=device_map,
                 torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2"
-                if args.use_flash_attn
-                else "eager",
+                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
             )
         elif args.use_liger_kernel:
             from liger_kernel.transformers import AutoLigerKernelForCausalLM
 
             fused_linear_cross_entropy = args.reduce_loss == "mean"
-            logger.info(
-                f"Attempting to apply liger-kernel. {fused_linear_cross_entropy=}"
-            )
+            logger.info(f"Attempting to apply liger-kernel. {fused_linear_cross_entropy=}")
 
             # Supported models: https://github.com/linkedin/Liger-Kernel/blob/main/src/liger_kernel/transformers/monkey_patch.py#L948
             model = AutoLigerKernelForCausalLM.from_pretrained(
@@ -620,9 +557,7 @@ def main(args: FlatArguments):
                 trust_remote_code=args.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2"
-                if args.use_flash_attn
-                else "eager",
+                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
             )
     else:
         logger.info("Training new model from scratch")
@@ -645,9 +580,7 @@ def main(args: FlatArguments):
 
     if args.use_lora:
         if args.use_qlora:
-            model = prepare_model_for_kbit_training(
-                model, use_gradient_checkpointing=args.gradient_checkpointing
-            )
+            model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
 
         logger.info("Initializing LORA model...")
         peft_config = LoraConfig(
@@ -675,9 +608,7 @@ def main(args: FlatArguments):
     train_dataloader = DataLoader(
         train_dataset,
         shuffle=True,
-        collate_fn=DataCollatorForSeq2Seq(
-            tokenizer=tokenizer, model=model, padding="longest"
-        ),
+        collate_fn=DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding="longest"),
         batch_size=args.per_device_train_batch_size,
     )
 
@@ -686,19 +617,11 @@ def main(args: FlatArguments):
     no_decay = ["bias", "layer_norm.weight"]
     optimizer_grouped_parameters = [
         {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if not any(nd in n for nd in no_decay)
-            ],
+            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
             "weight_decay": args.weight_decay,
         },
         {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if any(nd in n for nd in no_decay)
-            ],
+            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
             "weight_decay": 0.0,
         },
     ]
@@ -720,9 +643,7 @@ def main(args: FlatArguments):
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
-    num_update_steps_per_epoch = math.ceil(
-        len(train_dataloader) / args.gradient_accumulation_steps
-    )
+    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if args.max_train_steps is None:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
@@ -740,9 +661,7 @@ def main(args: FlatArguments):
     # num_training_steps by num_processes so that the total number of
     # updates matches the num_training_steps.
     num_training_steps_for_scheduler = (
-        args.max_train_steps
-        if overrode_max_train_steps
-        else args.max_train_steps * accelerator.num_processes
+        args.max_train_steps if overrode_max_train_steps else args.max_train_steps * accelerator.num_processes
     )
     lr_scheduler = get_scheduler(
         name=args.lr_scheduler_type,
@@ -756,9 +675,7 @@ def main(args: FlatArguments):
     )
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
-    num_update_steps_per_epoch = math.ceil(
-        len(train_dataloader) / args.gradient_accumulation_steps
-    )
+    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if overrode_max_train_steps:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
@@ -795,27 +712,17 @@ def main(args: FlatArguments):
         wandb_tracker = accelerator.get_tracker("wandb")
 
     # Train!
-    total_batch_size = (
-        args.per_device_train_batch_size
-        * accelerator.num_processes
-        * args.gradient_accumulation_steps
-    )
+    total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
     logger.info(f"  Num Epochs = {args.num_train_epochs}")
-    logger.info(
-        f"  Instantaneous batch size per device = {args.per_device_train_batch_size}"
-    )
-    logger.info(
-        f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}"
-    )
+    logger.info(f"  Instantaneous batch size per device = {args.per_device_train_batch_size}")
+    logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
     # Only show the progress bar once on each machine.
-    progress_bar = tqdm(
-        range(args.max_train_steps), disable=not accelerator.is_local_main_process
-    )
+    progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
     completed_steps = 0
     starting_epoch = 0
 
@@ -834,10 +741,7 @@ def main(args: FlatArguments):
             completed_steps = starting_epoch * num_update_steps_per_epoch
         else:
             # need to multiply `gradient_accumulation_steps` to reflect real steps
-            resume_step = (
-                int(training_difference.replace("step_", ""))
-                * args.gradient_accumulation_steps
-            )
+            resume_step = int(training_difference.replace("step_", "")) * args.gradient_accumulation_steps
             starting_epoch = resume_step // len(train_dataloader)
             completed_steps = resume_step // args.gradient_accumulation_steps
             resume_step -= starting_epoch * len(train_dataloader)
@@ -846,9 +750,7 @@ def main(args: FlatArguments):
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
     local_total_tokens = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
-    total_token_including_padding = torch.tensor(
-        0, dtype=torch.int64, device=accelerator.device
-    )
+    total_token_including_padding = torch.tensor(0, dtype=torch.int64, device=accelerator.device)
     start_time = time.time()
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
@@ -857,9 +759,7 @@ def main(args: FlatArguments):
         total_aux_loss = 0
         if last_checkpoint_path and resume_step is not None:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint
-            active_dataloader = accelerator.skip_first_batches(
-                train_dataloader, resume_step
-            )
+            active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_step)
         else:
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
@@ -919,16 +819,12 @@ def main(args: FlatArguments):
                         / args.logging_steps
                     )
                     total_tokens = accelerator.gather(local_total_tokens).sum().item()
-                    total_tokens_including_padding = (
-                        accelerator.gather(total_token_including_padding).sum().item()
-                    )
+                    total_tokens_including_padding = accelerator.gather(total_token_including_padding).sum().item()
                     metrics_to_log = {
                         "learning_rate": lr_scheduler.get_last_lr()[0],
                         "train_loss": avg_loss,
                         "total_tokens": total_tokens,
-                        "per_device_tps": total_tokens
-                        / accelerator.num_processes
-                        / (time.time() - start_time),
+                        "per_device_tps": total_tokens / accelerator.num_processes / (time.time() - start_time),
                         "total_tokens_including_padding": total_tokens_including_padding,
                         "per_device_tps_including_padding": total_tokens_including_padding
                         / accelerator.num_processes
@@ -970,13 +866,11 @@ def main(args: FlatArguments):
                             ),
                             "w",
                         ) as f:
-                            f.write(
-                                "COMPLETED"
-                            )  # annoyingly, empty files arent uploaded by beaker.
-                        if accelerator.is_local_main_process:  # TODO: in mason local model this is gonna error out if using something like output/test; because mason used the same shared file ssytem.
-                            clean_last_n_checkpoints(
-                                args.output_dir, args.keep_last_n_checkpoints
-                            )
+                            f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
+                        if (
+                            accelerator.is_local_main_process
+                        ):  # TODO: in mason local model this is gonna error out if using something like output/test; because mason used the same shared file ssytem.
+                            clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
                         accelerator.wait_for_everyone()
 
                 if completed_steps >= args.max_train_steps:
@@ -989,14 +883,10 @@ def main(args: FlatArguments):
             accelerator.save_state(output_dir)
             # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
             with open(
-                os.path.join(
-                    get_last_checkpoint_path(args, incomplete=True), "COMPLETED"
-                ),
+                os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"),
                 "w",
             ) as f:
-                f.write(
-                    "COMPLETED"
-                )  # annoyingly, empty files arent uploaded by beaker.
+                f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
             if accelerator.is_local_main_process:
                 clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
             accelerator.wait_for_everyone()
@@ -1073,19 +963,11 @@ def main(args: FlatArguments):
                 --model_name {args.run_name} \
                 --run_id {wandb_tracker.run.get_url()}
             """
-            process = subprocess.Popen(
-                ["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-            )
+            process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = process.communicate()
-            print(
-                f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}"
-            )
-            print(
-                f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}"
-            )
-            print(
-                f"Submit jobs after model training is finished - process return code: {process.returncode}"
-            )
+            print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
+            print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
+            print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
 
     if args.push_to_hub:
         push_folder_to_hub(
