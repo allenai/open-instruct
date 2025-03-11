@@ -97,7 +97,10 @@ class FlatArguments:
         },
     )
     config_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
+        default=None,
+        metadata={
+            "help": "Pretrained config name or path if not the same as model_name"
+        },
     )
     dpo_use_paged_optimizer: bool = field(
         default=False,
@@ -112,22 +115,33 @@ class FlatArguments:
     )
     dpo_loss_type: str = field(
         default="dpo",
-        metadata={"help": "Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."},
+        metadata={
+            "help": "Type of DPO loss to use. Options are 'dpo', 'dpo_norm', 'simpo', 'wpo'."
+        },
     )
     dpo_gamma_beta_ratio: float = field(
         default=0.3,
-        metadata={"help": "Gamma to beta ratio for SimPO loss. Default is 0.3. Not used for DPO loss."},
+        metadata={
+            "help": "Gamma to beta ratio for SimPO loss. Default is 0.3. Not used for DPO loss."
+        },
     )
     dpo_label_smoothing: float = field(
         default=0.0,
-        metadata={"help": "Label smoothing for DPO/SimPO loss. Default is 0 (no smoothing)."},
+        metadata={
+            "help": "Label smoothing for DPO/SimPO loss. Default is 0 (no smoothing)."
+        },
     )
     tokenizer_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
+        default=None,
+        metadata={
+            "help": "Pretrained tokenizer name or path if not the same as model_name"
+        },
     )
     tokenizer_revision: Optional[str] = field(
         default=None,
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+        metadata={
+            "help": "The specific model version to use (can be a branch name, tag name or commit id)."
+        },
     )
     chat_template_name: str = field(
         default="tulu",
@@ -145,11 +159,15 @@ class FlatArguments:
     )
     use_slow_tokenizer: bool = field(
         default=True,
-        metadata={"help": "Whether to use one of the slow tokenizer or not (which is then fast tokenizer)."},
+        metadata={
+            "help": "Whether to use one of the slow tokenizer or not (which is then fast tokenizer)."
+        },
     )
     model_revision: Optional[str] = field(
         default=None,
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+        metadata={
+            "help": "The specific model version to use (can be a branch name, tag name or commit id)."
+        },
     )
     trust_remote_code: bool = field(
         default=False,
@@ -172,22 +190,30 @@ class FlatArguments:
         },
     )
     dataset_name: Optional[str] = field(
-        default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
+        default=None,
+        metadata={"help": "The name of the dataset to use (via the datasets library)."},
     )
     dataset_mixer: Optional[dict] = field(
-        default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
+        default=None,
+        metadata={"help": "A dictionary of datasets (local or HF) to sample from."},
     )
     dataset_mixer_list: Optional[list[str]] = field(
-        default=None, metadata={"help": "A list of datasets (local or HF) to sample from."}
+        default=None,
+        metadata={"help": "A list of datasets (local or HF) to sample from."},
     )
     dataset_mix_dir: Optional[str] = field(
-        default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
+        default=None,
+        metadata={"help": "The directory to save the mixed dataset to disk."},
     )
     dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
+        default=None,
+        metadata={
+            "help": "The configuration name of the dataset to use (via the datasets library)."
+        },
     )
     train_file: Optional[str] = field(
-        default=None, metadata={"help": "The input training data file (a json/jsonl file)."}
+        default=None,
+        metadata={"help": "The input training data file (a json/jsonl file)."},
     )
     max_train_samples: Optional[int] = field(
         default=None,
@@ -212,7 +238,8 @@ class FlatArguments:
         },
     )
     overwrite_cache: bool = field(
-        default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
+        default=False,
+        metadata={"help": "Overwrite the cached training and evaluation sets"},
     )
     add_bos: bool = field(
         default=False,
@@ -223,11 +250,15 @@ class FlatArguments:
     )
     clip_grad_norm: float = field(
         default=-1,
-        metadata={"help": "Clip gradient norm. Not compatible with deepspeed (use deepspeed config instead)."},
+        metadata={
+            "help": "Clip gradient norm. Not compatible with deepspeed (use deepspeed config instead)."
+        },
     )
     gradient_accumulation_steps: int = field(
         default=1,
-        metadata={"help": "Number of updates steps to accumulate before performing a backward/update pass."},
+        metadata={
+            "help": "Number of updates steps to accumulate before performing a backward/update pass."
+        },
     )
     learning_rate: float = field(
         default=2e-5,
@@ -235,7 +266,9 @@ class FlatArguments:
     )
     logging_steps: Optional[int] = field(
         default=None,
-        metadata={"help": "Log the training loss and learning rate every logging_steps steps."},
+        metadata={
+            "help": "Log the training loss and learning rate every logging_steps steps."
+        },
     )
     lora_rank: int = field(
         default=64,
@@ -253,7 +286,14 @@ class FlatArguments:
         default="linear",
         metadata={
             "help": "The scheduler type to use for learning rate adjustment.",
-            "choices": ["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
+            "choices": [
+                "linear",
+                "cosine",
+                "cosine_with_restarts",
+                "polynomial",
+                "constant",
+                "constant_with_warmup",
+            ],
         },
     )
     num_train_epochs: int = field(
@@ -262,7 +302,9 @@ class FlatArguments:
     )
     output_dir: str = field(
         default="output/",
-        metadata={"help": "The output directory where the model predictions and checkpoints will be written."},
+        metadata={
+            "help": "The output directory where the model predictions and checkpoints will be written."
+        },
     )
     per_device_train_batch_size: int = field(
         default=8,
@@ -270,15 +312,21 @@ class FlatArguments:
     )
     use_lora: bool = field(
         default=False,
-        metadata={"help": "If True, will use LORA (low-rank parameter-efficient training) to train the model."},
+        metadata={
+            "help": "If True, will use LORA (low-rank parameter-efficient training) to train the model."
+        },
     )
     use_qlora: bool = field(
         default=False,
-        metadata={"help": "Use qLoRA training - initializes model in quantized form. Not compatible with deepspeed."},
+        metadata={
+            "help": "Use qLoRA training - initializes model in quantized form. Not compatible with deepspeed."
+        },
     )
     use_8bit_optimizer: bool = field(
         default=False,
-        metadata={"help": "Use 8bit optimizer from bitsandbytes. Not compatible with deepspeed."},
+        metadata={
+            "help": "Use 8bit optimizer from bitsandbytes. Not compatible with deepspeed."
+        },
     )
     warmup_ratio: float = field(
         default=0.03,
@@ -325,11 +373,15 @@ class FlatArguments:
     )
     save_to_hub: Optional[str] = field(
         default=None,
-        metadata={"help": "Save the model to the Hub under this name. E.g allenai/your-model"},
+        metadata={
+            "help": "Save the model to the Hub under this name. E.g allenai/your-model"
+        },
     )
     gradient_checkpointing: bool = field(
         default=False,
-        metadata={"help": "Turn on gradient checkpointing. Saves memory but slows training."},
+        metadata={
+            "help": "Turn on gradient checkpointing. Saves memory but slows training."
+        },
     )
     use_liger_kernel: bool = field(
         default=False,
@@ -337,9 +389,14 @@ class FlatArguments:
     )
     max_train_steps: Optional[int] = field(
         default=None,
-        metadata={"help": "If set, overrides the number of training steps. Otherwise, num_train_epochs is used."},
+        metadata={
+            "help": "If set, overrides the number of training steps. Otherwise, num_train_epochs is used."
+        },
     )
-    seed: int = field(default=42, metadata={"help": "Random seed for initialization and dataset shuffling."})
+    seed: int = field(
+        default=42,
+        metadata={"help": "Random seed for initialization and dataset shuffling."},
+    )
     checkpointing_steps: Optional[str] = field(
         default=None,
         metadata={
@@ -354,7 +411,9 @@ class FlatArguments:
     )
     keep_last_n_checkpoints: int = field(
         default=3,
-        metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
+        metadata={
+            "help": "How many checkpoints to keep in the output directory. -1 for all."
+        },
     )
     fused_optimizer: bool = field(
         default=True,
@@ -402,23 +461,36 @@ class FlatArguments:
             and self.dataset_mixer is None
             and self.dataset_mixer_list is None
         ):
-            raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
+            raise ValueError(
+                "Need either a dataset name, dataset mixer, or a training file."
+            )
         else:
             if self.train_file is not None:
                 extension = self.train_file.split(".")[-1]
-                assert extension in ["json", "jsonl"], "`train_file` should be a json or a jsonl file."
+                assert extension in ["json", "jsonl"], (
+                    "`train_file` should be a json or a jsonl file."
+                )
         if (
-            (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
+            (
+                self.dataset_name is not None
+                and (
+                    self.dataset_mixer is not None
+                    or self.dataset_mixer_list is not None
+                )
+            )
             or (self.dataset_name is not None and self.train_file is not None)
             or (
-                (self.dataset_mixer is not None or self.dataset_mixer_list is not None) and self.train_file is not None
+                (self.dataset_mixer is not None or self.dataset_mixer_list is not None)
+                and self.train_file is not None
             )
             or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
 
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
-            raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
+            raise ValueError(
+                "Cannot launch Beaker evaluation jobs without pushing to the Hub."
+            )
 
 
 def get_cache_ref_logprobs(
@@ -437,15 +509,20 @@ def get_cache_ref_logprobs(
         active_dataloader.set_epoch(epoch)
         if last_checkpoint_path and resume_step is not None:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint
-            active_dataloader = accelerator.skip_first_batches(active_dataloader, resume_step)
+            active_dataloader = accelerator.skip_first_batches(
+                active_dataloader, resume_step
+            )
         cached_reference_chosen_logps = []
         cached_reference_rejected_logps = []
         with torch.no_grad():
-            for step, batch in tqdm(enumerate(active_dataloader), disable=not accelerator.is_local_main_process):
+            for step, batch in tqdm(
+                enumerate(active_dataloader),
+                disable=not accelerator.is_local_main_process,
+            ):
                 if args.use_lora:
                     with accelerator.unwrap_model(model).disable_adapter():
-                        reference_chosen_logps, reference_rejected_logps, _ = forward_fn(
-                            model, batch, average_log_prob=average_log_prob
+                        reference_chosen_logps, reference_rejected_logps, _ = (
+                            forward_fn(model, batch, average_log_prob=average_log_prob)
                         )
                 else:
                     reference_chosen_logps, reference_rejected_logps, _ = forward_fn(
@@ -476,7 +553,9 @@ def main(args: FlatArguments):
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
         if args.hf_repo_revision is None:
             args.hf_repo_revision = args.run_name
-        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+        args.hf_repo_url = (
+            f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+        )
 
     if is_beaker_job():
         beaker_config = maybe_get_beaker_config()
@@ -521,8 +600,16 @@ def main(args: FlatArguments):
 
     accelerator.wait_for_everyone()
 
-    tokenizer_revision = args.model_revision if args.tokenizer_revision is None else args.tokenizer_revision
-    tokenizer_name = args.tokenizer_name if args.tokenizer_name is not None else args.model_name_or_path
+    tokenizer_revision = (
+        args.model_revision
+        if args.tokenizer_revision is None
+        else args.tokenizer_revision
+    )
+    tokenizer_name = (
+        args.tokenizer_name
+        if args.tokenizer_name is not None
+        else args.model_name_or_path
+    )
     if tokenizer_revision != args.model_revision:
         # Warn user if tokenizer and model use different revisions; this is an unusual
         # use case.
@@ -538,7 +625,9 @@ def main(args: FlatArguments):
     )
     tokenizer = tc.tokenizer
     if args.dataset_mixer is not None:
-        args.dataset_mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
+        args.dataset_mixer_list = [
+            item for pair in args.dataset_mixer.items() for item in pair
+        ]
     with accelerator.main_process_first():
         train_dataset = get_cached_dataset_tulu_preference(
             args.dataset_mixer_list,
@@ -594,7 +683,8 @@ def main(args: FlatArguments):
             elif args.use_liger_kernel:
                 from liger_kernel.transformers import AutoLigerKernelForCausalLM
 
-                # Applies liger-kernel triton kernels *if applicable*
+                logger.info("Attempting to apply liger-kernel.")
+
                 # Supported models: https://github.com/linkedin/Liger-Kernel/blob/main/src/liger_kernel/transformers/monkey_patch.py#L948
                 model = AutoLigerKernelForCausalLM.from_pretrained(
                     args.model_name_or_path,
@@ -636,7 +726,9 @@ def main(args: FlatArguments):
 
     if args.use_lora:
         if args.use_qlora:
-            model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
+            model = prepare_model_for_kbit_training(
+                model, use_gradient_checkpointing=args.gradient_checkpointing
+            )
 
         logger.info("Initializing LORA model...")
         peft_config = LoraConfig(
@@ -645,7 +737,15 @@ def main(args: FlatArguments):
             r=args.lora_rank,
             lora_alpha=args.lora_alpha,
             lora_dropout=args.lora_dropout,
-            target_modules=["q_proj", "o_proj", "v_proj", "k_proj", "gate_proj", "up_proj", "down_proj"],
+            target_modules=[
+                "q_proj",
+                "o_proj",
+                "v_proj",
+                "k_proj",
+                "gate_proj",
+                "up_proj",
+                "down_proj",
+            ],
         )
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
@@ -655,7 +755,9 @@ def main(args: FlatArguments):
     # debugging tool for fewer samples
     if args.max_train_samples is not None:
         max_train_samples = min(len(train_dataset), args.max_train_samples)
-        logger.info(f"Limiting training samples to {max_train_samples} from {len(train_dataset)}.")
+        logger.info(
+            f"Limiting training samples to {max_train_samples} from {len(train_dataset)}."
+        )
         train_dataset = train_dataset.select(range(max_train_samples))
 
     # Log a few random samples from the training set:
@@ -666,7 +768,9 @@ def main(args: FlatArguments):
     train_dataloader = DataLoader(
         train_dataset,
         shuffle=True,
-        collate_fn=DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest"),
+        collate_fn=DataCollatorForSeq2SeqDPO(
+            tokenizer=tokenizer, model=model, padding="longest"
+        ),
         batch_size=args.per_device_train_batch_size,
     )
 
@@ -675,11 +779,19 @@ def main(args: FlatArguments):
     no_decay = ["bias", "layer_norm.weight"]
     optimizer_grouped_parameters = [
         {
-            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if not any(nd in n for nd in no_decay)
+            ],
             "weight_decay": args.weight_decay,
         },
         {
-            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if any(nd in n for nd in no_decay)
+            ],
             "weight_decay": 0.0,
         },
     ]
@@ -693,12 +805,18 @@ def main(args: FlatArguments):
             is_paged=True,
         )
     else:
-        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
+        optimizer = torch.optim.AdamW(
+            optimizer_grouped_parameters,
+            lr=args.learning_rate,
+            fused=args.fused_optimizer,
+        )
     print("=============optimizer loaded")
     print_gpu_stats(init_gpu_memory)
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
+    num_update_steps_per_epoch = math.ceil(
+        len(train_dataloader) / args.gradient_accumulation_steps
+    )
     if args.max_train_steps is None:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
@@ -716,7 +834,9 @@ def main(args: FlatArguments):
     # num_training_steps by num_processes so that the total number of
     # updates matches the num_training_steps.
     num_training_steps_for_scheduler = (
-        args.max_train_steps if overrode_max_train_steps else args.max_train_steps * accelerator.num_processes
+        args.max_train_steps
+        if overrode_max_train_steps
+        else args.max_train_steps * accelerator.num_processes
     )
     lr_scheduler = get_scheduler(
         name=args.lr_scheduler_type,
@@ -732,7 +852,9 @@ def main(args: FlatArguments):
     print_gpu_stats(init_gpu_memory)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
+    num_update_steps_per_epoch = math.ceil(
+        len(train_dataloader) / args.gradient_accumulation_steps
+    )
     if overrode_max_train_steps:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
@@ -769,13 +891,21 @@ def main(args: FlatArguments):
         wandb_tracker = accelerator.get_tracker("wandb")
 
     # Train!
-    total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
+    total_batch_size = (
+        args.per_device_train_batch_size
+        * accelerator.num_processes
+        * args.gradient_accumulation_steps
+    )
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
     logger.info(f"  Num Epochs = {args.num_train_epochs}")
-    logger.info(f"  Instantaneous batch size per device = {args.per_device_train_batch_size}")
-    logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
+    logger.info(
+        f"  Instantaneous batch size per device = {args.per_device_train_batch_size}"
+    )
+    logger.info(
+        f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}"
+    )
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
 
@@ -798,7 +928,10 @@ def main(args: FlatArguments):
             completed_steps = starting_epoch * num_update_steps_per_epoch
         else:
             # need to multiply `gradient_accumulation_steps` to reflect real steps
-            resume_step = int(training_difference.replace("step_", "")) * args.gradient_accumulation_steps
+            resume_step = (
+                int(training_difference.replace("step_", ""))
+                * args.gradient_accumulation_steps
+            )
             starting_epoch = resume_step // len(train_dataloader)
             completed_steps = resume_step // args.gradient_accumulation_steps
             resume_step -= starting_epoch * len(train_dataloader)
@@ -813,15 +946,17 @@ def main(args: FlatArguments):
     average_log_prob = args.dpo_loss_type in average_log_prob_loss_types
     forward_fn = concatenated_forward if args.concatenated_forward else separate_forward
     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-        epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = get_cache_ref_logprobs(
-            model,
-            train_dataloader,
-            accelerator,
-            average_log_prob,
-            last_checkpoint_path,
-            resume_step,
-            range(starting_epoch, args.num_train_epochs),
-            forward_fn,
+        epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = (
+            get_cache_ref_logprobs(
+                model,
+                train_dataloader,
+                accelerator,
+                average_log_prob,
+                last_checkpoint_path,
+                resume_step,
+                range(starting_epoch, args.num_train_epochs),
+                forward_fn,
+            )
         )
         print("=============after cache logprobs")
         print_gpu_stats(init_gpu_memory)
@@ -830,7 +965,9 @@ def main(args: FlatArguments):
     print("=============after cache logprobs; clear cache")
     print_gpu_stats(init_gpu_memory)
     # Only show the progress bar once on each machine.
-    progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
+    progress_bar = tqdm(
+        range(args.max_train_steps), disable=not accelerator.is_local_main_process
+    )
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
 
@@ -841,7 +978,9 @@ def main(args: FlatArguments):
         train_dataloader.set_epoch(epoch)
         if last_checkpoint_path and resume_step is not None:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint
-            active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_step)
+            active_dataloader = accelerator.skip_first_batches(
+                train_dataloader, resume_step
+            )
         else:
             active_dataloader = train_dataloader
         # we need to average the log probs for simpo loss
@@ -850,12 +989,19 @@ def main(args: FlatArguments):
             # dpo forward pass & loss
             with accelerator.accumulate(model):
                 policy_chosen_logps, policy_rejected_logps, aux_loss = forward_fn(
-                    model, batch, average_log_prob=average_log_prob, output_router_logits=args.load_balancing_loss
+                    model,
+                    batch,
+                    average_log_prob=average_log_prob,
+                    output_router_logits=args.load_balancing_loss,
                 )  # `aux_loss` is only used when `args.load_balancing_loss = True`
                 if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
                     p_device = policy_chosen_logps.device
-                    reference_chosen_logps = epoch_cached_reference_chosen_logps[epoch][step].to(p_device)
-                    reference_rejected_logps = epoch_cached_reference_rejected_logps[epoch][step].to(p_device)
+                    reference_chosen_logps = epoch_cached_reference_chosen_logps[epoch][
+                        step
+                    ].to(p_device)
+                    reference_rejected_logps = epoch_cached_reference_rejected_logps[
+                        epoch
+                    ][step].to(p_device)
                     losses, _, _ = dpo_loss(
                         policy_chosen_logps,
                         policy_rejected_logps,
@@ -902,8 +1048,14 @@ def main(args: FlatArguments):
                 with torch.no_grad():
                     local_metrics[0] += loss
                     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
-                        chosen_rewards = (args.dpo_beta * (policy_chosen_logps - reference_chosen_logps)).mean()
-                        rejected_rewards = (args.dpo_beta * (policy_rejected_logps - reference_rejected_logps)).mean()
+                        chosen_rewards = (
+                            args.dpo_beta
+                            * (policy_chosen_logps - reference_chosen_logps)
+                        ).mean()
+                        rejected_rewards = (
+                            args.dpo_beta
+                            * (policy_rejected_logps - reference_rejected_logps)
+                        ).mean()
                         average_rewards = (chosen_rewards + rejected_rewards) / 2
                         accuracy = (chosen_rewards > rejected_rewards).float().mean()
                         margin = (chosen_rewards - rejected_rewards).mean()
@@ -924,7 +1076,9 @@ def main(args: FlatArguments):
                 if args.logging_steps and completed_steps % args.logging_steps == 0:
                     # single all reduce to save time, avoiding per metric all reduce
                     global_metrics = accelerator.reduce(local_metrics, reduction="mean")
-                    global_metrics /= args.gradient_accumulation_steps * args.logging_steps
+                    global_metrics /= (
+                        args.gradient_accumulation_steps * args.logging_steps
+                    )
                     global_metrics = global_metrics.tolist()
                     metrics_to_log = {
                         "training_step": completed_steps,
@@ -944,9 +1098,7 @@ def main(args: FlatArguments):
                                 "rewards/margin": global_metrics[5],
                             }
                         )
-                    logger_str = (
-                        f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {global_metrics[0]}"
-                    )
+                    logger_str = f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {global_metrics[0]}"
                     if args.load_balancing_loss:
                         logger_str += f" Aux Loss: {global_metrics[19]}"
                         metrics_to_log["aux_loss"] = global_metrics[19]
@@ -967,11 +1119,19 @@ def main(args: FlatArguments):
                         accelerator.save_state(output_dir)
                         # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
                         with open(
-                            os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w"
+                            os.path.join(
+                                get_last_checkpoint_path(args, incomplete=True),
+                                "COMPLETED",
+                            ),
+                            "w",
                         ) as f:
-                            f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
+                            f.write(
+                                "COMPLETED"
+                            )  # annoyingly, empty files arent uploaded by beaker.
                         if accelerator.is_local_main_process:
-                            clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
+                            clean_last_n_checkpoints(
+                                args.output_dir, args.keep_last_n_checkpoints
+                            )
                         accelerator.wait_for_everyone()
 
                 if completed_steps >= args.max_train_steps:
@@ -983,8 +1143,15 @@ def main(args: FlatArguments):
                 output_dir = os.path.join(args.output_dir, output_dir)
             accelerator.save_state(output_dir)
             # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
-            with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
-                f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
+            with open(
+                os.path.join(
+                    get_last_checkpoint_path(args, incomplete=True), "COMPLETED"
+                ),
+                "w",
+            ) as f:
+                f.write(
+                    "COMPLETED"
+                )  # annoyingly, empty files arent uploaded by beaker.
             if accelerator.is_local_main_process:
                 clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)
             accelerator.wait_for_everyone()
@@ -1061,11 +1228,19 @@ def main(args: FlatArguments):
                 --model_name {args.run_name} \
                 --run_id {wandb_tracker.run.get_url()}
             """
-            process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            process = subprocess.Popen(
+                ["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
             stdout, stderr = process.communicate()
-            print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
-            print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
-            print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+            print(
+                f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}"
+            )
+            print(
+                f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}"
+            )
+            print(
+                f"Submit jobs after model training is finished - process return code: {process.returncode}"
+            )
 
     if args.push_to_hub:
         push_folder_to_hub(
@@ -1083,9 +1258,9 @@ def print_gpu_stats(init_gpu_memory: Optional[int]):
     if torch.cuda.is_available():
         free_gpu_memory, total_gpu_memory = torch.cuda.mem_get_info()
         peak_memory = init_gpu_memory - free_gpu_memory
-        print(f"Peak memory usage: {peak_memory / 1024 ** 3:.2f} GB")
-        print(f"Total memory usage: {total_gpu_memory / 1024 ** 3:.2f} GB")
-        print(f"Free memory: {free_gpu_memory / 1024 ** 3:.2f} GB")
+        print(f"Peak memory usage: {peak_memory / 1024**3:.2f} GB")
+        print(f"Total memory usage: {total_gpu_memory / 1024**3:.2f} GB")
+        print(f"Free memory: {free_gpu_memory / 1024**3:.2f} GB")
 
 
 if __name__ == "__main__":

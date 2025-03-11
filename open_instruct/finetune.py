@@ -594,7 +594,11 @@ def main(args: FlatArguments):
         elif args.use_liger_kernel:
             from liger_kernel.transformers import AutoLigerKernelForCausalLM
 
-            # Applies liger-kernel triton kernels *if applicable*
+            fused_linear_cross_entropy = args.reduce_loss == "mean"
+            logger.info(
+                f"Attempting to apply liger-kernel. {fused_linear_cross_entropy=}"
+            )
+
             # Supported models: https://github.com/linkedin/Liger-Kernel/blob/main/src/liger_kernel/transformers/monkey_patch.py#L948
             model = AutoLigerKernelForCausalLM.from_pretrained(
                 args.model_name_or_path,
@@ -605,7 +609,7 @@ def main(args: FlatArguments):
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 use_flash_attention_2=True if args.use_flash_attn else False,
                 # liger-kernel specific args
-                fused_linear_cross_entropy=False,  # don't fuse the linear layer with CE loss, since we want logits
+                fused_linear_cross_entropy=fused_linear_cross_entropy,
             )
         else:
             model = AutoModelForCausalLM.from_pretrained(
