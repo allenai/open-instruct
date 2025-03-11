@@ -813,6 +813,81 @@ def maybe_get_beaker_config():
     )
 
 
+def live_subprocess_output(cmd: List[str]) -> str:
+    output_lines = []
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1
+    )
+    # Display output in real-time and collect it
+    for line in iter(process.stdout.readline, ''):
+        if line.strip():
+            print(line.strip())
+            output_lines.append(line.strip())
+    process.wait()
+    if process.returncode != 0:
+        # Get the actual error message from the process
+        process_error = process.stderr.read() if process.stderr else "No error message available"
+        error_message = f"gsutil command failed with return code {process.returncode}: {process_error}"
+        print(error_message)
+        raise Exception(error_message)
+    
+    return "\n".join(output_lines)
+
+
+def download_from_hf(model_name_or_path: str, revision: str) -> None:
+    cmd = [
+        "huggingface-cli",
+        "download",
+        model_name_or_path,
+        "--revision",
+        revision
+    ]
+    print(f"Downloading from HF with command: {cmd}")
+    return live_subprocess_output(cmd)
+
+
+def download_from_gs_bucket(src_path: str, dest_path: str) -> None:
+    cmd = [
+        "gsutil",
+        "-o", f"GSUtil:parallel_thread_count=1",
+        "-o", f"GSUtil:sliced_object_download_threshold=150",
+        "-m",
+        "cp", "-r", src_path, dest_path
+    ]
+    print(f"Downloading from GS bucket with command: {cmd}")
+    live_subprocess_output(cmd)
+
+
+def gs_folder_exists(path: str) -> bool:
+    cmd = [
+        "gsutil",
+        "ls",
+        path
+    ]
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    # print(f"GS stat command: {cmd}")
+    # print(f"GS stat stdout: {stdout}")
+    # print(f"GS stat stderr: {stderr}")
+    if process.returncode == 0:
+        return True
+    else:
+        return False
+
+def upload_to_gs_bucket(src_path: str, dest_path: str) -> None:
+    cmd = [
+        "gsutil",
+        "-o", "GSUtil:parallel_composite_upload_threshold=150M",
+        "cp", "-r", src_path, dest_path
+    ]
+    print(f"Copying model to GS bucket with command: {cmd}")
+    live_subprocess_output(cmd)
+
+
 def launch_ai2_evals_on_weka(
     path: str,
     leaderboard_name: str,
@@ -838,6 +913,7 @@ def launch_ai2_evals_on_weka(
         else:
             gs_saved_path = f"{gs_bucket_path}/{path}"
         # save the model to the gs bucket first
+        # TODO: use upload_to_gs_bucket instead
         gs_command = f"""gsutil \\
             -o "GSUtil:parallel_composite_upload_threshold=150M" \\
             cp -r {path} \\
