@@ -52,6 +52,12 @@ GCP_CLUSTERS = [
     "ai2/augusta-google-1"
 ]
 
+INTERCONNECT_CLUSTERS = [
+    "ai2/jupiter-cirrascale-2",
+    "ai2/ceres-cirrascale",
+    "ai2/augusta-google-1",
+]
+
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -320,7 +326,7 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
             ),
             beaker.EnvVar(
                 name="HF_HUB_ENABLE_HF_TRANSFER",
-                value="1",
+                value="0", # we disable it because GCP is weird on uploading to the hub
             ),
         ])
         if num_nodes > 1:
@@ -494,6 +500,18 @@ def get_datasets(beaker_datasets, cluster: List[str]):
 
 
 def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami: str, resumable: bool):
+    # Add a check to ensure that the user is using the correct clusters for multi-node jobs
+    if args.num_nodes > 1 and not all(c in INTERCONNECT_CLUSTERS for c in args.cluster):
+        confirmation = False
+        while not confirmation:
+            confirmation = input(f"Interconnect clusters are required for multi-node jobs. Are you sure you want to continue? (y/n)")
+            if confirmation == "y":
+                confirmation = True
+            elif confirmation == "n":
+                raise ValueError(f"Interconnect clusters are required for multi-node jobs; please only use the following clusters: {INTERCONNECT_CLUSTERS}")
+            else:
+                print("Invalid input. Please enter 'y' or 'n'.")
+    
     # special logic to deal with escape like
     # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
     # we need to wrap the json string with single quote
@@ -579,6 +597,16 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
 
 def main():
     args, commands = get_args()
+    # If the user is not in Ai2, we run the command as is
+    config_path = os.path.expanduser("~/.beaker/config.yml")
+    if not os.path.exists(config_path) and "BEAKER_TOKEN" not in os.environ:
+        print("Beaker credentials not found; running the command as is")
+        direct_commands = " ".join(commands[0])
+        # hack remove ai2 specific commands
+        direct_commands = direct_commands.replace("source configs/beaker_configs/ray_node_setup.sh &&", "")
+        os.system(direct_commands)
+        return
+    
     if args.workspace:
         beaker_client = beaker.Beaker.from_env(default_workspace=args.workspace)
     else:
