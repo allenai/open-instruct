@@ -136,6 +136,14 @@ def get_args():
         Can be specified multiple times. Example: --env MY_VAR=value1 --env OTHER_VAR=value2""",
         default=[],
     )
+    parser.add_argument(
+        "--secret",
+       type=parse_env_var,
+        action="append",
+        help="""Additional secret env variables in the format 'name=value'.
+        Can be specified multiple times. Example: --secret MY_VAR=value1 --secret OTHER_VAR=value2""",
+        default=[],
+    )
     # Split up the mason args from the Python args.
     mason_args, command_args = parser.parse_known_args()
     commands = parse_commands(command_args)
@@ -177,7 +185,8 @@ def parse_commands(command_args: List[str]) -> List[List[str]]:
 
 
 def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: List[str], 
-                whoami: str, resumable: bool, num_nodes: int, additional_env_vars: List[Dict[str, str]]):
+                whoami: str, resumable: bool, num_nodes: int, additional_env_vars: List[Dict[str, str]],
+                additional_secrets: List[Dict[str, str]]):
     env_vars = []
     # Add user-specified environment variables first
     for env_var in additional_env_vars:
@@ -187,6 +196,15 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
                 value=env_var["value"]
             )
         )
+    # add user-specific secrets
+    for secret in additional_secrets:
+        env_vars.append(
+            beaker.EnvVar(
+                name=secret["name"],
+                secret=secret["value"],
+            )
+        )
+
     useful_secrets = [
         "HF_TOKEN",
         "WANDB_API_KEY",
@@ -546,7 +564,7 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
                                    preemptible=args.preemptible),
         constraints=constraints,
         env_vars=get_env_vars(args.pure_docker_mode, args.cluster, beaker_secrets, 
-                            whoami, resumable, args.num_nodes, args.env),
+                            whoami, resumable, args.num_nodes, args.env, args.secret),
         resources=beaker.TaskResources(gpu_count=args.gpus),
         replicas=args.num_nodes,
     )
