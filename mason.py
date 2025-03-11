@@ -511,7 +511,14 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
                 raise ValueError(f"Interconnect clusters are required for multi-node jobs; please only use the following clusters: {INTERCONNECT_CLUSTERS}")
             else:
                 print("Invalid input. Please enter 'y' or 'n'.")
-    
+    if args.image == "ai2/cuda11.8-cudnn8-dev-ubuntu20.04" and any(c in GCP_CLUSTERS for c in args.cluster):
+        raise ValueError("GCP clusters do not have the dev filesystem, please use a proper image")
+
+    # In gcp, we save the model to a gs bucket first
+    if any(c in GCP_CLUSTERS for c in args.cluster):
+        command.append("--gs_bucket_path")
+        command.append(f"gs://ai2-llm/post-training/")
+
     # special logic to deal with escape like
     # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
     # we need to wrap the json string with single quote
