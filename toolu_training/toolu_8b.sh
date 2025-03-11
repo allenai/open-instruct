@@ -3,7 +3,7 @@ python3 -m scripts.submit_finetune_job \
     --priority high \
     --workspace ai2/tulu-3-dev \
     --num_nodes 4 \
-    --default_beaker_config configs/beaker_configs/default_finetune_multinode.yaml \
+    --default_beaker_config toolu_training/beaker_configs/default_finetune_multinode.yaml \
     --config toolu_training/train_configs/toolu_8b_sft.yaml \
     --exp_name "toolu_test" \
     --seed $seed \
