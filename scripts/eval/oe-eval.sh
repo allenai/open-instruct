@@ -47,8 +47,9 @@ set -ex
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--unseen-evals] [--priority priority] [--tasks TASKS] [--evaluate_on_weka]"
+    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--unseen-evals] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>]"
     echo "TASKS should be a comma-separated list of task specifications (e.g., 'gsm8k::tulu,bbh:cot::tulu')"
+    echo "STOP_SEQUENCES should be a comma-separated list of strings to stop generation at (e.g., '</answer>,\\n\\n')"
     exit 1
 }
 
@@ -67,6 +68,7 @@ while [[ "$#" -gt 0 ]]; do
         --evaluate_on_weka) EVALUATE_ON_WEKA="true" ;;
         --step) STEP="$2"; shift ;;
         --run-id) RUN_ID="$2"; shift ;;
+        --stop-sequences) STOP_SEQUENCES="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -91,6 +93,22 @@ PRIORITY="${PRIORITY:normal}"
 EVALUATE_ON_WEKA="${EVALUATE_ON_WEKA:-false}"
 RUN_ID="${RUN_ID:-}"
 STEP="${STEP:-}"
+
+# Process stop sequences if provided
+STOP_SEQUENCES_JSON=""
+if [[ -n "$STOP_SEQUENCES" ]]; then
+    # Convert comma-separated list to JSON array
+    IFS=',' read -ra STOP_SEQS <<< "$STOP_SEQUENCES"
+    STOP_SEQUENCES_JSON=", \"stop_sequences\": ["
+    for i in "${!STOP_SEQS[@]}"; do
+        if [ $i -gt 0 ]; then
+            STOP_SEQUENCES_JSON+=", "
+        fi
+        STOP_SEQUENCES_JSON+="\"${STOP_SEQS[$i]}\""
+    done
+    STOP_SEQUENCES_JSON+="]"
+fi
+
 DATALAKE_ARGS=""
 if [[ -n "$RUN_ID" ]]; then
     DATALAKE_ARGS+="run_id=$RUN_ID"
@@ -181,9 +199,10 @@ for TASK in "${TASKS[@]}"; do
             $MODEL_TYPE \
             --batch-size "$BATCH_SIZE" \
             --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
-            --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false } }" \
+            --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
+            --beaker-image "costah/oe-eval-0305_gs_olmo32b" \
             --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1"}' \
             ${REVISION_ARG} \
             --cluster ai2/neptune-cirrascale,ai2/saturn-cirrascale,ai2/jupiter-cirrascale-2 \
@@ -200,13 +219,15 @@ for TASK in "${TASKS[@]}"; do
         $MODEL_TYPE \
         --batch-size "$BATCH_SIZE" \
         --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
-        --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false } }" \
+        --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
         ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT" \
-        --gantry-args "{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\"}" \
+        --beaker-image "costah/oe-eval-0305_gs_olmo32b" \
+        --gantry-args "{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"}" \
         ${REVISION_ARG} \
+        --cluster ai2/augusta-google-1 \
         --beaker-retries 2 \
-        --beaker-priority "$PRIORITY" \
+        --beaker-priority normal \
         --push-datalake \
         --datalake-tags "$DATALAKE_ARGS"
     fi

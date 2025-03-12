@@ -119,6 +119,7 @@ parser.add_argument("--evaluate_on_weka", action="store_true", help="Evaluate OE
 parser.add_argument("--oe_eval_tasks", type=str, default=None, help="Evaluate OE eval on Beaker.")
 parser.add_argument("--step", type=int, default=None, help="Step number for postgresql logging.")
 parser.add_argument("--run_id", type=str, default=None, help="A unique run ID for postgresql logging.")
+parser.add_argument("--oe_eval_stop_sequences", type=str, default=None, help="Comma-separated list of stop sequences for OE eval.")
 args = parser.parse_args()
 
 
@@ -607,6 +608,8 @@ if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
         oe_eval_cmd += f" --model-location {model_info[1]}"
     elif model_info[1].startswith("/"):
         oe_eval_cmd += f" --model-location {model_info[1]}"
+    elif model_info[1].startswith("gs://"):
+        oe_eval_cmd += f" --model-location {model_info[1]}"
     else:
         oe_eval_cmd += f" --model-location beaker://{model_info[1]}"
     if args.hf_revision:
@@ -634,6 +637,11 @@ if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
         oe_eval_cmd += " --unseen-evals"
     # add priority
     oe_eval_cmd += f" --priority {args.priority}"
+    
+    # Add stop sequences if provided
+    if args.oe_eval_stop_sequences:
+        oe_eval_cmd += f" --stop-sequences '{args.oe_eval_stop_sequences}'"
+        
     print(f"Running OE eval with command: {oe_eval_cmd}")
     subprocess.Popen(oe_eval_cmd, shell=True)
 

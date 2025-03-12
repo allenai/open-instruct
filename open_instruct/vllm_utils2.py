@@ -33,7 +33,30 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+
+# monkey patch for olmo2 32B
+from vllm.model_executor.models.olmo2 import AttentionMetadata, Olmo2Attention
 from vllm.worker.worker import Worker
+
+
+def custom_forward(
+    self,
+    positions: torch.Tensor,
+    hidden_states: torch.Tensor,
+    kv_cache: torch.Tensor,
+    attn_metadata: AttentionMetadata,
+) -> torch.Tensor:
+    qkv, _ = self.qkv_proj(hidden_states)
+    # q, k, v = qkv.chunk(chunks=3, dim=-1)
+    q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+    q, k = self._apply_qk_norm(q, k)
+    q, k = self.rotary_emb(positions, q, k)
+    attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
+    output, _ = self.o_proj(attn_output)
+    return output
+
+
+Olmo2Attention.forward = custom_forward
 
 
 # Copy from pytorch to allow creating multiple main groups.
@@ -252,6 +275,6 @@ def create_vllm_engines(
 
 
 if __name__ == "__main__":
-    llm = LLMRayActor.remote("meta-llama/Llama-3.1-8B-Instruct", tensor_parallel_size=2)
+    llm = LLMRayActor.remote("Qwen/Qwen2.5-7B", tensor_parallel_size=2)
     output = ray.get(llm.generate.remote("San Franciso is a"))
     print(f"output: {output}")
