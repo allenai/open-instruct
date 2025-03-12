@@ -5,5 +5,6 @@ python3 -m scripts.submit_finetune_job \
     --num_nodes 4 \
     --default_beaker_config toolu_training/beaker_configs/default_finetune_multinode.yaml \
     --config toolu_training/train_configs/toolu_8b_sft.yaml \
-    --exp_name "toolu_test" \
+    --exp_name "Llama3.1_toolu" \
+    --reduce_loss sum \
     --hf_metadata_dataset allenai/olmo-instruct-evals
