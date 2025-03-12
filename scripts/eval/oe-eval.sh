@@ -227,7 +227,7 @@ for TASK in "${TASKS[@]}"; do
         ${REVISION_ARG} \
         --cluster ai2/augusta-google-1 \
         --beaker-retries 2 \
-        --beaker-priority normal \
+        --beaker-priority high \
         --push-datalake \
         --datalake-tags "$DATALAKE_ARGS"
     fi
