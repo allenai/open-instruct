@@ -36,7 +36,7 @@ The main things we are looking for are:
     5 minutes to tokenize the dataset. This translates to 32 * 5 * 8 = 1280 minutes = 21 hours of
     wasted H100 time.
     * Sometimes we also launch on places that don't have a shared cache (e.g., GCP), so we would
-    download individual datasets 32 times, and wait for concatenation and tokenization (actually 
+    download individual datasets 32 times, and wait for concatenation and tokenization (actually
     twice because the `with accelerator.main_process_first()` function assumes a shared cache)
 """
 
@@ -197,6 +197,41 @@ CHAT_TEMPLATES = {
         "{{ message['role'].capitalize() + ': ' + message['content'] + '\n' }}"
         "{% if loop.last and add_generation_prompt %}"
         "{{ 'Assistant: <think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "toolu": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{% if message.get('tools', none) is not none %}"
+        "{{ '<|system|>\n' + message['content'] + '\n' + '<tools>' + message['tools'] + '</tools>' + '\n' }}"
+        "{% else %}"
+        "{{ '<|system|>\n' + message['content']  + '\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'user' %}"
+        "{% if message.get('tools', none) is not none %}"
+        "{{ '<|user|>\n' + message['content'] + '\n' + '<tools>' + message['tools'] + '</tools>' + '\n' }}"
+        "{% else %}"
+        "{{ '<|user|>\n' + message['content'] + '\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'ipython' %}"
+        "{{ '<|ipython|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|assistant|>\n' }}"
+        "{% if message.get('content', none) is not none %}"
+        "{{ message['content'] }}"
+        "{% endif %}"
+        "{% if message.get('tool_calls', none) is not none %}"
+        "{{ '<tool_calls>' + message['tool_calls'] + '</tool_calls>' }}"
+        "{% endif %}"
+        "{% if not loop.last %}"
+        "{{ eos_token + '\n' }}"
+        "{% else %}"
+        "{{ eos_token }}"
+        "{% endif %}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|assistant|>\n' }}"
         "{% endif %}"
         "{% endfor %}"
     ),
