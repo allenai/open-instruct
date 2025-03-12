@@ -1373,34 +1373,34 @@ class PolicyTrainerRayProcess(RayProcess):
             # save steps
             if args.save_freq > 0 and training_step % args.save_freq == 0:
                 checkpoint_dir = f"{args.output_dir}_checkpoints"
-                os.makedirs(checkpoint_dir, exist_ok=True)
                 step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-                os.makedirs(step_dir, exist_ok=True)
                 print(f"Saving model at step {training_step} to {step_dir}")
                 self.save_model(self.model, step_dir)
                 if args.try_launch_beaker_eval_jobs_on_weka:
                     leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
-                    eval_futures.append(
-                        ray.remote(launch_ai2_evals_on_weka)
-                        .options(num_cpus=1)
-                        .remote(step_dir, leaderboard_name, args.oe_eval_max_length, self.wandb_url, training_step, args.oe_eval_tasks, args.stop_strings, args.gs_bucket_path)
-                    )
-                    # if a future is done, remove it from the deque
-                    if len(eval_futures) > 0:
-                        is_ready = len(ray.wait([eval_futures[0]], timeout=0.001)[0]) > 0
-                        if is_ready:
-                            print(f"Eval future {eval_futures[0]} is done")
-                            eval_futures.popleft()
+                    if self.rank == 0 and is_beaker_job():
+                        eval_futures.append(
+                            ray.remote(launch_ai2_evals_on_weka)
+                            .options(num_cpus=1)
+                            .remote(step_dir, leaderboard_name, args.oe_eval_max_length, self.wandb_url, training_step, args.oe_eval_tasks, args.stop_strings, args.gs_bucket_path)
+                        )
+                        # if a future is done, remove it from the deque
+                        if len(eval_futures) > 0:
+                            is_ready = len(ray.wait([eval_futures[0]], timeout=0.001)[0]) > 0
+                            if is_ready:
+                                print(f"Eval future {eval_futures[0]} is done")
+                                eval_futures.popleft()
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         self.save_model(self.model, args.output_dir)
         if args.try_launch_beaker_eval_jobs_on_weka:
             leaderboard_name = args.hf_repo_revision
-            eval_futures.append(
-                ray.remote(launch_ai2_evals_on_weka)
-                .options(num_cpus=1)
-                .remote(args.output_dir, leaderboard_name, args.oe_eval_max_length, self.wandb_url, training_step, args.oe_eval_tasks, args.stop_strings, args.gs_bucket_path)
-            )
-        ray.get(list(eval_futures))
+            if self.rank == 0 and is_beaker_job():
+                eval_futures.append(
+                    ray.remote(launch_ai2_evals_on_weka)
+                    .options(num_cpus=1)
+                    .remote(args.output_dir, leaderboard_name, args.oe_eval_max_length, self.wandb_url, training_step, args.oe_eval_tasks, args.stop_strings, args.gs_bucket_path)
+                )
+                ray.get(list(eval_futures))
         print("======== ✅ Evaluation jobs finished =========")
 
         # Ai2 logic: we use /output to store the artifacts of the job, so we
