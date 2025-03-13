@@ -64,7 +64,6 @@ import torch.utils.data
 from datasets import Dataset
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from huggingface_hub import HfApi
-import wandb
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.queue import Queue as RayQueue

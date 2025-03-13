@@ -1,11 +1,10 @@
+import logging
 import re
 import signal
-import logging
 from typing import Optional
 
 import sympy
 from sympy.parsing.latex import parse_latex
-
 
 eval_logger = logging.getLogger("math_utils")
 
