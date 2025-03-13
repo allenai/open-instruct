@@ -1685,6 +1685,21 @@ wheels = [
 ]
 
 [[package]]
+name = "nvitop"
+version = "1.4.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "nvidia-ml-py" },
+    { name = "psutil" },
+    { name = "windows-curses", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bb/5a/9089665cc1adda224fa02a0110aff325cb99fc7497f85b1cf173545df230/nvitop-1.4.2.tar.gz", hash = "sha256:13c039aa099374fb1a29eb9412849a9d984a162e2ad7d3a1ed2a7f5723914d71", size = 234098 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/57/144c7706acb92d29edd19686cc980b4df15845721c2fde8a3df7abb35122/nvitop-1.4.2-py3-none-any.whl", hash = "sha256:cbb78b935dd843ce18eca6fb9d3d0199da168a15a0019a8f2308afcd3dff1af4", size = 223178 },
+]
+
+[[package]]
 name = "open-instruct"
 version = "0.1.0"
 source = { editable = "." }
@@ -1698,6 +1713,7 @@ dependencies = [
     { name = "matplotlib" },
     { name = "nltk" },
     { name = "numpy" },
+    { name = "nvitop" },
     { name = "packaging" },
     { name = "peft" },
     { name = "setuptools" },
@@ -1740,6 +1756,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.9.3" },
     { name = "nltk", specifier = ">=3.9.1" },
     { name = "numpy", specifier = "<2" },
+    { name = "nvitop", specifier = ">=1.4.2" },
     { name = "packaging", specifier = ">=24.2" },
     { name = "peft", specifier = ">=0.13.2" },
     { name = "setuptools", specifier = ">=75.6.0" },
@@ -1747,7 +1764,7 @@ requires-dist = [
     { name = "torch", marker = "sys_platform != 'darwin'", specifier = ">=2.5.1", index = "https://download.pytorch.org/whl/cu121" },
     { name = "torch", marker = "sys_platform == 'darwin'", specifier = ">=2.5.1" },
     { name = "transformers", specifier = ">=4.46.3" },
-    { name = "vllm", specifier = ">=0.6.4.post1" },
+    { name = "vllm", specifier = "==0.6.6.post1" },
     { name = "wandb", specifier = "==0.18.1" },
 ]
 provides-extras = ["compile", "liger"]
@@ -3282,6 +3299,17 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/9f/69/83029f1f6300c5fb2471d621ab06f6ec6b3324685a2ce0f9777fd4a8b71e/werkzeug-3.1.3.tar.gz", hash = "sha256:60723ce945c19328679790e3282cc758aa4a6040e4bb330f53d30fa546d44746", size = 806925 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/52/24/ab44c871b0f07f491e5d2ad12c9bd7358e527510618cb1b803a88e986db1/werkzeug-3.1.3-py3-none-any.whl", hash = "sha256:54b78bf3716d19a65be4fceccc0d1d7b89e608834989dfae50ea87564639213e", size = 224498 },
+]
+
+[[package]]
+name = "windows-curses"
+version = "2.4.1"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/15/34/e70815e7ae6f157c00121180a607dbcdc82acfd949c70bba28c45d206dec/windows_curses-2.4.1-cp310-cp310-win32.whl", hash = "sha256:53d711e07194d0d3ff7ceff29e0955b35479bc01465d46c3041de67b8141db2f", size = 71136 },
+    { url = "https://files.pythonhosted.org/packages/a6/1d/1bb512c445af24fb0a3dccf9537c8727bba5920e69539227b87f5351f608/windows_curses-2.4.1-cp310-cp310-win_amd64.whl", hash = "sha256:325439cd4f37897a1de8a9c068a5b4c432f9244bf9c855ee2fbeb3fa721a770c", size = 81418 },
+    { url = "https://files.pythonhosted.org/packages/74/b3/46a2508fff83b5affb5a311797c584c494b4b0c4c8796a1afa2c1b1e03ac/windows_curses-2.4.1-cp311-cp311-win32.whl", hash = "sha256:4fa1a176bfcf098d0c9bb7bc03dce6e83a4257fc0c66ad721f5745ebf0c00746", size = 71129 },
+    { url = "https://files.pythonhosted.org/packages/50/29/fd7c0c80177d8df55f841504a5f332b95b0002c80f82055913b6caac94e6/windows_curses-2.4.1-cp311-cp311-win_amd64.whl", hash = "sha256:fd7d7a9cf6c1758f46ed76b8c67f608bc5fcd5f0ca91f1580fd2d84cf41c7f4f", size = 81431 },
 ]
 
 [[package]]

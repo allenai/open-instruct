@@ -40,6 +40,7 @@ import subprocess
 import threading
 import time
 from argparse import Namespace
+from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
@@ -1144,6 +1145,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 verifiable_counts = []
                 sequence_lengths = []
                 values = []
+                per_func_rewards = defaultdict(list)
                 if self.rank == 0:
                     g_response_token_ids = response_ids_Q.get()
                     DUMMY_PAD_TOKEN = (
@@ -1160,9 +1162,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     accelerator.process_index * queries.shape[0] : (accelerator.process_index + 1) * queries.shape[0]
                 ]
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
+                decoded_response = tokenizer.batch_decode(local_vllm_responses)
 
                 if args.add_r1_style_format_reward:
-                    decoded_response = tokenizer.batch_decode(local_vllm_responses)
                     format_scores = torch.tensor(
                         soft_format_reward_func(decoded_response, args.r1_style_format_reward), device=device
                     )
@@ -1207,15 +1209,20 @@ class PolicyTrainerRayProcess(RayProcess):
                         # we need to batch the gt to match query.
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
-                        verifiable_reward, verifiable_count = apply_verifiable_reward(
-                            postprocessed_response,
-                            postprocessed_query_response,
-                            tokenizer,
-                            ground_truth,
-                            dataset,
-                            verify_reward=args.verification_reward,
+                        verifiable_reward, per_func_reward = apply_verifiable_reward(
+                            responses=postprocessed_response,
+                            decoded_responses=decoded_response,
+                            ground_truths=ground_truth,
+                            datasets=dataset,
+                            reward_mult=args.verification_reward,
                         )
+                        verifiable_reward = torch.tensor(verifiable_reward, device=score.device)
+                        verifiable_count = verifiable_reward > 0
                         score += verifiable_reward
+                        # For each sample, aggregate each per-function reward into a single dict.
+                        for reward_dict in per_func_reward:
+                            for key, value in reward_dict.items():
+                                per_func_rewards[key].append(value)
                     else:
                         verifiable_count = torch.tensor([0.0], device=device).float()
 
@@ -1414,6 +1421,12 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics.add("val/stop_token_rate", contain_stop_token.float().mean())
                 if args.add_r1_style_format_reward:
                     local_metrics.add("val/format_scores", format_scores.float().mean())
+                for key, reward_list in per_func_rewards.items():
+                    rewards_tensor = torch.tensor(reward_list, device=device)
+                    # Mean per-function reward
+                    local_metrics.add(f"objective/{key}_reward", rewards_tensor.mean())
+                    # Correct rate: fraction of samples with positive reward
+                    local_metrics.add(f"objective/{key}_correct_rate", (rewards_tensor > 0).float().mean())
 
                 metrics = {
                     "episode": episode,

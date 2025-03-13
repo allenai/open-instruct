@@ -5,6 +5,10 @@ import beaker
 import os
 import secrets
 import string
+import subprocess
+
+from open_instruct.dataset_transformation import get_commit_hash
+from open_instruct.utils import download_from_hf, gs_folder_exists, upload_to_gs_bucket
 
 def parse_beaker_dataset(dataset_str):
     splt = dataset_str.split(":")
@@ -511,7 +515,58 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
                 raise ValueError(f"Interconnect clusters are required for multi-node jobs; please only use the following clusters: {INTERCONNECT_CLUSTERS}")
             else:
                 print("Invalid input. Please enter 'y' or 'n'.")
-    
+    if args.image == "ai2/cuda11.8-cudnn8-dev-ubuntu20.04" and any(c in GCP_CLUSTERS for c in args.cluster):
+        raise ValueError("GCP clusters do not have the dev filesystem, please use a proper image")
+
+    # In gcp, we save the model to a gs bucket first
+    if any(c in GCP_CLUSTERS for c in args.cluster):
+        # Replace the model_name_or_path with a downloaded path from the gs bucket
+        # extracts the `model_name_or_path` from the command
+        model_name_or_path = None
+        for idx, cmd in enumerate(command):
+            if cmd == "--model_name_or_path":
+                model_name_or_path = command[idx + 1]
+                break
+        model_revision = "main"
+        for idx, cmd in enumerate(command):
+            if cmd == "--model_revision":
+                model_revision = command[idx + 1]
+                break
+        
+        commit_hash = get_commit_hash(model_name_or_path, model_revision, "config.json", "model")
+        download_from_hf(model_name_or_path, model_revision) # first download the model
+        path = download_from_hf(model_name_or_path, model_revision) # then get the path
+        gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_models/{model_name_or_path}/{commit_hash}"
+        gs_folder = gs_folder_exists(gs_saved_path) # race condition exists, but it's fine since we are launching mason sequentially
+        if not gs_folder:
+            upload_to_gs_bucket(path, gs_saved_path)
+
+        download_path = gs_saved_path.replace("gs://", "/gs/")
+        download_path_without_last_folder = download_path.rsplit("/", 1)[0]
+        gs_download_command = [
+            "mkdir", "-p", download_path,
+            "&&",
+            "gsutil",
+            "-o", f"GSUtil:parallel_thread_count=1",
+            "-o", f"GSUtil:sliced_object_download_threshold=150",
+            "-m",
+            "cp", "-r", gs_saved_path, download_path_without_last_folder,
+            "&&",
+        ]
+        command = gs_download_command + command
+        command.append("--gs_bucket_path")
+        command.append(f"gs://ai2-llm/post-training/")
+
+        # Replace the model_name_or_path with the downloaded path
+        for idx, cmd in enumerate(command):
+            if cmd == "--model_name_or_path":
+                command[idx + 1] = download_path
+                break
+        for idx, cmd in enumerate(command):
+            if cmd == "--model_revision":
+                command[idx + 1] = "main"
+                break
+
     # special logic to deal with escape like
     # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
     # we need to wrap the json string with single quote

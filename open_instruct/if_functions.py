@@ -330,7 +330,7 @@ def validate_placeholders(text: str, N: int) -> tuple[bool, List[str]]:
     # Check if the number of placeholders meets the requirement
     has_enough = len(placeholders) >= N
 
-    return has_enough, placeholders
+    return has_enough
 
 
 # Number Bullets: Your answer must contain exactly {N} bullet points. Use the markdown bullet points such as: * This

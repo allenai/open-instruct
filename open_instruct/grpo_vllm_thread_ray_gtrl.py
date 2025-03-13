@@ -40,6 +40,7 @@ import subprocess
 import threading
 import time
 from argparse import Namespace
+from collections import defaultdict, deque
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
@@ -106,6 +107,7 @@ from open_instruct.utils import (
     BeakerRuntimeConfig,
     get_wandb_tags,
     is_beaker_job,
+    launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
@@ -136,6 +138,9 @@ class Args:
     """Seed of the experiment"""
     run_name: Optional[str] = None
     """A unique name of this run"""
+    saved_tokenizer_type: Literal["original", "tokenizer_config"] = "tokenizer_config"
+    """The type of tokenizer to save (original means the unmodified tokenizer directly loaded from .from_pretrained(),
+    tokenizer_config means the tokenizer obtained via `TokenizerConfig`"""
 
     # optimizer args
     eps: float = 1e-5
@@ -217,7 +222,6 @@ class Args:
     stop_strings: List[str] = None
     """List of strings that stop the generation when they are generated.
     The returned output will not contain the stop strings."""
-    eval_max_length: int = 4096  # max generation length for evaluation
 
     # online PPO specific args
     beta: float = 0.05
@@ -298,10 +302,14 @@ class Args:
     """Whether to launch beaker evaluation jobs after training on weka"""
     try_auto_save_to_beaker: bool = True
     """Whether to try to save the model to Beaker dataset `/output` after training"""
+    gs_bucket_path: Optional[str] = None
+    """The path to the gs bucket to save the model to"""
     oe_eval_tasks: Optional[List[str]] = None
     """The beaker evaluation tasks to launch"""
     hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
+    oe_eval_max_length: int = 4096
+    """the max generation length for evaluation for oe-eval"""
 
     def __post_init__(self):
         assert self.number_samples_per_prompt > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
@@ -789,6 +797,7 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.set_printoptions(precision=4, sci_mode=False)
 
         args = self.args
+        self.modified_tokenizer = tokenizer
 
         accelerator = Namespace()
         accelerator.process_index = self.rank
@@ -1005,6 +1014,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # training loop
         start_time = time.time()
+        eval_futures = deque([])
         global_data = next(iter_dataloader)
         data = data_collator(
             global_data[self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size]
@@ -1097,6 +1107,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 scores = []
                 verifiable_counts = []
                 sequence_lengths = []
+                per_func_rewards = defaultdict(list)
                 if self.rank == 0:
                     g_response_token_ids = response_ids_Q.get()
                     DUMMY_PAD_TOKEN = (
@@ -1154,18 +1165,21 @@ class PolicyTrainerRayProcess(RayProcess):
                         # we need to batch the gt to match query.
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
-                        verifiable_reward, verifiable_count = apply_verifiable_reward(
-                            postprocessed_response,
-                            postprocessed_query_response,
-                            tokenizer,
-                            ground_truth,
-                            dataset,
-                            verify_reward=args.verification_reward,
+                        decoded_response = tokenizer.batch_decode(postprocessed_response)
+                        verifiable_reward, per_func_reward = apply_verifiable_reward(
+                            responses=postprocessed_response,
+                            decoded_responses=decoded_response,
+                            ground_truths=ground_truth,
+                            datasets=dataset,
+                            reward_mult=args.verification_reward,
                         )
+                        verifiable_reward = torch.tensor(verifiable_reward, device=score.device)
+                        verifiable_count = verifiable_reward > 0
                         score += verifiable_reward
-                    else:
-                        verifiable_count = torch.tensor([0.0], device=device).float()
-
+                        # For each sample, aggregate each per-function reward into a single dict.
+                        for reward_dict in per_func_reward:
+                            for key, value in reward_dict.items():
+                                per_func_rewards[key].append(value)
                     if args.add_r1_style_format_reward:
                         score += format_scores[i : i + args.local_rollout_forward_batch_size]
 
@@ -1331,6 +1345,12 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics.add("val/stop_token_rate", contain_stop_token.float().mean())
                 if args.add_r1_style_format_reward:
                     local_metrics.add("val/format_scores", format_scores.float().mean())
+                for key, reward_list in per_func_rewards.items():
+                    rewards_tensor = torch.tensor(reward_list, device=device)
+                    # Mean per-function reward
+                    local_metrics.add(f"objective/{key}_reward", rewards_tensor.mean())
+                    # Correct rate: fraction of samples with positive reward
+                    local_metrics.add(f"objective/{key}_correct_rate", (rewards_tensor > 0).float().mean())
 
                 metrics = {
                     "episode": episode,
@@ -1352,17 +1372,53 @@ class PolicyTrainerRayProcess(RayProcess):
             # save steps
             if args.save_freq > 0 and training_step % args.save_freq == 0:
                 checkpoint_dir = f"{args.output_dir}_checkpoints"
-                os.makedirs(checkpoint_dir, exist_ok=True)
                 step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-                os.makedirs(step_dir, exist_ok=True)
                 print(f"Saving model at step {training_step} to {step_dir}")
                 self.save_model(self.model, step_dir)
                 if args.try_launch_beaker_eval_jobs_on_weka:
-                    self.launch_ai2_evals_on_weka(step_dir, training_step)
+                    leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
+                    if self.rank == 0 and is_beaker_job():
+                        eval_futures.append(
+                            ray.remote(launch_ai2_evals_on_weka)
+                            .options(num_cpus=1)
+                            .remote(
+                                step_dir,
+                                leaderboard_name,
+                                args.oe_eval_max_length,
+                                self.wandb_url,
+                                training_step,
+                                args.oe_eval_tasks,
+                                args.stop_strings,
+                                args.gs_bucket_path,
+                            )
+                        )
+                        # if a future is done, remove it from the deque
+                        if len(eval_futures) > 0:
+                            is_ready = len(ray.wait([eval_futures[0]], timeout=0.001)[0]) > 0
+                            if is_ready:
+                                print(f"Eval future {eval_futures[0]} is done")
+                                eval_futures.popleft()
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         self.save_model(self.model, args.output_dir)
         if args.try_launch_beaker_eval_jobs_on_weka:
-            self.launch_ai2_evals_on_weka(args.output_dir)
+            leaderboard_name = args.hf_repo_revision
+            if self.rank == 0 and is_beaker_job():
+                eval_futures.append(
+                    ray.remote(launch_ai2_evals_on_weka)
+                    .options(num_cpus=1)
+                    .remote(
+                        args.output_dir,
+                        leaderboard_name,
+                        args.oe_eval_max_length,
+                        self.wandb_url,
+                        training_step,
+                        args.oe_eval_tasks,
+                        args.stop_strings,
+                        args.gs_bucket_path,
+                    )
+                )
+                ray.get(list(eval_futures))
+        print("======== ✅ Evaluation jobs finished =========")
 
         # Ai2 logic: we use /output to store the artifacts of the job, so we
         # make a copy of the model to `/output` in the end.
@@ -1427,68 +1483,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
 
             # save tokenizer
-            self.original_tokenizer.save_pretrained(output_dir)
-
-    def launch_ai2_evals_on_weka(self, step_dir: str, training_step: Optional[int] = None) -> None:
-        """auto eval the metrics as `f"{args.exp_name}_step_{training_step}"` in our leaderboard"""
-        args = self.args
-        beaker_config = self.beaker_config
-        model_config = self.model_config
-        wandb_url = self.wandb_url
-        # Ai2 specific logic
-        if is_beaker_job() and self.rank == 0:
-            if training_step is not None:
-                leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
-            else:
-                leaderboard_name = args.hf_repo_revision
-            if args.hf_metadata_dataset:
-                dataset_list = args.dataset_mixer_list
-                # mainly just focussing here on what would be useful for the leaderboard.
-                # wandb will have even more useful information.
-                metadata_blob = {
-                    "model_name": args.exp_name,
-                    "model_type": "ppo",
-                    "datasets": dataset_list,
-                    "base_model": model_config.model_name_or_path,
-                    "wandb_path": wandb_url,
-                    "beaker_experiment": beaker_config.beaker_experiment_url,
-                    "beaker_datasets": beaker_config.beaker_dataset_id_urls,
-                }
-                upload_metadata_to_hf(
-                    metadata_blob,
-                    "metadata.json",
-                    args.hf_metadata_dataset,
-                    "results/" + leaderboard_name,  # to match what the auto-evals name as.
-                )
-
-            command = f"""\
-python scripts/submit_eval_jobs.py \
-    --model_name {leaderboard_name} \
-    --location {step_dir} \
-    --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
-    --is_tuned \
-    --workspace "tulu-3-results" \
-    --priority high \
-    --preemptible \
-    --use_hf_tokenizer_template \
-    --beaker_image "nathanl/open_instruct_auto" \
-    --run_oe_eval_experiments \
-    --evaluate_on_weka \
-    --run_id {wandb_url} \
-    --oe_eval_max_length {args.eval_max_length} \
-    --skip_oi_evals"""
-            if args.stop_strings is not None:
-                command += f" --stop_strings {','.join(args.stop_strings)}"
-            if training_step is not None:
-                command += f" --step {training_step}"
-            if args.oe_eval_tasks is not None:
-                command += f" --oe_eval_tasks {','.join(args.oe_eval_tasks)}"
-            print(f"Launching eval jobs with command: {command}")
-            process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            stdout, stderr = process.communicate()
-            print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
-            print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
-            print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+            if self.args.saved_tokenizer_type == "original":
+                self.original_tokenizer.save_pretrained(output_dir)
+            elif self.args.saved_tokenizer_type == "tokenizer_config":
+                self.modified_tokenizer.save_pretrained(output_dir)
 
 
 def kill_ray_cluster_if_a_worker_dies(object_refs: List[Any], stop_event: threading.Event):
@@ -1609,7 +1607,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         print(warning)
     tc = TokenizerConfig(
         model_name_or_path=tokenizer_name,
-        revision=model_config.model_revision,
+        revision=tokenizer_revision,
         use_fast=not model_config.use_slow_tokenizer,
         chat_template_name=model_config.chat_template_name,
         add_bos=model_config.add_bos,
