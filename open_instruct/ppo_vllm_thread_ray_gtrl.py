@@ -40,10 +40,10 @@ import subprocess
 import threading
 import time
 from argparse import Namespace
+from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
-from collections import defaultdict
 
 from open_instruct.dataset_transformation import (
     TokenizerConfig,

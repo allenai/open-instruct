@@ -942,14 +942,24 @@ class PolicyTrainerRayProcess(RayProcess):
             elif self.args.saved_tokenizer_type == "tokenizer_config":
                 self.modified_tokenizer.save_pretrained(output_dir)
 
-
     # we need this because we don't know which node is rank 0 is on
     def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
         args = self.args
         if self.rank == 0:
-            future = ray.remote(launch_ai2_evals_on_weka) \
-                .options(num_cpus=1) \
-                .remote(step_dir, leaderboard_name, args.oe_eval_max_length, wandb_url, training_step, args.oe_eval_tasks, args.stop_strings, args.gs_bucket_path)
+            future = (
+                ray.remote(launch_ai2_evals_on_weka)
+                .options(num_cpus=1)
+                .remote(
+                    step_dir,
+                    leaderboard_name,
+                    args.oe_eval_max_length,
+                    wandb_url,
+                    training_step,
+                    args.oe_eval_tasks,
+                    args.stop_strings,
+                    args.gs_bucket_path,
+                )
+            )
         else:
             future = None
         return future
@@ -1508,14 +1518,28 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
                         ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
                         if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                             leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
-                            eval_futures.extend([policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(step_dir, leaderboard_name, wandb_url, training_step) for i in range(args.world_size)])
+                            eval_futures.extend(
+                                [
+                                    policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                                        step_dir, leaderboard_name, wandb_url, training_step
+                                    )
+                                    for i in range(args.world_size)
+                                ]
+                            )
 
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):
             ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
             if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                 leaderboard_name = args.hf_repo_revision
-                eval_futures.extend([policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(args.output_dir, leaderboard_name, wandb_url, training_step) for i in range(args.world_size)])
+                eval_futures.extend(
+                    [
+                        policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                            args.output_dir, leaderboard_name, wandb_url, training_step
+                        )
+                        for i in range(args.world_size)
+                    ]
+                )
 
     except Exception as e:
         print(f"Training error occurred: {str(e)}")

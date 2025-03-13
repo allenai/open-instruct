@@ -5,12 +5,12 @@ Add new verifiers by subclassing VerifierFunction and implementing the __call__ 
 They are then automatically added to the REWARD_FN_MAPPING.
 """
 
-from abc import ABC, abstractmethod
-from typing import List, Union, Any, Dict
 import json
+import logging
 import re
 import string
-import logging
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Union
 
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.math_utils import (

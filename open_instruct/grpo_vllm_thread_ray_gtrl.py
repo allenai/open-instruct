@@ -40,10 +40,10 @@ import subprocess
 import threading
 import time
 from argparse import Namespace
+from collections import defaultdict, deque
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
-from collections import defaultdict, deque
 
 from open_instruct.dataset_transformation import (
     TokenizerConfig,
@@ -1381,7 +1381,16 @@ class PolicyTrainerRayProcess(RayProcess):
                         eval_futures.append(
                             ray.remote(launch_ai2_evals_on_weka)
                             .options(num_cpus=1)
-                            .remote(step_dir, leaderboard_name, args.oe_eval_max_length, self.wandb_url, training_step, args.oe_eval_tasks, args.stop_strings, args.gs_bucket_path)
+                            .remote(
+                                step_dir,
+                                leaderboard_name,
+                                args.oe_eval_max_length,
+                                self.wandb_url,
+                                training_step,
+                                args.oe_eval_tasks,
+                                args.stop_strings,
+                                args.gs_bucket_path,
+                            )
                         )
                         # if a future is done, remove it from the deque
                         if len(eval_futures) > 0:
@@ -1397,7 +1406,16 @@ class PolicyTrainerRayProcess(RayProcess):
                 eval_futures.append(
                     ray.remote(launch_ai2_evals_on_weka)
                     .options(num_cpus=1)
-                    .remote(args.output_dir, leaderboard_name, args.oe_eval_max_length, self.wandb_url, training_step, args.oe_eval_tasks, args.stop_strings, args.gs_bucket_path)
+                    .remote(
+                        args.output_dir,
+                        leaderboard_name,
+                        args.oe_eval_max_length,
+                        self.wandb_url,
+                        training_step,
+                        args.oe_eval_tasks,
+                        args.stop_strings,
+                        args.gs_bucket_path,
+                    )
                 )
                 ray.get(list(eval_futures))
         print("======== ✅ Evaluation jobs finished =========")
