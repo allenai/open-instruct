@@ -842,9 +842,9 @@ def download_from_gs_bucket(src_path: str, dest_path: str) -> None:
     cmd = [
         "gsutil",
         "-o",
-        f"GSUtil:parallel_thread_count=1",
+        "GSUtil:parallel_thread_count=1",
         "-o",
-        f"GSUtil:sliced_object_download_threshold=150",
+        "GSUtil:sliced_object_download_threshold=150",
         "-m",
         "cp",
         "-r",
