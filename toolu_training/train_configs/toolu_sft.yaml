@@ -1,7 +1,7 @@
-model_name_or_path: meta-llama/Llama-3.1-8B
+model_name_or_path: Qwen/Qwen2.5-7B
 model_revision: main
 use_flash_attn: true
-tokenizer_name: meta-llama/Llama-3.1-8B
+tokenizer_name: Qwen/Qwen2.5-7B
 use_slow_tokenizer: true
 dataset_mixer:
   ai2-adapt-dev/gtu-xlam-orig: 1.0
