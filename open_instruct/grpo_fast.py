@@ -990,8 +990,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 "step": self.args.resume_step,  # Current training step to resume from
                 "random_state": random.getstate(),
                 "np_random_state": np.random.get_state(),
-                "torch_random_state": torch.random.get_state(),
-                "cuda_random_state": torch.cuda.random.get_state(),
+                "torch_random_state": torch.get_rng_state(),
+                "cuda_random_state": torch.cuda.get_rng_state(),
             }
             torch.save(training_state, os.path.join(output_dir, "training_state.pt"))
     
@@ -1017,8 +1017,8 @@ class PolicyTrainerRayProcess(RayProcess):
             training_state = torch.load(os.path.join(checkpoint_dir, "training_state.pt"))
             random.setstate(training_state["random_state"])
             np.random.set_state(training_state["np_random_state"])
-            torch.random.set_state(training_state["torch_random_state"])
-            torch.cuda.random.set_state(training_state["cuda_random_state"])
+            torch.set_rng_state(training_state["torch_random_state"])
+            torch.cuda.set_rng_state(training_state["cuda_random_state"])
             
             # If client_state didn't have a step, use the one from training_state
             if resume_step <= 0:
