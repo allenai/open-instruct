@@ -40,6 +40,7 @@ import subprocess
 import threading
 import time
 from argparse import Namespace
+from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
@@ -64,6 +65,7 @@ import torch.utils.data
 from datasets import Dataset
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from huggingface_hub import HfApi
+from peft import PeftModel, get_peft_model_state_dict
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.queue import Queue as RayQueue
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
@@ -79,8 +81,6 @@ from transformers import (
 )
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
-from peft import PeftModel, get_peft_model_state_dict
-
 
 from open_instruct.dataset_processor import (
     DATASET_SOURCE_KEY,
@@ -1580,6 +1580,8 @@ python scripts/submit_eval_jobs.py \
     --run_id {wandb_url} \
     --oe_eval_max_length {args.eval_max_length} \
     --skip_oi_evals"""
+            if args.stop_strings is not None:
+                command += f" --stop_strings {','.join(args.stop_strings)}"
             if training_step is not None:
                 command += f" --step {training_step}"
             if args.oe_eval_tasks is not None:
