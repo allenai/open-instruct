@@ -11,7 +11,8 @@ import re
 import string
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Union
-
+from IFEval import instructions_registry
+from IFEval import instructions
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.math_utils import (
     get_unnormalized_answer,
@@ -167,6 +168,34 @@ class IFEvalVerifier(VerifierFunction):
         if not constraint:
             return func(prediction)
         return float(func(answer, **non_none_args))
+
+class IFEvalVerifier2(VerifierFunction):
+    """
+    Verifier for ifeval tasks that delegates evaluation to a function
+    specified in the constraint.
+
+    The constraint may be a JSON string or a dictionary containing a key
+    'func_name' used to lookup the evaluation function.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("ifeval", weight=1.0)
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict]) -> bool:
+        instruction_dict = instructions_registry.INSTRUCTION_DICT
+        constraint_dict = label
+        answer = prediction.split("<|assistant|>\n")[-1].strip()
+        instruction_key = constraint_dict["instruction_id"]
+        args = constraint_dict["kwargs"]
+        instruction_cls = instruction_dict[instruction_key]
+        instruction_instance = instruction_cls(instruction_key)
+        instruction = instruction_instance.build_description(**args)
+        args = instruction.get_instruction_args()
+        if args and "prompt" in args:
+            instruction.build_description(prompt=prompt)
+        if prediction.strip() and instruction.check_following(answer):
+            return 1.0
+        return 0.0
 
 
 def normalize_answer(s: str) -> str:
