@@ -922,7 +922,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if self.rank == 0:
             os.makedirs(output_dir, exist_ok=True)
 
-        # Save the training state first to ensure it's available on resume
+        # Save the training state first to ensure optimizer/scheduler state is preserved
         self.save_training_state(output_dir)
 
         # save model weights for ZeRO2/3
@@ -976,19 +976,16 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.original_tokenizer.save_pretrained(output_dir)
             elif self.args.saved_tokenizer_type == "tokenizer_config":
                 self.modified_tokenizer.save_pretrained(output_dir)
-            
-            # Save training state for resuming
-            self.save_training_state(output_dir)
     
     def save_training_state(self, output_dir: str) -> None:
         """Save optimizer, scheduler, and training step info for resuming training."""
+        # DeepSpeed checkpoint saves model, optimizer, and LR scheduler
+        # We pass in our current step as client_state for proper resuming
+        client_state = {"step": self.args.resume_step}
+        self.model.save_checkpoint(output_dir, client_state=client_state)
+        
+        # Save additional training state that DeepSpeed doesn't handle
         if self.rank == 0:
-            # Save DeepSpeed checkpoint
-            self.model.save_checkpoint(output_dir)
-            
-            # Save additional training state
-            # Important: self.args.resume_step is set by the main training loop to the current step
-            # when calling the set_attr method before saving
             training_state = {
                 "step": self.args.resume_step,  # Current training step to resume from
                 "random_state": random.getstate(),
@@ -1005,11 +1002,15 @@ class PolicyTrainerRayProcess(RayProcess):
             The step to resume from
         """
         # Load DeepSpeed checkpoint for the policy model
+        # This restores model, optimizer and LR scheduler state
         _, client_state = self.model.load_checkpoint(checkpoint_dir)
         
         # Note: We do NOT update the reference model from the checkpoint
         # The reference model should continue to use the original model weights
         # from the path specified in the config
+        
+        # First try to get step from client_state if available
+        resume_step = client_state.get("step", 0) if client_state else 0
         
         # Load additional training state
         if os.path.exists(os.path.join(checkpoint_dir, "training_state.pt")):
@@ -1018,14 +1019,13 @@ class PolicyTrainerRayProcess(RayProcess):
             np.random.set_state(training_state["np_random_state"])
             torch.random.set_state(training_state["torch_random_state"])
             torch.cuda.random.set_state(training_state["cuda_random_state"])
-            # Use the step from the training state directly - this is the exact step we saved
-            resume_step = training_state.get("step", 0)
             
-            # Make sure we don't accidentally resume from step 0
+            # If client_state didn't have a step, use the one from training_state
             if resume_step <= 0:
-                resume_step = 1
-        else:
-            # If no training state file, resume from step 1
+                resume_step = training_state.get("step", 0)
+        
+        # Make sure we don't accidentally resume from step 0
+        if resume_step <= 0:
             resume_step = 1
         
         # Set this in the args to ensure consistency
