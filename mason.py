@@ -480,9 +480,9 @@ def get_datasets(beaker_datasets, cluster: List[str]):
 def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami: str, resumable: bool):
     # pass through WANDB_ENTITY and WANDB_PROJECT
     if "WANDB_ENTITY" in os.environ:
-        command.append(f"WANDB_ENTITY={os.environ['WANDB_ENTITY']}")
+        command = [f"WANDB_ENTITY={os.environ['WANDB_ENTITY']}"] + command
     if "WANDB_PROJECT" in os.environ:
-        command.append(f"WANDB_PROJECT={os.environ['WANDB_PROJECT']}")
+        command = [f"WANDB_PROJECT={os.environ['WANDB_PROJECT']}"] + command
 
     # Add a check to ensure that the user is using the correct clusters for multi-node jobs
     if args.num_nodes > 1 and not all(c in INTERCONNECT_CLUSTERS for c in args.cluster):
