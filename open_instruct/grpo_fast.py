@@ -169,6 +169,12 @@ class Args:
     save_freq: int = -1
     """How many train steps to save the model"""
 
+    # Checkpoint and resume
+    resume_from_checkpoint: Optional[str] = None
+    """Path to a checkpoint directory to resume training from"""
+    resume_step: int = 0
+    """Training step to resume from if loading a checkpoint"""
+
     # Generation
     response_length: int = 256
     """the length of the response"""
@@ -498,6 +504,9 @@ class ShufflingIterator:
 
         # Ensure the effective dataset size is divisible by batch_size
         self.effective_size = len(self.data) - (len(self.data) % batch_size)
+        
+        # Track how many full iterations we've done (for resuming)
+        self.iteration_count = 0
 
     def __iter__(self) -> Iterator[List[int]]:
         return self
@@ -505,6 +514,7 @@ class ShufflingIterator:
     def __next__(self) -> List[int]:
         if self.index >= self.effective_size:
             self.index = 0
+            self.iteration_count += 1
             self.rng.shuffle(self.data)
 
         end_index = self.index + self.batch_size
@@ -512,6 +522,19 @@ class ShufflingIterator:
         self.index = end_index
 
         return batch
+        
+    def fast_forward(self, steps: int) -> None:
+        """Fast-forward the iterator by a given number of steps.
+        
+        This is used when resuming training from a checkpoint to ensure
+        we continue with the correct data batches.
+        
+        Args:
+            steps: Number of steps to fast-forward
+        """
+        print(f"Fast-forwarding dataloader by {steps} steps")
+        for _ in range(steps):
+            self.__next__()
 
 
 class RayProcess:
@@ -629,6 +652,15 @@ class PolicyTrainerRayProcess(RayProcess):
             dist_init_required=True,
         )
         self.model.train()
+
+        # Load from checkpoint if provided
+        resume_step = 0
+        if args.resume_from_checkpoint is not None:
+            if os.path.isdir(args.resume_from_checkpoint):
+                print(f"Attempting to load checkpoint from {args.resume_from_checkpoint}")
+                resume_step = self.load_training_state(args.resume_from_checkpoint)
+                print(f"Resuming from step {resume_step}")
+                self.args.resume_step = resume_step
 
         # reference model
         ds_config = get_eval_ds_config(
@@ -941,6 +973,80 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.original_tokenizer.save_pretrained(output_dir)
             elif self.args.saved_tokenizer_type == "tokenizer_config":
                 self.modified_tokenizer.save_pretrained(output_dir)
+            
+            # Save training state for resuming
+            self.save_training_state(output_dir)
+    
+    def save_training_state(self, output_dir: str) -> None:
+        """Save optimizer, scheduler, and training step info for resuming training."""
+        if self.rank == 0:
+            # Save DeepSpeed checkpoint
+            self.model.save_checkpoint(output_dir)
+            
+            # Save additional training state
+            # Important: self.args.resume_step is set by the main training loop to the current step
+            # when calling the set_attr method before saving
+            training_state = {
+                "step": self.args.resume_step,  # Current training step to resume from
+                "random_state": random.getstate(),
+                "np_random_state": np.random.get_state(),
+                "torch_random_state": torch.random.get_state(),
+                "cuda_random_state": torch.cuda.random.get_state(),
+            }
+            torch.save(training_state, os.path.join(output_dir, "training_state.pt"))
+    
+    def load_training_state(self, checkpoint_dir: str) -> int:
+        """Load optimizer, scheduler, and training step info to resume training.
+        
+        Returns:
+            The step to resume from
+        """
+        # Load DeepSpeed checkpoint for the policy model
+        _, client_state = self.model.load_checkpoint(checkpoint_dir)
+        
+        # Note: We do NOT update the reference model from the checkpoint
+        # The reference model should continue to use the original model weights
+        # from the path specified in the config
+        
+        # Load additional training state
+        if os.path.exists(os.path.join(checkpoint_dir, "training_state.pt")):
+            training_state = torch.load(os.path.join(checkpoint_dir, "training_state.pt"))
+            random.setstate(training_state["random_state"])
+            np.random.set_state(training_state["np_random_state"])
+            torch.random.set_state(training_state["torch_random_state"])
+            torch.cuda.random.set_state(training_state["cuda_random_state"])
+            # Use the step from the training state directly - this is the exact step we saved
+            resume_step = training_state.get("step", 0)
+            
+            # Make sure we don't accidentally resume from step 0
+            if resume_step <= 0:
+                resume_step = 1
+        else:
+            # If no training state file, resume from step 1
+            resume_step = 1
+        
+        # Set this in the args to ensure consistency
+        self.args.resume_step = resume_step
+        
+        # Ensure model is in training mode after loading
+        self.model.train()
+        
+        return resume_step
+
+    def get_attr(self, attr_name):
+        """Get an attribute from this object."""
+        if hasattr(self, attr_name):
+            return getattr(self, attr_name)
+        return None
+    
+    def set_attr(self, attr_name, attr_subfield, value):
+        """Set a field within an attribute of this object."""
+        if hasattr(self, attr_name):
+            attr = getattr(self, attr_name)
+            if hasattr(attr, attr_subfield):
+                setattr(attr, attr_subfield, value)
+                return True
+        return False
 
     # we need this because we don't know which node is rank 0 is on
     def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
@@ -1368,7 +1474,26 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
     if eval_dataset is not None:
         eval_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
         eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
+    
+    # Set resume_training_step based on checkpoint if provided
     resume_training_step = 1
+    if args.resume_from_checkpoint:
+        # Get the resume step from the first model (they should all have the same value)
+        resume_step = ray.get(policy_group.models[0].get_attr.remote("args")).resume_step
+        if resume_step > 0:
+            resume_training_step = resume_step
+            print(f"Resuming training from step {resume_training_step}")
+            # Update global args with the resume step for consistency
+            args.resume_step = resume_training_step
+            
+            # Fast-forward the dataloader to the correct position
+            # We need to skip (resume_training_step - 1) batches to resume at the right spot
+            if resume_training_step > 1:
+                print(f"Fast-forwarding dataloader to step {resume_training_step}")
+                iter_dataloader.fast_forward(resume_training_step - 1)
+        else:
+            print("Could not determine resume step from checkpoint, starting from step 1")
+    
     thread = threading.Thread(
         target=vllm_generate_thread,
         args=(
@@ -1410,7 +1535,8 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
     queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
     param_prompt_Q.put((None, queries_next))
 
-    episode = 0
+    # Initialize tracking variables 
+    episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     num_total_tokens = 0
     start_time = time.time()
     eval_futures = []
@@ -1515,6 +1641,10 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
                         checkpoint_dir = f"{args.output_dir}_checkpoints"
                         step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
                         print(f"Saving model at step {training_step} to {step_dir}")
+                        
+                        # Update the resume step in each model's args before saving
+                        ray.get([policy_group.models[i].set_attr.remote("args", "resume_step", training_step) for i in range(args.world_size)])
+                        
                         ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
                         if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                             leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
@@ -1529,6 +1659,9 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
 
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):
+            # Update the resume step in each model's args before final saving
+            ray.get([policy_group.models[i].set_attr.remote("args", "resume_step", training_step) for i in range(args.world_size)])
+            
             ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
             if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                 leaderboard_name = args.hf_repo_revision
