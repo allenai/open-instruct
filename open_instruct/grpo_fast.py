@@ -922,6 +922,9 @@ class PolicyTrainerRayProcess(RayProcess):
         if self.rank == 0:
             os.makedirs(output_dir, exist_ok=True)
 
+        # Save the training state first to ensure it's available on resume
+        self.save_training_state(output_dir)
+
         # save model weights for ZeRO2/3
         if hasattr(model_to_save, "module"):
             model_to_save = model_to_save.module
@@ -1330,6 +1333,19 @@ def data_preparation_thread(
 
 def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
     calculate_runtime_args(args)
+    
+    # Auto-resume from checkpoints if output_dir exists and contains checkpoints
+    checkpoint_dir = f"{args.output_dir}_checkpoints" if args.output_dir is not None else None
+    if checkpoint_dir is not None and os.path.isdir(checkpoint_dir) and args.resume_from_checkpoint is None:
+        # Find the latest checkpoint
+        checkpoints = [d for d in os.listdir(checkpoint_dir) if d.startswith("step_")]
+        if checkpoints:
+            latest_checkpoint = sorted(checkpoints, key=lambda x: int(x.split("_")[1]))[-1]
+            latest_checkpoint_path = os.path.join(checkpoint_dir, latest_checkpoint)
+            
+            # Set resume_from_checkpoint to the latest checkpoint path
+            print(f"Found existing checkpoint at {latest_checkpoint_path}, auto-resuming")
+            args.resume_from_checkpoint = latest_checkpoint_path
 
     # Setup experiment tracking and seeds
     all_configs = {}
