@@ -478,6 +478,12 @@ def get_datasets(beaker_datasets, cluster: List[str]):
 
 
 def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami: str, resumable: bool):
+    # pass through WANDB_ENTITY and WANDB_PROJECT
+    if "WANDB_ENTITY" in os.environ:
+        command.append(f"WANDB_ENTITY={os.environ['WANDB_ENTITY']}")
+    if "WANDB_PROJECT" in os.environ:
+        command.append(f"WANDB_PROJECT={os.environ['WANDB_PROJECT']}")
+
     # Add a check to ensure that the user is using the correct clusters for multi-node jobs
     if args.num_nodes > 1 and not all(c in INTERCONNECT_CLUSTERS for c in args.cluster):
         confirmation = False
@@ -493,15 +499,26 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
         raise ValueError("GCP clusters do not have the dev filesystem, please use a proper image")
 
     if is_open_instruct:
+        # For Weka clusters, we need to override the output_dir parameter to make auto-evaluation work
+        # If the output_dir is already set to a path in /weka/, we'll keep that path
+        # Otherwise, we'll set a default path in the user's directory on Weka
         if any(c in WEKA_CLUSTERS for c in args.cluster):
-            # add output_dir to the command
-            command.append("--output_dir")
-            command.append(f"/weka/oe-adapt-default/allennlp/deletable_checkpoint/{whoami}/")
+            need_to_override_output_dir = True
+            for idx, cmd in enumerate(command):
+                if cmd == "--output_dir":
+                    if "/weka/" in command[idx + 1]:
+                        need_to_override_output_dir = False
+                        break
+            if need_to_override_output_dir:
+                command.append("--output_dir")
+                command.append(f"/weka/oe-adapt-default/allennlp/deletable_checkpoint/{whoami}/")
 
-        # In gcp, we save the model to a gs bucket first
+        # For GCP clusters, since shared storage is slow, we optimize model loading by:
+        # 1. First downloading the model from HuggingFace to a local path
+        # 2. Uploading it to a Google Storage bucket (if not already there)
+        # 3. Then downloading it from the bucket to the compute node
+        # 4. Finally, replacing the original --model_name_or_path argument with the local path
         if any(c in GCP_CLUSTERS for c in args.cluster):
-            # Replace the model_name_or_path with a downloaded path from the gs bucket
-            # extracts the `model_name_or_path` from the command
             model_name_or_path = None
             for idx, cmd in enumerate(command):
                 if cmd == "--model_name_or_path":
@@ -531,6 +548,8 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
                 "-o", f"GSUtil:sliced_object_download_threshold=150",
                 "-m",
                 "cp", "-r", gs_saved_path, download_path_without_last_folder,
+                "&&", "ls", download_path_without_last_folder,
+                "&&", "ls", download_path,
                 "&&",
             ]
             command = gs_download_command + command
