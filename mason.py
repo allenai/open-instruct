@@ -5,6 +5,15 @@ import beaker
 import os
 import secrets
 import string
+import subprocess
+
+is_open_instruct = False
+try:
+    from open_instruct.dataset_transformation import get_commit_hash
+    from open_instruct.utils import download_from_hf, gs_folder_exists, upload_to_gs_bucket
+    is_open_instruct = True
+except ImportError:
+    pass
 
 def parse_beaker_dataset(dataset_str):
     splt = dataset_str.split(":")
@@ -50,6 +59,12 @@ WEKA_CLUSTERS = [
 ]
 GCP_CLUSTERS = [
     "ai2/augusta-google-1"
+]
+
+INTERCONNECT_CLUSTERS = [
+    "ai2/jupiter-cirrascale-2",
+    "ai2/ceres-cirrascale",
+    "ai2/augusta-google-1",
 ]
 
 
@@ -235,40 +250,9 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
                 value=os.getenv("PATH"),
             ),
         ])
-    
-    # if none of the cluster is in weka, we mount the NFS
-    if all(c in NFS_CLUSTERS for c in cluster):
-        env_vars.extend([
-            beaker.EnvVar(
-                name="HF_DATASETS_CACHE",
-                value="/net/nfs.cirrascale/allennlp/.cache/huggingface",
-            ),
-            beaker.EnvVar(
-                name="HF_HUB_CACHE",
-                value="/net/nfs.cirrascale/allennlp/.cache/hub",
-            ),
-            beaker.EnvVar(
-                name="HF_ASSETS_CACHE",
-                value="/net/nfs.cirrascale/allennlp/.cache/assets",
-            ),
-            beaker.EnvVar(
-                name="CHECKPOINT_OUTPUT_DIR",
-                value=f"/net/nfs.cirrascale/allennlp/deletable_checkpoint_states/{global_wandb_id}",
-            ),
-        ])
-        if len(cluster) == 1 and "ai2/pluto-cirrascale" in cluster:
-            env_vars.extend([
-                beaker.EnvVar(
-                    name="NCCL_IB_HCA",
-                    value="^=mlx5_1,mlx5_2",
-                ),
-                beaker.EnvVar(
-                    name="NCCL_DEBUG",
-                    value="INFO",
-                ),
-            ])
+
     # if all cluster is in weka, we mount the weka
-    elif all(c in WEKA_CLUSTERS for c in cluster):
+    if all(c in WEKA_CLUSTERS for c in cluster):
         env_vars.extend([
             beaker.EnvVar(
                 name="HF_HOME",
@@ -320,7 +304,7 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
             ),
             beaker.EnvVar(
                 name="HF_HUB_ENABLE_HF_TRANSFER",
-                value="1",
+                value="0", # we disable it because GCP is weird on uploading to the hub
             ),
         ])
         if num_nodes > 1:
@@ -494,6 +478,75 @@ def get_datasets(beaker_datasets, cluster: List[str]):
 
 
 def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami: str, resumable: bool):
+    # Add a check to ensure that the user is using the correct clusters for multi-node jobs
+    if args.num_nodes > 1 and not all(c in INTERCONNECT_CLUSTERS for c in args.cluster):
+        confirmation = False
+        while not confirmation:
+            confirmation = input(f"Interconnect clusters are required for multi-node jobs. Are you sure you want to continue? (y/n)")
+            if confirmation == "y":
+                confirmation = True
+            elif confirmation == "n":
+                raise ValueError(f"Interconnect clusters are required for multi-node jobs; please only use the following clusters: {INTERCONNECT_CLUSTERS}")
+            else:
+                print("Invalid input. Please enter 'y' or 'n'.")
+    if args.image == "ai2/cuda11.8-cudnn8-dev-ubuntu20.04" and any(c in GCP_CLUSTERS for c in args.cluster):
+        raise ValueError("GCP clusters do not have the dev filesystem, please use a proper image")
+
+    if is_open_instruct:
+        if any(c in WEKA_CLUSTERS for c in args.cluster):
+            # add output_dir to the command
+            command.append("--output_dir")
+            command.append(f"/weka/oe-adapt-default/allennlp/deletable_checkpoint/{whoami}/")
+
+        # In gcp, we save the model to a gs bucket first
+        if any(c in GCP_CLUSTERS for c in args.cluster):
+            # Replace the model_name_or_path with a downloaded path from the gs bucket
+            # extracts the `model_name_or_path` from the command
+            model_name_or_path = None
+            for idx, cmd in enumerate(command):
+                if cmd == "--model_name_or_path":
+                    model_name_or_path = command[idx + 1]
+                    break
+            model_revision = "main"
+            for idx, cmd in enumerate(command):
+                if cmd == "--model_revision":
+                    model_revision = command[idx + 1]
+                    break
+            
+            commit_hash = get_commit_hash(model_name_or_path, model_revision, "config.json", "model")
+            download_from_hf(model_name_or_path, model_revision) # first download the model
+            path = download_from_hf(model_name_or_path, model_revision) # then get the path
+            gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_models/{model_name_or_path}/{commit_hash}"
+            gs_folder = gs_folder_exists(gs_saved_path) # race condition exists, but it's fine since we are launching mason sequentially
+            if not gs_folder:
+                upload_to_gs_bucket(path, gs_saved_path)
+
+            download_path = gs_saved_path.replace("gs://", "/gs/")
+            download_path_without_last_folder = download_path.rsplit("/", 1)[0]
+            gs_download_command = [
+                "mkdir", "-p", download_path,
+                "&&",
+                "gsutil",
+                "-o", f"GSUtil:parallel_thread_count=1",
+                "-o", f"GSUtil:sliced_object_download_threshold=150",
+                "-m",
+                "cp", "-r", gs_saved_path, download_path_without_last_folder,
+                "&&",
+            ]
+            command = gs_download_command + command
+            command.append("--gs_bucket_path")
+            command.append(f"gs://ai2-llm/post-training/")
+
+            # Replace the model_name_or_path with the downloaded path
+            for idx, cmd in enumerate(command):
+                if cmd == "--model_name_or_path":
+                    command[idx + 1] = download_path
+                    break
+            for idx, cmd in enumerate(command):
+                if cmd == "--model_revision":
+                    command[idx + 1] = "main"
+                    break
+
     # special logic to deal with escape like
     # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
     # we need to wrap the json string with single quote
@@ -579,6 +632,16 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
 
 def main():
     args, commands = get_args()
+    # If the user is not in Ai2, we run the command as is
+    config_path = os.path.expanduser("~/.beaker/config.yml")
+    if not os.path.exists(config_path) and "BEAKER_TOKEN" not in os.environ:
+        print("Beaker credentials not found; running the command as is")
+        direct_commands = " ".join(commands[0])
+        # hack remove ai2 specific commands
+        direct_commands = direct_commands.replace("source configs/beaker_configs/ray_node_setup.sh &&", "")
+        os.system(direct_commands)
+        return
+    
     if args.workspace:
         beaker_client = beaker.Beaker.from_env(default_workspace=args.workspace)
     else:

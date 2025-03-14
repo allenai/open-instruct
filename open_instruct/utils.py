@@ -783,6 +783,7 @@ def get_beaker_dataset_ids(experiment_id: str, sort=False) -> Optional[List[str]
     return [dataset.id for dataset in dataset_infos]
 
 
+@functools.lru_cache(maxsize=1)
 def get_beaker_whoami() -> Optional[str]:
     get_beaker_whoami_command = "beaker account whoami --format json"
     process = subprocess.Popen(
@@ -810,6 +811,142 @@ def maybe_get_beaker_config():
         beaker_dataset_ids=get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"]),
         beaker_dataset_id_urls=beaker_dataset_id_urls,
     )
+
+
+def live_subprocess_output(cmd: List[str]) -> str:
+    output_lines = []
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    # Display output in real-time and collect it
+    for line in iter(process.stdout.readline, ""):
+        if line.strip():
+            print(line.strip())
+            output_lines.append(line.strip())
+    process.wait()
+    if process.returncode != 0:
+        # Get the actual error message from the process
+        process_error = process.stderr.read() if process.stderr else "No error message available"
+        error_message = f"gsutil command failed with return code {process.returncode}: {process_error}"
+        print(error_message)
+        raise Exception(error_message)
+
+    return "\n".join(output_lines)
+
+
+def download_from_hf(model_name_or_path: str, revision: str) -> None:
+    cmd = ["huggingface-cli", "download", model_name_or_path, "--revision", revision]
+    print(f"Downloading from HF with command: {cmd}")
+    return live_subprocess_output(cmd)
+
+
+def download_from_gs_bucket(src_path: str, dest_path: str) -> None:
+    cmd = [
+        "gsutil",
+        "-o",
+        "GSUtil:parallel_thread_count=1",
+        "-o",
+        "GSUtil:sliced_object_download_threshold=150",
+        "-m",
+        "cp",
+        "-r",
+        src_path,
+        dest_path,
+    ]
+    print(f"Downloading from GS bucket with command: {cmd}")
+    live_subprocess_output(cmd)
+
+
+def gs_folder_exists(path: str) -> bool:
+    cmd = ["gsutil", "ls", path]
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    # print(f"GS stat command: {cmd}")
+    # print(f"GS stat stdout: {stdout}")
+    # print(f"GS stat stderr: {stderr}")
+    if process.returncode == 0:
+        return True
+    else:
+        return False
+
+
+def upload_to_gs_bucket(src_path: str, dest_path: str) -> None:
+    cmd = ["gsutil", "-o", "GSUtil:parallel_composite_upload_threshold=150M", "cp", "-r", src_path, dest_path]
+    print(f"Copying model to GS bucket with command: {cmd}")
+    live_subprocess_output(cmd)
+
+
+def launch_ai2_evals_on_weka(
+    path: str,
+    leaderboard_name: str,
+    oe_eval_max_length: int,
+    wandb_url: str,
+    training_step: Optional[int] = None,
+    oe_eval_tasks: Optional[List[str]] = None,
+    stop_strings: Optional[List[str]] = None,
+    gs_bucket_path: Optional[str] = None,
+) -> None:
+    """
+    auto eval the metrics as `f"{args.exp_name}_step_{training_step}"` in our leaderboard
+    if gs_bucket_path is not None, save the model to the gs_bucket_path + path first, and evaluate from there.
+    """
+    weka_cluster = "ai2/saturn-cirrascale ai2/neptune-cirrascale"
+    gcp_cluster = "ai2/augusta-google-1"
+    cluster = weka_cluster if gs_bucket_path is None else gcp_cluster
+    beaker_users = get_beaker_whoami()
+
+    if gs_bucket_path is not None:
+        if beaker_users is not None:
+            gs_saved_path = f"{gs_bucket_path}/{beaker_users}/{path}"
+        else:
+            gs_saved_path = f"{gs_bucket_path}/{path}"
+        # save the model to the gs bucket first
+        # TODO: use upload_to_gs_bucket instead
+        gs_command = f"""gsutil \\
+            -o "GSUtil:parallel_composite_upload_threshold=150M" \\
+            cp -r {path} \\
+            {gs_saved_path}"""
+        print(f"Copying model to GS bucket with command: {gs_command}")
+        process = subprocess.Popen(["bash", "-c", gs_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+        print(f"GS bucket copy stdout:\n{stdout.decode()}")
+        print(f"GS bucket copy stderr:\n{stderr.decode()}")
+        print(f"GS bucket copy process return code: {process.returncode}")
+
+        # Update path to use the GS bucket path for evaluation
+        path = gs_saved_path
+
+    command = f"""\
+python scripts/submit_eval_jobs.py \
+--model_name {leaderboard_name} \
+--location {path} \
+--cluster {cluster} \
+--is_tuned \
+--workspace "tulu-3-results" \
+--priority high \
+--preemptible \
+--use_hf_tokenizer_template \
+--beaker_image "nathanl/open_instruct_auto" \
+--run_oe_eval_experiments \
+--run_id {wandb_url} \
+--oe_eval_max_length {oe_eval_max_length} \
+--skip_oi_evals"""
+    if training_step is not None:
+        command += f" --step {training_step}"
+    if cluster == weka_cluster:
+        command += " --evaluate_on_weka"
+    if oe_eval_tasks is not None:
+        command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
+    if stop_strings is not None:
+        command += f" --oe_eval_stop_sequences '{','.join(stop_strings)}'"
+    print(f"Launching eval jobs with command: {command}")
+    process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
+    print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
+    print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+
+
+# ----------------------------------------------------------------------------
+# HF utilities
 
 
 def retry_on_exception(max_attempts=4, delay=1, backoff=2):

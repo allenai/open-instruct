@@ -1,11 +1,10 @@
+import logging
 import re
 import signal
-import logging
 from typing import Optional
 
 import sympy
 from sympy.parsing.latex import parse_latex
-
 
 eval_logger = logging.getLogger("math_utils")
 
@@ -210,9 +209,7 @@ def is_equiv(x1: str, x2: str) -> bool:
                 else:
                     return False
             except ValueError:
-                eval_logger.debug(
-                    f"Had some trouble simplifying when comparing {x1} and {x2}"
-                )
+                eval_logger.debug(f"Had some trouble simplifying when comparing {x1} and {x2}")
     except TimeoutError:
         eval_logger.debug(f"Timed out comparing {x1} and {x2}")
         return False
