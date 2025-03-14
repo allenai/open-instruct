@@ -316,6 +316,8 @@ class Args:
     """Whether to try to save the model to Beaker dataset `/output` after training"""
     oe_eval_tasks: Optional[List[str]] = None
     """The beaker evaluation tasks to launch"""
+    eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
+    """the priority of auto-launched evaluation jobs"""
     hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
@@ -1567,7 +1569,7 @@ python scripts/submit_eval_jobs.py \
     --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
     --is_tuned \
     --workspace "tulu-3-results" \
-    --priority high \
+    --priority {args.eval_priority} \
     --preemptible \
     --use_hf_tokenizer_template \
     --beaker_image "nathanl/open_instruct_auto" \

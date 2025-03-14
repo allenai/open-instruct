@@ -883,6 +883,7 @@ def launch_ai2_evals_on_weka(
     oe_eval_tasks: Optional[List[str]] = None,
     stop_strings: Optional[List[str]] = None,
     gs_bucket_path: Optional[str] = None,
+    eval_priority: Optional[str] = "normal",
 ) -> None:
     weka_cluster = "ai2/saturn-cirrascale ai2/neptune-cirrascale"
     gcp_cluster = "ai2/augusta-google-1"
@@ -917,7 +918,7 @@ python scripts/submit_eval_jobs.py \
 --cluster {cluster} \
 --is_tuned \
 --workspace "tulu-3-results" \
---priority high \
+--priority {eval_priority} \
 --preemptible \
 --use_hf_tokenizer_template \
 --beaker_image "nathanl/open_instruct_auto" \
