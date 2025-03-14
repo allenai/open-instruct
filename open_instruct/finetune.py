@@ -56,10 +56,10 @@ from open_instruct.utils import (
     get_last_checkpoint_path,
     get_wandb_tags,
     is_beaker_job,
+    launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
-    upload_metadata_to_hf,
 )
 
 logger = get_logger(__name__)
@@ -329,12 +329,6 @@ class FlatArguments:
             "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
         },
     )
-    overwrite_output_dir: bool = field(
-        default=False,
-        metadata={
-            "help": "Overwrite the content of the output directory. Means that resumption will always start from scratch."
-        },
-    )
     keep_last_n_checkpoints: int = field(
         default=3,
         metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
@@ -357,8 +351,6 @@ class FlatArguments:
     )
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
-    try_auto_save_to_beaker: bool = True
-    """Whether to try to save the model to Beaker dataset `/output` after training"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: Optional[str] = None
@@ -373,6 +365,16 @@ class FlatArguments:
     """Whether to launch beaker evaluation jobs after training"""
     hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
+
+    # Ai2 specific settings
+    try_auto_save_to_beaker: bool = True
+    """Whether to try to save the model to Beaker dataset `/output` after training"""
+    gs_bucket_path: Optional[str] = None
+    """The path to the gs bucket to save the model to"""
+    oe_eval_tasks: Optional[List[str]] = None
+    """The beaker evaluation tasks to launch"""
+    oe_eval_max_length: int = 4096
+    """the max generation length for evaluation for oe-eval"""
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -406,6 +408,7 @@ def main(args: FlatArguments):
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.output_dir = os.path.join(args.output_dir, args.run_name)
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -913,62 +916,15 @@ def main(args: FlatArguments):
     ):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
 
-    if is_beaker_job() and accelerator.is_main_process:
-        # dpo script only supports these two options right now for datasets
-        if args.dataset_mixer:
-            dataset_list = list(args.dataset_mixer.keys())
-        elif args.dataset_mixer_list:
-            dataset_list = args.dataset_mixer_list[::2]  # even indices
-        elif args.dataset_name:
-            dataset_list = [args.dataset_name]
-        else:
-            dataset_list = [args.train_file]
-        # mainly just focussing here on what would be useful for the leaderboard.
-        # wandb will have even more useful information.
-        metadata_blob = {
-            "model_name": args.exp_name,
-            "model_type": "sft",
-            "datasets": dataset_list,
-            "base_model": args.model_name_or_path,
-            "wandb_path": wandb_tracker.run.get_url(),
-            "beaker_experiment": beaker_config.beaker_experiment_url,
-            "beaker_datasets": beaker_config.beaker_dataset_id_urls,
-        }
-        # save metadata to the output directory. then it should also get pushed to HF.
-        with open(os.path.join(args.output_dir, "metadata.json"), "w") as f:
-            json.dump(metadata_blob, f)
-
-        # upload metadata to the dataset if set
-        if args.hf_metadata_dataset:
-            upload_metadata_to_hf(
-                metadata_blob,
-                "metadata.json",
-                args.hf_metadata_dataset,
-                "results/" + args.run_name,  # to match what the auto-evals name as.
-            )
-
-        if args.try_launch_beaker_eval_jobs:
-            command = f"""\
-            python mason.py  \
-                --cluster ai2/ganymede-cirrascale ai2/ceres-cirrascale ai2/neptune-cirrascale ai2/saturn-cirrascale ai2/jupiter-cirrascale-2 \
-                --priority low \
-                --preemptible \
-                --budget ai2/allennlp \
-                --workspace ai2/tulu-2-improvements \
-                --image nathanl/open_instruct_auto \
-                --pure_docker_mode \
-                --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
-                --beaker_workload_id {beaker_config.beaker_workload_id} \
-                --upload_to_hf {args.hf_metadata_dataset} \
-                --model_name {args.run_name} \
-                --run_id {wandb_tracker.run.get_url()}
-            """
-            process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            stdout, stderr = process.communicate()
-            print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
-            print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
-            print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
-
+    if is_beaker_job() and accelerator.is_main_process and args.try_launch_beaker_eval_jobs:
+        launch_ai2_evals_on_weka(
+            output_dir=args.output_dir,
+            leaderboard_name=args.hf_repo_revision,
+            oe_eval_max_length=args.oe_eval_max_length,
+            wandb_url=wandb_tracker.run.get_url(),
+            oe_eval_tasks=args.oe_eval_tasks,
+            gs_bucket_path=args.gs_bucket_path,
+        )
     if args.push_to_hub:
         push_folder_to_hub(
             accelerator,
