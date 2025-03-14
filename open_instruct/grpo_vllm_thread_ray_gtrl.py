@@ -310,6 +310,8 @@ class Args:
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
+    eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
+    """the priority of auto-launched evaluation jobs"""
 
     def __post_init__(self):
         assert self.number_samples_per_prompt > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
@@ -1390,6 +1392,7 @@ class PolicyTrainerRayProcess(RayProcess):
                                 args.oe_eval_tasks,
                                 args.stop_strings,
                                 args.gs_bucket_path,
+                                args.eval_priority,
                             )
                         )
                         # if a future is done, remove it from the deque
@@ -1415,6 +1418,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         args.oe_eval_tasks,
                         args.stop_strings,
                         args.gs_bucket_path,
+                        args.eval_priority,
                     )
                 )
                 ray.get(list(eval_futures))
