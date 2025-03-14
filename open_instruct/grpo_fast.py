@@ -1023,6 +1023,9 @@ class PolicyTrainerRayProcess(RayProcess):
             # If client_state didn't have a step, use the one from training_state
             if resume_step <= 0:
                 resume_step = training_state.get("step", 0)
+
+        if resume_step > 0:
+            resume_step += 1  # Increment to start from the next step
         
         # Set this in the args to ensure consistency
         self.args.resume_step = resume_step
@@ -1502,7 +1505,7 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
             # We need to skip resume_training_step batches to resume at the right spot
             if resume_training_step > 1:
                 print(f"Fast-forwarding dataloader to step {resume_training_step}")
-                iter_dataloader.fast_forward(resume_training_step)
+                iter_dataloader.fast_forward(resume_training_step - 1)
         else:
             print("Could not determine resume step from checkpoint, starting from step 1")
     
@@ -1548,7 +1551,7 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
     param_prompt_Q.put((None, queries_next))
 
     # Initialize tracking variables 
-    episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+    episode = resume_training_step * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     num_total_tokens = 0
     start_time = time.time()
     eval_futures = []
