@@ -1024,10 +1024,6 @@ class PolicyTrainerRayProcess(RayProcess):
             if resume_step <= 0:
                 resume_step = training_state.get("step", 0)
         
-        # Make sure we don't accidentally resume from step 0
-        if resume_step <= 0:
-            resume_step = 1
-        
         # Set this in the args to ensure consistency
         self.args.resume_step = resume_step
         
@@ -1503,10 +1499,10 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
             args.resume_step = resume_training_step
             
             # Fast-forward the dataloader to the correct position
-            # We need to skip (resume_training_step - 1) batches to resume at the right spot
+            # We need to skip resume_training_step batches to resume at the right spot
             if resume_training_step > 1:
                 print(f"Fast-forwarding dataloader to step {resume_training_step}")
-                iter_dataloader.fast_forward(resume_training_step - 1)
+                iter_dataloader.fast_forward(resume_training_step)
         else:
             print("Could not determine resume step from checkpoint, starting from step 1")
     
