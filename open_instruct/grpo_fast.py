@@ -28,6 +28,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # isort: off
+from collections import defaultdict
 import json
 import os
 import shutil
@@ -43,8 +44,6 @@ import socket
 import subprocess
 import threading
 import time
-import traceback
-from argparse import Namespace
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Callable, Iterator, List, Literal, Optional
@@ -275,6 +274,8 @@ class Args:
     """Whether to launch beaker evaluation jobs after training on weka"""
     try_auto_save_to_beaker: bool = True
     """Whether to try to save the model to Beaker dataset `/output` after training"""
+    gs_bucket_path: Optional[str] = None
+    """The path to the gs bucket to save the model to"""
     oe_eval_tasks: Optional[List[str]] = None
     """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
@@ -940,42 +941,27 @@ class PolicyTrainerRayProcess(RayProcess):
             elif self.args.saved_tokenizer_type == "tokenizer_config":
                 self.modified_tokenizer.save_pretrained(output_dir)
 
-    def launch_ai2_evals_on_weka(self, step_dir: str, training_step: Optional[int] = None) -> None:
-        """auto eval the metrics as `f"{args.exp_name}_step_{training_step}"` in our leaderboard"""
+    # we need this because we don't know which node is rank 0 is on
+    def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
         args = self.args
-        wandb_url = self.wandb_url
-        # Ai2 specific logic
-        if is_beaker_job() and self.rank == 0:
-            if training_step is not None:
-                leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
-            else:
-                leaderboard_name = args.hf_repo_revision
-            command = f"""\
-python scripts/submit_eval_jobs.py \
-    --model_name {leaderboard_name} \
-    --location {step_dir} \
-    --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
-    --is_tuned \
-    --workspace "tulu-3-results" \
-    --priority high \
-    --preemptible \
-    --use_hf_tokenizer_template \
-    --beaker_image "nathanl/open_instruct_auto" \
-    --run_oe_eval_experiments \
-    --evaluate_on_weka \
-    --run_id {wandb_url} \
-    --oe_oe_eval_max_length {args.oe_eval_max_length} \
-    --skip_oi_evals"""
-            if training_step is not None:
-                command += f" --step {training_step}"
-            if args.oe_eval_tasks is not None:
-                command += f" --oe_eval_tasks {','.join(args.oe_eval_tasks)}"
-            print(f"Launching eval jobs with command: {command}")
-            process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            stdout, stderr = process.communicate()
-            print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
-            print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
-            print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+        if self.rank == 0:
+            future = (
+                ray.remote(launch_ai2_evals_on_weka)
+                .options(num_cpus=1)
+                .remote(
+                    step_dir,
+                    leaderboard_name,
+                    args.oe_eval_max_length,
+                    wandb_url,
+                    training_step,
+                    args.oe_eval_tasks,
+                    args.stop_strings,
+                    args.gs_bucket_path,
+                )
+            )
+        else:
+            future = None
+        return future
 
 
 class ModelGroup:
@@ -1136,15 +1122,15 @@ def data_preparation_thread(
                 global_std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0
             )
             global_advantages = (scores - global_mean_grouped_rewards) / (global_std_grouped_rewards + 1e-8)
-            global_advantages_lst = global_advantages.tolist()
-            packed_advantages = []
-            for i in range(len(packed_sequences.response_masks)):
-                packed_response_mask = packed_sequences.response_masks[i]
-                packed_advantage = torch.zeros_like(packed_response_mask, dtype=torch.float32)
-                for j in range(len(packed_advantage)):
-                    if packed_response_mask[j] >= 1:  # note that response masks are 1-indexed
-                        packed_advantage[j] = global_advantages_lst[packed_response_mask[j] - 1]
-                packed_advantages.append(packed_advantage)
+
+            # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
+            # and each value is the corresponding advantage score: index 0 is set to 0 since response masks start from 1 (1-indexed)
+            lookup_advantages = np.zeros(len(global_advantages) + 1, dtype=np.float32)
+            lookup_advantages[1:] = global_advantages
+            packed_advantages = [
+                torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
+                for packed_mask in packed_sequences.response_masks
+            ]
             packed_sequences.advantages = packed_advantages
 
         with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
@@ -1278,7 +1264,7 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
         print(warning)
     tc = TokenizerConfig(
         model_name_or_path=tokenizer_name,
-        revision=model_config.model_revision,
+        revision=tokenizer_revision,
         use_fast=not model_config.use_slow_tokenizer,
         chat_template_name=model_config.chat_template_name,
         add_bos=model_config.add_bos,
@@ -1426,6 +1412,7 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
     episode = 0
     num_total_tokens = 0
     start_time = time.time()
+    eval_futures = []
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
             print("-" * 100)
@@ -1525,20 +1512,18 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
                 if args.save_freq > 0 and training_step % args.save_freq == 0:
                     with Timer("[Main Thread] 🗡️ Saving model"):
                         checkpoint_dir = f"{args.output_dir}_checkpoints"
-                        os.makedirs(checkpoint_dir, exist_ok=True)
                         step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-                        os.makedirs(step_dir, exist_ok=True)
                         print(f"Saving model at step {training_step} to {step_dir}")
                         ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
                         if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                             leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
-                            launch_ai2_evals_on_weka(
-                                step_dir,
-                                leaderboard_name,
-                                args.oe_eval_max_length,
-                                wandb_url,
-                                training_step,
-                                args.oe_eval_tasks,
+                            eval_futures.extend(
+                                [
+                                    policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                                        step_dir, leaderboard_name, wandb_url, training_step
+                                    )
+                                    for i in range(args.world_size)
+                                ]
                             )
 
         print(f"Saving final model at step {training_step} to {args.output_dir}")
@@ -1546,13 +1531,13 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
             ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
             if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                 leaderboard_name = args.hf_repo_revision
-                launch_ai2_evals_on_weka(
-                    args.output_dir,
-                    leaderboard_name,
-                    args.oe_eval_max_length,
-                    wandb_url,
-                    training_step,
-                    args.oe_eval_tasks,
+                eval_futures.extend(
+                    [
+                        policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                            args.output_dir, leaderboard_name, wandb_url, training_step
+                        )
+                        for i in range(args.world_size)
+                    ]
                 )
 
     except Exception as e:
@@ -1667,9 +1652,11 @@ if __name__ == "__main__":
                         if float(answer) == float(ground_truths[i]):
                             arithmetic_rewards.append(args.arithmetic_reward)
                             scores[i] += args.arithmetic_reward
+                        else:
+                            arithmetic_rewards.append(0)
                     except:  # noqa
                         arithmetic_rewards.append(0)
-                        pass  # it's ok if things went wrong                        
+                        pass  # it's ok if things went wrong
                 metrics["objective/arithmetic_score"] = np.array(arithmetic_rewards).mean()
                 metrics["objective/arithmetic_correct_rate"] = (np.array(arithmetic_rewards) > 0.0).mean()
 

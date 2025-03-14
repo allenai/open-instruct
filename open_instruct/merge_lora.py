@@ -15,19 +15,18 @@
 import argparse
 import copy
 import os
-from typing import Optional
 import time
+from typing import Optional
 
-import yaml
 import bitsandbytes as bnb
 import torch
+import yaml
 from bitsandbytes.functional import dequantize_4bit
+from huggingface_hub import HfApi
 from peft import PeftConfig, PeftModel
 from peft.utils import _get_submodules
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-from huggingface_hub import HfApi
-
-from utils import retry_on_exception, maybe_use_ai2_hf_entity
+from utils import maybe_use_ai2_hf_entity, retry_on_exception
 
 
 def dequantize_model(model, dtype=torch.bfloat16, device="cuda"):
