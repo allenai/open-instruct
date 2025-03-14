@@ -365,12 +365,6 @@ class FlatArguments:
             "help": "Whether the various states should be saved at the end of every n steps, or 'epoch' for each epoch."  # noqa
         },
     )
-    overwrite_output_dir: bool = field(
-        default=False,
-        metadata={
-            "help": "Overwrite the content of the output directory. Means that resumption will always start from scratch."
-        },
-    )
     keep_last_n_checkpoints: int = field(
         default=3,
         metadata={"help": "How many checkpoints to keep in the output directory. -1 for all."},
@@ -1066,7 +1060,7 @@ def main(args: FlatArguments):
 
     if is_beaker_job() and accelerator.is_main_process and args.try_launch_beaker_eval_jobs:
         launch_ai2_evals_on_weka(
-            output_dir=args.output_dir,
+            path=args.output_dir,
             leaderboard_name=args.hf_repo_revision,
             oe_eval_max_length=args.oe_eval_max_length,
             wandb_url=wandb_tracker.run.get_url(),

@@ -918,7 +918,7 @@ def main(args: FlatArguments):
 
     if is_beaker_job() and accelerator.is_main_process and args.try_launch_beaker_eval_jobs:
         launch_ai2_evals_on_weka(
-            output_dir=args.output_dir,
+            path=args.output_dir,
             leaderboard_name=args.hf_repo_revision,
             oe_eval_max_length=args.oe_eval_max_length,
             wandb_url=wandb_tracker.run.get_url(),
