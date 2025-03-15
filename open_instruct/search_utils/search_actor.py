@@ -209,6 +209,8 @@ class LLMSearchRayActor:
                     for tokens, text in zip(encoded_outputs[start:stop], final_texts[start:stop])
                 ])
             )
+
+        print("Final outputs:", generation_outputs)
         return generation_outputs
     
     def init_process_group(self, master_address, master_port, rank_offset, world_size, group_name, backend):
