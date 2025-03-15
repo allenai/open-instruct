@@ -198,7 +198,10 @@ class LLMSearchRayActor:
             final_texts.append(full_text.replace(original, "", 1))
         
         # Encode final outputs and wrap in GenerationOutput objects.
-        encoded_outputs = [self.tokenizer.encode(text) for text in final_texts]
+        # truncate to max_context_length
+        encoded_outputs = [self.tokenizer.encode(text, max_length=self.max_context_length, truncation=True) for text in final_texts]
+        # re-decode with max length
+        final_texts = [self.tokenizer.decode(tokens) for tokens in encoded_outputs]
         # recreate the outputs based on the original `n` value
         generation_outputs = []
         for i in range(0, len(encoded_outputs), original_n):
