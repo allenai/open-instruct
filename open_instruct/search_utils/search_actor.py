@@ -33,6 +33,7 @@ def process_vllm_output_for_search(text: str) -> str:
         return ""
     
     query = query_match.group(1).strip()
+    print(f"Searching: {query}")
     snippets = get_snippets_for_query(query)
     if not snippets:
         return ""
@@ -58,6 +59,15 @@ class LLMSearchRayActor:
         assert self.__version__ >= "0.4.1", "OpenRLHF only supports vLLM >= 0.4.1"
 
         self.use_gpu_executor = kwargs["tensor_parallel_size"] == 1
+        
+        # Set default max context length if not provided
+        self.max_context_length = kwargs.pop("max_context_length", None)
+        # If not explicitly set, use max_model_len as the default
+        if self.max_context_length is None and "max_model_len" in kwargs:
+            self.max_context_length = kwargs["max_model_len"]
+        # Final fallback to a reasonable default
+        if self.max_context_length is None:
+            self.max_context_length = 8192
 
         # See https://github.com/vllm-project/vllm/blob/main/vllm/executor/gpu_executor.py
         if self.use_gpu_executor:
@@ -116,6 +126,9 @@ class LLMSearchRayActor:
         ]
         original_queries: Dict[int, str] = {i: q for i, q in queries}
         finished_queries: Dict[int, str] = {}
+        
+        # Track token counts for each query
+        query_token_counts: Dict[int, int] = {i: len(tokens) for i, tokens in enumerate(prompt_token_ids)}
 
         # Iteratively update queries with snippet responses.
         for _ in range(max_searches):
@@ -130,14 +143,50 @@ class LLMSearchRayActor:
             for (idx, current_text), output in zip(queries, outputs):
                 # Assume each output has at least one result.
                 output_text = output.outputs[0].text
+                
+                # Count tokens in the output
+                output_tokens = self.tokenizer.encode(output_text)
+                query_token_counts[idx] += len(output_tokens)
+                
+                # Check if we've exceeded the max context length
+                if query_token_counts[idx] >= self.max_context_length:
+                    # We've exceeded the limit, mark as finished
+                    finished_queries[idx] = current_text + output_text
+                    continue
+                
+                # Process potential snippet
                 snippet_response = process_vllm_output_for_search(output_text)
-                updated_text = current_text + output_text + snippet_response
+                
+                # If there's a snippet, check if we need to truncate it
                 if snippet_response:
-                    # Continue iterating if a snippet was appended.
-                    updated_queries.append((idx, updated_text))
+                    snippet_tokens = self.tokenizer.encode(snippet_response)
+                    remaining_tokens = self.max_context_length - query_token_counts[idx]
+                    
+                    if len(snippet_tokens) > remaining_tokens:
+                        # Need to truncate the snippet to fit
+                        if remaining_tokens > 0:
+                            # Truncate to the remaining token count
+                            truncated_snippet_tokens = snippet_tokens[:remaining_tokens]
+                            truncated_snippet = self.tokenizer.decode(truncated_snippet_tokens)
+                            # We leave the truncated snippet as is, without closing the tag
+                            
+                            # Update token count with truncated snippet
+                            query_token_counts[idx] += len(truncated_snippet_tokens)
+                            
+                            # Mark as finished since we've hit the limit
+                            finished_queries[idx] = current_text + output_text + truncated_snippet
+                        else:
+                            # No room for snippet at all
+                            finished_queries[idx] = current_text + output_text
+                    else:
+                        # Snippet fits, add it to the count
+                        query_token_counts[idx] += len(snippet_tokens)
+                        # Continue with search if we're still under the limit
+                        updated_queries.append((idx, current_text + output_text + snippet_response))
                 else:
-                    # Mark this query as finished if no snippet was added.
-                    finished_queries[idx] = updated_text
+                    # No snippet, mark as finished
+                    finished_queries[idx] = current_text + output_text
+            
             queries = updated_queries
 
         # Postprocess: remove the original prompt from finished outputs.
@@ -210,7 +259,8 @@ if __name__ == "__main__":
         dtype="bfloat16",
         seed=42,
         enable_prefix_caching=True,
-        max_model_len=8192,
+        max_model_len=8192,  # This will be used as default max_context_length if not explicitly set
+        max_context_length=4096,  # Explicitly set a custom max context length
         gpu_memory_utilization=0.95,
     )
     
