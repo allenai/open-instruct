@@ -15,19 +15,18 @@
 import argparse
 import copy
 import os
-from typing import Optional
 import time
+from typing import Optional
 
-import yaml
 import bitsandbytes as bnb
 import torch
+import yaml
 from bitsandbytes.functional import dequantize_4bit
+from huggingface_hub import HfApi
 from peft import PeftConfig, PeftModel
 from peft.utils import _get_submodules
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-from huggingface_hub import HfApi
-
-from utils import retry_on_exception, maybe_use_ai2_hf_entity
+from utils import maybe_use_ai2_hf_entity, retry_on_exception
 
 
 def dequantize_model(model, dtype=torch.bfloat16, device="cuda"):
@@ -109,11 +108,11 @@ if __name__ == "__main__":
         with open(args.config_file, "r") as f:
             configs = yaml.safe_load(f)
         # If the config file is provided, reuse settings which are same in the training scripts
-        args.base_model_name_or_path = configs['model_name_or_path']
-        args.lora_model_name_or_path = configs['output_dir']
-        args.use_fast_tokenizer = not configs['use_slow_tokenizer']
-        args.qlora = configs.get('use_qlora', False)
-        args.seed = configs.get('seed', args.seed)
+        args.base_model_name_or_path = configs["model_name_or_path"]
+        args.lora_model_name_or_path = configs["output_dir"]
+        args.use_fast_tokenizer = not configs["use_slow_tokenizer"]
+        args.qlora = configs.get("use_qlora", False)
+        args.seed = configs.get("seed", args.seed)
     if args.lora_model_name_or_path is None:
         raise ValueError("Please provide the path to the lora adapter model.")
     peft_config = PeftConfig.from_pretrained(args.lora_model_name_or_path)
@@ -157,7 +156,7 @@ if __name__ == "__main__":
     embedding_size = base_model.get_input_embeddings().weight.shape[0]
     if len(tokenizer) > embedding_size:
         print(
-            f"The vocabulary the tokenizer contains {len(tokenizer)-embedding_size} more tokens than the base model."
+            f"The vocabulary the tokenizer contains {len(tokenizer) - embedding_size} more tokens than the base model."
         )
         print("Resizing the token embeddings of the merged model...")
         if args.pad_to_multiple_of > 0:
@@ -182,16 +181,16 @@ if __name__ == "__main__":
 
     if args.push_to_hub:
         if "hf_repo_id" not in configs:  # auto-generate one
-            configs['hf_repo_id'] = "open_instruct_dev"
+            configs["hf_repo_id"] = "open_instruct_dev"
         if "hf_entity" not in configs:  # first try to use AI2 entity
-            configs['hf_entity'] = maybe_use_ai2_hf_entity()
-        if configs['hf_entity'] is None:  # then try to use the user's entity
-            configs['hf_entity'] = HfApi().whoami()["name"]
-        configs['hf_repo_id'] = f"{configs['hf_entity']}/{configs['hf_repo_id']}"
+            configs["hf_entity"] = maybe_use_ai2_hf_entity()
+        if configs["hf_entity"] is None:  # then try to use the user's entity
+            configs["hf_entity"] = HfApi().whoami()["name"]
+        configs["hf_repo_id"] = f"{configs['hf_entity']}/{configs['hf_repo_id']}"
         if "hf_repo_revision" not in configs:  # auto-generate one
             if "exp_name" not in configs:
-                configs['exp_name'] = os.path.basename(__file__)[: -len(".py")]
-            configs['hf_repo_revision'] = (
+                configs["exp_name"] = os.path.basename(__file__)[: -len(".py")]
+            configs["hf_repo_revision"] = (
                 f"{configs['exp_name']}__{args.base_model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
             )
         push_folder_to_hub(

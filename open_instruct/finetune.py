@@ -84,10 +84,12 @@ class FlatArguments:
         },
     )
     config_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
+        default=None,
+        metadata={"help": "Pretrained config name or path if not the same as model_name"},
     )
     tokenizer_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
+        default=None,
+        metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"},
     )
     tokenizer_revision: Optional[str] = field(
         default=None,
@@ -136,22 +138,28 @@ class FlatArguments:
         },
     )
     dataset_name: Optional[str] = field(
-        default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
+        default=None,
+        metadata={"help": "The name of the dataset to use (via the datasets library)."},
     )
     dataset_mixer: Optional[dict] = field(
-        default=None, metadata={"help": "A dictionary of datasets (local or HF) to sample from."}
+        default=None,
+        metadata={"help": "A dictionary of datasets (local or HF) to sample from."},
     )
     dataset_mixer_list: Optional[list[str]] = field(
-        default=None, metadata={"help": "A list of datasets (local or HF) to sample from."}
+        default=None,
+        metadata={"help": "A list of datasets (local or HF) to sample from."},
     )
     dataset_mix_dir: Optional[str] = field(
-        default=None, metadata={"help": "The directory to save the mixed dataset to disk."}
+        default=None,
+        metadata={"help": "The directory to save the mixed dataset to disk."},
     )
     dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
+        default=None,
+        metadata={"help": "The configuration name of the dataset to use (via the datasets library)."},
     )
     train_file: Optional[str] = field(
-        default=None, metadata={"help": "The input training data file (a json/jsonl file)."}
+        default=None,
+        metadata={"help": "The input training data file (a json/jsonl file)."},
     )
     max_train_samples: Optional[int] = field(
         default=None,
@@ -176,7 +184,8 @@ class FlatArguments:
         },
     )
     overwrite_cache: bool = field(
-        default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
+        default=False,
+        metadata={"help": "Overwrite the cached training and evaluation sets"},
     )
     add_bos: bool = field(
         default=False,
@@ -217,7 +226,14 @@ class FlatArguments:
         default="linear",
         metadata={
             "help": "The scheduler type to use for learning rate adjustment.",
-            "choices": ["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
+            "choices": [
+                "linear",
+                "cosine",
+                "cosine_with_restarts",
+                "polynomial",
+                "constant",
+                "constant_with_warmup",
+            ],
         },
     )
     num_train_epochs: int = field(
@@ -295,11 +311,18 @@ class FlatArguments:
         default=False,
         metadata={"help": "Turn on gradient checkpointing. Saves memory but slows training."},
     )
+    use_liger_kernel: bool = field(
+        default=False,
+        metadata={"help": "Whether to use LigerKernel for training."},
+    )
     max_train_steps: Optional[int] = field(
         default=None,
         metadata={"help": "If set, overrides the number of training steps. Otherwise, num_train_epochs is used."},
     )
-    seed: int = field(default=42, metadata={"help": "Random seed for initialization and dataset shuffling."})
+    seed: int = field(
+        default=42,
+        metadata={"help": "Random seed for initialization and dataset shuffling."},
+    )
     checkpointing_steps: Optional[str] = field(
         default=None,
         metadata={
@@ -507,6 +530,24 @@ def main(args: FlatArguments):
                 torch_dtype=torch.bfloat16,
                 attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
             )
+        elif args.use_liger_kernel:
+            from liger_kernel.transformers import AutoLigerKernelForCausalLM
+
+            fused_linear_cross_entropy = args.reduce_loss == "mean"
+            logger.info(f"Attempting to apply liger-kernel. {fused_linear_cross_entropy=}")
+
+            # Supported models: https://github.com/linkedin/Liger-Kernel/blob/main/src/liger_kernel/transformers/monkey_patch.py#L948
+            model = AutoLigerKernelForCausalLM.from_pretrained(
+                args.model_name_or_path,
+                revision=args.model_revision,
+                from_tf=bool(".ckpt" in args.model_name_or_path),
+                config=config,
+                trust_remote_code=args.trust_remote_code,
+                low_cpu_mem_usage=args.low_cpu_mem_usage,
+                use_flash_attention_2=True if args.use_flash_attn else False,
+                # liger-kernel specific args
+                fused_linear_cross_entropy=fused_linear_cross_entropy,
+            )
         else:
             model = AutoModelForCausalLM.from_pretrained(
                 args.model_name_or_path,
@@ -548,7 +589,15 @@ def main(args: FlatArguments):
             r=args.lora_rank,
             lora_alpha=args.lora_alpha,
             lora_dropout=args.lora_dropout,
-            target_modules=["q_proj", "o_proj", "v_proj", "k_proj", "gate_proj", "up_proj", "down_proj"],
+            target_modules=[
+                "q_proj",
+                "o_proj",
+                "v_proj",
+                "k_proj",
+                "gate_proj",
+                "up_proj",
+                "down_proj",
+            ],
         )
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
@@ -586,7 +635,11 @@ def main(args: FlatArguments):
             is_paged=True,
         )
     else:
-        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, fused=args.fused_optimizer)
+        optimizer = torch.optim.AdamW(
+            optimizer_grouped_parameters,
+            lr=args.learning_rate,
+            fused=args.fused_optimizer,
+        )
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
@@ -807,7 +860,11 @@ def main(args: FlatArguments):
                         accelerator.save_state(output_dir)
                         # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
                         with open(
-                            os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w"
+                            os.path.join(
+                                get_last_checkpoint_path(args, incomplete=True),
+                                "COMPLETED",
+                            ),
+                            "w",
                         ) as f:
                             f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
                         if (
@@ -825,7 +882,10 @@ def main(args: FlatArguments):
                 output_dir = os.path.join(args.output_dir, output_dir)
             accelerator.save_state(output_dir)
             # use this to mark the checkpoint as completely saved, to avoid restoring from garbled checkpoints
-            with open(os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"), "w") as f:
+            with open(
+                os.path.join(get_last_checkpoint_path(args, incomplete=True), "COMPLETED"),
+                "w",
+            ) as f:
                 f.write("COMPLETED")  # annoyingly, empty files arent uploaded by beaker.
             if accelerator.is_local_main_process:
                 clean_last_n_checkpoints(args.output_dir, args.keep_last_n_checkpoints)

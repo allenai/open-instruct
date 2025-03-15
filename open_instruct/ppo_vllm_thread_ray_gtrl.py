@@ -40,6 +40,7 @@ import subprocess
 import threading
 import time
 from argparse import Namespace
+from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
@@ -63,6 +64,7 @@ import torch.utils.data
 from datasets import Dataset
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from huggingface_hub import HfApi
+from peft import PeftModel, get_peft_model_state_dict
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.queue import Queue as RayQueue
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
@@ -78,8 +80,6 @@ from transformers import (
 )
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
-from peft import PeftModel, get_peft_model_state_dict
-
 
 from open_instruct.dataset_processor import (
     DATASET_SOURCE_KEY,
@@ -311,6 +311,8 @@ class Args:
     """Whether to try to save the model to Beaker dataset `/output` after training"""
     oe_eval_tasks: Optional[List[str]] = None
     """The beaker evaluation tasks to launch"""
+    eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
+    """the priority of auto-launched evaluation jobs"""
     hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
@@ -1145,6 +1147,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 verifiable_counts = []
                 sequence_lengths = []
                 values = []
+                per_func_rewards = defaultdict(list)
                 if self.rank == 0:
                     g_response_token_ids = response_ids_Q.get()
                     DUMMY_PAD_TOKEN = (
@@ -1161,9 +1164,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     accelerator.process_index * queries.shape[0] : (accelerator.process_index + 1) * queries.shape[0]
                 ]
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
+                decoded_response = tokenizer.batch_decode(local_vllm_responses)
 
                 if args.add_r1_style_format_reward:
-                    decoded_response = tokenizer.batch_decode(local_vllm_responses)
                     format_scores = torch.tensor(
                         soft_format_reward_func(decoded_response, args.r1_style_format_reward), device=device
                     )
@@ -1208,15 +1211,20 @@ class PolicyTrainerRayProcess(RayProcess):
                         # we need to batch the gt to match query.
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
-                        verifiable_reward, verifiable_count = apply_verifiable_reward(
-                            postprocessed_response,
-                            postprocessed_query_response,
-                            tokenizer,
-                            ground_truth,
-                            dataset,
-                            verify_reward=args.verification_reward,
+                        verifiable_reward, per_func_reward = apply_verifiable_reward(
+                            responses=postprocessed_response,
+                            decoded_responses=decoded_response,
+                            ground_truths=ground_truth,
+                            datasets=dataset,
+                            reward_mult=args.verification_reward,
                         )
+                        verifiable_reward = torch.tensor(verifiable_reward, device=score.device)
+                        verifiable_count = verifiable_reward > 0
                         score += verifiable_reward
+                        # For each sample, aggregate each per-function reward into a single dict.
+                        for reward_dict in per_func_reward:
+                            for key, value in reward_dict.items():
+                                per_func_rewards[key].append(value)
                     else:
                         verifiable_count = torch.tensor([0.0], device=device).float()
 
@@ -1415,6 +1423,12 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics.add("val/stop_token_rate", contain_stop_token.float().mean())
                 if args.add_r1_style_format_reward:
                     local_metrics.add("val/format_scores", format_scores.float().mean())
+                for key, reward_list in per_func_rewards.items():
+                    rewards_tensor = torch.tensor(reward_list, device=device)
+                    # Mean per-function reward
+                    local_metrics.add(f"objective/{key}_reward", rewards_tensor.mean())
+                    # Correct rate: fraction of samples with positive reward
+                    local_metrics.add(f"objective/{key}_correct_rate", (rewards_tensor > 0).float().mean())
 
                 metrics = {
                     "episode": episode,
@@ -1558,7 +1572,7 @@ python scripts/submit_eval_jobs.py \
     --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
     --is_tuned \
     --workspace "tulu-3-results" \
-    --priority high \
+    --priority {args.eval_priority} \
     --preemptible \
     --use_hf_tokenizer_template \
     --beaker_image "nathanl/open_instruct_auto" \
@@ -1567,6 +1581,8 @@ python scripts/submit_eval_jobs.py \
     --run_id {wandb_url} \
     --oe_eval_max_length {args.eval_max_length} \
     --skip_oi_evals"""
+            if args.stop_strings is not None:
+                command += f" --stop_strings {','.join(args.stop_strings)}"
             if training_step is not None:
                 command += f" --step {training_step}"
             if args.oe_eval_tasks is not None:

@@ -36,7 +36,7 @@ The main things we are looking for are:
     5 minutes to tokenize the dataset. This translates to 32 * 5 * 8 = 1280 minutes = 21 hours of
     wasted H100 time.
     * Sometimes we also launch on places that don't have a shared cache (e.g., GCP), so we would
-    download individual datasets 32 times, and wait for concatenation and tokenization (actually 
+    download individual datasets 32 times, and wait for concatenation and tokenization (actually
     twice because the `with accelerator.main_process_first()` function assumes a shared cache)
 """
 
@@ -55,6 +55,7 @@ from huggingface_hub import HfApi, ModelCard, revision_exists
 from rich.console import Console
 from rich.text import Text
 from transformers import (
+    AutoConfig,
     AutoTokenizer,
     GPTNeoXTokenizerFast,
     LlamaTokenizer,
@@ -352,10 +353,86 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
     return tokenizer
 
 
+def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
+    config = AutoConfig.from_pretrained(tc.model_name_or_path, revision=tc.revision)
+    # @vwxyzjn: "olmo" handles both `olmo2` and `olmoe`.
+    if "olmo" in config.model_type:
+        assert tc.add_bos, "For OLMo, you must run with `--add_bos`."
+        assert tc.use_fast, "For OLMo, you must use fast tokenizer."
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        tc.model_name_or_path,
+        revision=tc.revision,
+        trust_remote_code=tc.trust_remote_code,
+        use_fast=tc.use_fast,
+    )
+    # no default pad token for llama!
+    # here we add all special tokens again, because the default ones are not in the special_tokens_map
+    # only add if the pad token is not present already, or if the current one is set to eos_token_id.
+    if tokenizer.pad_token_id is None or tokenizer.pad_token_id == tokenizer.eos_token_id:
+        if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
+            num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
+            assert num_added_tokens in [
+                0,
+                1,
+            ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
+        elif isinstance(tokenizer, GPTNeoXTokenizerFast):
+            # OLMo newer models use this tokenizer
+            if tokenizer.bos_token is None:
+                tokenizer.bos_token = tokenizer.eos_token
+                assert (
+                    tc.add_bos
+                ), "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
+            # else, pythia / other models
+            else:
+                num_added_tokens = tokenizer.add_special_tokens(
+                    {
+                        "pad_token": "<pad>",
+                    }
+                )
+                assert (
+                    num_added_tokens <= 1
+                ), "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
+        # NOTE: (Costa) I just commented the `OPTForCausalLM` because we are not likely to use it.
+        # elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
+        #     num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
+        elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast):
+            num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
+            assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
+
+    assert (
+        tokenizer.pad_token_id != tokenizer.eos_token_id
+    ), "pad token and eos token matching causes issues in our setup."
+
+    # set the tokenizer chat template to the training format
+    # this will be used for encoding the training examples
+    # and saved together with the tokenizer to be used later.
+    if tc.chat_template_name in CHAT_TEMPLATES:
+        tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
+    else:
+        try:
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.model_name_or_path).chat_template
+        except Exception:
+            raise ValueError(f"Could not find chat template for {tc.model_name_or_path}.")
+
+    if tc.add_bos:
+        if tokenizer.chat_template.startswith("{{ bos_token }}") or (
+            tokenizer.bos_token is not None and tokenizer.chat_template.startswith(tokenizer.bos_token)
+        ):
+            raise ValueError(
+                "You specified add_bos=True, but the chat template already has a bos_token at the beginning."
+            )
+        # also add bos in the chat template if not already there
+        tokenizer.chat_template = "{{ bos_token }}" + tokenizer.chat_template
+
+    return tokenizer
+
+
 GET_TOKENIZER_FN = {
     "get_tokenizer_simple_v1": get_tokenizer_simple_v1,
     "get_tokenizer_tulu_v1": get_tokenizer_tulu_v1,  # old version, see https://github.com/allenai/open-instruct/pull/570
     "get_tokenizer_tulu_v2_1": get_tokenizer_tulu_v2_1,
+    "get_tokenizer_tulu_v2_2": get_tokenizer_tulu_v2_2,
 }
 
 
@@ -367,7 +444,7 @@ class TokenizerConfig:
     use_fast: bool = True
     chat_template_name: Optional[str] = None  # TODO: should I give an option to force override?
     add_bos: bool = False
-    get_tokenizer_fn: str = "get_tokenizer_tulu_v2_1"
+    get_tokenizer_fn: str = "get_tokenizer_tulu_v2_2"
 
     # for tracking purposes
     tokenizer_commit_hash: Optional[str] = None

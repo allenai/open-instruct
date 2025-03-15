@@ -85,7 +85,7 @@ docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg
 * **Docker with uv**: You can also use the Dockerfile to build a Docker image with uv. You can build the image with the following command:
 
 ```bash
-docker build -f Dockerfile.uv -t open_instruct_dev_uv .
+docker build -f Dockerfile.uv --build-arg UV_CACHE_DIR=$UV_CACHE_DIR -t open_instruct_dev_uv .
 # if you are interally at AI2, you can create an image like this:
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 beaker image delete $beaker_user/open_instruct_dev_uv 
