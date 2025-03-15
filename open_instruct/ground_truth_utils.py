@@ -221,7 +221,7 @@ class MaxLenVerifier(VerifierFunction):
         # return absolute difference between the length of the prediction and the max length
         # make sure to disallow negative rewards
         length_diff = abs(len(tokenized_prediction) - desired_length)
-        return 1 - ( length_diff / 4096 )
+        return 1 - ( length_diff / 8192 )
 
 
 def get_all_verifiers() -> Dict[str, VerifierFunction]:
