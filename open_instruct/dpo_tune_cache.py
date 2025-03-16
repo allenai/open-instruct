@@ -793,7 +793,7 @@ def main(args: FlatArguments):
         if is_beaker_job():
             experiment_config.update(vars(beaker_config))
         accelerator.init_trackers(
-            "open_instruct_internal",
+            args.wandb_project_name,
             experiment_config,
             init_kwargs={
                 "wandb": {
