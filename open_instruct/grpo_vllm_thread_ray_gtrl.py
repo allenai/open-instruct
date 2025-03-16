@@ -1678,6 +1678,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         args.seed,
         args.enable_prefix_caching,
         max_len,
+        args.response_length,
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,

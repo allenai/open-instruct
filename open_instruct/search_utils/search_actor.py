@@ -61,7 +61,7 @@ class LLMSearchRayActor:
         self.use_gpu_executor = kwargs["tensor_parallel_size"] == 1
         
         # Set default max context length if not provided
-        self.max_context_length = kwargs.pop("max_context_length", None)
+        self.max_context_length = kwargs.pop("max_output_len", None)
         # If not explicitly set, use max_model_len as the default
         if self.max_context_length is None and "max_model_len" in kwargs:
             self.max_context_length = kwargs["max_model_len"]
@@ -141,50 +141,38 @@ class LLMSearchRayActor:
             )
             updated_queries: List[Tuple[int, str]] = []
             for (idx, current_text), output in zip(queries, outputs):
-                # Assume each output has at least one result.
                 output_text = output.outputs[0].text
-                
-                # Count tokens in the output
                 output_tokens = self.tokenizer.encode(output_text)
-                query_token_counts[idx] += len(output_tokens)
-                
-                # Check if we've exceeded the max context length
-                if query_token_counts[idx] >= self.max_context_length:
-                    # We've exceeded the limit, mark as finished
-                    finished_queries[idx] = current_text + output_text
+                remaining_tokens = self.max_context_length - query_token_counts[idx]
+
+                # Truncate output_text if it exceeds the remaining token budget.
+                if len(output_tokens) > remaining_tokens:
+                    truncated_output_tokens = output_tokens[:remaining_tokens]
+                    truncated_output = self.tokenizer.decode(truncated_output_tokens)
+                    finished_queries[idx] = current_text + truncated_output
+                    query_token_counts[idx] = self.max_context_length
                     continue
-                
+                else:
+                    query_token_counts[idx] += len(output_tokens)
+
                 # Process potential snippet
                 snippet_response = process_vllm_output_for_search(output_text)
-                
-                # If there's a snippet, check if we need to truncate it
+
                 if snippet_response:
                     snippet_tokens = self.tokenizer.encode(snippet_response)
                     remaining_tokens = self.max_context_length - query_token_counts[idx]
-                    
                     if len(snippet_tokens) > remaining_tokens:
-                        # Need to truncate the snippet to fit
                         if remaining_tokens > 0:
-                            # Truncate to the remaining token count
                             truncated_snippet_tokens = snippet_tokens[:remaining_tokens]
                             truncated_snippet = self.tokenizer.decode(truncated_snippet_tokens)
-                            # We leave the truncated snippet as is, without closing the tag
-                            
-                            # Update token count with truncated snippet
                             query_token_counts[idx] += len(truncated_snippet_tokens)
-                            
-                            # Mark as finished since we've hit the limit
                             finished_queries[idx] = current_text + output_text + truncated_snippet
                         else:
-                            # No room for snippet at all
                             finished_queries[idx] = current_text + output_text
                     else:
-                        # Snippet fits, add it to the count
                         query_token_counts[idx] += len(snippet_tokens)
-                        # Continue with search if we're still under the limit
                         updated_queries.append((idx, current_text + output_text + snippet_response))
                 else:
-                    # No snippet, mark as finished
                     finished_queries[idx] = current_text + output_text
             
             queries = updated_queries

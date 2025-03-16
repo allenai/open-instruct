@@ -229,6 +229,7 @@ def create_vllm_engines(
     seed: int,
     enable_prefix_caching: bool,
     max_model_len: int,
+    max_output_len: int,
     vllm_gpu_memory_utilization: float = 0.9,
     single_gpu_mode: bool = False,
     pg: Optional[ray.util.placement_group] = None,
@@ -268,6 +269,7 @@ def create_vllm_engines(
                 seed=seed + i,
                 enable_prefix_caching=enable_prefix_caching,
                 max_model_len=max_model_len,
+                max_output_len=max_output_len,
                 gpu_memory_utilization=vllm_gpu_memory_utilization,
             )
         )
