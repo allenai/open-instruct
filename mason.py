@@ -492,6 +492,8 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
         command = [f"WANDB_ENTITY={os.environ['WANDB_ENTITY']}"] + command
     if "WANDB_PROJECT" in os.environ:
         command = [f"WANDB_PROJECT={os.environ['WANDB_PROJECT']}"] + command
+    if "WANDB_TAGS" in os.environ:
+        command = [f"WANDB_TAGS={os.environ['WANDB_TAGS']}"] + command
 
     # Add a check to ensure that the user is using the correct clusters for multi-node jobs
     if args.num_nodes > 1 and not all(c in INTERCONNECT_CLUSTERS for c in args.cluster):
