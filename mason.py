@@ -8,6 +8,15 @@ import string
 import subprocess
 
 is_open_instruct = False
+OPEN_INSTRUCT_COMMANDS = [
+    "open_instruct/finetune.py",
+    "open_instruct/dpo_tune_cache.py",
+    "open_instruct/grpo_fast.py",
+    "open_instruct/grpo_vllm_thread_ray_gtrl.py",
+    "open_instruct/ppo2.py",
+    "ppo_vllm_thread_ray_gtrl.py",
+    "reward_modeling.py",
+]
 try:
     from open_instruct.dataset_transformation import get_commit_hash
     from open_instruct.utils import download_from_hf, gs_folder_exists, upload_to_gs_bucket
@@ -84,7 +93,7 @@ def get_args():
         help="Beaker hostname on which the job could be run.",
         default=None
     )
-    parser.add_argument("--max_retries", type=int, help="Number of retries", default=1)
+    parser.add_argument("--max_retries", type=int, help="Number of retries", default=0)
     parser.add_argument("--budget", type=str, help="Budget to use.", required=True)
     parser.add_argument("--gpus", type=int, help="Number of gpus", default=0)
     parser.add_argument("--num_nodes", type=int, help="Number of nodes", default=1)
@@ -499,6 +508,8 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
         raise ValueError("GCP clusters do not have the dev filesystem, please use a proper image")
 
     if is_open_instruct:
+        is_open_instruct_training = any(cmd in command for cmd in OPEN_INSTRUCT_COMMANDS)
+
         # For Weka clusters, we need to override the output_dir parameter to make auto-evaluation work
         # If the output_dir is already set to a path in /weka/, we'll keep that path
         # Otherwise, we'll set a default path in the user's directory on Weka
@@ -509,7 +520,7 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
                     if "/weka/" in command[idx + 1]:
                         need_to_override_output_dir = False
                         break
-            if need_to_override_output_dir:
+            if need_to_override_output_dir and is_open_instruct_training:
                 command.append("--output_dir")
                 command.append(f"/weka/oe-adapt-default/allennlp/deletable_checkpoint/{whoami}/")
 
@@ -553,8 +564,9 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
                 "&&",
             ]
             command = gs_download_command + command
-            command.append("--gs_bucket_path")
-            command.append(f"gs://ai2-llm/post-training/")
+            if is_open_instruct_training:
+                command.append("--gs_bucket_path")
+                command.append(f"gs://ai2-llm/post-training/")
 
             # Replace the model_name_or_path with the downloaded path
             for idx, cmd in enumerate(command):
