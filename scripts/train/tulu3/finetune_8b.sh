@@ -1,11 +1,8 @@
-# Default values that can be overridden by environment variables
-IMAGE=${IMAGE:-nathanl/open_instruct_auto}
-CLUSTER=${CLUSTER:-ai2/jupiter-cirrascale-2}
 python mason.py \
-    --cluster $CLUSTER \
+    --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-3-dev \
     --priority high \
-    --image $IMAGE --pure_docker_mode \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
     --num_nodes 8 \
     --budget ai2/oe-adapt \
