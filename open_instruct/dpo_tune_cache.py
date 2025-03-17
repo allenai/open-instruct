@@ -489,7 +489,8 @@ def main(args: FlatArguments):
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
-    args.run_name = f"{args.exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
+    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.output_dir = os.path.join(args.output_dir, args.run_name)
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -815,7 +816,6 @@ def main(args: FlatArguments):
     logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
-
     completed_steps = 0
     starting_epoch = 0
 
