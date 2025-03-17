@@ -538,28 +538,32 @@ class MetricsTracker:
         return {name: reduced_metrics[idx] for name, idx in self.names2idx.items()}
     
     def get_reduced_metrics_correctness(self) -> dict[str, float]:
-        # Create a mask indicating which entries are valid (non-NaN)
+        # Create a mask for valid (non-nan) values.
         valid_mask = ~torch.isnan(self.metrics)
-        # Replace NaNs with zeros so they don’t affect the sum
+        # only metrics that fit a certain name get the non-nan treatment
+        def is_non_nan_metric(name):
+            return name.startswith("objective/") and (name.endswith("_reward") or name.endswith("_correct_rate"))
+        valid_mask = valid_mask & torch.tensor([is_non_nan_metric(name) for name in self.names2idx.keys()], device=self.metrics.device)
+        # Replace nan with 0 so they don't contribute to the sum.
         safe_metrics = torch.where(valid_mask, self.metrics, torch.zeros_like(self.metrics))
-        # Count valid entries (1 if valid, 0 if NaN)
-        valid_counts = valid_mask.to(torch.float32)
+        # Count valid (non-nan) contributions.
+        valid_counts = valid_mask.float()
 
-        # Sum safe metrics and valid counts across processes
+        # Sum both safe metrics and valid counts across processes.
         dist.all_reduce(safe_metrics, op=dist.ReduceOp.SUM)
         dist.all_reduce(valid_counts, op=dist.ReduceOp.SUM)
 
-        # Compute the average where valid, otherwise keep NaN if no valid entries
+        # For each metric, divide the summed value by the count of valid entries.
+        # If there are no valid entries (i.e. valid_counts is 0), leave it as nan.
         averaged_metrics = torch.where(
-            valid_counts > 0, 
-            safe_metrics / valid_counts, 
+            valid_counts > 0,
+            safe_metrics / valid_counts,
             torch.tensor(float('nan'), device=self.metrics.device)
         )
-        
+
+        # Convert to list and map names.
         reduced_metrics = averaged_metrics.tolist()
-        def is_valid_metric(name):
-            return name.startswith("objective/") and (name.endswith("_reward") or name.endswith("_correct_rate"))
-        return {name: reduced_metrics[idx] for name, idx in self.names2idx.items() if is_valid_metric(name)}
+        return {name: reduced_metrics[idx] for name, idx in self.names2idx.items()}
 
 
 class Timer:
@@ -1381,17 +1385,15 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Correct rate: fraction of samples with positive reward
                     local_metrics.add(f"objective/{key}_correct_rate", (rewards_tensor > 0).float().mean())
 
-                metrics = {
+                metrics.update({
                     "episode": episode,
                     "training_step": training_step,
                     "lr": self.scheduler.get_last_lr()[0],
                     "epoch": episode / len(train_dataset),
                     "time/from_scratch": time.time() - start_time,
                     "time/training": time.time() - training_time_start,
-                    **local_metrics.get_reduced_metrics(),
-                }
-                # override with our nan-safe correctness metric
-                metrics.update(local_metrics.get_reduced_metrics_correctness())
+                    **local_metrics.get_reduced_metrics_correctness(),
+                })
                 if self.rank == 0:
                     print_rich_single_line_metrics(metrics)
                     metrics_queue.put((metrics, episode, df))
