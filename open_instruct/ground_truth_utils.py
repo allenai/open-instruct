@@ -11,8 +11,8 @@ import re
 import string
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Union
-from IFEval import instructions_registry
-from IFEval import instructions
+from IFEvalG import instructions_registry
+from IFEvalG import instructions
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.math_utils import (
     get_unnormalized_answer,
