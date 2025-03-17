@@ -1385,7 +1385,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Correct rate: fraction of samples with positive reward
                     local_metrics.add(f"objective/{key}_correct_rate", (rewards_tensor > 0).float().mean())
 
-                metrics.update({
+                metrics = {
                     "episode": episode,
                     "training_step": training_step,
                     "lr": self.scheduler.get_last_lr()[0],
@@ -1393,7 +1393,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     "time/from_scratch": time.time() - start_time,
                     "time/training": time.time() - training_time_start,
                     **local_metrics.get_reduced_metrics_correctness(),
-                })
+                }
                 if self.rank == 0:
                     print_rich_single_line_metrics(metrics)
                     metrics_queue.put((metrics, episode, df))
