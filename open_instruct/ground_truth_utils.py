@@ -142,7 +142,7 @@ class StrictMathVerifier(VerifierFunction):
         return 0.0
 
 
-class IFEvalVerifier(VerifierFunction):
+class IFEvalVerifierold(VerifierFunction):
     """
     Verifier for ifeval tasks that delegates evaluation to a function
     specified in the constraint.
@@ -169,7 +169,7 @@ class IFEvalVerifier(VerifierFunction):
             return func(prediction)
         return float(func(answer, **non_none_args))
 
-class IFEvalVerifier2(VerifierFunction):
+class IFEvalVerifier(VerifierFunction):
     """
     Verifier for ifeval tasks that delegates evaluation to a function
     specified in the constraint.
@@ -183,9 +183,9 @@ class IFEvalVerifier2(VerifierFunction):
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict]) -> bool:
         instruction_dict = instructions_registry.INSTRUCTION_DICT
-        constraint_dict = label
+        constraint_dict = label[0]
         answer = prediction.split("<|assistant|>\n")[-1].strip()
-        instruction_key = constraint_dict["instruction_id"]
+        instruction_key = constraint_dict["instruction_id"][0]
         args = constraint_dict["kwargs"]
         instruction_cls = instruction_dict[instruction_key]
         instruction_instance = instruction_cls(instruction_key)
