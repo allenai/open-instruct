@@ -547,7 +547,7 @@ class MetricsTracker:
         is_non_nan_metric_tensor = torch.zeros(self.max_metrics, device=self.metrics.device)
         for idx, name in enumerate(self.names2idx.keys()):
             is_non_nan_metric_tensor[idx] = 1 if is_non_nan_metric(name) else 0
-        valid_mask = valid_mask & is_non_nan_metric_tensor
+        valid_mask = valid_mask & is_non_nan_metric_tensor.bool()
         # Replace nan with 0 so they don't contribute to the sum.
         safe_metrics = torch.where(valid_mask, self.metrics, torch.zeros_like(self.metrics))
         # Count valid (non-nan) contributions.
