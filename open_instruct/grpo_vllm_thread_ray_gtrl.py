@@ -798,6 +798,9 @@ class PolicyTrainerRayProcess(RayProcess):
     ):
         torch.set_printoptions(precision=4, sci_mode=False)
 
+        # get list of all reward types in dataset, used for logging
+        reward_types = list(set(train_dataset['dataset'].unique()))
+
         args = self.args
         self.modified_tokenizer = tokenizer
 
@@ -1109,7 +1112,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 scores = []
                 verifiable_counts = []
                 sequence_lengths = []
-                per_func_rewards = defaultdict(list)
+                per_func_rewards = {k: [] for k in reward_types}
                 if self.rank == 0:
                     g_response_token_ids = response_ids_Q.get()
                     DUMMY_PAD_TOKEN = (
