@@ -538,37 +538,64 @@ class MetricsTracker:
         return {name: reduced_metrics[idx] for name, idx in self.names2idx.items()}
     
     def get_reduced_metrics_correctness(self) -> dict[str, float]:
-        # Create a mask for valid (non-nan) values.
-        valid_mask = ~torch.isnan(self.metrics)
-        # only metrics that fit a certain name get the non-nan treatment
-        def is_non_nan_metric(name):
+        import torch.distributed as dist
+
+        # Get the number of processes.
+        world_size = dist.get_world_size()
+
+        # Define the predicate for "non-nan" (special) metrics.
+        def is_non_nan_metric(name: str) -> bool:
             return name.startswith("objective/") and (name.endswith("_reward") or name.endswith("_correct_rate"))
-        # create the second mask tensor
-        is_non_nan_metric_tensor = torch.zeros(self.max_metrics, device=self.metrics.device)
+
+        # Create a boolean mask for special metrics based on the order in names2idx.
+        special_mask = torch.zeros(self.max_metrics, dtype=torch.bool, device=self.metrics.device)
         for idx, name in enumerate(self.names2idx.keys()):
-            is_non_nan_metric_tensor[idx] = 1 if is_non_nan_metric(name) else 0
-        valid_mask = valid_mask | is_non_nan_metric_tensor.bool()
-        # Replace nan with 0 so they don't contribute to the sum.
-        safe_metrics = torch.where(valid_mask, self.metrics, torch.zeros_like(self.metrics))
-        # Count valid (non-nan) contributions.
-        valid_counts = valid_mask.float()
+            special_mask[idx] = is_non_nan_metric(name)
 
-        # Sum both safe metrics and valid counts across processes.
-        dist.all_reduce(safe_metrics, op=dist.ReduceOp.SUM)
-        dist.all_reduce(valid_counts, op=dist.ReduceOp.SUM)
+        # Split the metrics into special and regular.
+        special_values = self.metrics[special_mask]
+        regular_values = self.metrics[~special_mask]
 
-        # For each metric, divide the summed value by the count of valid entries.
-        # If there are no valid entries (i.e. valid_counts is 0), leave it as nan.
-        averaged_metrics = torch.where(
-            valid_counts > 0,
-            safe_metrics / valid_counts,
+        ### Process special metrics: nan-avoiding (like np.nanmean) ###
+        # For special metrics, we count only non-nan entries.
+        special_valid = ~torch.isnan(special_values)
+        # Replace nans with 0 so they don't contribute to the sum.
+        safe_special = torch.where(special_valid, special_values, torch.zeros_like(special_values))
+        # All-reduce the safe values and valid counts.
+        dist.all_reduce(safe_special, op=dist.ReduceOp.SUM)
+        special_counts = special_valid.float()
+        dist.all_reduce(special_counts, op=dist.ReduceOp.SUM)
+        # Compute the average: if no valid values, yield nan.
+        special_avg = torch.where(
+            special_counts > 0,
+            safe_special / special_counts,
             torch.tensor(float('nan'), device=self.metrics.device)
         )
 
-        # Convert to list and map names.
+        ### Process regular metrics: normal averaging ###
+        # For regular metrics, if any process has nan, the final result should be nan.
+        reg_sum = regular_values.clone()
+        dist.all_reduce(reg_sum, op=dist.ReduceOp.SUM)
+        # Also reduce a nan indicator: if any process has nan, we mark that metric.
+        reg_nan_indicator = regular_values.clone().detach()
+        # Create a mask: 1 if nan, 0 otherwise.
+        reg_nan_mask = torch.where(torch.isnan(reg_nan_indicator), torch.ones_like(reg_nan_indicator), torch.zeros_like(reg_nan_indicator))
+        dist.all_reduce(reg_nan_mask, op=dist.ReduceOp.SUM)
+        # If any process had nan (i.e. indicator > 0), the average becomes nan.
+        reg_avg = torch.where(
+            reg_nan_mask > 0,
+            torch.tensor(float('nan'), device=self.metrics.device),
+            reg_sum / world_size
+        )
+
+        # Reconstruct the full averaged metrics tensor.
+        averaged_metrics = torch.empty_like(self.metrics)
+        averaged_metrics[special_mask] = special_avg
+        averaged_metrics[~special_mask] = reg_avg
+
+        # Map the tensor values back to the corresponding names.
         reduced_metrics = averaged_metrics.tolist()
         return {name: reduced_metrics[idx] for name, idx in self.names2idx.items()}
-
 
 class Timer:
     """A context manager for timing code blocks"""
