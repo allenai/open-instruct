@@ -318,17 +318,9 @@ class FlatArguments:
             "Using 'sum' can improve chat model performance."
         },
     )
-    wandb_entity: Optional[str] = field(
-        default=None,
-        metadata={"help": "Entity to use for logging to wandb."},
-    )
     resume_from_checkpoint: Optional[str] = field(
         default=None,
         metadata={"help": "If the training should continue from a checkpoint folder."},
-    )
-    with_tracking: bool = field(
-        default=False,
-        metadata={"help": "Whether to enable experiment trackers for logging."},
     )
     report_to: Union[str, List[str]] = field(
         default="all",
@@ -385,10 +377,16 @@ class FlatArguments:
         default=0.001,
         metadata={"help": "Weight for load balancing loss if applicable."},
     )
-    cache_dataset_only: bool = False
-    """Immediately exit after caching the dataset"""
     concatenated_forward: bool = True
     """Whether to concatenate chosen and rejected for DPO training; True is good but you can set to False for saving memory."""
+
+    # Experiment tracking
+    with_tracking: bool = False
+    """If toggled, this experiment will be tracked with Weights and Biases"""
+    wandb_project_name: str = "open_instruct_internal"
+    """The wandb's project name"""
+    wandb_entity: Optional[str] = None
+    """The entity (team) of wandb's project"""
     push_to_hub: bool = True
     """Whether to upload the saved model to huggingface"""
     hf_entity: Optional[str] = None
@@ -403,6 +401,8 @@ class FlatArguments:
     """Whether to launch beaker evaluation jobs after training"""
     hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
+    cache_dataset_only: bool = False
+    """Immediately exit after caching the dataset"""
 
     # Ai2 specific settings
     try_auto_save_to_beaker: bool = True
@@ -489,7 +489,8 @@ def main(args: FlatArguments):
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
-    args.run_name = f"{args.exp_name}__{args.model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
+    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.output_dir = os.path.join(args.output_dir, args.run_name)
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -793,7 +794,7 @@ def main(args: FlatArguments):
         if is_beaker_job():
             experiment_config.update(vars(beaker_config))
         accelerator.init_trackers(
-            "open_instruct_internal",
+            args.wandb_project_name,
             experiment_config,
             init_kwargs={
                 "wandb": {
@@ -815,7 +816,6 @@ def main(args: FlatArguments):
     logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
-
     completed_steps = 0
     starting_epoch = 0
 
