@@ -560,13 +560,7 @@ class MetricsTracker:
         dist.all_reduce(valid_counts, op=dist.ReduceOp.SUM)
 
         # For each metric, divide the summed value by the count of valid entries.
-        # If there are no valid entries (i.e. valid_counts is 0), leave it as nan.
-        averaged_metrics = torch.where(
-            valid_counts > 0,
-            safe_metrics / valid_counts,
-            torch.tensor(float('nan'), device=self.metrics.device)
-        )
-
+        averaged_metrics = safe_metrics / valid_counts
         # Convert to list and map names.
         reduced_metrics = averaged_metrics.tolist()
         return {name: reduced_metrics[idx] for name, idx in self.names2idx.items()}
