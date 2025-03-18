@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """Registry of all instructions."""
-import instructions
+from IFEval import instructions
 
 _KEYWORD = "keywords:"
 
