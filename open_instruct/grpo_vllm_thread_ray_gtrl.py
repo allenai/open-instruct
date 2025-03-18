@@ -1206,9 +1206,14 @@ class PolicyTrainerRayProcess(RayProcess):
                     accelerator.process_index * queries.shape[0] : (accelerator.process_index + 1) * queries.shape[0]
                 ]
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
-
+                decoded_response = tokenizer.batch_decode(local_vllm_responses)
+                # adding a reward for using a query
+                if args.add_query_reward:
+                    query_scores = torch.zeros_like(local_vllm_responses, device=device)
+                    for i, resp in enumerate(decoded_response):
+                        if "<query>" in resp and "</query>" in resp:
+                            query_scores[i] = 1.0
                 if args.add_r1_style_format_reward:
-                    decoded_response = tokenizer.batch_decode(local_vllm_responses)
                     format_scores = torch.tensor(
                         soft_format_reward_func(decoded_response, args.r1_style_format_reward), device=device
                     )
@@ -1264,6 +1269,8 @@ class PolicyTrainerRayProcess(RayProcess):
                                 per_func_rewards[key].append(value)
                     if args.add_r1_style_format_reward:
                         score += format_scores[i : i + args.local_rollout_forward_batch_size]
+                    if args.add_query_reward:
+                        score += query_scores[i : i + args.local_rollout_forward_batch_size]
 
                     responses.append(response)
                     postprocessed_responses.append(postprocessed_response)
