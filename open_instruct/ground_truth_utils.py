@@ -4,7 +4,7 @@ Used to give feedback to the model based on the ground truth answer.
 Add new verifiers by subclassing VerifierFunction and implementing the __call__ method.
 They are then automatically added to the REWARD_FN_MAPPING.
 """
-
+import sys
 import json
 import logging
 import re
@@ -183,6 +183,7 @@ class IFEvalVerifier(VerifierFunction):
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict]) -> bool:
         instruction_dict = instructions_registry.INSTRUCTION_DICT
+        print("debugging")
         print(label)
         sys.exit(0)
         constraint_dict = label[0]
