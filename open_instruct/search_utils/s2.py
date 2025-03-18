@@ -19,7 +19,7 @@ def get_snippets_for_query(query):
         if res.status_code == 200:
             res = res.json()['data']
             snippets = [item['snippet']['text'] for item in res if item['snippet']]
-            snippets = snippets[:3]
+            snippets = snippets[:2]
             return ["\n".join(snippets)]
     except Exception as e:  # pylint: disable=broad-except
         print(f"Error: {e}")

@@ -512,7 +512,7 @@ def create_snippet_mask(input_ids, tokenizer):
     # Process each sequence in the batch
     for i in range(batch_size):
         # Get the sequence with padding removed
-        seq = input_ids[i].clone()
+        seq = input_ids[i].clone().cpu()
         non_pad_mask = seq != tokenizer.pad_token_id
         if not torch.any(non_pad_mask):
             continue  # Skip empty sequences
