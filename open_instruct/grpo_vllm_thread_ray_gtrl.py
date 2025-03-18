@@ -245,6 +245,8 @@ class Args:
     """whether to add the R1 style format reward"""
     r1_style_format_reward: float = 1.0
     """the reward value for R1 style format reward"""
+    add_query_reward: bool = False
+    """whether to add the query reward"""
 
     # async setting
     async_mode: bool = True
@@ -1212,7 +1214,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     query_scores = torch.zeros_like(local_vllm_responses, device=device)
                     for i, resp in enumerate(decoded_response):
                         if "<query>" in resp and "</query>" in resp:
-                            query_scores[i] = 1.0
+                            query_scores[i] = 10.0
                 if args.add_r1_style_format_reward:
                     format_scores = torch.tensor(
                         soft_format_reward_func(decoded_response, args.r1_style_format_reward), device=device
