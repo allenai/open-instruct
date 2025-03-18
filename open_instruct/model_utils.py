@@ -232,6 +232,8 @@ def apply_verifiable_reward(
     for tok_prediction, prediction, ground_truth, dataset in zip(
         responses, decoded_responses, ground_truths, datasets
     ):
+        print(ground_truth)
+        print(dataset)
         # allow multiple ground truths and datasets for a single response
         if isinstance(ground_truth, str):
             ground_truth_list = [ground_truth]
@@ -241,6 +243,7 @@ def apply_verifiable_reward(
             dataset_list = [dataset]
         else:
             dataset_list = dataset
+        print("I AM DEBUGGING")
         logger.info("Ground truth: %s", ground_truth_list)
         logger.info("Dataset: %s", dataset_list)
         print(ground_truth_list)
