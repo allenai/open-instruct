@@ -188,7 +188,7 @@ class IFEvalVerifier(VerifierFunction):
         constraint_dict = label
         answer = prediction.split("<|assistant|>\n")[-1].strip()
         instruction_key = constraint_dict["instruction_id"][0]
-        args = constraint_dict["kwargs"]
+        args = constraint_dict["kwargs"][0]
         instruction_cls = instruction_dict[instruction_key]
         instruction_instance = instruction_cls(instruction_key)
         instruction = instruction_instance.build_description(**args)
