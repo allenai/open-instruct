@@ -238,7 +238,7 @@ def apply_verifiable_reward(
         print(type(ground_truth))
         print(type(dataset))
         # allow multiple ground truths and datasets for a single response
-        if isinstance(ground_truth, str):
+        if isinstance(ground_truth, str) or isinstance(ground_truth, dict):
             ground_truth_list = [ground_truth]
         else:
             ground_truth_list = ground_truth
@@ -251,7 +251,6 @@ def apply_verifiable_reward(
         logger.info("Dataset: %s", dataset_list)
         print(ground_truth_list)
         print(dataset_list)
-        sys.exit(0)
         assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
         # for now, we just assume rewards are additive, rather than more complex functions.
         reward = 0
