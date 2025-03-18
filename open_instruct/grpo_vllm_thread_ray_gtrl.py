@@ -1418,8 +1418,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         # grpo change: directly subtract KL in loss (add)
                         # Apply snippet masking if enabled
                         if args.mask_snippet_loss:
-                            input_ids_batch = mini_batch["query_response"][micro_batch_inds]
-                            snippet_mask = create_snippet_mask(input_ids_batch, tokenizer)
+                            snippet_mask = create_snippet_mask(mb_query_responses, tokenizer)
                             # Combine padding mask with snippet mask (we want ~padding_mask AND snippet_mask)
                             combined_mask = ~padding_mask[micro_batch_inds] & snippet_mask
                             loss = masked_mean(pg_loss_max + (args.beta * kl), combined_mask)
