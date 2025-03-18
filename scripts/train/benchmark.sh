@@ -1,3 +1,6 @@
+# ------------------------------------------------------------
+# Tulu3
+
 # 8 nodes
 python launch.py scripts/train/tulu3/finetune_8b.sh \
     --cluster ai2/augusta-google-1 \
@@ -26,6 +29,9 @@ python launch.py scripts/train/tulu3/grpo_fast_8b.sh \
     --priority normal \
     --image costah/open_instruct_dev0316_16 | uv run bash
 
+# ------------------------------------------------------------
+# Qwen
+
 # 2 nodes
 python launch.py scripts/train/qwen/grpo_fast_7b.sh \
     --cluster ai2/augusta-google-1 \
@@ -41,12 +47,39 @@ python launch.py scripts/train/qwen/grpo_7b.sh \
     --priority normal \
     --image costah/open_instruct_dev0316_16 | uv run bash
 
+# ------------------------------------------------------------
+# Olmo2
 
 # 8 nodes
-python launch.py scripts/train/olmo2/grpo_fast_32b.sh \
+python launch.py scripts/train/olmo2/finetune_13b.sh \
     --cluster ai2/augusta-google-1 \
-    --priority high \
-    --image costah/open_instruct_dev0316_16 | uv run bash
+    --wandb_project_name open_instruct_public \
+    --priority normal \
+    --image costah/open_instruct_dev0316_17 | uv run bash
+
+# 8 nodes
+python launch.py scripts/train/olmo2/finetune_7b.sh \
+    --cluster ai2/augusta-google-1 \
+    --wandb_project_name open_instruct_public \
+    --priority normal \
+    --image costah/open_instruct_dev0316_17 | uv run bash
+
+# 4 nodes
+python launch.py scripts/train/olmo2/dpo_7b.sh \
+    --cluster ai2/augusta-google-1 \
+    --wandb_project_name open_instruct_public \
+    --priority normal \
+    --image costah/open_instruct_dev0316_17 | uv run bash
+
+# 4 nodes
+python launch.py scripts/train/olmo2/dpo_13b.sh \
+    --cluster ai2/augusta-google-1 \
+    --wandb_project_name open_instruct_public \
+    --priority normal \
+    --image costah/open_instruct_dev0316_17 | uv run bash
+
+
+
 
 
 python launch.py scripts/train/tulu3/grpo_fast_8b.sh \
