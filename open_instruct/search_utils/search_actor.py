@@ -36,7 +36,7 @@ def process_vllm_output_for_search(text: str) -> str:
     print(f"Searching: {query}")
     snippets = get_snippets_for_query(query)
     if not snippets:
-        return ""
+        return "<snippet>Query failed.</snippet>"
     
     return f"<snippet>{snippets[0]}</snippet>"
 
