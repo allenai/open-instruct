@@ -538,31 +538,17 @@ class MetricsTracker:
         return {name: reduced_metrics[idx] for name, idx in self.names2idx.items()}
     
     def get_reduced_metrics_correctness(self) -> dict[str, float]:
-        # Create a mask for objective metrics that should ignore NaNs.
-        # These are metrics whose names start with "objective/" and end with "_reward" or "_correct_rate".
-        mask_obj = torch.zeros_like(self.metrics, dtype=torch.bool)
-        for name in self.names2idx:
-            if name.startswith("objective/") and (name.endswith("_reward") or name.endswith("_correct_rate")):
-                mask_obj[self.names2idx[name]] = True
-
-        # For non-objective metrics, we want to include NaNs.
-        mask_nonobj = ~mask_obj
-
-        # For objective metrics, valid if not NaN; for non-objective, always valid.
-        valid_mask = torch.where(mask_obj, ~torch.isnan(self.metrics), torch.ones_like(self.metrics, dtype=torch.bool))
-
-        # For objective metrics, replace NaNs with 0 so they don't contribute to the sum.
-        # For non-objective metrics, leave the value unchanged (even if it's NaN).
-        safe_metrics = torch.where(mask_obj & torch.isnan(self.metrics), torch.zeros_like(self.metrics), self.metrics)
-
+        # count the number of valid (non-NaN) values
+        valid_mask = ~torch.isnan(self.metrics)
         valid_counts = valid_mask.float()
+        # replace NaN values with 0
+        safe_metrics = torch.where(valid_mask, self.metrics, torch.tensor(0.0, device=self.metrics.device))
 
         # Reduce (sum) safe metrics and valid counts across processes.
         dist.all_reduce(safe_metrics, op=dist.ReduceOp.SUM)
         dist.all_reduce(valid_counts, op=dist.ReduceOp.SUM)
 
-        # For objective metrics, the average is computed only over valid (non-NaN) values,
-        # while for non-objective metrics, if any NaN is present, the result will be NaN.
+        # compute averaged metrics
         averaged_metrics = safe_metrics / valid_counts
 
         reduced_metrics = averaged_metrics.tolist()
