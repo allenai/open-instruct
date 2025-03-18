@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """Registry of all instructions."""
-from open_instruct.IFEval import instructions
+from open_instruct.IFEvalG import instructions
 
 _KEYWORD = "keywords:"
 
