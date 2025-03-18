@@ -1211,7 +1211,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 decoded_response = tokenizer.batch_decode(local_vllm_responses)
                 # adding a reward for using a query
                 if args.add_query_reward:
-                    query_scores = torch.zeros_like(local_vllm_responses, device=device)
+                    query_scores = torch.zeros(queries.shape[0], device=device)
                     for i, resp in enumerate(decoded_response):
                         if "<query>" in resp and "</query>" in resp:
                             query_scores[i] = 10.0
