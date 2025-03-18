@@ -41,6 +41,7 @@ import logging
 import os
 import random
 import socket
+import subprocess
 import threading
 import time
 import traceback
@@ -1072,6 +1073,43 @@ class PolicyTrainerRayProcess(RayProcess):
             future = None
         return future
 
+    def launch_ai2_evals_on_weka(self, step_dir: str, training_step: Optional[int] = None) -> None:
+        """auto eval the metrics as `f"{args.exp_name}_step_{training_step}"` in our leaderboard"""
+        args = self.args
+        wandb_url = self.wandb_url
+        # Ai2 specific logic
+        if is_beaker_job() and self.rank == 0:
+            if training_step is not None:
+                leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
+            else:
+                leaderboard_name = args.hf_repo_revision
+            command = f"""\
+python scripts/submit_eval_jobs.py \
+    --model_name {leaderboard_name} \
+    --location {step_dir} \
+    --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
+    --is_tuned \
+    --workspace "tulu-3-results" \
+    --priority high \
+    --preemptible \
+    --use_hf_tokenizer_template \
+    --beaker_image "nathanl/open_instruct_auto" \
+    --run_oe_eval_experiments \
+    --evaluate_on_weka \
+    --run_id {wandb_url} \
+    --oe_oe_eval_max_length {args.oe_eval_max_length} \
+    --skip_oi_evals"""
+            if training_step is not None:
+                command += f" --step {training_step}"
+            if args.oe_eval_tasks is not None:
+                command += f" --oe_eval_tasks {','.join(args.oe_eval_tasks)}"
+            print(f"Launching eval jobs with command: {command}")
+            process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = process.communicate()
+            print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
+            print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
+            print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+
 
 class ModelGroup:
     def __init__(
@@ -1240,6 +1278,15 @@ def data_preparation_thread(
                 torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
                 for packed_mask in packed_sequences.response_masks
             ]
+            global_advantages_lst = global_advantages.tolist()
+            packed_advantages = []
+            for i in range(len(packed_sequences.response_masks)):
+                packed_response_mask = packed_sequences.response_masks[i]
+                packed_advantage = torch.zeros_like(packed_response_mask, dtype=torch.float32)
+                for j in range(len(packed_advantage)):
+                    if packed_response_mask[j] >= 1:  # note that response masks are 1-indexed
+                        packed_advantage[j] = global_advantages_lst[packed_response_mask[j] - 1]
+                packed_advantages.append(packed_advantage)
             packed_sequences.advantages = packed_advantages
 
         with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
@@ -1509,6 +1556,7 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
         else:
             print("Could not determine resume step from checkpoint, starting from step 1")
     
+    resume_training_step = 1
     thread = threading.Thread(
         target=vllm_generate_thread,
         args=(
@@ -1555,6 +1603,9 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
     num_total_tokens = 0
     start_time = time.time()
     eval_futures = []
+    episode = 0
+    num_total_tokens = 0
+    start_time = time.time()
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
             print("-" * 100)
@@ -1670,6 +1721,20 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
                                     )
                                     for i in range(args.world_size)
                                 ]
+                        os.makedirs(checkpoint_dir, exist_ok=True)
+                        step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
+                        os.makedirs(step_dir, exist_ok=True)
+                        print(f"Saving model at step {training_step} to {step_dir}")
+                        ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
+                        if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
+                            leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
+                            launch_ai2_evals_on_weka(
+                                step_dir,
+                                leaderboard_name,
+                                args.oe_eval_max_length,
+                                wandb_url,
+                                training_step,
+                                args.oe_eval_tasks,
                             )
 
         print(f"Saving final model at step {training_step} to {args.output_dir}")
@@ -1687,6 +1752,16 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
                         )
                         for i in range(args.world_size)
                     ]
+            ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
+            if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
+                leaderboard_name = args.hf_repo_revision
+                launch_ai2_evals_on_weka(
+                    args.output_dir,
+                    leaderboard_name,
+                    args.oe_eval_max_length,
+                    wandb_url,
+                    training_step,
+                    args.oe_eval_tasks,
                 )
 
     except Exception as e:
@@ -1805,7 +1880,7 @@ if __name__ == "__main__":
                             arithmetic_rewards.append(0)
                     except:  # noqa
                         arithmetic_rewards.append(0)
-                        pass  # it's ok if things went wrong
+                        pass  # it's ok if things went wrong                       
                 metrics["objective/arithmetic_score"] = np.array(arithmetic_rewards).mean()
                 metrics["objective/arithmetic_correct_rate"] = (np.array(arithmetic_rewards) > 0.0).mean()
 

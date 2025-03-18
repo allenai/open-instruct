@@ -914,11 +914,13 @@ def launch_ai2_evals_on_weka(
         # Update path to use the GS bucket path for evaluation
         path = gs_saved_path
 
+    """auto eval the metrics as `f"{args.exp_name}_step_{training_step}"` in our leaderboard"""
     command = f"""\
 python scripts/submit_eval_jobs.py \
 --model_name {leaderboard_name} \
 --location {path} \
 --cluster {cluster} \
+--cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
 --is_tuned \
 --workspace "tulu-3-results" \
 --priority high \
@@ -926,6 +928,7 @@ python scripts/submit_eval_jobs.py \
 --use_hf_tokenizer_template \
 --beaker_image "nathanl/open_instruct_auto" \
 --run_oe_eval_experiments \
+--evaluate_on_weka \
 --run_id {wandb_url} \
 --oe_eval_max_length {oe_eval_max_length} \
 --skip_oi_evals"""
@@ -937,6 +940,8 @@ python scripts/submit_eval_jobs.py \
         command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
     if stop_strings is not None:
         command += f" --oe_eval_stop_sequences '{','.join(stop_strings)}'"
+    if oe_eval_tasks is not None:
+        command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
     print(f"Launching eval jobs with command: {command}")
     process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
