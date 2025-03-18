@@ -26,7 +26,7 @@ This implementation has the following features:
 You can run the script in a single GPU mode to debug the training process.
 
 ```bash
-bash scripts/train/rlvr/grpo_mini.sh
+bash scripts/train/debug/grpo_mini.sh
 ```
 
 
@@ -48,7 +48,7 @@ The corresponding evals look good as well:
 ![grpo_qwen2.5_7B_works_evals](static/grpo_qwen2.5_7B_works_evals.png)
 
 
-## Explanation of the logged metrics
+### Explanation of the logged metrics
 
 
 * `episode`: the global episode number training has gone through (e.g., `3000` means we have trained on 3000 data points already -- in the case of RLVR that is prompts, which can repeat)
@@ -96,7 +96,7 @@ In simpler tasks, we see 2x faster training, and even 10x faster for more comple
 You can run the script in a single GPU mode to debug the training process.
 
 ```bash
-bash scripts/train/rlvr/grpo_fast_mini.sh
+bash scripts/train/debug/grpo_fast_mini.sh
 ```
 
 ### Qwen 2.5 7B with 2 nodes
