@@ -4,10 +4,10 @@ python mason.py \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
-    --num_nodes 1 \
+    --num_nodes 2 \
     --budget ai2/oe-adapt \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --exp_name qwen2.5_3b_grpo_fast_zero \
+    --exp_name qwen2.5_7b_grpo_fast_zero \
     --beta 0.0 \
     --num_unique_prompts_rollout 48 \
     --num_samples_per_prompt_rollout 16 \
@@ -21,7 +21,7 @@ python mason.py \
     --max_prompt_token_length 2048 \
     --response_length 4096 \
     --pack_length 6144 \
-    --model_name_or_path Qwen/Qwen2.5-3B \
+    --model_name_or_path Qwen/Qwen2.5-7B \
     --stop_strings '"</answer>"' \
     --apply_r1_style_format_reward True \
     --apply_verifiable_reward True \
@@ -38,10 +38,10 @@ python mason.py \
     --num_learners_per_node 4 \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
-    --vllm_num_engines 4 \
+    --vllm_num_engines 12 \
     --lr_scheduler_type linear \
     --seed 1 \
-    --num_evals 100 \
+    --num_evals 200 \
     --save_freq 40 \
     --try_launch_beaker_eval_jobs_on_weka \
     --gradient_checkpointing \
