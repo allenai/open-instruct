@@ -25,7 +25,7 @@ from typing import Dict, Optional, Sequence, Union
 from absl import logging
 import langdetect
 
-import instructions_util
+from open_instruct.IFEvalG import instructions_util
 
 
 _InstructionArgsDtype = Optional[Dict[str, Union[int, str, Sequence[str]]]]
