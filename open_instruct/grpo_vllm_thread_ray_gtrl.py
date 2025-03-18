@@ -40,7 +40,7 @@ import subprocess
 import threading
 import time
 from argparse import Namespace
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
@@ -536,7 +536,7 @@ class MetricsTracker:
         # convert to list so to avoid multiple .item() torch calls
         reduced_metrics = self.metrics.tolist()
         return {name: reduced_metrics[idx] for name, idx in self.names2idx.items()}
-    
+
     def get_reduced_metrics_correctness(self) -> dict[str, float]:
         # count the number of valid (non-NaN) values
         valid_mask = ~torch.isnan(self.metrics)
@@ -553,6 +553,7 @@ class MetricsTracker:
 
         reduced_metrics = averaged_metrics.tolist()
         return {name: reduced_metrics[idx] for name, idx in self.names2idx.items()}
+
 
 class Timer:
     """A context manager for timing code blocks"""
@@ -815,7 +816,7 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.set_printoptions(precision=4, sci_mode=False)
 
         # get list of all reward types in dataset, used for logging
-        reward_types = list(set(train_dataset.unique('dataset')))
+        reward_types = list(set(train_dataset.unique("dataset")))
 
         args = self.args
         self.modified_tokenizer = tokenizer
