@@ -192,3 +192,4 @@ xgrammar==0.1.9
 xxhash==3.5.0
 yarl==1.18.3
 zipp==3.21.0
+langdetect==1.0.9
