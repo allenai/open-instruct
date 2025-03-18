@@ -283,13 +283,6 @@ class FlatArguments:
         },
     )
     
-    mask_snippet_loss: bool = field(
-        default=False,
-        metadata={
-            "help": "Whether to mask the loss for tokens within <snippet>...</snippet> tags."
-            "This is useful for training with search functionality where snippets should not contribute to the loss."
-        },
-    )
     wandb_entity: Optional[str] = field(
         default=None,
         metadata={"help": "Entity to use for logging to wandb."},
@@ -774,27 +767,11 @@ def main(args: FlatArguments):
             local_total_tokens += batch["attention_mask"].sum()
             total_token_including_padding += batch["attention_mask"].numel()
             with accelerator.accumulate(model):
-                # Apply snippet masking if enabled
-                if args.mask_snippet_loss:
-                    from open_instruct.model_utils import create_snippet_mask
-                    snippet_mask = create_snippet_mask(batch["input_ids"], tokenizer)
-                    
                 if args.load_balancing_loss:
                     outputs = model(**batch, use_cache=False, output_router_logits=True)
                 else:
-                    # If we're masking snippets with mean reduction, modify labels before forward pass
-                    if args.mask_snippet_loss and args.reduce_loss == "mean":
-                        # Create a copy of the batch labels to modify
-                        modified_labels = batch["labels"].clone()
-                        # Set tokens that should be ignored (inside snippets) to -100
-                        modified_labels[~snippet_mask] = -100
-                        outputs = model(input_ids=batch["input_ids"], 
-                                       attention_mask=batch["attention_mask"],
-                                       labels=modified_labels, 
-                                       use_cache=False)
-                    else:
-                        # Standard forward pass
-                        outputs = model(**batch, use_cache=False)
+                    # Standard forward pass
+                    outputs = model(**batch, use_cache=False)
                         
                 if args.reduce_loss == "mean":
                     loss = outputs.loss
@@ -812,17 +789,6 @@ def main(args: FlatArguments):
                     shift_logits = logits[..., :-1, :].contiguous()
                     shift_labels = labels[..., 1:].contiguous()
                     
-                    # Apply snippet masking if enabled for sum reduction
-                    if args.mask_snippet_loss:
-                        # Shift the mask to match the shifted labels
-                        shift_snippet_mask = snippet_mask[:, 1:].contiguous()
-                        # Create a loss mask that combines the existing padding mask with our snippet mask
-                        # Only include tokens that are not padding (-100) AND not in snippets
-                        loss_mask = (shift_labels != -100) & shift_snippet_mask
-                        
-                        # Set labels that should be ignored to -100 (the standard ignore index)
-                        shift_labels = shift_labels.clone()
-                        shift_labels[~loss_mask] = -100
                     
                     # Flatten the tokens
                     loss_fct = torch.nn.CrossEntropyLoss(reduction="sum")
