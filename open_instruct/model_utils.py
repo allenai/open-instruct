@@ -241,6 +241,8 @@ def apply_verifiable_reward(
             dataset_list = [dataset]
         else:
             dataset_list = dataset
+        logger.info("Ground truth: %s", ground_truth_list)
+        logger.info("Dataset: %s", dataset_list)
         print(ground_truth_list)
         print(dataset_list)
         assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
