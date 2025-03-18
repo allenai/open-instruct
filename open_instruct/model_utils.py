@@ -235,6 +235,8 @@ def apply_verifiable_reward(
     ):
         print(ground_truth)
         print(dataset)
+        print(type(ground_truth))
+        print(type(dataset))
         # allow multiple ground truths and datasets for a single response
         if isinstance(ground_truth, str):
             ground_truth_list = [ground_truth]
