@@ -501,106 +501,59 @@ def create_snippet_mask(input_ids, tokenizer):
     """
     import re
     
-    # Store token IDs for faster lookup (compute once)
-    snippet_start = tokenizer.encode("<snippet>", add_special_tokens=False)
-    snippet_end = tokenizer.encode("</snippet>", add_special_tokens=False)
+    # Get token IDs for the snippet tags
+    start_tag_str = "<snippet>"
+    end_tag_str = "</snippet>"
     
-    # For faster processing, batch decode all sequences at once and use regex
+    # Initialize mask with all True (all tokens included in loss)
     batch_size, seq_len = input_ids.shape
     mask = torch.ones_like(input_ids, dtype=torch.bool)
     
-    # Process in smaller batches for memory efficiency
-    batch_size = input_ids.shape[0]
-    max_batch = 16  # Process 16 sequences at a time to conserve memory
-    
-    for batch_start in range(0, batch_size, max_batch):
-        batch_end = min(batch_start + max_batch, batch_size)
-        current_batch = input_ids[batch_start:batch_end]
-
-        # Get token offsets for each sequence (token → char mapping for fast lookups)
-        offset_mapping_batch = []
+    # Process each sequence in the batch
+    for i in range(batch_size):
+        # Get the sequence with padding removed
+        seq = input_ids[i].clone()
+        non_pad_mask = seq != tokenizer.pad_token_id
+        if not torch.any(non_pad_mask):
+            continue  # Skip empty sequences
         
-        for i in range(current_batch.shape[0]):
-            # Get the sequence with padding removed
-            seq = current_batch[i]
-            non_pad_mask = seq != tokenizer.pad_token_id
-            if not torch.any(non_pad_mask):
-                offset_mapping_batch.append(None)  # Empty sequence
-                continue
-                
-            seq = seq[non_pad_mask]
+        # Decode the sequence to text
+        text = tokenizer.decode(seq[non_pad_mask], skip_special_tokens=False)
+        
+        # Find all snippet tag pairs using regex
+        snippets = []
+        stack = []
+        
+        for start_match in re.finditer(re.escape(start_tag_str), text):
+            stack.append(start_match.start())
+        
+        for end_match in re.finditer(re.escape(end_tag_str), text):
+            if stack:
+                start_pos = stack.pop()
+                snippets.append((start_pos, end_match.end()))
+        
+        if not snippets:
+            continue  # No snippets found
+        
+        # For each snippet, identify token positions and mask them
+        for snippet_start, snippet_end in snippets:
+            # Encode the text up to the snippet start and end to get token positions
+            prefix_text = text[:snippet_start]
+            prefix_tokens = len(tokenizer.encode(prefix_text, add_special_tokens=False))
             
-            # Get the full text and find snippet positions with regex
-            text = tokenizer.decode(seq, skip_special_tokens=False)
+            full_snippet_text = text[:snippet_end]
+            snippet_end_tokens = len(tokenizer.encode(full_snippet_text, add_special_tokens=False))
             
-            # Get character-level offsets for each token
-            offset_mapping = []
-            current_text = ""
-            current_seq = seq.tolist()
+            # Mark the tokens corresponding to the snippet (and tags) as False
+            start_idx = prefix_tokens
+            end_idx = snippet_end_tokens
             
-            for token_idx, token_id in enumerate(current_seq):
-                token_text = tokenizer.decode([token_id], skip_special_tokens=False)
-                start_offset = len(current_text)
-                current_text += token_text
-                end_offset = len(current_text)
-                offset_mapping.append((start_offset, end_offset))
-            
-            offset_mapping_batch.append((text, offset_mapping, non_pad_mask))
-            
-        # Now process each sequence with efficient regex search
-        for i, mapping_data in enumerate(offset_mapping_batch):
-            if mapping_data is None:
-                continue
-                
-            text, offset_mapping, non_pad_mask = mapping_data
-            
-            # Find all snippet tags with regex (much faster than character scanning)
-            start_tags = [(m.start(), m.end()) for m in re.finditer(r'<snippet>', text)]
-            end_tags = [(m.start(), m.end()) for m in re.finditer(r'</snippet>', text)]
-            
-            if not start_tags:
-                continue
-                
-            # Match start and end tags based on nesting level
-            tag_pairs = []
-            stack = []
-            
-            for start_pos, _ in start_tags:
-                stack.append(start_pos)
-                
-            for end_start, end_end in end_tags:
-                if stack:
-                    start_pos = stack.pop()
-                    tag_pairs.append((start_pos, end_end))
-            
-            # No valid tag pairs found
-            if not tag_pairs:
-                continue
-                
-            # Map character positions to token positions and create the mask
-            abs_idx = batch_start + i
-            for start_char, end_char in tag_pairs:
-                # Find the token that contains the start position
-                start_token = None
-                end_token = None
-                
-                for t, (token_start, token_end) in enumerate(offset_mapping):
-                    # Find start token position
-                    if start_token is None and token_end > start_char:
-                        start_token = t
-                    # Find end token position
-                    if end_token is None and token_end >= end_char:
-                        end_token = t + 1  # +1 to include the end token
-                        break
-                
-                if start_token is not None and end_token is not None:
-                    # Convert relative token positions to absolute positions in the padded sequence
-                    padded_idx = torch.arange(len(non_pad_mask))[non_pad_mask]
-                    if start_token < len(padded_idx) and end_token <= len(padded_idx):
-                        pad_start = padded_idx[start_token].item()
-                        pad_end = padded_idx[min(end_token, len(padded_idx)-1)].item() + 1
-                        # Mark tokens in this range as False (excluded from loss)
-                        mask[abs_idx, pad_start:pad_end] = False
+            # Convert to absolute positions in the padded sequence
+            pad_indices = torch.arange(seq_len)[non_pad_mask]
+            if start_idx < len(pad_indices) and end_idx <= len(pad_indices):
+                mask_start = pad_indices[start_idx].item()
+                mask_end = pad_indices[min(end_idx, len(pad_indices)-1)].item() + 1
+                mask[i, mask_start:mask_end] = False
     
     return mask
 
@@ -1418,7 +1371,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         # grpo change: directly subtract KL in loss (add)
                         # Apply snippet masking if enabled
                         if args.mask_snippet_loss:
-                            snippet_mask = create_snippet_mask(mb_query_responses, tokenizer)
+                            snippet_mask = create_snippet_mask(mb_responses, tokenizer)
                             # Combine padding mask with snippet mask (we want ~padding_mask AND snippet_mask)
                             combined_mask = ~padding_mask[micro_batch_inds] & snippet_mask
                             loss = masked_mean(pg_loss_max + (args.beta * kl), combined_mask)
