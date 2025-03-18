@@ -1504,7 +1504,7 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
                     "episode": episode,
                     "training_step": training_step,
                     "val/num_total_tokens": num_total_tokens,
-                    "epoch": episode / len(train_dataset),
+                    "epoch": episode / len(train_dataset) / args.num_samples_per_prompt_rollout,
                     "tokens_per_second": num_total_tokens / (time.time() - start_time),
                     **data_thread_metrics,
                     **average_metrics,
