@@ -29,6 +29,7 @@ except ImportError:
 import pandas as pd
 import torch
 import transformers
+import sys
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
 from huggingface_hub import HfApi
@@ -248,6 +249,7 @@ def apply_verifiable_reward(
         logger.info("Dataset: %s", dataset_list)
         print(ground_truth_list)
         print(dataset_list)
+        sys.exit(0)
         assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
         # for now, we just assume rewards are additive, rather than more complex functions.
         reward = 0
