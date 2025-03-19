@@ -40,7 +40,7 @@ import subprocess
 import threading
 import time
 from argparse import Namespace
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
@@ -1057,6 +1057,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # training loop
         start_time = time.time()
+        eval_futures = deque([])
         global_data = next(iter_dataloader)
         data = data_collator(
             global_data[self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size]
