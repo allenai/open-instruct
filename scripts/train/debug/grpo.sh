@@ -2,7 +2,7 @@ python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --dataset_mixer_list nouhad/multiplication_test_100_2x2 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list nouhad/multiplication_test_100_2x2 1.0 \
-    --dataset_mixer_eval_list_splits test \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 512 \
     --max_prompt_token_length 512 \
     --response_length 512 \
@@ -11,9 +11,7 @@ python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --chat_template_name tulu \
-    --sft_messages_key messages \
     --learning_rate 3e-7 \
     --total_episodes 10000 \
     --penalty_reward_value -10.0 \
