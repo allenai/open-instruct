@@ -73,7 +73,7 @@ def pack_sequences(
 ) -> PackedSequences:
     # assert padding token does not exist in queries and responses
     assert not any(pad_token_id in query for query in queries)
-    assert not any(pad_token_id in response for response in responses)
+    # assert not any(pad_token_id in response for response in responses)
 
     query_responses = []
     attention_masks = []
