@@ -1254,7 +1254,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     if is_beaker_job():
         beaker_config = maybe_get_beaker_config()
         all_configs.update(vars(beaker_config))
-    all_configs.update(**asdict(args), **asdict(tokenizer_config), **asdict(model_config))
+    all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
     if args.with_tracking:
         import wandb
 
@@ -1303,7 +1303,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             skip_cache=args.dataset_skip_cache,
         )
         eval_dataset = eval_dataset.shuffle(seed=args.seed)
-
     if args.cache_dataset_only:
         return
 
