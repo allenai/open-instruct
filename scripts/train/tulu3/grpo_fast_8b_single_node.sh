@@ -29,7 +29,7 @@ python mason.py \
     --temperature 1.0 \
     --chat_template_name tulu \
     --total_episodes 2000000 \
-    --deepspeed_stage 3 \
+    --deepspeed_stage 2 \
     --per_device_train_batch_size 1 \
     --num_mini_batches 2 \
     --num_learners_per_node 6 \
