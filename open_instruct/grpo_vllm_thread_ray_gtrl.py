@@ -40,7 +40,7 @@ import subprocess
 import threading
 import time
 from argparse import Namespace
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
@@ -289,7 +289,7 @@ class Args:
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
     hf_repo_url: Optional[str] = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    output_dir: Optional[str] = None
+    output_dir: str = "output"
     """Where to save the model"""
     checkpoint_output_dir: Optional[str] = None
     """Where to save the model checkpoints in case of preemption"""
@@ -311,6 +311,8 @@ class Args:
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
+    eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
+    """the priority of auto-launched evaluation jobs"""
 
     def __post_init__(self):
         assert self.number_samples_per_prompt > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
@@ -332,6 +334,7 @@ def calculate_runtime_args(args: Args, model_config: ModelConfig):
     # accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
     # args.world_size = accelerator.num_processes
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.output_dir = os.path.join(args.output_dir, args.run_name)
     args.gradient_accumulation_steps = exact_div(
         args.local_mini_batch_size,
         args.per_device_train_batch_size,
@@ -534,6 +537,33 @@ class MetricsTracker:
         dist.all_reduce(self.metrics, op=dist.ReduceOp.SUM)
         # convert to list so to avoid multiple .item() torch calls
         reduced_metrics = self.metrics.tolist()
+        return {name: reduced_metrics[idx] for name, idx in self.names2idx.items()}
+
+    def get_reduced_metrics_correctness(self) -> dict[str, float]:
+        # count the number of valid (non-NaN) values
+        valid_mask = ~torch.isnan(self.metrics)
+        valid_counts = valid_mask.float()
+        # replace NaN values with 0
+        safe_metrics = torch.where(valid_mask, self.metrics, torch.tensor(0.0, device=self.metrics.device))
+
+        # for non-reward metrics, set valid counts to 1 (we will include nans)
+        # and dont mask the nans
+        def is_nan_metric(name):
+            return not (name.startswith("objective") and (name.endswith("reward") or name.endswith("correct_rate")))
+
+        for name, idx in self.names2idx.items():
+            if is_nan_metric(name):
+                valid_counts[idx] = 1.0
+                safe_metrics[idx] = self.metrics[idx]
+
+        # Reduce (sum) safe metrics and valid counts across processes.
+        dist.all_reduce(safe_metrics, op=dist.ReduceOp.SUM)
+        dist.all_reduce(valid_counts, op=dist.ReduceOp.SUM)
+
+        # compute averaged metrics
+        averaged_metrics = safe_metrics / valid_counts
+
+        reduced_metrics = averaged_metrics.tolist()
         return {name: reduced_metrics[idx] for name, idx in self.names2idx.items()}
 
 
@@ -796,6 +826,10 @@ class PolicyTrainerRayProcess(RayProcess):
         data_collator: Callable,
     ):
         torch.set_printoptions(precision=4, sci_mode=False)
+
+        # get list of all reward types in dataset, used for logging
+        # sorted to make sure the order is consistent
+        reward_types = sorted(list(set(train_dataset.unique("dataset"))))
 
         args = self.args
         self.modified_tokenizer = tokenizer
@@ -1108,7 +1142,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 scores = []
                 verifiable_counts = []
                 sequence_lengths = []
-                per_func_rewards = defaultdict(list)
+                per_func_rewards = {k: [] for k in reward_types}
                 if self.rank == 0:
                     g_response_token_ids = response_ids_Q.get()
                     DUMMY_PAD_TOKEN = (
@@ -1360,7 +1394,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     "epoch": episode / len(train_dataset),
                     "time/from_scratch": time.time() - start_time,
                     "time/training": time.time() - training_time_start,
-                    **local_metrics.get_reduced_metrics(),
+                    **local_metrics.get_reduced_metrics_correctness(),
                 }
                 if self.rank == 0:
                     print_rich_single_line_metrics(metrics)
@@ -1391,6 +1425,7 @@ class PolicyTrainerRayProcess(RayProcess):
                                 args.oe_eval_tasks,
                                 args.stop_strings,
                                 args.gs_bucket_path,
+                                args.eval_priority,
                             )
                         )
                         # if a future is done, remove it from the deque
@@ -1416,6 +1451,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         args.oe_eval_tasks,
                         args.stop_strings,
                         args.gs_bucket_path,
+                        args.eval_priority,
                     )
                 )
                 ray.get(list(eval_futures))

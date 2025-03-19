@@ -675,7 +675,7 @@ def get_last_checkpoint_path(args, incomplete: bool = False) -> str:
     # else, start from scratch.
     # if incomplete is true, include folders without "COMPLETE" in the folder.
     last_checkpoint_path = None
-    if args.output_dir and os.path.isdir(args.output_dir) and not args.overwrite_output_dir:
+    if args.output_dir and os.path.isdir(args.output_dir):
         last_checkpoint_path = get_last_checkpoint(args.output_dir, incomplete=incomplete)
         if last_checkpoint_path is None:
             logger.warning("Output directory exists but no checkpoint found. Starting from scratch.")
@@ -877,17 +877,14 @@ def upload_to_gs_bucket(src_path: str, dest_path: str) -> None:
 def launch_ai2_evals_on_weka(
     path: str,
     leaderboard_name: str,
-    oe_eval_max_length: int,
-    wandb_url: str,
+    oe_eval_max_length: Optional[int] = None,
+    wandb_url: Optional[str] = None,
     training_step: Optional[int] = None,
     oe_eval_tasks: Optional[List[str]] = None,
     stop_strings: Optional[List[str]] = None,
     gs_bucket_path: Optional[str] = None,
+    eval_priority: Optional[str] = "normal",
 ) -> None:
-    """
-    auto eval the metrics as `f"{args.exp_name}_step_{training_step}"` in our leaderboard
-    if gs_bucket_path is not None, save the model to the gs_bucket_path + path first, and evaluate from there.
-    """
     weka_cluster = "ai2/saturn-cirrascale ai2/neptune-cirrascale"
     gcp_cluster = "ai2/augusta-google-1"
     cluster = weka_cluster if gs_bucket_path is None else gcp_cluster
@@ -921,14 +918,16 @@ python scripts/submit_eval_jobs.py \
 --cluster {cluster} \
 --is_tuned \
 --workspace "tulu-3-results" \
---priority high \
+--priority {eval_priority} \
 --preemptible \
 --use_hf_tokenizer_template \
 --beaker_image "nathanl/open_instruct_auto" \
 --run_oe_eval_experiments \
---run_id {wandb_url} \
---oe_eval_max_length {oe_eval_max_length} \
 --skip_oi_evals"""
+    if wandb_url is not None:
+        command += f" --run_id {wandb_url}"
+    if oe_eval_max_length is not None:
+        command += f" --oe_eval_max_length {oe_eval_max_length}"
     if training_step is not None:
         command += f" --step {training_step}"
     if cluster == weka_cluster:
