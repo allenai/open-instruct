@@ -150,6 +150,8 @@ class Args:
     """Ratio of warmup steps to total steps (takes precedence over `warm_up_steps`)"""
     weight_decay: float = 0.0
     """Weight decay for AdamW if we apply some."""
+    set_weight_decay_on_bias_and_norm: bool = True
+    """Whether to set weight decay on bias and norm layers"""
     fused_optimizer: bool = False
     """Whether to use fused optimizer"""
 
@@ -197,6 +199,8 @@ class Args:
     """the KL estimator to use"""
     pack_length: int = 512
     """the length of the pack (you should prob set to the max length of the model)"""
+    masked_mean_axis: Optional[int] = None
+    """the axis to compute the mean of the masked values"""
 
     # Reward
     # -- r1 style format reward
@@ -263,7 +267,7 @@ class Args:
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
     hf_repo_url: Optional[str] = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    output_dir: Optional[str] = None
+    output_dir: str = "output"
     """Where to save the model"""
     save_traces: bool = False
     """Whether to save learning data traces"""
@@ -299,6 +303,7 @@ class Args:
 def calculate_runtime_args(args: Args):
     """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.output_dir = os.path.join(args.output_dir, args.run_name)
     args.world_size = sum(args.num_learners_per_node)
     args.num_training_steps = args.total_episodes // (
         args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
@@ -424,10 +429,10 @@ def _z3_params_to_fetch(param_list):
     return [p for p in param_list if hasattr(p, "ds_id") and p.ds_status == ZeroParamStatus.NOT_AVAILABLE]
 
 
-def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[bool] = None) -> torch.Tensor:
+def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
     if axis is not None:
-        return (values * mask).sum(axis=axis) / mask.sum(axis=axis)
+        return ((values * mask).sum(axis=axis) / mask.sum(axis=axis)).mean()
     else:
         return (values * mask).sum() / mask.sum()
 
@@ -594,7 +599,6 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = HfDeepSpeedConfig(ds_config)
         else:
             dschf = None
-        print(f"{dschf=}")
 
         self.original_tokenizer = AutoTokenizer.from_pretrained(
             model_config.model_name_or_path, revision=model_config.model_revision
@@ -610,7 +614,10 @@ class PolicyTrainerRayProcess(RayProcess):
         self.policy.gradient_checkpointing_enable()
         # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
         # AdamOptimizer = FusedAdam
-        optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
+        if args.set_weight_decay_on_bias_and_norm:
+            optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
+        else:
+            optim_params = self.policy.parameters()
         # self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
         self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
@@ -857,7 +864,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         kl = kl4
 
                     # grpo change: directly subtract KL in loss (add)
-                    loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool)
+                    loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
                     loss = loss / accumulation_steps
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
@@ -865,14 +872,14 @@ class PolicyTrainerRayProcess(RayProcess):
                     local_step += 1
                     with torch.no_grad():
                         # NOTE: in packed implementation, kl calculation are averages over response tokens
-                        kl1_stats[i] = masked_mean(kl1, mb_response_masks_bool).float()
-                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool).float()
-                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool).float()
-                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool).float()
-                        pg_clipfrac_stats[i] = masked_mean((pg_losses2 > pg_losses).float(), mb_response_masks_bool)
-                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool)
+                        kl1_stats[i] = masked_mean(kl1, mb_response_masks_bool, args.masked_mean_axis).float()
+                        kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, args.masked_mean_axis).float()
+                        kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, args.masked_mean_axis).float()
+                        kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, args.masked_mean_axis).float()
+                        pg_clipfrac_stats[i] = masked_mean((pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis)
+                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
                         loss_stats[i] = loss
-                        ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool)
+                        ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
 
             with torch.no_grad():
                 self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
@@ -1504,7 +1511,7 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
                     "episode": episode,
                     "training_step": training_step,
                     "val/num_total_tokens": num_total_tokens,
-                    "epoch": episode / len(train_dataset),
+                    "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
                     "tokens_per_second": num_total_tokens / (time.time() - start_time),
                     **data_thread_metrics,
                     **average_metrics,

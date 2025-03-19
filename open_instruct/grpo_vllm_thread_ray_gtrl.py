@@ -288,7 +288,7 @@ class Args:
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
     hf_repo_url: Optional[str] = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    output_dir: Optional[str] = None
+    output_dir: str = "output"
     """Where to save the model"""
     checkpoint_output_dir: Optional[str] = None
     """Where to save the model checkpoints in case of preemption"""
@@ -333,6 +333,7 @@ def calculate_runtime_args(args: Args, model_config: ModelConfig):
     # accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
     # args.world_size = accelerator.num_processes
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.output_dir = os.path.join(args.output_dir, args.run_name)
     args.gradient_accumulation_steps = exact_div(
         args.local_mini_batch_size,
         args.per_device_train_batch_size,
