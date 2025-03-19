@@ -200,6 +200,66 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    "r1_countdown": (
+        "A conversation between User and Assistant. "
+        "The user asks a question, and the Assistant solves it. "
+        "The goal here is to reach a target number by combining integers using basic arithmetic operations. "
+        "The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. "
+        "Write your thoughts in <think> </think> tags. "
+        "The answer is a series of arithmetic operations (+, -, *, /) that results in the target number. "
+        "Write the final answer in <answer> </answer> tags. "
+        "Make sure each step in the final answer is written as <answer> (number1 [+-*/] number2) [+-*/] number3 </answer>. "
+        "The answer should be a valid mathematical expression using only the given numbers, NOT the target number. "
+        "The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, "
+        "i.e., <think> reasoning process here </think> <answer> answer here </answer>."
+        "\n\n"
+        "{% for message in messages %}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['role'].capitalize() + ': ' + message['content'] + '\n' }}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ 'Assistant: <think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+),
+   "qwen_countdown1": (
+    "<|im_start|>system\n"
+    "Please reason step by step, and put your final answer within <answer> </answer> tags."
+    "The goal here is to reach a target number by combining integers using basic arithmetic operations. "
+    "Write your thoughts in <think> </think> tags. "
+    "The answer is a series of arithmetic operations (+, -, *, /) that results in the target number. "
+    "Write the final answer within <answer> </answer> tags. "
+    "Make sure each step in the final answer is written as <answer> (number1 [+-*/] number2) [+-*/] number3 </answer>. "
+    "The answer should be a valid mathematical expression using only the given numbers, NOT the target number."
+    "<|im_end|>\n\n"
+
+    "{% for message in messages %}"
+    "<|im_start|>{{ message['role'] }}\n{{ message['content'] }}<|im_end|>\n"
+    "{% endfor %}\n\n"
+
+    "{% if add_generation_prompt %}"
+    "<|im_start|>assistant\nLet me solve this step by step.\n<think>"
+    "{% endif %}"
+),
+   "qwen_math": (
+        "{%- if messages[0]['role'] == 'system' %}\n"
+        "    {{- '<|im_start|>system\\n' + messages[0]['content'] + '<|im_end|>\\n' }}\n"
+        "{%- else %}\n"
+        "    {{- '<|im_start|>system\\nPlease reason step by step, and put your final answer within \ boxed{}.<|im_end|>\\n' }}\n"
+        "{%- endif %}\n\n"
+        "{%- for message in messages %}\n"
+        "    {%- if message.role in ['user', 'system', 'assistant'] %}\n"
+        "        {{- '<|im_start|>' + message.role }}\n"
+        "        {%- if message.content %}\n"
+        "            {{- '\\n' + message.content }}\n"
+        "        {%- endif %}\n"
+        "        {{- '<|im_end|>\\n' }}\n"
+        "    {%- endif %}\n"
+        "{%- endfor %}\n\n"
+        "{%- if add_generation_prompt %}\n"
+        "    {{- '<|im_start|>assistant\\n' }}\n"
+        "{%- endif %}"
+    )
+
 }
 # flake8: noqa
 
@@ -264,11 +324,14 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
     # and saved together with the tokenizer to be used later.
     if tc.chat_template_name in CHAT_TEMPLATES:
         tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
-    else:
+    elif tc.chat_template_name == "default":
         try:
             tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.model_name_or_path).chat_template
         except Exception:
             raise ValueError(f"Could not find chat template for {tc.model_name_or_path}.")
+    else:
+        raise ValueError(f"Could not find chat template for {tc.model_name_or_path}.")
+
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -826,7 +889,7 @@ class DatasetTransformationCache:
             commit_message=f"Cache combined dataset with configs hash: {config_hash}",
         )
         print(f"🚀 Pushed transformed dataset to https://huggingface.co/datasets/{repo_name}/tree/{config_hash}")
-
+        # breakpoint()
         model_card = ModelCard(
             f"""\
 ---
