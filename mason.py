@@ -493,11 +493,6 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
         raise ValueError("GCP clusters do not have the dev filesystem, please use a proper image")
 
     if is_open_instruct:
-        if any(c in WEKA_CLUSTERS for c in args.cluster):
-            # add output_dir to the command
-            command.append("--output_dir")
-            command.append(f"/weka/oe-adapt-default/allennlp/deletable_checkpoint/{whoami}/")
-
         # In gcp, we save the model to a gs bucket first
         if any(c in GCP_CLUSTERS for c in args.cluster):
             # Replace the model_name_or_path with a downloaded path from the gs bucket

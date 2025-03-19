@@ -1,0 +1,27 @@
+python mason.py \
+    --cluster ai2/jupiter-cirrascale-2 \
+    --workspace ai2/reward-bench-v2 \
+    --priority high \
+    --preemptible \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
+    --budget ai2/oe-adapt \
+    --num_nodes 4 \
+    --gpus 8 -- accelerate launch \
+    --config_file configs/ds_configs/deepspeed_zero3.yaml open_instruct/reward_modeling.py \
+    --dataset_mixer '{"allenai/llama-3.1-tulu-3-70b-preference-mixture": 1.0}' \
+    --dataset_train_splits train \
+    --dataset_eval_mixer '{"allenai/llama-3.1-tulu-3-70b-preference-mixture": 1.0}' \
+    --dataset_eval_splits train \
+    --model_name_or_path allenai/Llama-3.1-Tulu-3-70B \
+    --chat_template tulu \
+    --learning_rate 3e-6 \
+    --wandb_project_name reward-models \
+    --per_device_train_batch_size 1 \
+    --per_device_eval_batch_size 1 \
+    --gradient_accumulation_steps 32 \
+    --max_token_length 2048 \
+    --max_prompt_token_length 2048 \
+    --num_train_epochs 1 \
+    --gradient_checkpointing \
+    --push_to_hub \
+    --with_tracking
