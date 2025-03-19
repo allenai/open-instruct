@@ -1724,6 +1724,7 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
                                     )
                                     for i in range(args.world_size)
                                 ]
+                            )
                         os.makedirs(checkpoint_dir, exist_ok=True)
                         step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
                         os.makedirs(step_dir, exist_ok=True)
