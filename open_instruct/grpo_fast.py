@@ -1756,6 +1756,7 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
                         )
                         for i in range(args.world_size)
                     ]
+                )
             ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
             if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                 leaderboard_name = args.hf_repo_revision
