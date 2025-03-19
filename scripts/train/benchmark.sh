@@ -64,6 +64,13 @@ python launch.py scripts/train/olmo2/finetune_7b.sh \
     --priority normal \
     --image costah/open_instruct_dev0316_17 | uv run bash
 
+# 8 nodes
+python launch.py scripts/train/olmo2/finetune_32b.sh \
+    --cluster ai2/augusta-google-1 \
+    --wandb_project_name open_instruct_public \
+    --priority normal \
+    --image costah/open_instruct_dev0316_18 | uv run bash
+
 # 4 nodes
 python launch.py scripts/train/olmo2/dpo_7b.sh \
     --cluster ai2/augusta-google-1 \
@@ -78,6 +85,27 @@ python launch.py scripts/train/olmo2/dpo_13b.sh \
     --priority normal \
     --image costah/open_instruct_dev0316_17 | uv run bash
 
+# 2 nodes
+for lr in 3e-7 4e-7 5e-7; do 
+    python launch.py scripts/train/olmo2/grpo_13b.sh \
+        --cluster ai2/augusta-google-1 \
+        --wandb_project_name open_instruct_public \
+        --priority normal \
+        --image costah/open_instruct_dev0316_18 \
+        --learning_rate $lr | uv run bash
+done
+    
+# 2 nodes
+for lr in 3e-7 4e-7 5e-7; do 
+    python launch.py scripts/train/olmo2/grpo_7b.sh \
+        --cluster ai2/augusta-google-1 \
+        --wandb_project_name open_instruct_public \
+        --priority normal \
+        --image costah/open_instruct_dev0316_18 \
+        --learning_rate $lr | uv run bash
+done
+
+
 
 
 
@@ -91,14 +119,14 @@ python launch.py scripts/train/tulu3/grpo_fast_8b.sh \
     --masked_mean_axis 1 \
     --image costah/open_instruct_dev0316_16 | uv run bash
 
-# (not part of the benchmark) 2 nodes
+# 2 nodes
 python launch.py scripts/train/tulu3/grpo_fast_8b.sh \
     --cluster ai2/augusta-google-1 \
     --priority normal \
     --wandb_project_name open_instruct_public \
     --exp_name tulu3.1_8b_grpo_fast_axis_1_mean \
     --masked_mean_axis 1 \
-    --image costah/open_instruct_dev0316_15 | uv run bash
+    --image costah/open_instruct_dev0316_18 | uv run bash
 
 
 # ------------------------------------------------------------
