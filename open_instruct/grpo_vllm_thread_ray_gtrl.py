@@ -816,7 +816,8 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.set_printoptions(precision=4, sci_mode=False)
 
         # get list of all reward types in dataset, used for logging
-        reward_types = list(set(train_dataset.unique("dataset")))
+        # sorted to make sure the order is consistent
+        reward_types = sorted(list(set(train_dataset.unique("dataset"))))
 
         args = self.args
         self.modified_tokenizer = tokenizer
