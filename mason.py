@@ -152,7 +152,7 @@ def get_args():
         "--no_auto_dataset_cache", action="store_true", help="If given, don't cache the dataset automatically"
     )
     parser.add_argument(
-        "--auto_output_dir", type=str, default="/weka/oe-adapt-default/allennlp/deletable_checkpoint",
+        "--auto_output_dir_path", type=str, default="/weka/oe-adapt-default/allennlp/deletable_checkpoint",
         help="If given, automatically replace the `--output_dir` argument with this path, essentially using it as a prefix"
     )
     parser.add_argument(
@@ -526,17 +526,32 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
         # If the output_dir is already set to a path in /weka/, we'll keep that path
         # Otherwise, we'll set a default path in the user's directory on Weka
         if any(c in WEKA_CLUSTERS for c in args.cluster):
-            need_to_override_output_dir = True
-            for idx, cmd in enumerate(command):
-                if cmd == "--output_dir":
-                    if "/weka/" in command[idx + 1]:
-                        need_to_override_output_dir = False
-                        break
-            if need_to_override_output_dir and is_open_instruct_training and not is_external_user:
-                new_output_dir = f"{args.auto_output_dir}/{whoami}/"
-                console.log(f"🔍🔍🔍 Automatically overriding the `--output_dir` argument to be in `{new_output_dir}`")
-                command.append("--output_dir")
-                command.append(new_output_dir)
+            if len(args.auto_output_dir_path) > 0:
+                need_to_override_output_dir = True
+                for idx, cmd in enumerate(command):
+                    if cmd == "--output_dir":
+                        if "/weka/" in command[idx + 1]:
+                            need_to_override_output_dir = False
+                            break
+                if need_to_override_output_dir and is_open_instruct_training and not is_external_user:
+                    new_output_dir = f"{args.auto_output_dir_path}/{whoami}/"
+                    console.log(f"🔍🔍🔍 Automatically overriding the `--output_dir` argument to be in `{new_output_dir}`")
+                    command.append("--output_dir")
+                    command.append(new_output_dir)
+            else:
+                no_eval_commands = [
+                    ["--try_launch_beaker_eval_jobs", "False"],
+                    ["--try_launch_beaker_eval_jobs_on_weka", "False"],
+                    ["--no_try_launch_beaker_eval_jobs"],
+                    ["--no_try_launch_beaker_eval_jobs_on_weka"],
+                ]
+                no_eval_concat_commands = [" ".join(cmd) for cmd in no_eval_commands]
+                no_eval_concat_command_exists = any(cmd in command for cmd in no_eval_concat_commands)
+                if not no_eval_concat_command_exists:
+                    raise ValueError("To auto-evaluation is turned on by default, to make sure it works, you must:\n"
+                                    "1. run mason with`--auto_output_dir_path /weka/...`, or\n"
+                                    "2. in the training command, disable auto-evaluation with `--no_try_launch_beaker_eval_jobs`, or\n"
+                                    "3. in the training command, use a `--output_dir` that starts with `/weka/`")
 
         # For GCP clusters, since shared storage is slow, we optimize model loading by:
         # 1. First downloading the model from HuggingFace to a local path
