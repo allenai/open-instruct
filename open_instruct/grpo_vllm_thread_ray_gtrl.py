@@ -47,7 +47,7 @@ from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
 
 from open_instruct.dataset_transformation import (
     TokenizerConfig,
-    get_cached_dataset_rlvr,
+    get_cached_dataset,
 )
 from open_instruct.ground_truth_utils import soft_format_reward_func
 
@@ -1618,7 +1618,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         add_bos=model_config.add_bos,
     )
     tokenizer = tc.tokenizer
-    train_dataset = get_cached_dataset_rlvr(
+    train_dataset = get_cached_dataset(
         args.dataset_mixer_list,
         args.dataset_mixer_list_splits,
         tc,
@@ -1629,7 +1629,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     train_dataset = train_dataset.shuffle(seed=args.seed)
     eval_dataset = None
     if args.dataset_mixer_eval_list is not None:
-        eval_dataset = get_cached_dataset_rlvr(
+        eval_dataset = get_cached_dataset(
             args.dataset_mixer_eval_list,
             args.dataset_mixer_eval_list_splits,
             tc,

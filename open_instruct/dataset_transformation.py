@@ -41,6 +41,7 @@ The main things we are looking for are:
 """
 
 import copy
+from functools import cached_property
 import hashlib
 import json
 import multiprocessing
@@ -207,8 +208,8 @@ CHAT_TEMPLATES = {
 
 def get_tokenizer_simple_v1(tc: "TokenizerConfig"):
     tokenizer = AutoTokenizer.from_pretrained(
-        tc.model_name_or_path,
-        revision=tc.revision,
+        tc.tokenizer_name_or_path,
+        revision=tc.tokenizer_revision,
         trust_remote_code=tc.trust_remote_code,
         use_fast=tc.use_fast,
     )
@@ -217,8 +218,8 @@ def get_tokenizer_simple_v1(tc: "TokenizerConfig"):
 
 def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
     tokenizer = AutoTokenizer.from_pretrained(
-        tc.model_name_or_path,
-        revision=tc.revision,
+        tc.tokenizer_name_or_path,
+        revision=tc.tokenizer_revision,
         trust_remote_code=tc.trust_remote_code,
         use_fast=tc.use_fast,
     )
@@ -267,9 +268,9 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
         tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
     else:
         try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.model_name_or_path).chat_template
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path).chat_template
         except Exception:
-            raise ValueError(f"Could not find chat template for {tc.model_name_or_path}.")
+            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -286,8 +287,8 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
 
 def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
     tokenizer = AutoTokenizer.from_pretrained(
-        tc.model_name_or_path,
-        revision=tc.revision,
+        tc.tokenizer_name_or_path,
+        revision=tc.tokenizer_revision,
         trust_remote_code=tc.trust_remote_code,
         use_fast=tc.use_fast,
     )
@@ -336,9 +337,9 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
         tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
     else:
         try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.model_name_or_path).chat_template
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path).chat_template
         except Exception:
-            raise ValueError(f"Could not find chat template for {tc.model_name_or_path}.")
+            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -354,15 +355,15 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
 
 
 def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
-    config = AutoConfig.from_pretrained(tc.model_name_or_path, revision=tc.revision)
+    config = AutoConfig.from_pretrained(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision)
     # @vwxyzjn: "olmo" handles both `olmo2` and `olmoe`.
     if "olmo" in config.model_type:
         assert tc.add_bos, "For OLMo, you must run with `--add_bos`."
         assert tc.use_fast, "For OLMo, you must use fast tokenizer."
 
     tokenizer = AutoTokenizer.from_pretrained(
-        tc.model_name_or_path,
-        revision=tc.revision,
+        tc.tokenizer_name_or_path,
+        revision=tc.tokenizer_revision,
         trust_remote_code=tc.trust_remote_code,
         use_fast=tc.use_fast,
     )
@@ -411,9 +412,9 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
         tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
     else:
         try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.model_name_or_path).chat_template
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path).chat_template
         except Exception:
-            raise ValueError(f"Could not find chat template for {tc.model_name_or_path}.")
+            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
@@ -438,22 +439,32 @@ GET_TOKENIZER_FN = {
 
 @dataclass
 class TokenizerConfig:
-    model_name_or_path: str
-    revision: str
-    trust_remote_code: bool = True
+    tokenizer_name_or_path: Optional[str] = None
+    tokenizer_revision: Optional[str] = None
+    trust_remote_code: bool = False
     use_fast: bool = True
-    chat_template_name: Optional[str] = None  # TODO: should I give an option to force override?
+    chat_template_name: str = "tulu"  # TODO: should I give an option to force override?
     add_bos: bool = False
     get_tokenizer_fn: str = "get_tokenizer_tulu_v2_2"
 
     # for tracking purposes
     tokenizer_commit_hash: Optional[str] = None
+    
+    # backward compatibility to make sure script runs
+    use_slow_tokenizer: bool = False # completely ignored
+    tokenizer_name: Optional[str] = None
 
-    def __post_init__(self):
+    @cached_property
+    def tokenizer(self):
         self.tokenizer_commit_hash = get_commit_hash(
-            self.model_name_or_path, self.revision, filename="tokenizer_config.json"
+            self.tokenizer_name_or_path, self.tokenizer_revision, filename="tokenizer_config.json"
         )
-        self.tokenizer = GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
+        if self.tokenizer_name is not None and self.tokenizer_name_or_path is None:
+            if self.tokenizer_name != self.tokenizer_name_or_path:
+                raise ValueError(f"tokenizer_name and tokenizer_name_or_path are different: {self.tokenizer_name=} != {self.tokenizer_name_or_path=},"
+                                 " you should use only `--tokenizer_name_or_path` in the future as `tokenizer_name` is deprecated.")
+            self.tokenizer_name_or_path = self.tokenizer_name
+        return GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
 
 
 # TODO: for testing, we should load the tokenizer from the sft / dpo / rl and make sure they are all the same.
@@ -784,7 +795,8 @@ class DatasetConfig:
     dataset_revision: str
     dataset_range: Optional[int] = None
     transform_fn: List[str] = field(default_factory=list)
-    transform_fn_args: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    transform_fn_args: List[Dict[str, Any]] = field(default_factory=list)
+    target_columns: Optional[List[str]] = None
 
     # for tracking purposes
     dataset_commit_hash: Optional[str] = None
@@ -820,22 +832,20 @@ class DatasetConfig:
 
 
 def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
+    assert len(dc.transform_fn) == len(dc.transform_fn_args), f"transform_fn and transform_fn_args must have the same length: {dc.transform_fn=} != {dc.transform_fn_args=}"
     # beaker specific logic; we may get assigned 15.5 CPU, so we convert it to float then int
     num_proc = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count())))
 
     tokenizer = tc.tokenizer
     dataset = dc.dataset
-
-    for fn_name in dc.transform_fn:
+    for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
         fn, fn_type = TRANSFORM_FNS[fn_name]
         # always pass in tokenizer and other args if needed
         fn_kwargs = {"tokenizer": tokenizer}
-        target_columns = dataset.column_names
-        if fn_name in dc.transform_fn_args:
-            target_columns = dc.transform_fn_args[fn_name].pop("target_columns", dataset.column_names)
-            fn_kwargs.update(dc.transform_fn_args[fn_name])
+        fn_kwargs.update(fn_args)
 
         # perform the transformation
+        target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
         if fn_type == "map":
             dataset = dataset.map(
                 fn,
@@ -870,7 +880,7 @@ class DatasetTransformationCache:
         config_str = json.dumps(combined_dict, sort_keys=True)
         return hashlib.sha256(config_str.encode()).hexdigest()[:10]
 
-    def load_or_transform_dataset(self, dcs: List[DatasetConfig], tc: TokenizerConfig) -> Dataset:
+    def load_or_transform_dataset(self, dcs: List[DatasetConfig], tc: TokenizerConfig, skip_cache: bool = False) -> Dataset:
         """Load dataset from cache if it exists, otherwise transform and cache it."""
         config_hash = self.compute_config_hash(dcs, tc)
         repo_name = f"{self.hf_entity}/dataset-mix-cached"
@@ -881,8 +891,11 @@ class DatasetTransformationCache:
         # Check if the revision exists
         if revision_exists(repo_name, config_hash, repo_type="dataset"):
             print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{config_hash}")
-            # Use the split from the first dataset config as default
-            return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=config_hash)
+            if skip_cache:
+                print("skip_cache is True, so we will not load the dataset from cache")
+            else:
+                # Use the split from the first dataset config as default
+                return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=config_hash)
 
         print(f"Cache not found, transforming datasets...")
 
@@ -894,6 +907,8 @@ class DatasetTransformationCache:
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
+        if skip_cache:
+            return combined_dataset
 
         # Push to hub with config hash as revision
         combined_dataset.push_to_hub(
@@ -936,95 +951,27 @@ This is a cached dataset produced by https://github.com/allenai/open-instruct
         return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=config_hash)
 
 
-def get_cached_dataset(dcs: List[DatasetConfig], tc: TokenizerConfig, hf_entity: Optional[str] = None) -> Dataset:
+def get_cached_dataset(dcs: List[DatasetConfig], tc: TokenizerConfig, hf_entity: Optional[str] = None, skip_cache: bool = False) -> Dataset:
     cache = DatasetTransformationCache(hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc)
+    return cache.load_or_transform_dataset(dcs, tc, skip_cache=skip_cache)
 
 
-def get_cached_dataset_tulu_sft(
-    dataset_mixer_list: List[str],
-    tc: TokenizerConfig,
-    max_seq_length: int,
-    hf_entity: Optional[str] = None,
-) -> Dataset:
-    dcs = []
-    assert len(dataset_mixer_list) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer_list}"
-    for i in range(0, len(dataset_mixer_list), 2):
-        dataset_name = dataset_mixer_list[i]
-        frac_or_num_samples = dataset_mixer_list[i + 1]
-        if "." in frac_or_num_samples:
-            frac_or_num_samples = float(frac_or_num_samples)
-        else:
-            frac_or_num_samples = int(frac_or_num_samples)
-
-        dataset_config = DatasetConfig(
-            dataset_name=dataset_name,
-            dataset_split="train",
-            dataset_revision="main",
-            transform_fn=["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"],
-            transform_fn_args={
-                "sft_tulu_tokenize_and_truncate_v1": {
-                    "max_seq_length": max_seq_length,
-                    "target_columns": TOKENIZED_SFT_DATASET_KEYS,
-                }
-            },
-        )
-        if frac_or_num_samples > 1.0:
-            new_range = int(frac_or_num_samples)
-        else:
-            new_range = int(frac_or_num_samples * len(dataset_config.dataset))
-        dataset_config.update_range(new_range)
-        dcs.append(dataset_config)
-    cache = DatasetTransformationCache(hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc)
-
-
-def get_cached_dataset_tulu_preference(
-    dataset_mixer_list: List[str], tc: TokenizerConfig, max_seq_length: int, hf_entity: Optional[str] = None
-) -> Dataset:
-    dcs = []
-    assert len(dataset_mixer_list) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer_list}"
-    for i in range(0, len(dataset_mixer_list), 2):
-        dataset_name = dataset_mixer_list[i]
-        frac_or_num_samples = dataset_mixer_list[i + 1]
-        if "." in frac_or_num_samples:
-            frac_or_num_samples = float(frac_or_num_samples)
-        else:
-            frac_or_num_samples = int(frac_or_num_samples)
-
-        dataset_config = DatasetConfig(
-            dataset_name=dataset_name,
-            dataset_split="train",
-            dataset_revision="main",
-            transform_fn=["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"],
-            transform_fn_args={
-                "preference_tulu_tokenize_and_truncate_v1": {
-                    "max_seq_length": max_seq_length,
-                    "target_columns": TOKENIZED_PREFERENCE_DATASET_KEYS,
-                }
-            },
-        )
-        if frac_or_num_samples > 1.0:
-            new_range = int(frac_or_num_samples)
-        else:
-            new_range = int(frac_or_num_samples * len(dataset_config.dataset))
-        dataset_config.update_range(new_range)
-        dcs.append(dataset_config)
-    cache = DatasetTransformationCache(hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc)
-
-
-def get_cached_dataset_rlvr(
+def get_cached_dataset_tulu(
     dataset_mixer_list: List[str],
     dataset_mixer_list_splits: List[str],
     tc: TokenizerConfig,
-    max_token_length: Optional[int] = None,
-    max_prompt_token_length: Optional[int] = None,
+    dataset_transform_fn: List[str],
+    transform_fn_args: List[Dict[str, Any]],
+    target_columns: Optional[List[str]] = None,
     hf_entity: Optional[str] = None,
+    skip_cache: bool = False,
 ) -> Dataset:
     if len(dataset_mixer_list_splits) == 1:
         print("by default, we will use the same split for all datasets")
         dataset_mixer_list_splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
+    else:
+        if len(dataset_mixer_list_splits) != len(dataset_mixer_list):
+            raise ValueError(f"dataset_mixer_list_splits length must be the same as dataset_mixer_list: {len(dataset_mixer_list_splits)=} != {len(dataset_mixer_list)=}")
     dcs = []
     assert len(dataset_mixer_list) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer_list}"
     for i in range(0, len(dataset_mixer_list), 2):
@@ -1039,13 +986,9 @@ def get_cached_dataset_rlvr(
             dataset_name=dataset_name,
             dataset_split=dataset_mixer_list_splits[i],
             dataset_revision="main",
-            transform_fn=["rlvr_tokenize_v1", "rlvr_filter_v1"],
-            transform_fn_args={
-                "rlvr_filter_v1": {
-                    "max_token_length": max_token_length,
-                    "max_prompt_token_length": max_prompt_token_length,
-                }
-            },
+            transform_fn=dataset_transform_fn,
+            transform_fn_args=transform_fn_args,
+            target_columns=target_columns,
         )
         if frac_or_num_samples > 1.0:
             new_range = int(frac_or_num_samples)
@@ -1054,18 +997,18 @@ def get_cached_dataset_rlvr(
         dataset_config.update_range(new_range)
         dcs.append(dataset_config)
     cache = DatasetTransformationCache(hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc)
+    return cache.load_or_transform_dataset(dcs, tc, skip_cache=skip_cache)
 
 
 def test_sft_dpo_same_tokenizer():
     base_to_sft_tc = TokenizerConfig(
-        model_name_or_path="meta-llama/Llama-3.1-8B", revision="main", chat_template_name="tulu"
+        tokenizer_name_or_path="meta-llama/Llama-3.1-8B", tokenizer_revision="main", chat_template_name="tulu"
     )
     sft_to_dpo_tc = TokenizerConfig(
-        model_name_or_path="allenai/Llama-3.1-Tulu-3-8B-SFT", revision="main", chat_template_name="tulu"
+        tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-SFT", tokenizer_revision="main", chat_template_name="tulu"
     )
     dpo_to_rl_tc = TokenizerConfig(
-        model_name_or_path="allenai/Llama-3.1-Tulu-3-8B-DPO", revision="main", chat_template_name="tulu"
+        tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-DPO", tokenizer_revision="main", chat_template_name="tulu"
     )
 
     def equal_tokenizer(tc1, tc2):
@@ -1088,7 +1031,7 @@ def test_sft_dpo_same_tokenizer():
 
 def test_config_hash_different():
     """Test that different configurations produce different hashes."""
-    tc = TokenizerConfig(model_name_or_path="meta-llama/Llama-3.1-8B", revision="main", chat_template_name="tulu")
+    tc = TokenizerConfig(tokenizer_name_or_path="meta-llama/Llama-3.1-8B", tokenizer_revision="main", chat_template_name="tulu")
 
     dcs1 = [
         DatasetConfig(
@@ -1116,121 +1059,109 @@ def test_config_hash_different():
     assert hash1 != hash2, "Different configs should have different hashes"
 
 
-def test_sft_dataset_caching():
-    """Test caching functionality for SFT datasets."""
-    tc = TokenizerConfig(model_name_or_path="meta-llama/Llama-3.1-8B", revision="main", chat_template_name="tulu")
+def test_get_cached_dataset_tulu_sft():
+    tc = TokenizerConfig(
+        tokenizer_name_or_path="meta-llama/Llama-3.1-8B",
+        tokenizer_revision="main",
+        use_fast=True,
+        chat_template_name="tulu",
+        add_bos=False,
+    )
+    dataset_mixer_list = ["allenai/tulu-3-sft-mixture", "1.0"]
+    dataset_mixer_list_splits = ["train"]
+    dataset_transform_fn = ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
 
-    dcs = [
-        DatasetConfig(
-            dataset_name="allenai/tulu-3-sft-personas-algebra",
-            dataset_split="train",
-            dataset_revision="main",
-            transform_fn=["sft_tokenize_v1"],
-            transform_fn_args={},
-        ),
-        DatasetConfig(
-            dataset_name="allenai/tulu-3-hard-coded-10x",
-            dataset_split="train",
-            dataset_revision="main",
-            transform_fn=["sft_tokenize_v1"],
-            transform_fn_args={},
-        ),
+    # our standard tulu setting
+    transform_fn_args = [
+        {"max_seq_length": 4096},
+        {},
     ]
+    dataset = get_cached_dataset_tulu(
+        dataset_mixer_list,
+        dataset_mixer_list_splits,
+        tc,
+        dataset_transform_fn,
+        transform_fn_args,
+        TOKENIZED_SFT_DATASET_KEYS,
+        skip_cache=True,
+    )
 
-    # First transformation should cache
-    dataset1 = get_cached_dataset(dcs, tc)
-
-    # Second load should use cache
-    dataset1_cached = get_cached_dataset(dcs, tc)
-
-    # Verify the datasets are the same
-    assert len(dataset1) == len(dataset1_cached), "Cached dataset should have same length"
+    gold_tokenized_dataset = load_dataset("allenai/dataset-mix-cached", split="train", revision="61ac38e052")
+    assert len(dataset) == len(gold_tokenized_dataset)
+    for i in range(len(dataset)):
+        assert dataset[i]["input_ids"] == gold_tokenized_dataset[i]["input_ids"]
+    return True
 
 
-def test_sft_different_transform():
-    """Test different transform functions produce different cached datasets."""
-    tc = TokenizerConfig(model_name_or_path="meta-llama/Llama-3.1-8B", revision="main", chat_template_name="tulu")
-
-    dcs = [
-        DatasetConfig(
-            dataset_name="allenai/tulu-3-sft-personas-algebra",
-            dataset_split="train",
-            dataset_revision="main",
-            transform_fn=["sft_tokenize_mask_out_prompt_v1"],
-            transform_fn_args={},
-        ),
-        DatasetConfig(
-            dataset_name="allenai/tulu-3-hard-coded-10x",
-            dataset_split="train",
-            dataset_revision="main",
-            transform_fn=["sft_tokenize_mask_out_prompt_v1"],
-            transform_fn_args={},
-        ),
+def test_get_cached_dataset_tulu_preference():
+    tc = TokenizerConfig(
+        tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-SFT",
+        tokenizer_revision="main",
+        use_fast=False,
+        chat_template_name="tulu",
+        add_bos=False,
+    )
+    dataset_mixer_list = ["allenai/llama-3.1-tulu-3-8b-preference-mixture", "1.0"]
+    dataset_mixer_list_splits = ["train"]
+    dataset_transform_fn = ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
+    transform_fn_args = [
+        {"max_seq_length": 2048},
+        {},
     ]
+    dataset = get_cached_dataset_tulu(
+        dataset_mixer_list,
+        dataset_mixer_list_splits,
+        tc,
+        dataset_transform_fn,
+        transform_fn_args,
+        TOKENIZED_PREFERENCE_DATASET_KEYS,
+        skip_cache=True,
+    )
+    gold_tokenized_dataset = load_dataset("allenai/dataset-mix-cached", split="train", revision="9415479293")
+    assert len(dataset) == len(gold_tokenized_dataset)
+    for i in range(len(dataset)):
+        assert dataset[i]["chosen_input_ids"] == gold_tokenized_dataset[i]["chosen_input_ids"]
+    return True
 
-    dataset = get_cached_dataset(dcs, tc)
-    assert dataset is not None, "Should successfully create dataset with different transform"
 
-
-def test_sft_filter():
-    """Test different transform functions produce different cached datasets."""
-    tc = TokenizerConfig(model_name_or_path="meta-llama/Llama-3.1-8B", revision="main", chat_template_name="tulu")
-
-    ARBITRARY_MAX_LENGTH = 1000
-    dcs = [
-        DatasetConfig(
-            dataset_name="allenai/tulu-3-sft-personas-algebra",
-            dataset_split="train",
-            dataset_revision="main",
-            transform_fn=["sft_tokenize_v1", "sft_filter_v1"],  # First tokenize, then filter
-            transform_fn_args={
-                "sft_filter_v1": {
-                    "max_token_length": ARBITRARY_MAX_LENGTH  # Filter to sequences <= ARBITRARY_MAX_LENGTH tokens
-                }
-            },
-        )
+def test_get_cached_dataset_tulu_rlvr():
+    tc = TokenizerConfig(
+        tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-DPO",
+        tokenizer_revision="main",
+        use_fast=False,
+        chat_template_name="tulu",
+        add_bos=False,
+    )
+    dataset_mixer_list = ["allenai/RLVR-GSM-MATH-IF-Mixed-Constraints", "1.0"]
+    dataset_mixer_list_splits = ["train"]
+    dataset_transform_fn = ["rlvr_tokenize_v1", "rlvr_filter_v1"]
+    transform_fn_args = [
+        {},
+        {
+            "max_token_length": 2048,
+            "max_prompt_token_length": 2048,
+        },
     ]
-
-    filtered_dataset = get_cached_dataset(dcs, tc)
-    # Verify that all sequences are <= ARBITRARY_MAX_LENGTH tokens
-    max_length = max(len(example[INPUT_IDS_KEY]) for example in filtered_dataset)
-    assert max_length <= ARBITRARY_MAX_LENGTH, f"Found sequence with length {max_length} > {ARBITRARY_MAX_LENGTH}"
-
-    print("Filter test passed! Max sequence length:", max_length)
-    print("All tests passed!")
-    assert filtered_dataset is not None, "Should successfully create dataset with different transform"
-
-
-def test_preference_dataset():
-    """Test caching functionality for preference datasets."""
-    tc = TokenizerConfig(model_name_or_path="meta-llama/Llama-3.1-8B", revision="main", chat_template_name="tulu")
-
-    dcs_pref = [
-        DatasetConfig(
-            dataset_name="allenai/tulu-3-pref-personas-instruction-following",
-            dataset_split="train",
-            dataset_revision="main",
-            transform_fn=["preference_tokenize_v1"],
-            transform_fn_args={},
-        ),
-        DatasetConfig(
-            dataset_name="allenai/tulu-3-wildchat-reused-on-policy-70b",
-            dataset_split="train",
-            dataset_revision="main",
-            transform_fn=["preference_tokenize_v1"],
-            transform_fn_args={},
-        ),
-    ]
-
-    dataset_pref = get_cached_dataset(dcs_pref, tc)
-    assert dataset_pref is not None, "Should successfully create preference dataset"
+    # allenai/dataset-mix-cached/tree/0ff0043e56
+    dataset = get_cached_dataset_tulu(
+        dataset_mixer_list,
+        dataset_mixer_list_splits,
+        tc,
+        dataset_transform_fn,
+        transform_fn_args,
+        skip_cache=True,
+    )
+    gold_tokenized_dataset = load_dataset("allenai/dataset-mix-cached", split="train", revision="0ff0043e56")
+    assert len(dataset) == len(gold_tokenized_dataset)
+    for i in range(len(dataset)):
+        assert dataset[i][INPUT_IDS_PROMPT_KEY] == gold_tokenized_dataset[i][INPUT_IDS_PROMPT_KEY]
+    return True
 
 
 if __name__ == "__main__":
     test_sft_dpo_same_tokenizer()
     test_config_hash_different()
-    test_sft_dataset_caching()
-    test_sft_different_transform()
-    test_preference_dataset()
-    test_sft_filter()
+    test_get_cached_dataset_tulu_sft()
+    # test_get_cached_dataset_tulu_preference()
+    # test_get_cached_dataset_tulu_rlvr()
     print("All tests passed!")

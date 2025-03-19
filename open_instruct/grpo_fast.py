@@ -78,7 +78,7 @@ from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     TokenizerConfig,
-    get_cached_dataset_rlvr,
+    get_cached_dataset_tulu,
     visualize_token,
 )
 from open_instruct.ground_truth_utils import soft_format_reward_func
@@ -119,6 +119,10 @@ class Args:
     """The dataset splits to use for training"""
     dataset_mixer_eval_list_splits: List[str] = field(default_factory=lambda: ["test"])
     """The dataset splits to use for evaluation"""
+    dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_filter_v1"])
+    """The list of transform functions to apply to the dataset."""
+    dataset_skip_cache: bool = False
+    """Whether to skip caching the dataset"""
     max_token_length: int = 512
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
@@ -298,34 +302,6 @@ class Args:
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
         ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
-
-
-def calculate_runtime_args(args: Args):
-    """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
-    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
-    args.output_dir = os.path.join(args.output_dir, args.run_name)
-    args.world_size = sum(args.num_learners_per_node)
-    args.num_training_steps = args.total_episodes // (
-        args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-    )
-    args.eval_freq = max(1, args.num_training_steps // args.num_evals)
-    args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
-
-    if args.push_to_hub:
-        if args.hf_repo_id is None:  # auto-generate one
-            args.hf_repo_id = "open_instruct_dev"
-        if args.hf_entity is None:  # first try to use AI2 entity
-            args.hf_entity = maybe_use_ai2_hf_entity()
-        if args.hf_entity is None:  # then try to use the user's entity
-            args.hf_entity = HfApi().whoami()["name"]
-        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
-        if args.hf_repo_revision is None:  # auto-generate one
-            args.hf_repo_revision = args.run_name
-        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-
-    if args.with_tracking:
-        if args.wandb_entity is None:
-            args.wandb_entity = maybe_use_ai2_wandb_entity()
 
 
 def get_train_ds_config(
@@ -1232,16 +1208,53 @@ def data_preparation_thread(
         )
 
 
-def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
-    calculate_runtime_args(args)
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
+    # ------------------------------------------------------------
+    # Setup tokenizer
+    tc.tokenizer_revision = model_config.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
+    tc.tokenizer_name_or_path = model_config.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
+    if tc.tokenizer_revision != model_config.model_revision and tc.tokenizer_name_or_path != model_config.model_name_or_path:
+        # Warn user if tokenizer and model use different revisions; this is an unusual
+        # use case.
+        warning = f"""Requested tokenizer revision `{tc.tokenizer_revision=}` is different
+                   from the model revision `{model_config.model_revision=}` or the tokenizer name `{tc.tokenizer_name_or_path=}`
+                   is different from the model name `{model_config.model_name_or_path=}`."""
+        print(warning)
+    tokenizer = tc.tokenizer
 
+    # ------------------------------------------------------------
+    # Set up runtime variables
+    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.output_dir = os.path.join(args.output_dir, args.run_name)
+    args.world_size = sum(args.num_learners_per_node)
+    args.num_training_steps = args.total_episodes // (
+        args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+    )
+    args.eval_freq = max(1, args.num_training_steps // args.num_evals)
+    args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
+    if args.push_to_hub:
+        if args.hf_repo_id is None:  # auto-generate one
+            args.hf_repo_id = "open_instruct_dev"
+        if args.hf_entity is None:  # first try to use AI2 entity
+            args.hf_entity = maybe_use_ai2_hf_entity()
+        if args.hf_entity is None:  # then try to use the user's entity
+            args.hf_entity = HfApi().whoami()["name"]
+        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
+        if args.hf_repo_revision is None:  # auto-generate one
+            args.hf_repo_revision = args.run_name
+        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+    if args.with_tracking:
+        if args.wandb_entity is None:
+            args.wandb_entity = maybe_use_ai2_wandb_entity()
+
+    # ------------------------------------------------------------
     # Setup experiment tracking and seeds
     all_configs = {}
     beaker_config = None
     if is_beaker_job():
         beaker_config = maybe_get_beaker_config()
         all_configs.update(vars(beaker_config))
-    all_configs.update(**asdict(args), **asdict(model_config))
+    all_configs.update(**asdict(args), **asdict(tokenizer_config), **asdict(model_config))
     if args.with_tracking:
         import wandb
 
@@ -1260,55 +1273,46 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    # Setup tokenizer and get datasets
-    tokenizer_revision = (
-        model_config.model_revision if model_config.tokenizer_revision is None else model_config.tokenizer_revision
-    )
-    tokenizer_name = (
-        model_config.tokenizer_name if model_config.tokenizer_name is not None else model_config.model_name_or_path
-    )
-    if tokenizer_revision != model_config.model_revision:
-        # Warn user if tokenizer and model use different revisions; this is an unusual
-        # use case.
-        warning = f"""Requested tokenizer revision `{tokenizer_revision}` is different
-                   from the model revision `{model_config.model_revision}`."""
-        print(warning)
-    tc = TokenizerConfig(
-        model_name_or_path=tokenizer_name,
-        revision=tokenizer_revision,
-        use_fast=not model_config.use_slow_tokenizer,
-        chat_template_name=model_config.chat_template_name,
-        add_bos=model_config.add_bos,
-    )
-    tokenizer = tc.tokenizer
-    train_dataset = get_cached_dataset_rlvr(
+    # ------------------------------------------------------------
+    # Set up datasets
+    transform_fn_args=[
+        {},
+        {
+            "max_token_length": args.max_token_length,
+            "max_prompt_token_length": args.max_prompt_token_length,
+        },
+    ]
+    train_dataset = get_cached_dataset_tulu(
         args.dataset_mixer_list,
         args.dataset_mixer_list_splits,
         tc,
-        args.max_prompt_token_length,
-        args.max_token_length,
-        args.hf_entity,
+        args.dataset_transform_fn,
+        transform_fn_args,
+        hf_entity=args.hf_entity,
     )
     train_dataset = train_dataset.shuffle(seed=args.seed)
     eval_dataset = None
     if args.dataset_mixer_eval_list is not None:
-        eval_dataset = get_cached_dataset_rlvr(
+        eval_dataset = get_cached_dataset_tulu(
             args.dataset_mixer_eval_list,
             args.dataset_mixer_eval_list_splits,
             tc,
-            args.max_prompt_token_length,
-            args.max_token_length,
-            args.hf_entity,
+            args.dataset_transform_fn,
+            transform_fn_args,
+            hf_entity=args.hf_entity,
+            skip_cache=args.dataset_skip_cache,
         )
         eval_dataset = eval_dataset.shuffle(seed=args.seed)
 
     if args.cache_dataset_only:
         return
 
+    # ------------------------------------------------------------
     # Runtime setups and quick logging
     pprint([args, model_config])
     visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
 
+    # ------------------------------------------------------------
     # Create the model and optimizer
     pg = None
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -1589,9 +1593,10 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((Args, ModelConfig))
-    args, model_config = parser.parse_args_into_dataclasses()
+    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
+    args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
     assert isinstance(args, Args)
+    assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
 
     def reward_fn(
@@ -1673,4 +1678,4 @@ if __name__ == "__main__":
 
         return scores, metrics
 
-    main(args, model_config, reward_fn)
+    main(args, tokenizer_config, model_config, reward_fn)
