@@ -543,6 +543,14 @@ class MetricsTracker:
         valid_counts = valid_mask.float()
         # replace NaN values with 0
         safe_metrics = torch.where(valid_mask, self.metrics, torch.tensor(0.0, device=self.metrics.device))
+        # for non-reward metrics, set valid counts to 1 (we will include nans)
+        # and dont mask the nans
+        def is_nan_metric(name):
+            return not (name.startswith("objective") and (name.endswith("reward") or name.endswith("correct_rate")))
+        for name, idx in self.names2idx.items():
+            if is_nan_metric(name):
+                valid_counts[idx] = 1.0
+                safe_metrics[idx] = self.metrics[idx]
 
         # Reduce (sum) safe metrics and valid counts across processes.
         dist.all_reduce(safe_metrics, op=dist.ReduceOp.SUM)
