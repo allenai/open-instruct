@@ -536,7 +536,7 @@ class MetricsTracker:
         # convert to list so to avoid multiple .item() torch calls
         reduced_metrics = self.metrics.tolist()
         return {name: reduced_metrics[idx] for name, idx in self.names2idx.items()}
-    
+
     def get_reduced_metrics_correctness(self) -> dict[str, float]:
         # count the number of valid (non-NaN) values
         valid_mask = ~torch.isnan(self.metrics)
@@ -563,7 +563,6 @@ class MetricsTracker:
 
         reduced_metrics = averaged_metrics.tolist()
         return {name: reduced_metrics[idx] for name, idx in self.names2idx.items()}
-
 
 
 class Timer:
