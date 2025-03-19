@@ -295,7 +295,7 @@ class Args:
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
     hf_repo_url: Optional[str] = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    output_dir: Optional[str] = None
+    output_dir: str = "output"
     """Where to save the model"""
     checkpoint_output_dir: Optional[str] = None
     """Where to save the model checkpoints in case of preemption"""
@@ -315,6 +315,8 @@ class Args:
     """The path to the gs bucket to save the model to"""
     oe_eval_tasks: Optional[List[str]] = None
     """The beaker evaluation tasks to launch"""
+    oe_eval_max_length: int = 4096
+    """the max generation length for evaluation for oe-eval"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
     hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
@@ -337,6 +339,7 @@ def calculate_runtime_args(args: Args, model_config: ModelConfig):
     # accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
     # args.world_size = accelerator.num_processes
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.output_dir = os.path.join(args.output_dir, args.run_name)
     args.gradient_accumulation_steps = exact_div(
         args.local_mini_batch_size,
         args.per_device_train_batch_size,
