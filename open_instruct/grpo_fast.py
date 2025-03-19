@@ -836,8 +836,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Cache the old logprobs
                     with torch.no_grad():
                         if epoch_idx == 0:
-                            old_logprobs[i] = mb_new_logprobs
-                        mb_old_logprobs = old_logprobs[i].detach()
+                            old_logprobs[i] = mb_new_logprobs.detach()
+                        mb_old_logprobs = old_logprobs[i]
 
                     # Calculate the policy's loss
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
