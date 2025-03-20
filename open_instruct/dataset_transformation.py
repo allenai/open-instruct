@@ -1157,6 +1157,36 @@ def test_sft_dpo_same_tokenizer():
     equal_tokenizer(base_to_sft_tc, dpo_to_rl_tc)
 
 
+def test_sft_dpo_same_tokenizer_olmo():
+    base_to_sft_tc = TokenizerConfig(
+        tokenizer_name_or_path="allenai/OLMo-2-1124-7B", tokenizer_revision="main", chat_template_name="tulu", add_bos=True
+    )
+    sft_to_dpo_tc = TokenizerConfig(
+        tokenizer_name_or_path="allenai/OLMo-2-1124-7B-SFT", tokenizer_revision="main", chat_template_name="tulu", add_bos=True
+    )
+    dpo_to_rl_tc = TokenizerConfig(
+        tokenizer_name_or_path="allenai/OLMo-2-1124-7B-DPO", tokenizer_revision="main", chat_template_name="tulu", add_bos=True
+    )
+    print("vocab size", base_to_sft_tc.tokenizer.vocab_size, len(base_to_sft_tc.tokenizer.vocab))
+
+    def equal_tokenizer(tc1, tc2):
+        tok1 = tc1.tokenizer
+        tok2 = tc2.tokenizer
+        assert tok1.vocab_size == tok2.vocab_size, "Vocab size should be the same"
+        assert tok1.model_max_length == tok2.model_max_length, "Model max length should be the same"
+        assert tok1.is_fast == tok2.is_fast, "is_fast should be the same"
+        assert tok1.padding_side == tok2.padding_side, "padding_side should be the same"
+        assert tok1.truncation_side == tok2.truncation_side, "truncation_side should be the same"
+        assert (
+            tok1.clean_up_tokenization_spaces == tok2.clean_up_tokenization_spaces
+        ), "clean_up_tokenization_spaces should be the same"
+        assert tok1.added_tokens_decoder == tok2.added_tokens_decoder, "added_tokens_decoder should be the same"
+
+    equal_tokenizer(base_to_sft_tc, sft_to_dpo_tc)
+    equal_tokenizer(sft_to_dpo_tc, dpo_to_rl_tc)
+    equal_tokenizer(base_to_sft_tc, dpo_to_rl_tc)
+
+
 def test_config_hash_different():
     """Test that different configurations produce different hashes."""
     tc = TokenizerConfig(tokenizer_name_or_path="meta-llama/Llama-3.1-8B", tokenizer_revision="main", chat_template_name="tulu")
@@ -1180,10 +1210,8 @@ def test_config_hash_different():
             transform_fn_args={},
         )
     ]
-
-    cache = DatasetTransformationCache()
-    hash1 = cache.compute_config_hash(dcs1, tc)
-    hash2 = cache.compute_config_hash(dcs2, tc)
+    hash1 = compute_config_hash(dcs1, tc)
+    hash2 = compute_config_hash(dcs2, tc)
     assert hash1 != hash2, "Different configs should have different hashes"
 
 
@@ -1288,6 +1316,7 @@ def test_get_cached_dataset_tulu_rlvr():
 
 if __name__ == "__main__":
     test_sft_dpo_same_tokenizer()
+    test_sft_dpo_same_tokenizer_olmo()
     test_config_hash_different()
     # test_get_cached_dataset_tulu_sft() # takes a long time to run
     # test_get_cached_dataset_tulu_preference() # takes a long time to run

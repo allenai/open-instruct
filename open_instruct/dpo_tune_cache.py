@@ -535,6 +535,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         )
         wandb_tracker = accelerator.get_tracker("wandb")
 
+    if accelerator.is_main_process:
+        pprint([args, tc])
+
     init_gpu_memory = None
     if torch.cuda.is_available():
         init_gpu_memory = torch.cuda.mem_get_info()[0]
@@ -586,7 +589,6 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
     if accelerator.is_main_process:
-        pprint([args, tc])
         visualize_token(train_dataset[0][CHOSEN_INPUT_IDS_KEY], tokenizer)
 
     if args.cache_dataset_only:

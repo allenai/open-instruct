@@ -457,6 +457,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         )
         wandb_tracker = accelerator.get_tracker("wandb")
 
+    if accelerator.is_main_process:
+        pprint([args, tc])
+
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -503,8 +506,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         )
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
-    pprint([args, tc])
-    visualize_token(train_dataset[0][INPUT_IDS_KEY], tokenizer)
+    if accelerator.is_main_process:
+        visualize_token(train_dataset[0][INPUT_IDS_KEY], tokenizer)
 
     if args.cache_dataset_only:
         return

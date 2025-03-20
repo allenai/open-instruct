@@ -247,7 +247,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     random.seed(local_seed)
     np.random.seed(local_seed)
     torch.manual_seed(local_seed)
-
+    if accelerator.is_main_process:
+        pprint([args, tc, model_config])
 
     # ------------------------------------------------------------
     # Set up datasets
@@ -287,6 +288,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
                 dataset_skip_cache=args.dataset_skip_cache,
             )
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
+    if accelerator.is_main_process:
+        visualize_token(train_dataset[0][CHOSEN_INPUT_IDS_KEY], tokenizer)
     if args.cache_dataset_only:
         return
 
@@ -296,9 +299,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         args.total_episodes = args.num_train_epochs * len(train_dataset)
     args.num_training_steps = args.total_episodes // args.batch_size
     args.eval_freq = max(1, args.total_episodes // args.micro_batch_size // args.num_evals)
-    if accelerator.is_main_process:
-        pprint([args, tc, model_config])
-        visualize_token(train_dataset[0][CHOSEN_INPUT_IDS_KEY], tokenizer)
 
     # ------------------------------------------------------------
     # Create the model and optimizer

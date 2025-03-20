@@ -513,6 +513,12 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                 if item == lst[i]:
                     return i
             return -1
+
+        # Save the runtime `whoami` calls
+        command.append("--hf_entity")
+        command.append("allenai")
+        command.append("--wandb_entity")
+        command.append("ai2-llm")
         
         dataset_cache_path = None
         dataset_config_hash = None
@@ -522,7 +528,10 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                 idx = find_list_idx(command, file)
                 if idx != -1:
                     # then try executing the same command with 
-                    caching_command = "python " + " ".join(command[idx:]) + " --cache_dataset_only"
+                    caching_command = command.copy()
+                    if "--with_tracking" in caching_command:
+                        caching_command.remove("--with_tracking")
+                    caching_command = "python " + " ".join(caching_command[idx:]) + " --cache_dataset_only"
                     console.log(f"📦📦📦 Running the caching command with `--cache_dataset_only`")
                     import subprocess
                     # Use Popen to get real-time output while also capturing it
@@ -565,9 +574,6 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                     return_code = result.returncode
                     console.log("✅✅✅ Finished running the caching command")
 
-                # remove `with_tracking` from the command
-                if "--with_tracking" in command:
-                    command.remove("--with_tracking")
 
         # For Weka clusters, we need to override the output_dir parameter to make auto-evaluation work
         # If the output_dir is already set to a path in /weka/, we'll keep that path
@@ -659,7 +665,6 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                 gs_folder = gs_folder_exists(gs_saved_path) # race condition exists, but it's fine since we are launching mason sequentially
                 if not gs_folder:
                     upload_to_gs_bucket(dataset_cache_path, gs_saved_path)
-                dataset_cache_path = gs_saved_path.replace("gs://", "/gs/")
                 dataset_cache_path_without_last_folder = dataset_cache_path.rsplit("/", 1)[0]
                 gs_download_command += [
                     "mkdir", "-p", dataset_cache_path_without_last_folder,
