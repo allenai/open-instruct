@@ -118,7 +118,8 @@ if __name__ == "__main__":
                 "max_prompt_token_length": 512,
             },
         ],
-        skip_cache=False,
+        target_columns=[CHOSEN_INPUT_IDS_KEY, REJECTED_INPUT_IDS_KEY],
+        dataset_skip_cache=False,
     )
     dataloader = DataLoader(
         eval_dataset,
