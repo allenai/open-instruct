@@ -32,9 +32,9 @@ from accelerate.logging import get_logger
 from accelerate.utils import InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
+from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
-from rich.pretty import pprint
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -118,7 +118,9 @@ class FlatArguments:
     """A list of datasets (local or HF) to sample from."""
     dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
     """The dataset splits to use for training"""
-    dataset_transform_fn: list[str] = field(default_factory=lambda: ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"])
+    dataset_transform_fn: list[str] = field(
+        default_factory=lambda: ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
+    )
     """The list of transform functions to apply to the dataset."""
     dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS)
     """The columns to use for the dataset."""
@@ -399,7 +401,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # ------------------------------------------------------------
     # Setup tokenizer
     tc.tokenizer_revision = args.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
-    tc.tokenizer_name_or_path = args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
+    tc.tokenizer_name_or_path = (
+        args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
+    )
     if tc.tokenizer_revision != args.model_revision and tc.tokenizer_name_or_path != args.model_name_or_path:
         # Warn user if tokenizer and model use different revisions; this is an unusual
         # use case.
@@ -933,4 +937,3 @@ if __name__ == "__main__":
     parser = ArgumentParserPlus((FlatArguments, TokenizerConfig))
     args, tc = parser.parse_args_into_dataclasses()
     main(args, tc)
-

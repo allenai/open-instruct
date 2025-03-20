@@ -4,13 +4,11 @@ from typing import Tuple
 import pandas as pd
 import torch
 import torch.nn.functional as F
-from datasets import load_dataset
 from huggingface_hub import HfApi
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import (
     AutoModelForSequenceClassification,
-    AutoTokenizer,
     PreTrainedModel,
     PreTrainedTokenizer,
 )
@@ -18,11 +16,9 @@ from transformers import (
 from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
     REJECTED_INPUT_IDS_KEY,
-    TOKENIZED_PREFERENCE_DATASET_KEYS,
+    SimplePreferenceCollator,
     TokenizerConfig,
     get_cached_dataset_tulu,
-    visualize_token,
-    SimplePreferenceCollator,
 )
 from open_instruct.model_utils import get_reward, print_rich_table
 

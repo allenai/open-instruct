@@ -578,9 +578,9 @@ class PolicyTrainerRayProcess(RayProcess):
         # next line instructs transformers to partition the model directly over multiple gpus using
         # deepspeed.zero.Init when model's `from_pretrained` method is called.
         if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            dschf = HfDeepSpeedConfig(ds_config)
+            HfDeepSpeedConfig(ds_config)
         else:
-            dschf = None
+            pass
 
         self.original_tokenizer = AutoTokenizer.from_pretrained(
             model_config.model_name_or_path, revision=model_config.model_revision
@@ -632,9 +632,9 @@ class PolicyTrainerRayProcess(RayProcess):
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
         if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            dschf = HfDeepSpeedConfig(ds_config)
+            HfDeepSpeedConfig(ds_config)
         else:
-            dschf = None
+            pass
         self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
@@ -858,7 +858,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, args.masked_mean_axis).float()
                         kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, args.masked_mean_axis).float()
                         kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, args.masked_mean_axis).float()
-                        pg_clipfrac_stats[i] = masked_mean((pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis)
+                        pg_clipfrac_stats[i] = masked_mean(
+                            (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
+                        )
                         pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
                         loss_stats[i] = loss
                         ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
@@ -1218,8 +1220,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     # ------------------------------------------------------------
     # Setup tokenizer
     tc.tokenizer_revision = model_config.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
-    tc.tokenizer_name_or_path = model_config.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
-    if tc.tokenizer_revision != model_config.model_revision and tc.tokenizer_name_or_path != model_config.model_name_or_path:
+    tc.tokenizer_name_or_path = (
+        model_config.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
+    )
+    if (
+        tc.tokenizer_revision != model_config.model_revision
+        and tc.tokenizer_name_or_path != model_config.model_name_or_path
+    ):
         # Warn user if tokenizer and model use different revisions; this is an unusual
         # use case.
         warning = f"""Requested tokenizer revision `{tc.tokenizer_revision=}` is different
@@ -1284,7 +1291,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
     # ------------------------------------------------------------
     # Set up datasets
-    transform_fn_args=[
+    transform_fn_args = [
         {},
         {
             "max_token_length": args.max_token_length,

@@ -30,7 +30,7 @@ import multiprocessing
 import os
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
 
 import matplotlib.pyplot as plt
 import torch
@@ -530,8 +530,6 @@ def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
         decoded_token = tokenizer.decode(token)
         rich_text.append(f"{decoded_token}", style=color)
     console.print(rich_text)
-
-
 
 
 class SimpleGenerateCollator:

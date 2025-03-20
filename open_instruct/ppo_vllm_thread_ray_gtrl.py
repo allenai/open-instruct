@@ -29,6 +29,7 @@
 # limitations under the License.
 
 import os
+
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 
 import gc
@@ -42,21 +43,10 @@ import subprocess
 import threading
 import time
 from argparse import Namespace
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
-
-from open_instruct.dataset_transformation import (
-    TokenizerConfig,
-    get_cached_dataset_tulu,
-    DATASET_SOURCE_KEY,
-    GROUND_TRUTHS_KEY,
-    INPUT_IDS_PROMPT_KEY,
-    visualize_token,
-)
-from open_instruct.ground_truth_utils import soft_format_reward_func
-
 
 import deepspeed
 import numpy as np
@@ -87,7 +77,15 @@ from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
 from open_instruct.dataset_processor import SimpleGenerateCollatorWithGroundTruth
-
+from open_instruct.dataset_transformation import (
+    DATASET_SOURCE_KEY,
+    GROUND_TRUTHS_KEY,
+    INPUT_IDS_PROMPT_KEY,
+    TokenizerConfig,
+    get_cached_dataset_tulu,
+    visualize_token,
+)
+from open_instruct.ground_truth_utils import soft_format_reward_func
 from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
@@ -1657,8 +1655,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # ------------------------------------------------------------
     # Setup tokenizer
     tc.tokenizer_revision = model_config.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
-    tc.tokenizer_name_or_path = model_config.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
-    if tc.tokenizer_revision != model_config.model_revision and tc.tokenizer_name_or_path != model_config.model_name_or_path:
+    tc.tokenizer_name_or_path = (
+        model_config.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
+    )
+    if (
+        tc.tokenizer_revision != model_config.model_revision
+        and tc.tokenizer_name_or_path != model_config.model_name_or_path
+    ):
         # Warn user if tokenizer and model use different revisions; this is an unusual
         # use case.
         warning = f"""Requested tokenizer revision `{tc.tokenizer_revision=}` is different
@@ -1736,7 +1739,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
     # ------------------------------------------------------------
     # Set up datasets
-    transform_fn_args=[
+    transform_fn_args = [
         {},
         {
             "max_token_length": args.max_token_length,

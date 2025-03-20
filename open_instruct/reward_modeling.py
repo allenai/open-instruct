@@ -1,10 +1,10 @@
-import json
 import os
 import random
 import time
 from dataclasses import asdict, dataclass, field
-from typing import List, Literal, Optional, Tuple
+from typing import List, Literal, Optional
 
+import deepspeed
 import numpy as np
 import pandas as pd
 import torch
@@ -13,13 +13,11 @@ import torch.nn.functional as F
 import torch.optim as optim
 from accelerate import Accelerator
 from accelerate.utils import gather_object
-import deepspeed
 from huggingface_hub import HfApi
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from transformers import (
-    AutoConfig,
     AutoModelForSequenceClassification,
     AutoTokenizer,
     PreTrainedModel,
@@ -30,10 +28,10 @@ from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
     REJECTED_INPUT_IDS_KEY,
     TOKENIZED_PREFERENCE_DATASET_KEYS,
+    SimplePreferenceCollator,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
-    SimplePreferenceCollator,
 )
 from open_instruct.model_utils import (
     ModelConfig,
@@ -47,7 +45,6 @@ from open_instruct.model_utils import (
 from open_instruct.reward_modeling_eval import evaluate
 from open_instruct.utils import (
     ArgumentParserPlus,
-    combine_dataset,
     get_wandb_tags,
     is_beaker_job,
     maybe_get_beaker_config,
@@ -61,7 +58,9 @@ api = HfApi()
 @dataclass
 class Args:
     # Dataset
-    dataset_mixer_list: List[str] = field(default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"])
+    dataset_mixer_list: List[str] = field(
+        default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"]
+    )
     """A list of datasets (local or HF) to sample from."""
     dataset_mixer_eval_list: List[str] = field(default_factory=lambda: [])
     """A list of datasets (local or HF) to sample from for evaluation."""
@@ -174,8 +173,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # ------------------------------------------------------------
     # Setup tokenizer
     tc.tokenizer_revision = model_config.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
-    tc.tokenizer_name_or_path = model_config.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
-    if tc.tokenizer_revision != model_config.model_revision and tc.tokenizer_name_or_path != model_config.model_name_or_path:
+    tc.tokenizer_name_or_path = (
+        model_config.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
+    )
+    if (
+        tc.tokenizer_revision != model_config.model_revision
+        and tc.tokenizer_name_or_path != model_config.model_name_or_path
+    ):
         # Warn user if tokenizer and model use different revisions; this is an unusual
         # use case.
         warning = f"""Requested tokenizer revision `{tc.tokenizer_revision=}` is different
@@ -250,7 +254,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
     # ------------------------------------------------------------
     # Set up datasets
-    transform_fn_args=[
+    transform_fn_args = [
         {},
         {
             "max_token_length": args.max_token_length,
@@ -407,7 +411,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
                             writer.add_scalar(key, value, episode)
 
             # (optionally) evaluate the model
-            if args.num_evals > 0 and training_step > 1 and training_step % args.eval_freq == 0 and eval_dataloader is not None:
+            if (
+                args.num_evals > 0
+                and training_step > 1
+                and training_step % args.eval_freq == 0
+                and eval_dataloader is not None
+            ):
                 eval_metrics, table = evaluate(model, eval_dataloader, tokenizer, max_sampled_texts=10)
                 for key in table:
                     table[key] = gather_object(table[key])

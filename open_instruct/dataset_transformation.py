@@ -41,18 +41,18 @@ The main things we are looking for are:
 """
 
 import copy
-from functools import cached_property
 import hashlib
 import json
 import multiprocessing
 import os
 from dataclasses import asdict, dataclass, field
+from functools import cached_property
 from typing import Any, Dict, List, Literal, Optional
 
 import torch
 import transformers
 from datasets import Dataset, concatenate_datasets, load_dataset
-from huggingface_hub import HfApi, ModelCard, revision_exists
+from huggingface_hub import ModelCard, revision_exists
 from rich.console import Console
 from rich.text import Text
 from transformers import (
@@ -70,13 +70,17 @@ from open_instruct.utils import hf_whoami
 
 # ----------------------------------------------------------------------------
 # Utilities
-def get_commit_hash(model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model") -> str:
+def get_commit_hash(
+    model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
+) -> str:
     file = cached_file(model_name_or_path, revision=revision, filename=filename, repo_type=repo_type)
     commit_hash = extract_commit_hash(file, None)
     return commit_hash
 
 
-def get_file_hash(model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model") -> str:
+def get_file_hash(
+    model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
+) -> str:
     try:
         file = cached_file(model_name_or_path, revision=revision, filename=filename, repo_type=repo_type)
         with open(file, "rb") as f:
@@ -85,7 +89,9 @@ def get_file_hash(model_name_or_path: str, revision: str, filename: str = "confi
         return f"{filename} not found"
 
 
-def get_files_hash_if_exists(model_name_or_path: str, revision: str, filenames: List[str], repo_type: str = "model") -> List[str]:
+def get_files_hash_if_exists(
+    model_name_or_path: str, revision: str, filenames: List[str], repo_type: str = "model"
+) -> List[str]:
     return [get_file_hash(model_name_or_path, revision, filename, repo_type) for filename in filenames]
 
 
@@ -466,7 +472,7 @@ class TokenizerConfig:
     tokenizer_files_hash: Optional[List[str]] = None
 
     # backward compatibility to make sure script runs
-    use_slow_tokenizer: bool = False # completely ignored
+    use_slow_tokenizer: bool = False  # completely ignored
     tokenizer_name: Optional[str] = None
 
     @cached_property
@@ -479,8 +485,10 @@ class TokenizerConfig:
         self.tokenizer_files_hash = ",".join(files_hash)
         if self.tokenizer_name is not None and self.tokenizer_name_or_path is None:
             if self.tokenizer_name != self.tokenizer_name_or_path:
-                raise ValueError(f"tokenizer_name and tokenizer_name_or_path are different: {self.tokenizer_name=} != {self.tokenizer_name_or_path=},"
-                                 " you should use only `--tokenizer_name_or_path` in the future as `tokenizer_name` is deprecated.")
+                raise ValueError(
+                    f"tokenizer_name and tokenizer_name_or_path are different: {self.tokenizer_name=} != {self.tokenizer_name_or_path=},"
+                    " you should use only `--tokenizer_name_or_path` in the future as `tokenizer_name` is deprecated."
+                )
             self.tokenizer_name_or_path = self.tokenizer_name
         return GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
 
@@ -847,7 +855,6 @@ class SimplePreferenceCollator:
         }
 
 
-
 # ----------------------------------------------------------------------------
 # Dataset Configuration and Caching
 @dataclass
@@ -894,7 +901,9 @@ class DatasetConfig:
 
 
 def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
-    assert len(dc.transform_fn) == len(dc.transform_fn_args), f"transform_fn and transform_fn_args must have the same length: {dc.transform_fn=} != {dc.transform_fn_args=}"
+    assert len(dc.transform_fn) == len(
+        dc.transform_fn_args
+    ), f"transform_fn and transform_fn_args must have the same length: {dc.transform_fn=} != {dc.transform_fn_args=}"
     # beaker specific logic; we may get assigned 15.5 CPU, so we convert it to float then int
     num_proc = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count())))
 
@@ -944,7 +953,9 @@ class DatasetTransformationCache:
         self.config_hash = config_hash
         self.hf_entity = hf_entity or hf_whoami()["name"]
 
-    def load_or_transform_dataset(self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False) -> Dataset:
+    def load_or_transform_dataset(
+        self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
+    ) -> Dataset:
         """Load dataset from cache if it exists, otherwise transform and cache it."""
         repo_name = f"{self.hf_entity}/dataset-mix-cached"
 
@@ -1029,16 +1040,18 @@ class LocalDatasetTransformationCache:
         """Save the configuration to a JSON file."""
         config_path = os.path.join(self.get_cache_path(), "config.json")
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
-        
+
         config_dict = {
             "tokenizer_config": asdict(tc),
             "dataset_configs": [asdict(dc) for dc in dcs],
-            "config_hash": config_hash
+            "config_hash": config_hash,
         }
         with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=2)
 
-    def load_or_transform_dataset(self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False) -> Dataset:
+    def load_or_transform_dataset(
+        self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
+    ) -> Dataset:
         """Load dataset from local cache if it exists, otherwise transform and cache it locally."""
         cache_path = self.get_cache_path()
 
@@ -1068,7 +1081,13 @@ class LocalDatasetTransformationCache:
         return combined_dataset
 
 
-def get_cached_dataset(dcs: List[DatasetConfig], tc: TokenizerConfig, hf_entity: Optional[str] = None, dataset_local_cache_dir: Optional[str] = None, dataset_skip_cache: bool = False) -> Dataset:
+def get_cached_dataset(
+    dcs: List[DatasetConfig],
+    tc: TokenizerConfig,
+    hf_entity: Optional[str] = None,
+    dataset_local_cache_dir: Optional[str] = None,
+    dataset_skip_cache: bool = False,
+) -> Dataset:
     if dataset_local_cache_dir is not None:
         cache = LocalDatasetTransformationCache(dataset_local_cache_dir=dataset_local_cache_dir)
     else:
@@ -1096,7 +1115,9 @@ def get_cached_dataset_tulu(
             dataset_mixer_list_splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
         else:
             if len(dataset_mixer_list_splits) != len(dataset_mixer_list):
-                raise ValueError(f"dataset_mixer_list_splits length must be the same as dataset_mixer_list: {len(dataset_mixer_list_splits)=} != {len(dataset_mixer_list)=}")
+                raise ValueError(
+                    f"dataset_mixer_list_splits length must be the same as dataset_mixer_list: {len(dataset_mixer_list_splits)=} != {len(dataset_mixer_list)=}"
+                )
         assert len(dataset_mixer_list) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer_list}"
         for i in range(0, len(dataset_mixer_list), 2):
             dataset_name = dataset_mixer_list[i]
@@ -1122,7 +1143,9 @@ def get_cached_dataset_tulu(
             dcs.append(dataset_config)
         dataset_config_hash = compute_config_hash(dcs, tc)
     if dataset_cache_mode == "local":
-        cache = LocalDatasetTransformationCache(config_hash=dataset_config_hash, dataset_local_cache_dir=dataset_local_cache_dir)
+        cache = LocalDatasetTransformationCache(
+            config_hash=dataset_config_hash, dataset_local_cache_dir=dataset_local_cache_dir
+        )
     elif dataset_cache_mode == "hf":
         cache = DatasetTransformationCache(config_hash=dataset_config_hash, hf_entity=hf_entity)
     return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
@@ -1159,13 +1182,22 @@ def test_sft_dpo_same_tokenizer():
 
 def test_sft_dpo_same_tokenizer_olmo():
     base_to_sft_tc = TokenizerConfig(
-        tokenizer_name_or_path="allenai/OLMo-2-1124-7B", tokenizer_revision="main", chat_template_name="tulu", add_bos=True
+        tokenizer_name_or_path="allenai/OLMo-2-1124-7B",
+        tokenizer_revision="main",
+        chat_template_name="tulu",
+        add_bos=True,
     )
     sft_to_dpo_tc = TokenizerConfig(
-        tokenizer_name_or_path="allenai/OLMo-2-1124-7B-SFT", tokenizer_revision="main", chat_template_name="tulu", add_bos=True
+        tokenizer_name_or_path="allenai/OLMo-2-1124-7B-SFT",
+        tokenizer_revision="main",
+        chat_template_name="tulu",
+        add_bos=True,
     )
     dpo_to_rl_tc = TokenizerConfig(
-        tokenizer_name_or_path="allenai/OLMo-2-1124-7B-DPO", tokenizer_revision="main", chat_template_name="tulu", add_bos=True
+        tokenizer_name_or_path="allenai/OLMo-2-1124-7B-DPO",
+        tokenizer_revision="main",
+        chat_template_name="tulu",
+        add_bos=True,
     )
     print("vocab size", base_to_sft_tc.tokenizer.vocab_size, len(base_to_sft_tc.tokenizer.vocab))
 
@@ -1189,7 +1221,9 @@ def test_sft_dpo_same_tokenizer_olmo():
 
 def test_config_hash_different():
     """Test that different configurations produce different hashes."""
-    tc = TokenizerConfig(tokenizer_name_or_path="meta-llama/Llama-3.1-8B", tokenizer_revision="main", chat_template_name="tulu")
+    tc = TokenizerConfig(
+        tokenizer_name_or_path="meta-llama/Llama-3.1-8B", tokenizer_revision="main", chat_template_name="tulu"
+    )
 
     dcs1 = [
         DatasetConfig(

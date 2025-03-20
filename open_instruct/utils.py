@@ -1000,6 +1000,7 @@ def maybe_use_ai2_wandb_entity() -> Optional[str]:
     else:
         return None
 
+
 @retry_on_exception()
 @functools.lru_cache(maxsize=1)
 def hf_whoami() -> List[str]:
