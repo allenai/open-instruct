@@ -235,10 +235,10 @@ def apply_verifiable_reward(
         per_func_reward = {}
         for gt, ds in zip(ground_truth_list, dataset_list):
             reward_func = REWARD_FN_MAPPING.get(ds.lower())
-            reward_weight = reward_func.weight
             if reward_func is None:
                 logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
                 continue
+            reward_weight = reward_func.weight
             # compare with ground truth.
             # sometimes we need the tokenized pred.
             reward_result = reward_func(
