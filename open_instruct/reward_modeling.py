@@ -432,13 +432,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
     # save model
     os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
-    original_tokenizer = AutoTokenizer.from_pretrained(
-        model_config.model_name_or_path, revision=model_config.model_revision
-    )
     save_with_accelerate(
         accelerator,
         model,
-        original_tokenizer,
+        tokenizer,
         args.output_dir,
     )
     if args.push_to_hub:

@@ -133,9 +133,6 @@ class Args:
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
     """The maximum prompt token length to use for the dataset"""
-    saved_tokenizer_type: Literal["original", "tokenizer_config"] = "tokenizer_config"
-    """The type of tokenizer to save (original means the unmodified tokenizer directly loaded from .from_pretrained(),
-    tokenizer_config means the tokenizer obtained via `TokenizerConfig`"""
     ground_truths_key: str = GROUND_TRUTHS_KEY
     """columns name for the ground truth"""
 
@@ -557,7 +554,7 @@ class PolicyTrainerRayProcess(RayProcess):
         tokenizer: PreTrainedTokenizer,
     ):
         self.args = args
-        self.modified_tokenizer = tokenizer
+        self.tokenizer = tokenizer
         self.model_config = model_config
         self.beaker_config = beaker_config
         self.wandb_url = wandb_url
@@ -582,9 +579,6 @@ class PolicyTrainerRayProcess(RayProcess):
         else:
             pass
 
-        self.original_tokenizer = AutoTokenizer.from_pretrained(
-            model_config.model_name_or_path, revision=model_config.model_revision
-        )
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
@@ -930,10 +924,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
 
             # save tokenizer
-            if self.args.saved_tokenizer_type == "original":
-                self.original_tokenizer.save_pretrained(output_dir)
-            elif self.args.saved_tokenizer_type == "tokenizer_config":
-                self.modified_tokenizer.save_pretrained(output_dir)
+            self.tokenizer.save_pretrained(output_dir)
 
     # we need this because we don't know which node is rank 0 is on
     def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):

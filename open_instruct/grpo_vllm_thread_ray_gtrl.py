@@ -149,9 +149,6 @@ class Args:
     """Seed of the experiment"""
     run_name: Optional[str] = None
     """A unique name of this run"""
-    saved_tokenizer_type: Literal["original", "tokenizer_config"] = "tokenizer_config"
-    """The type of tokenizer to save (original means the unmodified tokenizer directly loaded from .from_pretrained(),
-    tokenizer_config means the tokenizer obtained via `TokenizerConfig`"""
 
     # optimizer args
     eps: float = 1e-5
@@ -653,9 +650,6 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         print(f"{dschf=}")
 
-        self.original_tokenizer = AutoTokenizer.from_pretrained(
-            model_config.model_name_or_path, revision=model_config.model_revision
-        )
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
@@ -798,7 +792,7 @@ class PolicyTrainerRayProcess(RayProcess):
         reward_types = sorted(list(set(train_dataset.unique("dataset"))))
 
         args = self.args
-        self.modified_tokenizer = tokenizer
+        self.tokenizer = tokenizer
 
         accelerator = Namespace()
         accelerator.process_index = self.rank
@@ -1486,10 +1480,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
 
             # save tokenizer
-            if self.args.saved_tokenizer_type == "original":
-                self.original_tokenizer.save_pretrained(output_dir)
-            elif self.args.saved_tokenizer_type == "tokenizer_config":
-                self.modified_tokenizer.save_pretrained(output_dir)
+            self.tokenizer.save_pretrained(output_dir)
 
 
 def kill_ray_cluster_if_a_worker_dies(object_refs: List[Any], stop_event: threading.Event):
