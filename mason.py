@@ -19,8 +19,9 @@ OPEN_INSTRUCT_COMMANDS = [
     "open_instruct/grpo_fast.py",
     "open_instruct/grpo_vllm_thread_ray_gtrl.py",
     "open_instruct/ppo2.py",
-    "ppo_vllm_thread_ray_gtrl.py",
-    "reward_modeling.py",
+    "open_instruct/ppo_vllm_thread_ray_gtrl.py",
+    "open_instruct/ppo_vllm_thread_ray_gtrl_gcs.py",
+    "open_instruct/reward_modeling.py",
 ]
 
 def parse_beaker_dataset(dataset_str):

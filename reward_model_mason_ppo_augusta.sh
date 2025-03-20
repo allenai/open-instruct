@@ -3,9 +3,9 @@
 # `--vllm_tensor_parallel_size 2`
 # translates to 6 + 2 + 8 = 16 GPUs
 # which matches up with `--num_nodes 2 --gpus 8`
-revision=reward_modeling__1__1739590997
+revision=reward_modeling__1__1739943850
 for beta in 0.05; do
-exp_name="0318_ppo_sftbase_${beta}_${revision}"
+exp_name="0319_ppo_sftbase_${beta}_${revision}"
 python mason.py \
     --cluster ai2/augusta-google-1 \
     --workspace ai2/reward-bench-v2 \
@@ -48,6 +48,7 @@ python mason.py \
     --vllm_tensor_parallel_size 2 \
     --vllm_enforce_eager \
     --apply_verifiable_reward false \
+    --eval_priority normal \
     --seed 3 \
     --num_evals 1000 \
     --save_freq 100 \
