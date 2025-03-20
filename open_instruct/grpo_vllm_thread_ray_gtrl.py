@@ -28,11 +28,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
+
 import gc
 import json
 import logging
 import math
-import os
 import random
 import shutil
 import socket
@@ -48,10 +50,13 @@ from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
 from open_instruct.dataset_transformation import (
     TokenizerConfig,
     get_cached_dataset_tulu,
+    DATASET_SOURCE_KEY,
+    GROUND_TRUTHS_KEY,
+    INPUT_IDS_PROMPT_KEY,
+    visualize_token,
 )
 from open_instruct.ground_truth_utils import soft_format_reward_func
 
-os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 
 import deepspeed
 import numpy as np
@@ -81,14 +86,7 @@ from transformers import (
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
-from open_instruct.dataset_processor import (
-    DATASET_SOURCE_KEY,
-    GROUND_TRUTHS_KEY,
-    INPUT_IDS_PROMPT_KEY,
-    DatasetConfig,
-    SimpleGenerateCollatorWithGroundTruth,
-    visualize_token,
-)
+from open_instruct.dataset_processor import SimpleGenerateCollatorWithGroundTruth
 from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
@@ -1667,7 +1665,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     inits.extend(
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url) for model in policy_group.models
     )
-    max_len = dataset_config.max_prompt_token_length + args.response_length
+    max_len = args.max_prompt_token_length + args.response_length
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
