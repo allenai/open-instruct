@@ -44,7 +44,7 @@ from collections import deque
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
-from collections import defaultdict
+from itertools import chain
 
 from open_instruct.dataset_transformation import (
     TokenizerConfig,
@@ -829,7 +829,10 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # get list of all reward types in dataset, used for logging
         # sorted to make sure the order is consistent
-        reward_types = sorted(list(set(train_dataset.unique("dataset"))))
+        # have to handle case where dataset is a list of values.
+        dataset_column = train_dataset["dataset"]
+        all_datasets = chain.from_iterable(d if isinstance(d, list) else [d] for d in dataset_column)
+        reward_types = sorted(set(all_datasets))
 
         args = self.args
         self.modified_tokenizer = tokenizer
