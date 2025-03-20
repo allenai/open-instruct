@@ -1636,6 +1636,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # Set up runtime variables
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
+    args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
+    if is_beaker_job():
+        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
     args.gradient_accumulation_steps = exact_div(
         args.local_mini_batch_size,
         args.per_device_train_batch_size,

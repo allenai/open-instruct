@@ -78,7 +78,7 @@ from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     TokenizerConfig,
-    get_cached_dataset_tulu,
+    get_cached_dataset_rlvr,
     visualize_token,
 )
 from open_instruct.ground_truth_utils import soft_format_reward_func
@@ -119,16 +119,6 @@ class Args:
     """The dataset splits to use for training"""
     dataset_mixer_eval_list_splits: List[str] = field(default_factory=lambda: ["test"])
     """The dataset splits to use for evaluation"""
-    dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_filter_v1"])
-    """The list of transform functions to apply to the dataset."""
-    dataset_cache_mode: Literal["hf", "local"] = "local"
-    """The mode to use for caching the dataset."""
-    dataset_local_cache_dir: str = "local_dataset_cache"
-    """The directory to save the local dataset cache to."""
-    dataset_config_hash: Optional[str] = None
-    """The hash of the dataset configuration."""
-    dataset_skip_cache: bool = False
-    """Whether to skip the cache."""
     max_token_length: int = 512
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
@@ -211,6 +201,8 @@ class Args:
     """the length of the pack (you should prob set to the max length of the model)"""
     masked_mean_axis: Optional[int] = None
     """the axis to compute the mean of the masked values"""
+    ref_update_freq: int = 20
+    """the frequency of updating the reference policy"""
 
     # Reward
     # -- r1 style format reward
@@ -255,6 +247,10 @@ class Args:
     """vLLM GPU memory utilization"""
     vllm_enable_prefix_caching: bool = False
     """whether to enable prefix caching"""
+    vllm_early_stopping_percentage: Optional[float] = None
+    """the percentage of tokens to stop early"""
+    vllm_max_chunk_size: int = 1024
+    """the maximum chunk size for vLLM generation"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
@@ -308,6 +304,34 @@ class Args:
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
         ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+
+
+def calculate_runtime_args(args: Args):
+    """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
+    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.output_dir = os.path.join(args.output_dir, args.run_name)
+    args.world_size = sum(args.num_learners_per_node)
+    args.num_training_steps = args.total_episodes // (
+        args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+    )
+    args.eval_freq = max(1, args.num_training_steps // args.num_evals)
+    args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
+
+    if args.push_to_hub:
+        if args.hf_repo_id is None:  # auto-generate one
+            args.hf_repo_id = "open_instruct_dev"
+        if args.hf_entity is None:  # first try to use AI2 entity
+            args.hf_entity = maybe_use_ai2_hf_entity()
+        if args.hf_entity is None:  # then try to use the user's entity
+            args.hf_entity = HfApi().whoami()["name"]
+        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
+        if args.hf_repo_revision is None:  # auto-generate one
+            args.hf_repo_revision = args.run_name
+        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+
+    if args.with_tracking:
+        if args.wandb_entity is None:
+            args.wandb_entity = maybe_use_ai2_wandb_entity()
 
 
 def get_train_ds_config(
@@ -621,6 +645,9 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         self.model.train()
 
+
+    def setup_ref_policy(self, model_name_or_path: str, model_revision: str):
+        args = self.args
         # reference model
         ds_config = get_eval_ds_config(
             offload=False,
@@ -636,8 +663,8 @@ class PolicyTrainerRayProcess(RayProcess):
         else:
             dschf = None
         self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            model_config.model_name_or_path,
-            revision=model_config.model_revision,
+            model_name_or_path,
+            revision=model_revision,
             torch_dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
             use_cache=False,
@@ -818,8 +845,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Cache the old logprobs
                     with torch.no_grad():
                         if epoch_idx == 0:
-                            old_logprobs[i] = mb_new_logprobs
-                        mb_old_logprobs = old_logprobs[i].detach()
+                            old_logprobs[i] = mb_new_logprobs.detach()
+                        mb_old_logprobs = old_logprobs[i]
 
                     # Calculate the policy's loss
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
@@ -1012,9 +1039,79 @@ class ModelGroup:
             ).remote(world_size, rank, 0, master_addr, master_port)
             self.models.append(worker_policy)
 
+def chunked_generate_with_engines(vllm_engines: list['LLM'], prompts: list[list[int]], sampling_params: SamplingParams, max_chunk_size: int, early_stopping_percentage: Optional[float] = None):
+    """
+    In naive divide DP (data parallel) vllm generations, there are two issues:
+    1. some DP engines will finish generation earlier than others, and the ones that finished early will be idle
+    2. in the end, some DP engine runs with extremely low batch size / throughput
+
+    This function implements 1) chunked generation. Instead of generating all the tokens at once, we generate 
+    `max_chunk_size` tokens per iteration, and re-distribute the prompts evenly among the DP engines.
+    2) early stopping. What happens is that we get something like this:
+
+        2025-03-12T18:22:30.823Z 🔥 samples_per_engine=410
+        2025-03-12T18:22:30.823Z 🔥 samples_per_engine=24
+        2025-03-12T18:22:30.823Z 🔥 samples_per_engine=3
+        2025-03-12T18:22:30.823Z 🔥 samples_per_engine=2
+        2025-03-12T18:22:30.823Z 🔥 samples_per_engine=1
+        2025-03-12T18:22:30.823Z 🔥 samples_per_engine=1
+
+    This is inefficient because each DP engine is essentially generating with low batch size, so `early_stopping_percentage`
+    allows us to kill the generation early and pretend the generation's finish reason is `length`.
+    """
+    max_new_tokens = sampling_params.max_tokens
+    chunked_sampling_params = SamplingParams(
+        max_tokens=max_chunk_size,
+        temperature=sampling_params.temperature,
+        top_p=sampling_params.top_p,
+        top_k=sampling_params.top_k,
+        include_stop_str_in_output=sampling_params.include_stop_str_in_output,
+        stop=sampling_params.stop,
+        repetition_penalty=sampling_params.repetition_penalty,
+    )
+    prompt_and_responses = [prompt.copy() for prompt in prompts]
+    idxs = list(range(len(prompt_and_responses)))
+    dones = [0] * len(prompt_and_responses)
+    finish_reasons = ["length"] * len(prompt_and_responses)
+    max_iterations = max_new_tokens // max_chunk_size # don't do ceil div here because we don't want to over generate
+    init_samples_per_engine = (len(prompt_and_responses) + len(vllm_engines) - 1) // len(vllm_engines)
+    early_stopping_samples_per_engine = 3
+    # print(f"🔥 {early_stopping_samples_per_engine=}")
+    # MIN_ITERATION_PERCENTAGE = 0.5
+    # min_iteration = int(max_iterations * MIN_ITERATION_PERCENTAGE)
+    for it in range(max_iterations):
+        if all(dones):
+            break
+        not_done_idxs = [i for i in idxs if dones[i] == 0]
+        cur_prompt_and_responses = [prompt_and_responses[i] for i in not_done_idxs]
+        samples_per_engine = (len(cur_prompt_and_responses) + len(vllm_engines) - 1) // len(vllm_engines)
+        print(f"🔥 {samples_per_engine=}")
+        if samples_per_engine < early_stopping_samples_per_engine: # and it >= min_iteration:
+            break
+        split_prompt_and_responses = [cur_prompt_and_responses[i : i + samples_per_engine] for i in range(0, len(cur_prompt_and_responses), samples_per_engine)]
+        futures = [
+            vllm_engine.generate.remote(sampling_params=chunked_sampling_params, prompt_token_ids=queries, use_tqdm=False)
+            for vllm_engine, queries in zip(vllm_engines, split_prompt_and_responses)
+        ]
+        all_outputs = ray.get(futures)
+        for i, outputs in enumerate(all_outputs):
+            for j, output in enumerate(outputs):
+                seq_idx = not_done_idxs[i*samples_per_engine + j]
+                out = output.outputs[0] # we assume num_samples_per_prompt_rollout == 1
+                prompt_and_responses[seq_idx].extend(list(out.token_ids))
+                if out.finish_reason == "stop":
+                    dones[seq_idx] = 1
+                    finish_reasons[seq_idx] = out.finish_reason
+
+    response_ids = [prompt_and_response[len(prompt):] for prompt, prompt_and_response in zip(prompts, prompt_and_responses)]
+    return response_ids, finish_reasons
+
+
 
 def vllm_generate_thread(
     vllm_engines: List[ray.actor.ActorHandle],
+    vllm_max_chunk_size: int,
+    vllm_early_stopping_percentage: Optional[float],
     generation_config: SamplingParams,
     eval_generation_config: SamplingParams,
     inference_results_Q: Queue,
@@ -1024,38 +1121,22 @@ def vllm_generate_thread(
     evaluation_inference_results_Q: Queue,
     eval_freq: int,
     resume_training_step: int = 1,
+    num_samples_per_prompt_rollout: int = 1,
 ):
-    def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
-        # Split queries between engines
-        queries_per_engine = (len(prompts) + len(vllm_engines) - 1) // len(vllm_engines)
-        split_queries = [prompts[i : i + queries_per_engine] for i in range(0, len(prompts), queries_per_engine)]
-        # Generate responses in parallel across engines
-        futures = [
-            vllm_engine.generate.remote(sampling_params=sampling_params, prompt_token_ids=queries, use_tqdm=False)
-            for vllm_engine, queries in zip(vllm_engines, split_queries)
-        ]
-        # Gather all responses
-        all_outputs = ray.get(futures)
-        response_ids = []
-        finish_reasons = []  # either "stop" or "length"
-        for outputs in all_outputs:
-            response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
-            finish_reasons.extend([out.finish_reason for output in outputs for out in output.outputs])
-        return response_ids, finish_reasons
 
     for training_step in range(resume_training_step, num_training_steps + 1):
         items = param_prompt_Q.get()
         if items is None:
             break
         _, g_queries_list = items
-
+        g_queries_list = [item for item in g_queries_list for _ in range(num_samples_per_prompt_rollout)]
         with Timer("🔥 Generation time"):
-            response_ids, finish_reasons = generate_with_engines(g_queries_list, generation_config)
+            response_ids, finish_reasons = chunked_generate_with_engines(vllm_engines, g_queries_list, generation_config, vllm_max_chunk_size, vllm_early_stopping_percentage)
         inference_results_Q.put((response_ids, finish_reasons))
 
         # Evaluate the model
         if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-            response_ids, finish_reasons = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
+            response_ids, finish_reasons = chunked_generate_with_engines(vllm_engines, eval_prompt_token_ids, eval_generation_config, vllm_max_chunk_size, vllm_early_stopping_percentage)
             evaluation_inference_results_Q.put((response_ids, finish_reasons))
 
 
@@ -1214,56 +1295,16 @@ def data_preparation_thread(
         )
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
-    # ------------------------------------------------------------
-    # Setup tokenizer
-    tc.tokenizer_revision = model_config.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
-    tc.tokenizer_name_or_path = model_config.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
-    if tc.tokenizer_revision != model_config.model_revision and tc.tokenizer_name_or_path != model_config.model_name_or_path:
-        # Warn user if tokenizer and model use different revisions; this is an unusual
-        # use case.
-        warning = f"""Requested tokenizer revision `{tc.tokenizer_revision=}` is different
-                   from the model revision `{model_config.model_revision=}` or the tokenizer name `{tc.tokenizer_name_or_path=}`
-                   is different from the model name `{model_config.model_name_or_path=}`."""
-        print(warning)
-    tokenizer = tc.tokenizer
+def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
+    calculate_runtime_args(args)
 
-    # ------------------------------------------------------------
-    # Set up runtime variables
-    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
-    args.output_dir = os.path.join(args.output_dir, args.run_name)
-    args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
-    if is_beaker_job():
-        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
-    args.world_size = sum(args.num_learners_per_node)
-    args.num_training_steps = args.total_episodes // (
-        args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-    )
-    args.eval_freq = max(1, args.num_training_steps // args.num_evals)
-    args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
-    if args.push_to_hub:
-        if args.hf_repo_id is None:  # auto-generate one
-            args.hf_repo_id = "open_instruct_dev"
-        if args.hf_entity is None:  # first try to use AI2 entity
-            args.hf_entity = maybe_use_ai2_hf_entity()
-        if args.hf_entity is None:  # then try to use the user's entity
-            args.hf_entity = HfApi().whoami()["name"]
-        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
-        if args.hf_repo_revision is None:  # auto-generate one
-            args.hf_repo_revision = args.run_name
-        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-    if args.with_tracking:
-        if args.wandb_entity is None:
-            args.wandb_entity = maybe_use_ai2_wandb_entity()
-
-    # ------------------------------------------------------------
     # Setup experiment tracking and seeds
     all_configs = {}
     beaker_config = None
     if is_beaker_job():
         beaker_config = maybe_get_beaker_config()
         all_configs.update(vars(beaker_config))
-    all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
+    all_configs.update(**asdict(args), **asdict(model_config))
     if args.with_tracking:
         import wandb
 
@@ -1282,52 +1323,55 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    # ------------------------------------------------------------
-    # Set up datasets
-    transform_fn_args=[
-        {},
-        {
-            "max_token_length": args.max_token_length,
-            "max_prompt_token_length": args.max_prompt_token_length,
-        },
-    ]
-    train_dataset = get_cached_dataset_tulu(
-        dataset_mixer_list=args.dataset_mixer_list,
-        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
-        tc=tc,
-        dataset_transform_fn=args.dataset_transform_fn,
-        transform_fn_args=transform_fn_args,
-        dataset_cache_mode=args.dataset_cache_mode,
-        dataset_config_hash=args.dataset_config_hash,
-        hf_entity=args.hf_entity,
-        dataset_local_cache_dir=args.dataset_local_cache_dir,
-        dataset_skip_cache=args.dataset_skip_cache,
+    # Setup tokenizer and get datasets
+    tokenizer_revision = (
+        model_config.model_revision if model_config.tokenizer_revision is None else model_config.tokenizer_revision
+    )
+    tokenizer_name = (
+        model_config.tokenizer_name if model_config.tokenizer_name is not None else model_config.model_name_or_path
+    )
+    if tokenizer_revision != model_config.model_revision:
+        # Warn user if tokenizer and model use different revisions; this is an unusual
+        # use case.
+        warning = f"""Requested tokenizer revision `{tokenizer_revision}` is different
+                   from the model revision `{model_config.model_revision}`."""
+        print(warning)
+    tc = TokenizerConfig(
+        model_name_or_path=tokenizer_name,
+        revision=tokenizer_revision,
+        use_fast=not model_config.use_slow_tokenizer,
+        chat_template_name=model_config.chat_template_name,
+        add_bos=model_config.add_bos,
+    )
+    tokenizer = tc.tokenizer
+    train_dataset = get_cached_dataset_rlvr(
+        args.dataset_mixer_list,
+        args.dataset_mixer_list_splits,
+        tc,
+        args.max_prompt_token_length,
+        args.max_token_length,
+        args.hf_entity,
     )
     train_dataset = train_dataset.shuffle(seed=args.seed)
     eval_dataset = None
-    if len(args.dataset_mixer_eval_list) > 0:
-        eval_dataset = get_cached_dataset_tulu(
+    if args.dataset_mixer_eval_list is not None:
+        eval_dataset = get_cached_dataset_rlvr(
             args.dataset_mixer_eval_list,
             args.dataset_mixer_eval_list_splits,
             tc,
-            args.dataset_transform_fn,
-            transform_fn_args,
-            hf_entity=args.hf_entity,
-            dataset_cache_mode=args.dataset_cache_mode,
-            dataset_config_hash=args.dataset_config_hash,
-            dataset_local_cache_dir=args.dataset_local_cache_dir,
-            dataset_skip_cache=args.dataset_skip_cache,
+            args.max_prompt_token_length,
+            args.max_token_length,
+            args.hf_entity,
         )
         eval_dataset = eval_dataset.shuffle(seed=args.seed)
+
     if args.cache_dataset_only:
         return
 
-    # ------------------------------------------------------------
     # Runtime setups and quick logging
     pprint([args, model_config])
     visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
 
-    # ------------------------------------------------------------
     # Create the model and optimizer
     pg = None
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -1343,6 +1387,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     wandb_url = wandb.run.get_url() if args.with_tracking else None
     inits.extend(
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
+        for model in policy_group.models
+    )
+    ray.get(inits)
+    inits.extend(
+        model.setup_ref_policy.remote(
+            model_name_or_path=model_config.model_name_or_path,
+            model_revision=model_config.model_revision,
+        )
         for model in policy_group.models
     )
     max_len = args.max_prompt_token_length + args.response_length
@@ -1371,7 +1423,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         top_p=1.0,
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
-        n=args.num_samples_per_prompt_rollout,
+        n=1, # since we are doing chunked generation, but potentially we can enable this in the future somehow
         stop=args.stop_strings,
     )
     eval_generation_config = SamplingParams(
@@ -1402,6 +1454,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         target=vllm_generate_thread,
         args=(
             vllm_engines,
+            args.vllm_max_chunk_size,
+            args.vllm_early_stopping_percentage,
             generation_config,
             eval_generation_config,
             inference_results_Q,
@@ -1411,6 +1465,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             evaluation_inference_results_Q,
             args.eval_freq,
             resume_training_step,
+            args.num_samples_per_prompt_rollout,
         ),
     )
     thread.start()
@@ -1530,7 +1585,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     "episode": episode,
                     "training_step": training_step,
                     "val/num_total_tokens": num_total_tokens,
-                    "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
+                    "epoch": episode / len(train_dataset),
                     "tokens_per_second": num_total_tokens / (time.time() - start_time),
                     **data_thread_metrics,
                     **average_metrics,
@@ -1538,6 +1593,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 print_rich_single_line_metrics(metrics)
                 for key, value in metrics.items():
                     writer.add_scalar(key, value, episode)
+
+                # if training_step % args.ref_update_freq == 0:
+                #     with Timer("[Main Thread] 🗡️ Updating reference policy"):
+                #         ray.get([policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)])
 
                 if args.save_freq > 0 and training_step % args.save_freq == 0:
                     with Timer("[Main Thread] 🗡️ Saving model"):
@@ -1608,10 +1667,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
-    args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
+    parser = ArgumentParserPlus((Args, ModelConfig))
+    args, model_config = parser.parse_args_into_dataclasses()
     assert isinstance(args, Args)
-    assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
 
     def reward_fn(
@@ -1693,4 +1751,4 @@ if __name__ == "__main__":
 
         return scores, metrics
 
-    main(args, tokenizer_config, model_config, reward_fn)
+    main(args, model_config, reward_fn)
