@@ -19,8 +19,8 @@ OPEN_INSTRUCT_COMMANDS = [
     "open_instruct/grpo_fast.py",
     "open_instruct/grpo_vllm_thread_ray_gtrl.py",
     "open_instruct/ppo2.py",
-    "ppo_vllm_thread_ray_gtrl.py",
-    "reward_modeling.py",
+    "open_instruct/ppo_vllm_thread_ray_gtrl.py",
+    "open_instruct/reward_modeling.py",
 ]
 
 def parse_beaker_dataset(dataset_str):
@@ -512,15 +512,35 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                 if item == lst[i]:
                     return i
             return -1
+        
+        dataset_cache_path = None
+        dataset_config_hash = None
         if not args.no_auto_dataset_cache:
-            for file in ["open_instruct/finetune.py", "open_instruct/dpo_tune_cache.py"]:
+            for file in OPEN_INSTRUCT_COMMANDS:
+                # add cache_dataset_only to the command
                 idx = find_list_idx(command, file)
                 if idx != -1:
                     # then try executing the same command with 
                     caching_command = "python " + " ".join(command[idx:]) + " --cache_dataset_only"
                     console.log(f"📦📦📦 Running the caching command with `--cache_dataset_only`")
-                    os.system(caching_command)
+                    import subprocess
+                    result = subprocess.run(caching_command, shell=True, capture_output=True, text=True)
+                    stdout = result.stdout
+                    # Extract the cached dataset path from stdout if it exists
+                    for line in stdout.splitlines():
+                        if "✅ Found cached dataset at" in line:
+                            dataset_cache_path = line.split("✅ Found cached dataset at")[1].strip()
+                            dataset_config_hash = dataset_cache_path.split("/")[-1]
+                            console.log(f"📦 Found cached dataset at: {dataset_cache_path}")
+                            console.log(f"📦 Found cached dataset config hash: {dataset_config_hash}")
+                            break
+                    stderr = result.stderr
+                    return_code = result.returncode
                     console.log("✅✅✅ Finished running the caching command")
+
+                # remove `with_tracking` from the command
+                if "--with_tracking" in command:
+                    command.remove("--with_tracking")
 
         # For Weka clusters, we need to override the output_dir parameter to make auto-evaluation work
         # If the output_dir is already set to a path in /weka/, we'll keep that path
@@ -554,11 +574,11 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                                     "3. in the training command, use a `--output_dir` that starts with `/weka/`")
 
         # For GCP clusters, since shared storage is slow, we optimize model loading by:
-        # 1. First downloading the model from HuggingFace to a local path
-        # 2. Uploading it to a Google Storage bucket (if not already there)
-        # 3. Then downloading it from the bucket to the compute node
-        # 4. Finally, replacing the original --model_name_or_path argument with the local path
         if any(c in GCP_CLUSTERS for c in args.cluster):
+            # 1. First downloading the model from HuggingFace to a local path
+            # 2. Uploading it to a Google Storage bucket (if not already there)
+            # 3. Then downloading it from the bucket to the compute node
+            # 4. Finally, replacing the original --model_name_or_path argument with the local path
             model_name_or_path = None
             for idx, cmd in enumerate(command):
                 if cmd == "--model_name_or_path":
@@ -592,10 +612,9 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                 "&&", "ls", download_path,
                 "&&",
             ]
-            command = gs_download_command + command
-            if is_open_instruct_training:
-                command.append("--gs_bucket_path")
-                command.append(f"gs://ai2-llm/post-training/")
+
+            command.append("--gs_bucket_path")
+            command.append(f"gs://ai2-llm/post-training/")
 
             # Replace the model_name_or_path with the downloaded path
             for idx, cmd in enumerate(command):
@@ -606,6 +625,27 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                 if cmd == "--model_revision":
                     command[idx + 1] = "main"
                     break
+
+            # Save dataset to GCS
+            if dataset_cache_path:
+                gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_datasets/{dataset_cache_path}"
+                gs_folder = gs_folder_exists(gs_saved_path) # race condition exists, but it's fine since we are launching mason sequentially
+                if not gs_folder:
+                    upload_to_gs_bucket(dataset_cache_path, gs_saved_path)
+                dataset_cache_path = gs_saved_path.replace("gs://", "/gs/")
+                dataset_cache_path_without_last_folder = dataset_cache_path.rsplit("/", 1)[0]
+                gs_download_command += [
+                    "mkdir", "-p", dataset_cache_path_without_last_folder,
+                    "&&",
+                    "gsutil",
+                    "cp", "-r", gs_saved_path, dataset_cache_path_without_last_folder,
+                    "&&", "ls", dataset_cache_path_without_last_folder,
+                    "&&", "ls", dataset_cache_path,
+                    "&&",
+                ]
+                command.append("--dataset_config_hash")
+                command.append(dataset_config_hash)
+            command = gs_download_command + command
 
     # special logic to deal with escape like
     # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
