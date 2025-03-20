@@ -49,7 +49,6 @@ from transformers import (
 )
 
 from open_instruct.dataset_transformation import (
-    CHAT_TEMPLATES,
     CHOSEN_INPUT_IDS_KEY,
     TOKENIZED_PREFERENCE_DATASET_KEYS,
     TokenizerConfig,
@@ -466,7 +465,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     )
 
     # ------------------------------------------------------------
-    # Set up runtime variables
+    # Setup tokenizer
     tc.tokenizer_revision = args.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
     tc.tokenizer_name_or_path = args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
     if tc.tokenizer_revision != args.model_revision and tc.tokenizer_name_or_path != args.model_name_or_path:
@@ -478,6 +477,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         logger.warning(warning)
     tokenizer = tc.tokenizer
 
+    # ------------------------------------------------------------
+    # Set up runtime variables
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     if args.push_to_hub and accelerator.is_main_process:
@@ -567,8 +568,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         )
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
-    pprint([args, tc])
-    visualize_token(train_dataset[0][CHOSEN_INPUT_IDS_KEY], tokenizer)
+    if accelerator.is_main_process:
+        pprint([args, tc])
+        visualize_token(train_dataset[0][CHOSEN_INPUT_IDS_KEY], tokenizer)
 
     if args.cache_dataset_only:
         return

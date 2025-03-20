@@ -532,47 +532,6 @@ def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
     console.print(rich_text)
 
 
-class SimplePreferenceCollator:
-    def __init__(self, pad_token_id: int):
-        """Simple collator for preference dataset (always pad from the RIGHT)"""
-        self.pad_token_id = pad_token_id
-
-    def __call__(self, batch: List[Dict[str, int]]):
-        """the input will have input_ids_chosen, input_ids_rejected"""
-        # Find max length in the batch
-        max_length_chosen = -1
-        max_length_rejected = -1
-        for i in range(len(batch)):
-            max_length_chosen = max(max_length_chosen, len(batch[i]["input_ids_chosen"]))
-            max_length_rejected = max(max_length_rejected, len(batch[i]["input_ids_rejected"]))
-        max_length = max(max_length_chosen, max_length_rejected)
-        assert max_length > 0, "the dataset is empty"
-
-        # Initialize lists to store padded sequences and attention masks
-        padded_sequences_chosen = []
-        padded_sequences_rejected = []
-
-        for i in range(len(batch)):
-            # Calculate padding length
-            pad_length_chosen = max_length - len(batch[i][INPUT_IDS_CHOSEN_KEY])
-            pad_length_rejected = max_length - len(batch[i][INPUT_IDS_REJECTED_KEY])
-
-            # Pad from the right
-            padding_chosen = [self.pad_token_id] * pad_length_chosen
-            padding_rejected = [self.pad_token_id] * pad_length_rejected
-            padded_sequence_chosen = batch[i][INPUT_IDS_CHOSEN_KEY] + padding_chosen
-            padded_sequence_rejected = batch[i][INPUT_IDS_REJECTED_KEY] + padding_rejected
-            padded_sequences_chosen.append(padded_sequence_chosen)
-            padded_sequences_rejected.append(padded_sequence_rejected)
-
-        # Convert to tensors
-        padded_sequences_chosen = torch.tensor(padded_sequences_chosen)
-        padded_sequences_rejected = torch.tensor(padded_sequences_rejected)
-
-        return {
-            INPUT_IDS_CHOSEN_KEY: padded_sequences_chosen,
-            INPUT_IDS_REJECTED_KEY: padded_sequences_rejected,
-        }
 
 
 class SimpleGenerateCollator:

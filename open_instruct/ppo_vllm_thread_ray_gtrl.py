@@ -339,12 +339,6 @@ def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
         raise ValueError("Input must be either a string or a dictionary")
 
 
-def calculate_runtime_args(args: Args, model_config: ModelConfig):
-    """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
-    # accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
-    # args.world_size = accelerator.num_processes
-
-
 def get_train_ds_config(
     offload,
     adam_offload=False,
@@ -1476,7 +1470,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     )
                 )
                 ray.get(list(eval_futures))
-        print("======== ✅ Evaluation jobs finished =========")
+                print("======== ✅ Evaluation jobs finished =========")
 
         # Ai2 logic: we use /output to store the artifacts of the job, so we
         # make a copy of the model to `/output` in the end.

@@ -15,12 +15,13 @@ from transformers import (
     PreTrainedTokenizer,
 )
 
-from open_instruct.dataset_processor import (
-    CHAT_TEMPLATES,
-    INPUT_IDS_CHOSEN_KEY,
-    INPUT_IDS_REJECTED_KEY,
-    DatasetConfig,
-    PreferenceDatasetProcessor,
+from open_instruct.dataset_transformation import (
+    CHOSEN_INPUT_IDS_KEY,
+    REJECTED_INPUT_IDS_KEY,
+    TOKENIZED_PREFERENCE_DATASET_KEYS,
+    TokenizerConfig,
+    get_cached_dataset_tulu,
+    visualize_token,
     SimplePreferenceCollator,
 )
 from open_instruct.model_utils import get_reward, print_rich_table
@@ -52,10 +53,10 @@ def evaluate(
         table = defaultdict(list)
     with torch.no_grad():
         for data in tqdm(dataloader):
-            query_responses = torch.cat((data[INPUT_IDS_CHOSEN_KEY], data[INPUT_IDS_REJECTED_KEY]), dim=0)
+            query_responses = torch.cat((data[CHOSEN_INPUT_IDS_KEY], data[REJECTED_INPUT_IDS_KEY]), dim=0)
             _, predicted_reward, _ = get_reward(model, query_responses, tokenizer.pad_token_id, 0)
-            chosen_rewards = predicted_reward[: data[INPUT_IDS_CHOSEN_KEY].shape[0]]
-            rejected_rewards = predicted_reward[data[INPUT_IDS_CHOSEN_KEY].shape[0] :]
+            chosen_rewards = predicted_reward[: data[CHOSEN_INPUT_IDS_KEY].shape[0]]
+            rejected_rewards = predicted_reward[data[CHOSEN_INPUT_IDS_KEY].shape[0] :]
             accuracy = (chosen_rewards > rejected_rewards).float().mean()
             loss = -F.logsigmoid(chosen_rewards - rejected_rewards).mean()
             total_loss += loss.item()
@@ -66,8 +67,8 @@ def evaluate(
             total_batches += 1
 
             if table is not None and len(table["shared prompt text"]) < max_sampled_texts:
-                chosen_texts = tokenizer.batch_decode(data[INPUT_IDS_CHOSEN_KEY])
-                rejected_texts = tokenizer.batch_decode(data[INPUT_IDS_REJECTED_KEY])
+                chosen_texts = tokenizer.batch_decode(data[CHOSEN_INPUT_IDS_KEY])
+                rejected_texts = tokenizer.batch_decode(data[REJECTED_INPUT_IDS_KEY])
                 # remove padding
                 chosen_texts = [item.replace(tokenizer.pad_token, "") for item in chosen_texts]
                 rejected_texts = [item.replace(tokenizer.pad_token, "") for item in rejected_texts]
@@ -127,4 +128,3 @@ if __name__ == "__main__":
     metrics, table = evaluate(model, dataloader, tokenizer, max_sampled_texts=5)
     print(metrics)
     print_rich_table(pd.DataFrame(table))
-    ...
