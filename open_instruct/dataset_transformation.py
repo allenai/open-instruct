@@ -65,13 +65,28 @@ from transformers import (
 )
 from transformers.utils.hub import cached_file, extract_commit_hash
 
+from open_instruct.utils import hf_whoami
+
 
 # ----------------------------------------------------------------------------
 # Utilities
-def get_commit_hash(model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"):
+def get_commit_hash(model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model") -> str:
     file = cached_file(model_name_or_path, revision=revision, filename=filename, repo_type=repo_type)
     commit_hash = extract_commit_hash(file, None)
     return commit_hash
+
+
+def get_file_hash(model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model") -> str:
+    try:
+        file = cached_file(model_name_or_path, revision=revision, filename=filename, repo_type=repo_type)
+        with open(file, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return f"{filename} not found"
+
+
+def get_files_hash_if_exists(model_name_or_path: str, revision: str, filenames: List[str], repo_type: str = "model") -> List[str]:
+    return [get_file_hash(model_name_or_path, revision, filename, repo_type) for filename in filenames]
 
 
 # Performance tuning. Some rough numbers:
@@ -448,17 +463,20 @@ class TokenizerConfig:
     get_tokenizer_fn: str = "get_tokenizer_tulu_v2_2"
 
     # for tracking purposes
-    tokenizer_commit_hash: Optional[str] = None
-    
+    tokenizer_files_hash: Optional[List[str]] = None
+
     # backward compatibility to make sure script runs
     use_slow_tokenizer: bool = False # completely ignored
     tokenizer_name: Optional[str] = None
 
     @cached_property
     def tokenizer(self):
-        self.tokenizer_commit_hash = get_commit_hash(
-            self.tokenizer_name_or_path, self.tokenizer_revision, filename="tokenizer_config.json"
+        files_hash = get_files_hash_if_exists(
+            self.tokenizer_name_or_path,
+            self.tokenizer_revision,
+            filenames=["tokenizer_config.json", "tokenizer.json", "special_tokens_map.json", "vocab.json"],
         )
+        self.tokenizer_files_hash = ",".join(files_hash)
         if self.tokenizer_name is not None and self.tokenizer_name_or_path is None:
             if self.tokenizer_name != self.tokenizer_name_or_path:
                 raise ValueError(f"tokenizer_name and tokenizer_name_or_path are different: {self.tokenizer_name=} != {self.tokenizer_name_or_path=},"
@@ -914,7 +932,7 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
 class DatasetTransformationCache:
     def __init__(self, hf_entity: Optional[str] = None):
-        self.hf_entity = hf_entity or HfApi().whoami()["name"]
+        self.hf_entity = hf_entity or hf_whoami()["name"]
 
     def compute_config_hash(self, dcs: List[DatasetConfig], tc: TokenizerConfig) -> str:
         """Compute a deterministic hash of both configs for caching."""
@@ -1205,7 +1223,7 @@ def test_get_cached_dataset_tulu_rlvr():
 if __name__ == "__main__":
     test_sft_dpo_same_tokenizer()
     test_config_hash_different()
-    test_get_cached_dataset_tulu_sft()
-    # test_get_cached_dataset_tulu_preference()
-    # test_get_cached_dataset_tulu_rlvr()
+    # test_get_cached_dataset_tulu_sft() # takes a long time to run
+    # test_get_cached_dataset_tulu_preference() # takes a long time to run
+    # test_get_cached_dataset_tulu_rlvr() # takes ~ 30 seconds
     print("All tests passed!")
