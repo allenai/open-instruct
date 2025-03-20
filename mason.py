@@ -1,5 +1,6 @@
 import argparse
 import re
+import sys
 from typing import List, Dict
 import beaker
 import os
@@ -524,7 +525,33 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                     caching_command = "python " + " ".join(command[idx:]) + " --cache_dataset_only"
                     console.log(f"📦📦📦 Running the caching command with `--cache_dataset_only`")
                     import subprocess
-                    result = subprocess.run(caching_command, shell=True, capture_output=True, text=True)
+                    # Use Popen to get real-time output while also capturing it
+                    process = subprocess.Popen(
+                        caching_command, 
+                        shell=True, 
+                        stdout=subprocess.PIPE, 
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        bufsize=1
+                    )
+                    
+                    stdout_data, stderr_data = [], []
+                    
+                    # Read output in real-time
+                    for stream, data_list in [(process.stdout, stdout_data), (process.stderr, stderr_data)]:
+                        for line in iter(stream.readline, ''):
+                            if not line:
+                                break
+                            print(line.rstrip(), file=sys.stdout if stream == process.stdout else sys.stderr)
+                            data_list.append(line)
+                            
+                    # Wait for process to complete
+                    return_code = process.wait()
+                    result = type('SubprocessResult', (), {
+                        'returncode': return_code,
+                        'stdout': ''.join(stdout_data),
+                        'stderr': ''.join(stderr_data)
+                    })
                     stdout = result.stdout
                     # Extract the cached dataset path from stdout if it exists
                     for line in stdout.splitlines():
@@ -673,6 +700,8 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
             join_full_command
         )
     full_command = setup_commands + join_full_command
+    console.log(f"🔍🔍🔍 Full command")
+    print(full_command)
     return full_command
 
 def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami: str, resumable: bool):
