@@ -930,21 +930,22 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
     return dataset
 
 
+def compute_config_hash(dcs: List[DatasetConfig], tc: TokenizerConfig) -> str:
+    """Compute a deterministic hash of both configs for caching."""
+    dc_dicts = [{k: v for k, v in asdict(dc).items() if v is not None} for dc in dcs]
+    tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
+    combined_dict = {"dataset_configs": dc_dicts, "tokenizer_config": tc_dict}
+    config_str = json.dumps(combined_dict, sort_keys=True)
+    return hashlib.sha256(config_str.encode()).hexdigest()[:10]
+
+
 class DatasetTransformationCache:
     def __init__(self, hf_entity: Optional[str] = None):
         self.hf_entity = hf_entity or hf_whoami()["name"]
 
-    def compute_config_hash(self, dcs: List[DatasetConfig], tc: TokenizerConfig) -> str:
-        """Compute a deterministic hash of both configs for caching."""
-        dc_dicts = [{k: v for k, v in asdict(dc).items() if v is not None} for dc in dcs]
-        tc_dict = {k: v for k, v in asdict(tc).items() if v is not None}
-        combined_dict = {"dataset_configs": dc_dicts, "tokenizer_config": tc_dict}
-        config_str = json.dumps(combined_dict, sort_keys=True)
-        return hashlib.sha256(config_str.encode()).hexdigest()[:10]
-
     def load_or_transform_dataset(self, dcs: List[DatasetConfig], tc: TokenizerConfig, skip_cache: bool = False) -> Dataset:
         """Load dataset from cache if it exists, otherwise transform and cache it."""
-        config_hash = self.compute_config_hash(dcs, tc)
+        config_hash = compute_config_hash(dcs, tc)
         repo_name = f"{self.hf_entity}/dataset-mix-cached"
 
         # NOTE: the cached dataset is always train split
@@ -1011,6 +1012,7 @@ This is a cached dataset produced by https://github.com/allenai/open-instruct
         # NOTE: Load the dataset again to make sure it's downloaded to the HF cache
         print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{config_hash}")
         return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=config_hash)
+
 
 
 def get_cached_dataset(dcs: List[DatasetConfig], tc: TokenizerConfig, hf_entity: Optional[str] = None, skip_cache: bool = False) -> Dataset:
