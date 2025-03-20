@@ -47,7 +47,7 @@ import json
 import multiprocessing
 import os
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import torch
 import transformers
@@ -940,25 +940,25 @@ def compute_config_hash(dcs: List[DatasetConfig], tc: TokenizerConfig) -> str:
 
 
 class DatasetTransformationCache:
-    def __init__(self, hf_entity: Optional[str] = None):
+    def __init__(self, config_hash: str, hf_entity: Optional[str] = None):
+        self.config_hash = config_hash
         self.hf_entity = hf_entity or hf_whoami()["name"]
 
-    def load_or_transform_dataset(self, dcs: List[DatasetConfig], tc: TokenizerConfig, skip_cache: bool = False) -> Dataset:
+    def load_or_transform_dataset(self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False) -> Dataset:
         """Load dataset from cache if it exists, otherwise transform and cache it."""
-        config_hash = compute_config_hash(dcs, tc)
         repo_name = f"{self.hf_entity}/dataset-mix-cached"
 
         # NOTE: the cached dataset is always train split
         DEFAULT_SPLIT_FOR_CACHED_DATASET = "train"
 
         # Check if the revision exists
-        if revision_exists(repo_name, config_hash, repo_type="dataset"):
-            print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{config_hash}")
-            if skip_cache:
-                print("skip_cache is True, so we will not load the dataset from cache")
+        if revision_exists(repo_name, self.config_hash, repo_type="dataset"):
+            print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{self.config_hash}")
+            if dataset_skip_cache:
+                print("dataset_skip_cache is True, so we will not load the dataset from cache")
             else:
                 # Use the split from the first dataset config as default
-                return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=config_hash)
+                return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash)
 
         print(f"Cache not found, transforming datasets...")
 
@@ -970,17 +970,17 @@ class DatasetTransformationCache:
 
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
-        if skip_cache:
+        if dataset_skip_cache:
             return combined_dataset
 
         # Push to hub with config hash as revision
         combined_dataset.push_to_hub(
             repo_name,
             private=True,
-            revision=config_hash,
-            commit_message=f"Cache combined dataset with configs hash: {config_hash}",
+            revision=self.config_hash,
+            commit_message=f"Cache combined dataset with configs hash: {self.config_hash}",
         )
-        print(f"🚀 Pushed transformed dataset to https://huggingface.co/datasets/{repo_name}/tree/{config_hash}")
+        print(f"🚀 Pushed transformed dataset to https://huggingface.co/datasets/{repo_name}/tree/{self.config_hash}")
 
         model_card = ModelCard(
             f"""\
@@ -1007,17 +1007,73 @@ This is a cached dataset produced by https://github.com/allenai/open-instruct
 ```
 """
         )
-        model_card.push_to_hub(repo_name, repo_type="dataset", revision=config_hash)
+        model_card.push_to_hub(repo_name, repo_type="dataset", revision=self.config_hash)
 
         # NOTE: Load the dataset again to make sure it's downloaded to the HF cache
-        print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{config_hash}")
-        return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=config_hash)
+        print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{self.config_hash}")
+        return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash)
 
 
+class LocalDatasetTransformationCache:
+    def __init__(self, config_hash: str, dataset_local_cache_dir: str):
+        """Initialize the local cache with a directory path."""
+        self.config_hash = config_hash
+        self.dataset_local_cache_dir = dataset_local_cache_dir
+        os.makedirs(dataset_local_cache_dir, exist_ok=True)
 
-def get_cached_dataset(dcs: List[DatasetConfig], tc: TokenizerConfig, hf_entity: Optional[str] = None, skip_cache: bool = False) -> Dataset:
-    cache = DatasetTransformationCache(hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc, skip_cache=skip_cache)
+    def get_cache_path(self) -> str:
+        """Get the path to the cached dataset."""
+        return os.path.join(self.dataset_local_cache_dir, self.config_hash)
+
+    def save_config(self, config_hash: str, dcs: List[DatasetConfig], tc: TokenizerConfig):
+        """Save the configuration to a JSON file."""
+        config_path = os.path.join(self.get_cache_path(), "config.json")
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        
+        config_dict = {
+            "tokenizer_config": asdict(tc),
+            "dataset_configs": [asdict(dc) for dc in dcs],
+            "config_hash": config_hash
+        }
+        with open(config_path, "w") as f:
+            json.dump(config_dict, f, indent=2)
+
+    def load_or_transform_dataset(self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False) -> Dataset:
+        """Load dataset from local cache if it exists, otherwise transform and cache it locally."""
+        cache_path = self.get_cache_path()
+
+        # Check if the cache exists
+        if os.path.exists(cache_path) and not dataset_skip_cache:
+            print(f"✅ Found cached dataset at {cache_path}")
+            return Dataset.load_from_disk(cache_path)
+
+        print(f"Cache not found or invalid, transforming datasets...")
+
+        # Transform each dataset
+        transformed_datasets = []
+        for dc in dcs:
+            dataset = get_dataset_v1(dc, tc)
+            transformed_datasets.append(dataset)
+
+        # Combine datasets
+        combined_dataset = concatenate_datasets(transformed_datasets)
+        if dataset_skip_cache:
+            return combined_dataset
+
+        # Save to local cache
+        combined_dataset.save_to_disk(cache_path)
+        self.save_config(self.config_hash, dcs, tc)
+        print(f"🚀 Saved transformed dataset to {cache_path}")
+        print(f"✅ Found cached dataset at {cache_path}")
+        return combined_dataset
+
+
+def get_cached_dataset(dcs: List[DatasetConfig], tc: TokenizerConfig, hf_entity: Optional[str] = None, dataset_local_cache_dir: Optional[str] = None, dataset_skip_cache: bool = False) -> Dataset:
+    if dataset_local_cache_dir is not None:
+        cache = LocalDatasetTransformationCache(dataset_local_cache_dir=dataset_local_cache_dir)
+    else:
+        cache = DatasetTransformationCache(hf_entity=hf_entity)
+    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
 
 
 def get_cached_dataset_tulu(
@@ -1027,41 +1083,49 @@ def get_cached_dataset_tulu(
     dataset_transform_fn: List[str],
     transform_fn_args: List[Dict[str, Any]],
     target_columns: Optional[List[str]] = None,
+    dataset_cache_mode: Literal["hf", "local"] = "local",
+    dataset_config_hash: Optional[str] = None,
     hf_entity: Optional[str] = None,
-    skip_cache: bool = False,
+    dataset_local_cache_dir: str = "local_dataset_cache",
+    dataset_skip_cache: bool = False,
 ) -> Dataset:
-    if len(dataset_mixer_list_splits) == 1:
-        print("by default, we will use the same split for all datasets")
-        dataset_mixer_list_splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
-    else:
-        if len(dataset_mixer_list_splits) != len(dataset_mixer_list):
-            raise ValueError(f"dataset_mixer_list_splits length must be the same as dataset_mixer_list: {len(dataset_mixer_list_splits)=} != {len(dataset_mixer_list)=}")
     dcs = []
-    assert len(dataset_mixer_list) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer_list}"
-    for i in range(0, len(dataset_mixer_list), 2):
-        dataset_name = dataset_mixer_list[i]
-        frac_or_num_samples = dataset_mixer_list[i + 1]
-        if "." in frac_or_num_samples:
-            frac_or_num_samples = float(frac_or_num_samples)
+    if dataset_config_hash is None:
+        if len(dataset_mixer_list_splits) == 1:
+            print("by default, we will use the same split for all datasets")
+            dataset_mixer_list_splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
         else:
-            frac_or_num_samples = int(frac_or_num_samples)
+            if len(dataset_mixer_list_splits) != len(dataset_mixer_list):
+                raise ValueError(f"dataset_mixer_list_splits length must be the same as dataset_mixer_list: {len(dataset_mixer_list_splits)=} != {len(dataset_mixer_list)=}")
+        assert len(dataset_mixer_list) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer_list}"
+        for i in range(0, len(dataset_mixer_list), 2):
+            dataset_name = dataset_mixer_list[i]
+            frac_or_num_samples = dataset_mixer_list[i + 1]
+            if "." in frac_or_num_samples:
+                frac_or_num_samples = float(frac_or_num_samples)
+            else:
+                frac_or_num_samples = int(frac_or_num_samples)
 
-        dataset_config = DatasetConfig(
-            dataset_name=dataset_name,
-            dataset_split=dataset_mixer_list_splits[i],
-            dataset_revision="main",
-            transform_fn=dataset_transform_fn,
-            transform_fn_args=transform_fn_args,
-            target_columns=target_columns,
-        )
-        if frac_or_num_samples > 1.0:
-            new_range = int(frac_or_num_samples)
-        else:
-            new_range = int(frac_or_num_samples * len(dataset_config.dataset))
-        dataset_config.update_range(new_range)
-        dcs.append(dataset_config)
-    cache = DatasetTransformationCache(hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc, skip_cache=skip_cache)
+            dataset_config = DatasetConfig(
+                dataset_name=dataset_name,
+                dataset_split=dataset_mixer_list_splits[i],
+                dataset_revision="main",
+                transform_fn=dataset_transform_fn,
+                transform_fn_args=transform_fn_args,
+                target_columns=target_columns,
+            )
+            if frac_or_num_samples > 1.0:
+                new_range = int(frac_or_num_samples)
+            else:
+                new_range = int(frac_or_num_samples * len(dataset_config.dataset))
+            dataset_config.update_range(new_range)
+            dcs.append(dataset_config)
+        dataset_config_hash = compute_config_hash(dcs, tc)
+    if dataset_cache_mode == "local":
+        cache = LocalDatasetTransformationCache(config_hash=dataset_config_hash, dataset_local_cache_dir=dataset_local_cache_dir)
+    elif dataset_cache_mode == "hf":
+        cache = DatasetTransformationCache(config_hash=dataset_config_hash, hf_entity=hf_entity)
+    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
 
 
 def test_sft_dpo_same_tokenizer():
@@ -1147,7 +1211,7 @@ def test_get_cached_dataset_tulu_sft():
         dataset_transform_fn,
         transform_fn_args,
         TOKENIZED_SFT_DATASET_KEYS,
-        skip_cache=True,
+        dataset_skip_cache=True,
     )
 
     gold_tokenized_dataset = load_dataset("allenai/dataset-mix-cached", split="train", revision="61ac38e052")
@@ -1179,7 +1243,7 @@ def test_get_cached_dataset_tulu_preference():
         dataset_transform_fn,
         transform_fn_args,
         TOKENIZED_PREFERENCE_DATASET_KEYS,
-        skip_cache=True,
+        dataset_skip_cache=True,
     )
     gold_tokenized_dataset = load_dataset("allenai/dataset-mix-cached", split="train", revision="9415479293")
     assert len(dataset) == len(gold_tokenized_dataset)
@@ -1213,7 +1277,7 @@ def test_get_cached_dataset_tulu_rlvr():
         tc,
         dataset_transform_fn,
         transform_fn_args,
-        skip_cache=True,
+        dataset_skip_cache=True,
     )
     gold_tokenized_dataset = load_dataset("allenai/dataset-mix-cached", split="train", revision="0ff0043e56")
     assert len(dataset) == len(gold_tokenized_dataset)

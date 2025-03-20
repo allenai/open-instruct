@@ -70,8 +70,16 @@ class Args:
     """The dataset splits to use for evaluation"""
     dataset_transform_fn: list[str] = field(default_factory=lambda: ["preference_tokenize_v1", "preference_filter_v1"])
     """The list of transform functions to apply to the dataset."""
+    dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
+    """The columns to use for the dataset."""
+    dataset_cache_mode: Literal["hf", "local"] = "local"
+    """The mode to use for caching the dataset."""
+    dataset_local_cache_dir: str = "local_dataset_cache"
+    """The directory to save the local dataset cache to."""
+    dataset_config_hash: Optional[str] = None
+    """The hash of the dataset configuration."""
     dataset_skip_cache: bool = False
-    """Whether to skip caching the dataset"""
+    """Whether to skip the cache."""
     max_token_length: int = 512
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
@@ -249,16 +257,20 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     ]
     with accelerator.main_process_first():
         train_dataset = get_cached_dataset_tulu(
-            args.dataset_mixer_list,
-            args.dataset_mixer_list_splits,
-            tc,
-            args.dataset_transform_fn,
-            transform_fn_args,
-            TOKENIZED_PREFERENCE_DATASET_KEYS,
-            args.hf_entity,
+            dataset_mixer_list=args.dataset_mixer_list,
+            dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+            tc=tc,
+            dataset_transform_fn=args.dataset_transform_fn,
+            transform_fn_args=transform_fn_args,
+            target_columns=args.dataset_target_columns,
+            dataset_cache_mode=args.dataset_cache_mode,
+            dataset_config_hash=args.dataset_config_hash,
+            hf_entity=args.hf_entity,
+            dataset_local_cache_dir=args.dataset_local_cache_dir,
+            dataset_skip_cache=args.dataset_skip_cache,
         )
         train_dataset = train_dataset.shuffle(seed=args.seed)
-        if args.dataset_mixer_eval_list is not None:
+        if len(args.dataset_mixer_eval_list) > 0:
             eval_dataset = get_cached_dataset_tulu(
                 args.dataset_mixer_eval_list,
                 args.dataset_mixer_eval_list_splits,
@@ -266,7 +278,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
                 args.dataset_transform_fn,
                 transform_fn_args,
                 hf_entity=args.hf_entity,
-                skip_cache=args.dataset_skip_cache,
+                dataset_cache_mode=args.dataset_cache_mode,
+                dataset_config_hash=args.dataset_config_hash,
+                dataset_local_cache_dir=args.dataset_local_cache_dir,
+                dataset_skip_cache=args.dataset_skip_cache,
             )
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
     if args.cache_dataset_only:
@@ -309,18 +324,21 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         shuffle=True,
         collate_fn=data_collator,
     )
-    eval_dataloader = DataLoader(
-        eval_dataset,
-        batch_size=args.per_device_eval_batch_size,
-        shuffle=False,
-        collate_fn=data_collator,
-    )
+    eval_dataloader = None
+    if len(args.dataset_mixer_eval_list) > 0:
+        eval_dataloader = DataLoader(
+            eval_dataset,
+            batch_size=args.per_device_eval_batch_size,
+            shuffle=False,
+            collate_fn=data_collator,
+        )
 
     # sync random states for DataLoader(shuffle=True) before `accelerator.prepare`
     # see https://gist.github.com/vwxyzjn/2581bff1e48e185e0b85b6dfe1def79c
     torch.manual_seed(args.seed)
     model, optimizer, dataloader = accelerator.prepare(model, optimizer, dataloader)
-    eval_dataloader = accelerator.prepare(eval_dataloader)
+    if eval_dataloader is not None:
+        eval_dataloader = accelerator.prepare(eval_dataloader)
     torch.manual_seed(local_seed)
 
     # set up the metrics and initial states
@@ -383,7 +401,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
                             writer.add_scalar(key, value, episode)
 
             # (optionally) evaluate the model
-            if args.num_evals > 0 and training_step > 1 and training_step % args.eval_freq == 0:
+            if args.num_evals > 0 and training_step > 1 and training_step % args.eval_freq == 0 and eval_dataloader is not None:
                 eval_metrics, table = evaluate(model, eval_dataloader, tokenizer, max_sampled_texts=10)
                 for key in table:
                     table[key] = gather_object(table[key])

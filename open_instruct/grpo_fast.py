@@ -121,8 +121,14 @@ class Args:
     """The dataset splits to use for evaluation"""
     dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_filter_v1"])
     """The list of transform functions to apply to the dataset."""
+    dataset_cache_mode: Literal["hf", "local"] = "local"
+    """The mode to use for caching the dataset."""
+    dataset_local_cache_dir: str = "local_dataset_cache"
+    """The directory to save the local dataset cache to."""
+    dataset_config_hash: Optional[str] = None
+    """The hash of the dataset configuration."""
     dataset_skip_cache: bool = False
-    """Whether to skip caching the dataset"""
+    """Whether to skip the cache."""
     max_token_length: int = 512
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
@@ -1283,16 +1289,20 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         },
     ]
     train_dataset = get_cached_dataset_tulu(
-        args.dataset_mixer_list,
-        args.dataset_mixer_list_splits,
-        tc,
-        args.dataset_transform_fn,
-        transform_fn_args,
+        dataset_mixer_list=args.dataset_mixer_list,
+        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+        tc=tc,
+        dataset_transform_fn=args.dataset_transform_fn,
+        transform_fn_args=transform_fn_args,
+        dataset_cache_mode=args.dataset_cache_mode,
+        dataset_config_hash=args.dataset_config_hash,
         hf_entity=args.hf_entity,
+        dataset_local_cache_dir=args.dataset_local_cache_dir,
+        dataset_skip_cache=args.dataset_skip_cache,
     )
     train_dataset = train_dataset.shuffle(seed=args.seed)
     eval_dataset = None
-    if args.dataset_mixer_eval_list is not None:
+    if len(args.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(
             args.dataset_mixer_eval_list,
             args.dataset_mixer_eval_list_splits,
@@ -1300,7 +1310,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             args.dataset_transform_fn,
             transform_fn_args,
             hf_entity=args.hf_entity,
-            skip_cache=args.dataset_skip_cache,
+            dataset_cache_mode=args.dataset_cache_mode,
+            dataset_config_hash=args.dataset_config_hash,
+            dataset_local_cache_dir=args.dataset_local_cache_dir,
+            dataset_skip_cache=args.dataset_skip_cache,
         )
         eval_dataset = eval_dataset.shuffle(seed=args.seed)
     if args.cache_dataset_only:

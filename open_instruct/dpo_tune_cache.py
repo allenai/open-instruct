@@ -25,7 +25,7 @@ import shutil
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Literal, Optional, Union
 
 import datasets
 import deepspeed
@@ -156,6 +156,16 @@ class FlatArguments:
     """The dataset splits to use for training"""
     dataset_transform_fn: list[str] = field(default_factory=lambda: ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"])
     """The list of transform functions to apply to the dataset."""
+    dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
+    """The columns to use for the dataset."""
+    dataset_cache_mode: Literal["hf", "local"] = "local"
+    """The mode to use for caching the dataset."""
+    dataset_local_cache_dir: str = "local_dataset_cache"
+    """The directory to save the local dataset cache to."""
+    dataset_config_hash: Optional[str] = None
+    """The hash of the dataset configuration."""
+    dataset_skip_cache: bool = False
+    """Whether to skip the cache."""
     dataset_mix_dir: Optional[str] = field(
         default=None,
         metadata={"help": "The directory to save the mixed dataset to disk."},
@@ -558,13 +568,17 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             {},
         ]
         train_dataset = get_cached_dataset_tulu(
-            args.dataset_mixer_list,
-            args.dataset_mixer_list_splits,
-            tc,
-            args.dataset_transform_fn,
-            transform_fn_args,
-            TOKENIZED_PREFERENCE_DATASET_KEYS,
-            args.hf_entity,
+            dataset_mixer_list=args.dataset_mixer_list,
+            dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+            tc=tc,
+            dataset_transform_fn=args.dataset_transform_fn,
+            transform_fn_args=transform_fn_args,
+            target_columns=args.dataset_target_columns,
+            dataset_cache_mode=args.dataset_cache_mode,
+            dataset_config_hash=args.dataset_config_hash,
+            hf_entity=args.hf_entity,
+            dataset_local_cache_dir=args.dataset_local_cache_dir,
+            dataset_skip_cache=args.dataset_skip_cache,
         )
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
