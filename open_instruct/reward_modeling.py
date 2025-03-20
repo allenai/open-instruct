@@ -13,6 +13,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from accelerate import Accelerator
 from accelerate.utils import gather_object
+import deepspeed
 from huggingface_hub import HfApi
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
@@ -152,9 +153,6 @@ class Args:
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     output_dir: str = "output"
     """Where to save the model"""
-
-    resize_token_embeddings: bool = True
-    """Whether to resize the token embeddings to a factor of 8 for utilizing tensor cores better"""
 
 
 def layer_init(layer: nn.Module, std: float):
@@ -305,7 +303,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
         model_config.model_name_or_path, revision=model_config.model_revision, num_labels=1
     )
-    if args.resize_token_embeddings:  # optimize for tensor core
+    # resize does its own gather
+    embeddings = model.get_input_embeddings()
+    with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
+        embedding_size = embeddings.weight.shape[0]
+    if len(tokenizer) > embedding_size:
+        # pad to multiple for tensor cores.
         model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
     if model_config.gradient_checkpointing:
         model.gradient_checkpointing_enable()
