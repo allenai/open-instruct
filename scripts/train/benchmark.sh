@@ -8,6 +8,14 @@ python launch.py scripts/train/tulu3/finetune_8b.sh \
     --priority normal \
     --image costah/open_instruct_dev0316 | uv run bash
 
+
+# 8 nodes
+python launch.py scripts/train/tulu3/finetune_8b.sh \
+    --cluster ai2/augusta-google-1 \
+    --num_nodes 1 \
+    --priority normal \
+    --image costah/open_instruct_dev0316_22 | uv run bash
+
 # 4 nodes
 python launch.py scripts/train/tulu3/dpo_8b.sh \
     --cluster ai2/augusta-google-1 \

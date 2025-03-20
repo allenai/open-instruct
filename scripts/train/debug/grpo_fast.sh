@@ -2,7 +2,7 @@ exp_name="base_smollm_grpo_${RANDOM}"
 python open_instruct/grpo_fast.py \
     --exp_name $exp_name \
     --output_dir output/dummy \
-    --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \
+    --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
     --dataset_mixer_eval_list_splits train \
