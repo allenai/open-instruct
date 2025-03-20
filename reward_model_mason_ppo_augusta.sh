@@ -55,5 +55,6 @@ python mason.py \
     --reward_model_multiplier 1.0 \
     --gradient_checkpointing \
     --wandb_project_name reward-models \
-    --with_tracking
+    --with_tracking \
+    --gs_bucket_path gs://ai2-llm/post-training/
 done
