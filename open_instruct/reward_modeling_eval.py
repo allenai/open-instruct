@@ -108,18 +108,22 @@ def evaluate(
 
 if __name__ == "__main__":
     model = AutoModelForSequenceClassification.from_pretrained("EleutherAI/pythia-14m", num_labels=1)
-    dataset_config = DatasetConfig(
-        dataset_name="trl-internal-testing/sentiment-trl-style", chat_template="simple_chat"
+    tc = TokenizerConfig(tokenizer_name_or_path="EleutherAI/pythia-14m")
+    tokenizer = tc.tokenizer
+    eval_dataset = get_cached_dataset_tulu(
+        ["trl-internal-testing/sentiment-trl-style", "1.0"],
+        ["test"],
+        tc,
+        ["preference_tokenize_v1", "preference_filter_v1"],
+        [
+            {},
+            {
+                "max_token_length": 1024,
+                "max_prompt_token_length": 512,
+            },
+        ],
+        skip_cache=False,
     )
-    tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m", padding_side="right")
-    tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
-    tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
-    eval_dataset = load_dataset(dataset_config.dataset_name)["test"]
-    dataset_processor = PreferenceDatasetProcessor(
-        tokenizer=tokenizer,
-        config=dataset_config,
-    )
-    eval_dataset = dataset_processor.tokenize(eval_dataset)
     dataloader = DataLoader(
         eval_dataset,
         batch_size=8,
