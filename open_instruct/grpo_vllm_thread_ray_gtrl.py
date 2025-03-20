@@ -1202,7 +1202,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
                         decoded_response = tokenizer.batch_decode(postprocessed_response)
                         verifiable_reward, per_func_reward = apply_verifiable_reward(
-                            responses=[seq[seq != tokenizer.pad_token_id].tolist() for seq in postprocessed_response],,
+                            responses=[seq[seq != tokenizer.pad_token_id].tolist() for seq in postprocessed_response],
                             decoded_responses=decoded_response,
                             ground_truths=ground_truth,
                             datasets=dataset,
