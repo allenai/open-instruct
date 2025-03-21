@@ -1394,7 +1394,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     "episode": episode,
                     "training_step": training_step,
                     "lr": self.scheduler.get_last_lr()[0],
-                    "epoch": episode / len(train_dataset),
+                    "epoch": episode / args.number_samples_per_prompt / len(train_dataset),
                     "time/from_scratch": time.time() - start_time,
                     "time/training": time.time() - training_time_start,
                     **local_metrics.get_reduced_metrics_correctness(),
