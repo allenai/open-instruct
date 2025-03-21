@@ -63,9 +63,9 @@ result = ray.get(
     )
 )
 # grab text answers
-predictions = [x.outputs[0].text for x in result]
+generations = [x.outputs[0].text for x in result]
 # parse out answer
-predictions = [x.split("<answer>")[-1].split("</answer>")[0].lower() for x in predictions]
+predictions = [x.split("<answer>")[-1].split("</answer>")[0].lower() for x in generations]
 labels = [data["ground_truth"].lower() for data in ds]
 # calculate accuracy
 accuracy = sum([1 if predictions[i] == labels[i] else 0 for i in range(len(predictions))]) / len(predictions)
@@ -73,5 +73,5 @@ print(f"Accuracy: {accuracy}")
 # save predictions with sample data.
 os.makedirs(args.output_dir, exist_ok=True)
 with open(f"{args.output_dir}/predictions.txt", "w") as f:
-    for sample, prediction in zip(ds, predictions):
-        f.write(json.dumps({**sample, "prediction": prediction}) + "\n")
+    for sample, prediction, generation in zip(ds, predictions, generations):
+        f.write(json.dumps({**sample, "prediction": prediction, "generation": generation}) + "\n")
