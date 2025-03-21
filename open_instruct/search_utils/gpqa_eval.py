@@ -1,6 +1,7 @@
 '''
 Eval GPQA using the search actor.
 '''
+import os
 import argparse
 import ray
 import json
@@ -70,6 +71,7 @@ labels = [data["ground_truth"].lower() for data in ds]
 accuracy = sum([1 if predictions[i] == labels[i] else 0 for i in range(len(predictions))]) / len(predictions)
 print(f"Accuracy: {accuracy}")
 # save predictions with sample data.
+os.makedirs(args.output_dir, exist_ok=True)
 with open(f"{args.output_dir}/predictions.txt", "w") as f:
     for sample, prediction in zip(ds, predictions):
         f.write(json.dumps({**ds, "prediction": prediction}) + "\n")
