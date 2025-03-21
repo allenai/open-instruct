@@ -28,11 +28,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+
+os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
+
 import gc
 import json
 import logging
 import math
-import os
 import random
 import shutil
 import socket
@@ -44,14 +47,6 @@ from collections import deque
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
-
-from open_instruct.dataset_transformation import (
-    TokenizerConfig,
-    get_cached_dataset_rlvr,
-)
-from open_instruct.ground_truth_utils import soft_format_reward_func
-
-os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 
 import deepspeed
 import numpy as np
@@ -73,7 +68,6 @@ from torch.utils.tensorboard import SummaryWriter
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSequenceClassification,
-    AutoTokenizer,
     PreTrainedModel,
     PreTrainedTokenizer,
     get_scheduler,
@@ -81,14 +75,16 @@ from transformers import (
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
-from open_instruct.dataset_processor import (
+from open_instruct.dataset_processor import SimpleGenerateCollatorWithGroundTruth
+from open_instruct.dataset_transformation import (
     DATASET_SOURCE_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
-    DatasetConfig,
-    SimpleGenerateCollatorWithGroundTruth,
+    TokenizerConfig,
+    get_cached_dataset_tulu,
     visualize_token,
 )
+from open_instruct.ground_truth_utils import soft_format_reward_func
 from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
@@ -130,6 +126,22 @@ class Args:
     """The dataset splits to use for training"""
     dataset_mixer_eval_list_splits: Optional[List[str]] = None
     """The dataset splits to use for evaluation"""
+    dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_filter_v1"])
+    """The list of transform functions to apply to the dataset."""
+    dataset_cache_mode: Literal["hf", "local"] = "local"
+    """The mode to use for caching the dataset."""
+    dataset_local_cache_dir: str = "local_dataset_cache"
+    """The directory to save the local dataset cache to."""
+    dataset_config_hash: Optional[str] = None
+    """The hash of the dataset configuration."""
+    dataset_config_eval_hash: Optional[str] = None
+    """The hash of the dataset configuration for evaluation."""
+    dataset_skip_cache: bool = False
+    """Whether to skip the cache."""
+    max_token_length: int = 512
+    """The maximum token length to use for the dataset"""
+    max_prompt_token_length: int = 256
+    """The maximum prompt token length to use for the dataset"""
 
     # common args
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -138,9 +150,6 @@ class Args:
     """Seed of the experiment"""
     run_name: Optional[str] = None
     """A unique name of this run"""
-    saved_tokenizer_type: Literal["original", "tokenizer_config"] = "tokenizer_config"
-    """The type of tokenizer to save (original means the unmodified tokenizer directly loaded from .from_pretrained(),
-    tokenizer_config means the tokenizer obtained via `TokenizerConfig`"""
 
     # optimizer args
     eps: float = 1e-5
@@ -290,8 +299,6 @@ class Args:
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     output_dir: str = "output"
     """Where to save the model"""
-    checkpoint_output_dir: Optional[str] = None
-    """Where to save the model checkpoints in case of preemption"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
 
@@ -326,48 +333,6 @@ def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
         return value, json.dumps(value)
     else:
         raise ValueError("Input must be either a string or a dictionary")
-
-
-def calculate_runtime_args(args: Args, model_config: ModelConfig):
-    """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
-    # accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
-    # args.world_size = accelerator.num_processes
-    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
-    args.output_dir = os.path.join(args.output_dir, args.run_name)
-    args.gradient_accumulation_steps = exact_div(
-        args.local_mini_batch_size,
-        args.per_device_train_batch_size,
-        "`local_mini_batch_size` must be a multiple of `per_device_train_batch_size`",
-    )
-    args.world_size = sum(args.actor_num_gpus_per_node)
-    args.micro_batch_size = int(args.per_device_train_batch_size * args.world_size)
-    args.local_total_prompts = args.local_rollout_batch_size * args.number_samples_per_prompt
-    args.rollout_batch_size = int(args.local_rollout_batch_size * args.world_size)
-    args.mini_batch_size = int(args.local_mini_batch_size * args.world_size)
-    args.num_mini_batches = exact_div((args.rollout_batch_size * args.number_samples_per_prompt), args.mini_batch_size)
-    args.num_training_steps = args.total_episodes // (args.rollout_batch_size * args.number_samples_per_prompt)
-    args.eval_freq = max(1, args.num_training_steps // args.num_evals)
-    # PPO logic: do checks and set up dataloader batch size
-    if args.whiten_rewards:
-        assert (
-            args.local_mini_batch_size >= 8
-        ), f"Per-rank minibatch size {args.local_mini_batch_size} is insufficient for whitening"
-    args.local_dataloader_batch_size = args.rollout_batch_size
-    if args.push_to_hub:
-        if args.hf_repo_id is None:  # auto-generate one
-            args.hf_repo_id = "open_instruct_dev"
-        if args.hf_entity is None:  # first try to use AI2 entity
-            args.hf_entity = maybe_use_ai2_hf_entity()
-        if args.hf_entity is None:  # then try to use the user's entity
-            args.hf_entity = HfApi().whoami()["name"]
-        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
-        if args.hf_repo_revision is None:  # auto-generate one
-            args.hf_repo_revision = args.run_name
-        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-
-    if args.with_tracking:
-        if args.wandb_entity is None:
-            args.wandb_entity = maybe_use_ai2_wandb_entity()
 
 
 def get_train_ds_config(
@@ -686,9 +651,6 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         print(f"{dschf=}")
 
-        self.original_tokenizer = AutoTokenizer.from_pretrained(
-            model_config.model_name_or_path, revision=model_config.model_revision
-        )
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
@@ -831,7 +793,7 @@ class PolicyTrainerRayProcess(RayProcess):
         reward_types = sorted(list(set(train_dataset.unique("dataset"))))
 
         args = self.args
-        self.modified_tokenizer = tokenizer
+        self.tokenizer = tokenizer
 
         accelerator = Namespace()
         accelerator.process_index = self.rank
@@ -1519,10 +1481,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 model_to_save.save_pretrained(output_dir, state_dict=output_state_dict)
 
             # save tokenizer
-            if self.args.saved_tokenizer_type == "original":
-                self.original_tokenizer.save_pretrained(output_dir)
-            elif self.args.saved_tokenizer_type == "tokenizer_config":
-                self.modified_tokenizer.save_pretrained(output_dir)
+            self.tokenizer.save_pretrained(output_dir)
 
 
 def kill_ray_cluster_if_a_worker_dies(object_refs: List[Any], stop_event: threading.Event):
@@ -1600,17 +1559,74 @@ class ModelGroup:
             self.models.append(worker_policy)
 
 
-def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
-    calculate_runtime_args(args, model_config)
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
+    # ------------------------------------------------------------
+    # Setup tokenizer
+    tc.tokenizer_revision = model_config.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
+    tc.tokenizer_name_or_path = (
+        model_config.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
+    )
+    if (
+        tc.tokenizer_revision != model_config.model_revision
+        and tc.tokenizer_name_or_path != model_config.model_name_or_path
+    ):
+        # Warn user if tokenizer and model use different revisions; this is an unusual
+        # use case.
+        warning = f"""Requested tokenizer revision `{tc.tokenizer_revision=}` is different
+                   from the model revision `{model_config.model_revision=}` or the tokenizer name `{tc.tokenizer_name_or_path=}`
+                   is different from the model name `{model_config.model_name_or_path=}`."""
+        print(warning)
+    tokenizer = tc.tokenizer
 
-    # set up experiment tracking and seeds
+    # ------------------------------------------------------------
+    # Set up runtime variables
+    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.output_dir = os.path.join(args.output_dir, args.run_name)
+    args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
+    if is_beaker_job():
+        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+    args.gradient_accumulation_steps = exact_div(
+        args.local_mini_batch_size,
+        args.per_device_train_batch_size,
+        "`local_mini_batch_size` must be a multiple of `per_device_train_batch_size`",
+    )
+    args.world_size = sum(args.actor_num_gpus_per_node)
+    args.micro_batch_size = int(args.per_device_train_batch_size * args.world_size)
+    args.local_total_prompts = args.local_rollout_batch_size * args.number_samples_per_prompt
+    args.rollout_batch_size = int(args.local_rollout_batch_size * args.world_size)
+    args.mini_batch_size = int(args.local_mini_batch_size * args.world_size)
+    args.num_mini_batches = exact_div((args.rollout_batch_size * args.number_samples_per_prompt), args.mini_batch_size)
+    args.num_training_steps = args.total_episodes // (args.rollout_batch_size * args.number_samples_per_prompt)
+    args.eval_freq = max(1, args.num_training_steps // args.num_evals)
+    # PPO logic: do checks and set up dataloader batch size
+    if args.whiten_rewards:
+        assert (
+            args.local_mini_batch_size >= 8
+        ), f"Per-rank minibatch size {args.local_mini_batch_size} is insufficient for whitening"
+    args.local_dataloader_batch_size = args.rollout_batch_size
+    if args.push_to_hub:
+        if args.hf_repo_id is None:  # auto-generate one
+            args.hf_repo_id = "open_instruct_dev"
+        if args.hf_entity is None:  # first try to use AI2 entity
+            args.hf_entity = maybe_use_ai2_hf_entity()
+        if args.hf_entity is None:  # then try to use the user's entity
+            args.hf_entity = HfApi().whoami()["name"]
+        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
+        if args.hf_repo_revision is None:  # auto-generate one
+            args.hf_repo_revision = args.run_name
+        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+    if args.with_tracking:
+        if args.wandb_entity is None:
+            args.wandb_entity = maybe_use_ai2_wandb_entity()
+
+    # ------------------------------------------------------------
+    # Setup experiment tracking and seeds
     all_configs = {}
     beaker_config = None
     if is_beaker_job():
-        args.checkpoint_output_dir = os.environ.get("CHECKPOINT_OUTPUT_DIR", None)
         beaker_config = maybe_get_beaker_config()
         all_configs.update(vars(beaker_config))
-    all_configs.update(**asdict(args), **asdict(dataset_config), **asdict(model_config))
+    all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
     if args.with_tracking:
         import wandb
 
@@ -1629,44 +1645,41 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    tokenizer_revision = (
-        model_config.model_revision if model_config.tokenizer_revision is None else model_config.tokenizer_revision
-    )
-    tokenizer_name = (
-        model_config.tokenizer_name if model_config.tokenizer_name is not None else model_config.model_name_or_path
-    )
-    if tokenizer_revision != model_config.model_revision:
-        # Warn user if tokenizer and model use different revisions; this is an unusual
-        # use case.
-        warning = f"""Requested tokenizer revision `{tokenizer_revision}` is different
-                   from the model revision `{model_config.model_revision}`."""
-        print(warning)
-    tc = TokenizerConfig(
-        model_name_or_path=tokenizer_name,
-        revision=tokenizer_revision,
-        use_fast=not model_config.use_slow_tokenizer,
-        chat_template_name=model_config.chat_template_name,
-        add_bos=model_config.add_bos,
-    )
-    tokenizer = tc.tokenizer
-    train_dataset = get_cached_dataset_rlvr(
-        args.dataset_mixer_list,
-        args.dataset_mixer_list_splits,
-        tc,
-        dataset_config.max_prompt_token_length,
-        dataset_config.max_token_length,
-        args.hf_entity,
+    # ------------------------------------------------------------
+    # Set up datasets
+    transform_fn_args = [
+        {},
+        {
+            "max_token_length": args.max_token_length,
+            "max_prompt_token_length": args.max_prompt_token_length,
+        },
+    ]
+    train_dataset = get_cached_dataset_tulu(
+        dataset_mixer_list=args.dataset_mixer_list,
+        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+        tc=tc,
+        dataset_transform_fn=args.dataset_transform_fn,
+        transform_fn_args=transform_fn_args,
+        dataset_cache_mode=args.dataset_cache_mode,
+        dataset_config_hash=args.dataset_config_hash,
+        hf_entity=args.hf_entity,
+        dataset_local_cache_dir=args.dataset_local_cache_dir,
+        dataset_skip_cache=args.dataset_skip_cache,
     )
     train_dataset = train_dataset.shuffle(seed=args.seed)
     eval_dataset = None
-    if args.dataset_mixer_eval_list is not None:
-        eval_dataset = get_cached_dataset_rlvr(
+    if len(args.dataset_mixer_eval_list) > 0:
+        eval_dataset = get_cached_dataset_tulu(
             args.dataset_mixer_eval_list,
             args.dataset_mixer_eval_list_splits,
             tc,
-            dataset_config.max_prompt_token_length,
-            dataset_config.max_token_length,
-            args.hf_entity,
+            args.dataset_transform_fn,
+            transform_fn_args,
+            hf_entity=args.hf_entity,
+            dataset_cache_mode=args.dataset_cache_mode,
+            dataset_config_hash=args.dataset_config_eval_hash,
+            dataset_local_cache_dir=args.dataset_local_cache_dir,
+            dataset_skip_cache=args.dataset_skip_cache,
         )
         eval_dataset = eval_dataset.shuffle(seed=args.seed)
     if args.cache_dataset_only:
@@ -1675,7 +1688,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     data_collator = SimpleGenerateCollatorWithGroundTruth(pad_token_id=tokenizer.pad_token_id)
 
     # some more runtime logging
-    pprint([args, dataset_config, model_config])
+    pprint([args, tc, model_config])
     visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
 
     # create the model and optimizer
@@ -1695,7 +1708,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     inits.extend(
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url) for model in policy_group.models
     )
-    max_len = dataset_config.max_prompt_token_length + args.response_length
+    max_len = args.max_prompt_token_length + args.response_length
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
@@ -1805,12 +1818,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             args.hf_repo_revision,
         )
 
-    # The `checkpoint_output_dir` is only used in case of preemption and should be deleted if the run was successful.
-    # We use `--save_freq` to save intermediate checkpoints in the output folder instead.
-    if args.checkpoint_output_dir is not None and os.path.exists(args.checkpoint_output_dir):
-        shutil.rmtree(args.checkpoint_output_dir, ignore_errors=True)
-
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((Args, DatasetConfig, ModelConfig))
+    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
     main(*parser.parse())

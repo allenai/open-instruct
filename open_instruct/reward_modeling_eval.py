@@ -4,24 +4,21 @@ from typing import Tuple
 import pandas as pd
 import torch
 import torch.nn.functional as F
-from datasets import load_dataset
 from huggingface_hub import HfApi
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import (
     AutoModelForSequenceClassification,
-    AutoTokenizer,
     PreTrainedModel,
     PreTrainedTokenizer,
 )
 
-from open_instruct.dataset_processor import (
-    CHAT_TEMPLATES,
-    INPUT_IDS_CHOSEN_KEY,
-    INPUT_IDS_REJECTED_KEY,
-    DatasetConfig,
-    PreferenceDatasetProcessor,
+from open_instruct.dataset_transformation import (
+    CHOSEN_INPUT_IDS_KEY,
+    REJECTED_INPUT_IDS_KEY,
     SimplePreferenceCollator,
+    TokenizerConfig,
+    get_cached_dataset_tulu,
 )
 from open_instruct.model_utils import get_reward, print_rich_table
 
@@ -52,10 +49,10 @@ def evaluate(
         table = defaultdict(list)
     with torch.no_grad():
         for data in tqdm(dataloader):
-            query_responses = torch.cat((data[INPUT_IDS_CHOSEN_KEY], data[INPUT_IDS_REJECTED_KEY]), dim=0)
+            query_responses = torch.cat((data[CHOSEN_INPUT_IDS_KEY], data[REJECTED_INPUT_IDS_KEY]), dim=0)
             _, predicted_reward, _ = get_reward(model, query_responses, tokenizer.pad_token_id, 0)
-            chosen_rewards = predicted_reward[: data[INPUT_IDS_CHOSEN_KEY].shape[0]]
-            rejected_rewards = predicted_reward[data[INPUT_IDS_CHOSEN_KEY].shape[0] :]
+            chosen_rewards = predicted_reward[: data[CHOSEN_INPUT_IDS_KEY].shape[0]]
+            rejected_rewards = predicted_reward[data[CHOSEN_INPUT_IDS_KEY].shape[0] :]
             accuracy = (chosen_rewards > rejected_rewards).float().mean()
             loss = -F.logsigmoid(chosen_rewards - rejected_rewards).mean()
             total_loss += loss.item()
@@ -66,8 +63,8 @@ def evaluate(
             total_batches += 1
 
             if table is not None and len(table["shared prompt text"]) < max_sampled_texts:
-                chosen_texts = tokenizer.batch_decode(data[INPUT_IDS_CHOSEN_KEY])
-                rejected_texts = tokenizer.batch_decode(data[INPUT_IDS_REJECTED_KEY])
+                chosen_texts = tokenizer.batch_decode(data[CHOSEN_INPUT_IDS_KEY])
+                rejected_texts = tokenizer.batch_decode(data[REJECTED_INPUT_IDS_KEY])
                 # remove padding
                 chosen_texts = [item.replace(tokenizer.pad_token, "") for item in chosen_texts]
                 rejected_texts = [item.replace(tokenizer.pad_token, "") for item in rejected_texts]
@@ -107,18 +104,23 @@ def evaluate(
 
 if __name__ == "__main__":
     model = AutoModelForSequenceClassification.from_pretrained("EleutherAI/pythia-14m", num_labels=1)
-    dataset_config = DatasetConfig(
-        dataset_name="trl-internal-testing/sentiment-trl-style", chat_template="simple_chat"
+    tc = TokenizerConfig(tokenizer_name_or_path="EleutherAI/pythia-14m")
+    tokenizer = tc.tokenizer
+    eval_dataset = get_cached_dataset_tulu(
+        ["trl-internal-testing/sentiment-trl-style", "1.0"],
+        ["test"],
+        tc,
+        ["preference_tokenize_v1", "preference_filter_v1"],
+        [
+            {},
+            {
+                "max_token_length": 1024,
+                "max_prompt_token_length": 512,
+            },
+        ],
+        target_columns=[CHOSEN_INPUT_IDS_KEY, REJECTED_INPUT_IDS_KEY],
+        dataset_skip_cache=False,
     )
-    tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m", padding_side="right")
-    tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
-    tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
-    eval_dataset = load_dataset(dataset_config.dataset_name)["test"]
-    dataset_processor = PreferenceDatasetProcessor(
-        tokenizer=tokenizer,
-        config=dataset_config,
-    )
-    eval_dataset = dataset_processor.tokenize(eval_dataset)
     dataloader = DataLoader(
         eval_dataset,
         batch_size=8,
@@ -127,4 +129,3 @@ if __name__ == "__main__":
     metrics, table = evaluate(model, dataloader, tokenizer, max_sampled_texts=5)
     print(metrics)
     print_rich_table(pd.DataFrame(table))
-    ...
