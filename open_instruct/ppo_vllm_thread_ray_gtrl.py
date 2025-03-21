@@ -68,7 +68,6 @@ from torch.utils.tensorboard import SummaryWriter
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSequenceClassification,
-    AutoTokenizer,
     PreTrainedModel,
     PreTrainedTokenizer,
     get_scheduler,

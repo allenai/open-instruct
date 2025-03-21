@@ -65,7 +65,6 @@ from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
 from transformers import (
     AutoModelForCausalLM,
-    AutoTokenizer,
     PreTrainedModel,
     PreTrainedTokenizer,
     get_scheduler,
