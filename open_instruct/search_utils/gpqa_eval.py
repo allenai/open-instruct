@@ -74,4 +74,4 @@ print(f"Accuracy: {accuracy}")
 os.makedirs(args.output_dir, exist_ok=True)
 with open(f"{args.output_dir}/predictions.txt", "w") as f:
     for sample, prediction in zip(ds, predictions):
-        f.write(json.dumps({**ds, "prediction": prediction}) + "\n")
+        f.write(json.dumps({**sample, "prediction": prediction}) + "\n")
