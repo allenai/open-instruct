@@ -26,7 +26,7 @@ actor = LLMSearchRayActor.options(
     num_gpus=1
 ).remote(
     model_path=args.model_path,
-    revision=args.model_revsion,
+    revision=args.model_revision,
     tokenizer_revision=args.tokenizer_revision,
     trust_remote_code=True,
     tensor_parallel_size=1,
