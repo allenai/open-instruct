@@ -1330,9 +1330,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         self.model.step()
                         with torch.no_grad():
                             if epoch_idx == 0:
-                                kl1_stats[micro_batch_inds] = masked_mean(kl1, ~padding_mask[micro_batch_inds])
-                                kl2_stats[micro_batch_inds] = masked_mean(kl2, ~padding_mask[micro_batch_inds])
-                                kl3_stats[micro_batch_inds] = masked_mean(kl3, ~padding_mask[micro_batch_inds])
+                                kl1_stats[micro_batch_inds] = masked_mean(kl1, ~padding_mask[micro_batch_inds]).float()
+                                kl2_stats[micro_batch_inds] = masked_mean(kl2, ~padding_mask[micro_batch_inds]).float()
+                                kl3_stats[micro_batch_inds] = masked_mean(kl3, ~padding_mask[micro_batch_inds]).float()
                                 # don't need to keep track of kl4 because it's the same as kl1 numerically
                             pg_clipfrac = masked_mean(
                                 (pg_losses2 > pg_losses).float(), ~padding_mask[micro_batch_inds]
