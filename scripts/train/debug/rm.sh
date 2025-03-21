@@ -1,5 +1,5 @@
 python open_instruct/reward_modeling.py \
-    --dataset_mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
+    --dataset_mixer_list trl-internal-testing/sentiment-trl-style 400 \
     --model_name_or_path EleutherAI/pythia-14m \
     --tokenizer_name EleutherAI/pythia-14m \
     --learning_rate 3e-6 \
