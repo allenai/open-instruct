@@ -4,7 +4,7 @@ python mason.py \
     --priority normal \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
-    --num_nodes 4 \
+    --num_nodes 2 \
     --budget ai2/oe-adapt \
     --gpus 8 -- accelerate launch \
     --mixed_precision bf16 \
@@ -22,12 +22,11 @@ python mason.py \
     --dataset_mixer_list allenai/llama-3.1-tulu-3-8b-preference-mixture 1.0 \
     --max_token_length 4096 \
     --max_prompt_token_length 2048 \
-    --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 2 \
+    --per_device_train_batch_size 4 \
+    --gradient_accumulation_steps 4 \
     --learning_rate 3e-6 \
     --lr_scheduler_type linear \
     --num_train_epochs 1 \
     --gradient_checkpointing \
     --with_tracking \
-    --logging_steps 1 \
     --seed 8
