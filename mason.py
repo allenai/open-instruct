@@ -8,6 +8,7 @@ import secrets
 import string
 from rich.console import Console
 from rich.text import Text
+import select
 
 console = Console()
 
@@ -520,8 +521,8 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
         command.append("--wandb_entity")
         command.append("ai2-llm")
         
-        dataset_cache_path = None
-        dataset_config_hash = None
+        dataset_cache_paths = []
+        dataset_config_hashes = []
         if not args.no_auto_dataset_cache:
             for file in OPEN_INSTRUCT_COMMANDS:
                 # add cache_dataset_only to the command
@@ -546,18 +547,29 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                     
                     stdout_data, stderr_data = [], []
                     
-                    # Read output in real-time
-                    for stream, data_list in [(process.stdout, stdout_data), (process.stderr, stderr_data)]:
-                        for line in iter(stream.readline, ''):
-                            if not line:
-                                break
-                            print(line.rstrip(), file=sys.stdout if stream == process.stdout else sys.stderr)
-                            data_list.append(line)
+                    # Set up select to monitor both stdout and stderr
+                    streams = [process.stdout, process.stderr]
+                    while True:
+                        # Wait for output on either stream
+                        reads = select.select(streams, [], [])[0]
+                        
+                        done = True
+                        for stream in reads:
+                            line = stream.readline()
+                            if line:
+                                done = False
+                                is_stdout = stream == process.stdout
+                                print(line.rstrip(), file=sys.stdout if is_stdout else sys.stderr)
+                                if is_stdout:
+                                    stdout_data.append(line)
+                                else:
+                                    stderr_data.append(line)
+                        
+                        if done and process.poll() is not None:
+                            break
                             
-                    # Wait for process to complete
-                    return_code = process.wait()
                     result = type('SubprocessResult', (), {
-                        'returncode': return_code,
+                        'returncode': process.returncode,
                         'stdout': ''.join(stdout_data),
                         'stderr': ''.join(stderr_data)
                     })
@@ -569,7 +581,8 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                             dataset_config_hash = dataset_cache_path.split("/")[-1]
                             console.log(f"📦 Found cached dataset at: {dataset_cache_path}")
                             console.log(f"📦 Found cached dataset config hash: {dataset_config_hash}")
-                            break
+                            dataset_cache_paths.append(dataset_cache_path)
+                            dataset_config_hashes.append(dataset_config_hash)
                     stderr = result.stderr
                     return_code = result.returncode
                     console.log("✅✅✅ Finished running the caching command")
@@ -660,23 +673,28 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                     break
 
             # Save dataset to GCS
-            if dataset_cache_path:
-                gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_datasets/{dataset_cache_path}"
-                gs_folder = gs_folder_exists(gs_saved_path) # race condition exists, but it's fine since we are launching mason sequentially
-                if not gs_folder:
-                    upload_to_gs_bucket(dataset_cache_path, gs_saved_path)
-                dataset_cache_path_without_last_folder = dataset_cache_path.rsplit("/", 1)[0]
-                gs_download_command += [
-                    "mkdir", "-p", dataset_cache_path_without_last_folder,
-                    "&&",
-                    "gsutil",
-                    "cp", "-r", gs_saved_path, dataset_cache_path_without_last_folder,
-                    "&&", "ls", dataset_cache_path_without_last_folder,
-                    "&&", "ls", dataset_cache_path,
-                    "&&",
-                ]
-                command.append("--dataset_config_hash")
-                command.append(dataset_config_hash)
+            if len(dataset_cache_paths) > 0:
+                for cidx, (dataset_cache_path, dataset_config_hash) in enumerate(zip(dataset_cache_paths, dataset_config_hashes)):
+                    gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_datasets/{dataset_cache_path}"
+                    gs_folder = gs_folder_exists(gs_saved_path) # race condition exists, but it's fine since we are launching mason sequentially
+                    if not gs_folder:
+                        upload_to_gs_bucket(dataset_cache_path, gs_saved_path)
+                    dataset_cache_path_without_last_folder = dataset_cache_path.rsplit("/", 1)[0]
+                    gs_download_command += [
+                        "mkdir", "-p", dataset_cache_path_without_last_folder,
+                        "&&",
+                        "gsutil",
+                        "cp", "-r", gs_saved_path, dataset_cache_path_without_last_folder,
+                        "&&", "ls", dataset_cache_path_without_last_folder,
+                        "&&", "ls", dataset_cache_path,
+                        "&&",
+                    ]
+                    if cidx == 0:
+                        command.append("--dataset_config_hash")
+                        command.append(dataset_config_hash)
+                    elif cidx == 1:
+                        command.append("--dataset_config_eval_hash")
+                        command.append(dataset_config_hash)
             command = gs_download_command + command
 
     # special logic to deal with escape like

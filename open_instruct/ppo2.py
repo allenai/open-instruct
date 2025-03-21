@@ -140,6 +140,8 @@ class Args:
     """The directory to save the local dataset cache to."""
     dataset_config_hash: Optional[str] = None
     """The hash of the dataset configuration."""
+    dataset_config_eval_hash: Optional[str] = None
+    """The hash of the dataset configuration for evaluation."""
     dataset_skip_cache: bool = False
     """Whether to skip the cache."""
     max_token_length: int = 512
@@ -1728,7 +1730,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             transform_fn_args,
             hf_entity=args.hf_entity,
             dataset_cache_mode=args.dataset_cache_mode,
-            dataset_config_hash=args.dataset_config_hash,
+            dataset_config_hash=args.dataset_config_eval_hash,
             dataset_local_cache_dir=args.dataset_local_cache_dir,
             dataset_skip_cache=args.dataset_skip_cache,
         )
