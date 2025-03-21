@@ -11,9 +11,7 @@ python open_instruct/ppo_vllm_thread_ray_gtrl.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --chat_template_name tulu \
-    --sft_messages_key messages \
     --learning_rate 3e-7 \
     --total_episodes 10000 \
     --penalty_reward_value -10.0 \

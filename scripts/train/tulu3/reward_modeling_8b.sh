@@ -1,0 +1,32 @@
+python mason.py \
+    --cluster ai2/jupiter-cirrascale-2 \
+    --workspace ai2/tulu-3-dev \
+    --priority normal \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
+    --preemptible \
+    --num_nodes 2 \
+    --budget ai2/oe-adapt \
+    --gpus 8 -- accelerate launch \
+    --mixed_precision bf16 \
+    --num_processes 8 \
+    --use_deepspeed \
+    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
+    --deepspeed_multinode_launcher standard \
+    open_instruct/reward_modeling.py \
+    --exp_name tulu3_8b_rm \
+    --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-SFT \
+    --model_revision main \
+    --tokenizer_name allenai/Llama-3.1-Tulu-3-8B-SFT \
+    --tokenizer_revision main \
+    --use_slow_tokenizer \
+    --dataset_mixer_list allenai/llama-3.1-tulu-3-8b-preference-mixture 1.0 \
+    --max_token_length 4096 \
+    --max_prompt_token_length 2048 \
+    --per_device_train_batch_size 4 \
+    --gradient_accumulation_steps 4 \
+    --learning_rate 3e-6 \
+    --lr_scheduler_type linear \
+    --num_train_epochs 1 \
+    --gradient_checkpointing \
+    --with_tracking \
+    --seed 8

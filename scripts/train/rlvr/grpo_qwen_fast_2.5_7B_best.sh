@@ -1,0 +1,53 @@
+exp_name="0302_qwen2.5_7B_math_grpo_fast1_${RANDOM}"
+python mason.py \
+    --cluster ai2/jupiter-cirrascale-2  \
+    --workspace ai2/tulu-3-dev \
+    --priority urgent \
+    --preemptible \
+    --num_nodes 2 \
+    --max_retries 0 \
+    --budget ai2/oe-adapt \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+    --exp_name 0302_qwen2.5_7B_math_grpo_fast1_1317 \
+    --beta 0.0 \
+    --number_samples_per_prompt 16 \
+    --output_dir /weka/oe-adapt-default/costah/models/0302_qwen2.5_7B_math_grpo_fast1_1317 \
+    --oe_eval_tasks minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning \
+    --save_freq 40 \
+    --no_try_launch_beaker_eval_jobs \
+    --try_launch_beaker_eval_jobs_on_weka \
+    --local_rollout_batch_size 8 \
+    --kl_estimator kl3 \
+    --learning_rate 5e-7 \
+    --dataset_mixer_list ai2-adapt-dev/math_ground_truth_zs 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list ai2-adapt-dev/math_ground_truth_zs 16 \
+    --dataset_mixer_eval_list_splits train \
+    --max_token_length 2048 \
+    --max_prompt_token_length 2048 \
+    --response_length 2048 \
+    --pack_length 4096 \
+    --model_name_or_path Qwen/Qwen2.5-7B \
+    --stop_strings "</answer>" \
+    --add_r1_style_format_reward \
+    --chat_template_name r1_simple_chat_postpend_think \
+    --non_stop_penalty False \
+    --stop_token eos \
+    --temperature 1.0 \
+    --ground_truths_key ground_truth \
+    --total_episodes 1000000 \
+    --penalty_reward_value 0.0 \
+    --deepspeed_stage 2 \
+    --per_device_train_batch_size 1 \
+    --num_mini_batches 1 \
+    --actor_num_gpus_per_node 6 \
+    --num_epochs 1 \
+    --vllm_tensor_parallel_size 1 \
+    --vllm_num_engines 10 \
+    --lr_scheduler_type linear \
+    --apply_verifiable_reward true \
+    --seed 1 \
+    --num_evals 200 \
+    --reward_model_multiplier 0.0 \
+    --gradient_checkpointing \
+    --with_tracking

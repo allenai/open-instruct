@@ -15,11 +15,11 @@ accelerate launch \
     --weight_decay 0.0 \
     --num_train_epochs 2 \
     --output_dir output/sft_pythia_14m/ \
-    --with_tracking \
     --report_to wandb \
     --logging_steps 1 \
     --reduce_loss sum \
     --model_revision main \
     --dataset_mixer_list allenai/tulu-3-sft-personas-algebra 100 \
     --add_bos \
-    --seed 123
+    --seed 123 \
+    # --with_tracking \

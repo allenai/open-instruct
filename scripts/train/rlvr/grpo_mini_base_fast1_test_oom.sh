@@ -1,13 +1,5 @@
-exp_name="0302_qwen2.5_7B_math_grpo_fast1_${RANDOM}"
-python mason.py \
-    --cluster ai2/jupiter-cirrascale-2  \
-    --workspace ai2/tulu-3-dev \
-    --priority normal \
-    --preemptible \
-    --num_nodes 1 \
-    --max_retries 0 \
-    --budget ai2/oe-adapt \
-    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_vllm_thread_ray_gtrl.py \
+exp_name="base_smollm_grpo_${RANDOM}"
+python open_instruct/grpo_fast.py \
     --exp_name $exp_name \
     --output_dir /weka/oe-adapt-default/costah/models/$exp_name \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \
@@ -15,11 +7,14 @@ python mason.py \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
-    --max_prompt_token_length 2048 \
-    --response_length 2048 \
+    --max_prompt_token_length 1024 \
+    --response_length 1024 \
+    --pack_length 2048 \
+    --per_device_train_batch_size 8 \
+    --local_rollout_batch_size 16 \
     --number_samples_per_prompt 4 \
-    --model_name_or_path meta-llama/Llama-3.1-8B \
-    --stop_strings '"</answer>"' \
+    --model_name_or_path HuggingFaceTB/SmolLM2-135M \
+    --stop_strings "</answer>" \
     --add_r1_style_format_reward \
     --non_stop_penalty False \
     --stop_token eos \
@@ -30,20 +25,19 @@ python mason.py \
     --sft_messages_key messages \
     --learning_rate 3e-7 \
     --total_episodes 1000000 \
-    --deepspeed_stage 3 \
-    --per_device_train_batch_size 1 \
-    --local_rollout_forward_batch_size 1 \
-    --local_mini_batch_size 16 \
-    --local_rollout_batch_size 16 \
+    --deepspeed_stage 2 \
     --num_epochs 1 \
-    --actor_num_gpus_per_node 6 \
-    --vllm_tensor_parallel_size 2 \
+    --actor_num_gpus_per_node 1 \
+    --vllm_tensor_parallel_size 1 \
     --beta 0.01 \
     --apply_verifiable_reward true \
     --seed 3 \
-    --num_evals 100 \
-    --save_freq 100 \
+    --num_evals 1 \
     --reward_model_multiplier 0.0 \
     --no_try_launch_beaker_eval_jobs \
+    --vllm_sync_backend nccl \
+    --vllm_gpu_memory_utilization 0.9 \
+    --vllm_enforce_eager \
     --gradient_checkpointing \
-    --with_tracking
+    # --with_tracking
+    # --single_gpu_mode \

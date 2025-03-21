@@ -15,9 +15,9 @@ accelerate launch \
     --weight_decay 0.0 \
     --num_train_epochs 3 \
     --output_dir output/dpo_pythia_14m/ \
-    --with_tracking \
     --report_to wandb \
     --logging_steps 1 \
     --dataset_mixer_list allenai/tulu-3-wildchat-reused-on-policy-8b 100 \
     --add_bos \
-    --seed 123
+    --seed 123 \
+    # --with_tracking \
