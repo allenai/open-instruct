@@ -35,7 +35,7 @@ actor = LLMSearchRayActor.options(
     seed=42,
     enable_prefix_caching=True,
     max_model_len=args.model_len,  # This will be used as default max_context_length if not explicitly set
-    max_context_length=args.model_len,  # Explicitly set a custom max context length
+    max_output_len=args.model_len,  # Explicitly set a custom max context length
     gpu_memory_utilization=0.95,
 )
 
