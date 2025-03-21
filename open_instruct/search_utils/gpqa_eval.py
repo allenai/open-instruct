@@ -62,7 +62,7 @@ result = ray.get(
     )
 )
 # grab text answers
-predictions = [x[0].text for x in result]
+predictions = [x.outputs[0].text for x in result]
 # parse out answer
 predictions = [x.split("<answer>")[-1].split("</answer>")[0].lower() for x in predictions]
 labels = [data["ground_truth"].lower() for data in ds]
