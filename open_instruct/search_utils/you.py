@@ -1,6 +1,7 @@
 import os
 import requests
 
+from open_instruct.search_utils.s2 import create_session_with_retries
 
 def get_snippets_for_query(query: str) -> List[str]:
     """
@@ -11,10 +12,12 @@ def get_snippets_for_query(query: str) -> List[str]:
     if not api_key:
         raise ValueError("Missing YOUCOM_API_KEY environment variable.")
     
+    session = create_session_with_retries()
+    
     headers = {"X-API-Key": api_key}
     params = {"query": query, "num_web_results": 1}
     try:
-        response = requests.get(
+        response = session.get(
             "https://api.ydc-index.io/search",
             params=params,
             headers=headers,
@@ -22,9 +25,8 @@ def get_snippets_for_query(query: str) -> List[str]:
         )
         response.raise_for_status()
         data = response.json()
-    except requests.RequestException as e:
-        # Log the error as needed; returning empty list here
-        return []
+    except requests.exceptions.RequestException as e:
+        print(f"Error: {e}")
     
     snippets = []
     for hit in data.get("hits", []):
