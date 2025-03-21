@@ -19,7 +19,6 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from transformers import (
     AutoModelForSequenceClassification,
-    AutoTokenizer,
     PreTrainedModel,
     get_scheduler,
 )
@@ -78,6 +77,8 @@ class Args:
     """The directory to save the local dataset cache to."""
     dataset_config_hash: Optional[str] = None
     """The hash of the dataset configuration."""
+    dataset_config_eval_hash: Optional[str] = None
+    """The hash of the dataset configuration for evaluation."""
     dataset_skip_cache: bool = False
     """Whether to skip the cache."""
     max_token_length: int = 512
@@ -152,6 +153,10 @@ class Args:
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
     output_dir: str = "output"
     """Where to save the model"""
+
+    # Ai2 specific settings
+    gs_bucket_path: Optional[str] = None
+    """The path to the gs bucket to save the model to"""
 
 
 def layer_init(layer: nn.Module, std: float):
@@ -285,7 +290,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
                 transform_fn_args,
                 hf_entity=args.hf_entity,
                 dataset_cache_mode=args.dataset_cache_mode,
-                dataset_config_hash=args.dataset_config_hash,
+                dataset_config_hash=args.dataset_config_eval_hash,
                 dataset_local_cache_dir=args.dataset_local_cache_dir,
                 dataset_skip_cache=args.dataset_skip_cache,
             )

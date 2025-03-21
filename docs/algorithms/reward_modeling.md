@@ -17,6 +17,7 @@ This implementation has the following key features:
 - Auto save the trained checkpoint to HuggingFace Hub
 - Supports LigerKernel for optimized training with fused operations
 
+## `reward_modeling.py`
 
 
 ### Debug (Single GPU)
@@ -26,8 +27,6 @@ You can run the script in a single GPU mode to debug the training process.
 ```bash
 bash scripts/train/debug/reward_modeling.sh
 ```
-
-![reward_modeling](reward_modeling/reward_modeling_debug.png)
 
 
 ### Reproduce `allenai/Llama-3.1-Tulu-3-8B-RM` (8 Nodes)
@@ -39,6 +38,14 @@ bash scripts/train/tulu3/reward_modeling_8b.sh
 ```
 
 
+![finetune_plot](reward_modeling/tulu3_8b_rm.png)
+![finetune_plot](reward_modeling/tulu3_8b_rm-time.png)
+
+
+* Here is the report: [Tulu3-8B-RM](https://wandb.ai/ai2-llm/open_instruct_public/reports/Tulu3-8B-RM--VmlldzoxMTkwOTgyNw)
+
+You can reproduce our `allenai/Llama-3.1-Tulu-3-8B-RM` model by running the following command:
+
 
 ### Training Metrics
 
@@ -48,8 +55,8 @@ During training, the following metrics are logged:
 * `epoch`: the fraction or multiple of the epoch (e.g., `2.7` means we have trained on the dataset for 2 epochs and 70% of the third epoch)
 * `train/rm/accuracy`: the training accuracy of the training batch
 * `train/rm/loss`: the logsigmoid loss of the reward modeling of the training batch
-* `train/rm/chosen_reward`: the reward of the chosen responses of the training batch
-* `train/rm/rejected_reward`: the reward of the rejected responses of the training batch
+* `train/rm/chosen_rewards`: the reward of the chosen responses of the training batch
+* `train/rm/rejected_rewards`: the reward of the rejected responses of the training batch
 * `train/rm/reward_margin`: the reward margin (chosen_reward - rejected_reward) of the training batch
 * `train/rm/lr`: the training learning rate
 
