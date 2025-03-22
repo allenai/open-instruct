@@ -255,9 +255,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --chat_template_name tulu \
-    --sft_messages_key messages \
     --total_episodes 100000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -314,9 +312,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --chat_template_name tulu \
-    --sft_messages_key messages \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -488,9 +484,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --chat_template_name tulu \
-    --sft_messages_key messages \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -546,9 +540,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --chat_template_name tulu \
-    --sft_messages_key messages \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -604,9 +596,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --chat_template_name tulu \
-    --sft_messages_key messages \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -663,9 +653,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --chat_template_name tulu \
-    --sft_messages_key messages \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -721,9 +709,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --chat_template_name tulu \
-    --sft_messages_key messages \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -781,9 +767,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --chat_template_name tulu \
-    --sft_messages_key messages \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -839,9 +823,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --chat_template_name tulu \
-    --sft_messages_key messages \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -897,9 +879,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --chat_template_name tulu \
-    --sft_messages_key messages \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
