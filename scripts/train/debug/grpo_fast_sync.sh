@@ -18,7 +18,6 @@ python open_instruct/grpo_fast.py \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
     --temperature 0.7 \
-    --ground_truths_key ground_truth \
     --chat_template_name r1_simple_chat_postpend_think \
     --learning_rate 3e-7 \
     --total_episodes 10000 \
