@@ -13,7 +13,7 @@ python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --temperature 1.0 \
     --chat_template_name tulu \
     --learning_rate 3e-7 \
-    --total_episodes 10000 \
+    --total_episodes 200 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
     --per_device_train_batch_size 1 \
