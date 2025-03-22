@@ -15,7 +15,7 @@ python open_instruct/ppo2.py \
     --chat_template_name tulu \
     --sft_messages_key messages \
     --learning_rate 3e-7 \
-    --total_episodes 10000 \
+    --total_episodes 200 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
     --per_device_train_batch_size 1 \
@@ -27,7 +27,6 @@ python open_instruct/ppo2.py \
     --vllm_tensor_parallel_size 1 \
     --beta 0.05 \
     --apply_verifiable_reward true \
-    --output_dir output/rlvr_1b \
     --seed 3 \
     --num_evals 3 \
     --save_freq 100 \
