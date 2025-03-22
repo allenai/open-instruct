@@ -1004,7 +1004,7 @@ def maybe_use_ai2_wandb_entity() -> Optional[str]:
 @retry_on_exception()
 @functools.lru_cache(maxsize=1)
 def hf_whoami() -> List[str]:
-    logger.info("called HfApi().whoami()")
+    print("called HfApi().whoami()")
     return HfApi().whoami()
 
 
