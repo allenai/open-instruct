@@ -17,7 +17,6 @@ This implementation has the following key features:
 - Auto save the trained checkpoint to HuggingFace Hub
 - Supports LigerKernel for optimized training with fused operations
 
-## `reward_modeling.py`
 
 
 ### Debug (Single GPU)
@@ -42,9 +41,7 @@ bash scripts/train/tulu3/reward_modeling_8b.sh
 ![finetune_plot](reward_modeling/tulu3_8b_rm-time.png)
 
 
-* Here is the report: [Tulu3-8B-RM](https://wandb.ai/ai2-llm/open_instruct_public/reports/Tulu3-8B-RM--VmlldzoxMTkwOTgyNw)
-
-You can reproduce our `allenai/Llama-3.1-Tulu-3-8B-RM` model by running the following command:
+<iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Tulu3-8B-RM--VmlldzoxMTkwOTgyNw" style="width:100%; height:500px" title="Tulu3-8B-RM"></iframe>
 
 
 ### Training Metrics
