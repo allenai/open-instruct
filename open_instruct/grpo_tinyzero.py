@@ -66,6 +66,14 @@ from open_instruct.dataset_transformation import (
     visualize_token,
 )
 from open_instruct.ground_truth_utils import soft_format_reward_func
+from open_instruct.grpo_fast import (
+    ModelGroup,
+    PolicyTrainerRayProcess,
+    ShufflingIterator,
+    Timer,
+    data_preparation_thread,
+    vllm_generate_thread,
+)
 from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
@@ -83,14 +91,6 @@ from open_instruct.utils import (
 )
 from open_instruct.vllm_utils2 import create_vllm_engines
 
-from open_instruct.grpo_fast import (
-    Timer,
-    ShufflingIterator,
-    PolicyTrainerRayProcess,
-    ModelGroup,
-    vllm_generate_thread,
-    data_preparation_thread,
-)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -99,21 +99,15 @@ INVALID_LOGPROB = 1.0
 @dataclass
 class Args:
     # Dataset
-    dataset_mixer_list: List[str] = field(
-        default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"]
-    )
+    dataset_mixer_list: List[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_eval_list: List[str] = field(
-        default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"]
-    )
+    dataset_mixer_eval_list: List[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
     """A list of datasets (local or HF) to sample from for evaluation."""
     dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
     """The dataset splits to use for training"""
     dataset_mixer_eval_list_splits: List[str] = field(default_factory=lambda: ["test"])
     """The dataset splits to use for evaluation"""
-    dataset_transform_fn: list[str] = field(
-        default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_filter_v1"]
-    )
+    dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_filter_v1"])
     """The list of transform functions to apply to the dataset."""
     dataset_cache_mode: Literal["hf", "local"] = "local"
     """The mode to use for caching the dataset."""
@@ -301,33 +295,21 @@ class Args:
     def __post_init__(self):
         if self.single_gpu_mode:
             self.vllm_gpu_memory_utilization = 0.3
+        assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
         assert (
-            self.num_samples_per_prompt_rollout > 1
-        ), "Number of samples per prompt must be greater than 1 for GRPO!"
-        assert (
-            self.apply_verifiable_reward
-            or self.apply_r1_style_format_reward
-            or self.non_stop_penalty
+            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
         ), "At least one reward must be applied!"
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
         ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
 
 
-def main(
-    args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable
-):
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
     # ------------------------------------------------------------
     # Setup tokenizer
-    tc.tokenizer_revision = (
-        model_config.model_revision
-        if tc.tokenizer_revision is None
-        else tc.tokenizer_revision
-    )
+    tc.tokenizer_revision = model_config.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
     tc.tokenizer_name_or_path = (
-        model_config.model_name_or_path
-        if tc.tokenizer_name_or_path is None
-        else tc.tokenizer_name_or_path
+        model_config.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
     )
     if (
         tc.tokenizer_revision != model_config.model_revision
@@ -347,18 +329,14 @@ def main(
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
     if is_beaker_job():
-        args.dataset_local_cache_dir = (
-            "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
-        )
+        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
     args.world_size = sum(args.num_learners_per_node)
     args.num_training_steps = args.total_episodes // (
         args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     )
     args.eval_freq = max(1, args.num_training_steps // args.num_evals)
     if args.is_ai2:
-        args.try_launch_beaker_eval_jobs_on_weka = (
-            args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
-        )
+        args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -369,9 +347,7 @@ def main(
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
         if args.hf_repo_revision is None:  # auto-generate one
             args.hf_repo_revision = args.run_name
-        args.hf_repo_url = (
-            f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-        )
+        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
     if args.with_tracking:
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
@@ -399,8 +375,7 @@ def main(
     writer = SummaryWriter(f"runs/{args.run_name}")
     writer.add_text(
         "hyperparameters",
-        "|param|value|\n|-|-|\n%s"
-        % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),  # noqa
     )
 
     # ------------------------------------------------------------
@@ -451,10 +426,7 @@ def main(
     # ------------------------------------------------------------
     # Create the model and optimizer
     pg = None
-    bundles = [
-        {"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10}
-        for actor_num_gpus in args.num_learners_per_node
-    ]
+    bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
     ray.get(pg.ready())
     inits = []
@@ -466,9 +438,7 @@ def main(
     )
     wandb_url = wandb.run.get_url() if args.with_tracking else None
     inits.extend(
-        model.from_pretrained.remote(
-            args, model_config, beaker_config, wandb_url, tokenizer
-        )
+        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
         for model in policy_group.models
     )
     max_len = args.max_prompt_token_length + args.response_length
@@ -488,12 +458,7 @@ def main(
     ray.get(inits)
     print("======== ✅ all models and vLLM engines initialized =========")
 
-    ray.get(
-        [
-            m.setup_model_update_group.remote(vllm_engines=vllm_engines)
-            for m in policy_group.models
-        ]
-    )
+    ray.get([m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models])
     print("======== ✅ model update group setup successfully =========")
 
     # Setup training
@@ -514,9 +479,7 @@ def main(
         stop=args.stop_strings,
     )
     train_dataset_idxs = np.arange(len(train_dataset))
-    iter_dataloader = ShufflingIterator(
-        train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed
-    )
+    iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
 
     inference_results_Q = Queue(maxsize=1)
     param_prompt_Q = Queue(maxsize=1)
@@ -586,16 +549,12 @@ def main(
             # ------------------------------------------------------------------------------------------------
             # Optionally evaluate the model
             try:
-                evaluation_responses, _ = evaluation_inference_results_Q.get(
-                    timeout=0.01
-                )
+                evaluation_responses, _ = evaluation_inference_results_Q.get(timeout=0.01)
                 print("[Main Thread] 📊 Evaluation responses received")
                 table = {}
                 table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
                 table["response"] = tokenizer.batch_decode(evaluation_responses)
-                table["response"] = [
-                    item.replace(tokenizer.pad_token, "") for item in table["response"]
-                ]
+                table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
                 table["ground_truth"] = eval_ground_truths
                 df = pd.DataFrame(table)
                 if args.with_tracking:
@@ -615,9 +574,7 @@ def main(
                     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
                     datasets_next = data_next[DATASET_SOURCE_KEY]
                     with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
-                        ray.get(
-                            [m.broadcast_to_vllm.remote() for m in policy_group.models]
-                        )
+                        ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
                 queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
                 param_prompt_Q.put((None, queries_next))
             else:
@@ -629,12 +586,8 @@ def main(
                     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
                     datasets_next = data_next[DATASET_SOURCE_KEY]
                     with Timer("🔄 Loading weights using shared memory"):
-                        ray.get(
-                            [m.broadcast_to_vllm.remote() for m in policy_group.models]
-                        )
-                    queries_prompt_Q.put(
-                        (queries_next, ground_truths_next, datasets_next)
-                    )
+                        ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
+                    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
                     param_prompt_Q.put((None, queries_next))
 
             # ------------------------------------------------------------------------------------------------
@@ -652,9 +605,7 @@ def main(
                 f"Number of training examples per device: {B=}, packed sequence fraction of original sequences: {len(packed_sequences.query_responses) / packed_data['responses_count']}"
             )
             if B == 0:
-                print(
-                    "[Main Thread] 🤡 After packing, there is not enough data to train"
-                )
+                print("[Main Thread] 🤡 After packing, there is not enough data to train")
                 continue
 
             # ------------------------------------------------------------------------------------------------
@@ -670,17 +621,12 @@ def main(
                         for i in range(args.world_size)
                     ]
                 )
-                average_metrics = {
-                    k: sum(m[k] for m in metrics_list) / len(metrics_list)
-                    for k in metrics_list[0]
-                }
+                average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
                 metrics = {
                     "episode": episode,
                     "training_step": training_step,
                     "val/num_total_tokens": num_total_tokens,
-                    "epoch": episode
-                    / args.num_samples_per_prompt_rollout
-                    / len(train_dataset),
+                    "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
                     "tokens_per_second": num_total_tokens / (time.time() - start_time),
                     **data_thread_metrics,
                     **average_metrics,
@@ -694,21 +640,12 @@ def main(
                         checkpoint_dir = f"{args.output_dir}_checkpoints"
                         step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
                         print(f"Saving model at step {training_step} to {step_dir}")
-                        ray.get(
-                            [
-                                policy_group.models[i].save_model.remote(step_dir)
-                                for i in range(args.world_size)
-                            ]
-                        )
+                        ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
                         if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
-                            leaderboard_name = (
-                                f"{args.hf_repo_revision}_step_{training_step}"
-                            )
+                            leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
                             eval_futures.extend(
                                 [
-                                    policy_group.models[
-                                        i
-                                    ].launch_ai2_evals_on_weka_wrapper.remote(
+                                    policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
                                         step_dir,
                                         leaderboard_name,
                                         wandb_url,
@@ -720,12 +657,7 @@ def main(
 
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):
-            ray.get(
-                [
-                    policy_group.models[i].save_model.remote(args.output_dir)
-                    for i in range(args.world_size)
-                ]
-            )
+            ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
             if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                 leaderboard_name = args.hf_repo_revision
                 eval_futures.extend(
@@ -791,12 +723,8 @@ if __name__ == "__main__":
         scores = [0] * len(decoded_responses)
         metrics = {}
         if args.apply_r1_style_format_reward:
-            with Timer(
-                "[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"
-            ):
-                format_scores = soft_format_reward_func(
-                    decoded_responses, args.r1_style_format_reward
-                )
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
+                format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
                 if len(format_scores) != len(scores):
                     raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
                 for i in range(len(format_scores)):
@@ -804,9 +732,7 @@ if __name__ == "__main__":
                 metrics["val/format_scores"] = np.array(format_scores).mean()
 
         if args.apply_verifiable_reward:
-            with Timer(
-                "[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"
-            ):
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
                 verifiable_rewards, per_func_rewards = apply_verifiable_reward(
                     responses,
                     decoded_responses,
@@ -820,9 +746,7 @@ if __name__ == "__main__":
                     scores[i] = verifiable_rewards[i] + scores[i]
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
-                metrics["objective/verifiable_correct_rate"] = (
-                    np_verifiable_rewards > 0.0
-                ).mean()
+                metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
                 # reshuffle around per_func rewards
                 per_func_lists = defaultdict(list)
                 for reward_dict in per_func_rewards:
@@ -836,9 +760,7 @@ if __name__ == "__main__":
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:
-            with Timer(
-                "[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty"
-            ):
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty"):
                 assert len(finish_reasons) == len(scores)
                 for i in range(len(finish_reasons)):
                     if finish_reasons[i] != "stop":
@@ -846,9 +768,7 @@ if __name__ == "__main__":
 
         # @nouha: handle arithmetic reward
         if args.apply_arithmetic_reward:
-            with Timer(
-                "[Data Preparation Thread] Calculating rewards -- 🧮 Calculating arithmetic reward"
-            ):
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating arithmetic reward"):
                 arithmetic_rewards = []
                 for i in range(len(decoded_responses)):
                     # extract the string between <answer> and </answer>
@@ -867,12 +787,8 @@ if __name__ == "__main__":
                     except:  # noqa
                         arithmetic_rewards.append(0)
                         pass  # it's ok if things went wrong
-                metrics["objective/arithmetic_score"] = np.array(
-                    arithmetic_rewards
-                ).mean()
-                metrics["objective/arithmetic_correct_rate"] = (
-                    np.array(arithmetic_rewards) > 0.0
-                ).mean()
+                metrics["objective/arithmetic_score"] = np.array(arithmetic_rewards).mean()
+                metrics["objective/arithmetic_correct_rate"] = (np.array(arithmetic_rewards) > 0.0).mean()
 
         return scores, metrics
 
