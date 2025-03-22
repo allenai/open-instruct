@@ -76,6 +76,7 @@ nav:
     - algorithms/dataset.md
     - algorithms/finetune.md
     - algorithms/grpo.md
+    - algorithms/reward_modeling.md
 
 
 extra_css:
