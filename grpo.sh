@@ -20,7 +20,7 @@ uv run open_instruct/grpo_tinyzero.py \
     --chat_template_name r1_simple_chat_postpend_think \
     --learning_rate 3e-7 \
     --total_episodes 128000 \
-    --per_device_train_batch_size 1 \
+    --per_device_train_batch_size 4 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \

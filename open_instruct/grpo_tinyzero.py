@@ -109,7 +109,7 @@ class Args:
     """The dataset splits to use for evaluation"""
     dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_filter_v1"])
     """The list of transform functions to apply to the dataset."""
-    dataset_cache_mode: Literal["hf", "local"] = "local"
+    dataset_cache_mode: Literal["hf", "local"] = "hf"
     """The mode to use for caching the dataset."""
     dataset_local_cache_dir: str = "local_dataset_cache"
     """The directory to save the local dataset cache to."""
