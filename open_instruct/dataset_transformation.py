@@ -457,6 +457,10 @@ GET_TOKENIZER_FN = {
     "get_tokenizer_tulu_v2_2": get_tokenizer_tulu_v2_2,
 }
 
+DEFAULT_SFT_MESSAGES_KEY = "messages"
+GROUND_TRUTHS_KEY = "ground_truth"
+DATASET_SOURCE_KEY = "dataset"
+
 
 @dataclass
 class TokenizerConfig:
@@ -474,6 +478,10 @@ class TokenizerConfig:
     # backward compatibility to make sure script runs
     use_slow_tokenizer: bool = False  # completely ignored
     tokenizer_name: Optional[str] = None
+    ground_truths_key: str = GROUND_TRUTHS_KEY
+    """columns name for the ground truth"""
+    sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
+    """columns name for the sft messages"""
 
     @cached_property
     def tokenizer(self):
@@ -499,7 +507,6 @@ class TokenizerConfig:
 # ----------------------------------------------------------------------------
 # Dataset Transformation
 # SFT dataset
-DEFAULT_SFT_MESSAGES_KEY = "messages"
 INPUT_IDS_KEY = "input_ids"
 ATTENTION_MASK_KEY = "attention_mask"
 LABELS_KEY = "labels"
@@ -526,8 +533,6 @@ REJECTED_LABELS_KEY = "rejected_labels"
 
 INPUT_IDS_PROMPT_KEY = "input_ids_prompt"
 ATTENTION_MASK_PROMPT_KEY = "attention_mask_prompt"
-GROUND_TRUTHS_KEY = "ground_truth"
-DATASET_SOURCE_KEY = "dataset"
 
 TOKENIZED_PREFERENCE_DATASET_KEYS = [
     CHOSEN_INPUT_IDS_KEY,
