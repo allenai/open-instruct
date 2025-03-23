@@ -48,10 +48,6 @@ bash scripts/train/tulu3/finetune_8b.sh
     ![tulu3_8b](finetune/tulu3_8b.png)
 
 
-``` title="docs/algorithms/plot/finetune_plot.sh" linenums="1"
---8<-- "docs/algorithms/plot/finetune_plot.sh:1:12"
-```
-
 
 ![finetune_plot](finetune/tulu3_8b_sft.png)
 ![finetune_plot](finetune/tulu3_8b_sft-time.png)
@@ -68,6 +64,23 @@ Based on our internal evaluation, the SFT model is roughly on par with the origi
 
 
 ![finetune_plot](finetune/tulu3_8b_repro.png)
+
+
+### Reproduce `allenai/OLMo-2-1124-7B-SFT` (8 Nodes)
+
+You can reproduce our `allenai/OLMo-2-1124-7B-SFT` model by running the following command:
+
+```bash
+bash scripts/train/olmo2/finetune_7b.sh
+```
+
+![finetune_plot](finetune/olmo2_7b_sft.png)
+![finetune_plot](finetune/olmo2_7b_sft-time.png)
+
+
+<iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-7B-SFT--VmlldzoxMTkyNzUyOA" style="width:100%; height:500px" title="OLMo2-7B-SFT"></iframe>
+
+
 
 
 ### Training Metrics
