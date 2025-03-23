@@ -36,6 +36,7 @@ os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 # isort: on
 
 
+import logging
 import os
 import threading
 import time
@@ -43,7 +44,7 @@ import traceback
 from argparse import Namespace
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
-from typing import Callable, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional
 
 import numpy as np
 import pandas as pd
@@ -51,10 +52,12 @@ import ray
 import torch
 import torch.utils
 import torch.utils.data
+from datasets import load_dataset
 from huggingface_hub import HfApi
 from ray.util.placement_group import placement_group
 from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
+from transformers import AutoTokenizer
 from vllm import SamplingParams
 
 from open_instruct.dataset_transformation import (
@@ -62,7 +65,6 @@ from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     TokenizerConfig,
-    get_cached_dataset_tulu,
     visualize_token,
 )
 from open_instruct.ground_truth_utils import soft_format_reward_func
@@ -94,37 +96,20 @@ from open_instruct.vllm_utils2 import create_vllm_engines
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
+logger = logging.Logger(__name__)
 
 
 @dataclass
 class Args:
     # Dataset
-    dataset_mixer_list: List[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
-    """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_eval_list: List[str] = field(default_factory=lambda: ["ai2-adapt-dev/rlvr_gsm8k_zs", "1.0"])
-    """A list of datasets (local or HF) to sample from for evaluation."""
-    dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
-    """The dataset splits to use for training"""
-    dataset_mixer_eval_list_splits: List[str] = field(default_factory=lambda: ["test"])
-    """The dataset splits to use for evaluation"""
-    dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_filter_v1"])
-    """The list of transform functions to apply to the dataset."""
-    dataset_cache_mode: Literal["hf", "local"] = "hf"
-    """The mode to use for caching the dataset."""
-    dataset_local_cache_dir: str = "local_dataset_cache"
-    """The directory to save the local dataset cache to."""
-    dataset_config_hash: Optional[str] = None
-    """The hash of the dataset configuration."""
-    dataset_config_eval_hash: Optional[str] = None
-    """The hash of the dataset configuration for evaluation."""
-    dataset_skip_cache: bool = False
-    """Whether to skip the cache."""
+    dataset_name: str = None
+    """Dataset name"""
+    dataset_split: str = "train"
+    """Dataset split"""
     max_token_length: int = 512
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
     """The maximum prompt token length to use for the dataset"""
-    ground_truths_key: str = GROUND_TRUTHS_KEY
-    """columns name for the ground truth"""
 
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -208,13 +193,13 @@ class Args:
     # -- r1 style format reward
     apply_r1_style_format_reward: bool = False
     """whether to add the R1 style format reward"""
-    r1_style_format_reward: float = 1.0
+    r1_style_format_reward: float = 0.1
     """the reward value for R1 style format reward"""
 
     # -- verifiable reward
     apply_verifiable_reward: bool = True
     """whether to apply verifiable reward"""
-    verification_reward: float = 10.0
+    verification_reward: float = 0.9
     """the reward value for verifiable responses"""
 
     # -- non stop penalty
@@ -222,12 +207,6 @@ class Args:
     """whether to penalize responses which did not finish generation"""
     non_stop_penalty_value: float = 0.0
     """the reward value for responses which did not finish generation"""
-
-    # -- arithmetic reward
-    apply_arithmetic_reward: bool = False
-    """whether to apply arithmetic reward"""
-    arithmetic_reward: float = 10.0
-    """the reward value for arithmetic responses"""
 
     # Ray
     single_gpu_mode: bool = False
@@ -304,6 +283,66 @@ class Args:
         ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
 
 
+def preprocess_example(
+    example: Dict[str, Any],
+    tokenizer: AutoTokenizer,
+    SYSTEM_MESSAGE: str,
+    PROMPT_TEMPLATE: str,
+):
+    numbers: List[int] = example["nums"]
+    target: int = example["target"]
+
+    messages = [
+        {"role": "system", "content": SYSTEM_MESSAGE},
+        {
+            "role": "user",
+            "content": PROMPT_TEMPLATE.format(numbers=numbers, target=target),
+        },
+        {"role": "assistant", "content": "Let me solve this step by step.\n<think>"},
+    ]
+    input_ids = tokenizer.apply_chat_template(messages, tokenize=True, continue_final_message=True)
+    prompt = tokenizer.decode(input_ids, skip_special_tokens=False, clean_up_tokenization_spaces=False)
+    return {
+        "prompt": prompt,
+        "messages": messages,
+        INPUT_IDS_PROMPT_KEY: input_ids,
+        GROUND_TRUTHS_KEY: [[target, *numbers]],  # we have to make ground truth length 1
+    }
+
+
+def create_datasets(args: Args, tokenizer):
+    # SYSTEM_MESSAGE = "You are a helpful assistant. You first thinks about the reasoning process in the mind and then provides the user with the answer."
+    SYSTEM_MESSAGE = (
+        "A conversation between User and Assistant. "
+        "The user asks a question, and the Assistant solves it. "
+        "The assistant first thinks about the reasoning process in "
+        "the mind and then provides the user with the answer. "
+        "The reasoning process and answer are enclosed within <think> </think> "
+        "and <answer> </answer> tags, respectively, "
+        "i.e., <think> reasoning process here </think> "
+        "<answer> answer here </answer>."
+    )
+    PROMPT_TEMPLATE = "Using the numbers {numbers}, create an equation that equals {target}. You can use basic arithmetic operations (+, -, *, /) and each number can only be used once. Show your work in <think> </think> tags. And return the final equation and answer in <answer> </answer> tags, for example <answer>(1 + 2) / (3 * 5)</answer>."
+    dataset = load_dataset(args.dataset_name, split=args.dataset_split)
+    dataset = dataset.add_column(DATASET_SOURCE_KEY, ["countdown"] * len(dataset))
+    dataset = dataset.map(
+        preprocess_example,
+        num_proc=6,
+        fn_kwargs={
+            "tokenizer": tokenizer,
+            "SYSTEM_MESSAGE": SYSTEM_MESSAGE,
+            "PROMPT_TEMPLATE": PROMPT_TEMPLATE,
+        },
+    )
+
+    # Split dataset
+    train_test_split = dataset.train_test_split(test_size=500, seed=42)
+    train_dataset = train_test_split["train"]
+    test_dataset = train_test_split["test"]
+
+    return train_dataset, test_dataset
+
+
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
     # ------------------------------------------------------------
     # Setup tokenizer
@@ -327,9 +366,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     # Set up runtime variables
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
-    args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
-    if is_beaker_job():
-        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+    # args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
+    # if is_beaker_job():
+    #     args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
     args.world_size = sum(args.num_learners_per_node)
     args.num_training_steps = args.total_episodes // (
         args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
@@ -380,41 +419,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
     # ------------------------------------------------------------
     # Set up datasets
-    transform_fn_args = [
-        {},
-        {
-            "max_token_length": args.max_token_length,
-            "max_prompt_token_length": args.max_prompt_token_length,
-        },
-    ]
-    train_dataset = get_cached_dataset_tulu(
-        dataset_mixer_list=args.dataset_mixer_list,
-        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
-        tc=tc,
-        dataset_transform_fn=args.dataset_transform_fn,
-        transform_fn_args=transform_fn_args,
-        dataset_cache_mode=args.dataset_cache_mode,
-        dataset_config_hash=args.dataset_config_hash,
-        hf_entity=args.hf_entity,
-        dataset_local_cache_dir=args.dataset_local_cache_dir,
-        dataset_skip_cache=args.dataset_skip_cache,
-    )
-    train_dataset = train_dataset.shuffle(seed=args.seed)
-    eval_dataset = None
-    if len(args.dataset_mixer_eval_list) > 0:
-        eval_dataset = get_cached_dataset_tulu(
-            args.dataset_mixer_eval_list,
-            args.dataset_mixer_eval_list_splits,
-            tc,
-            args.dataset_transform_fn,
-            transform_fn_args,
-            hf_entity=args.hf_entity,
-            dataset_cache_mode=args.dataset_cache_mode,
-            dataset_config_hash=args.dataset_config_eval_hash,
-            dataset_local_cache_dir=args.dataset_local_cache_dir,
-            dataset_skip_cache=args.dataset_skip_cache,
-        )
-        eval_dataset = eval_dataset.shuffle(seed=args.seed)
+    train_dataset, eval_dataset = create_datasets(args, tokenizer)
     if args.cache_dataset_only:
         return
 
@@ -716,7 +721,7 @@ if __name__ == "__main__":
     def reward_fn(
         responses: List[torch.Tensor],
         decoded_responses: List[str],
-        ground_truths: List[str],
+        ground_truths: List[Any],
         datasets: List[str],
         finish_reasons: List[str],
     ) -> List[float]:
@@ -765,30 +770,6 @@ if __name__ == "__main__":
                 for i in range(len(finish_reasons)):
                     if finish_reasons[i] != "stop":
                         scores[i] = args.non_stop_penalty_value
-
-        # @nouha: handle arithmetic reward
-        if args.apply_arithmetic_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating arithmetic reward"):
-                arithmetic_rewards = []
-                for i in range(len(decoded_responses)):
-                    # extract the string between <answer> and </answer>
-                    decoded_response = decoded_responses[i]
-                    answer_start = decoded_response.find("<answer>") + len("<answer>")
-                    answer_end = decoded_response.find("</answer>")
-                    # normalize the number (e.g., 1,000 -> 1000)
-                    try:
-                        answer = decoded_response[answer_start:answer_end]
-                        answer = answer.replace(",", "").strip()
-                        if float(answer) == float(ground_truths[i]):
-                            arithmetic_rewards.append(args.arithmetic_reward)
-                            scores[i] += args.arithmetic_reward
-                        else:
-                            arithmetic_rewards.append(0)
-                    except:  # noqa
-                        arithmetic_rewards.append(0)
-                        pass  # it's ok if things went wrong
-                metrics["objective/arithmetic_score"] = np.array(arithmetic_rewards).mean()
-                metrics["objective/arithmetic_correct_rate"] = (np.array(arithmetic_rewards) > 0.0).mean()
 
         return scores, metrics
 

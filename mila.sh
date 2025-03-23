@@ -4,7 +4,6 @@
 # export WANDB_PROJECT=trl
 # export WANDB_ENTITY=mila-language-drift
 export HF_HOME=/network/scratch/n/noukhovm/huggingface
-module load python/3.10
 module load cuda/12.1.1
 source .venv/bin/activate
 # mkdir $SLURM_TMPDIR/$SLURM_JOB_ID
