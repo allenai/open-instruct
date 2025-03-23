@@ -72,6 +72,6 @@ accuracy = sum([1 if predictions[i] == labels[i] else 0 for i in range(len(predi
 print(f"Accuracy: {accuracy}")
 # save predictions with sample data.
 os.makedirs(args.output_dir, exist_ok=True)
-with open(f"{args.output_dir}/predictions.txt", "w") as f:
+with open(f"{args.output_dir}/predictions.jsonl", "w") as f:
     for sample, prediction, generation in zip(ds, predictions, generations):
         f.write(json.dumps({**sample, "prediction": prediction, "generation": generation}) + "\n")
