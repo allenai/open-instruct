@@ -1,25 +1,7 @@
-# Reward model training
+# Proximal Policy Optimization (PPO)
 
 `open_instruct/ppo_vllm_thread.py` contains the script for training PPO models.
 
-
-## Get started
-
-In the sections below, we will include some examples on how to train models and demonstrating different features. A couple of notes:
-
-* You should adjust your `per_device_train_batch_size` and `gradient_accumulation_steps` accordingly to maximize throughput on a particular GPU type.
-* For the examples below, we use `mason.py` to invoke experiment orchastration on Ai2's cluster. For external users, you can copy the command after the `--` and run it on your system or debug locally. For example: the documentation will have commands like the following, but you can just run `$YOUR_COMMAND` on your system and make sure it matches `$NUM_GPUS`.
-    * You can you `--image costah/open_instruct_onlinedpo2` to specify a custom image or if you don't specify any it's going to use the default image.
-    * If you installed your python on NFS you can run a debug mode by **not toggling** `--pure_docker_mode` and it will mount your python environment on the docker container.
-
-```bash
-python mason.py \
-    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
-    --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
-    --priority preemptible \
-    --budget ai2/allennlp \
-    --gpus $NUM_GPUS -- $YOUR_COMMAND
-```
 
 
 ### Level 0: single GPU; quick debug. Should take less than 10 minutes to finish

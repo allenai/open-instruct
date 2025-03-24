@@ -2,13 +2,62 @@
 
 GRPO is an online RL method used in [DeepSeek R1 paper](https://arxiv.org/abs/2501.12948) and its first appearance is in [DeepSeekMath](https://arxiv.org/abs/2402.03300)
 
-`open_instruct/grpo_vllm_thread_ray_gtrl.py` contains an implementation of GRPO.
 
 
 ## Implemented Variants
 
-- `grpo_vllm_thread_ray_gtrl.py` is the original GRPO implementation, using vLLM and Ray.
 - `grpo_fast.py` is a faster variant using [packing techniques](https://huggingface.co/blog/sirluk/llm-sequence-packing).
+- `grpo_vllm_thread_ray_gtrl.py` is the original GRPO implementation, using vLLM and Ray.
+
+
+
+## `grpo_fast.py`
+
+This implementation has the following features:
+
+- Uses packing techniques to speed up the training process, inspired by [Open-Reasoner-Zero/Open-Reasoner-Zero](https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero)
+- Uses a thread-based approach to parallelize the training and inference processes, based on [Asynchronous RLHF](https://arxiv.org/abs/2410.18252).
+- Uses a data preparation thread to prepare the data for the training process.
+
+In simpler tasks, we see 2x faster training, and even 10x faster for more complex tasks. With `grpo_fast.py`, we can run crank up `number_samples_per_prompt` and train on really large batch sizes.
+
+
+### Debug (Single GPU)
+
+You can run the script in a single GPU mode to debug the training process.
+
+```bash
+bash scripts/train/debug/grpo_fast_mini.sh
+```
+
+### Reproduce `allenai/Llama-3.1-Tulu-3.1-8B` (1 Nodes)
+
+You can reproduce our `allenai/Llama-3.1-Tulu-3.1-8B` model by running the following command:
+
+```bash
+bash scripts/train/tulu3/grpo_fast_8b_single_node.sh
+```
+
+???+ info
+
+    Here the `grpo_fast.py` actually use 6 GPUs for training and 2 GPUs for inference, so it's using less hardware but runs faster than `grpo_vllm_thread_ray_gtrl.py` which uses 2 nodes (12 GPUs for training and 4 GPUs for inference).
+
+
+![grpo_tulu3_8b](grpo/tulu3.1_8b_grpo_fast.png)
+![grpo_tulu3_8b_time](grpo/tulu3.1_8b_grpo_fast-time.png)
+
+<iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Tulu3-1-8B-GRPO-Fast--VmlldzoxMTk0NzcwOA" style="width:100%; height:500px" title="Tulu3-8B-GRPO-Fast"></iframe>
+
+
+### Qwen 2.5 7B with 2 nodes
+
+Here is a command to run GRPO on the `Qwen/Qwen2.5-7B` on [ai2-adapt-dev/math_ground_truth_zs](https://huggingface.co/datasets/ai2-adapt-dev/math_ground_truth_zs), very similar to the command above. However
+
+```bash
+bash scripts/train/rlvr/grpo_qwen_fast_2.5_7B.sh
+```
+
+![grpo_qwen_fast_2.5_7B](static/grpo_qwen_fast_2.5_7B.png)
 
 
 
@@ -26,29 +75,63 @@ This implementation has the following features:
 You can run the script in a single GPU mode to debug the training process.
 
 ```bash
-bash scripts/train/debug/grpo_mini.sh
+bash scripts/train/debug/grpo.sh
 ```
 
 
 
-### Qwen 2.5 7B with 2 nodes
+### Reproduce `allenai/Llama-3.1-Tulu-3.1-8B` (2 Nodes)
+
+You can reproduce our `allenai/Llama-3.1-Tulu-3.1-8B` model by running the following command:
+
+```bash
+bash scripts/train/tulu3/grpo_8b.sh
+```
+
+![grpo_tulu3_8b](grpo/tulu3.1_8b_grpo.png)
+![grpo_tulu3_8b_time](grpo/tulu3.1_8b_grpo-time.png)
+
+
+<iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Tulu3-1-8B-GRPO--VmlldzoxMTkyNzc2MA" style="width:100%; height:500px" title="Tulu3-8B-GRPO"></iframe>
+
+
+### Reproduce `allenai/OLMo-2-1124-7B` (2 Nodes)
+
+You can reproduce our `allenai/OLMo-2-1124-7B` model by running the following command:
+
+```bash
+bash scripts/train/olmo2/grpo_7b.sh
+```
+
+![grpo_olmo2_7b](grpo/olmo2_7b_grpo.png)
+![grpo_olmo2_7b_time](grpo/olmo2_7b_grpo-time.png)
+
+<iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-7B-GRPO--VmlldzoxMTkyNzc1OA" style="width:100%; height:500px" title="OLMo2-7B-GRPO"></iframe>
+
+
+### Qwen 2.5 7B Zero-style (🧪 Experimental)
 
 Here is a command to run GRPO on the `Qwen/Qwen2.5-7B` on [ai2-adapt-dev/math_ground_truth_zs](https://huggingface.co/datasets/ai2-adapt-dev/math_ground_truth_zs), which is simply a zero-shot version of the RLVR MATH dataset. The training is done starting from a base model, similar to how [DeepSeek R1](https://arxiv.org/abs/2501.12948) does it.
 
 ```bash
-bash scripts/train/rlvr/grpo_qwen2.5_7B_works.sh
+bash scripts/train/qwen/grpo_7b.sh
 ```
+
+![grpo_qwen2.5_7B_works](grpo/qwen2.5_7b_grpo_zero.png)
+![grpo_qwen2.5_7B_works_time](grpo/qwen2.5_7b_grpo_zero-time.png)
+
 
 The results look quite reasonable: with format score, score all going up, and sequence length seems stable (at least at first)
 
-![grpo_qwen2.5_7B_works](static/grpo_qwen2.5_7B_works.png)
 
 The corresponding evals look good as well:
 
 ![grpo_qwen2.5_7B_works_evals](static/grpo_qwen2.5_7B_works_evals.png)
 
 
-### Explanation of the logged metrics
+### Training Metrics
+
+During training, the following metrics are logged:
 
 
 * `episode`: the global episode number training has gone through (e.g., `3000` means we have trained on 3000 data points already -- in the case of RLVR that is prompts, which can repeat)
@@ -79,35 +162,6 @@ The corresponding evals look good as well:
 * `val/format_scores`: the mean format scores, indicating the quality of response formatting (only logged if `add_r1_style_format_reward` is enabled)
 
 
-
-## `grpo_fast.py`
-
-This implementation has the following features:
-
-- Uses packing techniques to speed up the training process, inspired by [Open-Reasoner-Zero/Open-Reasoner-Zero](https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero)
-- Uses a thread-based approach to parallelize the training and inference processes, based on [Asynchronous RLHF](https://arxiv.org/abs/2410.18252).
-- Uses a data preparation thread to prepare the data for the training process.
-
-In simpler tasks, we see 2x faster training, and even 10x faster for more complex tasks. With `grpo_fast.py`, we can run crank up `number_samples_per_prompt` and train on really large batch sizes.
-
-
-### Debug (Single GPU)
-
-You can run the script in a single GPU mode to debug the training process.
-
-```bash
-bash scripts/train/debug/grpo_fast_mini.sh
-```
-
-### Qwen 2.5 7B with 2 nodes
-
-Here is a command to run GRPO on the `Qwen/Qwen2.5-7B` on [ai2-adapt-dev/math_ground_truth_zs](https://huggingface.co/datasets/ai2-adapt-dev/math_ground_truth_zs), very similar to the command above. However
-
-```bash
-bash scripts/train/rlvr/grpo_qwen_fast_2.5_7B.sh
-```
-
-![grpo_qwen_fast_2.5_7B](static/grpo_qwen_fast_2.5_7B.png)
 
 
 

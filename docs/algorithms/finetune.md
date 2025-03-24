@@ -53,17 +53,23 @@ bash scripts/train/tulu3/finetune_8b.sh
 ![finetune_plot](finetune/tulu3_8b_sft-time.png)
 
 
-<iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Tulu-3-8B-SFT--VmlldzoxMTg1NzIxMw" style="width:100%; height:500px" title="Tulu3-8B-SFT"></iframe>
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Tulu3-8B-SFT--VmlldzoxMTk0OTY4MA" style="width:100%; height:500px" title="Tulu3-8B-SFT"></iframe>
 
 
-Based on our internal evaluation, the SFT model is roughly on par with the original `allenai/Llama-3.1-Tulu-3-8B` model, though the `codex_humaneval` is a bit lower. Our original `allenai/Llama-3.1-Tulu-3-8B` was trained with more random seeds, so its slightly higher performance is expected.
+???+ info
+
+
+    Based on our internal evaluation, the SFT model is roughly on par with the original `allenai/Llama-3.1-Tulu-3-8B` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training.
+
+    ![finetune_plot](finetune/tulu3_8b_eval.png)
 
 ???+ info
 
     We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
 
 
-![finetune_plot](finetune/tulu3_8b_repro.png)
 
 
 ### Reproduce `allenai/OLMo-2-1124-7B-SFT` (8 Nodes)
@@ -78,8 +84,9 @@ bash scripts/train/olmo2/finetune_7b.sh
 ![finetune_plot](finetune/olmo2_7b_sft-time.png)
 
 
-<iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-7B-SFT--VmlldzoxMTkyNzUyOA" style="width:100%; height:500px" title="OLMo2-7B-SFT"></iframe>
+??? note "👉 Tracked WandB Experiments (Click to expand)"
 
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-1124-7B-SFT--VmlldzoxMTg1NzIxMw" style="width:100%; height:500px" title="OLMo2-1124-7B-SFT"></iframe>
 
 
 
