@@ -2,7 +2,7 @@
 can launch the server with:
 
 ```
-uv run uvicorn --host 0.0.0.0 open_instruct.code_api:app
+uv run uvicorn --host 0.0.0.0 open_instruct.api:app
 ```
 
 and then test with:
