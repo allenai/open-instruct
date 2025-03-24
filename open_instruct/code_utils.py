@@ -3,6 +3,7 @@ import os
 import shutil
 from ctypes import c_int
 from typing import Any, Dict, List, Optional
+import logging
 
 from datasets import load_dataset
 
@@ -19,6 +20,9 @@ tmp_rmdir = os.rmdir
 tmp_print = print
 tmp_rm_tree = shutil.rmtree
 tmp_unlink = os.unlink
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 
 # -------------------------------------------------------------
@@ -119,6 +123,7 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
     if test_ct == 0:
         return []
     if not should_execute(program=program, tests=tests):
+        logger.info("Not executing program %s", program)
         return [0] * len(tests)
 
     reliability_guard()
