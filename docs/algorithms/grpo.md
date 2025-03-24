@@ -46,18 +46,27 @@ bash scripts/train/tulu3/grpo_fast_8b_single_node.sh
 ![grpo_tulu3_8b](grpo/tulu3.1_8b_grpo_fast.png)
 ![grpo_tulu3_8b_time](grpo/tulu3.1_8b_grpo_fast-time.png)
 
-<iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Tulu3-1-8B-GRPO-Fast--VmlldzoxMTk0NzcwOA" style="width:100%; height:500px" title="Tulu3-8B-GRPO-Fast"></iframe>
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+    
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Tulu3-1-8B-GRPO-Fast--VmlldzoxMTk0NzcwOA" style="width:100%; height:500px" title="Tulu3-8B-GRPO-Fast"></iframe>
+
+???+ info
+
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+
+    ![grpo_plot](grpo/tulu3.1_8b_grpo_fast_eval_curve.png)
+
+???+ info
+
+    Based on our internal evaluation, the GRPO model is roughly on par with the original `allenai/Llama-3.1-Tulu-3.1-8B` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training. 
+
+    ![grpo_plot](grpo/tulu3.1_8b_grpo_fast_eval.png)
 
 
-### Qwen 2.5 7B with 2 nodes
+???+ info
 
-Here is a command to run GRPO on the `Qwen/Qwen2.5-7B` on [ai2-adapt-dev/math_ground_truth_zs](https://huggingface.co/datasets/ai2-adapt-dev/math_ground_truth_zs), very similar to the command above. However
+    We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
 
-```bash
-bash scripts/train/rlvr/grpo_qwen_fast_2.5_7B.sh
-```
-
-![grpo_qwen_fast_2.5_7B](static/grpo_qwen_fast_2.5_7B.png)
 
 
 
@@ -92,7 +101,23 @@ bash scripts/train/tulu3/grpo_8b.sh
 ![grpo_tulu3_8b_time](grpo/tulu3.1_8b_grpo-time.png)
 
 
-<iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Tulu3-1-8B-GRPO--VmlldzoxMTkyNzc2MA" style="width:100%; height:500px" title="Tulu3-8B-GRPO"></iframe>
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+    
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Tulu3-1-8B-GRPO--VmlldzoxMTkyNzc2MA" style="width:100%; height:500px" title="Tulu3-8B-GRPO"></iframe>
+
+
+???+ info
+
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+
+    ![grpo_plot](grpo/tulu3.1_8b_grpo_eval_curve.png)
+
+
+???+ info
+
+    Based on our internal evaluation, the GRPO model is roughly on par with the original `allenai/Llama-3.1-Tulu-3.1-8B` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training. 
+
+    ![grpo_plot](grpo/tulu3.1_8b_grpo_eval.png)
 
 
 ### Reproduce `allenai/OLMo-2-1124-7B` (2 Nodes)
@@ -106,7 +131,9 @@ bash scripts/train/olmo2/grpo_7b.sh
 ![grpo_olmo2_7b](grpo/olmo2_7b_grpo.png)
 ![grpo_olmo2_7b_time](grpo/olmo2_7b_grpo-time.png)
 
-<iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-7B-GRPO--VmlldzoxMTkyNzc1OA" style="width:100%; height:500px" title="OLMo2-7B-GRPO"></iframe>
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+    
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-7B-GRPO--VmlldzoxMTkyNzc1OA" style="width:100%; height:500px" title="OLMo2-7B-GRPO"></iframe>
 
 
 ### Qwen 2.5 7B Zero-style (🧪 Experimental)
@@ -168,11 +195,12 @@ During training, the following metrics are logged:
 ## Acknowledgements
 
 We would like to thank the following resources for GRPO theory:
+
 - [DeepSeek R1](https://arxiv.org/abs/2501.12948)
 - [DeepSeekMath](https://arxiv.org/abs/2402.03300)
 - [Asynchronous RLHF](https://arxiv.org/abs/2410.18252)
 
-We would like to thank the following resources for GRPO implementation:
+We would like to thank the following resources for GRPO implementation and Ray usage:
 
 - [Packing Techniques](https://huggingface.co/blog/sirluk/llm-sequence-packing)
 - [OpenRLHF/OpenRLHF](https://github.com/OpenRLHF/OpenRLHF)
