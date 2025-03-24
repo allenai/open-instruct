@@ -75,8 +75,12 @@ nav:
   - Training:
     - algorithms/dataset.md
     - algorithms/finetune.md
+    - algorithms/dpo.md
     - algorithms/grpo.md
+    - algorithms/ppo.md
     - algorithms/reward_modeling.md
+  - Not Maintained:
+    - algorithms/synthetic_preference_dataset.md
 
 
 extra_css:
