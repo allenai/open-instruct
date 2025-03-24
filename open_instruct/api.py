@@ -16,8 +16,12 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
 from open_instruct.code_utils import get_successful_tests_fast
+import logging
 
 app = FastAPI()
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 class TestRequest(BaseModel):
     program: str
@@ -27,6 +31,7 @@ class TestRequest(BaseModel):
 @app.post("/test_program")
 async def test_program(request: TestRequest):
     try:
+        logger.info("Executing tests for program: %s", request.program)
         results = get_successful_tests_fast(
             program=request.program,
             tests=request.tests,
@@ -50,9 +55,9 @@ if __name__ == "__main__":
     # Test data
     payload = {
         "program": """
-    def add(a, b):
-        return a + b
-    """,
+def add(a, b):
+    return a + b
+""",
         "tests": [
             "assert add(1, 2) == 3",
             "assert add(-1, 1) == 0",
@@ -64,6 +69,9 @@ if __name__ == "__main__":
     # Send POST request
     response = requests.post(url, json=payload)
 
+    response_json = response.json()
     # Print results
     print("Status Code:", response.status_code)
-    print("Response:", response.json()) 
+    print("Response:", response_json) 
+
+    assert response_json['results'] == [1, 1, 0]
