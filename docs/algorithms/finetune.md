@@ -88,6 +88,16 @@ bash scripts/train/olmo2/finetune_7b.sh
 
     <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-1124-7B-SFT--VmlldzoxMTg1NzIxMw" style="width:100%; height:500px" title="OLMo2-1124-7B-SFT"></iframe>
 
+???+ info
+
+    Based on our internal evaluation, the SFT model is roughly on par with the original `allenai/OLMo-2-1124-7B` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training.
+
+    ![finetune_plot](finetune/olmo2_7b_sft_eval.png)
+
+???+ info
+
+    We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
+
 
 
 ### Training Metrics

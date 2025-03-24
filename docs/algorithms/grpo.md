@@ -120,9 +120,9 @@ bash scripts/train/tulu3/grpo_8b.sh
     ![grpo_plot](grpo/tulu3.1_8b_grpo_eval.png)
 
 
-### Reproduce `allenai/OLMo-2-1124-7B` (2 Nodes)
+### Reproduce `allenai/OLMo-2-1124-7B-Instruct` but better (2 Nodes)
 
-You can reproduce our `allenai/OLMo-2-1124-7B` model by running the following command:
+You can reproduce our `allenai/OLMo-2-1124-7B-Instruct` model by running the following command:
 
 ```bash
 bash scripts/train/olmo2/grpo_7b.sh
@@ -134,6 +134,21 @@ bash scripts/train/olmo2/grpo_7b.sh
 ??? note "👉 Tracked WandB Experiments (Click to expand)"
     
     <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-7B-GRPO--VmlldzoxMTkyNzc1OA" style="width:100%; height:500px" title="OLMo2-7B-GRPO"></iframe>
+
+???+ info
+
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+
+    ![grpo_plot](grpo/olmo2_7b_grpo_eval_curve.png)
+
+
+???+ info
+
+    Based on our internal evaluation, the GRPO model actually outperforms the original `allenai/OLMo-2-1124-7B-Instruct` model. This is mostly because the original `allenai/OLMo-2-1124-7B-Instruct` was trained with PPO, which may suffer from not using a outcome reward model to initialize the value model (since it uses a genreal RM to initialize the value model). Note that your results may vary slightly due to the random seeds used in the training. 
+
+    ![grpo_plot](grpo/olmo2_7b_grpo_eval.png)
+
+
 
 
 ### Qwen 2.5 7B Zero-style (🧪 Experimental)
