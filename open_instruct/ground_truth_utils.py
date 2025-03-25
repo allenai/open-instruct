@@ -183,14 +183,10 @@ class IFEvalVerifier(VerifierFunction):
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict]) -> bool:
         instruction_dict = instructions_registry.INSTRUCTION_DICT
-        print("debugging")
-        print(label)
         constraint_dict = label
         answer = prediction.split("<|assistant|>\n")[-1].strip()
         instruction_key = constraint_dict["instruction_id"][0]
         args = constraint_dict["kwargs"][0]
-        print(args)
-        print(instruction_key)
         instruction_cls = instruction_dict[instruction_key]
         instruction_instance = instruction_cls(instruction_key)
         instruction = instruction_instance.build_description(**args)
