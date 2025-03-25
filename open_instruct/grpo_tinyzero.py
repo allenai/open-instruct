@@ -272,7 +272,7 @@ class Args:
     """the priority of auto-launched evaluation jobs"""
 
     def __post_init__(self):
-        if self.single_gpu_mode:
+        if self.single_gpu_mode and self.vllm_gpu_memory_utilization > 0.3:
             self.vllm_gpu_memory_utilization = 0.3
         assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
         assert (
@@ -322,7 +322,7 @@ def create_datasets(args: Args, tokenizer):
         "i.e., <think> reasoning process here </think> "
         "<answer> answer here </answer>."
     )
-    PROMPT_TEMPLATE = "Using the numbers {numbers}, create an equation that equals {target}. You can use basic arithmetic operations (+, -, *, /) and each number can only be used once. Show your work in <think> </think> tags. And return the final equation and answer in <answer> </answer> tags, for example <answer>(1 + 2) / (3 * 5)</answer>."
+    PROMPT_TEMPLATE = "Using the numbers {numbers}, create an equation that equals {target}. You can use basic arithmetic operations (+, -, *, /) and each number can only be used once. Show your work in <think> </think> tags. And return the final equation and answer in <answer> </answer> tags, for example <answer>(10 + 2) / 3</answer>."
     dataset = load_dataset(args.dataset_name, split=args.dataset_split)
     dataset = dataset.add_column(DATASET_SOURCE_KEY, ["countdown"] * len(dataset))
     dataset = dataset.map(
@@ -359,7 +359,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         warning = f"""Requested tokenizer revision `{tc.tokenizer_revision=}` is different
                    from the model revision `{model_config.model_revision=}` or the tokenizer name `{tc.tokenizer_name_or_path=}`
                    is different from the model name `{model_config.model_name_or_path=}`."""
-        print(warning)
+        logger.warning(warning)
     tokenizer = tc.tokenizer
 
     # ------------------------------------------------------------
@@ -461,10 +461,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         pg=pg if args.single_gpu_mode else None,
     )
     ray.get(inits)
-    print("======== ✅ all models and vLLM engines initialized =========")
+    logger.info("======== ✅ all models and vLLM engines initialized =========")
 
     ray.get([m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models])
-    print("======== ✅ model update group setup successfully =========")
+    logger.info("======== ✅ model update group setup successfully =========")
 
     # Setup training
     generation_config = SamplingParams(
@@ -515,7 +515,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         ),
     )
     thread.start()
-    print("======== ✅ vllm generate thread starts =========")
+    logger.info("======== ✅ vllm generate thread starts =========")
 
     packing_thread = threading.Thread(
         target=data_preparation_thread,
@@ -530,7 +530,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         ),
     )
     packing_thread.start()
-    print("======== ✅ data preparation thread starts =========")
+    logger.info("======== ✅ data preparation thread starts =========")
 
     # Send initial data to both threads
     data_next = train_dataset[next(iter_dataloader)]
@@ -546,7 +546,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     eval_futures = []
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
-            print("-" * 100)
+            logger.info("-" * 100)
             episode += (
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
             )  # each sample is an episode
@@ -555,7 +555,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             # Optionally evaluate the model
             try:
                 evaluation_responses, _ = evaluation_inference_results_Q.get(timeout=0.01)
-                print("[Main Thread] 📊 Evaluation responses received")
+                logger.info("[Main Thread] 📊 Evaluation responses received")
                 table = {}
                 table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
                 table["response"] = tokenizer.batch_decode(evaluation_responses)
@@ -568,7 +568,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     print_rich_table(df.iloc[:1])
                 del table
             except Empty:
-                print("[Main Thread] 🙈 Evaluation responses not received")
+                logger.info("[Main Thread] 🙈 Evaluation responses not received")
 
             # ------------------------------------------------------------------------------------------------
             # Sync weights and send the next batch of prompts to vLLM
@@ -606,11 +606,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 num_total_tokens += packed_data["num_new_tokens"]
 
             # Log info about the packed sequences
-            print(
+            logger.info(
                 f"Number of training examples per device: {B=}, packed sequence fraction of original sequences: {len(packed_sequences.query_responses) / packed_data['responses_count']}"
             )
             if B == 0:
-                print("[Main Thread] 🤡 After packing, there is not enough data to train")
+                logger.info("[Main Thread] 🤡 After packing, there is not enough data to train")
                 continue
 
             # ------------------------------------------------------------------------------------------------
@@ -644,7 +644,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     with Timer("[Main Thread] 🗡️ Saving model"):
                         checkpoint_dir = f"{args.output_dir}_checkpoints"
                         step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-                        print(f"Saving model at step {training_step} to {step_dir}")
+                        logger.info(f"Saving model at step {training_step} to {step_dir}")
                         ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
                         if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                             leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
@@ -660,7 +660,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                                 ]
                             )
 
-        print(f"Saving final model at step {training_step} to {args.output_dir}")
+        logger.info(f"Saving final model at step {training_step} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):
             ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
             if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
@@ -675,17 +675,17 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 )
 
     except Exception as e:
-        print(f"Training error occurred: {str(e)}")
-        print(traceback.format_exc())
+        logger.info(f"Training error occurred: {str(e)}")
+        logger.info(traceback.format_exc())
         ray.shutdown()
         os._exit(1)
         raise  # Re-raise the exception after shutdown
 
     # Clean up threads
     thread.join()
-    print("======== ✅ vllm generate thread ends =========")
+    logger.info("======== ✅ vllm generate thread ends =========")
     packing_thread.join()
-    print("======== ✅ data preparation thread ends =========")
+    logger.info("======== ✅ data preparation thread ends =========")
     ray.shutdown()
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
@@ -697,12 +697,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         and args.output_dir.rstrip("/") != "/output"
     ):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
-    print("finished training")
+    logger.info("finished training")
 
     accelerator = Namespace()
     accelerator.is_main_process = True  # hack
     if args.push_to_hub:
-        print("Pushing model to hub")
+        logger.info("Pushing model to hub")
         push_folder_to_hub(
             accelerator,
             args.output_dir,
