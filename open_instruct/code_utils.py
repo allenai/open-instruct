@@ -21,7 +21,7 @@ tmp_print = print
 tmp_rm_tree = shutil.rmtree
 tmp_unlink = os.unlink
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
