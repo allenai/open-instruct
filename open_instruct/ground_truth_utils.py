@@ -194,11 +194,11 @@ class IFEvalVerifier(VerifierFunction):
         instruction_cls = instruction_dict[instruction_key]
         instruction_instance = instruction_cls(instruction_key)
         instruction_instance.build_description(**args)
-        #args = instruction.get_instruction_args()
+        #args = instruction_instance.get_instruction_args()
         #if args and "prompt" in args:
         #    instruction.build_description(prompt=prompt)
-        print(instruction.check_following(answer))
-        if prediction.strip() and instruction.check_following(answer):
+        print(instruction_instance.check_following(answer))
+        if prediction.strip() and instruction_instance.check_following(answer):
             return 1.0
         return 0.0
 
