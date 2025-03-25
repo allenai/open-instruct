@@ -245,6 +245,8 @@ def apply_verifiable_reward(
             logger.warning("No ground truth provided for a sample, applying 0 reward.")
             rewards.append(0)
             continue
+            
+        curr_verify_reward = verify_reward
         if dataset.lower() == "gsm8k":
             verified = verify_gsm8k_sample(prediction, ground_truth)
         elif dataset.lower() == "math":
@@ -252,11 +254,13 @@ def apply_verifiable_reward(
         elif dataset.lower() == "ifeval":
             verified = verify_ifeval_sample(prediction, ground_truth)
         elif dataset.lower() == "ace_coder":
-            verified = verify_ace_coder_sample(prediction, ground_truth)
+            pass_rate = verify_ace_coder_sample(prediction, ground_truth)
+            verified = True
+            curr_verify_reward *= pass_rate
         # if verified, give reward
         if verified:
             logger.info("Applying ground truth reward 🤗")
-            rewards.append(verify_reward)
+            rewards.append(curr_verify_reward)
         else:
             rewards.append(0)
     rewards_tensors = torch.tensor(rewards, device=query_responses.device)
