@@ -1,21 +1,25 @@
 """
-can launch the server with:
-
+can launch local server with:
 ```
-uv run uvicorn --host 0.0.0.0 open_instruct.api:app
+uv run uvicorn --host 0.0.0.0 open_instruct.code_api.api:app
+```
+
+or use docker:
+```
+docker build -t code-api -f open_instruct/code_api/Dockerfile .
+docker run -p 8000:8000 code-api
 ```
 
 and then test with:
-
 ```
-python open_instruct/api.py
+python open_instruct/code_api/api.py
 ```
 """
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
-from open_instruct.code_utils import get_successful_tests_fast
+from code_utils import get_successful_tests_fast
 import logging
 
 app = FastAPI()
