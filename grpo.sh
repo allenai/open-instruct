@@ -1,19 +1,28 @@
-exp_name="base_smollm_grpo_${RANDOM}"
+#!/bin/bash
+#SBATCH --gres=gpu:a100l:1
+#SBATCH --mem=32G
+#SBATCH -c 4
+#SBATCH --time=8:00:00
+#SBATCH -p main
+
+source mila.sh
+exp_name="grpo_qwen1.5b"
+
 uv run open_instruct/grpo_tinyzero.py \
     --exp_name $exp_name \
-    --output_dir output/$exp_name \
+    --output_dir $SCRATCH/open_instruct/results/ \
     --dataset_name Jiayi-Pan/Countdown-Tasks-3to4 \
     --dataset_split train[:20000] \
     --max_token_length 256 \
     --max_prompt_token_length 256 \
     --response_length 1024 \
-    --pack_length 8192 \
-    --num_unique_prompts_rollout 16 \
-    --num_samples_per_prompt_rollout 4 \
+    --pack_length 4096 \
     --per_device_train_batch_size 1 \
+    --num_unique_prompts_rollout 32 \
+    --num_samples_per_prompt_rollout 4 \
     --total_episodes 64000 \
     --model_name_or_path Qwen/Qwen2.5-1.5B-Instruct \
-    --stop_strings ["<answer>","<|im_end|>"] \
+    --stop_strings "<|im_end|>" \
     --apply_r1_style_format_reward \
     --r1_style_format_reward 0.1 \
     --apply_verifiable_reward \
@@ -29,10 +38,11 @@ uv run open_instruct/grpo_tinyzero.py \
     --num_evals 5 \
     --save_freq 50 \
     --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.3 \
+    --vllm_gpu_memory_utilization 0.2 \
     --vllm_enforce_eager \
     --single_gpu_mode \
-    --async_mode False $@
+    --async_mode False \
+    --with_tracking $@
 
     # --deepspeed_stage 2 \
     # --gradient_checkpointing \

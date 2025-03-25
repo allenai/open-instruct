@@ -58,6 +58,7 @@ from ray.util.placement_group import placement_group
 from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoTokenizer
+from tqdm import trange
 from vllm import SamplingParams
 
 from open_instruct.dataset_transformation import (
@@ -234,7 +235,9 @@ class Args:
     # Experiment tracking
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "open_instruct_internal"
+    with_logging: bool = True
+    """Whether to do debug print logging"""
+    wandb_project_name: str = None
     """The wandb's project name"""
     wandb_entity: Optional[str] = None
     """The entity (team) of wandb's project"""
@@ -387,9 +390,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         if args.hf_repo_revision is None:  # auto-generate one
             args.hf_repo_revision = args.run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-    if args.with_tracking:
-        if args.wandb_entity is None:
-            args.wandb_entity = maybe_use_ai2_wandb_entity()
+    # if args.with_tracking:
+    #     if args.wandb_entity is None:
+    #         args.wandb_entity = maybe_use_ai2_wandb_entity()
 
     # ------------------------------------------------------------
     # Setup experiment tracking and seeds
@@ -408,7 +411,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             sync_tensorboard=True,
             config=all_configs,
             name=args.run_name,
-            save_code=True,
+            # save_code=True,
             tags=[args.exp_name] + get_wandb_tags(),
         )
     writer = SummaryWriter(f"runs/{args.run_name}")
@@ -545,7 +548,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     start_time = time.time()
     eval_futures = []
     try:
-        for training_step in range(resume_training_step, args.num_training_steps + 1):
+        for training_step in trange(resume_training_step, args.num_training_steps + 1):
             logger.info("-" * 100)
             episode += (
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
@@ -718,6 +721,9 @@ if __name__ == "__main__":
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
 
+    if not args.with_logging:
+        logger.setLevel(logging.WARNING)
+
     def reward_fn(
         responses: List[torch.Tensor],
         decoded_responses: List[str],
@@ -734,7 +740,9 @@ if __name__ == "__main__":
                     raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
                 for i in range(len(format_scores)):
                     scores[i] = format_scores[i] + scores[i]
-                metrics["val/format_scores"] = np.array(format_scores).mean()
+                np_format_scores = np.array(format_scores)
+                metrics["objective/format_reward"] = np_format_scores.mean()
+                metrics["objective/format_correct_rate"] = (np_format_scores > 0).mean()
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
