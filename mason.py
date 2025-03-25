@@ -173,6 +173,11 @@ def get_args():
         Can be specified multiple times. Example: --secret MY_VAR=value1 --secret OTHER_VAR=value2""",
         default=[],
     )
+    parser.add_argument(
+        "--host-networking",
+        action="store_true",
+        help="If set, use host networking in experiment. If num_nodes > 1, this is automatically set to True.",
+    )
     # Split up the mason args from the Python args.
     mason_args, command_args = parser.parse_known_args()
     commands = parse_commands(command_args)
@@ -766,6 +771,8 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         spec.host_networking = True
         spec.propagate_failure = True
         spec.propagate_preemption = True
+    if args.host_networking:
+        spec.host_networking = True
 
     return spec
 
