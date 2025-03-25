@@ -12,15 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import os
 import re
-import requests
 import ray
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Any
 
 from open_instruct.vllm_utils2 import WorkerWrap
-from open_instruct.search_utils.s2 import get_snippets_for_query
+from open_instruct.search_utils.massive_ds import get_snippets_for_query
 
 
 def process_vllm_output_for_search(text: str) -> str:
