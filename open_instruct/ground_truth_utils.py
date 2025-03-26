@@ -191,6 +191,8 @@ class IFEvalVerifier(VerifierFunction):
         answer = prediction.split("<|assistant|>\n")[-1].strip()
         instruction_key = constraint_dict["instruction_id"][0]
         args = constraint_dict["kwargs"][0]
+        print("deebuugggg")
+        print(constraint_dict)
         if args == None:
             args = {}
         args = {k: v for k, v in args.items() if v is not None}
