@@ -186,6 +186,28 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    "tulu_thinker": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|system|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'user' %}"
+        "{{ '<|user|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{% set content = message['content'] %}"
+        "{% if '</think>' in content %}"
+        "{% set content = content.split('</think>')[-1] %}"
+        "{% endif %}"
+        "{% if not loop.last %}"
+        "{{ '<|assistant|>\n' + content + eos_token + '\n' }}"
+        "{% else %}"
+        "{{ '<|assistant|>\n' + content + eos_token }}"
+        "{% endif %}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|assistant|>\n<think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
     # template is taken from https://arxiv.org/abs/2501.12948.
     "r1_simple_chat": (
         "A conversation between User and Assistant. "
