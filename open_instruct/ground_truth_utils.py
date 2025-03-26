@@ -10,6 +10,7 @@ import logging
 import re
 import string
 from abc import ABC, abstractmethod
+from collections import Counter
 from typing import Any, Dict, List, Union
 
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
@@ -190,6 +191,19 @@ def normalize_answer(s: str) -> str:
     return white_space_fix(remove_articles(remove_punc(s.lower())))
 
 
+def f1_score(prediction, ground_truth):
+    prediction_tokens = normalize_answer(prediction).split()
+    ground_truth_tokens = normalize_answer(ground_truth).split()
+    common = Counter(prediction_tokens) & Counter(ground_truth_tokens)
+    num_same = sum(common.values())
+    if num_same == 0:
+        return 0
+    precision = 1.0 * num_same / len(prediction_tokens)
+    recall = 1.0 * num_same / len(ground_truth_tokens)
+    f1 = (2 * precision * recall) / (precision + recall)
+    return f1
+
+
 class FlanVerifier(VerifierFunction):
     """
     Verifier for Flan tasks that extracts the answer after "The answer is:"
@@ -231,6 +245,23 @@ def get_all_verifiers() -> Dict[str, VerifierFunction]:
     return verifiers
 
 
+class TuluThinkerVerifier
+    """
+    A generalist verifier that just uses F1 score to compare the prediction to the ground truth.
+    In future will replace this with more sophisticated verifiers.
+    """
+    def __init__(self) -> None:
+        super().__init__("tulu_thinker", weight=1.0)
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
+        # remove thinking section from the prediction
+        prediction = prediction.split("</think>")[-1]
+        # TODO: should I add a format reward-type thing? See what happens with RL.
+        # return f1 score
+        return f1_score(prediction, label)
+
+
+
 # Auto-generate the mappings.
 REWARD_FN_MAPPING: Dict[str, VerifierFunction] = get_all_verifiers()
 
@@ -242,6 +273,6 @@ def soft_format_reward_func(responses: List[str], reward_scale: float = 1.0) -> 
 
     Returns a list of rewards scaled by reward_scale.
     """
-    pattern = r".*?</think>\s*<answer>.*?</answer>"
+    pattern = r".*?</think>.*"
     matches = [re.match(pattern, r, re.DOTALL) for r in responses]
     return [reward_scale if match else 0.0 for match in matches]
