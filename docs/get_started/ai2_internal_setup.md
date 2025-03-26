@@ -36,7 +36,7 @@ beaker secret write -w ai2/tulu-3-dev "${beaker_whoami}_HF_TOKEN" xxxx
 ```
 
 
-## Job submission
+## Job submission via mason.py
 
 `mason.py` is our job submission script. It basically takes your command and runs it in the specified clusters.
 
@@ -77,30 +77,29 @@ python mason.py \
 
 `mason.py` does a few things:
 
-### Auto set HF cache environment variables:
+**Auto set HF cache environment variables:**
 
 During the job submission, it automatically tries to setup a shared Hugging Face cache with environment variables. For example, it sets
-    * `HF_HOME=/weka/oe-adapt-default/allennlp/.cache/huggingface`. 
-    * `HF_DATASETS_CACHE=/weka/oe-adapt-default/allennlp/.cache/huggingface`
-    * `HF_HUB_CACHE=/weka/oe-adapt-default/allennlp/.cache/hub`
 
-### Auto set `--hf_entity` and `--wandb_entity` arguments:
+* `HF_HOME=/weka/oe-adapt-default/allennlp/.cache/huggingface`. 
+* `HF_DATASETS_CACHE=/weka/oe-adapt-default/allennlp/.cache/huggingface`
+* `HF_HUB_CACHE=/weka/oe-adapt-default/allennlp/.cache/hub`
+
+**Auto set `--hf_entity` and `--wandb_entity` arguments:**
 
 so during runtime we issue fewer HF API calls, which sometimes could fail due to rate limiting.
 
-### Auto caching datasets:
+**Auto caching datasets:**
 
 mason.py will auto call `--cache_dataset_only` for you, so you do the tokenization locally instead of in the jobs, which saves idle GPU time in the actual jobs.
 
 
-### Auto upload to Google Cloud Storage:
+**Auto upload to Google Cloud Storage:**
 
 When submitting to the `ai2/augusta-google-1` cluster, mason will try to read your model and upload it to Google Cloud Storage and download it to the job (since the cluster does not have a reliable shared filesystem).
 
 
-
-
-### Ai2 Internal Evaluation
+## Ai2 Internal Evaluation
 
 We provide a script integrated with beaker for use internally at Ai2. For example, to run all the tulu 3 evals with easy uploading:
 ```bash

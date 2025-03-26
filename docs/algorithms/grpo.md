@@ -184,7 +184,7 @@ During training, the following metrics are logged:
 * `objective/rlhf_reward`: the RLHF reward, which is `objective/scores` - `beta` * `objective/kl`
 * `objective/non_score_reward`: `beta` * `objective/kl`
 * `objective/entropy`: the entropy of the current policy
-* `objective/loss`: the DPO loss
+* `objective/loss`: the GRPO loss
 * `objective/kl2`: the second variant of KL divergence used in the training process, calculated similarly to `objective/kl`
 * `objective/kl3`: the third variant of KL divergence used in the training process, providing additional insights into policy divergence
 * `objective/scores_mean`: the mean of the scores of the current response, providing an average measure of response quality
@@ -228,5 +228,3 @@ We would like to thank the following projects for general infrastructure:
 - [Ray](https://github.com/ray-project/ray)
 - [DeepSpeedAI/DeepSpeed](https://github.com/deepspeedai/DeepSpeed)
 - [HuggingFace/Transformers](https://github.com/huggingface/transformers)
-
-
