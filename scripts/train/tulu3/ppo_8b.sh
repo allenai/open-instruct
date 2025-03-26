@@ -2,7 +2,6 @@ python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-3-dev \
     --priority high \
-    --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
@@ -31,8 +30,7 @@ python mason.py \
     --per_device_train_batch_size 2 \
     --local_rollout_forward_batch_size 2 \
     --actor_num_gpus_per_node 4 8 \
-    --vllm_tensor_parallel_size 1 \
-    --vllm_num_engines 4 \
+    --vllm_tensor_parallel_size 4 \
     --apply_verifiable_reward true \
     --seed 1 \
     --num_evals 100 \

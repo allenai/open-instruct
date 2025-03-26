@@ -21,21 +21,20 @@ Open Instruct includes a `dataset_transformation.py` utility which
 
 We expect the dataset to have a `messages` key, which is a list of dictionaries with `role` and `content` keys. For example,
 
-* https://huggingface.co/datasets/allenai/tulu-3-sft-personas-instruction-following
-* https://huggingface.co/datasets/allenai/tulu-3-sft-personas-code
+* [allenai/tulu-3-sft-personas-instruction-following](https://huggingface.co/datasets/allenai/tulu-3-sft-personas-instruction-following)
+* [allenai/tulu-3-sft-personas-code](https://huggingface.co/datasets/allenai/tulu-3-sft-personas-code)
 
 Below is a minimal example of how `dataset_transformation.py` was used in the `finetune.py` script to mix, tokenize, and filter a dataset for SFT.
 
 ```python
 from open_instruct.dataset_transformation import (
-    CHAT_TEMPLATES,
     TokenizerConfig,
-    get_cached_dataset_tulu_sft,
+    get_cached_dataset_tulu,
     visualize_token,
 )
 tc = TokenizerConfig(
-    model_name_or_path="meta-llama/Llama-3.1-8B",
-    revision="main",
+    tokenizer_name_or_path="meta-llama/Llama-3.1-8B",
+    tokenizer_revision="main",
     use_fast=True,
     chat_template_name="tulu",
 )
@@ -43,10 +42,20 @@ dataset_mixer_list = [
     "allenai/tulu-3-sft-personas-instruction-following", "1.0",
     "allenai/tulu-3-sft-personas-code", "1.0",
 ]
-train_dataset = get_cached_dataset_tulu_sft(
+dataset_mixer_list_splits = ["train"]
+dataset_transform_fn = ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
+transform_fn_args = [
+    {"max_seq_length": 4096},
+    {},
+]
+train_dataset = get_cached_dataset_tulu(
     dataset_mixer_list,
+    dataset_mixer_list_splits,
     tc,
-    max_seq_length=4096,
+    dataset_transform_fn,
+    transform_fn_args,
+    target_columns=["input_ids", "attention_mask", "labels"],
+    dataset_cache_mode="local",
 )
 print(train_dataset)
 visualize_token(train_dataset[0]["input_ids"], tc.tokenizer)
