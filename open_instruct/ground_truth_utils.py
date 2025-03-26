@@ -186,6 +186,8 @@ class IFEvalVerifier(VerifierFunction):
         print("DEBUGGING")
         print(label)
         constraint_dict = label
+        if isinstance(constraint_dict, str):
+            constraint_dict = json.loads(constraint_dict)
         answer = prediction.split("<|assistant|>\n")[-1].strip()
         instruction_key = constraint_dict["instruction_id"][0]
         args = constraint_dict["kwargs"][0]
