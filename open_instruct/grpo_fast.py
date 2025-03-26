@@ -1432,6 +1432,8 @@ def main(args: Args, model_config: ModelConfig, reward_fn: Callable):
                 table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
                 table["ground_truth"] = eval_ground_truths
                 df = pd.DataFrame(table)
+                print(eval_ground_truths)
+                print(df)
                 if args.with_tracking:
                     wandb.log({"sample_completions": wandb.Table(dataframe=df)})
                 else:
