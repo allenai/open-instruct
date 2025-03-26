@@ -1,4 +1,16 @@
-#!/usr/bin/env python3
+"""
+This script is used to add or update arguments in a shell script. For example,
+
+```bash
+python update_command_args.py scripts/train/tulu3/grpo_fast_8b.sh \
+    --cluster ai2/augusta-google-1 \
+    --priority normal \
+    --image costah/open_instruct_dev0320_11 | uv run bash
+```
+
+would replace the `--cluster`, `--priority`, `--image` arguments in the script with the ones specified.
+"""
+
 import sys
 import re
 import argparse
