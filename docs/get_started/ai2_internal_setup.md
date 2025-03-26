@@ -36,7 +36,7 @@ beaker secret write -w ai2/tulu-3-dev "${beaker_whoami}_HF_TOKEN" xxxx
 ```
 
 
-## Job submission via mason.py
+## mason.py (for job submission)
 
 `mason.py` is our job submission script. It basically takes your command and runs it in the specified clusters.
 
@@ -99,38 +99,128 @@ mason.py will auto call `--cache_dataset_only` for you, so you do the tokenizati
 When submitting to the `ai2/augusta-google-1` cluster, mason will try to read your model and upload it to Google Cloud Storage and download it to the job (since the cluster does not have a reliable shared filesystem).
 
 
+
+## update_command_args.py (for sweep, benchmark, etc.)
+
+The [/scripts/train](/scripts/train) directory contains many examples on how to launch jobs with mason.py. Sometimes the commands can get long and hard to manage, so we wrote a script called [update_command_args.py](/update_command_args.py) that can be used to add or update arguments in a shell script. For example,
+
+```bash
+python update_command_args.py scripts/train/tulu3/grpo_fast_8b.sh \
+    --cluster ai2/augusta-google-1 \
+    --priority normal \
+    --image costah/open_instruct_dev0320_11  --non_stop_penalty False | uv run bash
+```
+
+This will update the `--cluster`, `--priority`, `--image`, and `--non_stop_penalty` arguments in the script with the ones specified, making it easier to launch jobs with different configurations.
+
+
+As another example, you can run something like this for a learning rate search:
+
+```bash
+for lr in 1e-6 1e-5 1e-4; do
+    python update_command_args.py scripts/train/tulu3/grpo_fast_8b.sh \
+        --exp_name grpo_fast_8b_lr_${lr} \
+        --learning_rate $lr \
+        --image costah/open_instruct_dev0320_11 --non_stop_penalty False | uv run bash
+done
+```
+
+We also have a script called [scripts/train/benchmark.sh](/scripts/train/benchmark.sh) that keeps track of all the commands used to launch jobs in our public [wandb project `ai2-llm/open_instruct_public`](https://wandb.ai/ai2-llm/open_instruct_public).
+
+
+
+
 ## Ai2 Internal Evaluation
 
-We provide a script integrated with beaker for use internally at Ai2. For example, to run all the tulu 3 evals with easy uploading:
+We provide a script integrated with beaker for use internally at Ai2. There are couple of use cases.
+
+*1.* Run evals against a public Hugging Face model. Basically you need to prefix the model name with `hf-` and provide the location as the HF path (e.g. `meta-llama/Meta-Llama-3-8B-Instruct`).
+
+```bash
+for model in allenai/OLMoE-1B-7B-0125-Instruct allenai/OLMoE-1B-7B-0125-DPO allenai/OLMoE-1B-7B-0125-SFT allenai/OLMoE-1B-7B-0924-SFT allenai/OLMoE-1B-7B-0924-Instruct; do
+python scripts/submit_eval_jobs.py \
+    --model_name hf-$model \
+    --cluster ai2/jupiter-cirrascale-2 ai2/neptune-cirrascale ai2/saturn-cirrascale ai2/ceres-cirrascale  \
+    --priority high \
+    --location $model \
+    --is_tuned \
+    --workspace "tulu-3-results" \
+    --priority high \
+    --preemptible \
+    --use_hf_tokenizer_template \
+    --run_oe_eval_experiments \
+    --evaluate_on_weka \
+    --skip_oi_evals
+done
+```
+
+
+*2.* Run evals against a model hosted on Beaker dataset. If it's a training run, you should try matching the `exp_name` and `run_id` with the training run.
+
+
+```bash
+model_name=0222_32B_dpo_lr_8.5e-7__allenai_open_instruct_dev__42__1741225304
+url=https://wandb.ai/ai2-llm/open_instruct_internal/runs/7afq8x28
+location=01JNMHSM8DDSFB3GJDBM5MP6J8
+python scripts/submit_eval_jobs.py \
+    --model_name $model_name \
+    --cluster ai2/jupiter-cirrascale-2 ai2/neptune-cirrascale ai2/saturn-cirrascale ai2/ceres-cirrascale  \
+    --priority high \
+    --location $location \
+    --is_tuned \
+    --workspace "tulu-3-results" \
+    --preemptible \
+    --use_hf_tokenizer_template \
+    --run_oe_eval_experiments \
+    --skip_oi_evals \
+    --run_id $url
+```
+
+This will later show up in the [internal leaderboard](https://huggingface.co/spaces/allenai/oe-eval-leaderboard).
+
+![internal leaderboard](./internal_leaderboard.png)
+
+
+*3.* Run evals against a model hosted on weka.
+
 ```bash
 python scripts/submit_eval_jobs.py \
-      --model_name <model name> \
-      --location <beaker id> \
-      --is_tuned --workspace tulu-3-results \
-      --preemptible \
-      --use_hf_tokenizer_template \
-      --beaker_image nathanl/open_instruct_auto \
-      --upload_to_hf allenai/tulu-3-evals \
-      --run_oe_eval_experiments \
-      --run_safety_evaluations \
-      --skip_oi_evals
+    --model_name test_no_hf_upload \
+    --location /weka/oe-adapt-default/costah/models/0129_grpo_math_kl_fix_zs_0.0_16_half-m_461_checkpoints/step_640 \
+    --cluster ai2/saturn-cirrascale ai2/neptune-cirrascale \
+    --is_tuned \
+    --workspace "tulu-3-results" \
+    --priority high \
+    --preemptible \
+    --use_hf_tokenizer_template \
+    --beaker_image "nathanl/open_instruct_auto" \
+    --run_oe_eval_experiments \
+    --evaluate_on_weka \
+    --oe_eval_tasks gsm8k::tulu,minerva_math::tulu \
+    --run_id https://wandb.ai/ai2-llm/open_instruct_internal/runs/swf79vby \
+    --skip_oi_evals \
+    --oe_eval_max_length 8096
 ```
-Replace location with your beaker ID, and model name with your model name (note this will affect experiment naming, so make it unique and memorable!). For HF models, use a name with `hf-<model-name>` for the model_name argument, and for location give the HF path (e.g. `meta-llama/Meta-Llama-3-8B-Instruct`). Note this assumes your model has a valid HF tokenizer chat template.
 
-To make this script work you have to clone the [following repository](https://github.com/allenai/oe-eval-internal/tree/main) to the top level directory of the open-instruct repository.
 
-You can additionally run other evaluations in this repository through varied arguments to the script.
-
-You can also upload metadata via the `scripts/add_metadata.py` script. Just run `python scripts/add_metadata.py` and follow the prompts.
-
-If you have used automatic evaluation, you cacn also upload metadata via `python add_metadata_from_wandb.py`. Example usage:
+*4.* Run evals against a model on Google Cloud Storage.
 
 ```bash
-# from a wandb url
-python scripts/add_metadata_from_wandb.py --wandb_run_id ai2-llm/open_instruct_internal/runs/fjclmg47
-# or from a hf_revision (the name of the autoeval)
-python scripts/add_metadata_from_wandb.py --hf_repo_revision valpy_dpo_mix_uf_wc_regen_da_sftmix_v4.23___model__42__1725581304
+python scripts/submit_eval_jobs.py \
+    --model_name test_gs_location \
+    --location gs://ai2-llm/post-training/allenai/Llama-3.1-Tulu-3.1-8B \
+    --cluster ai2/augusta-google-1 \
+    --is_tuned \
+    --workspace tulu-3-results \
+    --preemptible \
+    --use_hf_tokenizer_template \
+    --beaker_image nathanl/open_instruct_auto \
+    --oe_eval_tasks gsm8k::tulu \
+    --skip_oi_evals \
+    --gpu_multiplier 2 \
+    --run_oe_eval_experiments
 ```
+
 
 ## Running with gantry
 
