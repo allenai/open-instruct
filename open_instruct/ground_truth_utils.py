@@ -256,6 +256,8 @@ class TuluThinkerVerifier:
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
         # remove thinking section from the prediction
         prediction = prediction.split("</think>")[-1]
+        # remove answer tags from the prediction
+        prediction = prediction.replace("<answer>", "").replace("</answer>", "")
         # TODO: should I add a format reward-type thing? See what happens with RL.
         # return f1 score
         return f1_score(prediction, label)
