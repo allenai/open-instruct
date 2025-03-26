@@ -251,6 +251,9 @@ class ReSearchVerifier(VerifierFunction):
         if "<answer>" not in prediction and "</answer>" not in prediction:
             return 0.0
         answer_string = prediction.split("<answer>")[-1].split("</answer>")[0]
+        # check answer non-empty
+        if not answer_string:
+            return 0.0
         f1 = f1_score(answer_string, label)
         # if f1 is 0, but format is correct, return 0.1
         if f1 == 0:

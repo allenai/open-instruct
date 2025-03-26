@@ -1213,7 +1213,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 if args.add_query_reward:
                     query_scores = torch.zeros(queries.shape[0], device=device)
                     for i, resp in enumerate(decoded_response):
-                        if "<query>" in resp and "</query>" in resp:
+                        # check for query tags AND that the query is not empty
+                        if "<query>" in resp and "</query>" in resp and len(decoded_response.split("<query>")[1].split("</query>")) > 0:
                             query_scores[i] = 10.0
                 if args.add_r1_style_format_reward:
                     format_scores = torch.tensor(
