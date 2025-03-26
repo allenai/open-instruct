@@ -4,6 +4,7 @@ Used to give feedback to the model based on the ground truth answer.
 Add new verifiers by subclassing VerifierFunction and implementing the __call__ method.
 They are then automatically added to the REWARD_FN_MAPPING.
 """
+import ast
 import sys
 import json
 import logging
@@ -185,7 +186,8 @@ class IFEvalVerifier(VerifierFunction):
         instruction_dict = instructions_registry.INSTRUCTION_DICT
         print("DEBUGGING")
         print(label)
-        constraint_dict = label
+        constraint_dict = ast.literal_eval(label)
+        #constraint_dict = label
         if isinstance(constraint_dict, str):
             constraint_dict = json.loads(constraint_dict)
         answer = prediction.split("<|assistant|>\n")[-1].strip()
