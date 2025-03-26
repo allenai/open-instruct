@@ -63,17 +63,31 @@ from transformers import (
     LlamaTokenizerFast,
     PreTrainedTokenizer,
 )
-from transformers.utils.hub import cached_file, extract_commit_hash
+from transformers.utils.hub import _CACHED_NO_EXIST, try_to_load_from_cache, TRANSFORMERS_CACHE, extract_commit_hash, cached_file
 
 from open_instruct.utils import hf_whoami
 
 
 # ----------------------------------------------------------------------------
 # Utilities
+def custom_cached_file(model_name_or_path: str, filename: str, revision: str = None, repo_type: str = "model"):
+    """@vwxyzjn: HF's `cached_file` no longer works for `repo_type="dataset"`."""
+    # local_file = os.path.join(model_name_or_path, filename)
+
+    if os.path.isdir(model_name_or_path):
+        resolved_file = os.path.join(model_name_or_path, filename)
+        if os.path.isfile(resolved_file):
+            return resolved_file
+        else:
+            return None
+    else:
+        return try_to_load_from_cache(model_name_or_path, filename, cache_dir=TRANSFORMERS_CACHE, revision=revision, repo_type=repo_type)
+
+
 def get_commit_hash(
     model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
 ) -> str:
-    file = cached_file(model_name_or_path, revision=revision, filename=filename, repo_type=repo_type)
+    file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     commit_hash = extract_commit_hash(file, None)
     return commit_hash
 
@@ -81,12 +95,16 @@ def get_commit_hash(
 def get_file_hash(
     model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
 ) -> str:
-    try:
-        file = cached_file(model_name_or_path, revision=revision, filename=filename, repo_type=repo_type)
+    file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
+    if isinstance(file, str):
         with open(file, "rb") as f:
             return hashlib.sha256(f.read()).hexdigest()
-    except OSError:
+    elif file is _CACHED_NO_EXIST:
         return f"{filename} not found"
+    elif file is None:
+        return f"{filename} not found"
+    else:
+        raise ValueError(f"Unexpected file type: {type(file)}")
 
 
 def get_files_hash_if_exists(
