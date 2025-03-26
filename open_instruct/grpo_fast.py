@@ -134,8 +134,6 @@ class Args:
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
     """The maximum prompt token length to use for the dataset"""
-    ground_truths_key: str = GROUND_TRUTHS_KEY
-    """columns name for the ground truth"""
 
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]

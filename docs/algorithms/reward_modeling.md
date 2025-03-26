@@ -17,6 +17,12 @@ This implementation has the following key features:
 - Auto save the trained checkpoint to HuggingFace Hub
 - Supports LigerKernel for optimized training with fused operations
 
+There are several relevant implementation details:
+
+1. The tokenizer pads from the right: when the length of the data points differ, the tokenizer pads from the right
+1. Disable dropout in the model: this is actually an implementation detail in PPO training, but for consistency we also disable dropout in the reward model training (see p.3. in https://arxiv.org/pdf/1909.08593)
+1. Layer initialization: we initialize the score's weight according to `std=1 / np.sqrt(model.config.hidden_size + 1)` (see p. 11 in https://arxiv.org/abs/2009.01325)
+
 
 
 ### Debug (Single GPU)
@@ -41,8 +47,7 @@ bash scripts/train/tulu3/reward_modeling_8b.sh
 ![finetune_plot](reward_modeling/tulu3_8b_rm-time.png)
 
 
-* Here is the report: [Tulu3-8B-RM](https://wandb.ai/ai2-llm/open_instruct_public/reports/Tulu3-8B-RM--VmlldzoxMTkwOTgyNw)
-
+<iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Tulu3-8B-RM--VmlldzoxMTkwOTgyNw" style="width:100%; height:500px" title="Tulu3-8B-RM"></iframe>
 
 
 ### Training Metrics
@@ -60,15 +65,6 @@ During training, the following metrics are logged:
 
 
 We also have `eval/rm/accuracy`, `eval/rm/loss`, `eval/rm/chosen_rewards`, `eval/rm/rejected_rewards`, `eval/rm/reward_margin` for the evalation dataset.
-
-
-### Implementation details
-
-These are relevant implementation details on reward modeling:
-
-1. The tokenizer pads from the right: when the length of the data points differ, the tokenizer pads from the right
-1. Disable dropout in the model: this is actually an implementation detail in PPO training, but for consistency we also disable dropout in the reward model training (see p.3. in https://arxiv.org/pdf/1909.08593)
-1. Layer initialization: we initialize the score's weight according to `std=1 / np.sqrt(model.config.hidden_size + 1)` (see p. 11 in https://arxiv.org/abs/2009.01325)
 
 
 
