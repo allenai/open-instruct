@@ -1664,29 +1664,92 @@ if __name__ == "__main__":
                     if finish_reasons[i] != "stop":
                         scores[i] = args.non_stop_penalty_value
 
+        def extract_solution(solution_str):
+            """Extract the equation from the solution string."""
+            answer_pattern = r'<answer>(.*?)</answer>'
+            match = re.finditer(answer_pattern, solution_str)
+            matches = list(match)
+            if matches:
+                final_answer = matches[-1].group(1).strip()
+            else:
+                final_answer = None
+            return final_answer
+
         # @nouha: handle arithmetic reward
+        import re
+        def validate_equation(equation_str, available_numbers):
+            """Validate that equation only uses available numbers and each number once."""
+            try:
+                # Extract all numbers from the equation
+                numbers_in_eq = [int(n) for n in re.findall(r'\d+', equation_str)]
+                
+                # Check if all numbers in equation are available
+                available_numbers = sorted(available_numbers)
+                numbers_in_eq = sorted(numbers_in_eq)
+                
+                # Each number should be used exactly once
+                return numbers_in_eq == available_numbers
+            except:
+                return False
+        
+        def evaluate_equation(equation_str):
+            """Safely evaluate the arithmetic equation using eval() with precautions."""
+            try:
+                # Define a regex pattern that only allows numbers, operators, parentheses, and whitespace
+                allowed_pattern = r'^[\d+\-*/().\s]+$'
+                if not re.match(allowed_pattern, equation_str):
+                    raise ValueError("Invalid characters in equation.")
+
+                # Evaluate the equation with restricted globals and locals
+                result = eval(equation_str, {"__builtins__": None}, {})
+                return result
+            except Exception as e:
+                return None
+        
+         # handle countdown puzzle reward
         if args.apply_arithmetic_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating arithmetic reward"):
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating countdown reward"):
                 arithmetic_rewards = []
+                extracted_numbers = []
                 for i in range(len(decoded_responses)):
                     # extract the string between <answer> and </answer>
                     decoded_response = decoded_responses[i]
-                    answer_start = decoded_response.find("<answer>") + len("<answer>")
-                    answer_end = decoded_response.find("</answer>")
-                    # normalize the number (e.g., 1,000 -> 1000)
+                    available_numbers = list(map(int, ground_truths[i].split(",")))[:-1]
+                    groundtruth = list(map(int, ground_truths[i].split(",")))[-1]
+                    # Attempt to extract the answer
+                    extracted_answer = extract_solution(solution_str=decoded_response)
+                    extracted_numbers.append(extracted_answer)
+
+                    # breakpoint()
+                    if not validate_equation(extracted_answer, available_numbers):
+                        # print(f"Invalid equation: {decoded_response}")
+                        arithmetic_rewards.append(0)
+                        extracted_numbers.append(None)
+                        continue
+                    
+                    # Evaluate equation
                     try:
-                        answer = decoded_response[answer_start:answer_end]
-                        answer = answer.replace(",", "").strip()
-                        if float(answer) == float(ground_truths[i]):
-                            arithmetic_rewards.append(args.arithmetic_reward)
-                            scores[i] += args.arithmetic_reward
+                        if extracted_answer: 
+                            result = evaluate_equation(extracted_answer)
+                            if result is None:
+                                print(f"Could not evaluate equation")
+                                arithmetic_rewards.append(0)
+                            else:
+                                if result == groundtruth:
+                                    arithmetic_rewards.append(args.arithmetic_reward)
+                                    scores[i] += args.arithmetic_reward
+                                else:
+                                    arithmetic_rewards.append(0)
                         else:
                             arithmetic_rewards.append(0)
-                    except:  # noqa
+                    except:
+                        print(f"Error evaluating equation")
                         arithmetic_rewards.append(0)
-                        pass  # it's ok if things went wrong
+
+                # breakpoint()
                 metrics["objective/arithmetic_score"] = np.array(arithmetic_rewards).mean()
                 metrics["objective/arithmetic_correct_rate"] = (np.array(arithmetic_rewards) > 0.0).mean()
+
 
         return scores, metrics
 
