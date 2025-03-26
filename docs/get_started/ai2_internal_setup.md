@@ -1,14 +1,28 @@
 # Ai2 Internal Setup
 
-This document details some best practices when submitting jobs in our cluster.
+This document details some best practices when working with our cluster.
 
-## First-time setup
+## (One-time setup) VScode + Weka setup
+
+You should join the `#vscode-weka-dev-workflow` slack channel to setup your VScode to work with weka.
+
+After following the instructions there, you should end up with a VScode / Cursor setup that looks like this:
+
+- Your terminal has direct access to the weka filesystem.
+- You can run `beaker` commands from the terminal.
+- You can edit files in the weka filesystem.
+- You can run python scripts with the pyenv / uv environment.
+
+![VScode setup](./vscode.png)
+
+
+## (One-time setup) Setup API keys
 
 You need to first obtain API key or tokens from the following website:
 
-* `BEAKER_TOKEN`: https://beaker.org/user
-* `WANDB_API_KEY`: https://wandb.ai/authorize
-* `HF_TOKEN`: https://huggingface.co/settings/tokens
+* `BEAKER_TOKEN`: [https://beaker.org/user](https://beaker.org/user)
+* `WANDB_API_KEY`: [https://wandb.ai/authorize](https://wandb.ai/authorize)
+* `HF_TOKEN`: [https://huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
 
 Then you need to write them in beaker secret as follows (replace the `xxxx` with your own API key or token)
 ```bash
@@ -16,18 +30,28 @@ beaker_whoami=$(beaker account whoami --format json | jq -r '.[0].name')
 beaker secret write -w ai2/tulu-2-improvements "${beaker_whoami}_BEAKER_TOKEN" xxxx
 beaker secret write -w ai2/tulu-2-improvements "${beaker_whoami}_WANDB_API_KEY" xxxx
 beaker secret write -w ai2/tulu-2-improvements "${beaker_whoami}_HF_TOKEN" xxxx
+beaker secret write -w ai2/tulu-3-dev "${beaker_whoami}_BEAKER_TOKEN" xxxx
+beaker secret write -w ai2/tulu-3-dev "${beaker_whoami}_WANDB_API_KEY" xxxx
+beaker secret write -w ai2/tulu-3-dev "${beaker_whoami}_HF_TOKEN" xxxx
 ```
+
 
 ## Job submission
 
-`mason.py` is our job submission script. It takes in the command after `--` and runs it in the specified clusters. During the job submission, it automatically tries to setup a shared Hugging Face cache with environment variables. For example, it sets
+`mason.py` is our job submission script. It basically takes your command and runs it in the specified clusters.
 
-* `HF_HOME=/weka/oe-adapt-default/allennlp/.cache/huggingface`. 
-* `HF_DATASETS_CACHE=/weka/oe-adapt-default/allennlp/.cache/huggingface`
-* `HF_HUB_CACHE=/weka/oe-adapt-default/allennlp/.cache/hub`
+For example, let's say you have a training job like this:
 
+```bash
+python open_instruct/finetune.py \
+    --model_name_or_path EleutherAI/pythia-14m \
+    --tokenizer_name EleutherAI/pythia-14m \
+    --dataset_mixer_list allenai/tulu-3-sft-personas-algebra 100 \
+    --use_flash_attn False \
+    --with_tracking --report_to wandb
+```
 
-You can run things like below for a quick spin. This example just starts a beaker job to print the Python version in your beaker image.
+You can take your command above and run it on the weka cluster with the following command (use `--` to separate the mason command from the python command):
 
 ```bash
 python mason.py \
@@ -36,325 +60,44 @@ python mason.py \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --priority normal \
     --budget ai2/oe-adapt \
-    --gpus 1 -- which python
+    --gpus 0 -- python open_instruct/finetune.py \
+    --model_name_or_path EleutherAI/pythia-14m \
+    --tokenizer_name EleutherAI/pythia-14m \
+    --dataset_mixer_list allenai/tulu-3-sft-personas-algebra 100 \
+    --use_flash_attn False \
+    --with_tracking --report_to wandb
 ```
 
 
-### Caching model (Weka-only)
+![mason.py](./mason.png)
 
-You can run the following command to cache models to the share Hugging Face cache. We recommend this for weka (shared filesystem) users because otherwise your jobs would 1) waste time downloading the model while GPU is idle and 2) risk potential download failures.
-
-```bash
-python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale ai2/neptune-cirrascale --image nathanl/open_instruct_auto --pure_docker_mode \
-    --workspace ai2/tulu-3-dev \
-    --priority normal \
-    --preemptible \
-    --budget ai2/allennlp \
-    --gpus 0 -- python scripts/cache_hf.py \
-    --model_name_or_path "allenai/open_instruct_dev" \
-    --model_revision "reward_modeling__1__1737836233"
-```
-
-If you have the weka environment setup you can also just run
-
-```bash
-python scripts/cache_hf.py \
-    --model_name_or_path "allenai/open_instruct_dev" \
-    --model_revision "reward_modeling__1__1737836233"
-```
+![mason_job.py](./mason_job.png)
 
 
-### Supervised Fine-tuning (SFT):
 
-Otherwise, the `mason.py` command can be used to launch all of our other training jobs.
-```bash
-python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
-    --workspace ai2/tulu-3-dev \
-    --priority normal \
-    --image nathanl/open_instruct_auto --pure_docker_mode \
-    --preemptible \
-    --num_nodes 4 \
-    --budget ai2/oe-adapt \
-    --gpus 8 -- accelerate launch \
-    --mixed_precision bf16 \
-    --num_processes 8 \
-    --use_deepspeed \
-    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
-    --deepspeed_multinode_launcher standard \
-    open_instruct/finetune.py \
-    --model_name_or_path meta-llama/Llama-3.1-8B \
-    --tokenizer_name meta-llama/Llama-3.1-8B \
-    --use_slow_tokenizer \
-    --use_flash_attn \
-    --max_seq_length 4096 \
-    --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 4 \
-    --learning_rate 5e-06 \
-    --lr_scheduler_type linear \
-    --warmup_ratio 0.03 \
-    --weight_decay 0.0 \
-    --num_train_epochs 2 \
-    --output_dir output/sft_8b \
-    --with_tracking \
-    --report_to wandb \
-    --logging_steps 1 \
-    --reduce_loss sum \
-    --model_revision main \
-    --dataset_mixer_list allenai/tulu-3-sft-mixture 1.0 \
-    --dataset_mix_dir output/sft_8b \
-    --exp_name tulu-3-8b-sft \
-    --seed 123
-```
+`mason.py` does a few things:
+
+### Auto set HF cache environment variables:
+
+During the job submission, it automatically tries to setup a shared Hugging Face cache with environment variables. For example, it sets
+    * `HF_HOME=/weka/oe-adapt-default/allennlp/.cache/huggingface`. 
+    * `HF_DATASETS_CACHE=/weka/oe-adapt-default/allennlp/.cache/huggingface`
+    * `HF_HUB_CACHE=/weka/oe-adapt-default/allennlp/.cache/hub`
+
+### Auto set `--hf_entity` and `--wandb_entity` arguments:
+
+so during runtime we issue fewer HF API calls, which sometimes could fail due to rate limiting.
+
+### Auto caching datasets:
+
+mason.py will auto call `--cache_dataset_only` for you, so you do the tokenization locally instead of in the jobs, which saves idle GPU time in the actual jobs.
 
 
-Note that during job submission, we will try to tokenize and cache the dataset so we are not running these CPU-heavy workloads in GPU jobs. Specifically, `mason.py` will parse out `python` command you are running and attempts to run it with `--cache_dataset_only` flag. For example, you will see output like
+### Auto upload to Google Cloud Storage:
 
-```bash
-📦📦📦 Running the caching full_command: python open_instruct/dpo_tune_cache.py --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-SFT --use_flash_attn --tokenizer_name allenai/Llama-3.1-Tulu-3-8B-SFT --max_seq_length 2048 --preprocessing_num_workers 16 --per_device_train_batch_size 1 --gradient_accumulation_steps 16 --learning_rate 5e-07 --lr_scheduler_type linear --warmup_ratio 0.1 --weight_decay 0.0 --num_train_epochs 1 --output_dir output/dpo_8b --with_tracking --report_to wandb --logging_steps 1 --model_revision main --gradient_checkpointing --dataset_mixer_list allenai/llama-3.1-tulu-3-8b-preference-mixture 1.0 --use_slow_tokenizer --use_lora False --dpo_loss_type dpo_norm --dpo_beta 5 --exp_name tulu-3-8b-dpo --cache_dataset_only
-[2025-01-21 09:58:09,342] [WARNING] [real_accelerator.py:162:get_accelerator] Setting accelerator to CPU. If you have GPU or other accelerator, we were unable to detect it.
-[2025-01-21 09:58:09,354] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cpu (auto detect)
-Failed to get Beaker experiment: b'Error: experiment "01JD3WCQYTBPE195GVWPVMDHVV" not found\n\n'
-
-# ....
-Cache not found, transforming datasets...
-Map (num_proc=192): 100%|██████████████████| 271409/271409 [00:40<00:00, 6690.00 examples/s]
-Filter (num_proc=192): 100%|███████████████| 271409/271409 [00:36<00:00, 7492.34 examples/s]
-Creating parquet from Arrow format: 100%|███████████████████| 17/17 [00:02<00:00,  7.26ba/s]
-Creating parquet from Arrow format: 100%|███████████████████| 17/17 [00:02<00:00,  7.77ba/s
-🚀 Pushed transformed dataset to https://huggingface.co/datasets/vwxyzjn/dataset-mix-cached/tree/992c2b51ba
-✅ Found cached dataset at https://huggingface.co/datasets/vwxyzjn/dataset-mix-cached/tree/992c2b51ba
-
-# ...
-
-Kicked off Beaker job. https://beaker.org/ex/01JJ50D88M757GZD14W9CNN7NT
-```
-
-It would be most helpful if you run the `mason.py` command on a vscode session with access to weka, that way, the dataset is also automatically downloaded to the shared `HF_HOME` on weka, etc.
-
-When you inspect the job, it's going to have the following outputs, meaning the cached dataset is found and used:
-
-```
-2025-01-21T18:02:04.840723691Z 
-2025-01-21T18:02:05.948433221Z ✅ Found cached dataset at https://huggingface.co/datasets/vwxyzjn/dataset-mix-cached/tree/992c2b51ba
-2025-01-21T18:02:06.120806993Z ✅ Found cached dataset at https://huggingface.co/datasets/vwxyzjn/dataset-mix-cached/tree/992c2b51ba
-2025-01-21T18:02:06.190569046Z ✅ Found cached dataset at https://huggingface.co/datasets/vwxyzjn/dataset-mix-cached/tree/992c2b51ba
-2025-01-21T18:02:06.197208582Z ✅ Found cached dataset at https://huggingface.co/datasets/vwxyzjn/dataset-mix-cached/tree/992c2b51ba
-2025-01-21T18:02:06.333301775Z ✅ Found cached dataset at https://huggingface.co/datasets/vwxyzjn/dataset-mix-cached/tree/992c2b51ba
-2025-01-21T18:02:06.338503095Z ✅ Found cached dataset at https://huggingface.co/datasets/vwxyzjn/dataset-mix-cached/tree/992c2b51ba
-2025-01-21T18:02:06.385010439Z ✅ Found cached dataset at https://huggingface.co/datasets/vwxyzjn/dataset-mix-cached/tree/992c2b51ba
-```
+When submitting to the `ai2/augusta-google-1` cluster, mason will try to read your model and upload it to Google Cloud Storage and download it to the job (since the cluster does not have a reliable shared filesystem).
 
 
-### Direct Preference Optimization (DPO):
-
-
-```bash
-python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
-    --workspace ai2/tulu-3-dev \
-    --priority normal \
-    --image nathanl/open_instruct_auto --pure_docker_mode \
-    --preemptible \
-    --num_nodes 4 \
-    --budget ai2/oe-adapt \
-    --gpus 8 -- accelerate launch \
-    --mixed_precision bf16 \
-    --num_processes 8 \
-    --use_deepspeed \
-    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
-    --deepspeed_multinode_launcher standard \
-    open_instruct/dpo_tune_cache.py \
-    --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-SFT \
-    --use_flash_attn \
-    --tokenizer_name allenai/Llama-3.1-Tulu-3-8B-SFT \
-    --max_seq_length 2048 \
-    --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 16 \
-    --learning_rate 5e-07 \
-    --lr_scheduler_type linear \
-    --warmup_ratio 0.1 \
-    --weight_decay 0.0 \
-    --num_train_epochs 1 \
-    --output_dir /output \
-    --with_tracking \
-    --report_to wandb \
-    --logging_steps 1 \
-    --model_revision main \
-    --gradient_checkpointing \
-    --dataset_mixer_list allenai/llama-3.1-tulu-3-8b-preference-mixture 1.0 \
-    --use_slow_tokenizer \
-    --use_lora False \
-    --dpo_loss_type dpo_norm \
-    --dpo_beta 5 \
-    --exp_name tulu-3-8b-dpo
-```
-
-
-## RM:
-
-```bash
-python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
-    --workspace ai2/tulu-3-dev \
-    --priority high \
-    --preemptible \
-    --image nathanl/open_instruct_auto --pure_docker_mode \
-    --budget ai2/oe-adapt \
-    --num_nodes 4 \
-    --gpus 8 -- accelerate launch \
-    --config_file configs/ds_configs/deepspeed_zero3.yaml open_instruct/reward_modeling.py \
-    --dataset_mixer '{"allenai/llama-3.1-tulu-3-8b-preference-mixture": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"allenai/ultrafeedback_binarized_cleaned": 1.0}' \
-    --dataset_eval_splits test_prefs \
-    --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-SFT \
-    --chat_template tulu \
-    --learning_rate 3e-6 \
-    --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 32 \
-    --max_token_length 2048 \
-    --max_prompt_token_length 2048 \
-    --num_train_epochs 1 \
-    --output_dir output/rm_8b \
-    --gradient_checkpointing \
-    --push_to_hub \
-    --with_tracking
-```
-
-## RLVR:
-
-```bash
-# make sure to match up the GPUs. E.g.,
-# `--actor_num_gpus_per_node 6 8`
-# `--vllm_tensor_parallel_size 2`
-# translates to 6 + 2 + 8 = 16 GPUs
-# which matches up with `--num_nodes 2 --gpus 8`
-for beta in 0.05; do
-exp_name="0112_ppo_rlvr_${beta}_${RANDOM}"
-python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
-    --workspace ai2/tulu-3-dev \
-    --priority high \
-    --preemptible \
-    --image nathanl/open_instruct_auto --pure_docker_mode \
-    --budget ai2/oe-adapt \
-    --num_nodes 2 \
-    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl.py \
-    --exp_name $exp_name \
-    --beta $beta \
-    --output_dir /weka/oe-adapt-default/allennlp/deletable_checkpoint/$exp_name \
-    --try_launch_beaker_eval_jobs_on_weka \
-    --try_launch_beaker_eval_jobs False \
-    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
-    --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
-    --dataset_mixer_eval_list_splits train \
-    --max_token_length 2048 \
-    --max_prompt_token_length 2048 \
-    --response_length 2048 \
-    --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-DPO \
-    --reward_model_path allenai/Llama-3.1-Tulu-3-8B-RM \
-    --non_stop_penalty \
-    --stop_token eos \
-    --temperature 1.0 \
-    --ground_truths_key ground_truth \
-    --chat_template_name tulu \
-    --sft_messages_key messages \
-    --learning_rate 3e-7 \
-    --total_episodes 200000 \
-    --penalty_reward_value -10.0 \
-    --deepspeed_stage 3 \
-    --per_device_train_batch_size 1 \
-    --local_rollout_forward_batch_size 1 \
-    --local_mini_batch_size 4 \
-    --local_rollout_batch_size 4 \
-    --actor_num_gpus_per_node 6 8 \
-    --vllm_tensor_parallel_size 2 \
-    --vllm_enforce_eager \
-    --apply_verifiable_reward true \
-    --seed 3 \
-    --num_evals 1000 \
-    --save_freq 40 \
-    --reward_model_multiplier 0.0 \
-    --gradient_checkpointing \
-    --with_tracking
-done
-```
-
-GRPO:
-```bash
-for beta in 0.0 0.05 0.03; do
-for nspp in 4 8 16; do
-exp_name="0112_grpo_math_zs_${beta}_${nspp}_${RANDOM}"
-python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
-    --workspace ai2/tulu-3-dev \
-    --priority high \
-    --preemptible \
-    --num_nodes 4 \
-    --budget ai2/oe-adapt \
-    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& uv run python open_instruct/grpo_vllm_thread_ray_gtrl.py \
-    --exp_name $exp_name \
-    --beta $beta \
-    --local_mini_batch_size 8 \
-    --number_samples_per_prompt $nspp \
-    --output_dir /weka/oe-adapt-default/costah/$exp_name \
-    --dataset_mixer "{\"ai2-adapt-dev/math_ground_truth_zs\": 1.0}" \
-    --dataset_train_splits train \
-    --dataset_eval_mixer "{\"ai2-adapt-dev/math_ground_truth_zs\": 32}" \
-    --dataset_eval_splits train \
-    --max_token_length 2048 \
-    --max_prompt_token_length 2048 \
-    --response_length 4096 \
-    --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-DPO \
-    --non_stop_penalty \
-    --stop_token eos \
-    --temperature 1.0 \
-    --ground_truths_key ground_truth \
-    --chat_template_name tulu \
-    --sft_messages_key messages \
-    --learning_rate 5e-7 \
-    --total_episodes 1000000 \
-    --penalty_reward_value 0.0 \
-    --deepspeed_stage 3 \
-    --per_device_train_batch_size 2 \
-    --local_rollout_forward_batch_size 2 \
-    --local_rollout_batch_size 8 \
-    --actor_num_gpus_per_node 7 8 8 8 \
-    --num_epochs 1 \
-    --vllm_tensor_parallel_size 1 \
-    --lr_scheduler_type constant \
-    --apply_verifiable_reward true \
-    --seed 1 \
-    --num_evals 1000 \
-    --save_freq 40 \
-    --reward_model_multiplier 0.0 \
-    --no_try_launch_beaker_eval_jobs \
-    --try_launch_beaker_eval_jobs_on_weka \
-    --gradient_checkpointing \
-    --with_tracking
-done
-done
-```
-
-
-### End-to-end Model Training
-
-For post-training, we often need to train the models throughout all 3 stages. The rough steps are as follows:
-
-1. Run a sweep of SFT training and use the internal leaderboard https://huggingface.co/spaces/allenai/oe-eval-leaderboard to select the best model.
-2. Run a sweep of DPO training and select the best model.
-3. Based on the best DPO model, use its dataset to train an RM.
-4. Use the best DPO (and RM) to train an RLVR model.
-
-
-We have some example dev scripts on the whole process in the `docs/archived_dev_scripts` directory. Note that these scripts are not cleaned up like [docs/tulu3.md](docs/tulu3.md), but they are useful for reference.
-
-* docs/archived_dev_scripts/olmo2_1124.sh (the commands used to produce [OLMo 2 1124](https://huggingface.co/collections/allenai/olmo-2-674117b93ab84e98afc72edc))
-* docs/archived_dev_scripts/olmoe_0125.sh (the commands used to produce [OLMoE 0125](https://huggingface.co/collections/allenai/olmoe-0125-67992134f9ebea0a941706ca))
 
 
 ### Ai2 Internal Evaluation
