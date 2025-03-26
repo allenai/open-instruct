@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import string
+from collections import Counter
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Union
 
@@ -190,6 +191,19 @@ def normalize_answer(s: str) -> str:
     return white_space_fix(remove_articles(remove_punc(s.lower())))
 
 
+def f1_score(prediction, ground_truth):
+    prediction_tokens = normalize_answer(prediction).split()
+    ground_truth_tokens = normalize_answer(ground_truth).split()
+    common = Counter(prediction_tokens) & Counter(ground_truth_tokens)
+    num_same = sum(common.values())
+    if num_same == 0:
+        return 0
+    precision = 1.0 * num_same / len(prediction_tokens)
+    recall = 1.0 * num_same / len(ground_truth_tokens)
+    f1 = (2 * precision * recall) / (precision + recall)
+    return f1
+
+
 class FlanVerifier(VerifierFunction):
     """
     Verifier for Flan tasks that extracts the answer after "The answer is:"
@@ -221,6 +235,28 @@ class StringMatcherVerifier(VerifierFunction):
         answer_string = prediction.split("<answer>")[-1].split("</answer>")[0]
         # normalize
         return float(normalize_answer(answer_string) == normalize_answer(label))
+
+
+
+class ReSearchVerifier(VerifierFunction):
+    """
+    Verifier from ReSearch paper (https://arxiv.org/abs/2503.19470)
+    Uses F1 score + format. If format is achieved but f1 is 0, returns 0.1. Otherwise returns F1.
+    """
+    def __init__(self) -> None:
+        super().__init__("re_search", weight=1.0)
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> float:
+        # extract answer
+        if "<answer>" not in prediction and "</answer>" not in prediction:
+            return 0.0
+        answer_string = prediction.split("<answer>")[-1].split("</answer>")[0]
+        f1 = f1_score(answer_string, label)
+        # if f1 is 0, but format is correct, return 0.1
+        if f1 == 0:
+            return 0.1
+        # otherwise return f1
+        return f1
 
 
 class MaxLenVerifier(VerifierFunction):
