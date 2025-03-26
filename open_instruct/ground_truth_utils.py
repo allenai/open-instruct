@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import string
+import requests
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Union
 
@@ -219,6 +220,56 @@ class MaxLenVerifier(VerifierFunction):
         # linear func that hits 1 at max_length and 0 after
         return 0 if len(tokenized_prediction) > max_length else len(tokenized_prediction) / max_length
 
+class CodeVerifier(VerifierFunction):
+    """
+    Verifier that runs python code against test cases. The pass rate is a multiplier on verified reward.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("ace_coder", weight=1.0)
+
+    def extract_python_code(model_output: str) -> str:
+        """Extract the first code block between ``` markers from the model output."""
+        # Find content between ``` markers
+        pattern = r"```(?:python)?(.*?)```"
+        matches = re.findall(pattern, model_output, re.DOTALL)
+
+        if not matches:
+            return model_output
+
+        # Return the first match, stripped of whitespace
+        return matches[0].strip()
+    
+
+    def verify_ace_coder_sample(model_output, tests: List[str], max_execution_time: float = 1.0):
+        """First extract the python code from the model output, then run it against the test cases. See example below.
+        """
+        # Extract the python code from the model output
+        python_code = CodeVerifier.extract_python_code(model_output)
+
+
+        # local execution is bad (causes checkpoint saving to fail because it disables `os.mkdir`)
+        # so we use the API instead.
+        url = "http://phobos-cs-aus-453.reviz.ai2.in:8000/test_program"
+        # Test data
+        payload = {
+            "program": python_code,
+            "tests": tests,
+            "max_execution_time": 1.0
+        }
+
+        response = requests.post(url, json=payload)
+        passes = response.json()["results"]
+        pass_rate = sum(passes) / len(passes)
+        return pass_rate
+    
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: List[str]) -> bool:
+        """
+        Extract the python code from the model output, then run it against the test cases.
+        For code, the label is a list of test cases.
+        """
+        pass_rate = CodeVerifier.verify_ace_coder_sample(prediction, label)
+        return pass_rate
 
 def get_all_verifiers() -> Dict[str, VerifierFunction]:
     """
