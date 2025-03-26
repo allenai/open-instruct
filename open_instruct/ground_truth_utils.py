@@ -10,7 +10,7 @@ from typing import List
 
 import requests
 
-from open_instruct.code_utils import get_successful_tests_fast
+from open_instruct.code import get_successful_tests_fast
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.math_utils import (
     get_unnormalized_answer,

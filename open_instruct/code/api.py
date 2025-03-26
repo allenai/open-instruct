@@ -4,15 +4,15 @@ can launch local server with:
 uv run uvicorn --host 0.0.0.0 open_instruct.code_api.api:app
 ```
 
-or use docker:
+or launch the server in a docker container:
 ```
-docker build -t code-api -f open_instruct/code_api/Dockerfile .
+docker build -t code-api -f open_instruct/code/Dockerfile .
 docker run -p 8000:8000 code-api
 ```
 
 and then test with:
 ```
-python open_instruct/code_api/api.py
+python open_instruct/code/api.py
 ```
 """
 
