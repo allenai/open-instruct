@@ -202,10 +202,10 @@ for TASK in "${TASKS[@]}"; do
             --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
-            --beaker-image "costah/oe-eval-0305_gs_olmo32b" \
+            --beaker-image "nouhad/oe-eval-multiplication-preset" \
             --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1"}' \
             ${REVISION_ARG} \
-            --cluster ai2/neptune-cirrascale,ai2/saturn-cirrascale,ai2/jupiter-cirrascale-2 \
+            --cluster ai2/saturn-cirrascale,ai2/jupiter-cirrascale-2 \
             --beaker-retries 2 \
             --beaker-priority "$PRIORITY" \
             --push-datalake \
