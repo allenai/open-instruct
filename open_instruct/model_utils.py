@@ -230,8 +230,6 @@ def apply_verifiable_reward(
         else:
             dataset_list = dataset
         
-        #print(f"ground_truth_list: {ground_truth_list}")
-        #print(f"dataset_list: {dataset_list}")
         if dataset_list[0] == "ace_coder" and type(ground_truth_list[0]) == str:
             ground_truth_list = [ground_truth_list]
         assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."

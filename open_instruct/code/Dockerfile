@@ -20,9 +20,20 @@ RUN mkdir -p cache && chmod 777 cache
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8000
 ENV PYTHONPATH=/app
+ENV PYTHONFAULTHANDLER=1
+ENV LOG_LEVEL=INFO
+ENV PYTHONHASHSEED=random
 
 # Expose the port the app runs on
 EXPOSE ${PORT}
 
-# Command to run the application
-CMD uvicorn code.api:app --host 0.0.0.0 --port $PORT
+# Command to run the application with better process management
+CMD uvicorn code.api:app \
+    --host 0.0.0.0 \
+    --port $PORT \
+    --workers 1 \
+    --log-level info \
+    --timeout-keep-alive 75 \
+    --limit-concurrency 100 \
+    --backlog 2048 \
+    --limit-max-requests 10000
