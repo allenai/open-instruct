@@ -20,7 +20,7 @@ for data in dataset['train']:
             },
         ],
         "ground_truth": data['answer'],
-        "dataset": "string_matcher"
+        "dataset": "re_search"
     })
 
 new_test_data = []
@@ -38,7 +38,7 @@ for data in dataset['test']:
             },
         ],
         "ground_truth": data['answer'],
-        "dataset": "string_matcher"
+        "dataset": "re_search"
     })
 
 ds = DatasetDict({
