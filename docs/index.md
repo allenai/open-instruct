@@ -41,6 +41,7 @@ Try some of the models we train with Open Instruct. There is a [free demo](https
 
 ## News
 
+- [2025-02-12] We released the [`allenai/Llama-3.1-Tulu-3.1-8B` model](https://huggingface.co/allenai/Llama-3.1-Tulu-3.1-8B), which is trained with our GRPO recipe and outperforms the old [`allenai/Llama-3.1-Tulu-3-8B` model](https://huggingface.co/allenai/Llama-3.1-Tulu-3-8B) in almost all of our evals.
 - [2024-11-22] We released [TÜLU 3: Pushing Frontiers in Open Language Model Post-Training](https://arxiv.org/abs/2411.15124) and updated our entire stack of open post-training recipes with both Llama 3.1 and OLMo 2.
 - [2024-07-01] We released [Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback](https://arxiv.org/abs/2406.09279) and have majorly updated our codebase to support new models and package versions.
 - [2023-11-27] We released [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702). Check out our models [here](https://huggingface.co/collections/allenai/tulu-v2-suite-6551b56e743e6349aab45101). We have added a DPO finetuning script for replicating our results.
