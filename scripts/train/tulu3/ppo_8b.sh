@@ -6,14 +6,12 @@ python mason.py \
     --preemptible \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
-    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_vllm_thread_ray_gtrl.py \
-    --exp_name tulu3.1_8b_grpo \
-    --beta 0.01 \
-    --local_mini_batch_size 32 \
-    --number_samples_per_prompt 16 \
-    --local_rollout_batch_size 4 \
-    --kl_estimator kl3 \
-    --learning_rate 5e-7 \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/ppo_vllm_thread_ray_gtrl.py \
+    --exp_name tulu3_8b_ppo \
+    --beta 0.05 \
+    --local_mini_batch_size 16 \
+    --local_rollout_batch_size 16 \
+    --learning_rate 3e-7 \
     --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
@@ -22,24 +20,23 @@ python mason.py \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
     --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-DPO \
+    --reward_model_path allenai/Llama-3.1-Tulu-3-8B-RM \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
     --chat_template_name tulu \
     --total_episodes 2000000 \
-    --penalty_reward_value 0.0 \
+    --penalty_reward_value -10.0 \
     --deepspeed_stage 2 \
     --per_device_train_batch_size 2 \
     --local_rollout_forward_batch_size 2 \
     --actor_num_gpus_per_node 4 8 \
-    --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
     --vllm_num_engines 4 \
-    --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
     --num_evals 100 \
-    --save_freq 40 \
+    --save_freq 80 \
     --reward_model_multiplier 0.0 \
     --no_try_launch_beaker_eval_jobs \
     --try_launch_beaker_eval_jobs_on_weka \
