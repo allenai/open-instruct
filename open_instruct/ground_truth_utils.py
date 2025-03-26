@@ -187,6 +187,7 @@ class IFEvalVerifier(VerifierFunction):
         print("DEBUGGING")
         print(label)
         constraint_dict = ast.literal_eval(label)
+        constraint_dict = constraint_dict[0]
         #constraint_dict = label
         if isinstance(constraint_dict, str):
             constraint_dict = json.loads(constraint_dict)
