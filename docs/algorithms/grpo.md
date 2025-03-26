@@ -7,7 +7,7 @@ GRPO is an online RL method used in [DeepSeek R1 paper](https://arxiv.org/abs/25
 ## Implemented Variants
 
 - `grpo_fast.py` is a faster variant using [packing techniques](https://huggingface.co/blog/sirluk/llm-sequence-packing).
-- `grpo_vllm_thread_ray_gtrl.py` is the original GRPO implementation, using vLLM and Ray.
+- `grpo_vllm_thread_ray_gtrl.py` is a more vanilla GRPO implementation, using vLLM and Ray.
 
 
 
