@@ -245,7 +245,7 @@ def get_all_verifiers() -> Dict[str, VerifierFunction]:
     return verifiers
 
 
-class TuluThinkerVerifier
+class TuluThinkerVerifier:
     """
     A generalist verifier that just uses F1 score to compare the prediction to the ground truth.
     In future will replace this with more sophisticated verifiers.
