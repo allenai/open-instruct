@@ -35,7 +35,7 @@ python mason.py \
     --temperature 1.0 \
     --ground_truths_key ground_truth \
     --sft_messages_key messages \
-    --total_episodes 5000000 \
+    --total_episodes 10000000 \
     --deepspeed_stage 2 \
     --per_device_train_batch_size 2 \
     --local_rollout_forward_batch_size 2 \
@@ -47,7 +47,7 @@ python mason.py \
     --seed 1 \
     --num_evals 200 \
     --reward_model_multiplier 0.0 \
-    --save_freq 80 \
+    --save_freq 40 \
     --try_launch_beaker_eval_jobs_on_weka \
     --gradient_checkpointing \
     --with_tracking

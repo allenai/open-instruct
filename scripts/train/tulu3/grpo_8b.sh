@@ -25,9 +25,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --chat_template_name tulu \
-    --sft_messages_key messages \
     --total_episodes 2000000 \
     --penalty_reward_value 0.0 \
     --deepspeed_stage 2 \
@@ -35,7 +33,8 @@ python mason.py \
     --local_rollout_forward_batch_size 2 \
     --actor_num_gpus_per_node 4 8 \
     --num_epochs 1 \
-    --vllm_tensor_parallel_size 4 \
+    --vllm_tensor_parallel_size 1 \
+    --vllm_num_engines 4 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \

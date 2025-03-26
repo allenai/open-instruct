@@ -31,18 +31,18 @@ python mason.py \
     --oe_eval_tasks minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning \
     --oe_eval_max_length 8192 \
     --temperature 1.0 \
-    --total_episodes 5000000 \
-    --deepspeed_stage 2 \
+    --total_episodes 1000000 \
+    --deepspeed_stage 3 \
     --per_device_train_batch_size 1 \
     --num_mini_batches 1 \
-    --num_learners_per_node 6 \
+    --num_learners_per_node 4 \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
-    --vllm_num_engines 10 \
+    --vllm_num_engines 12 \
     --lr_scheduler_type linear \
     --seed 1 \
     --num_evals 200 \
-    --save_freq 80 \
+    --save_freq 40 \
     --try_launch_beaker_eval_jobs_on_weka \
     --gradient_checkpointing \
     --with_tracking
