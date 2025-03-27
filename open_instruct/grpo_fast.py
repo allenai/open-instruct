@@ -226,6 +226,8 @@ class Args:
     """whether to apply ace coder reward"""
     ace_coder_reward: float = 10.0
     """the reward value for ace coder responses"""
+    ace_coder_api_url: Optional[str] = None
+    """the URL of the ace coder API"""
 
     # -- non stop penalty
     non_stop_penalty: bool = False
@@ -308,6 +310,8 @@ class Args:
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
         ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+        if self.apply_ace_coder_reward:
+            assert self.ace_coder_api_url is not None, "The ace coder API URL must be provided!"
 
 
 def get_train_ds_config(
@@ -1666,6 +1670,7 @@ if __name__ == "__main__":
                 ace_coder_rewards = verify_ace_coder_sample(
                     decoded_responses,
                     ground_truths,
+                    args.ace_coder_api_url,
                 )
                 # ace_coder_rewards *= args.ace_coder_reward
                 ace_coder_rewards = [item * args.ace_coder_reward for item in ace_coder_rewards]

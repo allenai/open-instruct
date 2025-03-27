@@ -237,13 +237,10 @@ def extract_python_code(model_output: str) -> str:
     return matches[0].strip()
 
 
-async def _verify_ace_coder_sample_async(model_output: str, tests: List[str], max_execution_time: float = 1.0) -> float:
+async def _verify_ace_coder_sample_async(model_output: str, tests: List[str], api_url: str, max_execution_time: float = 1.0) -> float:
     """Async helper to verify a single code sample against test cases."""
     # Extract the python code from the model output
     python_code = extract_python_code(model_output)
-
-    # API endpoint
-    url = "http://0.0.0.0:1234/test_program"
 
     # Test data
     payload = {
@@ -253,26 +250,27 @@ async def _verify_ace_coder_sample_async(model_output: str, tests: List[str], ma
     }
 
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload) as response:
+        async with session.post(api_url, json=payload) as response:
             result = await response.json()
             passes = result["results"]
             pass_rate = sum(passes) / len(passes) if passes else 0.0
             return pass_rate
 
-async def _verify_ace_coder_samples_async(model_outputs: List[str], tests_list: List[List[str]], max_execution_time: float = 1.0) -> List[float]:
+async def _verify_ace_coder_samples_async(model_outputs: List[str], tests_list: List[List[str]], api_url: str, max_execution_time: float = 1.0) -> List[float]:
     """Async function to verify multiple code samples against their respective test cases."""
     tasks = []
     for model_output, tests in zip(model_outputs, tests_list):
-        tasks.append(_verify_ace_coder_sample_async(model_output, tests, max_execution_time))
+        tasks.append(_verify_ace_coder_sample_async(model_output, tests, api_url, max_execution_time))
     
     return await asyncio.gather(*tasks)
 
-def verify_ace_coder_sample(model_outputs: List[str], tests: List[List[str]], max_execution_time: float = 1.0) -> List[float]:
+def verify_ace_coder_sample(model_outputs: List[str], tests: List[List[str]], api_url: str, max_execution_time: float = 1.0) -> List[float]:
     """First extract the python code from the model outputs, then run them against their respective test cases.
     
     Args:
         model_outputs: A list of model output strings
         tests: A list of lists of test cases, where each inner list corresponds to a model output
+        api_url: URL of the API endpoint for testing code
         max_execution_time: Maximum execution time per test case in seconds
         
     Returns:
@@ -291,7 +289,7 @@ def verify_ace_coder_sample(model_outputs: List[str], tests: List[List[str]], ma
         raise ValueError(f"Length mismatch: {len(model_outputs)} model outputs vs {len(tests)} test sets")
     
     # Run async verification
-    return asyncio.run(_verify_ace_coder_samples_async(model_outputs, tests, max_execution_time))
+    return asyncio.run(_verify_ace_coder_samples_async(model_outputs, tests, api_url, max_execution_time))
 
 def get_all_verifiers() -> Dict[str, VerifierFunction]:
     """
