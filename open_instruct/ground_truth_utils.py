@@ -265,7 +265,7 @@ class CodeVerifier(VerifierFunction):
 
         for attempt in range(max_retries):
             try:
-                response = session.post(url, json=payload, timeout=30)  # Add timeout
+                response = session.post(url, json=payload, timeout=2)  # Add timeout
                 response.raise_for_status()  # Raise exception for bad status codes
                 passes = response.json()["results"]
                 pass_rate = sum(passes) / len(passes)
