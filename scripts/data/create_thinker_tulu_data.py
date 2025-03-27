@@ -13,7 +13,8 @@ for sample in ds:
         # <think> gets added by the chat template, so we dont add it here
         new_content = message["content"].replace("<|reserved_special_token_246|>", "")
         new_content = new_content.replace("<|reserved_special_token_247|>", "</think><answer>")
-        new_content = new_content + "</answer>"
+        if "<answer>" in new_content:
+            new_content = new_content + "</answer>"
         new_messages.append({
             "role": message["role"],
             "content": new_content
