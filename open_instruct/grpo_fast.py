@@ -80,7 +80,7 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
-from open_instruct.ground_truth_utils import soft_format_reward_func
+from open_instruct.ground_truth_utils import soft_format_reward_func, verify_ace_coder_sample
 from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
@@ -221,6 +221,12 @@ class Args:
     verification_reward: float = 10.0
     """the reward value for verifiable responses"""
 
+    # -- ace coder reward
+    apply_ace_coder_reward: bool = True
+    """whether to apply ace coder reward"""
+    ace_coder_reward: float = 10.0
+    """the reward value for ace coder responses"""
+
     # -- non stop penalty
     non_stop_penalty: bool = False
     """whether to penalize responses which did not finish generation"""
@@ -295,8 +301,6 @@ class Args:
     """the priority of auto-launched evaluation jobs"""
 
     def __post_init__(self):
-        if self.single_gpu_mode:
-            self.vllm_gpu_memory_utilization = 0.3
         assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
         assert (
             self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
@@ -1655,6 +1659,20 @@ if __name__ == "__main__":
                     np_value = np.array(value)
                     metrics[f"objective/{key}_reward"] = np_value.mean()
                     metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
+
+
+        if args.apply_ace_coder_reward:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying ace coder reward"):
+                ace_coder_rewards = verify_ace_coder_sample(
+                    decoded_responses,
+                    ground_truths,
+                )
+                # ace_coder_rewards *= args.ace_coder_reward
+                ace_coder_rewards = [item * args.ace_coder_reward for item in ace_coder_rewards]
+                for i in range(len(ace_coder_rewards)):
+                    scores[i] = ace_coder_rewards[i] + scores[i]
+                metrics["objective/ace_coder_reward"] = np.array(ace_coder_rewards).mean()
+                metrics["objective/ace_coder_correct_rate"] = (np.array(ace_coder_rewards) > 0.0).mean()
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:

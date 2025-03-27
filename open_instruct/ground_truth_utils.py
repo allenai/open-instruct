@@ -5,12 +5,15 @@ Add new verifiers by subclassing VerifierFunction and implementing the __call__ 
 They are then automatically added to the REWARD_FN_MAPPING.
 """
 
+import asyncio
 import json
 import logging
 import re
 import string
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Union
+
+import aiohttp
 
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.math_utils import (
@@ -220,6 +223,76 @@ class MaxLenVerifier(VerifierFunction):
         return 0 if len(tokenized_prediction) > max_length else len(tokenized_prediction) / max_length
 
 
+
+def extract_python_code(model_output: str) -> str:
+    """Extract the first code block between ``` markers from the model output."""
+    # Find content between ``` markers
+    pattern = r"```(?:python)?(.*?)```"
+    matches = re.findall(pattern, model_output, re.DOTALL)
+    
+    if not matches:
+        return model_output
+        
+    # Return the first match, stripped of whitespace
+    return matches[0].strip()
+
+
+async def _verify_ace_coder_sample_async(model_output: str, tests: List[str], max_execution_time: float = 1.0) -> float:
+    """Async helper to verify a single code sample against test cases."""
+    # Extract the python code from the model output
+    python_code = extract_python_code(model_output)
+
+    # API endpoint
+    url = "http://0.0.0.0:1234/test_program"
+
+    # Test data
+    payload = {
+        "program": python_code,
+        "tests": tests,
+        "max_execution_time": max_execution_time
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload) as response:
+            result = await response.json()
+            passes = result["results"]
+            pass_rate = sum(passes) / len(passes) if passes else 0.0
+            return pass_rate
+
+async def _verify_ace_coder_samples_async(model_outputs: List[str], tests_list: List[List[str]], max_execution_time: float = 1.0) -> List[float]:
+    """Async function to verify multiple code samples against their respective test cases."""
+    tasks = []
+    for model_output, tests in zip(model_outputs, tests_list):
+        tasks.append(_verify_ace_coder_sample_async(model_output, tests, max_execution_time))
+    
+    return await asyncio.gather(*tasks)
+
+def verify_ace_coder_sample(model_outputs: List[str], tests: List[List[str]], max_execution_time: float = 1.0) -> List[float]:
+    """First extract the python code from the model outputs, then run them against their respective test cases.
+    
+    Args:
+        model_outputs: A list of model output strings
+        tests: A list of lists of test cases, where each inner list corresponds to a model output
+        max_execution_time: Maximum execution time per test case in seconds
+        
+    Returns:
+        A list of pass rates for each model output
+    """
+    # Handle case where tests is a single list of strings (apply to all model outputs)
+    if tests and isinstance(tests[0], str):
+        tests = [tests] * len(model_outputs)
+    
+    # Ensure tests is a list of lists
+    if not all(isinstance(t, list) for t in tests):
+        raise ValueError("tests must be a list of lists of strings")
+    
+    # Ensure lengths match
+    if len(model_outputs) != len(tests):
+        raise ValueError(f"Length mismatch: {len(model_outputs)} model outputs vs {len(tests)} test sets")
+    
+    # Run async verification
+    return asyncio.run(_verify_ace_coder_samples_async(model_outputs, tests, max_execution_time))
+
 def get_all_verifiers() -> Dict[str, VerifierFunction]:
     """
     Auto-generate a dictionary mapping verifier names to their instances.
@@ -245,3 +318,12 @@ def soft_format_reward_func(responses: List[str], reward_scale: float = 1.0) -> 
     pattern = r".*?</think>\s*<answer>.*?</answer>"
     matches = [re.match(pattern, r, re.DOTALL) for r in responses]
     return [reward_scale if match else 0.0 for match in matches]
+
+
+def test_verify_ace_coder_sample():
+    model_outputs = [
+        "```python\nprint('Hello, world!')\n```",
+        "```python\nprint('Hello, world!')\n```"
+    ]
+    tests = [["print('Hello, world!')"], ["print('Hello, world!')"]]
+    print(verify_ace_coder_sample(model_outputs, tests))
