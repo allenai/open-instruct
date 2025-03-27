@@ -35,7 +35,7 @@ class TestRequest(BaseModel):
 @app.post("/test_program")
 async def test_program(request: TestRequest):
     try:
-        logger.info("Executing tests for program: %s", request.program)
+        # logger.info("Executing tests for program: %s", request.program)
         results = get_successful_tests_fast(
             program=request.program,
             tests=request.tests,
