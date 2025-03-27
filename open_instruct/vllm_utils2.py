@@ -57,7 +57,6 @@ def ray_noset_visible_devices(env_vars=os.environ):
     return any(env_vars.get(env_var) for env_var in NOSET_VISIBLE_DEVICES_ENV_VARS_LIST)
 
 
-
 # Copy from pytorch to allow creating multiple main groups.
 # https://github.com/pytorch/pytorch/blob/main/torch/distributed/distributed_c10d.py
 def init_process_group(
