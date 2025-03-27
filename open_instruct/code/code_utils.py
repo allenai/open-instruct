@@ -149,22 +149,13 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
     test_results = [0] * len(tests)
     
     print(f"Starting process with {test_ct} tests")
-    """
-    p = multiprocessing.Process(target=run_tests_against_program_helper_2, args=(program, tests, test_results, log_file))
-    p.start()
-    p.join(timeout=max_execution_time)
-    print(f"Process joined with {test_ct} tests")
-    if p.is_alive():
-        print(f"Process is alive, killing with {test_ct} tests")
-        p.kill()
-    """
-
     try:
         execution_context = {}
         execution_context.update({"__builtins__": __builtins__})
         exec(program, execution_context)
     except Exception as e:
         print(f"Program execution failed: {e}")
+        partial_undo_reliability_guard()
         return [0] * len(tests)
     
     for idx, test in enumerate(tests):
@@ -256,7 +247,7 @@ def reliability_guard(maximum_memory_bytes: Optional[int] = None):
     builtins.exit = None
     builtins.quit = None
     # builtins.open = None
-    # builtins.print = lambda *args, **kwargs: None
+    builtins.print = lambda *args, **kwargs: None
 
     import os
 
