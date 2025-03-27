@@ -58,6 +58,7 @@ import torch.utils
 import torch.utils.data
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from huggingface_hub import HfApi
+from liger_kernel.transformers import AutoLigerKernelForCausalLM
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
@@ -102,6 +103,7 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
 )
 from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
+
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -580,15 +582,26 @@ class PolicyTrainerRayProcess(RayProcess):
         else:
             pass
 
-        self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            model_config.model_name_or_path,
-            revision=model_config.model_revision,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-            use_cache=False,
-        )
+        if args.liger_kernel:
+            self.policy: PreTrainedModel = AutoLigerKernelForCausalLM.from_pretrained(
+                model_config.model_name_or_path,
+                revision=model_config.model_revision,
+                torch_dtype=torch.bfloat16,
+                attn_implementation=model_config.attn_implementation,
+                use_cache=False,
+            )
+        else:
+            self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+                model_config.model_name_or_path,
+                revision=model_config.model_revision,
+                torch_dtype=torch.bfloat16,
+                attn_implementation=model_config.attn_implementation,
+                use_cache=False,
+            )
+
         disable_dropout_in_model(self.policy)
-        self.policy.gradient_checkpointing_enable()
+        if model_config.gradient_checkpointing:
+            self.policy.gradient_checkpointing_enable()
         # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
         # AdamOptimizer = FusedAdam
         if args.set_weight_decay_on_bias_and_norm:
@@ -596,6 +609,7 @@ class PolicyTrainerRayProcess(RayProcess):
         else:
             optim_params = self.policy.parameters()
         # self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
+
         self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
@@ -630,13 +644,22 @@ class PolicyTrainerRayProcess(RayProcess):
             HfDeepSpeedConfig(ds_config)
         else:
             pass
-        self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            model_config.model_name_or_path,
-            revision=model_config.model_revision,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-            use_cache=False,
-        )
+        if args.liger_kernel:
+            self.ref_policy: PreTrainedModel = AutoLigerKernelForCausalLM.from_pretrained(
+                model_config.model_name_or_path,
+                revision=model_config.model_revision,
+                torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2",
+                use_cache=False,
+            )
+        else:
+            self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+                model_config.model_name_or_path,
+                revision=model_config.model_revision,
+                torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2",
+                use_cache=False,
+            )
         disable_dropout_in_model(self.ref_policy)
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
         self.ref_policy.eval()
@@ -1018,6 +1041,7 @@ def vllm_generate_thread(
     evaluation_inference_results_Q: Queue,
     eval_freq: int,
     resume_training_step: int = 1,
+    sleep_mode: bool = False,
 ):
     def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
         # Split queries between engines
@@ -1043,14 +1067,24 @@ def vllm_generate_thread(
             break
         _, g_queries_list = items
 
+        if sleep_mode:
+            for vllm_engine in vllm_engines:
+                vllm_engine.wake_up.remote()
+
         with Timer("🔥 Generation time"):
             response_ids, finish_reasons = generate_with_engines(g_queries_list, generation_config)
         inference_results_Q.put((response_ids, finish_reasons))
 
         # Evaluate the model
-        if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-            response_ids, finish_reasons = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
-            evaluation_inference_results_Q.put((response_ids, finish_reasons))
+
+        if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0 and training_step > 1:
+            with Timer("🔥 Generating Eval"):
+                response_ids, finish_reasons = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
+                evaluation_inference_results_Q.put((response_ids, finish_reasons))
+
+        if sleep_mode:
+            for vllm_engine in vllm_engines:
+                vllm_engine.sleep.remote(1)
 
 
 def data_preparation_thread(
@@ -1357,6 +1391,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
+        enable_sleep_mode=args.sleep_mode,
     )
     ray.get(inits)
     print("======== ✅ all models and vLLM engines initialized =========")

@@ -102,6 +102,8 @@ logger = logging.Logger(__name__)
 
 @dataclass
 class Args:
+    liger_kernel: bool = False
+
     # Dataset
     dataset_name: str = None
     """Dataset name"""
@@ -212,6 +214,10 @@ class Args:
     # Ray
     single_gpu_mode: bool = False
     """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
+    sleep_mode: bool = False
+    """Potentially save memory by sleeping LLM between calls"""
+    offload_ref: bool = False
+    """Offload to cpu ref during generation"""
     num_learners_per_node: List[int] = field(default_factory=lambda: [1])
     """number of GPU deepspeed learners per node (e.g., --num_learners_per_node 2 4 means 2 learner processes
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
@@ -277,6 +283,8 @@ class Args:
     def __post_init__(self):
         if self.single_gpu_mode and self.vllm_gpu_memory_utilization > 0.3:
             self.vllm_gpu_memory_utilization = 0.3
+        if self.sleep_mode:
+            assert self.single_gpu_mode, "sleep mode only necessary for single GPU"
         assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
         assert (
             self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
@@ -359,12 +367,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     ):
         # Warn user if tokenizer and model use different revisions; this is an unusual
         # use case.
-        warning = f"""Requested tokenizer revision `{tc.tokenizer_revision=}` is different
-                   from the model revision `{model_config.model_revision=}` or the tokenizer name `{tc.tokenizer_name_or_path=}`
-                   is different from the model name `{model_config.model_name_or_path=}`."""
+        warning = f"""Requested tokenizer revision `{tc.tokenizer_revision=}` is different 
+        from the model revision `{model_config.model_revision=}` or the tokenizer name `{tc.tokenizer_name_or_path=}` 
+        is different from the model name `{model_config.model_name_or_path=}`."""
         logger.warning(warning)
     tokenizer = tc.tokenizer
-
     # ------------------------------------------------------------
     # Set up runtime variables
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
@@ -419,7 +426,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),  # noqa
     )
-
     # ------------------------------------------------------------
     # Set up datasets
     train_dataset, eval_dataset = create_datasets(args, tokenizer)
@@ -445,10 +451,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.single_gpu_mode,
     )
     wandb_url = wandb.run.get_url() if args.with_tracking else None
+
     inits.extend(
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
         for model in policy_group.models
     )
+
     max_len = args.max_prompt_token_length + args.response_length
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
@@ -462,6 +470,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
+        enable_sleep_mode=args.sleep_mode,
     )
     ray.get(inits)
     logger.info("======== ✅ all models and vLLM engines initialized =========")
@@ -501,6 +510,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     if eval_dataset is not None:
         eval_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
         eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
+        eval_dataset_names = eval_dataset[:num_eval_samples][DATASET_SOURCE_KEY]
     resume_training_step = 1
     thread = threading.Thread(
         target=vllm_generate_thread,
@@ -515,6 +525,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             evaluation_inference_results_Q,
             args.eval_freq,
             resume_training_step,
+            args.sleep_mode,
         ),
     )
     thread.start()
@@ -557,11 +568,34 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             # ------------------------------------------------------------------------------------------------
             # Optionally evaluate the model
             try:
-                evaluation_responses, _ = evaluation_inference_results_Q.get(timeout=0.01)
+                eval_responses, eval_finish_reasons = evaluation_inference_results_Q.get(timeout=0.01)
+
+                eval_sequence_lengths = np.array([len(response) for response in eval_responses])
+                eval_decoded_responses = tokenizer.batch_decode(eval_responses, skip_special_tokens=True)
+                eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_finish_reasons) / len(
+                    eval_finish_reasons
+                )
+
+                eval_scores, eval_reward_metrics = reward_fn(
+                    eval_responses,
+                    eval_decoded_responses,
+                    eval_ground_truths,
+                    eval_dataset_names,
+                    eval_finish_reasons,
+                )
+                eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
+                eval_metrics = {
+                    "eval/scores": np.array(eval_scores).mean(),
+                    "eval/sequence_lengths": eval_sequence_lengths.mean(),
+                    "eval/sequence_lengths_min": eval_sequence_lengths.min(),
+                    "eval/sequence_lengths_max": eval_sequence_lengths.max(),
+                    "eval/stop_rate": eval_stop_rate,
+                    **eval_reward_metrics,
+                }
                 logger.info("[Main Thread] 📊 Evaluation responses received")
                 table = {}
                 table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
-                table["response"] = tokenizer.batch_decode(evaluation_responses)
+                table["response"] = tokenizer.batch_decode(eval_responses)
                 table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
                 table["ground_truth"] = eval_ground_truths
                 df = pd.DataFrame(table)
@@ -570,6 +604,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 else:
                     print_rich_table(df.iloc[:1])
                 del table
+                print_rich_single_line_metrics(eval_metrics)
+                for key, value in eval_metrics.items():
+                    writer.add_scalar(key, value, episode)
             except Empty:
                 logger.info("[Main Thread] 🙈 Evaluation responses not received")
 

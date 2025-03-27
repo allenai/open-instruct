@@ -21,8 +21,9 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch>=2.5.1",
     "transformers>=4.46.3",
-    "vllm==0.6.6.post1",
+    "vllm==0.7.3",
     "wandb==0.18.1",
+    "liger-kernel",
 ]
 
 [build-system]
