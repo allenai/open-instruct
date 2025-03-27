@@ -39,7 +39,6 @@ import math
 import random
 import shutil
 import socket
-import subprocess
 import threading
 import time
 from argparse import Namespace
@@ -107,7 +106,6 @@ from open_instruct.utils import (
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
-    upload_metadata_to_hf,
 )
 from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
 
@@ -233,7 +231,6 @@ class Args:
     stop_strings: List[str] = None
     """List of strings that stop the generation when they are generated.
     The returned output will not contain the stop strings."""
-    eval_max_length: int = 4096  # max generation length for evaluation
 
     # online PPO specific args
     beta: float = 0.05
@@ -322,12 +319,14 @@ class Args:
     """Whether to launch beaker evaluation jobs after training on weka"""
     try_auto_save_to_beaker: bool = True
     """Whether to try to save the model to Beaker dataset `/output` after training"""
+    gs_bucket_path: Optional[str] = None
+    """The path to the gs bucket to save the model to"""
     oe_eval_tasks: Optional[List[str]] = None
     """The beaker evaluation tasks to launch"""
+    oe_eval_max_length: int = 4096
+    """the max generation length for evaluation for oe-eval"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
-    hf_metadata_dataset: Optional[str] = "allenai/tulu-3-evals"
-    """What dataset to upload the metadata to. If unset, don't upload metadata"""
 
 
 def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
@@ -1213,6 +1212,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         # we need to batch the gt to match query.
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
+                        decoded_response = tokenizer.batch_decode(postprocessed_response)
                         verifiable_reward, per_func_reward = apply_verifiable_reward(
                             responses=postprocessed_response,
                             decoded_responses=decoded_response,
@@ -1847,49 +1847,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # save model
     ray.shutdown()
     stop_event.set()
-
-    # Ai2 specific logic
-    if is_beaker_job():
-        if args.hf_metadata_dataset:
-            dataset_list = args.dataset_mixer_list
-            # mainly just focussing here on what would be useful for the leaderboard.
-            # wandb will have even more useful information.
-            metadata_blob = {
-                "model_name": args.exp_name,
-                "model_type": "sft",
-                "datasets": dataset_list,
-                "base_model": model_config.model_name_or_path,
-                "wandb_path": wandb.run.get_url(),
-                "beaker_experiment": beaker_config.beaker_experiment_url,
-                "beaker_datasets": beaker_config.beaker_dataset_id_urls,
-            }
-            upload_metadata_to_hf(
-                metadata_blob,
-                "metadata.json",
-                args.hf_metadata_dataset,
-                "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
-            )
-
-        if args.try_launch_beaker_eval_jobs and len(beaker_config.beaker_dataset_id_urls) > 0:
-            command = f"""\
-            python mason.py  \
-                --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/s2-cirrascale ai2/general-cirrascale \
-                --priority low \
-                --preemptible \
-                --budget ai2/allennlp \
-                --workspace ai2/tulu-2-improvements \
-                --image nathanl/open_instruct_auto \
-                --pure_docker_mode \
-                --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
-                --beaker_workload_id {beaker_config.beaker_workload_id} \
-                --upload_to_hf {args.hf_metadata_dataset} \
-                --model_name {args.hf_repo_revision}
-            """
-            process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            stdout, stderr = process.communicate()
-            print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
-            print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
-            print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
 
     accelerator = Namespace()
     accelerator.is_main_process = True  # hack

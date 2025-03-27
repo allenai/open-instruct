@@ -32,7 +32,7 @@ cupy-cuda12x==13.4.1 ; sys_platform != 'darwin'
 cycler==0.12.1
 datasets==3.2.0
 debugpy==1.8.13
-deepspeed==0.16.4
+deepspeed==0.15.4
 depyf==0.18.0
 dill==0.3.8
 diskcache==5.6.3
