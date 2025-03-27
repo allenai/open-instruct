@@ -15,7 +15,6 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
-
 from datetime import timedelta
 from typing import Any, Optional, Union
 
@@ -162,7 +161,6 @@ class LLMRayActor:
 
         # See https://github.com/vllm-project/vllm/blob/main/vllm/executor/gpu_executor.py
         if self.use_gpu_executor:
-
             vllm.worker.worker.Worker = WorkerWrap
         else:
             # RayGPUExecutor
@@ -191,6 +189,12 @@ class LLMRayActor:
                 RayWorkerWrapperPath.RayWorkerWrapper = RayWorkerWrapper
 
         self.llm = vllm.LLM(*args, **kwargs)
+
+    def sleep(self, *args, **kwargs):
+        self.llm.sleep(*args, **kwargs)
+
+    def wake_up(self, *args, **kwargs):
+        self.llm.wake_up(*args, **kwargs)
 
     def generate(self, *args, **kwargs):
         return self.llm.generate(*args, **kwargs)
@@ -232,6 +236,7 @@ def create_vllm_engines(
     vllm_gpu_memory_utilization: float = 0.9,
     single_gpu_mode: bool = False,
     pg: Optional[ray.util.placement_group] = None,
+    enable_sleep_mode: bool = False,
 ):
     vllm_engines = []
     for i in range(num_engines):
@@ -268,6 +273,7 @@ def create_vllm_engines(
                 enable_prefix_caching=enable_prefix_caching,
                 max_model_len=max_model_len,
                 gpu_memory_utilization=vllm_gpu_memory_utilization,
+                enable_sleep_mode=enable_sleep_mode,
             )
         )
 
