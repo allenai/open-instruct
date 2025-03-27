@@ -16,8 +16,8 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 
-from datetime import timedelta
 import os
+from datetime import timedelta
 from typing import Any, List, Optional, Union
 
 import ray
@@ -56,13 +56,6 @@ def ray_noset_visible_devices(env_vars=os.environ):
     ]
     return any(env_vars.get(env_var) for env_var in NOSET_VISIBLE_DEVICES_ENV_VARS_LIST)
 
-
-def get_physical_gpu_id():
-    import torch
-
-    device = torch.cuda.current_device()
-    props = torch.cuda.get_device_properties(device)
-    return str(props.uuid)
 
 
 # Copy from pytorch to allow creating multiple main groups.
@@ -123,72 +116,6 @@ def init_process_group(
     return pg
 
 
-class WorkerWrap:
-    def init_process_group(
-        self, master_address, master_port, rank_offset, world_size, group_name, backend="nccl", use_ray=False
-    ):
-        """Init torch process group for model weights update"""
-        import torch
-
-        assert torch.distributed.is_initialized(), f"default torch process group must be initialized"
-        assert group_name != "", f"group name must not be empty"
-
-        rank = torch.distributed.get_rank() + rank_offset
-        if use_ray:
-            import ray.util.collective as collective
-
-            collective.init_collective_group(world_size=world_size, rank=rank, backend=backend, group_name=group_name)
-            self._model_update_group = group_name
-        else:
-            self._model_update_group = init_process_group(
-                backend=backend,
-                init_method=f"tcp://{master_address}:{master_port}",
-                world_size=world_size,
-                rank=rank,
-                group_name=group_name,
-            )
-        self._model_update_with_ray = use_ray
-        print(
-            f"init_process_group: master_address={master_address}, master_port={master_port}, ",
-            f"rank={rank}, world_size={world_size}, group_name={group_name}",
-        )
-
-    def update_weight(self, name, dtype, shape, empty_cache=False):
-        import torch
-        assert dtype == self.model_config.dtype, f"mismatch dtype: src {dtype}, dst {self.model_config.dtype}"
-        weight = torch.empty(shape, dtype=dtype, device="cuda")
-        if self._model_update_with_ray:
-            import ray.util.collective as collective
-
-            collective.broadcast(weight, 0, group_name=self._model_update_group)
-        else:
-            torch.distributed.broadcast(weight, 0, group=self._model_update_group)
-
-        self.model_runner.model.load_weights(weights=[(name, weight)])
-
-        del weight
-        # TODO: should we empty cache if all weights have updated?
-        # if empty_cache:
-        #     torch.cuda.empty_cache()
-
-    def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles=None, empty_cache=False):
-        import torch
-
-        assert dtype == self.model_config.dtype, f"mismatch dtype: src {dtype}, dst {self.model_config.dtype}"
-
-        handle = ipc_handles[get_physical_gpu_id()]
-        device_id = self.device.index
-        func, args = handle
-        list_args = list(args)
-        # the key is to change device id to the current device id
-        # in case two processes have different CUDA_VISIBLE_DEVICES
-        list_args[6] = device_id
-        weight = func(*list_args)
-        self.model_runner.model.load_weights(weights=[(name, weight)])
-        torch.cuda.synchronize()
-
-
-
 @ray.remote
 class LLMRayActor:
 
@@ -212,7 +139,6 @@ class LLMRayActor:
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             print(f"creating LLM with bundle_indices={bundle_indices}")
 
-
         from vllm import LLM
 
         self.llm = LLM(*args, **kwargs)
@@ -220,7 +146,9 @@ class LLMRayActor:
     def generate(self, *args, **kwargs):
         return self.llm.generate(*args, **kwargs)
 
-    def init_process_group(self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False):
+    def init_process_group(
+        self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
+    ):
         return self.llm.collective_rpc(
             "init_process_group",
             args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
@@ -240,7 +168,6 @@ class LLMRayActor:
 
     def wake_up(self):
         self.llm.wake_up()
-
 
 
 def create_vllm_engines(
@@ -295,7 +222,7 @@ def create_vllm_engines(
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
                 # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
-                runtime_env=ray.runtime_env.RuntimeEnv(env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0"})
+                runtime_env=ray.runtime_env.RuntimeEnv(env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}),
             ).remote(
                 model=pretrain,
                 revision=revision,
@@ -363,8 +290,6 @@ if __name__ == "__main__":
         max_model_len=1024,
     )
     llm = vllm_engines[0]
-    # output = ray.get(llm.generate.remote("San Franciso is a"))
-    # print(f"output: {output}")
     from vllm.utils import get_ip, get_open_port
 
     master_address = get_ip()

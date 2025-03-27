@@ -4,11 +4,12 @@ class WorkerWrap:
     ):
         """Init torch process group for model weights update"""
         import torch
+
         from open_instruct.vllm_utils2 import init_process_group
 
         print("init_process_group")
-        assert torch.distributed.is_initialized(), f"default torch process group must be initialized"
-        assert group_name != "", f"group name must not be empty"
+        assert torch.distributed.is_initialized(), "default torch process group must be initialized"
+        assert group_name != "", "group name must not be empty"
 
         rank = torch.distributed.get_rank() + rank_offset
         if use_ray:
@@ -34,7 +35,6 @@ class WorkerWrap:
     def update_weight(self, name, dtype, shape, empty_cache=False):
         import torch
 
-
         assert dtype == self.model_config.dtype, f"mismatch dtype: src {dtype}, dst {self.model_config.dtype}"
         weight = torch.empty(shape, dtype=dtype, device="cuda")
         if self._model_update_with_ray:
@@ -53,7 +53,9 @@ class WorkerWrap:
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles=None, empty_cache=False):
         import torch
+
         from open_instruct.vllm_utils2 import get_physical_gpu_id
+
         assert dtype == self.model_config.dtype, f"mismatch dtype: src {dtype}, dst {self.model_config.dtype}"
 
         handle = ipc_handles[get_physical_gpu_id()]

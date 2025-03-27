@@ -63,7 +63,12 @@ from transformers import (
     LlamaTokenizerFast,
     PreTrainedTokenizer,
 )
-from transformers.utils.hub import _CACHED_NO_EXIST, try_to_load_from_cache, TRANSFORMERS_CACHE, extract_commit_hash, cached_file
+from transformers.utils.hub import (
+    _CACHED_NO_EXIST,
+    TRANSFORMERS_CACHE,
+    extract_commit_hash,
+    try_to_load_from_cache,
+)
 
 from open_instruct.utils import hf_whoami
 
@@ -81,7 +86,9 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str = N
         else:
             return None
     else:
-        return try_to_load_from_cache(model_name_or_path, filename, cache_dir=TRANSFORMERS_CACHE, revision=revision, repo_type=repo_type)
+        return try_to_load_from_cache(
+            model_name_or_path, filename, cache_dir=TRANSFORMERS_CACHE, revision=revision, repo_type=repo_type
+        )
 
 
 def get_commit_hash(
