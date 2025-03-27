@@ -7,7 +7,7 @@ uv run uvicorn --host 0.0.0.0 open_instruct.code_api.api:app
 or launch the server in a docker container:
 ```
 docker build -t code-api -f open_instruct/code/Dockerfile .
-docker run -p 8000:8000 code-api
+docker run -p 1234:1234 code-api
 ```
 
 and then test with:
