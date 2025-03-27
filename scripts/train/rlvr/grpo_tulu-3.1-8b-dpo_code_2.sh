@@ -1,10 +1,10 @@
-exp_name="0326_llama3.1-8b_code_grpo_fast_${RANDOM}"
+exp_name="0326_llama3.1-8b_code_grpo_fast2_${RANDOM}"
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 ai2/neptune-cirrascale ai2/saturn-cirrascale \
+    --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
-    --num_nodes 1 \
+    --num_nodes 2 \
     --budget ai2/oe-adapt \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name $exp_name \

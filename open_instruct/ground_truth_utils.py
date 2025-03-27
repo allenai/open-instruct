@@ -10,6 +10,7 @@ import logging
 import re
 import string
 import requests
+import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Union
 
@@ -247,7 +248,6 @@ class CodeVerifier(VerifierFunction):
         # Extract the python code from the model output
         python_code = CodeVerifier.extract_python_code(model_output)
 
-
         # local execution is bad (causes checkpoint saving to fail because it disables `os.mkdir`)
         # so we use the API instead.
         url = "http://phobos-cs-aus-453.reviz.ai2.in:8000/test_program"
@@ -258,10 +258,29 @@ class CodeVerifier(VerifierFunction):
             "max_execution_time": 1.0
         }
 
-        response = requests.post(url, json=payload)
-        passes = response.json()["results"]
-        pass_rate = sum(passes) / len(passes)
-        return pass_rate
+        # Use a session for connection pooling
+        session = requests.Session()
+        max_retries = 3
+        retry_delay = 1  # seconds
+
+        for attempt in range(max_retries):
+            try:
+                response = session.post(url, json=payload, timeout=30)  # Add timeout
+                response.raise_for_status()  # Raise exception for bad status codes
+                passes = response.json()["results"]
+                pass_rate = sum(passes) / len(passes)
+                return pass_rate
+            except requests.exceptions.RequestException as e:
+                if attempt == max_retries - 1:  # Last attempt
+                    logger.error(f"Failed to connect to code verification service after {max_retries} attempts: {e}")
+                    # this might be bad, but for now assume that timeouts/connection errors are because of infinite loops
+                    # or poorly optimized code
+                    return 0.0
+                logger.warning(f"Attempt {attempt + 1} failed, retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+            finally:
+                session.close()  # Ensure session is closed
     
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: List[str]) -> bool:
         """

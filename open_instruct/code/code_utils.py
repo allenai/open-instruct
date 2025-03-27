@@ -4,8 +4,8 @@ import shutil
 from ctypes import c_int
 from typing import Any, Dict, List, Optional
 import logging
-
 from datasets import load_dataset
+import builtins
 
 # taken from https://github.com/TIGER-AI-Lab/AceCoder/blob/62bb7fc25d694fed04a5270c89bf2cdc282804f7/data/inference/EvaluateInferencedCode.py#L372
 # we save the current working directory and restore them later
@@ -23,6 +23,10 @@ tmp_unlink = os.unlink
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+log_dir = os.path.expanduser('~/../weka/oe-adapt-default/saurabhs/repos/open-instruct/open_instruct/code')
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, 'code_utils.log')
 
 
 # -------------------------------------------------------------
@@ -83,28 +87,36 @@ def get_successful_tests_slow(program: str, tests: List[str], max_execution_time
 # -------------------------------------------------------------
 # The fast but more readable version
 # -------------------------------------------------------------
-test_results = multiprocessing.Array("i", 1000)  # Support up to 1000 tests
-
-
-def run_tests_against_program_helper_2(func: str, tests: List[str]) -> None:
+def run_tests_against_program_helper_2(func: str, tests: List[str], results_array, log_file) -> None:
     """Run all tests against the program and store results in shared array"""
-    execution_context: Dict[str, Any] = {}
-    execution_context.update({"__builtins__": __builtins__})
-
+    results_array[0] = 999
+    return 
     try:
-        exec(func, execution_context)
-    except Exception:
+        # Create a clean namespace with Python builtins
+        execution_context = {'__builtins__': __builtins__}
+        
+        # First compile the program to catch syntax errors
+        compiled_program = compile(func, '<string>', 'exec')
+        with open(log_file, 'a') as f:
+            f.write(f"Program: {func}\n")
+            f.write(f"Compiled program: {compiled_program}\n")
+        exec(compiled_program, execution_context)
+    except Exception as e:
+        print(f"Program execution failed: {e}")
         for i in range(len(tests)):
-            test_results[i] = 0
+            results_array[i] = 0
         return
 
+    # Run each test
     for idx, test in enumerate(tests):
         try:
-            exec(test, execution_context)
-            test_results[idx] = 1
-        except Exception:
-            test_results[idx] = 0
-
+            # Compile the test case
+            compiled_test = compile(test, '<string>', 'exec')
+            exec(compiled_test, execution_context)
+            results_array[idx] = 1
+        except Exception as e:
+            print(f"Test {idx} failed: {e}")
+            results_array[idx] = 0
 
 def get_successful_tests_fast(program: str, tests: List[str], max_execution_time: float = 1.0) -> List[int]:
     """Run a program against a list of tests, if the program exited successfully then we consider
@@ -120,28 +132,50 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
     Return:
         a list of 0/1 indicating passed or not"""
     test_ct = len(tests)
+    print(f"Running {test_ct} tests")
     if test_ct == 0:
         return []
     if not should_execute(program=program, tests=tests):
-        logger.info("Not executing program %s", program)
+        print(f"Not executing program {program}")
         return [0] * len(tests)
 
     reliability_guard()
 
     # Reset test results
-    for i in range(len(tests)):
-        test_results[i] = 0
-
-    p = multiprocessing.Process(target=run_tests_against_program_helper_2, args=(program, tests))
+    #test_results = multiprocessing.Array("i", len(tests))
+    #for i in range(len(tests)):
+    #    test_results[i] = 0
+    
+    test_results = [0] * len(tests)
+    
+    print(f"Starting process with {test_ct} tests")
+    """
+    p = multiprocessing.Process(target=run_tests_against_program_helper_2, args=(program, tests, test_results, log_file))
     p.start()
     p.join(timeout=max_execution_time)
+    print(f"Process joined with {test_ct} tests")
     if p.is_alive():
+        print(f"Process is alive, killing with {test_ct} tests")
         p.kill()
+    """
 
+    try:
+        execution_context = {}
+        execution_context.update({"__builtins__": __builtins__})
+        exec(program, execution_context)
+    except Exception as e:
+        print(f"Program execution failed: {e}")
+        return [0] * len(tests)
+    
+    for idx, test in enumerate(tests):
+        try:
+            exec(test, execution_context)
+            test_results[idx] = 1
+        except Exception as e:
+            print(f"Test {idx} failed: {e}")
+            test_results[idx] = 0
     partial_undo_reliability_guard()
-
-    return [test_results[i] for i in range(len(tests))]
-
+    return test_results
 
 # -------------------------------------------------------------
 # Utility
@@ -219,12 +253,10 @@ def reliability_guard(maximum_memory_bytes: Optional[int] = None):
 
     faulthandler.disable()
 
-    import builtins
-
     builtins.exit = None
     builtins.quit = None
     # builtins.open = None
-    builtins.print = lambda *args, **kwargs: None
+    # builtins.print = lambda *args, **kwargs: None
 
     import os
 
