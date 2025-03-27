@@ -234,17 +234,6 @@ class MaxLenVerifier(VerifierFunction):
         return 0 if len(tokenized_prediction) > max_length else len(tokenized_prediction) / max_length
 
 
-def get_all_verifiers() -> Dict[str, VerifierFunction]:
-    """
-    Auto-generate a dictionary mapping verifier names to their instances.
-    """
-    verifiers: Dict[str, VerifierFunction] = {}
-    for subclass in VerifierFunction.__subclasses__():
-        instance = subclass()
-        verifiers[instance.name.lower()] = instance
-    return verifiers
-
-
 class TuluThinkerVerifier:
     """
     A generalist verifier that just uses F1 score to compare the prediction to the ground truth.
@@ -261,6 +250,17 @@ class TuluThinkerVerifier:
         # TODO: should I add a format reward-type thing? See what happens with RL.
         # return f1 score
         return f1_score(prediction, label)
+
+
+def get_all_verifiers() -> Dict[str, VerifierFunction]:
+    """
+    Auto-generate a dictionary mapping verifier names to their instances.
+    """
+    verifiers: Dict[str, VerifierFunction] = {}
+    for subclass in VerifierFunction.__subclasses__():
+        instance = subclass()
+        verifiers[instance.name.lower()] = instance
+    return verifiers
 
 
 
