@@ -19,7 +19,7 @@ for sample in ds:
             "role": message["role"],
             "content": new_content
         })
-    last_turn_no_think = new_messages[-1]["content"].split("</think>")[-1]
+    last_turn_no_think = new_messages[-1]["content"].split("</think>")[-1].replace("<answer>", "").replace("</answer>", "")
     new_data.append({
         "messages": new_messages,
         "ground_truth": last_turn_no_think,
