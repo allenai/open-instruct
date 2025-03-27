@@ -545,15 +545,13 @@ wheels = [
 
 [[package]]
 name = "deepspeed"
-version = "0.16.4"
+version = "0.15.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "einops" },
     { name = "hjson" },
     { name = "msgpack" },
     { name = "ninja" },
     { name = "numpy" },
-    { name = "nvidia-ml-py" },
     { name = "packaging" },
     { name = "psutil" },
     { name = "py-cpuinfo" },
@@ -562,11 +560,7 @@ dependencies = [
     { name = "torch", version = "2.6.0+cu124", source = { registry = "https://download.pytorch.org/whl/cu124" }, marker = "sys_platform != 'darwin'" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b5/a9/f408e70e37fcd877e56e446081b40f2ce225f726a070cc4dfc478c570b58/deepspeed-0.16.4.tar.gz", hash = "sha256:495febfb6dd20423f44b1c4a1bb6da2cadbcaf9b07962e17f87d52edfeec9bba", size = 1440664 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3d/65/1a6394f5d6dee851e9ea59e385f6d6428e3bfe36f83c06e0336e14dcfd11/deepspeed-0.16.4-cp310-cp310-win_amd64.whl", hash = "sha256:09e0b4f10c22b8054f340d90077a8d382092491fcf90fe1779c4e6180314e234", size = 56240918 },
-    { url = "https://files.pythonhosted.org/packages/a3/aa/bb67b63cc25c5e29e4ca3f8b155e0faf74d5a33acf2ec67e249206a36b0f/deepspeed-0.16.4-cp311-cp311-win_amd64.whl", hash = "sha256:7daa0c05780dd7f95d51bace474e116707c733f4d9d8c279773e1e969db1b841", size = 56257346 },
-]
+sdist = { url = "https://files.pythonhosted.org/packages/34/c5/dfa824defc1919289a00cbb722aee92cee85ce1e11f7349779235dbe4810/deepspeed-0.15.4.tar.gz", hash = "sha256:60e7c044b7fc386cdad1206212d22b6963ea551f656ed51f7cb34b299459bf2c", size = 1403058 }
 
 [[package]]
 name = "depyf"
@@ -1932,7 +1926,7 @@ requires-dist = [
     { name = "bitsandbytes", specifier = ">=0.44.1" },
     { name = "datasets", specifier = ">=3.1.0" },
     { name = "debugpy", specifier = ">=1.8.13" },
-    { name = "deepspeed", specifier = "==0.16.4" },
+    { name = "deepspeed", specifier = "==0.15.4" },
     { name = "flash-attn", marker = "extra == 'compile'", specifier = ">=2.7.2.post1" },
     { name = "hf-transfer", specifier = ">=0.1.8" },
     { name = "liger-kernel", marker = "extra == 'liger'", specifier = ">=0.5.4" },
