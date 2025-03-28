@@ -222,7 +222,7 @@ class Args:
     """the reward value for verifiable responses"""
 
     # -- ace coder reward
-    apply_ace_coder_reward: bool = True
+    apply_ace_coder_reward: bool = False
     """whether to apply ace coder reward"""
     ace_coder_reward: float = 10.0
     """the reward value for ace coder responses"""
