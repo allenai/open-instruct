@@ -12,7 +12,7 @@ python update_command_args.py scripts/train/tulu3/finetune_8b.sh \
     --wandb_project_name open_instruct_public \
     --priority normal \
     --seed 1 \
-    --image costah/open_instruct_dev0320_11 | uv run bash
+    --image costah/open_instruct_dev0327_4 | uv run bash
 
 # 4 nodes
 python update_command_args.py scripts/train/tulu3/dpo_8b.sh \
@@ -39,6 +39,13 @@ python update_command_args.py scripts/train/tulu3/grpo_8b.sh \
     --seed 40 \
     --image costah/open_instruct_dev0320_11 | uv run bash
 
+
+# 2 nodes
+python update_command_args.py scripts/train/tulu3/ppo_8b.sh \
+    --wandb_project_name open_instruct_public \
+    --priority high \
+    --image costah/open_instruct_dev_uv13 | uv run bash
+
 # 2 nodes
 python update_command_args.py scripts/train/tulu3/grpo_fast_8b.sh \
     --cluster ai2/augusta-google-1 \
@@ -63,9 +70,13 @@ python update_command_args.py scripts/train/tulu3/grpo_fast_8b_single_node.sh \
 python update_command_args.py scripts/train/qwen/grpo_fast_7b.sh \
     --cluster ai2/augusta-google-1 \
     --wandb_project_name open_instruct_public \
-    --priority normal \
-    --image costah/open_instruct_dev0320_11 | uv run bash
+    --priority urgent | uv run bash
 
+# 4 nodes
+python update_command_args.py scripts/train/qwen/grpo_fast_7b_orz.sh \
+    --cluster ai2/augusta-google-1 \
+    --wandb_project_name open_instruct_public \
+    --priority urgent | uv run bash
 
 # 2 nodes
 python update_command_args.py scripts/train/qwen/grpo_7b.sh \
@@ -88,8 +99,8 @@ python update_command_args.py scripts/train/qwen/grpo_fast_3b_single_node.sh \
 python update_command_args.py scripts/train/olmo2/finetune_13b.sh \
     --cluster ai2/augusta-google-1 \
     --wandb_project_name open_instruct_public \
-    --priority normal \
-    --image costah/open_instruct_dev0320_11 | uv run bash
+    --priority high \
+    --image costah/open_instruct_dev_uv12 | uv run bash
 
 # 8 nodes
 python update_command_args.py scripts/train/olmo2/finetune_7b.sh \
@@ -102,7 +113,7 @@ python update_command_args.py scripts/train/olmo2/finetune_7b.sh \
 python update_command_args.py scripts/train/olmo2/finetune_32b.sh \
     --cluster ai2/augusta-google-1 \
     --wandb_project_name open_instruct_public \
-    --priority normal \
+    --priority high \
     --image costah/open_instruct_dev0320_11 | uv run bash
 
 # 4 nodes
@@ -118,3 +129,18 @@ python update_command_args.py scripts/train/olmo2/dpo_13b.sh \
     --wandb_project_name open_instruct_public \
     --priority normal \
     --image costah/open_instruct_dev0320_11 | uv run bash
+
+# 2 nodes
+python update_command_args.py scripts/train/olmo2/grpo_fast_7b_zero.sh \
+    --cluster ai2/augusta-google-1 \
+    --wandb_project_name open_instruct_public \
+    --priority urgent \
+    --image costah/open_instruct_dev0327_4 | uv run bash
+
+# 2 nodes
+python update_command_args.py scripts/train/olmo2/grpo_fast_13b_zero.sh \
+    --cluster ai2/augusta-google-1 \
+    --wandb_project_name open_instruct_public \
+    --priority urgent \
+    --image costah/open_instruct_dev0327_4 | uv run bash
+
