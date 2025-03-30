@@ -38,13 +38,14 @@ uv run open_instruct/grpo_tinyzero.py \
     --num_evals 5 \
     --save_freq 50 \
     --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.2 \
+    --vllm_gpu_memory_utilization 0.4 \
     --vllm_enforce_eager \
     --single_gpu_mode \
+    --deepspeed_stage 2 \
     --async_mode False \
+    --liger_kernel \
     --with_tracking $@
 
-    # --deepspeed_stage 2 \
     # --gradient_checkpointing \
     # --dataset_mixer_list_splits train \
     # --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \

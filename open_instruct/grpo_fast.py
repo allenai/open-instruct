@@ -782,6 +782,9 @@ class PolicyTrainerRayProcess(RayProcess):
         to_device_inplace(collated_response_masks, self.device)
         accumulation_steps = len(collated_query_responses) // (num_mini_batches)
 
+        if self.args.offload_ref:
+            with Timer("[Training Processes] Move Ref to GPU", noop=self.rank != 0):
+                self.ref_policy.to(self.device)
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
         with Timer("Inference Calculation", noop=self.rank != 0):
@@ -802,6 +805,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:].bool(), INVALID_LOGPROB)
                     collated_ref_logprobs.append(ref_logprob)
                     torch.cuda.empty_cache()
+        if self.args.offload_ref:
+            with Timer("[Training Processes] Move Ref to CPU", noop=self.rank != 0):
+                self.ref_policy.to("cpu")
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
