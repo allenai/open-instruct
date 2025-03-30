@@ -70,7 +70,7 @@ bash scripts/train/tulu3/grpo_fast_8b_single_node.sh
 
 
 
-### Olmo2 7B GRPO Fast Zero-style (🧪 Experimental)
+### (🧪 Experimental) Olmo2 7B GRPO Fast Zero-style
 
 We have
 
@@ -98,7 +98,7 @@ bash scripts/train/olmo2/grpo_fast_7b_zero.sh
     We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
 
 
-### Olmo2 13B GRPO Fast Zero-style (🧪 Experimental)
+### (🧪 Experimental) Olmo2 13B GRPO Fast Zero-style
 
 We have
 
@@ -208,7 +208,7 @@ bash scripts/train/olmo2/grpo_7b.sh
 
 
 
-### Qwen 2.5 7B Zero-style (🧪 Experimental)
+### (🧪 Experimental) Qwen 2.5 7B Zero-style
 
 Here is a command to run GRPO on the `Qwen/Qwen2.5-7B` on [ai2-adapt-dev/math_ground_truth_zs](https://huggingface.co/datasets/ai2-adapt-dev/math_ground_truth_zs), which is simply a zero-shot version of the RLVR MATH dataset. The training is done starting from a base model, similar to how [DeepSeek R1](https://arxiv.org/abs/2501.12948) does it.
 
