@@ -220,12 +220,20 @@ bash scripts/train/qwen/grpo_7b.sh
 ![grpo_qwen2.5_7B_works_time](grpo/qwen2.5_7b_grpo_zero-time.png)
 
 
-The results look quite reasonable: with format score, score all going up, and sequence length seems stable (at least at first)
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+    
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Qwen2-5-7B-GRPO-Zero--VmlldzoxMjA0MjY5OA" style="width:100%; height:500px" title="Qwen2.5-7B-GRPO-Zero"></iframe>
+
+???+ info
+
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+
+    ![grpo_plot](grpo/qwen2.5_7b_grpo_zero_eval_curve.png)
 
 
-The corresponding evals look good as well:
+???+ info
 
-![grpo_qwen2.5_7B_works_evals](static/grpo_qwen2.5_7B_works_evals.png)
+    We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
 
 
 ### Training Metrics
