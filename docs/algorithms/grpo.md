@@ -70,6 +70,63 @@ bash scripts/train/tulu3/grpo_fast_8b_single_node.sh
 
 
 
+### Olmo2 7B GRPO Fast Zero-style (🧪 Experimental)
+
+We have
+
+```bash
+bash scripts/train/olmo2/grpo_fast_7b_zero.sh
+```
+
+
+![grpo_olmo2_7b_zero](grpo/olmo2_7b_grpo_fast_zero.png)
+![grpo_olmo2_7b_zero_time](grpo/olmo2_7b_grpo_fast_zero-time.png)
+
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+    
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-7B-GRPO-Fast-Zero--VmlldzoxMjA0MjU4MQ" style="width:100%; height:500px" title="OLMo2-7B-GRPO-Fast-Zero"></iframe>
+
+???+ info
+
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+
+    ![grpo_plot](grpo/olmo2_7b_grpo_fast_zero_eval_curve.png)
+
+
+???+ info
+
+    We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
+
+
+### Olmo2 13B GRPO Fast Zero-style (🧪 Experimental)
+
+We have
+
+```bash
+bash scripts/train/olmo2/grpo_fast_13b_zero.sh
+```
+
+
+![grpo_olmo2_13b_zero](grpo/olmo2_13b_grpo_fast_zero.png)
+![grpo_olmo2_13b_zero_time](grpo/olmo2_13b_grpo_fast_zero-time.png)
+
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+    
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-13B-GRPO-Fast-Zero--VmlldzoxMjA0MjU4Mw" style="width:100%; height:500px" title="OLMo2-13B-GRPO-Fast-Zero"></iframe>
+
+???+ info
+
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+
+    ![grpo_plot](grpo/olmo2_13b_grpo_fast_zero_eval_curve.png)
+
+
+???+ info
+
+    We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
+
+
+
 ## `grpo_vllm_thread_ray_gtrl.py`
 
 
