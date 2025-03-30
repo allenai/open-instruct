@@ -99,6 +99,61 @@ bash scripts/train/olmo2/finetune_7b.sh
     We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
 
 
+### Reproduce `allenai/OLMo-2-1124-13B-SFT` (8 Nodes)
+
+You can reproduce our `allenai/OLMo-2-1124-13B-SFT` model by running the following command:
+
+```bash
+bash scripts/train/olmo2/finetune_13b.sh
+```
+
+![finetune_plot](finetune/olmo2_13b_sft.png)
+![finetune_plot](finetune/olmo2_13b_sft-time.png)
+
+
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-13B-SFT--VmlldzoxMjA0MjUyNg" style="width:100%; height:500px" title="OLMo2-1124-7B-SFT"></iframe>
+
+???+ info
+
+    Based on our internal evaluation, the SFT model is roughly on par with the original `allenai/OLMo-2-1124-7B` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training.
+
+    ![finetune_plot](finetune/olmo2_13b_sft_eval.png)
+
+???+ info
+
+    We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
+
+
+### Reproduce `allenai/OLMo-2-1124-32B-SFT` (8 Nodes)
+
+You can reproduce our `allenai/OLMo-2-1124-32B-SFT` model by running the following command:
+
+```bash
+bash scripts/train/olmo2/finetune_32b.sh
+```
+
+![finetune_plot](finetune/olmo2_32b_sft.png)
+![finetune_plot](finetune/olmo2_32b_sft-time.png)
+
+
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-32B-SFT--VmlldzoxMjA0MjUxOQ" style="width:100%; height:500px" title="OLMo2-1124-7B-SFT"></iframe>
+
+???+ info
+
+    Based on our internal evaluation, the SFT model is roughly on par with the original `allenai/OLMo-2-1124-7B` model, though there are some slight differences. Note that your results may vary slightly due to the random seeds used in the training.
+
+    ![finetune_plot](finetune/olmo2_32b_sft_eval.png)
+
+???+ info
+
+    We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
+
+
+
 
 ### Training Metrics
 
