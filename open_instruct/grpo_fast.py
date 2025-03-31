@@ -1624,8 +1624,6 @@ if __name__ == "__main__":
             stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
             bf16=True,
         )
-        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-        ds_config["train_batch_size"] = args.mini_batch_size
         reward_model, *_ = deepspeed.initialize(model=reward_model, config=ds_config)
         reward_model.eval()
 
