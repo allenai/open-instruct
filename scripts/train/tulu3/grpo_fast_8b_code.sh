@@ -1,13 +1,14 @@
+exp_name="tulu3_8b_grpo_fast_code_${RANDOM}"
+CODE_API_URL=https://p9f1719l7f.execute-api.us-west-2.amazonaws.com
 python mason.py \
-    --cluster ai2/augusta-google-1 \
-    --image costah/open_instruct_dev_uv18 --pure_docker_mode \
+    --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup_code.sh \&\& python open_instruct/grpo_fast.py \
-    --exp_name tulu3.1_8b_grpo_fast_code \
+    --exp_name $exp_name \
     --beta 0.01 \
     --num_unique_prompts_rollout 48 \
     --num_samples_per_prompt_rollout 16 \
@@ -25,7 +26,7 @@ python mason.py \
     --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-DPO \
     --apply_verifiable_reward false \
     --apply_ace_coder_reward true \
-    --ace_coder_api_url \$CODE_API_URL/test_program \
+    --ace_coder_api_url $CODE_API_URL/test_program \
     --non_stop_penalty True \
     --non_stop_penalty_value 0.0 \
     --temperature 1.0 \
@@ -39,7 +40,7 @@ python mason.py \
     --vllm_tensor_parallel_size 1 \
     --vllm_num_engines 10 \
     --lr_scheduler_type constant \
-    --seed 1 \
+    --seed 88 \
     --num_evals 100 \
     --save_freq 40 \
     --gradient_checkpointing \

@@ -15,18 +15,18 @@ BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk 
 RAY_NODE_PORT=8888
 ray stop --force
 
-export CODE_API_URL="http://${BEAKER_LEADER_REPLICA_IP}:1234/test_program"
+# export CODE_API_URL="http://${BEAKER_LEADER_REPLICA_IP}:1234/test_program"
 
 if [ "$BEAKER_REPLICA_RANK" == "0" ]; then
     echo "Starting Ray head node"
 
     # Start the API server in the background using nohup
-    echo "Starting API server on port 1234"
-    cd open_instruct/code
-    nohup uvicorn api:app --host 0.0.0.0 --port 1234 > api_server.log 2>&1 &
-    echo "API server started with PID $!"
-    cd ..
-    cd ..
+    #echo "Starting API server on port 1234"
+    #cd open_instruct/code
+    #nohup uvicorn api:app --host 0.0.0.0 --port 1234 > api_server.log 2>&1 &
+    #echo "API server started with PID $!"
+    #cd ..
+    #cd ..
     
     ray start --head --port=$RAY_NODE_PORT
 else

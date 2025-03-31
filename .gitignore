@@ -147,3 +147,6 @@ dmypy.json
 .idea/
 .vscode
 .DS_Store
+
+/open_instruct/code/terraform/.terraform/
+/open_instruct/code/terraform/lambda_function.zip
