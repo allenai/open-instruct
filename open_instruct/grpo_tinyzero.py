@@ -286,7 +286,9 @@ class Args:
 
     def __post_init__(self):
         if self.single_gpu_mode and self.vllm_gpu_memory_utilization > 0.3:
-            self.vllm_gpu_memory_utilization = 0.3
+            logger.warning(
+                f"You're setting vllm gpu mem utilization quite high ({self.vllm_gpu_memory_utilization}) for single gpu mode"
+            )
         if self.sleep_mode:
             assert self.single_gpu_mode, "sleep mode only necessary for single GPU"
         assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
@@ -506,7 +508,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
-        enable_sleep_mode=args.sleep_mode,
+        vllm_enable_sleep=args.sleep_mode,
     )
     ray.get(inits)
     logger.info("======== ✅ all models and vLLM engines initialized =========")

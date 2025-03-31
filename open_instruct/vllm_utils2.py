@@ -68,9 +68,7 @@ def init_process_group(
     group_name: str = None,
     pg_options: Optional[Any] = None,
 ):
-    assert (store is None) or (
-        init_method is None
-    ), "Cannot specify both init_method and store."
+    assert (store is None) or (init_method is None), "Cannot specify both init_method and store."
 
     if store is not None:
         assert world_size > 0, "world_size must be positive if using store"
@@ -99,9 +97,7 @@ def init_process_group(
     # NOTE: The pg_options parameter was renamed into backend_options in PyTorch 2.6.0
     # https://github.com/pytorch/pytorch/commit/a0c7029a75628cd5fa8df83c0de0ea98ee7fd844
     # We need to determine the appropriate parameter name based on PyTorch version
-    pg_options_param_name = (
-        "backend_options" if str(torch.__version__) >= "2.6" else "pg_options"
-    )
+    pg_options_param_name = "backend_options" if str(torch.__version__) >= "2.6" else "pg_options"
     pg, _ = _new_process_group_helper(
         world_size,
         rank,
@@ -171,13 +167,9 @@ class LLMRayActor:
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        return self.llm.collective_rpc(
-            "update_weight", args=(name, dtype, shape, empty_cache)
-        )
+        return self.llm.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
-    def update_weight_cuda_ipc(
-        self, name, dtype, shape, ipc_handles, empty_cache=False
-    ):
+    def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
         return self.llm.collective_rpc(
             "update_weight_cuda_ipc",
             args=(name, dtype, shape, ipc_handles, empty_cache),
@@ -224,18 +216,14 @@ def create_vllm_engines(
 
     if not use_hybrid_engine:
         # Create a big placement group to ensure that all engines are packed
-        bundles = [
-            {"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size)
-        ]
+        bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size)]
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
     for i in range(num_engines):
         bundle_indices = None
         if tensor_parallel_size > 1:
-            bundle_indices = list(
-                range(i * tensor_parallel_size, (i + 1) * tensor_parallel_size)
-            )
+            bundle_indices = list(range(i * tensor_parallel_size, (i + 1) * tensor_parallel_size))
 
         scheduling_strategy = PlacementGroupSchedulingStrategy(
             placement_group=pg,
@@ -249,9 +237,7 @@ def create_vllm_engines(
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
                 # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
-                runtime_env=ray.runtime_env.RuntimeEnv(
-                    env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}
-                ),
+                runtime_env=ray.runtime_env.RuntimeEnv(env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}),
             ).remote(
                 model=pretrain,
                 revision=revision,
@@ -267,7 +253,7 @@ def create_vllm_engines(
                 max_model_len=max_model_len,
                 gpu_memory_utilization=vllm_gpu_memory_utilization,
                 bundle_indices=bundle_indices,
-                num_gpus=0.2 if use_hybrid_engine else 1,
+                num_gpus=num_gpus if use_hybrid_engine else 1,
                 enable_sleep_mode=vllm_enable_sleep,
                 noset_visible_devices=ray_noset_visible_devices(),
             )
@@ -279,9 +265,7 @@ def create_vllm_engines(
     return vllm_engines
 
 
-def batch_vllm_engine_call(
-    engines: List[Any], method_name: str, *args, rank_0_only: bool = True, **kwargs
-):
+def batch_vllm_engine_call(engines: List[Any], method_name: str, *args, rank_0_only: bool = True, **kwargs):
     """
     Batch call a method on multiple vLLM engines.
     Args:

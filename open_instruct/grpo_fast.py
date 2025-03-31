@@ -109,7 +109,7 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
 )
-from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
+from open_instruct.vllm_utils2 import batch_vllm_engine_call, create_vllm_engines, init_process_group
 
 
 api = HfApi()
@@ -1077,8 +1077,7 @@ def vllm_generate_thread(
         _, g_queries_list = items
 
         if sleep_mode:
-            for vllm_engine in vllm_engines:
-                vllm_engine.wake_up.remote()
+            batch_vllm_engine_call(vllm_engines, "wake_up", rank_0_only=False)
 
         with Timer("🔥 Generation time"):
             response_ids, finish_reasons = generate_with_engines(g_queries_list, generation_config)
@@ -1092,8 +1091,7 @@ def vllm_generate_thread(
                 evaluation_inference_results_Q.put((response_ids, finish_reasons))
 
         if sleep_mode:
-            for vllm_engine in vllm_engines:
-                vllm_engine.sleep.remote(1)
+            batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)
 
 
 def data_preparation_thread(
