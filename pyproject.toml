@@ -74,3 +74,6 @@ dev = [
     "markdown-include>=0.8.1",
     "pytest>=8.3.4",
 ]
+
+[tool.isort]
+known_first_party = ["open_instruct"]
