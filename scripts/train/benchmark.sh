@@ -92,6 +92,22 @@ python update_command_args.py scripts/train/qwen/grpo_fast_3b_single_node.sh \
     --priority normal \
     --image costah/open_instruct_dev0320_11 | uv run bash
 
+
+# 8 nodes
+python update_command_args.py scripts/train/qwen/grpo_fast_32b.sh \
+    --cluster ai2/augusta-google-1 \
+    --wandb_project_name open_instruct_public \
+    --priority high | uv run bash
+
+# ------------------------------------------------------------
+# Llama3
+
+# 4 nodes
+python update_command_args.py scripts/train/llama3/grpo_fast_7b_math.sh \
+    --cluster ai2/augusta-google-1 \
+    --wandb_project_name open_instruct_public \
+    --priority high | uv run bash
+
 # ------------------------------------------------------------
 # Olmo2
 
