@@ -64,6 +64,7 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
 from transformers import (
+    AutoModelForSequenceClassification,
     AutoModelForCausalLM,
     AutoTokenizer,
     PreTrainedModel,
@@ -86,6 +87,7 @@ from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
     disable_dropout_in_model,
+    get_reward,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
     print_rich_table,
@@ -270,6 +272,14 @@ class Args:
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
 
+    # reward modeling
+    reward_model_multiplier: float = 1.0
+    """the reward model multiplier, for down/upscaling the reward model output"""
+    reward_model_path: str = "EleutherAI/pythia-160m"
+    """the path to the reward model"""
+    reward_model_revision: Optional[str] = None
+    """the revision of the reward model"""
+
     # Ai2 specific settings
     try_launch_beaker_eval_jobs_on_weka: bool = False
     """Whether to launch beaker evaluation jobs after training on weka"""
@@ -287,7 +297,7 @@ class Args:
             self.vllm_gpu_memory_utilization = 0.3
         assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
         assert (
-            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
+            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty or self.reward_model_multiplier
         ), "At least one reward must be applied!"
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
@@ -655,6 +665,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
         self.ref_policy.eval()
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
+
 
     def forward(
         self,
@@ -1587,6 +1598,37 @@ if __name__ == "__main__":
     assert isinstance(args, Args)
     assert isinstance(model_config, ModelConfig)
 
+    # reward model
+    if args.reward_model_multiplier:
+        reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
+            args.reward_model_path,
+            revision=args.reward_model_revision,
+            num_labels=1,
+            torch_dtype=torch.bfloat16,
+            attn_implementation="flash_attention_2",
+            use_cache=False,
+        )
+        reward_model_vocab_size = reward_model.config.vocab_size
+        # if policy_vocab_size != reward_model_vocab_size:
+        #     raise ValueError(
+        #         "Policy and reward model must have the same vocab size. "
+        #         f"Policy: {self.policy_vocab_size}, Reward: {self.reward_model_vocab_size}. "
+        #         "If they don't have the same vocab size, the policy could generate tokens which "
+        #         "is going to cause index out of bound error in the reward model."
+        #     )
+        disable_dropout_in_model(reward_model)
+        ds_config = get_eval_ds_config(
+            offload=False,
+            # inference model only has stage 3 (sharding) or stage 0 (no sharding)
+            # stage 2 is optimizer sharding which doesn't apply to inference
+            stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
+            bf16=True,
+        )
+        ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
+        ds_config["train_batch_size"] = args.mini_batch_size
+        reward_model, *_ = deepspeed.initialize(model=reward_model, config=ds_config)
+        reward_model.eval()
+
     def reward_fn(
         responses: List[torch.Tensor],
         decoded_responses: List[str],
@@ -1604,6 +1646,16 @@ if __name__ == "__main__":
                 for i in range(len(format_scores)):
                     scores[i] = format_scores[i] + scores[i]
                 metrics["val/format_scores"] = np.array(format_scores).mean()
+        print("debugging")
+        print(datasets)
+        # @valpy: RM reward
+        # if args.reward_model_multiplier:
+        #     rm_tokenizer = reward_model.tokenizer
+        #     context_length = queries.shape[1]
+        #     _, score, _ = get_reward(
+        #         reward_model, responses, rm_tokenizer.pad_token_id, context_length
+        #     )
+        #     score *= args.reward_model_multiplier
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):

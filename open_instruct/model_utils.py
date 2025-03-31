@@ -230,6 +230,7 @@ def apply_verifiable_reward(
 ):
     rewards = []
     per_func_rewards = []
+
     for tok_prediction, prediction, ground_truth, dataset in zip(
         responses, decoded_responses, ground_truths, datasets
     ):
