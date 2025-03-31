@@ -1625,7 +1625,7 @@ if __name__ == "__main__":
     ) -> List[float]:
         scores = [0] * len(decoded_responses)
         metrics = {}
-        breakpoint()
+
         if args.apply_r1_style_format_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
                 format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
