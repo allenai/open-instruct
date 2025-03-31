@@ -27,7 +27,7 @@ python open_instruct/grpo_fast.py \
     --seed 3 \
     --num_evals 20 \
     --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.2 \
+    --vllm_gpu_memory_utilization 0.5 \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
