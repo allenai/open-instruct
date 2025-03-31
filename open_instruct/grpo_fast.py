@@ -28,36 +28,35 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # isort: off
-from collections import defaultdict
-import json
 import os
-import shutil
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
-# isort: on
-
-
-import logging
-import os
-import random
-import socket
-import threading
-import time
-import traceback
-from argparse import Namespace
-from dataclasses import asdict, dataclass, field
-from queue import Empty, Queue
-from typing import Callable, Iterator, List, Literal, Optional
-
-try: 
+try:
     import deepspeed
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
+
     # @vwxyzjn: when importing on CPU-only machines, we get the following error:
     # RuntimeError: 0 active drivers ([]). There should only be one.
     # so we need to catch the exception and do nothing
     # https://github.com/deepspeedai/DeepSpeed/issues/7028
 except Exception:
     pass
+# isort: on
+
+import json
+import logging
+import os
+import random
+import shutil
+import socket
+import threading
+import time
+import traceback
+from argparse import Namespace
+from collections import defaultdict
+from dataclasses import asdict, dataclass, field
+from queue import Empty, Queue
+from typing import Callable, Iterator, List, Literal, Optional
 
 import numpy as np
 import pandas as pd
