@@ -68,6 +68,35 @@ bash scripts/train/tulu3/grpo_fast_8b_single_node.sh
     We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
 
 
+### (🧪 Experimental) Qwen 2.5 7B GRPO Fast Zero-style
+
+We have
+
+```bash
+bash scripts/train/qwen/grpo_fast_7b.sh
+```
+
+
+![grpo_qwen2.5_7B_works](grpo/qwen2.5_7b_grpo_fast_zero.png)
+![grpo_qwen2.5_7B_works_time](grpo/qwen2.5_7b_grpo_fast_zero-time.png)
+
+
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+    
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Qwen2-5-7B-GRPO-Fast-Zero--VmlldzoxMjA2NDExMA" style="width:100%; height:500px" title="Qwen2.5-7B-GRPO-Fast-Zero"></iframe>
+
+
+???+ info
+
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+
+    ![grpo_plot](grpo/qwen2.5_7b_grpo_fast_zero_eval_curve.png)
+
+???+ info
+
+    We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
+
+
 
 
 ### (🧪 Experimental) Olmo2 7B GRPO Fast Zero-style
