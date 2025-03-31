@@ -19,7 +19,7 @@ python mason.py \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 8192 \
     --max_prompt_token_length 2048 \
-    --response_length 6144 \
+    --response_length 8192 \
     --pack_length 16384 \
     --model_name_or_path Qwen/Qwen2.5-7B \
     --stop_strings '"</answer>"' \
