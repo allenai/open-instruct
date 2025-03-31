@@ -60,6 +60,8 @@ from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoTokenizer
 from tqdm import trange
 from vllm import SamplingParams
+from ray.exceptions import RayTaskError
+from contextlib import contextmanager
 
 from open_instruct.dataset_transformation import (
     DATASET_SOURCE_KEY,
@@ -294,6 +296,32 @@ class Args:
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
         ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+
+
+@contextmanager
+def catch_ray_errors():
+    """
+    A simple context manager to catch GPU OOM errors in Ray tasks
+    and bubble them up to the terminal output.
+    """
+    error_occured = False  # noqa
+    try:
+        yield
+    except RayTaskError as e:
+        error_occurred = True
+        # Get the original error from the Ray task
+        print(f"Ray task failed with error: {e}")
+        if e.__cause__:
+            print(f"Original error: {e.__cause__}")
+    except Exception as e:
+        error_occurred = True
+        print(f"Unexpected error: {e}")
+        print(traceback.format_exc())
+    finally:
+        # Only shutdown Ray if an error was caught
+        if error_occurred and ray.is_initialized():
+            print("Error detected - shutting down Ray")
+            ray.shutdown()
 
 
 def preprocess_example(
@@ -663,7 +691,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
             # ------------------------------------------------------------------------------------------------
             # Train the model
-            with Timer("[Main Thread] 🗡️ Training"):
+            with Timer("[Main Thread] 🗡️ Training"), catch_ray_errors():
                 metrics_list: List[dict[str, float]] = ray.get(
                     [
                         policy_group.models[i].train.remote(
