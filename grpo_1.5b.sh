@@ -22,7 +22,7 @@ uv run open_instruct/grpo_tinyzero.py \
     --num_samples_per_prompt_rollout 4 \
     --total_episodes 64000 \
     --model_name_or_path Qwen/Qwen2.5-1.5B-Instruct \
-    --stop_strings "<|im_end|>" \
+    --stop_strings "<|im_end|>" "<|endoftext|>" \
     --apply_r1_style_format_reward \
     --r1_style_format_reward 0.1 \
     --apply_verifiable_reward \

@@ -1117,7 +1117,10 @@ def data_preparation_thread(
             responses, finish_reasons = inference_results_Q.get()
             for i in range(len(finish_reasons)):
                 if finish_reasons[i] == "stop" and responses[i][-1] != tokenizer.eos_token_id:
-                    responses[i].append(tokenizer.eos_token_id)
+                    if responses[i][-1] == tokenizer.pad_token_id:
+                        responses[i][-1] = tokenizer.eos_token_id
+                    else:
+                        responses[i].append(tokenizer.eos_token_id)
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
