@@ -302,8 +302,6 @@ class Args:
     """the priority of auto-launched evaluation jobs"""
 
     def __post_init__(self):
-        if self.single_gpu_mode:
-            self.vllm_gpu_memory_utilization = 0.3
         assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
         assert (
             self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
@@ -1627,6 +1625,7 @@ if __name__ == "__main__":
     ) -> List[float]:
         scores = [0] * len(decoded_responses)
         metrics = {}
+        breakpoint()
         if args.apply_r1_style_format_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
                 format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
