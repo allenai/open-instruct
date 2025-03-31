@@ -1,6 +1,7 @@
 site_name: Open Instruct
 site_url: https://github.com/allenai/open-instruct
 theme:
+  favicon: assets/favicon.ico
   name: material
   features:
     # - navigation.instant
