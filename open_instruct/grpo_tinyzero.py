@@ -107,7 +107,9 @@ class Args:
     # Dataset
     dataset_name: str = None
     """Dataset name"""
-    dataset_split: str = "train"
+    dataset_train_split: str = "train"
+    """Dataset split"""
+    dataset_eval_split: str = "train"
     """Dataset split"""
     max_token_length: int = 512
     """The maximum token length to use for the dataset"""
@@ -334,9 +336,9 @@ def create_datasets(args: Args, tokenizer):
         "<answer> answer here </answer>."
     )
     PROMPT_TEMPLATE = "Using the numbers {numbers}, create an equation that equals {target}. You can use basic arithmetic operations (+, -, *, /) and each number can only be used once. Show your work in <think> </think> tags. And return the final equation and answer in <answer> </answer> tags, for example <answer>(10 + 2) / 3</answer>."
-    dataset = load_dataset(args.dataset_name, split=args.dataset_split)
-    dataset = dataset.add_column(DATASET_SOURCE_KEY, ["countdown"] * len(dataset))
-    dataset = dataset.map(
+    train_dataset = load_dataset(args.dataset_name, split=args.dataset_train_split)
+    train_dataset = train_dataset.add_column(DATASET_SOURCE_KEY, ["countdown"] * len(train_dataset))
+    train_dataset = train_dataset.map(
         preprocess_example,
         num_proc=6,
         fn_kwargs={
@@ -346,12 +348,18 @@ def create_datasets(args: Args, tokenizer):
         },
     )
 
-    # Split dataset
-    train_test_split = dataset.train_test_split(test_size=500, seed=42)
-    train_dataset = train_test_split["train"]
-    test_dataset = train_test_split["test"]
-
-    return train_dataset, test_dataset
+    eval_dataset = load_dataset(args.dataset_name, split=args.dataset_eval_split)
+    eval_dataset = eval_dataset.add_column(DATASET_SOURCE_KEY, ["countdown"] * len(eval_dataset))
+    eval_dataset = eval_dataset.map(
+        preprocess_example,
+        num_proc=6,
+        fn_kwargs={
+            "tokenizer": tokenizer,
+            "SYSTEM_MESSAGE": SYSTEM_MESSAGE,
+            "PROMPT_TEMPLATE": PROMPT_TEMPLATE,
+        },
+    )
+    return train_dataset, eval_dataset
 
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
@@ -753,7 +761,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
 if __name__ == "__main__":
     parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
-    args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
+    args, tokenizer_config, model_config = parser.parse()
     assert isinstance(args, Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)

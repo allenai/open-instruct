@@ -12,7 +12,8 @@ uv run open_instruct/grpo_tinyzero.py \
     --exp_name $exp_name \
     --output_dir $SCRATCH/open_instruct/results/ \
     --dataset_name Jiayi-Pan/Countdown-Tasks-3to4 \
-    --dataset_split train[:20000] \
+    --dataset_train_split train[:20000] \
+    --dataset_eval_split train[20000:21000] \
     --max_token_length 256 \
     --max_prompt_token_length 256 \
     --response_length 1024 \
@@ -36,9 +37,9 @@ uv run open_instruct/grpo_tinyzero.py \
     --beta 0.001 \
     --seed 3 \
     --num_evals 5 \
-    --save_freq 50 \
+    --save_freq 100 \
     --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.4 \
+    --vllm_gpu_memory_utilization 0.5 \
     --vllm_enforce_eager \
     --single_gpu_mode \
     --deepspeed_stage 2 \
