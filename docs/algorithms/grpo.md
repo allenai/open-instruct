@@ -68,6 +68,92 @@ bash scripts/train/tulu3/grpo_fast_8b_single_node.sh
     We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
 
 
+### (🧪 Experimental) Qwen 2.5 7B GRPO Fast Zero-style
+
+We have
+
+```bash
+bash scripts/train/qwen/grpo_fast_7b.sh
+```
+
+
+![grpo_qwen2.5_7B_works](grpo/qwen2.5_7b_grpo_fast_zero.png)
+![grpo_qwen2.5_7B_works_time](grpo/qwen2.5_7b_grpo_fast_zero-time.png)
+
+
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+    
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Qwen2-5-7B-GRPO-Fast-Zero--VmlldzoxMjA2NDExMA" style="width:100%; height:500px" title="Qwen2.5-7B-GRPO-Fast-Zero"></iframe>
+
+
+???+ info
+
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+
+    ![grpo_plot](grpo/qwen2.5_7b_grpo_fast_zero_eval_curve.png)
+
+???+ info
+
+    We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
+
+
+
+
+### (🧪 Experimental) Olmo2 7B GRPO Fast Zero-style
+
+We have
+
+```bash
+bash scripts/train/olmo2/grpo_fast_7b_zero.sh
+```
+
+
+![grpo_olmo2_7b_zero](grpo/olmo2_7b_grpo_fast_zero.png)
+![grpo_olmo2_7b_zero_time](grpo/olmo2_7b_grpo_fast_zero-time.png)
+
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+    
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-7B-GRPO-Fast-Zero--VmlldzoxMjA0MjU4MQ" style="width:100%; height:500px" title="OLMo2-7B-GRPO-Fast-Zero"></iframe>
+
+???+ info
+
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+
+    ![grpo_plot](grpo/olmo2_7b_grpo_fast_zero_eval_curve.png)
+
+
+???+ info
+
+    We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
+
+
+### (🧪 Experimental) Olmo2 13B GRPO Fast Zero-style
+
+We have
+
+```bash
+bash scripts/train/olmo2/grpo_fast_13b_zero.sh
+```
+
+
+![grpo_olmo2_13b_zero](grpo/olmo2_13b_grpo_fast_zero.png)
+![grpo_olmo2_13b_zero_time](grpo/olmo2_13b_grpo_fast_zero-time.png)
+
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+    
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-13B-GRPO-Fast-Zero--VmlldzoxMjA0MjU4Mw" style="width:100%; height:500px" title="OLMo2-13B-GRPO-Fast-Zero"></iframe>
+
+???+ info
+
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+
+    ![grpo_plot](grpo/olmo2_13b_grpo_fast_zero_eval_curve.png)
+
+
+???+ info
+
+    We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
+
 
 
 ## `grpo_vllm_thread_ray_gtrl.py`
@@ -151,7 +237,7 @@ bash scripts/train/olmo2/grpo_7b.sh
 
 
 
-### Qwen 2.5 7B Zero-style (🧪 Experimental)
+### (🧪 Experimental) Qwen 2.5 7B Zero-style
 
 Here is a command to run GRPO on the `Qwen/Qwen2.5-7B` on [ai2-adapt-dev/math_ground_truth_zs](https://huggingface.co/datasets/ai2-adapt-dev/math_ground_truth_zs), which is simply a zero-shot version of the RLVR MATH dataset. The training is done starting from a base model, similar to how [DeepSeek R1](https://arxiv.org/abs/2501.12948) does it.
 
@@ -163,12 +249,20 @@ bash scripts/train/qwen/grpo_7b.sh
 ![grpo_qwen2.5_7B_works_time](grpo/qwen2.5_7b_grpo_zero-time.png)
 
 
-The results look quite reasonable: with format score, score all going up, and sequence length seems stable (at least at first)
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+    
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Qwen2-5-7B-GRPO-Zero--VmlldzoxMjA0MjY5OA" style="width:100%; height:500px" title="Qwen2.5-7B-GRPO-Zero"></iframe>
+
+???+ info
+
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+
+    ![grpo_plot](grpo/qwen2.5_7b_grpo_zero_eval_curve.png)
 
 
-The corresponding evals look good as well:
+???+ info
 
-![grpo_qwen2.5_7B_works_evals](static/grpo_qwen2.5_7B_works_evals.png)
+    We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
 
 
 ### Training Metrics
