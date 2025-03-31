@@ -1,5 +1,6 @@
 python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/augusta-google-1 \
+    --image costah/open_instruct_dev_uv18 --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
@@ -24,7 +25,7 @@ python mason.py \
     --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-DPO \
     --apply_verifiable_reward false \
     --apply_ace_coder_reward true \
-    --ace_coder_api_url http://neptune-cs-aus-267.reviz.ai2:1234/test_program \
+    --ace_coder_api_url \$CODE_API_URL/test_program \
     --non_stop_penalty True \
     --non_stop_penalty_value 0.0 \
     --temperature 1.0 \

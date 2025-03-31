@@ -19,7 +19,7 @@ python open_instruct/code/api.py
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
-from .code_utils import get_successful_tests_fast
+from code_utils import get_successful_tests_fast
 import logging
 
 app = FastAPI()
