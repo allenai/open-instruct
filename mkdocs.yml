@@ -1,0 +1,91 @@
+site_name: Open Instruct
+site_url: https://github.com/allenai/open-instruct
+theme:
+  favicon: assets/favicon.ico
+  name: material
+  features:
+    # - navigation.instant
+    - navigation.tracking
+    # - navigation.tabs
+    # - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: dark)" 
+      scheme: ai2-dark
+      primary: custom
+      toggle:
+        icon: material/lightbulb
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)" 
+      scheme: ai2
+      primary: custom
+      toggle:
+        icon: material/lightbulb-outline
+        name: Switch to dark mode
+#adding git repo
+repo_url: https://github.com/allenai/open-instruct
+repo_name: allenai/open-instruct
+#markdown_extensions 
+markdown_extensions:
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true 
+  - abbr
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.snippets
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - footnotes
+  - markdown_include.include:
+      base_path: docs
+  - pymdownx.emoji:
+      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_generator: !!python/name:materialx.emoji.to_svg
+  - pymdownx.arithmatex:
+      generic: true
+  # - toc:
+  #     permalink: true
+  # - markdown.extensions.codehilite:
+  #     guess_lang: false
+  # - admonition
+  # - codehilite
+  # - extra
+  # - pymdownx.superfences:
+  #     custom_fences:
+  #     - name: mermaid
+  #       class: mermaid
+  #       format: !!python/name:pymdownx.superfences.fence_code_format ''
+  # - pymdownx.tabbed
+
+
+plugins:
+  - search
+nav:
+  - Overview: index.md
+  - Get Started:
+    - get_started/installation.md
+    - get_started/ai2_internal_setup.md
+  - Training:
+    - algorithms/dataset_transformation.md
+    - algorithms/finetune.md
+    - algorithms/dpo.md
+    - algorithms/grpo.md
+    - algorithms/ppo.md
+    - algorithms/reward_modeling.md
+  - Not Maintained:
+    - algorithms/synthetic_preference_dataset.md
+
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js

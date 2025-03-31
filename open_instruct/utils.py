@@ -988,7 +988,6 @@ def retry_on_exception(max_attempts=4, delay=1, backoff=2):
 @functools.lru_cache(maxsize=1)
 def maybe_use_ai2_wandb_entity() -> Optional[str]:
     """Ai2 internal logic: try use the ai2-llm team if possible. Should not affect external users."""
-    logger.info("called maybe_use_ai2_wandb_entity()")
     import wandb
 
     wandb.login()
@@ -1004,7 +1003,6 @@ def maybe_use_ai2_wandb_entity() -> Optional[str]:
 @retry_on_exception()
 @functools.lru_cache(maxsize=1)
 def hf_whoami() -> List[str]:
-    logger.info("called HfApi().whoami()")
     return HfApi().whoami()
 
 
