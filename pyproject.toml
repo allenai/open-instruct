@@ -91,6 +91,6 @@ ignore = [
 ]
 extend-select = ["E", "F", "I", "W", "UP", "B", "T", "C"]
 
-[tool.isort]
+[tool.ruff.lint.isort]
 lines-after-imports = 2
 known-first-party = ["open-instruct"]

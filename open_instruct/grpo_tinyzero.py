@@ -42,6 +42,7 @@ import threading
 import time
 import traceback
 from argparse import Namespace
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Dict, List, Literal, Optional
@@ -54,14 +55,13 @@ import torch.utils
 import torch.utils.data
 from datasets import load_dataset
 from huggingface_hub import HfApi
+from ray.exceptions import RayTaskError
 from ray.util.placement_group import placement_group
 from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
-from transformers import AutoTokenizer
 from tqdm import trange
+from transformers import AutoTokenizer
 from vllm import SamplingParams
-from ray.exceptions import RayTaskError
-from contextlib import contextmanager
 
 from open_instruct.dataset_transformation import (
     DATASET_SOURCE_KEY,
@@ -403,9 +403,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     ):
         # Warn user if tokenizer and model use different revisions; this is an unusual
         # use case.
-        warning = f"""Requested tokenizer revision `{tc.tokenizer_revision=}` is different 
-        from the model revision `{model_config.model_revision=}` or the tokenizer name `{tc.tokenizer_name_or_path=}` 
-        is different from the model name `{model_config.model_name_or_path=}`."""
+        warning = f"Requested tokenizer revision `{tc.tokenizer_revision=}` is different"
+        f" from the model revision `{model_config.model_revision=}` or the tokenizer name `{tc.tokenizer_name_or_path=}`"
+        f" is different from the model name `{model_config.model_name_or_path=}`."
         logger.warning(warning)
     tokenizer = tc.tokenizer
     # ------------------------------------------------------------
