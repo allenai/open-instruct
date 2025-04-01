@@ -3,6 +3,7 @@ import random
 import time
 from dataclasses import asdict, dataclass, field
 from typing import List, Literal, Optional
+import subprocess
 
 import deepspeed
 import numpy as np
@@ -450,6 +451,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             args.hf_repo_id,
             args.hf_repo_revision,
         )
+
+    bash_command = f"""
+        python scripts/submit_ties_jobs.py --model={args.hf_repo_id} --revision={args.hf_repo_revision} --dataset=allenai/reward-bench-v2-v0 --batch_size 16 --priority high
+        python scripts/submit_rbv1_eval_jobs.py --model={args.hf_repo_id} --revision={args.hf_repo_revision} --priority normal --image saumyam/rewardbench-0321 --upload_to_hub
+    """
+
+    subprocess.run(bash_command, shell=True, executable="/bin/bash")
 
 
 if __name__ == "__main__":
