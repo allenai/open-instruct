@@ -1606,6 +1606,7 @@ if __name__ == "__main__":
             #attn_implementation="flash_attention_2",
             #use_cache=False,
         )
+        rm_tokenizer = AutoTokenizer.from_pretrained(args.reward_model_path)
         reward_model_vocab_size = reward_model.config.vocab_size
         # if policy_vocab_size != reward_model_vocab_size:
         #     raise ValueError(
@@ -1645,7 +1646,6 @@ if __name__ == "__main__":
                 metrics["val/format_scores"] = np.array(format_scores).mean()
         # @valpy: RM reward
         if args.reward_model_multiplier:
-            rm_tokenizer = reward_model.tokenizer
             _, score, _ = get_reward(
                 reward_model, responses, rm_tokenizer.pad_token_id, context_length
             )
