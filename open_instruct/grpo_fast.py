@@ -1091,9 +1091,8 @@ def data_preparation_thread(
         # Get next batch of prompts and responses
         items = queries_prompt_Q.get()
         queries, ground_truths, datasets = items
-        print(queries)
-        print("DEBUGGGING")
         #context_length = queries.shape[1]
+        context_length = len(queries[0])
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
         if args.num_samples_per_prompt_rollout > 1:
