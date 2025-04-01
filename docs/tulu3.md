@@ -325,9 +325,7 @@ python open_instruct/ppo_vllm_thread_ray_gtrl.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --chat_template_name tulu \
-    --sft_messages_key messages \
     --learning_rate 3e-7 \
     --total_episodes 10000000 \
     --penalty_reward_value -10.0 \
@@ -380,9 +378,7 @@ source configs/beaker_configs/ray_node_setup.sh && python open_instruct/ppo_vllm
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --chat_template_name tulu \
-    --sft_messages_key messages \
     --learning_rate 1e-7 \
     --total_episodes 400000 \
     --penalty_reward_value -10.0 \
@@ -438,9 +434,7 @@ TORCH_NCCL_ENABLE_MONITORING=0 python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --chat_template tulu \
-    --sft_messages_key messages \
     --learning_rate 1e-7 \
     --total_episodes 400000 \
     --num_epochs 4 \
@@ -519,9 +513,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
     --chat_template_name tulu \
-    --sft_messages_key messages \
     --total_episodes 10000000 \
     --penalty_reward_value 0.0 \
     --deepspeed_stage 2 \
@@ -598,9 +590,7 @@ If you are running on a single node (8 GPUs), consider adjusting the commands as
      --non_stop_penalty \
      --stop_token eos \
      --temperature 1.0 \
-     --ground_truths_key ground_truth \
      --chat_template_name tulu \
-     --sft_messages_key messages \
      --total_episodes 10000000 \
      --penalty_reward_value 0.0 \
 -    --deepspeed_stage 2 \
