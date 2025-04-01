@@ -1091,7 +1091,7 @@ def data_preparation_thread(
         # Get next batch of prompts and responses
         items = queries_prompt_Q.get()
         queries, ground_truths, datasets = items
-
+        context_length = queries.shape[1]
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
         if args.num_samples_per_prompt_rollout > 1:
@@ -1118,7 +1118,7 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards"):
-            scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons)
+            scores, reward_metrics = reward_fn(context_length, responses, decoded_responses, ground_truths, datasets, finish_reasons)
 
         with Timer("🎆 [Data Preparation Thread] Calculating advantages"):
             # Calculate advantages
@@ -1625,6 +1625,7 @@ if __name__ == "__main__":
         # reward_model.eval()
 
     def reward_fn(
+        context_length: int,
         responses: List[torch.Tensor],
         decoded_responses: List[str],
         ground_truths: List[str],
@@ -1642,13 +1643,13 @@ if __name__ == "__main__":
                     scores[i] = format_scores[i] + scores[i]
                 metrics["val/format_scores"] = np.array(format_scores).mean()
         # @valpy: RM reward
-        # if args.reward_model_multiplier:
-        #     rm_tokenizer = reward_model.tokenizer
-        #     context_length = queries.shape[1]
-        #     _, score, _ = get_reward(
-        #         reward_model, responses, rm_tokenizer.pad_token_id, context_length
-        #     )
-        #     score *= args.reward_model_multiplier
+        if args.reward_model_multiplier:
+            rm_tokenizer = reward_model.tokenizer
+            _, score, _ = get_reward(
+                reward_model, responses, rm_tokenizer.pad_token_id, context_length
+            )
+            score *= args.reward_model_multiplier
+            print("score!!!!!!!", score)
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):

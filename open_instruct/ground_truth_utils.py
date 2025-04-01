@@ -190,20 +190,17 @@ class IFEvalVerifierSingle(VerifierFunction):
         if isinstance(constraint_dict, str):
             constraint_dict = json.loads(constraint_dict)
         answer = prediction.split("<|assistant|>\n")[-1].strip()
-        print(constraint_dict)
         instruction_key = constraint_dict["instruction_id"][0]
         args = constraint_dict["kwargs"][0]
         if args is None:
             args = {}
         args = {k: v for k, v in args.items() if v is not None}
-        print(args)
         instruction_cls = instruction_dict[instruction_key]
         instruction_instance = instruction_cls(instruction_key)
         instruction_instance.build_description(**args)
         #args = instruction_instance.get_instruction_args()
         #if args and "prompt" in args:
         #    instruction.build_description(prompt=prompt)
-        print(instruction_instance.check_following(answer))
         if prediction.strip() and instruction_instance.check_following(answer):
             return 1.0
         return 0.0
@@ -236,11 +233,9 @@ class IFEvalVerifier(VerifierFunction):
             if args is None:
                 args = {}
             args = {k: v for k, v in args.items() if v is not None}
-            print(args)
             instruction_cls = instruction_dict[instruction_key]
             instruction_instance = instruction_cls(instruction_key)
             instruction_instance.build_description(**args)
-            print(instruction_instance.check_following(answer))
             if prediction.strip() and instruction_instance.check_following(answer):
                 rewards.append(1.0)
             else:
