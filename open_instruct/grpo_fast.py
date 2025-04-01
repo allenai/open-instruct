@@ -1617,15 +1617,15 @@ if __name__ == "__main__":
         #         "is going to cause index out of bound error in the reward model."
         #     )
         disable_dropout_in_model(reward_model)
-        ds_config = get_eval_ds_config(
-            offload=False,
-            # inference model only has stage 3 (sharding) or stage 0 (no sharding)
-            # stage 2 is optimizer sharding which doesn't apply to inference
-            stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
-            bf16=True,
-        )
-        reward_model, *_ = deepspeed.initialize(model=reward_model, config=ds_config)
-        reward_model.eval()
+        # ds_config = get_eval_ds_config(
+        #     offload=False,
+        #     # inference model only has stage 3 (sharding) or stage 0 (no sharding)
+        #     # stage 2 is optimizer sharding which doesn't apply to inference
+        #     stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
+        #     bf16=True,
+        # )
+        # reward_model, *_ = deepspeed.initialize(model=reward_model, config=ds_config)
+        # reward_model.eval()
 
     def reward_fn(
         responses: List[torch.Tensor],
