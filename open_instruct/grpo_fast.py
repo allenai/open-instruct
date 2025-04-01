@@ -28,35 +28,42 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # isort: off
-from collections import defaultdict
-import json
 import os
-import shutil
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
+try:
+    import deepspeed
+    from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
+
+    # @vwxyzjn: when importing on CPU-only machines, we get the following error:
+    # RuntimeError: 0 active drivers ([]). There should only be one.
+    # so we need to catch the exception and do nothing
+    # https://github.com/deepspeedai/DeepSpeed/issues/7028
+except Exception:
+    pass
 # isort: on
 
-
+import json
 import logging
 import os
 import random
+import shutil
 import socket
 import threading
 import time
 import traceback
 from argparse import Namespace
+from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Callable, Iterator, List, Literal, Optional
 
-import deepspeed
 import numpy as np
 import pandas as pd
 import ray
 import torch
 import torch.utils
 import torch.utils.data
-from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util.placement_group import PlacementGroup, placement_group
@@ -1628,6 +1635,7 @@ if __name__ == "__main__":
     ) -> List[float]:
         scores = [0] * len(decoded_responses)
         metrics = {}
+
         if args.apply_r1_style_format_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
                 format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)

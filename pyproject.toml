@@ -10,7 +10,7 @@ dependencies = [
     "bitsandbytes>=0.44.1",
     "datasets>=3.1.0",
     "debugpy>=1.8.13",
-    "deepspeed==0.16.4", # 0.16.0 bugs out https://github.com/microsoft/DeepSpeed/issues/6793
+    "deepspeed==0.15.4", # 0.16.0 bugs out https://github.com/microsoft/DeepSpeed/issues/6793
     "hf-transfer>=0.1.8",
     "matplotlib>=3.9.3",
     "nltk>=3.9.1",
@@ -18,6 +18,7 @@ dependencies = [
     "nvitop>=1.4.2",
     "packaging>=24.2",
     "peft>=0.13.2",
+    "ray[default]>=2.44.1",
     "setuptools>=75.6.0",
     "tensorboard>=2.18.0",
     "torch>=2.6.0",
@@ -74,3 +75,6 @@ dev = [
     "markdown-include>=0.8.1",
     "pytest>=8.3.4",
 ]
+
+[tool.isort]
+known_first_party = ["open_instruct"]
