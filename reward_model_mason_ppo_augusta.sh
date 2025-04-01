@@ -3,13 +3,13 @@
 # `--vllm_tensor_parallel_size 2`
 # translates to 6 + 2 + 8 = 16 GPUs
 # which matches up with `--num_nodes 2 --gpus 8`
-revision=reward_modeling__1__1739943850
+revision=reward_modeling__1__1741287363
 for beta in 0.05; do
-exp_name="0319_ppo_sftbase_${beta}_${revision}"
+exp_name="0326_ppo_sftbase_${beta}_${revision}"
 python mason.py \
     --cluster ai2/augusta-google-1 \
     --workspace ai2/reward-bench-v2 \
-    --priority high \
+    --priority normal \
     --preemptible \
     --image saumyam/open-instruct-0318-nonrlvr --pure_docker_mode \
     --budget ai2/oe-adapt \
@@ -20,9 +20,9 @@ python mason.py \
     --output_dir /output \
     --try_launch_beaker_eval_jobs_on_weka \
     --try_launch_beaker_eval_jobs False \
-    --dataset_mixer_list saumyamalik/tulu-3-8b-preference-mixture-with-messages 1.0 \
+    --dataset_mixer_list saumyamalik/Skywork-Reward-Preference-80K-v0.2-with-messages 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list saumyamalik/tulu-3-8b-preference-mixture-with-messages 16 \
+    --dataset_mixer_eval_list saumyamalik/Skywork-Reward-Preference-80K-v0.2-with-messages 16 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
