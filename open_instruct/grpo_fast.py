@@ -1091,6 +1091,7 @@ def data_preparation_thread(
         # Get next batch of prompts and responses
         items = queries_prompt_Q.get()
         queries, ground_truths, datasets = items
+        print(queries)
         context_length = queries.shape[1]
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
