@@ -194,4 +194,3 @@ yarl==1.18.3
 zipp==3.21.0
 langdetect==1.0.9
 immutabledict==1.2.0
-mpi4py==3.1.1
