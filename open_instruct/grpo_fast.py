@@ -1605,7 +1605,7 @@ if __name__ == "__main__":
             revision=args.reward_model_revision,
             num_labels=1,
             torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
+            #attn_implementation="flash_attention_2",
             use_cache=False,
         )
         reward_model_vocab_size = reward_model.config.vocab_size
