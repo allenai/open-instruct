@@ -1093,7 +1093,7 @@ def data_preparation_thread(
         queries, ground_truths, datasets = items
         print(queries)
         print("DEBUGGGING")
-        context_length = queries.shape[1]
+        #context_length = queries.shape[1]
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
         if args.num_samples_per_prompt_rollout > 1:
