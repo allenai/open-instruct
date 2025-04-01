@@ -1092,6 +1092,7 @@ def data_preparation_thread(
         items = queries_prompt_Q.get()
         queries, ground_truths, datasets = items
         print(queries)
+        print("DEBUGGGING")
         context_length = queries.shape[1]
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
