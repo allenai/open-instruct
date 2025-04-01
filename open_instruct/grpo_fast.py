@@ -1644,8 +1644,6 @@ if __name__ == "__main__":
                 for i in range(len(format_scores)):
                     scores[i] = format_scores[i] + scores[i]
                 metrics["val/format_scores"] = np.array(format_scores).mean()
-        print("debugging")
-        print(datasets)
         # @valpy: RM reward
         # if args.reward_model_multiplier:
         #     rm_tokenizer = reward_model.tokenizer
@@ -1664,6 +1662,8 @@ if __name__ == "__main__":
                     datasets,
                     reward_mult=args.verification_reward,
                 )
+                print("debugging")
+                print(datasets)
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
                 for i in range(len(verifiable_rewards)):
