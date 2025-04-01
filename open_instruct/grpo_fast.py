@@ -1595,7 +1595,7 @@ if __name__ == "__main__":
     args, model_config = parser.parse_args_into_dataclasses()
     assert isinstance(args, Args)
     assert isinstance(model_config, ModelConfig)
-
+    from transformers import AutoTokenizer
     # reward model
     if args.reward_model_multiplier:
         reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
