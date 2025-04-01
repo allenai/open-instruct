@@ -275,7 +275,7 @@ class Args:
     # reward modeling
     reward_model_multiplier: float = 1.0
     """the reward model multiplier, for down/upscaling the reward model output"""
-    reward_model_path: str = "OpenAssistant/reward-model-deberta-v3-large"
+    reward_model_path: str = "EleutherAI/pythia-160m"
     """the path to the reward model"""
     reward_model_revision: Optional[str] = None
     """the revision of the reward model"""
