@@ -1607,6 +1607,8 @@ if __name__ == "__main__":
             #use_cache=False,
         )
         rm_tokenizer = AutoTokenizer.from_pretrained(args.reward_model_path)
+        pad_token_id = rm_tokenizer.pad_token_id
+        print("pad_token_id22", pad_token_id)
         reward_model_vocab_size = reward_model.config.vocab_size
         # if policy_vocab_size != reward_model_vocab_size:
         #     raise ValueError(

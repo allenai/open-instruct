@@ -176,11 +176,7 @@ def get_reward(
 
     # Create an attention mask where tokens that are not padding have a value of 1, and padding tokens have a value of 0
     # Shape: (batch_size, sequence_length)
-    print(query_responses)
-    print(pad_token_id)
-    print("debuggggg")
     attention_mask = query_responses != pad_token_id
-    print(attention_mask)
     # Calculate position IDs for each token, considering the cumulative sum of the attention mask (to exclude padding)
     # Shape: (batch_size, sequence_length)
     position_ids = attention_mask.cumsum(1) - attention_mask.long()
