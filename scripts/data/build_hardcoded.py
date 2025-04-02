@@ -14,7 +14,8 @@ python scripts/data/build_hardcoded.py \
     --base_model "Llama 3.1" \
     --posttrain_recipe "Tülu 3" \
     --context_length 4096 \
-    --license "Llama 3.1 Community License Agreement"
+    --license "Llama 3.1 Community License Agreement" \
+    --weights_link "https://huggingface.co/allenai"
 
 For OLMo 2, run:
 
@@ -25,7 +26,8 @@ python scripts/data/build_hardcoded.py \
     --posttrain_recipe "Tülu 3" \
     --context_length 4096 \
     --date_cutoff "November 2024" \
-    --license "Apache 2.0" 
+    --license "Apache 2.0" \
+    --weights_link "https://huggingface.co/allenai"
 """
 
 # --- Configuration ---
@@ -40,6 +42,7 @@ DEFAULT_PLACEHOLDERS = {
     "<|BASE_MODEL|>": "OLMo 2",
     "<|DATE_CUTOFF|>": "November 2024", 
     "<|LICENSE|>": "Apache 2.0",
+    "<|WEIGHTS_LINK|>": "",  # New placeholder for model weights link
 }
 
 # Map argparse argument names to placeholder keys
@@ -50,10 +53,11 @@ ARG_TO_PLACEHOLDER_MAP = {
     'base_model': '<|BASE_MODEL|>',
     'date_cutoff': '<|DATE_CUTOFF|>',
     'license': '<|LICENSE|>',
+    'weights_link': '<|WEIGHTS_LINK|>',  # New mapping for weights link
 }
 
 # Valid filter tags
-VALID_FILTER_TAGS = ["olmo", "tulu", "date-cutoff", "no-tools", "english-only", "license"]
+VALID_FILTER_TAGS = ["olmo", "tulu", "date-cutoff", "no-tools", "english-only", "license", "availability"]
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -103,11 +107,18 @@ def parse_arguments():
         default=None,
         help=f"Value to override default for <|LICENSE|> ('{DEFAULT_PLACEHOLDERS['<|LICENSE|>']}')."
     )
+    parser.add_argument(
+        "--weights_link",
+        type=str,
+        default=None,
+        help=f"Value to override default for <|WEIGHTS_LINK|> ('{DEFAULT_PLACEHOLDERS['<|WEIGHTS_LINK|>']}')."
+    )
     # --- Other Arguments ---
     parser.add_argument(
         "--system_prompt_template",
         type=str,
-        default="You are <|MODEL_NAME|>, a helpful assistant built by Ai2. Your date cutoff is <|DATE_CUTOFF|> and you do not have access to external tools such as search and running code, but you're very happy to help users find their way with it.", # No default system prompt
+        default="You are <|MODEL_NAME|>, a helpful assistant built by Ai2. Your date cutoff is <|DATE_CUTOFF|> and you do not have access to external tools such as search and running code, but you're very happy to help users find their way with it." + 
+                ("<|WEIGHTS_LINK|>" and " The model weights are available at <|WEIGHTS_LINK|>." or ""),
         help="Optional text for the system prompt. Can contain placeholders like <|MODEL_NAME|>."
     )
     parser.add_argument(
