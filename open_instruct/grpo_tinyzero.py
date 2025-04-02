@@ -146,7 +146,7 @@ class Args:
     """Weight decay for AdamW if we apply some."""
     set_weight_decay_on_bias_and_norm: bool = True
     """Whether to set weight decay on bias and norm layers"""
-    fused_optimizer: bool = False
+    fused_optimizer: bool = True
     """Whether to use fused optimizer"""
 
     # Batch sizes
@@ -222,6 +222,8 @@ class Args:
     """Potentially save memory by sleeping LLM between calls"""
     offload_ref: bool = False
     """Offload to cpu ref during generation"""
+    no_ref: bool = False
+    """Offload to cpu ref during generation"""
     num_learners_per_node: List[int] = field(default_factory=lambda: [1])
     """number of GPU deepspeed learners per node (e.g., --num_learners_per_node 2 4 means 2 learner processes
     on the first node and 4 learner processes on the second node; each process will have 1 GPU)"""
@@ -239,6 +241,8 @@ class Args:
     """whether to enable prefix caching"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
+    deepspeed_adam_offload: bool = False
+    """the deepspeed optimizer offload"""
     gather_whole_model: bool = True
     """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
 
@@ -285,10 +289,12 @@ class Args:
     """the priority of auto-launched evaluation jobs"""
 
     def __post_init__(self):
-        if self.single_gpu_mode and self.vllm_gpu_memory_utilization > 0.3:
-            logger.warning(
-                f"You're setting vllm gpu mem utilization quite high ({self.vllm_gpu_memory_utilization}) for single gpu mode"
-            )
+        if self.single_gpu_mode:
+            if self.vllm_gpu_memory_utilization > 0.3:
+                logger.warning(
+                    f"You're setting vllm gpu mem utilization quite high ({self.vllm_gpu_memory_utilization}) for single gpu mode"
+                )
+            assert self.vllm_sync_backend == "gloo", "Single GPU requires vllm_sync_backend=gloo"
         if self.sleep_mode:
             assert self.single_gpu_mode, "sleep mode only necessary for single GPU"
         assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
@@ -306,8 +312,8 @@ def catch_ray_errors():
     A simple context manager to catch GPU OOM errors in Ray tasks
     and bubble them up to the terminal output.
     """
-    error_occured = False  # noqa
     try:
+        error_occured = False  # noqa
         yield
     except RayTaskError as e:
         error_occurred = True
@@ -315,15 +321,17 @@ def catch_ray_errors():
         print(f"Ray task failed with error: {e}")
         if e.__cause__:
             print(f"Original error: {e.__cause__}")
+        raise
     except Exception as e:
         error_occurred = True
         print(f"Unexpected error: {e}")
         print(traceback.format_exc())
-    finally:
-        # Only shutdown Ray if an error was caught
-        if error_occurred and ray.is_initialized():
-            print("Error detected - shutting down Ray")
-            ray.shutdown()
+        raise
+    # finally:
+    #     # Only shutdown Ray if an error was caught
+    #     if error_occurred and ray.is_initialized():
+    #         print("Error detected - shutting down Ray")
+    #         ray.shutdown()
 
 
 def preprocess_example(
@@ -647,7 +655,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     writer.add_scalar(key, value, episode)
             except Empty:
                 logger.info("[Main Thread] 🙈 Evaluation responses not received")
-
             # ------------------------------------------------------------------------------------------------
             # Sync weights and send the next batch of prompts to vLLM
             if args.async_mode:
@@ -753,8 +760,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 )
 
     except Exception as e:
-        logger.info(f"Training error occurred: {str(e)}")
-        logger.info(traceback.format_exc())
+        logger.error(f"Training error occurred: {str(e)}")
+        logger.error(traceback.format_exc())
         ray.shutdown()
         os._exit(1)
         raise  # Re-raise the exception after shutdown

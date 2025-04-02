@@ -570,7 +570,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         ds_config = get_train_ds_config(
             offload=False,
-            adam_offload=False,
+            adam_offload=args.deepspeed_adam_offload,
             stage=args.deepspeed_stage,
             bf16=True,
         )
@@ -647,25 +647,26 @@ class PolicyTrainerRayProcess(RayProcess):
             HfDeepSpeedConfig(ds_config)
         else:
             pass
-        if args.liger_kernel:
-            self.ref_policy: PreTrainedModel = AutoLigerKernelForCausalLM.from_pretrained(
-                model_config.model_name_or_path,
-                revision=model_config.model_revision,
-                torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2",
-                use_cache=False,
-            )
-        else:
-            self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-                model_config.model_name_or_path,
-                revision=model_config.model_revision,
-                torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2",
-                use_cache=False,
-            )
-        disable_dropout_in_model(self.ref_policy)
-        self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
-        self.ref_policy.eval()
+        if args.beta > 0:
+            if args.liger_kernel:
+                self.ref_policy: PreTrainedModel = AutoLigerKernelForCausalLM.from_pretrained(
+                    model_config.model_name_or_path,
+                    revision=model_config.model_revision,
+                    torch_dtype=torch.bfloat16,
+                    attn_implementation="flash_attention_2",
+                    use_cache=False,
+                )
+            else:
+                self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+                    model_config.model_name_or_path,
+                    revision=model_config.model_revision,
+                    torch_dtype=torch.bfloat16,
+                    attn_implementation="flash_attention_2",
+                    use_cache=False,
+                )
+            disable_dropout_in_model(self.ref_policy)
+            self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
+            self.ref_policy.eval()
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
 
     def forward(
@@ -785,32 +786,36 @@ class PolicyTrainerRayProcess(RayProcess):
         to_device_inplace(collated_response_masks, self.device)
         accumulation_steps = len(collated_query_responses) // (num_mini_batches)
 
-        if self.args.offload_ref:
-            with Timer("[Training Processes] Move Ref to GPU", noop=self.rank != 0):
-                self.ref_policy.to(self.device)
-        # Calculate the logprob of the reference policy
-        collated_ref_logprobs = []
-        with Timer("Inference Calculation", noop=self.rank != 0):
-            with torch.no_grad():
-                for i in range(len(collated_query_responses)):
-                    query_response = collated_query_responses[i]
-                    attention_mask = collated_attention_masks[i]
-                    position_id = collated_position_ids[i]
-                    response_mask = collated_response_masks[i]
-                    ref_logprob = self.forward(
-                        self.ref_policy,
-                        query_response,
-                        attention_mask,
-                        position_id,
-                        pad_token_id,
-                        args.temperature,
-                    )
-                    ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:].bool(), INVALID_LOGPROB)
-                    collated_ref_logprobs.append(ref_logprob)
-                    torch.cuda.empty_cache()
-        if self.args.offload_ref:
-            with Timer("[Training Processes] Move Ref to CPU", noop=self.rank != 0):
-                self.ref_policy.to("cpu")
+        if self.args.beta > 0 and args.no_ref:
+            if self.args.offload_ref:
+                with Timer("[Training Processes] Move Ref to GPU", noop=self.rank != 0):
+                    self.ref_policy.to(self.device)
+            # Calculate the logprob of the reference policy
+            collated_ref_logprobs = []
+            with Timer("Inference Calculation", noop=self.rank != 0):
+                with torch.no_grad():
+                    for i in range(len(collated_query_responses)):
+                        query_response = collated_query_responses[i]
+                        attention_mask = collated_attention_masks[i]
+                        position_id = collated_position_ids[i]
+                        response_mask = collated_response_masks[i]
+                        ref_logprob = self.forward(
+                            self.ref_policy,
+                            query_response,
+                            attention_mask,
+                            position_id,
+                            pad_token_id,
+                            args.temperature,
+                        )
+                        ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:].bool(), INVALID_LOGPROB)
+                        collated_ref_logprobs.append(ref_logprob)
+                        torch.cuda.empty_cache()
+            if self.args.offload_ref:
+                with Timer("[Training Processes] Move Ref to CPU", noop=self.rank != 0):
+                    self.ref_policy.to("cpu")
+        else:
+            collated_ref_logprobs = [torch.zeros(1).to(self.device) for _ in range(len(collated_query_responses))]
+
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
