@@ -1646,8 +1646,10 @@ if __name__ == "__main__":
                 metrics["val/format_scores"] = np.array(format_scores).mean()
         # @valpy: RM reward
         if args.reward_model_multiplier:
+            pad_token_id = rm_tokenizer.pad_token_id
+            print("pad_token_id", pad_token_id)
             _, score, _ = get_reward(
-                reward_model, responses, rm_tokenizer.pad_token_id, context_length
+                reward_model, responses, pad_token_id, context_length
             )
             score *= args.reward_model_multiplier
             print("score!!!!!!!", score)
