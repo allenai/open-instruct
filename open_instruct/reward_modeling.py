@@ -451,13 +451,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             args.hf_repo_id,
             args.hf_repo_revision,
         )
+    
 
-    bash_command = f"""
-        python scripts/submit_ties_jobs.py --model={args.hf_repo_id} --revision={args.hf_repo_revision} --dataset=allenai/reward-bench-v2-v0 --batch_size 16 --priority high
-        python scripts/submit_rbv1_eval_jobs.py --model={args.hf_repo_id} --revision={args.hf_repo_revision} --priority normal --image saumyam/rewardbench-0321 --upload_to_hub
-    """
+    if accelerator.is_main_process:
+        bash_command = f"""
+            python scripts/submit_ties_jobs.py --model={args.hf_repo_id} --revision={args.hf_repo_revision} --dataset=allenai/reward-bench-v2-v0 --batch_size 16 --priority high
+            python scripts/submit_rbv1_eval_jobs.py --model={args.hf_repo_id} --revision={args.hf_repo_revision} --priority normal --image saumyam/rewardbench-0321
+        """
 
-    subprocess.run(bash_command, shell=True, executable="/bin/bash")
+        subprocess.run(bash_command, shell=True, executable="/bin/bash")
 
 
 if __name__ == "__main__":
