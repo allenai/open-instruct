@@ -249,16 +249,30 @@ async def _verify_ace_coder_sample_async(model_output: str, tests: List[str], ap
         "max_execution_time": max_execution_time
     }
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(api_url, json=payload) as response:
-                result = await response.json()
-                passes = result["results"]
-                pass_rate = sum(passes) / len(passes) if passes else 0.0
-                return pass_rate
-    except Exception as e:
-        logger.warning(f"Error verifying code sample: {e}")
-        return 0.0
+    # lambda is throttled, so retry up to 3 times
+    max_retries = 3
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(api_url, json=payload) as response:
+                    if response.status == 429:  # Too Many Requests
+                        retry_count += 1
+                        await asyncio.sleep(1)  # Simple backoff
+                        continue
+                    
+                    result = await response.json()
+                    passes = result["results"]
+                    pass_rate = sum(passes) / len(passes) if passes else 0.0
+                    return pass_rate
+        except Exception as e:
+            logger.warning(f"Error verifying code sample: {e}")
+            return 0.0
+    
+    # If we get here, we've hit max retries
+    logger.warning("Max retries exceeded for request")
+    return 0.0
 
 async def _verify_ace_coder_samples_async(model_outputs: List[str], tests_list: List[List[str]], api_url: str, max_execution_time: float = 1.0) -> List[float]:
     """Async function to verify multiple code samples against their respective test cases."""

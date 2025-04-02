@@ -44,7 +44,7 @@ resource "aws_lambda_function" "test_program" {
   role            = "arn:aws:iam::153242493257:role/lambda_basic_execution"
   handler         = "lambda_function.lambda_handler"
   runtime         = "python3.9"
-  timeout         = 30
+  timeout         = 15
   memory_size     = 256
   
   # Use S3 instead of direct upload
@@ -86,12 +86,21 @@ resource "aws_apigatewayv2_route" "lambda_route" {
   api_id    = aws_apigatewayv2_api.lambda_api.id
   route_key = "POST /test_program"
   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
+  
+  # Add this to prevent caching
+  api_key_required = false
+  authorization_type = "NONE"
 }
 
 # Create API Gateway stage
 resource "aws_apigatewayv2_stage" "lambda_stage" {
   api_id = aws_apigatewayv2_api.lambda_api.id
   name   = "prod"
+
+  default_route_settings {
+    throttling_burst_limit = 200
+    throttling_rate_limit  = 0
+  }
 }
 
 # Create Lambda permission for API Gateway
@@ -105,5 +114,5 @@ resource "aws_lambda_permission" "api_gw" {
 
 # Output the API endpoint URL
 output "api_endpoint" {
-  value = "${aws_apigatewayv2_api.lambda_api.api_endpoint}/test_program"
+  value = "${aws_apigatewayv2_api.lambda_api.api_endpoint}/prod/test_program"
 } 

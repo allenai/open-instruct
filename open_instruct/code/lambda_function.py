@@ -3,7 +3,7 @@ from typing import List
 import traceback
 
 
-def get_successful_tests_fast(program: str, tests: List[str], max_execution_time: float = 1.0) -> List[int]:
+def get_successful_tests(program: str, tests: List[str], max_execution_time: float = 1.0) -> List[int]:
     """Run a program against a list of tests, if the program exited successfully then we consider
     the test to be passed. Note that you SHOULD ONLY RUN THIS FUNCTION IN A VIRTUAL ENVIRONMENT
     as we do not guarantee the safety of the program provided.
@@ -24,13 +24,16 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
     results = []
     execution_context = {"__builtins__": __builtins__}
     
+    print(f"Testing program: {program}")
     try:
         exec(program, execution_context)
     except Exception:
         return [0] * len(tests)
     
+    print(f"Testing tests: {tests}")
     for test in tests:
         try:
+            print(f"Testing test: {test}")
             # Create a fresh copy of the execution context with the program
             test_context = execution_context.copy()
             exec(test, test_context)
@@ -45,6 +48,7 @@ def lambda_handler(event, context):
     AWS Lambda handler for the test_program endpoint
     """
     try:
+        request_id = context.aws_request_id
         # Parse the request body
         body = json.loads(event['body'])
         program = body.get('program', '')
@@ -52,11 +56,13 @@ def lambda_handler(event, context):
         max_execution_time = body.get('max_execution_time', 1.0)
 
         # Execute tests
-        results = get_successful_tests_fast(
+        results = get_successful_tests(
             program=program,
             tests=tests,
             max_execution_time=max_execution_time
         )
+
+        print(f"Completed test run for request {request_id}")
 
         return {
             'statusCode': 200,

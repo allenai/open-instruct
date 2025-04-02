@@ -54,8 +54,8 @@ if __name__ == "__main__":
     import requests
 
     # API endpoint
-    url = "http://phobos-cs-aus-453.reviz.ai2.in:1234/test_program"
-
+    #url = "http://phobos-cs-aus-453.reviz.ai2.in:1234/test_program"
+    url = "https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod/test_program"
     # Test data
     payload = {
         "program": """

@@ -1,5 +1,6 @@
-exp_name="tulu3_8b_grpo_fast_code_${RANDOM}"
-CODE_API_URL=https://p9f1719l7f.execute-api.us-west-2.amazonaws.com
+exp_name="tulu3_8b_grpo_fast_code_lambda_${RANDOM}"
+CODE_API_URL=https://p9f1719l7f.execute-api.us-west-2.amazonaws.com/prod
+#CODE_API_URL=http://phobos-cs-aus-453.reviz.ai2.in:1234
 python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-3-dev \
@@ -40,7 +41,7 @@ python mason.py \
     --vllm_tensor_parallel_size 1 \
     --vllm_num_engines 10 \
     --lr_scheduler_type constant \
-    --seed 88 \
+    --seed 66 \
     --num_evals 100 \
     --save_freq 40 \
     --gradient_checkpointing \

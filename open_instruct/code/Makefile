@@ -29,7 +29,7 @@ plan-lambda:
 	@cd $(TERRAFORM_DIR) && terraform plan
 
 # Deploy the Lambda function
-deploy-lambda: build-lambda init-terraform
+deploy-lambda: clean-lambda build-lambda init-terraform
 	@echo "Deploying Lambda function..."
 	@cd $(TERRAFORM_DIR) && terraform apply -auto-approve
 	@echo "Deployment complete! API endpoint:"
