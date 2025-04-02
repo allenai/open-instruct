@@ -1,4 +1,4 @@
-python open_instruct/grpo_fast.py \
+python open_instruct/grpo_fast_wip.py \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 64 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 16 \
@@ -10,10 +10,11 @@ python open_instruct/grpo_fast.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 16 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path HuggingFaceTB/SmolLM2-135M \
+    --model_name_or_path Qwen/Qwen2.5-0.5B-Instruct \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
+    --apply_llm_verifier_reward true \
     --temperature 0.7 \
     --ground_truths_key ground_truth \
     --chat_template_name r1_simple_chat_postpend_think \
@@ -33,3 +34,6 @@ python open_instruct/grpo_fast.py \
     --gradient_checkpointing \
     --single_gpu_mode \
     # --with_tracking
+
+    # --chat_template_name r1_simple_chat_postpend_think \ Qwen/Qwen2.5-0.5B
+    #     --model_name_or_path HuggingFaceTB/SmolLM2-135M \

@@ -40,6 +40,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from open_instruct.ground_truth_utils import REWARD_FN_MAPPING
+from open_instruct.ground_truth_utils_wip import LMJudgeVerifier
 from open_instruct.utils import retry_on_exception
 
 logger = logging.getLogger(__name__)
@@ -233,6 +234,7 @@ def apply_verifiable_reward(
         # for now, we just assume rewards are additive, rather than more complex functions.
         reward = 0
         per_func_reward = {}
+        # breakpoint()
         for gt, ds in zip(ground_truth_list, dataset_list):
             reward_func = REWARD_FN_MAPPING.get(ds.lower())
             if reward_func is None:
@@ -251,6 +253,59 @@ def apply_verifiable_reward(
             per_func_reward[ds] = per_func_reward.get(ds, 0) + (reward_mult * reward_result * reward_weight)
         rewards.append(reward)
         per_func_rewards.append(per_func_reward)
+    # breakpoint()
+    return rewards, per_func_rewards
+
+# TODO (Faeze): merge this with apply_verifiable_reward and use dataset name to select the function
+def apply_llm_verifier_reward(
+    responses: List[torch.Tensor],
+    decoded_responses: List[str],
+    ground_truths: List[str],
+    datasets: List[Union[str, List[str]]],
+    queries: List[str],
+    reward_mult: int = 10,
+    judge_type: str = "quality",
+):
+    rewards = []
+    per_func_rewards = []
+    for tok_prediction, prediction, ground_truth, dataset, query in zip(
+        responses, decoded_responses, ground_truths, datasets, queries
+    ):
+        # allow multiple ground truths and datasets for a single response
+        if isinstance(ground_truth, str):
+            ground_truth_list = [ground_truth]
+        else:
+            ground_truth_list = ground_truth
+        if isinstance(dataset, str):
+            dataset_list = [dataset]
+        else:
+            dataset_list = dataset
+        assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
+        # for now, we just assume rewards are additive, rather than more complex functions.
+        reward = 0
+        per_func_reward = {}
+        breakpoint()
+        for gt, ds in zip(ground_truth_list, dataset_list):
+            reward_func = LMJudgeVerifier(judge_type=judge_type) #TODO: later add "general" and "judge_type" inputs # REWARD_FN_MAPPING.get(ds.lower())
+            if reward_func is None:
+                logger.warning("No judge verifier found for dataset %s. Skipping reward.", ds)
+                continue
+            reward_weight = reward_func.weight
+            # cuse llm as judge
+            # sometimes we need the tokenized pred.
+            reward_result = reward_func(
+                tokenized_prediction=tok_prediction,
+                prediction=prediction,
+                label=gt,
+                query=query,
+            )
+            logger.info("Applying rubric-based or llm grader reward 🤗")
+            reward_mult = 1 if "rubric" in judge_type else reward_mult
+            reward += reward_mult * reward_result * reward_weight
+            per_func_reward[ds] = per_func_reward.get(ds, 0) + (reward_mult * reward_result * reward_weight)
+        rewards.append(reward)
+        per_func_rewards.append(per_func_reward)
+    breakpoint()
     return rewards, per_func_rewards
 
 

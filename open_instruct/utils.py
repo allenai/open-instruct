@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import time
+import re
 from dataclasses import dataclass
 from typing import Any, List, NewType, Optional, Tuple, Union
 
@@ -1036,3 +1037,12 @@ def upload_metadata_to_hf(
         repo_type="dataset",
     )
     os.remove("tmp.json")
+
+
+def extract_user_query(conversation: str) -> str:
+    # Define the regex pattern
+    pattern = r"<answer>.*?</answer>\.\n\nUser: (.*?)\nAssistant: <think>"
+    # Search for the pattern in the input string
+    match = re.search(pattern, conversation, re.DOTALL)
+    # Return the captured group if found, else return None
+    return match.group(1).strip() if match else None
