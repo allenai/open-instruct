@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --gres=gpu:a100l:1
+#SBATCH --gres=gpu:a100l:2
 #SBATCH --mem=32G
-#SBATCH -c 4
-#SBATCH --time=8:00:00
+#SBATCH -c 8
+#SBATCH --time=4:00:00
 #SBATCH -p main
 
 source mila.sh
