@@ -13,7 +13,8 @@ python scripts/data/build_hardcoded.py \
     --model_name "Tülu 3" \
     --base_model "Llama 3.1" \
     --posttrain_recipe "Tülu 3" \
-    --context_length 4096 
+    --context_length 4096 \ 
+    --license "Llama 3.1 Community License Agreement" \
 
 For OLMo 2, run:
 
@@ -23,7 +24,8 @@ python scripts/data/build_hardcoded.py \
     --base_model "OLMo 2" \
     --posttrain_recipe "Tülu 3" \
     --context_length 4096 \
-    --date_cutoff "November 2024"
+    --date_cutoff "November 2024" \
+    --license "Apache 2.0" \
 """
 
 # --- Configuration ---
@@ -49,7 +51,7 @@ ARG_TO_PLACEHOLDER_MAP = {
 }
 
 # Valid filter tags
-VALID_FILTER_TAGS = ["olmo", "tulu", "date-cutoff", "no-tools", "english-only"]
+VALID_FILTER_TAGS = ["olmo", "tulu", "date-cutoff", "no-tools", "english-only", "license"]
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -92,6 +94,12 @@ def parse_arguments():
         type=str,
         default=None,
         help=f"Value to override default for <|DATE_CUTOFF|> ('{DEFAULT_PLACEHOLDERS['<|DATE_CUTOFF|>']}')."
+    )
+    parser.add_argument(
+        "--license",
+        type=str,
+        default=None,
+        help=f"Value to override default for <|LICENSE|> ('{DEFAULT_PLACEHOLDERS['<|LICENSE|>']}')."
     )
     # --- Other Arguments ---
     parser.add_argument(
