@@ -13,8 +13,8 @@ python scripts/data/build_hardcoded.py \
     --model_name "Tülu 3" \
     --base_model "Llama 3.1" \
     --posttrain_recipe "Tülu 3" \
-    --context_length 4096 \ 
-    --license "Llama 3.1 Community License Agreement" \
+    --context_length 4096 \
+    --license "Llama 3.1 Community License Agreement"
 
 For OLMo 2, run:
 
@@ -25,7 +25,7 @@ python scripts/data/build_hardcoded.py \
     --posttrain_recipe "Tülu 3" \
     --context_length 4096 \
     --date_cutoff "November 2024" \
-    --license "Apache 2.0" \
+    --license "Apache 2.0" 
 """
 
 # --- Configuration ---
@@ -39,6 +39,7 @@ DEFAULT_PLACEHOLDERS = {
     "<|CONTEXT_LENGTH|>": 4096, 
     "<|BASE_MODEL|>": "OLMo 2",
     "<|DATE_CUTOFF|>": "November 2024", 
+    "<|LICENSE|>": "Apache 2.0",
 }
 
 # Map argparse argument names to placeholder keys
@@ -48,6 +49,7 @@ ARG_TO_PLACEHOLDER_MAP = {
     'context_length': '<|CONTEXT_LENGTH|>',
     'base_model': '<|BASE_MODEL|>',
     'date_cutoff': '<|DATE_CUTOFF|>',
+    'license': '<|LICENSE|>',
 }
 
 # Valid filter tags
