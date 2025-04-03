@@ -14,7 +14,7 @@ for sample in ds:
         continue
     messages = [
         {"role": "user", "content": question},
-        {"role": "assistant", "content": f"{model_reasoning}</think><answer>{model_answer}</answer>"},
+        {"role": "assistant", "content": f"<think>{model_reasoning}</think><answer>{model_answer}</answer>"},
     ]
     new_data.append({
         "messages": messages,
