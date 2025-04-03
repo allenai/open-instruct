@@ -1,20 +1,20 @@
 python mason.py \
     --cluster ai2/augusta-google-1 \
-    --image costah/open_instruct_dev_uv18 --pure_docker_mode \
+    --image costah/open_instruct_dev_uv24 --pure_docker_mode \
     --workspace ai2/tulu-3-dev \
     --priority high \
     --preemptible \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup_code.sh \&\& python open_instruct/grpo_fast.py \
-    --exp_name tulu3.1_8b_grpo_fast_code \
+    --exp_name the_algorithm_python_tulu3.1_8b_grpo_fast_code \
     --beta 0.01 \
     --num_unique_prompts_rollout 48 \
     --num_samples_per_prompt_rollout 16 \
     --try_launch_beaker_eval_jobs_on_weka \
     --kl_estimator kl3 \
     --learning_rate 5e-7 \
-    --dataset_mixer_list vwxyzjn/rlvr_acecoder 64 \
+    --dataset_mixer_list vwxyzjn/rlvr_acecoder 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list vwxyzjn/rlvr_acecoder 16 \
     --dataset_mixer_eval_list_splits train \
@@ -27,6 +27,7 @@ python mason.py \
     --apply_ace_coder_reward true \
     --ace_coder_api_url \$CODE_API_URL/test_program \
     --non_stop_penalty True \
+    --oe_eval_tasks gsm8k::tulu,bbh:cot-v1::tulu,codex_humaneval::tulu,codex_humanevalplus::tulu,mbppplus::openinstruct \
     --non_stop_penalty_value 0.0 \
     --temperature 1.0 \
     --chat_template_name tulu \
