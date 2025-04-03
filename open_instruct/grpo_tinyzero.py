@@ -359,7 +359,7 @@ def preprocess_example(
         prompt = tokenizer.decode(input_ids, skip_special_tokens=False, clean_up_tokenization_spaces=False)
     else:
         prompt = prompt_template.format(numbers=numbers, target=target)
-        input_ids = tokenizer(prompt, add_special_tokens=False)
+        input_ids = tokenizer.encode(prompt, add_special_tokens=False)
         messages = None
 
     return {
