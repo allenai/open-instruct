@@ -4,14 +4,16 @@ Used to give feedback to the model based on the ground truth answer.
 Add new verifiers by subclassing VerifierFunction and implementing the __call__ method.
 They are then automatically added to the REWARD_FN_MAPPING.
 """
-
+import ast
+import sys
 import json
 import logging
 import re
 import string
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Union
-
+from IFEvalG import instructions_registry
+from IFEvalG import instructions
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.math_utils import (
     get_unnormalized_answer,
@@ -141,7 +143,7 @@ class StrictMathVerifier(VerifierFunction):
         return 0.0
 
 
-class IFEvalVerifierOLD(VerifierFunction):
+class IFEvalVerifierold(VerifierFunction):
     """
     Verifier for ifeval tasks that delegates evaluation to a function
     specified in the constraint.
@@ -168,6 +170,42 @@ class IFEvalVerifierOLD(VerifierFunction):
             return func(prediction)
         return float(func(answer, **non_none_args))
 
+class IFEvalVerifierSingle(VerifierFunction):
+    """
+    Verifier for ifeval tasks that delegates evaluation to a function
+    specified in the constraint.
+
+    The constraint may be a JSON string or a dictionary containing a key
+    'func_name' used to lookup the evaluation function.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("ifeval", weight=1.0)
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict]) -> bool:
+        instruction_dict = instructions_registry.INSTRUCTION_DICT
+        constraint_dict = ast.literal_eval(label)
+        constraint_dict = constraint_dict[0]
+        #constraint_dict = label
+        if isinstance(constraint_dict, str):
+            constraint_dict = json.loads(constraint_dict)
+        answer = prediction.split("<|assistant|>\n")[-1].strip()
+        instruction_key = constraint_dict["instruction_id"][0]
+        args = constraint_dict["kwargs"][0]
+        if args is None:
+            args = {}
+        args = {k: v for k, v in args.items() if v is not None}
+        instruction_cls = instruction_dict[instruction_key]
+        instruction_instance = instruction_cls(instruction_key)
+        instruction_instance.build_description(**args)
+        #args = instruction_instance.get_instruction_args()
+        #if args and "prompt" in args:
+        #    instruction.build_description(prompt=prompt)
+        if prediction.strip() and instruction_instance.check_following(answer):
+            return 1.0
+        return 0.0
+
+
 class IFEvalVerifier(VerifierFunction):
     """
     Verifier for ifeval tasks that delegates evaluation to a function
@@ -184,6 +222,7 @@ class IFEvalVerifier(VerifierFunction):
         instruction_dict = instructions_registry.INSTRUCTION_DICT
         constraint_dict = ast.literal_eval(label)
         constraint_dict = constraint_dict[0]
+        #constraint_dict = label
         if isinstance(constraint_dict, str):
             constraint_dict = json.loads(constraint_dict)
         answer = prediction.split("<|assistant|>\n")[-1].strip()
@@ -202,8 +241,6 @@ class IFEvalVerifier(VerifierFunction):
             else:
                 rewards.append(0.0)
         return sum(rewards) / len(rewards)
-
-
 
 def normalize_answer(s: str) -> str:
     """
