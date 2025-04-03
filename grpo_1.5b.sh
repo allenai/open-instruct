@@ -6,7 +6,7 @@
 #SBATCH -p main
 
 source mila.sh
-exp_name="grpo_qwen1.5b"
+exp_name="grpo_qwen1.5b_base"
 
 uv run open_instruct/grpo_tinyzero.py \
     --exp_name $exp_name \
@@ -22,8 +22,8 @@ uv run open_instruct/grpo_tinyzero.py \
     --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 4 \
     --total_episodes 64000 \
-    --model_name_or_path Qwen/Qwen2.5-1.5B-Instruct \
-    --stop_strings "<|im_end|>" "<|endoftext|>" \
+    --model_name_or_path Qwen/Qwen2.5-1.5B \
+    --base_prompt \
     --apply_r1_style_format_reward \
     --r1_style_format_reward 0.1 \
     --apply_verifiable_reward \
@@ -38,14 +38,14 @@ uv run open_instruct/grpo_tinyzero.py \
     --seed 3 \
     --num_evals 5 \
     --save_freq 100 \
-    --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.5 \
+    --vllm_gpu_memory_utilization 0.35 \
     --single_gpu_mode \
     --deepspeed_stage 2 \
     --async_mode False \
-    --liger_kernel \
+    --vllm_sync_backend gloo \
     --with_tracking $@
 
+    # --liger_kernel \
     # --vllm_enforce_eager \
     # --gradient_checkpointing \
     # --dataset_mixer_list_splits train \

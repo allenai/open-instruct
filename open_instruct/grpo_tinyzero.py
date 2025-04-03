@@ -288,6 +288,8 @@ class Args:
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
 
+    base_prompt: bool = False
+
     def __post_init__(self):
         if self.single_gpu_mode:
             if self.vllm_gpu_memory_utilization > 0.3:
@@ -337,22 +339,29 @@ def catch_ray_errors():
 def preprocess_example(
     example: Dict[str, Any],
     tokenizer: AutoTokenizer,
-    SYSTEM_MESSAGE: str,
-    PROMPT_TEMPLATE: str,
+    system_message: str,
+    prompt_template: str,
+    chat_template: bool = True,
 ):
     numbers: List[int] = example["nums"]
     target: int = example["target"]
 
-    messages = [
-        {"role": "system", "content": SYSTEM_MESSAGE},
-        {
-            "role": "user",
-            "content": PROMPT_TEMPLATE.format(numbers=numbers, target=target),
-        },
-        {"role": "assistant", "content": "Let me solve this step by step.\n<think>"},
-    ]
-    input_ids = tokenizer.apply_chat_template(messages, tokenize=True, continue_final_message=True)
-    prompt = tokenizer.decode(input_ids, skip_special_tokens=False, clean_up_tokenization_spaces=False)
+    if chat_template:
+        messages = [
+            {"role": "system", "content": system_message},
+            {
+                "role": "user",
+                "content": prompt_template.format(numbers=numbers, target=target),
+            },
+            {"role": "assistant", "content": "Let me solve this step by step.\n<think>"},
+        ]
+        input_ids = tokenizer.apply_chat_template(messages, tokenize=True, continue_final_message=True)
+        prompt = tokenizer.decode(input_ids, skip_special_tokens=False, clean_up_tokenization_spaces=False)
+    else:
+        prompt = prompt_template.format(numbers=numbers, target=target)
+        input_ids = tokenizer(prompt, add_special_tokens=False)
+        messages = None
+
     return {
         "prompt": prompt,
         "messages": messages,
@@ -363,17 +372,31 @@ def preprocess_example(
 
 def create_datasets(args: Args, tokenizer):
     # SYSTEM_MESSAGE = "You are a helpful assistant. You first thinks about the reasoning process in the mind and then provides the user with the answer."
-    SYSTEM_MESSAGE = (
-        "A conversation between User and Assistant. "
-        "The user asks a question, and the Assistant solves it. "
-        "The assistant first thinks about the reasoning process in "
-        "the mind and then provides the user with the answer. "
-        "The reasoning process and answer are enclosed within <think> </think> "
-        "and <answer> </answer> tags, respectively, "
-        "i.e., <think> reasoning process here </think> "
-        "<answer> answer here </answer>."
-    )
-    PROMPT_TEMPLATE = "Using the numbers {numbers}, create an equation that equals {target}. You can use basic arithmetic operations (+, -, *, /) and each number can only be used once. Show your work in <think> </think> tags. And return the final equation and answer in <answer> </answer> tags, for example <answer>(10 + 2) / 3</answer>."
+    # SYSTEM_MESSAGE = (
+    #     "A conversation between User and Assistant. "
+    #     "The user asks a question, and the Assistant solves it. "
+    #     "The assistant first thinks about the reasoning process in "
+    #     "the mind and then provides the user with the answer. "
+    #     "The reasoning process and answer are enclosed within <think> </think> "
+    #     "and <answer> </answer> tags, respectively, "
+    #     "i.e., <think> reasoning process here </think> "
+    #     "<answer> answer here </answer>."
+    # )
+    if args.base_prompt:
+        PROMPT_TEMPLATE = """A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant first thinks about the reasoning process in the mind and then provides the user with the answer.
+User: Using the numbers {numbers}, create an equation that equals {target}. You can use basic arithmetic operations (+, -, *, /) and each number can only be used once. Show your work in <think> </think> tags. And return the final answer in <answer> </answer> tags, for example <answer> (1 + 2) / 3 </answer>.
+Assistant: Let me solve this step by step.
+<think>"""
+        SYSTEM_MESSAGE = ""
+    else:
+        SYSTEM_MESSAGE = (
+            "A conversation between User and Assistant. "
+            "The user asks a question, and the Assistant solves it. "
+            "The assistant first thinks about the reasoning process in "
+            "the mind and then provides the user with the answer. "
+        )
+        PROMPT_TEMPLATE = "Using the numbers {numbers}, create an equation that equals {target}. You can use basic arithmetic operations (+, -, *, /) and each number can only be used once. Show your work in <think> </think> tags. And return the final equation and answer in <answer> </answer> tags, for example <answer>(1 + 2) * 3</answer>."
+
     train_dataset = load_dataset(args.dataset_name, split=args.dataset_train_split)
     train_dataset = train_dataset.add_column(DATASET_SOURCE_KEY, ["countdown"] * len(train_dataset))
     train_dataset = train_dataset.map(
@@ -381,8 +404,9 @@ def create_datasets(args: Args, tokenizer):
         num_proc=6,
         fn_kwargs={
             "tokenizer": tokenizer,
-            "SYSTEM_MESSAGE": SYSTEM_MESSAGE,
-            "PROMPT_TEMPLATE": PROMPT_TEMPLATE,
+            "system_message": SYSTEM_MESSAGE,
+            "prompt_template": PROMPT_TEMPLATE,
+            "chat_template": not args.base_prompt,
         },
     )
 
@@ -393,8 +417,9 @@ def create_datasets(args: Args, tokenizer):
         num_proc=6,
         fn_kwargs={
             "tokenizer": tokenizer,
-            "SYSTEM_MESSAGE": SYSTEM_MESSAGE,
-            "PROMPT_TEMPLATE": PROMPT_TEMPLATE,
+            "system_message": SYSTEM_MESSAGE,
+            "prompt_template": PROMPT_TEMPLATE,
+            "chat_template": not args.base_prompt,
         },
     )
     return train_dataset, eval_dataset
@@ -523,6 +548,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
     ray.get([m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models])
     logger.info("======== ✅ model update group setup successfully =========")
+
+    if args.stop_strings is None:
+        args.stop_strings = [tokenizer.eos_token]
 
     # Setup training
     generation_config = SamplingParams(
