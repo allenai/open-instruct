@@ -372,12 +372,14 @@ class LMJudgeVerifier(VerifierFunction):
         
         # Convert score to binary if needed or return raw score
         if isinstance(judgment.score, (int, float)):
-            return judgment.score
+            score = judgment.score
         elif isinstance(judgment.score, str):
-            return extract_score_from_string(judgment.score)
+            score = extract_score_from_string(judgment.score)
         else:
             logger.warning(f"Unexpected score type: {type(judgment.score)}, defaulting to 0.0")
-            return 0.0
+            score = 0.0
+
+        return score, judgment.cost, judgment.response_time
         
     def get_judgement(
         self,

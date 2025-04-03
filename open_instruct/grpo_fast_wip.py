@@ -232,7 +232,7 @@ class Args:
     # -- llm verifiers reward
     apply_llm_verifier_reward: bool = False
     """whether to apply llm verifiers as reward"""
-    llm_verification_reward: float = 10.0
+    llm_verification_reward: float = 1.0
     llm_judge_type: str = "quality_ref"
     """the reward value for non/partially-verifiable responses"""
 
@@ -1103,6 +1103,8 @@ def data_preparation_thread(
         # breakpoint()
         with Timer("💰 [Data Preparation Thread] Calculating rewards"):
             scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons, decoded_queries)
+            # # print api_cost
+            # print(f"[Reward Preparation Thread] ${api_cost=}")
 
         with Timer("🎆 [Data Preparation Thread] Calculating advantages"):
             # Calculate advantages
@@ -1311,6 +1313,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         dataset_local_cache_dir=args.dataset_local_cache_dir,
         dataset_skip_cache=args.dataset_skip_cache,
     )
+
     train_dataset = train_dataset.shuffle(seed=args.seed)
     eval_dataset = None
     if len(args.dataset_mixer_eval_list) > 0:
@@ -1645,7 +1648,7 @@ if __name__ == "__main__":
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
-                verifiable_rewards, per_func_rewards = apply_verifiable_reward(
+                verifiable_rewards, per_func_rewards, _, _ = apply_verifiable_reward(
                     responses,
                     decoded_responses,
                     ground_truths,
@@ -1674,9 +1677,9 @@ if __name__ == "__main__":
         if args.apply_llm_verifier_reward:
             if not queries:
                 raise ValueError("Queries must be provided for llm judge reward.")
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying llm judge reward"):
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🤖 Applying llm judge reward"):
                 # breakpoint()
-                llm_judge_rewards, per_func_rewards = apply_llm_verifier_reward(
+                llm_judge_rewards, per_func_rewards, api_cost, avg_response_time = apply_llm_verifier_reward(
                     responses,
                     decoded_responses,
                     ground_truths,
@@ -1690,8 +1693,11 @@ if __name__ == "__main__":
                 for i in range(len(llm_judge_rewards)):
                     scores[i] = llm_judge_rewards[i] + scores[i]
                 np_llm_judge_rewards = np.array(llm_judge_rewards)
+                np_api_cost = np.array(api_cost)
                 metrics["objective/llm_judge_reward"] = np_llm_judge_rewards.mean()
                 metrics["objective/llm_judge_correct_rate"] = (np_llm_judge_rewards > 0.0).mean()
+                metrics["api_cost"] = np_api_cost.mean()
+
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:

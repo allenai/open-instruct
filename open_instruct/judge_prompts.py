@@ -83,8 +83,9 @@ AI assistant to the user query displayed below. Judge whether the provided answe
 
 Notes:
 1- Besides comparing to the referennce answer, your evaluation should consider factors such as the helpfulness, relevance, accuracy, depth, creativity, and level of detail of the response.
-2- Begin your evaluation by providing a short explanation. 
-3- Be as objective as possible. After providing your explanation, please rate the response on a scale of 1 to 10.
+2- Note that sometimes the reference answer is not the only answer. So any valid variation of the reference answer is also acceptable.
+3- Begin your evaluation by providing a short explanation. 
+4- Be as objective as possible. After providing your explanation, please rate the response on a scale of 1 to 10.
 
 [Query]
 {input}

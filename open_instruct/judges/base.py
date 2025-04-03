@@ -145,7 +145,7 @@ class BaseJudge:
             response_model=None,
             response_format={"type": "json_object"}
         )
-        breakpoint()
+        # breakpoint()
         data = json.loads(completion.choices[0].message.content)
         reasoning = data["REASONING"]
         score = data["SCORE"]

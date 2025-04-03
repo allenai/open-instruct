@@ -43,11 +43,11 @@ def get_completion(
     if response_format and response_model:
         raise Exception("response_format and response_model cannot both be provided. please provide only one.")
     
-    # track_cost_callback - Automatically attaches results to response
+    # track_cost_callback - Automatically stores results
     def track_cost_callback(kwargs, completion_response, start_time, end_time):
         try:
-            response_cost = getattr(completion_response, "usage", {}).get("total_cost", 0)
-            response_time = end_time - start_time  # Convert to seconds
+            response_cost = kwargs.get("response_cost", 0) # completion_response.get("usage", {}).get("response_cost", 0)
+            response_time = (end_time - start_time).total_seconds()  # Convert timedelta to float
 
             # Attach cost & response time as attributes to response object
             setattr(completion_response, "cost", response_cost)
@@ -59,10 +59,9 @@ def get_completion(
     # Set callback
     litellm.success_callback = [track_cost_callback]
     
-    breakpoint()
     # Capture start time
     start_time = time.time()
-
+    
     if response_model and response_format is None:
         if client.__class__.__name__ == "OpenAI":
             client = instructor.from_openai(client)

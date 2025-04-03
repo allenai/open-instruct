@@ -218,6 +218,8 @@ def apply_verifiable_reward(
 ):
     rewards = []
     per_func_rewards = []
+    total_cost = 0
+    avg_response_time = 0
     for tok_prediction, prediction, ground_truth, dataset in zip(
         responses, decoded_responses, ground_truths, datasets
     ):
@@ -254,7 +256,7 @@ def apply_verifiable_reward(
         rewards.append(reward)
         per_func_rewards.append(per_func_reward)
     # breakpoint()
-    return rewards, per_func_rewards
+    return rewards, per_func_rewards, total_cost, avg_response_time
 
 # TODO (Faeze): merge this with apply_verifiable_reward and use dataset name to select the function
 def apply_llm_verifier_reward(
@@ -268,6 +270,8 @@ def apply_llm_verifier_reward(
 ):
     rewards = []
     per_func_rewards = []
+    total_cost = []
+    total_response_time = []
     for tok_prediction, prediction, ground_truth, dataset, query in zip(
         responses, decoded_responses, ground_truths, datasets, queries
     ):
@@ -284,7 +288,9 @@ def apply_llm_verifier_reward(
         # for now, we just assume rewards are additive, rather than more complex functions.
         reward = 0
         per_func_reward = {}
-        breakpoint()
+        cost = 0
+        response_time = 0 # in seconds
+        # breakpoint()
         for gt, ds in zip(ground_truth_list, dataset_list):
             reward_func = LMJudgeVerifier(judge_type=judge_type) #TODO: later add "general" and "judge_type" inputs # REWARD_FN_MAPPING.get(ds.lower())
             if reward_func is None:
@@ -293,20 +299,27 @@ def apply_llm_verifier_reward(
             reward_weight = reward_func.weight
             # cuse llm as judge
             # sometimes we need the tokenized pred.
-            reward_result = reward_func(
+            reward_result, cost, response_time = reward_func(
                 tokenized_prediction=tok_prediction,
                 prediction=prediction,
                 label=gt,
                 query=query,
             )
             logger.info("Applying rubric-based or llm grader reward 🤗")
-            reward_mult = 1 if "rubric" in judge_type else reward_mult
+            reward_mult = 10 if "rubric" in judge_type else reward_mult
             reward += reward_mult * reward_result * reward_weight
             per_func_reward[ds] = per_func_reward.get(ds, 0) + (reward_mult * reward_result * reward_weight)
+
+            cost += cost
+            total_response_time.append(response_time)
+
         rewards.append(reward)
         per_func_rewards.append(per_func_reward)
-    breakpoint()
-    return rewards, per_func_rewards
+        total_cost.append(cost)
+
+    # breakpoint()
+    avg_response_time = sum(total_response_time) / len(total_response_time) if total_response_time else 0
+    return rewards, per_func_rewards, total_cost, avg_response_time
 
 
 def forward(
