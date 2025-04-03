@@ -1596,37 +1596,6 @@ if __name__ == "__main__":
     assert isinstance(args, Args)
     assert isinstance(model_config, ModelConfig)
     from transformers import AutoTokenizer
-    # reward model
-    if args.reward_model_multiplier:
-        reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
-            args.reward_model_path,
-            revision=args.reward_model_revision,
-            num_labels=1,
-            torch_dtype=torch.bfloat16,
-            #attn_implementation="flash_attention_2",
-            #use_cache=False,
-        )
-        rm_tokenizer = AutoTokenizer.from_pretrained(args.reward_model_path)
-        pad_token_id = rm_tokenizer.pad_token_id
-        print("pad_token_id22", pad_token_id)
-        reward_model_vocab_size = reward_model.config.vocab_size
-        # if policy_vocab_size != reward_model_vocab_size:
-        #     raise ValueError(
-        #         "Policy and reward model must have the same vocab size. "
-        #         f"Policy: {self.policy_vocab_size}, Reward: {self.reward_model_vocab_size}. "
-        #         "If they don't have the same vocab size, the policy could generate tokens which "
-        #         "is going to cause index out of bound error in the reward model."
-        #     )
-        disable_dropout_in_model(reward_model)
-        # ds_config = get_eval_ds_config(
-        #     offload=False,
-        #     # inference model only has stage 3 (sharding) or stage 0 (no sharding)
-        #     # stage 2 is optimizer sharding which doesn't apply to inference
-        #     stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
-        #     bf16=True,
-        # )
-        # reward_model, *_ = deepspeed.initialize(model=reward_model, config=ds_config)
-        # reward_model.eval()
 
     def reward_fn(
         context_length: int,
@@ -1648,8 +1617,18 @@ if __name__ == "__main__":
                 metrics["val/format_scores"] = np.array(format_scores).mean()
         # @valpy: RM reward
         if args.reward_model_multiplier:
+            reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
+                args.reward_model_path,
+                revision=args.reward_model_revision,
+                num_labels=1,
+                torch_dtype=torch.bfloat16,
+                # attn_implementation="flash_attention_2",
+                # use_cache=False,
+            )
+            rm_tokenizer = AutoTokenizer.from_pretrained(args.reward_model_path)
             pad_token_id = rm_tokenizer.pad_token_id
-            print("pad_token_id", pad_token_id)
+            print("pad_token_id22", pad_token_id)
+            disable_dropout_in_model(reward_model)
             _, score, _ = get_reward(
                 reward_model, responses, pad_token_id, context_length
             )
