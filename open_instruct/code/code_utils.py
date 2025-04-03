@@ -5,8 +5,6 @@ from ctypes import c_int
 from typing import Any, Dict, List, Optional
 import logging
 
-from datasets import load_dataset
-
 # taken from https://github.com/TIGER-AI-Lab/AceCoder/blob/62bb7fc25d694fed04a5270c89bf2cdc282804f7/data/inference/EvaluateInferencedCode.py#L372
 # we save the current working directory and restore them later
 cwd = os.getcwd()
@@ -283,6 +281,8 @@ def reliability_guard(maximum_memory_bytes: Optional[int] = None):
 
 
 if __name__ == "__main__":
+    from datasets import load_dataset
+
     # for testing purpose
     program = "a = 1"
     bad_test = "assert False"

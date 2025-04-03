@@ -14,6 +14,11 @@ and then test with:
 ```
 python open_instruct/code/api.py
 ```
+
+or 
+
+curl -X GET http://localhost:1234/health
+curl -X POST http://localhost:1234/test_program -H "Content-Type: application/json" -d '{"program": "def add(a, b): return a + b", "tests": ["assert add(1, 2) == 3", "assert add(-1, 1) == 0", "assert add(0, 0) == 1"], "max_execution_time": 1.0}'
 """
 
 from fastapi import FastAPI, HTTPException
@@ -54,7 +59,7 @@ if __name__ == "__main__":
     import requests
 
     # API endpoint
-    url = "http://phobos-cs-aus-453.reviz.ai2.in:1234/test_program"
+    url = "http://localhost:1234/test_program"
 
     # Test data
     payload = {
