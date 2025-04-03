@@ -7,7 +7,7 @@ python mason.py \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup_code.sh \&\& python open_instruct/grpo_fast.py \
-    --exp_name the_algorithm_python_tulu3.1_8b_grpo_fast_code \
+    --exp_name tulu3.1_8b_grpo_fast_code_acecoder \
     --beta 0.01 \
     --num_unique_prompts_rollout 48 \
     --num_samples_per_prompt_rollout 16 \
