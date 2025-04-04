@@ -1187,7 +1187,8 @@ class PolicyTrainerRayProcess(RayProcess):
                                 per_func_rewards[key].append(value)
                     if args.add_r1_style_format_reward:
                         score += format_scores[i : i + args.local_rollout_forward_batch_size]
-
+                    if args.apply_verifiable_reward and args.reward_model_multiplier:
+                        score = score / 2.0
                     responses.append(response)
                     postprocessed_responses.append(postprocessed_response)
                     ref_logprobs.append(ref_logprob)
