@@ -14,16 +14,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 import logging
 import math
 import os
 import shutil
-import subprocess
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import List, Optional, Union
+from typing import List, Literal, Optional, Union
 
 import datasets
 import deepspeed
@@ -34,6 +32,7 @@ from accelerate.logging import get_logger
 from accelerate.utils import InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
+from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from transformers import (
@@ -45,9 +44,11 @@ from transformers import (
 )
 
 from open_instruct.dataset_transformation import (
-    CHAT_TEMPLATES,
+    INPUT_IDS_KEY,
+    TOKENIZED_SFT_DATASET_KEYS,
     TokenizerConfig,
-    get_cached_dataset_tulu_sft,
+    get_cached_dataset_tulu,
+    visualize_token,
 )
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.utils import (
@@ -87,45 +88,13 @@ class FlatArguments:
         default=None,
         metadata={"help": "Pretrained config name or path if not the same as model_name"},
     )
-    tokenizer_name: Optional[str] = field(
-        default=None,
-        metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"},
-    )
-    tokenizer_revision: Optional[str] = field(
-        default=None,
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
-    )
-    chat_template_name: str = field(
-        default="tulu",
-        metadata={
-            "help": (
-                f"The name of the chat template to use. "
-                f"You can choose one of our pre-defined templates: {', '.join(CHAT_TEMPLATES.keys())}."
-                f"Or, you can provide a tokenizer name or path here and we will apply its chat template."
-            )
-        },
-    )
     use_flash_attn: bool = field(
         default=True,
         metadata={"help": "Whether to use flash attention in the model training"},
     )
-    use_slow_tokenizer: bool = field(
-        default=True,
-        metadata={"help": "Whether to use one of the slow tokenizer or not (which is then fast tokenizer)."},
-    )
     model_revision: Optional[str] = field(
         default=None,
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
-    )
-    trust_remote_code: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "Whether or not to allow for custom models defined on the Hub in their own modeling files. "
-                "This option should only be set to `True` for repositories you trust and in which you "
-                "have read the code, as it will execute code present on the Hub on your local machine."
-            )
-        },
     )
     low_cpu_mem_usage: bool = field(
         default=False,
@@ -145,10 +114,24 @@ class FlatArguments:
         default=None,
         metadata={"help": "A dictionary of datasets (local or HF) to sample from."},
     )
-    dataset_mixer_list: Optional[list[str]] = field(
-        default=None,
-        metadata={"help": "A list of datasets (local or HF) to sample from."},
+    dataset_mixer_list: List[str] = field(default_factory=lambda: ["allenai/tulu-3-sft-personas-algebra", "1.0"])
+    """A list of datasets (local or HF) to sample from."""
+    dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
+    """The dataset splits to use for training"""
+    dataset_transform_fn: list[str] = field(
+        default_factory=lambda: ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
     )
+    """The list of transform functions to apply to the dataset."""
+    dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS)
+    """The columns to use for the dataset."""
+    dataset_cache_mode: Literal["hf", "local"] = "local"
+    """The mode to use for caching the dataset."""
+    dataset_local_cache_dir: str = "local_dataset_cache"
+    """The directory to save the local dataset cache to."""
+    dataset_config_hash: Optional[str] = None
+    """The hash of the dataset configuration."""
+    dataset_skip_cache: bool = False
+    """Whether to skip the cache."""
     dataset_mix_dir: Optional[str] = field(
         default=None,
         metadata={"help": "The directory to save the mixed dataset to disk."},
@@ -186,13 +169,6 @@ class FlatArguments:
     overwrite_cache: bool = field(
         default=False,
         metadata={"help": "Overwrite the cached training and evaluation sets"},
-    )
-    add_bos: bool = field(
-        default=False,
-        metadata={
-            "help": "Forcibly add bos token to the beginning of the input sequence."
-            " Use only when tokenizer does not add bos token by default."
-        },
     )
     clip_grad_norm: float = field(
         default=-1,
@@ -403,13 +379,48 @@ class FlatArguments:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
 
 
-def main(args: FlatArguments):
+def main(args: FlatArguments, tc: TokenizerConfig):
+    # ------------------------------------------------------------
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
     # in the environment
+    accelerator_log_kwargs = {}
+    if args.with_tracking:
+        accelerator_log_kwargs["log_with"] = args.report_to
+        accelerator_log_kwargs["project_dir"] = args.output_dir
+    # if you get timeouts (e.g. due to long tokenization) increase this.
+    timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
+    dataloader_config = DataLoaderConfiguration(use_seedable_sampler=True)
+    accelerator = Accelerator(
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        dataloader_config=dataloader_config,
+        **accelerator_log_kwargs,
+        kwargs_handlers=[timeout_kwargs],
+    )
+
+    # ------------------------------------------------------------
+    # Setup tokenizer
+    tc.tokenizer_revision = args.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
+    tc.tokenizer_name_or_path = (
+        args.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
+    )
+    if tc.tokenizer_revision != args.model_revision and tc.tokenizer_name_or_path != args.model_name_or_path:
+        # Warn user if tokenizer and model use different revisions; this is an unusual
+        # use case.
+        warning = f"""Requested tokenizer revision `{tc.tokenizer_revision=}` is different
+                   from the model revision `{args.model_revision=}` or the tokenizer name `{tc.tokenizer_name_or_path=}`
+                   is different from the model name `{args.model_name_or_path=}`."""
+        logger.warning(warning)
+    tokenizer = tc.tokenizer
+
+    # ------------------------------------------------------------
+    # Set up runtime variables
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
-    if args.push_to_hub:
+    args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
+    if is_beaker_job():
+        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+    if args.push_to_hub and accelerator.is_main_process:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
         if args.hf_entity is None:  # first try to use AI2 entity
@@ -420,26 +431,39 @@ def main(args: FlatArguments):
         if args.hf_repo_revision is None:
             args.hf_repo_revision = args.run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+        if is_beaker_job():
+            beaker_config = maybe_get_beaker_config()
 
-    if is_beaker_job():
-        beaker_config = maybe_get_beaker_config()
-
-    accelerator_log_kwargs = {}
-
+    # ------------------------------------------------------------
+    # Initialize the trackers we use, and also store our configuration.
+    # The trackers initializes automatically on the main process.
     if args.with_tracking:
-        accelerator_log_kwargs["log_with"] = args.report_to
-        accelerator_log_kwargs["project_dir"] = args.output_dir
+        experiment_config = vars(args)
+        # TensorBoard cannot log Enums, need the raw value
+        experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"]
 
-    # if you get timeouts (e.g. due to long tokenization) increase this.
-    timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
-    dataloader_config = DataLoaderConfiguration(use_seedable_sampler=True)
+        # (Optional) Ai2 internal tracking
+        if args.wandb_entity is None:
+            args.wandb_entity = maybe_use_ai2_wandb_entity()
+        if accelerator.is_main_process and is_beaker_job():
+            experiment_config.update(vars(beaker_config))
+        experiment_config.update(vars(tc))
+        accelerator.init_trackers(
+            args.wandb_project_name,
+            experiment_config,
+            init_kwargs={
+                "wandb": {
+                    "name": args.run_name,
+                    "entity": args.wandb_entity,
+                    "tags": [args.exp_name] + get_wandb_tags(),
+                }
+            },
+        )
+        wandb_tracker = accelerator.get_tracker("wandb")
 
-    accelerator = Accelerator(
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        dataloader_config=dataloader_config,
-        **accelerator_log_kwargs,
-        kwargs_handlers=[timeout_kwargs],
-    )
+    if accelerator.is_main_process:
+        pprint([args, tc])
+
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -464,33 +488,31 @@ def main(args: FlatArguments):
 
     accelerator.wait_for_everyone()
 
-    tokenizer_revision = args.model_revision if args.tokenizer_revision is None else args.tokenizer_revision
-    tokenizer_name = args.tokenizer_name if args.tokenizer_name is not None else args.model_name_or_path
-    if tokenizer_revision != args.model_revision:
-        # Warn user if tokenizer and model use different revisions; this is an unusual
-        # use case.
-        warning = f"""Requested tokenizer revision `{tokenizer_revision}` is different
-                   from the model revision `{args.model_revision}`."""
-        logger.warning(warning)
-    tc = TokenizerConfig(
-        model_name_or_path=tokenizer_name,
-        revision=tokenizer_revision,
-        use_fast=not args.use_slow_tokenizer,
-        chat_template_name=args.chat_template_name,
-        add_bos=args.add_bos,
-    )
-    tokenizer = tc.tokenizer
     if args.dataset_mixer is not None:
         args.dataset_mixer_list = [item for pair in args.dataset_mixer.items() for item in pair]
     with accelerator.main_process_first():
-        train_dataset = get_cached_dataset_tulu_sft(
-            args.dataset_mixer_list,
-            tc,
-            args.max_seq_length,
-            args.hf_entity,
+        transform_fn_args = [
+            {"max_seq_length": args.max_seq_length},
+            {},
+        ]
+        train_dataset = get_cached_dataset_tulu(
+            dataset_mixer_list=args.dataset_mixer_list,
+            dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+            tc=tc,
+            dataset_transform_fn=args.dataset_transform_fn,
+            transform_fn_args=transform_fn_args,
+            target_columns=args.dataset_target_columns,
+            dataset_cache_mode=args.dataset_cache_mode,
+            dataset_config_hash=args.dataset_config_hash,
+            hf_entity=args.hf_entity,
+            dataset_local_cache_dir=args.dataset_local_cache_dir,
+            dataset_skip_cache=args.dataset_skip_cache,
         )
         train_dataset = train_dataset.shuffle(seed=args.seed)
         train_dataset.set_format(type="pt")
+    if accelerator.is_main_process:
+        visualize_token(train_dataset[0][INPUT_IDS_KEY], tokenizer)
+
     if args.cache_dataset_only:
         return
 
@@ -499,13 +521,13 @@ def main(args: FlatArguments):
         config = AutoConfig.from_pretrained(
             args.config_name,
             revision=args.model_revision,
-            trust_remote_code=args.trust_remote_code,
+            trust_remote_code=tc.trust_remote_code,
         )
     elif args.model_name_or_path:
         config = AutoConfig.from_pretrained(
             args.model_name_or_path,
             revision=args.model_revision,
-            trust_remote_code=args.trust_remote_code,
+            trust_remote_code=tc.trust_remote_code,
         )
     else:
         raise ValueError(
@@ -527,7 +549,7 @@ def main(args: FlatArguments):
                 revision=args.model_revision,
                 from_tf=bool(".ckpt" in args.model_name_or_path),
                 config=config,
-                trust_remote_code=args.trust_remote_code,
+                trust_remote_code=tc.trust_remote_code,
                 quantization_config=bnb_config,
                 device_map=device_map,
                 torch_dtype=torch.bfloat16,
@@ -545,7 +567,7 @@ def main(args: FlatArguments):
                 revision=args.model_revision,
                 from_tf=bool(".ckpt" in args.model_name_or_path),
                 config=config,
-                trust_remote_code=args.trust_remote_code,
+                trust_remote_code=tc.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 use_flash_attention_2=True if args.use_flash_attn else False,
                 # liger-kernel specific args
@@ -557,7 +579,7 @@ def main(args: FlatArguments):
                 revision=args.model_revision,
                 from_tf=bool(".ckpt" in args.model_name_or_path),
                 config=config,
-                trust_remote_code=args.trust_remote_code,
+                trust_remote_code=tc.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 torch_dtype=torch.bfloat16,
                 attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
@@ -689,34 +711,8 @@ def main(args: FlatArguments):
     if checkpointing_steps is not None and str(checkpointing_steps).lower() != "epoch":
         checkpointing_steps = int(checkpointing_steps)
 
-    # We need to initialize the trackers we use, and also store our configuration.
-    # The trackers initializes automatically on the main process.
-    if args.with_tracking:
-        experiment_config = vars(args)
-        # TensorBoard cannot log Enums, need the raw value
-        experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"]
-
-        # (Optional) Ai2 internal tracking
-        if args.wandb_entity is None:
-            args.wandb_entity = maybe_use_ai2_wandb_entity()
-        if is_beaker_job():
-            experiment_config.update(vars(beaker_config))
-        accelerator.init_trackers(
-            args.wandb_project_name,
-            experiment_config,
-            init_kwargs={
-                "wandb": {
-                    "name": args.run_name,
-                    "entity": args.wandb_entity,
-                    "tags": [args.exp_name] + get_wandb_tags(),
-                }
-            },
-        )
-        wandb_tracker = accelerator.get_tracker("wandb")
-
     # Train!
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
-
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
     logger.info(f"  Num Epochs = {args.num_train_epochs}")
@@ -938,6 +934,6 @@ def main(args: FlatArguments):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((FlatArguments))
-    args = parser.parse()
-    main(args)
+    parser = ArgumentParserPlus((FlatArguments, TokenizerConfig))
+    args, tc = parser.parse_args_into_dataclasses()
+    main(args, tc)
