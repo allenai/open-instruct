@@ -53,6 +53,7 @@ import socket
 import subprocess
 import threading
 import time
+import re
 from argparse import Namespace
 from collections import deque
 from dataclasses import asdict, dataclass, field
@@ -476,61 +477,44 @@ def create_snippet_mask(input_ids, tokenizer):
         Tensor of shape [batch_size, seq_len] with False for tokens to ignore in loss
         calculation (tokens within and including <snippet>...</snippet> tags)
     """
-    import re
+
+    # Define snippet tag strings.
+    start_tag = "<snippet>"
+    end_tag = "</snippet>"
     
-    # Get token IDs for the snippet tags
-    start_tag_str = "<snippet>"
-    end_tag_str = "</snippet>"
+    # Compile a regex pattern that captures snippet blocks (non-greedy match).
+    pattern = re.compile(re.escape(start_tag) + r".*?" + re.escape(end_tag), re.DOTALL)
     
-    # Initialize mask with all True (all tokens included in loss)
     batch_size, seq_len = input_ids.shape
     mask = torch.ones_like(input_ids, dtype=torch.bool)
     
-    # Process each sequence in the batch
+    # Process each sequence in the batch.
     for i in range(batch_size):
-        # Get the sequence with padding removed
         seq = input_ids[i].clone().cpu()
         non_pad_mask = seq != tokenizer.pad_token_id
         if not torch.any(non_pad_mask):
-            continue  # Skip empty sequences
+            continue  # Skip empty sequences.
         
-        # Decode the sequence to text
+        # Decode only the non-padding tokens.
         text = tokenizer.decode(seq[non_pad_mask], skip_special_tokens=False)
         
-        # Find all snippet tag pairs using regex
-        snippets = []
-        stack = []
-        
-        for start_match in re.finditer(re.escape(start_tag_str), text):
-            stack.append(start_match.start())
-        
-        for end_match in re.finditer(re.escape(end_tag_str), text):
-            if stack:
-                start_pos = stack.pop()
-                snippets.append((start_pos, end_match.end()))
-        
-        if not snippets:
-            continue  # No snippets found
-        
-        # For each snippet, identify token positions and mask them
-        for snippet_start, snippet_end in snippets:
-            # Encode the text up to the snippet start and end to get token positions
+        # Find all snippet blocks using the compiled regex.
+        for match in pattern.finditer(text):
+            snippet_start, snippet_end = match.span()
+            
+            # Compute the token position for the start of the snippet.
             prefix_text = text[:snippet_start]
-            prefix_tokens = len(tokenizer.encode(prefix_text, add_special_tokens=False))
+            prefix_token_count = len(tokenizer.encode(prefix_text, add_special_tokens=False))
             
-            full_snippet_text = text[:snippet_end]
-            snippet_end_tokens = len(tokenizer.encode(full_snippet_text, add_special_tokens=False))
+            # Compute the token position for the end of the snippet.
+            snippet_end_token_count = len(tokenizer.encode(text[:snippet_end], add_special_tokens=False))
             
-            # Mark the tokens corresponding to the snippet (and tags) as False
-            start_idx = prefix_tokens
-            end_idx = snippet_end_tokens
-            
-            # Convert to absolute positions in the padded sequence
+            # Map the token positions to positions in the original padded sequence.
             pad_indices = torch.arange(seq_len)[non_pad_mask]
-            if start_idx < len(pad_indices) and end_idx <= len(pad_indices):
-                mask_start = pad_indices[start_idx].item()
-                mask_end = pad_indices[min(end_idx, len(pad_indices)-1)].item() + 1
-                mask[i, mask_start:mask_end] = False
+            if prefix_token_count < len(pad_indices) and snippet_end_token_count <= len(pad_indices):
+                start_idx = pad_indices[prefix_token_count].item()
+                end_idx = pad_indices[snippet_end_token_count - 1].item() + 1  # Include end token.
+                mask[i, start_idx:end_idx] = False
     
     return mask
 
@@ -1386,7 +1370,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         if args.mask_snippet_loss:
                             snippet_mask = create_snippet_mask(mb_responses, tokenizer)
                             # Combine padding mask with snippet mask (we want ~padding_mask AND snippet_mask)
-                            combined_mask = ~padding_mask[micro_batch_inds] & snippet_mask
+                            combined_mask = (~padding_mask[micro_batch_inds]) & snippet_mask
                             loss = masked_mean(pg_loss_max + (args.beta * kl), combined_mask)
                         else:
                             loss = masked_mean(pg_loss_max + (args.beta * kl), ~padding_mask[micro_batch_inds])
