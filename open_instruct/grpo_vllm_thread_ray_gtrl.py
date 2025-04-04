@@ -739,13 +739,13 @@ class PolicyTrainerRayProcess(RayProcess):
                 use_cache=False,
             )
             self.reward_model_vocab_size = self.reward_model.config.vocab_size
-            if self.policy_vocab_size != self.reward_model_vocab_size:
-                raise ValueError(
-                    "Policy and reward model must have the same vocab size. "
-                    f"Policy: {self.policy_vocab_size}, Reward: {self.reward_model_vocab_size}. "
-                    "If they don't have the same vocab size, the policy could generate tokens which "
-                    "is going to cause index out of bound error in the reward model."
-                )
+            # if self.policy_vocab_size != self.reward_model_vocab_size:
+            #     raise ValueError(
+            #         "Policy and reward model must have the same vocab size. "
+            #         f"Policy: {self.policy_vocab_size}, Reward: {self.reward_model_vocab_size}. "
+            #         "If they don't have the same vocab size, the policy could generate tokens which "
+            #         "is going to cause index out of bound error in the reward model."
+            #     )
             disable_dropout_in_model(self.reward_model)
             ds_config = get_eval_ds_config(
                 offload=False,

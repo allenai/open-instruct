@@ -1,7 +1,7 @@
 python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-3-dev \
-    --priority urgent \
+    --priority high \
     --image valpy/open_instruct_dev_multi --pure_docker_mode \
     --preemptible \
     --num_nodes 2 \
