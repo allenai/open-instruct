@@ -9,6 +9,7 @@ dependencies = [
     "antlr4-python3-runtime==4.11",
     "bitsandbytes>=0.44.1",
     "datasets>=3.1.0",
+    "debugpy>=1.8.13",
     "deepspeed==0.15.4", # 0.16.0 bugs out https://github.com/microsoft/DeepSpeed/issues/6793
     "hf-transfer>=0.1.8",
     "matplotlib>=3.9.3",
@@ -17,11 +18,12 @@ dependencies = [
     "nvitop>=1.4.2",
     "packaging>=24.2",
     "peft>=0.13.2",
+    "ray[default]>=2.44.1",
     "setuptools>=75.6.0",
     "tensorboard>=2.18.0",
-    "torch>=2.5.1",
+    "torch>=2.6.0",
     "transformers>=4.46.3",
-    "vllm==0.6.6.post1",
+    "vllm>=0.8.2",
     "wandb==0.18.1",
 ]
 
@@ -35,12 +37,12 @@ py-modules = ["open_instruct"]
 # pytorch related setups
 [tool.uv.sources]
 torch = [
-  { index = "pytorch-cu121", marker = "platform_system != 'Darwin'"},
+  { index = "pytorch-cu124", marker = "platform_system != 'Darwin'"},
 ]
 
 [[tool.uv.index]]
-name = "pytorch-cu121"
-url = "https://download.pytorch.org/whl/cu121"
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
 explicit = true
 
 [[tool.uv.index]]
@@ -69,5 +71,10 @@ dev = [
     "black>=24.10.0",
     "flake8>=7.1.1",
     "isort>=5.13.2",
+    "mkdocs-material>=9.6.8",
+    "markdown-include>=0.8.1",
     "pytest>=8.3.4",
 ]
+
+[tool.isort]
+known_first_party = ["open_instruct"]

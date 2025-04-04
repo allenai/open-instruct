@@ -51,18 +51,6 @@ class ModelConfig:
     """The model checkpoint for weights initialization."""
     model_revision: Optional[str] = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
-    tokenizer_name: Optional[str] = None
-    """The tokenizer checkpoint for weights initialization. (by default the model_name_or_path is used)"""
-    tokenizer_revision: Optional[str] = None
-    """The specific tokenizer version to use (can be a branch name, tag name or commit id)."""
-    use_slow_tokenizer: bool = False
-    """Whether to use the slow tokenizer or not."""
-    add_bos: bool = False
-    """Whether to add the BOS token to the input."""
-    chat_template_name: Optional[str] = None
-    """The chat template for the tokenizer."""
-    trust_remote_code: bool = False
-    """Trust remote code when loading a model."""
     torch_dtype: Optional[str] = None
     """Override the default `torch.dtype` and load the model under this dtype."""
     attn_implementation: Optional[Literal["flash_attention_2"]] = None
@@ -247,10 +235,10 @@ def apply_verifiable_reward(
         per_func_reward = {}
         for gt, ds in zip(ground_truth_list, dataset_list):
             reward_func = REWARD_FN_MAPPING.get(ds.lower())
-            reward_weight = reward_func.weight
             if reward_func is None:
                 logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
                 continue
+            reward_weight = reward_func.weight
             # compare with ground truth.
             # sometimes we need the tokenized pred.
             reward_result = reward_func(

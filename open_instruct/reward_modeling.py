@@ -1,10 +1,10 @@
-import json
 import os
 import random
 import time
-from dataclasses import asdict, dataclass
-from typing import List, Literal, Optional, Tuple
+from dataclasses import asdict, dataclass, field
+from typing import List, Literal, Optional
 
+import deepspeed
 import numpy as np
 import pandas as pd
 import torch
@@ -12,27 +12,24 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from accelerate import Accelerator
-from accelerate.utils import broadcast, gather_object
-from datasets import DatasetDict
+from accelerate.utils import gather_object
 from huggingface_hub import HfApi
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from transformers import (
-    AutoConfig,
     AutoModelForSequenceClassification,
-    AutoTokenizer,
     PreTrainedModel,
     get_scheduler,
 )
 
-from open_instruct.dataset_processor import (
-    CHAT_TEMPLATES,
-    INPUT_IDS_CHOSEN_KEY,
-    INPUT_IDS_REJECTED_KEY,
-    DatasetConfig,
-    PreferenceDatasetProcessor,
+from open_instruct.dataset_transformation import (
+    CHOSEN_INPUT_IDS_KEY,
+    REJECTED_INPUT_IDS_KEY,
+    TOKENIZED_PREFERENCE_DATASET_KEYS,
     SimplePreferenceCollator,
+    TokenizerConfig,
+    get_cached_dataset_tulu,
     visualize_token,
 )
 from open_instruct.model_utils import (
@@ -47,7 +44,6 @@ from open_instruct.model_utils import (
 from open_instruct.reward_modeling_eval import evaluate
 from open_instruct.utils import (
     ArgumentParserPlus,
-    combine_dataset,
     get_wandb_tags,
     is_beaker_job,
     maybe_get_beaker_config,
@@ -60,21 +56,39 @@ api = HfApi()
 
 @dataclass
 class Args:
-    # required dataset args
-    dataset_mixer: str = None
-    """A dictionary of datasets (local or HF) to sample from."""
-    dataset_train_splits: List[str] = None
+    # Dataset
+    dataset_mixer_list: List[str] = field(
+        default_factory=lambda: ["allenai/tulu-3-wildchat-reused-on-policy-8b", "1.0"]
+    )
+    """A list of datasets (local or HF) to sample from."""
+    dataset_mixer_eval_list: List[str] = field(default_factory=lambda: [])
+    """A list of datasets (local or HF) to sample from for evaluation."""
+    dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
     """The dataset splits to use for training"""
-    dataset_eval_mixer: Optional[str] = None
-    """A dictionary of datasets (local or HF) to sample from for evaluation"""
-    dataset_eval_splits: Optional[List[str]] = None
+    dataset_mixer_eval_list_splits: List[str] = field(default_factory=lambda: [])
     """The dataset splits to use for evaluation"""
-    dataset_mixer_dict: Optional[dict] = None
-    """The dataset mixer as a dictionary"""
-    dataset_eval_mixer_dict: Optional[dict] = None
-    """The dataset eval mixer as a dictionary"""
+    dataset_transform_fn: list[str] = field(default_factory=lambda: ["preference_tokenize_v1", "preference_filter_v1"])
+    """The list of transform functions to apply to the dataset."""
+    dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_PREFERENCE_DATASET_KEYS)
+    """The columns to use for the dataset."""
+    dataset_cache_mode: Literal["hf", "local"] = "local"
+    """The mode to use for caching the dataset."""
+    dataset_local_cache_dir: str = "local_dataset_cache"
+    """The directory to save the local dataset cache to."""
+    dataset_config_hash: Optional[str] = None
+    """The hash of the dataset configuration."""
+    dataset_config_eval_hash: Optional[str] = None
+    """The hash of the dataset configuration for evaluation."""
+    dataset_skip_cache: bool = False
+    """Whether to skip the cache."""
+    max_token_length: int = 512
+    """The maximum token length to use for the dataset"""
+    max_prompt_token_length: int = 256
+    """The maximum prompt token length to use for the dataset"""
+    cache_dataset_only: bool = False
+    """Immediately exit after caching the dataset"""
 
-    # common args
+    # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
     seed: int = 1
@@ -82,7 +96,7 @@ class Args:
     run_name: Optional[str] = None
     """A unique name of this run"""
 
-    # optimizer args
+    # Optimizer
     eps: float = 1e-5
     """The epsilon value for the optimizer"""
     learning_rate: float = 2e-5
@@ -94,7 +108,7 @@ class Args:
     warm_up_steps: int = 0
     """Number of warm up steps for the scheduler"""
 
-    # various batch sizes
+    # Batch sizes
     num_train_epochs: int = 1
     """Number of epochs to train"""
     gradient_accumulation_steps: int = 8
@@ -120,7 +134,7 @@ class Args:
     eval_freq: Optional[int] = None
     """The frequency of evaluation steps"""
 
-    # wandb and HF tracking configs
+    # Experiment tracking
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "open_instruct_internal"
@@ -137,40 +151,60 @@ class Args:
     """The revision of the saved model in the Hugging Face Hub (can be autoset if not given)"""
     hf_repo_url: Optional[str] = None
     """The url of the saved model in the Hugging Face Hub (will be autoset)"""
-    output_dir: Optional[str] = None
+    output_dir: str = "output"
     """Where to save the model"""
 
-    resize_token_embeddings: bool = True
-    """Whether to resize the token embeddings to a factor of 8 for utilizing tensor cores better"""
-
-    def __post_init__(self):
-        self.dataset_mixer_dict, self.dataset_mixer = process_dataset_mixer(self.dataset_mixer)
-        if self.dataset_eval_mixer is not None:
-            self.dataset_eval_mixer_dict, self.dataset_eval_mixer = process_dataset_mixer(self.dataset_eval_mixer)
+    # Ai2 specific settings
+    gs_bucket_path: Optional[str] = None
+    """The path to the gs bucket to save the model to"""
 
 
-def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
-    # if passed through cli: convert the dataset mixers to dictionaries
-    if isinstance(value, str):
-        return json.loads(value), value
-    # if passed through yaml: convert the dataset mixers to strings
-    elif isinstance(value, dict):
-        return value, json.dumps(value)
-    else:
-        raise ValueError("Input must be either a string or a dictionary")
+def layer_init(layer: nn.Module, std: float):
+    torch.nn.init.normal_(layer.weight, std=std)
+    return layer
 
 
-def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig) -> Accelerator:
-    """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
+    from open_instruct.olmo_adapter import (
+        Olmo2Config,
+        Olmo2ForSequenceClassification,
+        OlmoeConfig,
+        OlmoeForSequenceClassification,
+    )
+
+    AutoModelForSequenceClassification.register(Olmo2Config, Olmo2ForSequenceClassification)
+    AutoModelForSequenceClassification.register(OlmoeConfig, OlmoeForSequenceClassification)
+
+    # ------------------------------------------------------------
+    # Setup tokenizer
+    tc.tokenizer_revision = model_config.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
+    tc.tokenizer_name_or_path = (
+        model_config.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
+    )
+    if (
+        tc.tokenizer_revision != model_config.model_revision
+        and tc.tokenizer_name_or_path != model_config.model_name_or_path
+    ):
+        # Warn user if tokenizer and model use different revisions; this is an unusual
+        # use case.
+        warning = f"""Requested tokenizer revision `{tc.tokenizer_revision=}` is different
+                   from the model revision `{model_config.model_revision=}` or the tokenizer name `{tc.tokenizer_name_or_path=}`
+                   is different from the model name `{model_config.model_name_or_path=}`."""
+        print(warning)
+    tokenizer = tc.tokenizer
+
+    # ------------------------------------------------------------
+    # Set up runtime variables
     accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
     args.world_size = accelerator.num_processes
     args.local_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps
     args.micro_batch_size = int(args.per_device_train_batch_size * args.world_size)
     args.batch_size = int(args.local_batch_size * args.world_size)
-    time_tensor = torch.tensor(int(time.time()), device=accelerator.device)
-    # set a unique run name with the current timestamp
-    time_int = broadcast(time_tensor, 0).item()
-    args.run_name = f"{args.exp_name}__{args.seed}__{time_int}"
+    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    args.output_dir = os.path.join(args.output_dir, args.run_name)
+    args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
+    if is_beaker_job():
+        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -186,37 +220,18 @@ def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig
     if args.with_tracking and accelerator.is_main_process:
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
-    return accelerator
-
-
-def layer_init(layer: nn.Module, std: float):
-    torch.nn.init.normal_(layer.weight, std=std)
-    return layer
-
-
-def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
-    from open_instruct.olmo_adapter import (
-        Olmo2Config,
-        Olmo2ForSequenceClassification,
-        OlmoeConfig,
-        OlmoeForSequenceClassification,
-    )
-
-    AutoModelForSequenceClassification.register(Olmo2Config, Olmo2ForSequenceClassification)
-    AutoModelForSequenceClassification.register(OlmoeConfig, OlmoeForSequenceClassification)
-    accelerator = calculate_runtime_args_and_accelerator(args, model_config)
     local_seed = args.seed + accelerator.process_index
 
-    # set up experiment tracking and seeds
+    # ------------------------------------------------------------
+    # Setup experiment tracking and seeds
     all_configs = {}
     if is_beaker_job():
-        args.checkpoint_output_dir = os.environ.get("CHECKPOINT_OUTPUT_DIR", args.output_dir)
         beaker_config = maybe_get_beaker_config()
         # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
         if len(beaker_config.beaker_dataset_id_urls) > 0:
             args.output_dir = "/output"
         all_configs.update(vars(beaker_config))
-    all_configs.update(**asdict(args), **asdict(dataset_config), **asdict(model_config))
+    all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
     if accelerator.is_main_process:
         if args.with_tracking:
             import wandb
@@ -239,79 +254,70 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     random.seed(local_seed)
     np.random.seed(local_seed)
     torch.manual_seed(local_seed)
-    torch.backends.cudnn.deterministic = True
+    if accelerator.is_main_process:
+        pprint([args, tc, model_config])
 
-    # create a tokenizer (pad from right)
-    config = AutoConfig.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision)
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_config.model_name_or_path, revision=model_config.model_revision, padding_side="right"
-    )
-    if config.architectures == "LlamaForCausalLM" and config.bos_token_id == 128000:
-        tokenizer.pad_token_id = 128002  # <|reserved_special_token_0|>
-    else:
-        tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
-    if dataset_config.chat_template is not None:
-        tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
-
-    # create the dataset
-    dataset_dict = DatasetDict()
-    dataset_processor = PreferenceDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
-    if len(args.dataset_train_splits) != len(args.dataset_mixer_dict) and len(args.dataset_train_splits) == 1:
-        args.dataset_train_splits = [args.dataset_train_splits[0]] * len(args.dataset_mixer_dict)
-        print(
-            f"Dataset splits not provided for all datasets. Using the same {args.dataset_train_splits[0]} split for all datasets."
-        )
-    if len(args.dataset_eval_splits) != len(args.dataset_eval_mixer_dict) and len(args.dataset_eval_splits) == 1:
-        args.dataset_eval_splits = [args.dataset_eval_splits[0]] * len(args.dataset_eval_mixer_dict)
-        print(
-            f"Dataset splits not provided for all datasets. Using the same {args.dataset_eval_splits[0]} split for all datasets."
-        )
-    train_dataset = combine_dataset(
-        args.dataset_mixer_dict,
-        splits=args.dataset_train_splits,
-        columns_to_keep=[dataset_config.preference_chosen_key, dataset_config.preference_rejected_key],
-    )
-    if dataset_config.sanity_check:
-        train_dataset = train_dataset.select(
-            range(0, min(len(train_dataset), dataset_config.sanity_check_max_samples))
-        )
+    # ------------------------------------------------------------
+    # Set up datasets
+    transform_fn_args = [
+        {},
+        {
+            "max_token_length": args.max_token_length,
+            "max_prompt_token_length": args.max_prompt_token_length,
+        },
+    ]
     with accelerator.main_process_first():
-        train_dataset = dataset_processor.tokenize(train_dataset)
-        train_dataset = dataset_processor.filter(train_dataset)
-    dataset_dict["train"] = train_dataset
-    eval_dataset = None
-    if args.dataset_eval_mixer is not None:
-        eval_dataset = combine_dataset(
-            args.dataset_eval_mixer_dict,
-            splits=args.dataset_eval_splits,
-            columns_to_keep=[dataset_config.preference_chosen_key, dataset_config.preference_rejected_key],
+        train_dataset = get_cached_dataset_tulu(
+            dataset_mixer_list=args.dataset_mixer_list,
+            dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+            tc=tc,
+            dataset_transform_fn=args.dataset_transform_fn,
+            transform_fn_args=transform_fn_args,
+            target_columns=args.dataset_target_columns,
+            dataset_cache_mode=args.dataset_cache_mode,
+            dataset_config_hash=args.dataset_config_hash,
+            hf_entity=args.hf_entity,
+            dataset_local_cache_dir=args.dataset_local_cache_dir,
+            dataset_skip_cache=args.dataset_skip_cache,
         )
-        eval_dataset = eval_dataset.select(range(0, min(len(eval_dataset), dataset_config.sanity_check_max_samples)))
-        with accelerator.main_process_first():
-            eval_dataset = dataset_processor.tokenize(eval_dataset)
-            eval_dataset = dataset_processor.filter(eval_dataset)
-        dataset_dict["eval"] = eval_dataset
+        train_dataset = train_dataset.shuffle(seed=args.seed)
+        if len(args.dataset_mixer_eval_list) > 0:
+            eval_dataset = get_cached_dataset_tulu(
+                args.dataset_mixer_eval_list,
+                args.dataset_mixer_eval_list_splits,
+                tc,
+                args.dataset_transform_fn,
+                transform_fn_args,
+                hf_entity=args.hf_entity,
+                dataset_cache_mode=args.dataset_cache_mode,
+                dataset_config_hash=args.dataset_config_eval_hash,
+                dataset_local_cache_dir=args.dataset_local_cache_dir,
+                dataset_skip_cache=args.dataset_skip_cache,
+            )
+            eval_dataset = eval_dataset.shuffle(seed=args.seed)
+    if accelerator.is_main_process:
+        visualize_token(train_dataset[0][CHOSEN_INPUT_IDS_KEY], tokenizer)
+    if args.cache_dataset_only:
+        return
 
-    # some more runtime logging
+    # ------------------------------------------------------------
+    # Runtime setups and quick logging
     if args.total_episodes is None:
         args.total_episodes = args.num_train_epochs * len(train_dataset)
     args.num_training_steps = args.total_episodes // args.batch_size
     args.eval_freq = max(1, args.total_episodes // args.micro_batch_size // args.num_evals)
-    if accelerator.is_main_process:
-        pprint([args, dataset_config, model_config])
-        visualize_token(train_dataset[0][INPUT_IDS_CHOSEN_KEY], tokenizer)
-        if args.with_tracking:
-            # upload the visualized token length
-            dataset_processor.get_token_length_visualization(
-                dataset_dict, save_path=f"runs/{args.run_name}/token_length.png"
-            )
-            wandb.log({"token_length": wandb.Image(f"runs/{args.run_name}/token_length.png")})
 
-    # create the model and optimizer
+    # ------------------------------------------------------------
+    # Create the model and optimizer
     model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
         model_config.model_name_or_path, revision=model_config.model_revision, num_labels=1
     )
-    if args.resize_token_embeddings:  # optimize for tensor core
+    # resize does its own gather
+    embeddings = model.get_input_embeddings()
+    with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
+        embedding_size = embeddings.weight.shape[0]
+    if len(tokenizer) > embedding_size:
+        # pad to multiple for tensor cores.
         model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
     if model_config.gradient_checkpointing:
         model.gradient_checkpointing_enable()
@@ -333,18 +339,21 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         shuffle=True,
         collate_fn=data_collator,
     )
-    eval_dataloader = DataLoader(
-        eval_dataset,
-        batch_size=args.per_device_eval_batch_size,
-        shuffle=False,
-        collate_fn=data_collator,
-    )
+    eval_dataloader = None
+    if len(args.dataset_mixer_eval_list) > 0:
+        eval_dataloader = DataLoader(
+            eval_dataset,
+            batch_size=args.per_device_eval_batch_size,
+            shuffle=False,
+            collate_fn=data_collator,
+        )
 
     # sync random states for DataLoader(shuffle=True) before `accelerator.prepare`
     # see https://gist.github.com/vwxyzjn/2581bff1e48e185e0b85b6dfe1def79c
     torch.manual_seed(args.seed)
     model, optimizer, dataloader = accelerator.prepare(model, optimizer, dataloader)
-    eval_dataloader = accelerator.prepare(eval_dataloader)
+    if eval_dataloader is not None:
+        eval_dataloader = accelerator.prepare(eval_dataloader)
     torch.manual_seed(local_seed)
 
     # set up the metrics and initial states
@@ -364,11 +373,11 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         for data in dataloader:
             episode += args.micro_batch_size
             training_step += 1
-            query_responses = torch.cat((data[INPUT_IDS_CHOSEN_KEY], data[INPUT_IDS_REJECTED_KEY]), dim=0)
+            query_responses = torch.cat((data[CHOSEN_INPUT_IDS_KEY], data[REJECTED_INPUT_IDS_KEY]), dim=0)
             with accelerator.accumulate(model):
                 _, predicted_reward, _ = get_reward(model, query_responses, tokenizer.pad_token_id, 0)
-                chosen_reward = predicted_reward[: data[INPUT_IDS_CHOSEN_KEY].shape[0]]
-                rejected_reward = predicted_reward[data[INPUT_IDS_CHOSEN_KEY].shape[0] :]
+                chosen_reward = predicted_reward[: data[CHOSEN_INPUT_IDS_KEY].shape[0]]
+                rejected_reward = predicted_reward[data[CHOSEN_INPUT_IDS_KEY].shape[0] :]
                 accuracy = (chosen_reward > rejected_reward).float().mean()
                 loss = -F.logsigmoid(chosen_reward - rejected_reward).mean()
                 accelerator.backward(loss)
@@ -407,7 +416,12 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                             writer.add_scalar(key, value, episode)
 
             # (optionally) evaluate the model
-            if args.num_evals > 0 and training_step > 1 and training_step % args.eval_freq == 0:
+            if (
+                args.num_evals > 0
+                and training_step > 1
+                and training_step % args.eval_freq == 0
+                and eval_dataloader is not None
+            ):
                 eval_metrics, table = evaluate(model, eval_dataloader, tokenizer, max_sampled_texts=10)
                 for key in table:
                     table[key] = gather_object(table[key])
@@ -423,13 +437,10 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # save model
     os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
-    original_tokenizer = AutoTokenizer.from_pretrained(
-        model_config.model_name_or_path, revision=model_config.model_revision
-    )
     save_with_accelerate(
         accelerator,
         model,
-        original_tokenizer,
+        tokenizer,
         args.output_dir,
     )
     if args.push_to_hub:
@@ -442,5 +453,5 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParserPlus((Args, DatasetConfig, ModelConfig))
+    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
     main(*parser.parse())

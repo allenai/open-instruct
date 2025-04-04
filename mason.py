@@ -1,19 +1,29 @@
 import argparse
 import re
+import sys
 from typing import List, Dict
 import beaker
 import os
 import secrets
 import string
-import subprocess
+from rich.console import Console
+from rich.text import Text
+import select
 
-is_open_instruct = False
-try:
-    from open_instruct.dataset_transformation import get_commit_hash
-    from open_instruct.utils import download_from_hf, gs_folder_exists, upload_to_gs_bucket
-    is_open_instruct = True
-except ImportError:
-    pass
+console = Console()
+
+
+# ----------------------------------------------------------------------
+# Open Instruct logic
+OPEN_INSTRUCT_COMMANDS = [
+    "open_instruct/finetune.py",
+    "open_instruct/dpo_tune_cache.py",
+    "open_instruct/grpo_fast.py",
+    "open_instruct/grpo_vllm_thread_ray_gtrl.py",
+    "open_instruct/ppo2.py",
+    "open_instruct/ppo_vllm_thread_ray_gtrl.py",
+    "open_instruct/reward_modeling.py",
+]
 
 def parse_beaker_dataset(dataset_str):
     splt = dataset_str.split(":")
@@ -84,7 +94,7 @@ def get_args():
         help="Beaker hostname on which the job could be run.",
         default=None
     )
-    parser.add_argument("--max_retries", type=int, help="Number of retries", default=1)
+    parser.add_argument("--max_retries", type=int, help="Number of retries", default=0)
     parser.add_argument("--budget", type=str, help="Budget to use.", required=True)
     parser.add_argument("--gpus", type=int, help="Number of gpus", default=0)
     parser.add_argument("--num_nodes", type=int, help="Number of nodes", default=1)
@@ -144,6 +154,10 @@ def get_args():
         "--no_auto_dataset_cache", action="store_true", help="If given, don't cache the dataset automatically"
     )
     parser.add_argument(
+        "--auto_output_dir_path", type=str, default="/weka/oe-adapt-default/allennlp/deletable_checkpoint",
+        help="If given, automatically replace the `--output_dir` argument with this path, essentially using it as a prefix"
+    )
+    parser.add_argument(
         "--env",
         type=parse_env_var,
         action="append",
@@ -158,6 +172,11 @@ def get_args():
         help="""Additional secret env variables in the format 'name=value'.
         Can be specified multiple times. Example: --secret MY_VAR=value1 --secret OTHER_VAR=value2""",
         default=[],
+    )
+    parser.add_argument(
+        "--no-host-networking",
+        action="store_true",
+        help="If set, don't use host networking in experiment. Note this will make multi-node jobs error.",
     )
     # Split up the mason args from the Python args.
     mason_args, command_args = parser.parse_known_args()
@@ -477,31 +496,140 @@ def get_datasets(beaker_datasets, cluster: List[str]):
     return res
 
 
-def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami: str, resumable: bool):
-    # Add a check to ensure that the user is using the correct clusters for multi-node jobs
-    if args.num_nodes > 1 and not all(c in INTERCONNECT_CLUSTERS for c in args.cluster):
-        confirmation = False
-        while not confirmation:
-            confirmation = input(f"Interconnect clusters are required for multi-node jobs. Are you sure you want to continue? (y/n)")
-            if confirmation == "y":
-                confirmation = True
-            elif confirmation == "n":
-                raise ValueError(f"Interconnect clusters are required for multi-node jobs; please only use the following clusters: {INTERCONNECT_CLUSTERS}")
-            else:
-                print("Invalid input. Please enter 'y' or 'n'.")
-    if args.image == "ai2/cuda11.8-cudnn8-dev-ubuntu20.04" and any(c in GCP_CLUSTERS for c in args.cluster):
-        raise ValueError("GCP clusters do not have the dev filesystem, please use a proper image")
+def make_internal_command(command: List[str], args: argparse.Namespace, whoami: str, is_external_user: bool) -> str:
+    # pass through WANDB_ENTITY and WANDB_PROJECT
+    if "WANDB_ENTITY" in os.environ:
+        command = [f"WANDB_ENTITY={os.environ['WANDB_ENTITY']}"] + command
+    if "WANDB_PROJECT" in os.environ:
+        command = [f"WANDB_PROJECT={os.environ['WANDB_PROJECT']}"] + command
+    if "WANDB_TAGS" in os.environ:
+        command = [f"WANDB_TAGS={os.environ['WANDB_TAGS']}"] + command
 
-    if is_open_instruct:
+    is_open_instruct_training = any(cmd in command for cmd in OPEN_INSTRUCT_COMMANDS)
+    if is_open_instruct_training:
+        from open_instruct.dataset_transformation import get_commit_hash
+        from open_instruct.utils import download_from_hf, gs_folder_exists, upload_to_gs_bucket
+        # HACK: Cache dataset logic:
+        # Here we basically try to run the tokenization full_command locally before running it on beaker
+        # We could in theory submit a cpu only job to beaker to do this, but that requires setting up
+        # dependency jobs somehow. Since tokenization is like ~5 minutes, we can just run it locally.
+        # Once it's cached, we don't need to cache it again.
+        def find_list_idx(lst: List[str], item: str):
+            for i in range(len(lst)):
+                if item == lst[i]:
+                    return i
+            return -1
+
+        # Save the runtime `whoami` calls
+        command.append("--hf_entity")
+        command.append("allenai")
+        command.append("--wandb_entity")
+        command.append("ai2-llm")
+        
+        dataset_cache_paths = []
+        dataset_config_hashes = []
+        if not args.no_auto_dataset_cache:
+            for file in OPEN_INSTRUCT_COMMANDS:
+                # add cache_dataset_only to the command
+                idx = find_list_idx(command, file)
+                if idx != -1:
+                    # then try executing the same command with 
+                    caching_command = command.copy()
+                    if "--with_tracking" in caching_command:
+                        caching_command.remove("--with_tracking")
+                    caching_command = "python " + " ".join(caching_command[idx:]) + " --cache_dataset_only"
+                    console.log(f"📦📦📦 Running the caching command with `--cache_dataset_only`")
+                    import subprocess
+                    # Use Popen to get real-time output while also capturing it
+                    process = subprocess.Popen(
+                        caching_command, 
+                        shell=True, 
+                        stdout=subprocess.PIPE, 
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        bufsize=1
+                    )
+                    
+                    stdout_data, stderr_data = [], []
+                    
+                    # Set up select to monitor both stdout and stderr
+                    streams = [process.stdout, process.stderr]
+                    while True:
+                        # Wait for output on either stream
+                        reads = select.select(streams, [], [])[0]
+                        
+                        done = True
+                        for stream in reads:
+                            line = stream.readline()
+                            if line:
+                                done = False
+                                is_stdout = stream == process.stdout
+                                print(line.rstrip(), file=sys.stdout if is_stdout else sys.stderr)
+                                if is_stdout:
+                                    stdout_data.append(line)
+                                else:
+                                    stderr_data.append(line)
+                        
+                        if done and process.poll() is not None:
+                            break
+                            
+                    result = type('SubprocessResult', (), {
+                        'returncode': process.returncode,
+                        'stdout': ''.join(stdout_data),
+                        'stderr': ''.join(stderr_data)
+                    })
+                    stdout = result.stdout
+                    # Extract the cached dataset path from stdout if it exists
+                    for line in stdout.splitlines():
+                        if "✅ Found cached dataset at" in line:
+                            dataset_cache_path = line.split("✅ Found cached dataset at")[1].strip()
+                            dataset_config_hash = dataset_cache_path.split("/")[-1]
+                            console.log(f"📦 Found cached dataset at: {dataset_cache_path}")
+                            console.log(f"📦 Found cached dataset config hash: {dataset_config_hash}")
+                            dataset_cache_paths.append(dataset_cache_path)
+                            dataset_config_hashes.append(dataset_config_hash)
+                    stderr = result.stderr
+                    return_code = result.returncode
+                    console.log("✅✅✅ Finished running the caching command")
+
+
+        # For Weka clusters, we need to override the output_dir parameter to make auto-evaluation work
+        # If the output_dir is already set to a path in /weka/, we'll keep that path
+        # Otherwise, we'll set a default path in the user's directory on Weka
         if any(c in WEKA_CLUSTERS for c in args.cluster):
-            # add output_dir to the command
-            command.append("--output_dir")
-            command.append(f"/weka/oe-adapt-default/allennlp/deletable_checkpoint/{whoami}/")
+            if len(args.auto_output_dir_path) > 0:
+                need_to_override_output_dir = True
+                for idx, cmd in enumerate(command):
+                    if cmd == "--output_dir":
+                        if "/weka/" in command[idx + 1]:
+                            need_to_override_output_dir = False
+                            break
+                if need_to_override_output_dir and is_open_instruct_training and not is_external_user:
+                    new_output_dir = f"{args.auto_output_dir_path}/{whoami}/"
+                    console.log(f"🔍🔍🔍 Automatically overriding the `--output_dir` argument to be in `{new_output_dir}`")
+                    command.append("--output_dir")
+                    command.append(new_output_dir)
+            else:
+                no_eval_commands = [
+                    ["--try_launch_beaker_eval_jobs", "False"],
+                    ["--try_launch_beaker_eval_jobs_on_weka", "False"],
+                    ["--no_try_launch_beaker_eval_jobs"],
+                    ["--no_try_launch_beaker_eval_jobs_on_weka"],
+                ]
+                no_eval_concat_commands = [" ".join(cmd) for cmd in no_eval_commands]
+                no_eval_concat_command_exists = any(cmd in command for cmd in no_eval_concat_commands)
+                if not no_eval_concat_command_exists:
+                    raise ValueError("To auto-evaluation is turned on by default, to make sure it works, you must:\n"
+                                    "1. run mason with`--auto_output_dir_path /weka/...`, or\n"
+                                    "2. in the training command, disable auto-evaluation with `--no_try_launch_beaker_eval_jobs`, or\n"
+                                    "3. in the training command, use a `--output_dir` that starts with `/weka/`")
 
-        # In gcp, we save the model to a gs bucket first
+        # For GCP clusters, since shared storage is slow, we optimize model loading by:
         if any(c in GCP_CLUSTERS for c in args.cluster):
-            # Replace the model_name_or_path with a downloaded path from the gs bucket
-            # extracts the `model_name_or_path` from the command
+            # 1. First downloading the model from HuggingFace to a local path
+            # 2. Uploading it to a Google Storage bucket (if not already there)
+            # 3. Then downloading it from the bucket to the compute node
+            # 4. Finally, replacing the original --model_name_or_path argument with the local path
             model_name_or_path = None
             for idx, cmd in enumerate(command):
                 if cmd == "--model_name_or_path":
@@ -531,9 +659,11 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
                 "-o", f"GSUtil:sliced_object_download_threshold=150",
                 "-m",
                 "cp", "-r", gs_saved_path, download_path_without_last_folder,
+                "&&", "ls", download_path_without_last_folder,
+                "&&", "ls", download_path,
                 "&&",
             ]
-            command = gs_download_command + command
+
             command.append("--gs_bucket_path")
             command.append(f"gs://ai2-llm/post-training/")
 
@@ -547,6 +677,31 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
                     command[idx + 1] = "main"
                     break
 
+            # Save dataset to GCS
+            if len(dataset_cache_paths) > 0:
+                for cidx, (dataset_cache_path, dataset_config_hash) in enumerate(zip(dataset_cache_paths, dataset_config_hashes)):
+                    gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_datasets/{dataset_cache_path}"
+                    gs_folder = gs_folder_exists(gs_saved_path) # race condition exists, but it's fine since we are launching mason sequentially
+                    if not gs_folder:
+                        upload_to_gs_bucket(dataset_cache_path, gs_saved_path)
+                    dataset_cache_path_without_last_folder = dataset_cache_path.rsplit("/", 1)[0]
+                    gs_download_command += [
+                        "mkdir", "-p", dataset_cache_path_without_last_folder,
+                        "&&",
+                        "gsutil",
+                        "cp", "-r", gs_saved_path, dataset_cache_path_without_last_folder,
+                        "&&", "ls", dataset_cache_path_without_last_folder,
+                        "&&", "ls", dataset_cache_path,
+                        "&&",
+                    ]
+                    if cidx == 0:
+                        command.append("--dataset_config_hash")
+                        command.append(dataset_config_hash)
+                    elif cidx == 1:
+                        command.append("--dataset_config_eval_hash")
+                        command.append(dataset_config_hash)
+            command = gs_download_command + command
+
     # special logic to deal with escape like
     # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
     # we need to wrap the json string with single quote
@@ -554,36 +709,9 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
         if "{" in command[idx]:
             command[idx] = "'" + command[idx] + "'"
     full_command = command
-    command = ['/bin/bash', '-c']
-    setup_commands = (
-        "echo 'Running on host: $BEAKER_REPLICA_RANK' && "
-        "echo 'Running on host: $BEAKER_LEADER_REPLICA_HOSTNAME' && "
-        "git config --global safe.directory '*' && " # fix the permission issue with git
-        "umask 000 && " # fix the permission issue with the cache folder
-    )
-    
-    # HACK: Cache dataset logic:
-    # Here we basically try to run the tokenization full_command locally before running it on beaker
-    # We could in theory submit a cpu only job to beaker to do this, but that requires setting up
-    # dependency jobs somehow. Since tokenization is like ~5 minutes, we can just run it locally.
-    # Once it's cached, we don't need to cache it again.
-    def find_list_idx(lst: List[str], item: str):
-        for i in range(len(lst)):
-            if item == lst[i]:
-                return i
-        return -1
-    if not args.no_auto_dataset_cache:
-        for file in ["open_instruct/finetune.py", "open_instruct/dpo_tune_cache.py"]:
-            idx = find_list_idx(full_command, file)
-            if idx != -1:
-                # then try executing the same full_command with 
-                caching_command = "python " + " ".join(full_command[idx:]) + " --cache_dataset_only"
-                print(f"📦📦📦 Running the caching full_command: {caching_command}")
-                os.system(caching_command)
-                print("✅✅✅ Finished running the caching full_command")
-
+    setup_commands = ""
     if not args.pure_docker_mode:
-        setup_commands += f"cd {os.getcwd()} && "
+        setup_commands = f"cd {os.getcwd()} && "
 
     join_full_command = " ".join(full_command)
     # override accelerate call
@@ -600,7 +728,24 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
             join_full_command
         )
     full_command = setup_commands + join_full_command
-    print(f"{full_command=}")
+    console.log(f"🔍🔍🔍 Full command")
+    print(full_command)
+    return full_command
+
+def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami: str, resumable: bool):
+    # Add a check to ensure that the user is using the correct clusters for multi-node jobs
+    if args.num_nodes > 1 and not all(c in INTERCONNECT_CLUSTERS for c in args.cluster):
+        confirmation = False
+        while not confirmation:
+            confirmation = input(f"Interconnect clusters are required for multi-node jobs. Are you sure you want to continue? (y/n)")
+            if confirmation == "y":
+                confirmation = True
+            elif confirmation == "n":
+                raise ValueError(f"Interconnect clusters are required for multi-node jobs; please only use the following clusters: {INTERCONNECT_CLUSTERS}")
+            else:
+                print("Invalid input. Please enter 'y' or 'n'.")
+    if args.image == "ai2/cuda11.8-cudnn8-dev-ubuntu20.04" and any(c in GCP_CLUSTERS for c in args.cluster):
+        raise ValueError("GCP clusters do not have the dev filesystem, please use a proper image")
 
     if args.hostname is not None:
         constraints = beaker.Constraints(hostname=args.hostname)
@@ -609,7 +754,7 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
     spec = beaker.TaskSpec(
         name=f"{args.task_name}__{i}",
         image=beaker.ImageSource(beaker=args.image),
-        command=command,
+        command=['/bin/bash', '-c'],
         arguments=[full_command],
         result=beaker.ResultSpec(path="/output"),
         datasets=get_datasets(args.beaker_datasets, args.cluster),
@@ -623,9 +768,12 @@ def make_task_spec(args, command: List[str], i: int, beaker_secrets: str, whoami
     )
     if args.num_nodes > 1:
         spec.leader_selection = True
-        spec.host_networking = True
         spec.propagate_failure = True
         spec.propagate_preemption = True
+    if args.no_host_networking:
+        spec.host_networking = False
+    else:
+        spec.host_networking = True
 
     return spec
 
@@ -634,30 +782,42 @@ def main():
     args, commands = get_args()
     # If the user is not in Ai2, we run the command as is
     config_path = os.path.expanduser("~/.beaker/config.yml")
-    if not os.path.exists(config_path) and "BEAKER_TOKEN" not in os.environ:
-        print("Beaker credentials not found; running the command as is")
-        direct_commands = " ".join(commands[0])
-        # hack remove ai2 specific commands
-        direct_commands = direct_commands.replace("source configs/beaker_configs/ray_node_setup.sh &&", "")
-        os.system(direct_commands)
-        return
-    
-    if args.workspace:
-        beaker_client = beaker.Beaker.from_env(default_workspace=args.workspace)
+    is_external_user = not os.path.exists(config_path) and "BEAKER_TOKEN" not in os.environ
+    if is_external_user:
+        whoami = "external_user"
+        beaker_secrets = []
     else:
-        beaker_client = beaker.Beaker.from_env()
+        if args.workspace:
+            beaker_client = beaker.Beaker.from_env(default_workspace=args.workspace)
+        else:
+            beaker_client = beaker.Beaker.from_env()
+        beaker_secrets = [secret.name for secret in beaker_client.workspace.secrets()]
+        whoami = beaker_client.account.whoami().name
 
-    beaker_secrets = [secret.name for secret in beaker_client.workspace.secrets()]
-    whoami = beaker_client.account.whoami().name
+    full_commands = [make_internal_command(command, args, whoami, is_external_user) for command in commands]
+    if is_external_user:
+        console.rule("[bold red]Non-Ai2 User Detected[/bold red]")
+        console.print(Text(
+            (
+                "👋 Hi external user! The following command will be executed in our internal server; feel free to modify it to your needs. "
+                "(For example, you might need to replace `\"$BEAKER_LEADER_REPLICA_HOSTNAME\"` with your own hostname)"
+            ),
+            style="bold",
+        ))
+    for idx, full_command in enumerate(full_commands):
+        console.rule(f"[bold blue]Command {idx+1}[/bold blue]")
+        console.print(Text(full_command))
+    if is_external_user:
+        return
     experiment_spec = beaker.ExperimentSpec(
         description=args.description,
-        tasks=[make_task_spec(args, command, i, beaker_secrets, whoami, args.resumable) for i, command in enumerate(commands)],
+        tasks=[make_task_spec(args, full_command, i, beaker_secrets, whoami, args.resumable) for i, full_command in enumerate(full_commands)],
         budget=args.budget,
         retry=beaker.RetrySpec(allowed_task_retries=args.max_retries)
     )
 
     exp = beaker_client.experiment.create(spec=experiment_spec)
-    print(f"Kicked off Beaker job. https://beaker.org/ex/{exp.id}")
+    console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.id}")
 
 
 if __name__ == "__main__":
