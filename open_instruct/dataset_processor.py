@@ -53,6 +53,7 @@ INPUT_IDS_PROMPT_KEY = "input_ids_prompt"
 ATTENTION_MASK_PROMPT_KEY = "attention_mask_prompt"
 GROUND_TRUTHS_KEY = "ground_truth"
 DATASET_SOURCE_KEY = "dataset"
+MESSAGES_KEY = "messages"
 
 # NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
 # also we don't really need `ATTENTION_MASK_CHOSEN_KEY` and `ATTENTION_MASK_REJECTED_KEY`
@@ -601,10 +602,14 @@ class SimpleGenerateCollatorWithGroundTruth:
         # datasets
         datasets = [x[DATASET_SOURCE_KEY] for x in batch]
 
+        # messages
+        messages = [x[MESSAGES_KEY] for x in batch]
+
         return {
             INPUT_IDS_PROMPT_KEY: padded_sequences,
             GROUND_TRUTHS_KEY: ground_truths,
             DATASET_SOURCE_KEY: datasets,
+            MESSAGES_KEY: messages,
         }
 
 
