@@ -237,7 +237,6 @@ def create_vllm_engines(
                 distributed_executor_backend=distributed_executor_backend,
                 enable_prefix_caching=enable_prefix_caching,
                 max_model_len=max_model_len,
-                max_output_len=max_output_len,
                 gpu_memory_utilization=vllm_gpu_memory_utilization,
                 bundle_indices=bundle_indices,
                 num_gpus=0.2 if use_hybrid_engine else 1,
