@@ -73,6 +73,7 @@ class LLMSearchRayActor:
 
         self.llm = LLM(*args, **kwargs)
         self.tokenizer = self.llm.get_tokenizer()
+        self.max_context_length =   kwargs.get("max_context_length", 8192)
 
     def generate(
         self,
