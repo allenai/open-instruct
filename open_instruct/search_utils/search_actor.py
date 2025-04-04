@@ -17,7 +17,6 @@ import ray
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Any
 
-from open_instruct.vllm_utils2 import WorkerWrap
 from open_instruct.search_utils.massive_ds import get_snippets_for_query
 
 
