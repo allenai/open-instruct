@@ -51,6 +51,7 @@ class CompletionList:
 class LLMSearchRayActor:
     def __init__(self, *args, bundle_indices: list = None, **kwargs):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
+        self.max_context_length =   kwargs.pop("max_context_length", 8192)
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
             # stop ray from manipulating *_VISIBLE_DEVICES
@@ -73,7 +74,6 @@ class LLMSearchRayActor:
 
         self.llm = LLM(*args, **kwargs)
         self.tokenizer = self.llm.get_tokenizer()
-        self.max_context_length =   kwargs.get("max_context_length", 8192)
 
     def generate(
         self,
