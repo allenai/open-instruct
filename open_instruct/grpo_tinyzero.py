@@ -315,25 +315,17 @@ def catch_ray_errors():
     and bubble them up to the terminal output.
     """
     try:
-        error_occured = False  # noqa
         yield
     except RayTaskError as e:
-        error_occurred = True
         # Get the original error from the Ray task
         print(f"Ray task failed with error: {e}")
         if e.__cause__:
             print(f"Original error: {e.__cause__}")
         raise
     except Exception as e:
-        error_occurred = True
         print(f"Unexpected error: {e}")
         print(traceback.format_exc())
         raise
-    # finally:
-    #     # Only shutdown Ray if an error was caught
-    #     if error_occurred and ray.is_initialized():
-    #         print("Error detected - shutting down Ray")
-    #         ray.shutdown()
 
 
 def preprocess_example(

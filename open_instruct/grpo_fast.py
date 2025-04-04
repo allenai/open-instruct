@@ -786,7 +786,7 @@ class PolicyTrainerRayProcess(RayProcess):
         to_device_inplace(collated_response_masks, self.device)
         accumulation_steps = len(collated_query_responses) // (num_mini_batches)
 
-        if self.args.beta > 0 and args.no_ref:
+        if self.args.beta > 0 and not args.no_ref:
             if self.args.offload_ref:
                 with Timer("[Training Processes] Move Ref to GPU", noop=self.rank != 0):
                     self.ref_policy.to(self.device)
