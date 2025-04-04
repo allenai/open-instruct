@@ -1159,6 +1159,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         )
                     # Response Processing 2. run reward model on the truncated responses
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
+                    print(data)
                     messages = data["messages"]
                     messages = messages + messages
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
