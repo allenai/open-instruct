@@ -1162,9 +1162,27 @@ class PolicyTrainerRayProcess(RayProcess):
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
                     score = torch.zeros(query.shape[0], device=query.device)
                     if args.reward_model_multiplier:
+                        response_txts = tokenizer.batch_decode(postprocessed_response, skip_special_tokens=True)
+                        print(response_txts)
+                        reward_model_tokens = []
+                        for j in range(i, i + args.local_rollout_forward_batch_size):
+                            messages[j][-1]["content"] = response_txts[j - i]
+                            reward_model_tokens.append(reward_model_tokenizer.apply_chat_template(messages[j]))
+
+                        # right pad the reward model tokens
+                        max_reward_model_len = max(len(item) for item in reward_model_tokens)
+                        reward_model_tokens = [
+                            item + [reward_model_tokenizer.pad_token_id] * (max_reward_model_len - len(item))
+                            for item in reward_model_tokens
+                        ]
+                        reward_model_tokens = torch.tensor(reward_model_tokens, device=device)
                         _, score, _ = get_reward(
-                            self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
+                            reward_model, reward_model_tokens, reward_model_tokenizer.pad_token_id, 0
                         )
+                        print("rmodel score", score)
+                        # _, score, _ = get_reward(
+                        #     self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
+                        # )
                         score *= args.reward_model_multiplier
                     if args.apply_verifiable_reward:
                         # we need to batch the gt to match query.
