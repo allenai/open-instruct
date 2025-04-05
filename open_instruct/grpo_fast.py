@@ -826,6 +826,7 @@ class PolicyTrainerRayProcess(RayProcess):
             kl4_stats = torch.zeros(len(collated_query_responses))
             pg_clipfrac_stats = torch.zeros(len(collated_query_responses))
             pg_loss_stats = torch.zeros(len(collated_query_responses))
+            kl_loss_stats = torch.zeros(len(collated_query_responses))
             loss_stats = torch.zeros(len(collated_query_responses))
             ratio_stats = torch.zeros(len(collated_query_responses))
             for epoch_idx in range(args.num_epochs):
@@ -890,6 +891,16 @@ class PolicyTrainerRayProcess(RayProcess):
                         kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, args.masked_mean_axis).float()
                         kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, args.masked_mean_axis).float()
                         kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, args.masked_mean_axis).float()
+
+                        if args.kl_estimator == "kl1":
+                            kl_loss_stats[i] = kl1_stats[i] * args.beta
+                        elif args.kl_estimator == "kl2":
+                            kl_loss_stats[i] = kl2_stats[i] * args.beta
+                        elif args.kl_estimator == "kl3":
+                            kl_loss_stats[i] = kl3_stats[i] * args.beta
+                        elif args.kl_estimator == "kl4":
+                            kl_loss_stats[i] = kl4_stats[i] * args.beta
+
                         pg_clipfrac_stats[i] = masked_mean(
                             (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
                         )
@@ -903,7 +914,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("objective/kl3_avg", kl3_stats.mean())
                 self.local_metrics.add("objective/kl4_avg", kl4_stats.mean())
                 self.local_metrics.add("loss/policy_avg", pg_loss_stats.mean())
-                self.local_metrics.add("loss/policy_avg", loss_stats.mean())
+                self.local_metrics.add("loss/kl_avg", kl_loss_stats.mean())
+                self.local_metrics.add("loss/total_avg", loss_stats.mean())
                 self.local_metrics.add("policy/clipfrac_avg", pg_clipfrac_stats.mean())
                 self.local_metrics.add("val/ratio", ratio_stats.mean())
                 self.local_metrics.add("val/ratio_var", ratio_stats.var())
@@ -1055,7 +1067,7 @@ def vllm_generate_thread(
     evaluation_inference_results_Q: Queue,
     eval_freq: int,
     resume_training_step: int = 1,
-    sleep_mode: bool = False,
+    vllm_sleep_level: int = 0,
 ):
     def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
         # Split queries between engines
@@ -1081,7 +1093,7 @@ def vllm_generate_thread(
             break
         _, g_queries_list = items
 
-        if sleep_mode:
+        if vllm_sleep_level > 0:
             batch_vllm_engine_call(vllm_engines, "wake_up", rank_0_only=False)
 
         with Timer("🔥 Generation time"):
@@ -1095,8 +1107,8 @@ def vllm_generate_thread(
                 response_ids, finish_reasons = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
                 evaluation_inference_results_Q.put((response_ids, finish_reasons))
 
-        if sleep_mode:
-            batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)
+        if vllm_sleep_level > 0:
+            batch_vllm_engine_call(vllm_engines, "sleep", level=vllm_sleep_level, rank_0_only=False)
 
 
 def data_preparation_thread(

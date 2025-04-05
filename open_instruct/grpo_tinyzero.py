@@ -218,7 +218,7 @@ class Args:
     # Ray
     single_gpu_mode: bool = False
     """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
-    sleep_mode: bool = False
+    vllm_sleep_level: int = 0
     """Potentially save memory by sleeping LLM between calls"""
     offload_ref: bool = False
     """Offload to cpu ref during generation"""
@@ -297,7 +297,7 @@ class Args:
                     f"You're setting vllm gpu mem utilization quite high ({self.vllm_gpu_memory_utilization}) for single gpu mode"
                 )
             assert self.vllm_sync_backend == "gloo", "Single GPU requires vllm_sync_backend=gloo"
-        if self.sleep_mode:
+        if self.vllm_sleep_level > 0:
             assert self.single_gpu_mode, "sleep mode only necessary for single GPU"
         assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
         assert (
@@ -533,7 +533,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
-        vllm_enable_sleep=args.sleep_mode,
+        vllm_enable_sleep=args.vllm_sleep_level > 0,
     )
     ray.get(inits)
     logger.info("======== ✅ all models and vLLM engines initialized =========")
@@ -591,7 +591,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             evaluation_inference_results_Q,
             args.eval_freq,
             resume_training_step,
-            args.sleep_mode,
+            args.vllm_sleep_level,
         ),
     )
     thread.start()
