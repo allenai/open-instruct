@@ -1204,7 +1204,6 @@ class PolicyTrainerRayProcess(RayProcess):
                             messages[j].append({"role": "assistant", "content": response_txts[j - i]})
                             print(messages[j])
                             reward_model_tokens.append(self.reward_model_tokenizer.apply_chat_template(messages[j]))
-                        sys.exit(0)
                         # right pad the reward model tokens
                         max_reward_model_len = max(len(item) for item in reward_model_tokens)
                         reward_model_tokens = [
