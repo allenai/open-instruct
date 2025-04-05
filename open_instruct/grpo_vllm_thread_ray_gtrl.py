@@ -1186,7 +1186,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         for j in range(i, i + args.local_rollout_forward_batch_size):
                             #messages[j][-1]["content"] = response_txts[j - i]
                             messages[j].append({"role": "assistant", "content": response_txts[j - i]})
-                            print(messages[j])
                             reward_model_tokens.append(self.reward_model_tokenizer.apply_chat_template(messages[j]))
                         # right pad the reward model tokens
                         max_reward_model_len = max(len(item) for item in reward_model_tokens)
@@ -1195,14 +1194,12 @@ class PolicyTrainerRayProcess(RayProcess):
                             for item in reward_model_tokens
                         ]
                         print(reward_model_tokens)
-                        print(len(reward_model_tokens))
-                        print(len(reward_model_tokens[0]))
+                        print("reward_model_tokens "+len(reward_model_tokens))
+                        print("kukaracha "+ len(reward_model_tokens[0]))
                         reward_model_tokens = torch.tensor(reward_model_tokens, device=device)
                         _, score, _ = get_reward(
                             self.reward_model, reward_model_tokens, self.reward_model_tokenizer.pad_token_id, 0
                         )
-                        print("rmodel score", score)
-                        sys.exit(0)
                         # _, score, _ = get_reward(
                         #     self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                         # )
