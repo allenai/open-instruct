@@ -1154,7 +1154,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 messages = data["messages"]
                 print("aaaa")
                 print(messages)
-                messages = sum([], [messages for _ in range(args.num_completions_per_prompt)])
+                messages = sum([], [messages for _ in range(args.number_samples_per_prompt)])
                 print("bbbb")
                 print(messages)
                 #messages = messages + messages
