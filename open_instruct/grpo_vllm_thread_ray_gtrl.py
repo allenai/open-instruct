@@ -1152,7 +1152,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         soft_format_reward_func(decoded_response, args.r1_style_format_reward), device=device
                     )
                 messages = data["messages"]
-                messages = sum([], [messages for _ in range(args.number_samples_per_prompt)])
+                #messages = sum([], [messages for _ in range(args.number_samples_per_prompt)])
                 #messages = messages + messages
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
                     query = queries[i : i + args.local_rollout_forward_batch_size]
