@@ -635,7 +635,7 @@ class RayProcess:
 @ray.remote(num_gpus=1)
 class PolicyTrainerRayProcess(RayProcess):
     def from_pretrained(
-        self, args: Args, model_config: ModelConfig, beaker_config: BeakerRuntimeConfig, wandb_url: str
+        self, args: Args, model_config: ModelConfig, beaker_config: BeakerRuntimeConfig, wandb_url: str, tokenizer: PreTrainedTokenizer
     ):
         self.args = args
         self.model_config = model_config
@@ -773,7 +773,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
             # if reward model does not have a chat template, use the same as the policy model
             if self.reward_model_tokenizer.chat_template is None:
-                self.reward_model_tokenizer.chat_template = self.tokenizer.chat_template
+                self.reward_model_tokenizer.chat_template = tokenizer.chat_template
 
         assert (
             args.reward_model_multiplier or args.apply_verifiable_reward
@@ -1752,7 +1752,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     )
     wandb_url = wandb.run.get_url() if args.with_tracking else None
     inits.extend(
-        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url) for model in policy_group.models
+        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer) for model in policy_group.models
     )
     max_len = args.max_prompt_token_length + args.response_length
     vllm_engines = create_vllm_engines(
