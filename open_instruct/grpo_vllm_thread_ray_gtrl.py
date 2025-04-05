@@ -1187,6 +1187,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         print(args.local_rollout_forward_batch_size)
                         print(i)
                         print(len(messages))
+                        print(messages)
                         print(len(response_txts))
                         for j in range(i, i + args.local_rollout_forward_batch_size):
                             messages[j][-1]["content"] = response_txts[j - i]
