@@ -1185,6 +1185,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         reward_model_tokens = []
                         for j in range(i, i + args.local_rollout_forward_batch_size):
                             print("j"+str(j))
+                            print("i"+str(i))
+                            print(response_txts)
                             #messages[j][-1]["content"] = response_txts[j - i]
                             messages[j].append({"role": "assistant", "content": response_txts[j - i]})
                             print(messages[j])
