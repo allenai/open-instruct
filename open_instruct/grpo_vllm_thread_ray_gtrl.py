@@ -1151,6 +1151,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     format_scores = torch.tensor(
                         soft_format_reward_func(decoded_response, args.r1_style_format_reward), device=device
                     )
+                messages = data["messages"]
+                messages = messages + messages
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
                     query = queries[i : i + args.local_rollout_forward_batch_size]
                     query_response = query_responses[i : i + args.local_rollout_forward_batch_size]
@@ -1175,8 +1177,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         )
                     # Response Processing 2. run reward model on the truncated responses
                     #postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
-                    messages = data["messages"]
-                    messages = messages + messages
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
                     score = torch.zeros(query.shape[0], device=query.device)
                     if args.reward_model_multiplier:
@@ -1190,7 +1190,12 @@ class PolicyTrainerRayProcess(RayProcess):
                         print(messages)
                         print(len(response_txts))
                         for j in range(i, i + args.local_rollout_forward_batch_size):
-                            messages[j][-1]["content"] = response_txts[j - i]
+                            print("inside")
+                            print(j)
+                            print(j-i)
+                            #messages[j][-1]["content"] = response_txts[j - i]
+                            messages[j].append({"role": "assistant", "content": response_txts[j - i]})
+                            print(messages[j])
                             reward_model_tokens.append(self.reward_model_tokenizer.apply_chat_template(messages[j]))
 
                         # right pad the reward model tokens
