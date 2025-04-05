@@ -1152,9 +1152,16 @@ class PolicyTrainerRayProcess(RayProcess):
                         soft_format_reward_func(decoded_response, args.r1_style_format_reward), device=device
                     )
                 messages = data["messages"]
-                messages = messages + messages
+                print("aaaa")
+                print(messages)
+                messages = sum([], [messages for _ in range(args.num_completions_per_prompt)])
+                print("bbbb")
+                print(messages)
+                #messages = messages + messages
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
                     query = queries[i : i + args.local_rollout_forward_batch_size]
+                    print("query", query)
+                    print(len(query))
                     query_response = query_responses[i : i + args.local_rollout_forward_batch_size]
                     response = query_response[:, context_length:]
 
@@ -1197,7 +1204,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             messages[j].append({"role": "assistant", "content": response_txts[j - i]})
                             print(messages[j])
                             reward_model_tokens.append(self.reward_model_tokenizer.apply_chat_template(messages[j]))
-
+                        sys.exit(0)
                         # right pad the reward model tokens
                         max_reward_model_len = max(len(item) for item in reward_model_tokens)
                         reward_model_tokens = [
