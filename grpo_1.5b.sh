@@ -19,8 +19,8 @@ uv run open_instruct/grpo_tinyzero.py \
     --response_length 1024 \
     --pack_length 4096 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 16 \
-    --num_samples_per_prompt_rollout 4 \
+    --num_unique_prompts_rollout 8 \
+    --num_samples_per_prompt_rollout 8 \
     --total_episodes 128000 \
     --model_name_or_path Qwen/Qwen2.5-1.5B \
     --base_prompt \
@@ -30,7 +30,7 @@ uv run open_instruct/grpo_tinyzero.py \
     --apply_verifiable_reward \
     --verification_reward 0.9 \
     --non_stop_penalty False \
-    --temperature 0.7 \
+    --temperature 1.0 \
     --learning_rate 1e-6 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
