@@ -773,7 +773,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
             # if reward model does not have a chat template, use the same as the policy model
             if self.reward_model_tokenizer.chat_template is None:
-                self.reward_model_tokenizer.chat_template = tokenizer.chat_template
+                self.reward_model_tokenizer.chat_template = self.tokenizer.chat_template
 
         assert (
             args.reward_model_multiplier or args.apply_verifiable_reward
