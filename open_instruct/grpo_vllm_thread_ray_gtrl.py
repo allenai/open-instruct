@@ -1114,11 +1114,12 @@ class PolicyTrainerRayProcess(RayProcess):
             torch.cuda.empty_cache()
             # if we generate multiple samples per prompt, we need to repeat the queries and ground truths
             # to match the vllm outputs.
+            messages = data["messages"]
             if args.number_samples_per_prompt > 1:
                 queries = queries.repeat_interleave(args.number_samples_per_prompt, dim=0)
                 ground_truths = [gt for gt in ground_truths for _ in range(args.number_samples_per_prompt)]
                 datasets = [ds for ds in datasets for _ in range(args.number_samples_per_prompt)]
-
+                messages = [msg for msg in messages for _ in range(args.number_samples_per_prompt)]
             training_time_start = time.time()
             with torch.no_grad():
                 context_length = queries.shape[1]
@@ -1151,7 +1152,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     format_scores = torch.tensor(
                         soft_format_reward_func(decoded_response, args.r1_style_format_reward), device=device
                     )
-                messages = data["messages"]
                 #messages = sum([], [messages for _ in range(args.number_samples_per_prompt)])
                 #messages = messages + messages
                 print(queries[:5])
