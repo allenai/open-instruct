@@ -1155,7 +1155,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 #messages = sum([], [messages for _ in range(args.number_samples_per_prompt)])
                 #messages = messages + messages
                 print(queries[:5])
-                print(query_response[:5])
+                print(query_responses[:5])
                 print(queries.shape)
                 blabla = tokenizer.batch_decode(query_responses[:5], skip_special_tokens=True)
                 print("blabla "+str(blabla))
