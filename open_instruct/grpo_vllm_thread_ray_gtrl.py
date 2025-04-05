@@ -758,6 +758,20 @@ class PolicyTrainerRayProcess(RayProcess):
             ds_config["train_batch_size"] = args.mini_batch_size
             self.reward_model, *_ = deepspeed.initialize(model=self.reward_model, config=ds_config)
             self.reward_model.eval()
+            self.reward_model_tokenizer = AutoTokenizer.from_pretrained(
+                args.reward_model_path, revision=args.reward_model_revision, padding_side="right"
+            )
+            reward_model_config = AutoConfig.from_pretrained(
+                args.reward_model_path, revision=args.reward_model_revision, num_labels=1
+            )
+            if reward_model_config.architectures == "LlamaForCausalLM" and reward_model_config.bos_token_id == 128000:
+                self.reward_model_tokenizer.pad_token_id = 128002
+            else:
+                self.reward_model_tokenizer.add_special_tokens({"pad_token": "[PAD]"})
+
+            # if reward model does not have a chat template, use the same as the policy model
+            if self.reward_model_tokenizer.chat_template is None:
+                self.reward_model_tokenizer.chat_template = tokenizer.chat_template
 
         assert (
             args.reward_model_multiplier or args.apply_verifiable_reward
@@ -1170,17 +1184,17 @@ class PolicyTrainerRayProcess(RayProcess):
                         reward_model_tokens = []
                         for j in range(i, i + args.local_rollout_forward_batch_size):
                             messages[j][-1]["content"] = response_txts[j - i]
-                            reward_model_tokens.append(reward_model_tokenizer.apply_chat_template(messages[j]))
+                            reward_model_tokens.append(self.reward_model_tokenizer.apply_chat_template(messages[j]))
 
                         # right pad the reward model tokens
                         max_reward_model_len = max(len(item) for item in reward_model_tokens)
                         reward_model_tokens = [
-                            item + [reward_model_tokenizer.pad_token_id] * (max_reward_model_len - len(item))
+                            item + [self.reward_model_tokenizer.pad_token_id] * (max_reward_model_len - len(item))
                             for item in reward_model_tokens
                         ]
                         reward_model_tokens = torch.tensor(reward_model_tokens, device=device)
                         _, score, _ = get_reward(
-                            reward_model, reward_model_tokens, reward_model_tokenizer.pad_token_id, 0
+                            self.reward_model, reward_model_tokens, self.reward_model_tokenizer.pad_token_id, 0
                         )
                         print("rmodel score", score)
                         # _, score, _ = get_reward(
