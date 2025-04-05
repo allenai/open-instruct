@@ -1203,11 +1203,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         print(reward_model_tokens)
                         print("reward_model_tokensfinal "+str(len(reward_model_tokens)))
                         print("kukaracha "+ str(len(reward_model_tokens[0])))
-                        print("wohooo "+ str(len(reward_model_tokens[0][0])))
                         reward_model_tokens = torch.tensor(reward_model_tokens, device=device)
                         _, score, _ = get_reward(
                             self.reward_model, reward_model_tokens, self.reward_model_tokenizer.pad_token_id, 0
                         )
+                        print("rewaaaard: "+str(score))
                         # _, score, _ = get_reward(
                         #     self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
                         # )
