@@ -1184,19 +1184,20 @@ class PolicyTrainerRayProcess(RayProcess):
                         response_txts = tokenizer.batch_decode(postprocessed_response, skip_special_tokens=True)
                         reward_model_tokens = []
                         for j in range(i, i + args.local_rollout_forward_batch_size):
-                            print(j)
+                            print("j"+str(j))
                             #messages[j][-1]["content"] = response_txts[j - i]
                             messages[j].append({"role": "assistant", "content": response_txts[j - i]})
                             reward_model_tokens.append(self.reward_model_tokenizer.apply_chat_template(messages[j]))
                             print("reward_model_tokens "+str(reward_model_tokens))
                         # right pad the reward model tokens
                         max_reward_model_len = max(len(item) for item in reward_model_tokens)
+                        print("max_reward_model_len "+str(max_reward_model_len))
                         reward_model_tokens = [
                             item + [self.reward_model_tokenizer.pad_token_id] * (max_reward_model_len - len(item))
                             for item in reward_model_tokens
                         ]
                         print(reward_model_tokens)
-                        print("reward_model_tokens "+str(len(reward_model_tokens)))
+                        print("reward_model_tokensfinal "+str(len(reward_model_tokens)))
                         print("kukaracha "+ str(len(reward_model_tokens[0])))
                         print("wohooo "+ str(len(reward_model_tokens[0][0])))
                         reward_model_tokens = torch.tensor(reward_model_tokens, device=device)
