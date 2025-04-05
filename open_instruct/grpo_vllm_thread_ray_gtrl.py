@@ -1181,8 +1181,13 @@ class PolicyTrainerRayProcess(RayProcess):
                     score = torch.zeros(query.shape[0], device=query.device)
                     if args.reward_model_multiplier:
                         response_txts = tokenizer.batch_decode(postprocessed_response, skip_special_tokens=True)
+                        print("new")
                         print(response_txts)
                         reward_model_tokens = []
+                        print(args.local_rollout_forward_batch_size)
+                        print(i)
+                        print(len(messages))
+                        print(len(response_txts))
                         for j in range(i, i + args.local_rollout_forward_batch_size):
                             messages[j][-1]["content"] = response_txts[j - i]
                             reward_model_tokens.append(self.reward_model_tokenizer.apply_chat_template(messages[j]))
