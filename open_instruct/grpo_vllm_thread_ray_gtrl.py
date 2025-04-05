@@ -1154,8 +1154,17 @@ class PolicyTrainerRayProcess(RayProcess):
                 messages = data["messages"]
                 #messages = sum([], [messages for _ in range(args.number_samples_per_prompt)])
                 #messages = messages + messages
+                print(queries[:5])
+                print(query_response[:5])
+                print(queries.shape)
+                blabla = tokenizer.batch_decode(query_responses[:5], skip_special_tokens=True)
+                print("blabla "+str(blabla))
+                plipli = tokenizer.batch_decode(queries[:5], skip_special_tokens=True)
+                print("plipli "+str(plipli))
+                print("messages: "+str(messages[:5]))
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
                     query = queries[i : i + args.local_rollout_forward_batch_size]
+                    print(len)
                     query_response = query_responses[i : i + args.local_rollout_forward_batch_size]
                     response = query_response[:, context_length:]
 
