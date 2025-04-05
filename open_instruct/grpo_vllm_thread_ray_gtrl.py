@@ -75,6 +75,7 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
 from transformers import (
+    AutoConfig,
     AutoTokenizer,
     AutoModelForCausalLM,
     AutoModelForSequenceClassification,
