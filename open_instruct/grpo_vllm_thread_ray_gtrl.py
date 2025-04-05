@@ -1152,19 +1152,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     format_scores = torch.tensor(
                         soft_format_reward_func(decoded_response, args.r1_style_format_reward), device=device
                     )
-                #messages = sum([], [messages for _ in range(args.number_samples_per_prompt)])
-                #messages = messages + messages
-                print(queries[:5])
-                print(query_responses[:5])
-                print(queries.shape)
-                blabla = tokenizer.batch_decode(query_responses[:5], skip_special_tokens=True)
-                print("blabla "+str(blabla))
-                plipli = tokenizer.batch_decode(queries[:5], skip_special_tokens=True)
-                print("plipli "+str(plipli))
-                print("messages: "+str(messages[:5]))
+
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
                     query = queries[i : i + args.local_rollout_forward_batch_size]
-                    print(len)
                     query_response = query_responses[i : i + args.local_rollout_forward_batch_size]
                     response = query_response[:, context_length:]
 
@@ -1193,33 +1183,18 @@ class PolicyTrainerRayProcess(RayProcess):
                         response_txts = tokenizer.batch_decode(postprocessed_response, skip_special_tokens=True)
                         reward_model_tokens = []
                         for j in range(i, i + args.local_rollout_forward_batch_size):
-                            print("j"+str(j))
-                            print("i"+str(i))
-                            print(response_txts)
-                            #messages[j][-1]["content"] = response_txts[j - i]
                             messages[j].append({"role": "assistant", "content": response_txts[j - i]})
-                            print(messages[j])
-                            print(self.reward_model_tokenizer.apply_chat_template(messages[j]))
                             reward_model_tokens.append(self.reward_model_tokenizer.apply_chat_template(messages[j]))
-                            print("reward_model_tokens "+str(reward_model_tokens))
                         # right pad the reward model tokens
                         max_reward_model_len = max(len(item) for item in reward_model_tokens)
-                        print("max_reward_model_len "+str(max_reward_model_len))
                         reward_model_tokens = [
                             item + [self.reward_model_tokenizer.pad_token_id] * (max_reward_model_len - len(item))
                             for item in reward_model_tokens
                         ]
-                        print(reward_model_tokens)
-                        print("reward_model_tokensfinal "+str(len(reward_model_tokens)))
-                        print("kukaracha "+ str(len(reward_model_tokens[0])))
                         reward_model_tokens = torch.tensor(reward_model_tokens, device=device)
                         _, score, _ = get_reward(
                             self.reward_model, reward_model_tokens, self.reward_model_tokenizer.pad_token_id, 0
                         )
-                        print("rewaaaard: "+str(score))
-                        # _, score, _ = get_reward(
-                        #     self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
-                        # )
                         score *= args.reward_model_multiplier
                     if args.apply_verifiable_reward:
                         # we need to batch the gt to match query.
