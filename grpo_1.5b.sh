@@ -37,7 +37,7 @@ uv run open_instruct/grpo_tinyzero.py \
     --vllm_tensor_parallel_size 1 \
     --beta 0.001 \
     --seed 3 \
-    --num_evals 5 \
+    --num_evals 4 \
     --save_freq 100 \
     --vllm_gpu_memory_utilization 0.35 \
     --single_gpu_mode \
