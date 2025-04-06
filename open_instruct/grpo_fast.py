@@ -734,6 +734,9 @@ class PolicyTrainerRayProcess(RayProcess):
         model = self.model.module
         count, num_params = 0, len(list(model.named_parameters()))
         refss = []
+        if self.args.vllm_sleep_level > 0:
+            batch_vllm_engine_call(self.vllm_engines, "wake_up", rank_0_only=False)
+
         if self.args.gather_whole_model:
             with deepspeed.zero.GatheredParameters(model.parameters(), enabled=self.args.deepspeed_stage == 3):
                 for name, param in model.named_parameters():
@@ -1093,8 +1096,8 @@ def vllm_generate_thread(
             break
         _, g_queries_list = items
 
-        if vllm_sleep_level > 0:
-            batch_vllm_engine_call(vllm_engines, "wake_up", rank_0_only=False)
+        # if vllm_sleep_level > 0:
+        #     batch_vllm_engine_call(vllm_engines, "wake_up", rank_0_only=False)
 
         with Timer("🔥 Generation time"):
             response_ids, finish_reasons = generate_with_engines(g_queries_list, generation_config)
