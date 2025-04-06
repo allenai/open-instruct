@@ -1088,7 +1088,7 @@ class LocalDatasetTransformationCache:
         # Check if the cache exists
         if os.path.exists(cache_path) and not dataset_skip_cache:
             print(f"✅ Found cached dataset at {cache_path}")
-            return Dataset.load_from_disk(cache_path)
+            return Dataset.load_from_disk(cache_path, keep_in_memory=True)
 
         print(f"Cache not found or invalid, transforming datasets...")
 
@@ -1108,7 +1108,7 @@ class LocalDatasetTransformationCache:
         self.save_config(self.config_hash, dcs, tc)
         print(f"🚀 Saved transformed dataset to {cache_path}")
         print(f"✅ Found cached dataset at {cache_path}")
-        return combined_dataset
+        return Dataset.load_from_disk(cache_path, keep_in_memory=True)
 
 
 def get_cached_dataset(
