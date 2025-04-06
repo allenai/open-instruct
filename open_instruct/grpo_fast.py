@@ -790,6 +790,7 @@ class PolicyTrainerRayProcess(RayProcess):
             kl2_stats = torch.zeros(len(collated_query_responses))
             kl3_stats = torch.zeros(len(collated_query_responses))
             kl4_stats = torch.zeros(len(collated_query_responses))
+            kl_loss_stats = torch.zeros(len(collated_query_responses))
             pg_clipfrac_stats = torch.zeros(len(collated_query_responses))
             pg_loss_stats = torch.zeros(len(collated_query_responses))
             loss_stats = torch.zeros(len(collated_query_responses))
@@ -856,6 +857,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         kl2_stats[i] = masked_mean(kl2, mb_response_masks_bool, args.masked_mean_axis).float()
                         kl3_stats[i] = masked_mean(kl3, mb_response_masks_bool, args.masked_mean_axis).float()
                         kl4_stats[i] = masked_mean(kl4, mb_response_masks_bool, args.masked_mean_axis).float()
+                        if args.kl_estimator == "kl1":
+                            kl_loss_stats[i] = kl1_stats[i] * args.beta
+                        elif args.kl_estimator == "kl2":
+                            kl_loss_stats[i] = kl2_stats[i] * args.beta
+                        elif args.kl_estimator == "kl3":
+                            kl_loss_stats[i] = kl3_stats[i] * args.beta
+                        elif args.kl_estimator == "kl4":
+                            kl_loss_stats[i] = kl4_stats[i] * args.beta
                         pg_clipfrac_stats[i] = masked_mean(
                             (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
                         )
@@ -869,7 +878,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("objective/kl3_avg", kl3_stats.mean())
                 self.local_metrics.add("objective/kl4_avg", kl4_stats.mean())
                 self.local_metrics.add("loss/policy_avg", pg_loss_stats.mean())
-                self.local_metrics.add("loss/policy_avg", loss_stats.mean())
+                self.local_metrics.add("loss/kl_avg", kl_loss_stats.mean())
+                self.local_metrics.add("loss/total_avg", loss_stats.mean())
                 self.local_metrics.add("policy/clipfrac_avg", pg_clipfrac_stats.mean())
                 self.local_metrics.add("val/ratio", ratio_stats.mean())
                 self.local_metrics.add("val/ratio_var", ratio_stats.var())
