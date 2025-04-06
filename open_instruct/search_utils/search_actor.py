@@ -83,7 +83,7 @@ class LLMSearchRayActor:
     ) -> List[List[GenerationOutput]]:
         max_searches = 5
 
-        # if num samples > 1, remove from sampling params and instead duplicate prompts.
+        # If num samples > 1, duplicate prompts and set sampling_params.n to 1.
         original_n = sampling_params.n
         if sampling_params.n > 1:
             new_prompt_token_ids = []
@@ -100,7 +100,7 @@ class LLMSearchRayActor:
         original_queries: Dict[int, str] = {i: q for i, q in queries}
         finished_queries: Dict[int, str] = {}
         
-        # Track token counts for each query
+        # Track token counts for each query.
         query_token_counts: Dict[int, int] = {i: len(tokens) for i, tokens in enumerate(prompt_token_ids)}
 
         # Iteratively update queries with snippet responses.
@@ -113,6 +113,7 @@ class LLMSearchRayActor:
                 sampling_params=sampling_params, prompts=query_texts, use_tqdm=use_tqdm
             )
             updated_queries: List[Tuple[int, str]] = []
+            # Process each query and update its text.
             for (idx, current_text), output in zip(queries, outputs):
                 output_text = output.outputs[0].text
                 output_tokens = self.tokenizer.encode(output_text)
@@ -128,7 +129,7 @@ class LLMSearchRayActor:
                 else:
                     query_token_counts[idx] += len(output_tokens)
 
-                # Process potential snippet
+                # Process potential snippet.
                 snippet_response = process_vllm_output_for_search(output_text)
 
                 if snippet_response:
@@ -150,6 +151,11 @@ class LLMSearchRayActor:
             
             queries = updated_queries
 
+        # Finalize any queries that haven't been marked finished ---
+        for idx, current_text in queries:
+            if idx not in finished_queries:
+                finished_queries[idx] = current_text
+
         # Postprocess: remove the original prompt from finished outputs.
         final_texts: List[str] = []
         for i in range(len(prompt_token_ids)):
@@ -159,11 +165,14 @@ class LLMSearchRayActor:
             final_texts.append(full_text.replace(original, "", 1))
         
         # Encode final outputs and wrap in GenerationOutput objects.
-        # truncate to max_context_length
-        encoded_outputs = [self.tokenizer.encode(text, max_length=self.max_context_length, truncation=True) for text in final_texts]
-        # re-decode with max length
+        # Truncate to max_context_length.
+        encoded_outputs = [
+            self.tokenizer.encode(text, max_length=self.max_context_length, truncation=True)
+            for text in final_texts
+        ]
+        # Re-decode with max length.
         final_texts = [self.tokenizer.decode(tokens) for tokens in encoded_outputs]
-        # recreate the outputs based on the original `n` value
+        # Recreate the outputs based on the original `n` value.
         generation_outputs = []
         for i in range(0, len(encoded_outputs), original_n):
             start, stop = i, i + original_n
@@ -173,6 +182,8 @@ class LLMSearchRayActor:
                     for tokens, text in zip(encoded_outputs[start:stop], final_texts[start:stop])
                 ])
             )
+        # set the sampling params back to original
+        sampling_params.n = original_n
 
         return generation_outputs
     
