@@ -243,6 +243,7 @@ def create_vllm_engines(
                 enable_sleep_mode=vllm_enable_sleep,
                 noset_visible_devices=ray_noset_visible_devices(),
                 max_context_length=max_model_len,
+                max_output_len=max_output_len,
             )
         )
 

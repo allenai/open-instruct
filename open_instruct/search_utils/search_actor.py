@@ -14,6 +14,7 @@
 # limitations under the License.
 import re
 import ray
+import os
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Any
 
@@ -51,7 +52,7 @@ class CompletionList:
 class LLMSearchRayActor:
     def __init__(self, *args, bundle_indices: list = None, **kwargs):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
-        self.max_context_length =   kwargs.pop("max_context_length", 8192)
+        self.max_output_length =   kwargs.pop("max_output_len", 8192)
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
             # stop ray from manipulating *_VISIBLE_DEVICES
@@ -101,7 +102,8 @@ class LLMSearchRayActor:
         finished_queries: Dict[int, str] = {}
         
         # Track token counts for each query.
-        query_token_counts: Dict[int, int] = {i: len(tokens) for i, tokens in enumerate(prompt_token_ids)}
+        # init with 0, we just want max output length
+        query_token_counts: Dict[int, int] = {i: 0 for i, _ in enumerate(prompt_token_ids)}
 
         # Iteratively update queries with snippet responses.
         for _ in range(max_searches):
@@ -117,14 +119,14 @@ class LLMSearchRayActor:
             for (idx, current_text), output in zip(queries, outputs):
                 output_text = output.outputs[0].text
                 output_tokens = self.tokenizer.encode(output_text)
-                remaining_tokens = self.max_context_length - query_token_counts[idx]
+                remaining_tokens = self.max_output_length - query_token_counts[idx]
 
                 # Truncate output_text if it exceeds the remaining token budget.
                 if len(output_tokens) > remaining_tokens:
                     truncated_output_tokens = output_tokens[:remaining_tokens]
                     truncated_output = self.tokenizer.decode(truncated_output_tokens)
                     finished_queries[idx] = current_text + truncated_output
-                    query_token_counts[idx] = self.max_context_length
+                    query_token_counts[idx] = self.max_output_length
                     continue
                 else:
                     query_token_counts[idx] += len(output_tokens)
@@ -134,7 +136,7 @@ class LLMSearchRayActor:
 
                 if snippet_response:
                     snippet_tokens = self.tokenizer.encode(snippet_response)
-                    remaining_tokens = self.max_context_length - query_token_counts[idx]
+                    remaining_tokens = self.max_output_length - query_token_counts[idx]
                     if len(snippet_tokens) > remaining_tokens:
                         if remaining_tokens > 0:
                             truncated_snippet_tokens = snippet_tokens[:remaining_tokens]
@@ -167,7 +169,7 @@ class LLMSearchRayActor:
         # Encode final outputs and wrap in GenerationOutput objects.
         # Truncate to max_context_length.
         encoded_outputs = [
-            self.tokenizer.encode(text, max_length=self.max_context_length, truncation=True)
+            self.tokenizer.encode(text, max_length=self.max_output_length, truncation=True)
             for text in final_texts
         ]
         # Re-decode with max length.
