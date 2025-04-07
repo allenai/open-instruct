@@ -1658,7 +1658,7 @@ if __name__ == "__main__":
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
-                verifiable_rewards, per_func_rewards, _, _ = apply_verifiable_reward(
+                verifiable_rewards, per_func_rewards, _ = apply_verifiable_reward(
                     responses,
                     decoded_responses,
                     ground_truths,
@@ -1689,7 +1689,7 @@ if __name__ == "__main__":
                 raise ValueError("Queries must be provided for llm judge reward.")
             with Timer("[Data Preparation Thread] Calculating rewards -- 🤖 Applying llm judge reward"):
                 # breakpoint()
-                llm_judge_rewards, per_func_rewards, api_cost, avg_response_time = apply_llm_verifier_reward(
+                llm_judge_rewards, per_func_rewards, api_cost = apply_llm_verifier_reward(
                     responses,
                     decoded_responses,
                     ground_truths,

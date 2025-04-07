@@ -219,7 +219,6 @@ def apply_verifiable_reward(
     rewards = []
     per_func_rewards = []
     total_cost = 0
-    avg_response_time = 0
     for tok_prediction, prediction, ground_truth, dataset in zip(
         responses, decoded_responses, ground_truths, datasets
     ):
@@ -256,7 +255,7 @@ def apply_verifiable_reward(
         rewards.append(reward)
         per_func_rewards.append(per_func_reward)
     # breakpoint()
-    return rewards, per_func_rewards, total_cost, avg_response_time
+    return rewards, per_func_rewards, total_cost
 
 # TODO (Faeze): merge this with apply_verifiable_reward and use dataset name to select the function
 def apply_llm_verifier_reward(
@@ -312,7 +311,7 @@ def apply_llm_verifier_reward(
             per_func_reward[ds] = per_func_reward.get(ds, 0) + (reward_mult * reward_result * reward_weight)
 
             cost += api_cost
-            total_response_time.append(response_time)
+            # total_response_time.append(response_time)
 
         # breakpoint()
         rewards.append(reward)
@@ -320,8 +319,8 @@ def apply_llm_verifier_reward(
         total_cost.append(cost)
 
     # breakpoint()
-    avg_response_time = sum(total_response_time) / len(total_response_time) if total_response_time else 0
-    return rewards, per_func_rewards, total_cost, avg_response_time
+    # avg_response_time = sum(total_response_time) / len(total_response_time) if total_response_time else 0
+    return rewards, per_func_rewards, total_cost
 
 
 def forward(
