@@ -9,10 +9,11 @@ from vllm import SamplingParams
 from datasets import load_dataset
 from transformers import AutoTokenizer
 from open_instruct.search_utils.search_actor import LLMSearchRayActor
+from open_instruct.ground_truth_utils import f1_score
 from open_instruct.vllm_utils2 import ray_noset_visible_devices
 ray.init()
 
-parser = argparse.ArgumentParser(description="Eval GPQA using the search actor.")
+parser = argparse.ArgumentParser(description="Eval SimpleQA using the search actor.")
 parser.add_argument("--model_path", type=str, help="Path to the model.")
 parser.add_argument("--model_revision", type=str, default="main", help="Model revision.")
 parser.add_argument("--tokenizer_revision", type=str, default="main", help="Tokenizer revision.")
@@ -22,6 +23,12 @@ args = parser.parse_args()
 
 # Load the tokenizer
 tokenizer = AutoTokenizer.from_pretrained(args.model_path, revision=args.tokenizer_revision)
+
+scheduling_strategy = PlacementGroupSchedulingStrategy(
+    placement_group=pg,
+    placement_group_capture_child_tasks=True,
+    placement_group_bundle_index=i * tensor_parallel_size,
+)
 
 actor = LLMSearchRayActor.options(
     num_cpus=4,
@@ -50,7 +57,7 @@ actor = LLMSearchRayActor.options(
 )
 
 # load the GPQA test subsplit (gpqa diamond).
-ds = load_dataset("hamishivi/GPQA-RLVR", split="test")
+ds = load_dataset("hamishivi/SimpleQA-RLVR", split="test")
 prompt_token_ids = [tokenizer.apply_chat_template(data["messages"], add_generation_prompt=True) for data in ds]
 
 # use greedy decoding
@@ -76,9 +83,10 @@ generations = [x.outputs[0].text for x in result]
 # parse out answer
 predictions = [x.split("<answer>")[-1].split("</answer>")[0].lower() for x in generations]
 labels = [data["ground_truth"].lower() for data in ds]
-# calculate accuracy
-accuracy = sum([1 if predictions[i] == labels[i] else 0 for i in range(len(predictions))]) / len(predictions)
-print(f"Accuracy: {accuracy}")
+# calculate string f1
+f1_scores = [f1_score(predictions[i], labels[i]) for i in range(len(predictions))]
+avg_f1 = sum(f1_scores) / len(f1_scores)
+print(f"Average F1: {avg_f1}")
 # save predictions with sample data.
 os.makedirs(args.output_dir, exist_ok=True)
 with open(f"{args.output_dir}/predictions.jsonl", "w") as f:
