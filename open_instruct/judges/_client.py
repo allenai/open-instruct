@@ -73,8 +73,8 @@ def get_completion(
             prompt_tokens = usage.get("prompt_tokens", 0)
             completion_tokens = usage.get("completion_tokens", 0)
 
-            input_cost = (prompt_tokens / 1000) * PRICING_PER_1M_TOKENS.get(model_name, {}).get("input", 0)
-            output_cost = (completion_tokens / 1000) * PRICING_PER_1M_TOKENS.get(model_name, {}).get("output", 0)
+            input_cost = (prompt_tokens) * PRICING_PER_1M_TOKENS.get(model_name, {}).get("input", 0)
+            output_cost = (completion_tokens) * PRICING_PER_1M_TOKENS.get(model_name, {}).get("output", 0)
             total_cost = input_cost + output_cost
 
             response_time = end_time - start_time
