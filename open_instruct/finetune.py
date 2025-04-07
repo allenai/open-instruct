@@ -360,9 +360,6 @@ class FlatArguments:
         if (
             (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
             or (self.dataset_name is not None)
-            or (
-                (self.dataset_mixer is not None or self.dataset_mixer_list is not None)
-            )
             or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
