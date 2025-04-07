@@ -154,7 +154,6 @@ class BaseJudge:
         except json.JSONDecodeError:
             print(
                 f"Model did not return a valid JSON response. Response: {completion.choices[0].message.content}")
-            reasoning = completion.choices[0].message.content
             reasoning = ""
             score = extract_score_from_string(completion.choices[0].message.content)
 
