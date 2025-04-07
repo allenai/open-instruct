@@ -24,12 +24,6 @@ args = parser.parse_args()
 # Load the tokenizer
 tokenizer = AutoTokenizer.from_pretrained(args.model_path, revision=args.tokenizer_revision)
 
-scheduling_strategy = PlacementGroupSchedulingStrategy(
-    placement_group=pg,
-    placement_group_capture_child_tasks=True,
-    placement_group_bundle_index=i * tensor_parallel_size,
-)
-
 actor = LLMSearchRayActor.options(
     num_cpus=4,
     num_gpus=1,
