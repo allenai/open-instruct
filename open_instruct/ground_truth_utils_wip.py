@@ -17,7 +17,15 @@ from openai import OpenAI
 from textwrap import dedent
 from judges.base import BaseJudge, Judgment
 from judge_prompts import JUDGE_PROMPT_MAP
-from judge_utils import JudgeQuality, JudgeFactuality, JudgeRelevance, JudgeCorrectness, JudgeGroundedness, JudgeHarmfulness
+from judge_utils import (
+    JudgeQuality, 
+    JudgeFactuality, 
+    JudgeRelevance, 
+    JudgeCorrectness, 
+    JudgeGroundedness, 
+    JudgeHarmfulness, 
+    extract_final_answer
+)
 from judge_utils import JUDGE_CLASS_MAP, extract_score_from_string
 
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
@@ -33,7 +41,7 @@ from open_instruct.math_utils import (
 logger = logging.getLogger(__name__)
 
 # define openai client reading openai_api-key from env
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+client = OpenAI(api_key=os.environ.get("faezeb_OPENAI_API_KEY"))
 
 class VerifierFunction(ABC):
     """
@@ -179,62 +187,62 @@ class IFEvalVerifier(VerifierFunction):
         return float(func(answer, **non_none_args))
     
 
-class LMJudgeVerifier(VerifierFunction):
-    """
-    Verifier for general tasks that delegates evaluation to LLM Judges (classifier or grader)
-    specified in the label.
+# class LMJudgeVerifier(VerifierFunction):
+#     """
+#     Verifier for general tasks that delegates evaluation to LLM Judges (classifier or grader)
+#     specified in the label.
 
-    The rubrics may be a JSON string or a dictionary containing criteria based on which
-    the response can be evaluated.
-    """
+#     The rubrics may be a JSON string or a dictionary containing criteria based on which
+#     the response can be evaluated.
+#     """
 
-    def __init__(self) -> None:
-        super().__init__("general", weight=1.0)
+#     def __init__(self) -> None:
+#         super().__init__("general", weight=1.0)
 
-    def __call__(self, query: str, prediction: str, label: Union[str, List], subtask: str = None) -> bool:
-        """
-        Evaluate the given prediction against the ground truth (and an optional rubric).
+#     def __call__(self, query: str, prediction: str, label: Union[str, List], subtask: str = None) -> bool:
+#         """
+#         Evaluate the given prediction against the ground truth (and an optional rubric).
 
-        Args:
-            query (str): The user query.
-            prediction (str): The model output.
-            label (Any): The ground truth answer or evaluation rubric.
-            subtask (str): Optional subtask name for the selecting evaluation prompt.
+#         Args:
+#             query (str): The user query.
+#             prediction (str): The model output.
+#             label (Any): The ground truth answer or evaluation rubric.
+#             subtask (str): Optional subtask name for the selecting evaluation prompt.
 
-        Returns:
-            int: Reward score. Can be binary (0/1) or continuous.
-        """
-        answer = prediction.split("<|assistant|>\n")[-1].strip()
-        if subtask is None:
-            subtask = "general"
-        if subtask not in JUDGE_PROMPT_MAP:
-            raise ValueError(f"Not found the subtask prompt: {subtask}")
+#         Returns:
+#             int: Reward score. Can be binary (0/1) or continuous.
+#         """
+#         answer = prediction.split("<|assistant|>\n")[-1].strip()
+#         if subtask is None:
+#             subtask = "general"
+#         if subtask not in JUDGE_PROMPT_MAP:
+#             raise ValueError(f"Not found the subtask prompt: {subtask}")
         
-        user_prompt = JUDGE_PROMPT_MAP[subtask]
-        user_prompt = dedent(user_prompt).format(input=query, output=answer)
+#         user_prompt = JUDGE_PROMPT_MAP[subtask]
+#         user_prompt = dedent(user_prompt).format(input=query, output=answer)
         
 
     
-    def get_judgement(
-        self,
-        judge_prompt: str,
-        input: str,
-        output: str = None,
-        expected: str = None,
-    ) -> Judgment:
-        """
-        Judge the input and return a verdict.
-        """
-        system_prompt = None
-        user_prompt = dedent(judge_prompt)
-        # select the judge class based on the subtask
+#     def get_judgement(
+#         self,
+#         judge_prompt: str,
+#         input: str,
+#         output: str = None,
+#         expected: str = None,
+#     ) -> Judgment:
+#         """
+#         Judge the input and return a verdict.
+#         """
+#         system_prompt = None
+#         user_prompt = dedent(judge_prompt)
+#         # select the judge class based on the subtask
 
 
-        reasoning, score, cost, response_time = self._judge(
-            user_prompt=user_prompt,
-            system_prompt=system_prompt,
-        )
-        return Judgment(reasoning=reasoning, score=score, cost=cost, response_time=response_time)
+#         reasoning, score, cost, response_time = self._judge(
+#             user_prompt=user_prompt,
+#             system_prompt=system_prompt,
+#         )
+#         return Judgment(reasoning=reasoning, score=score, cost=cost, response_time=response_time)
 
     
 # class LMJudgeVerifierGrader(VerifierFunction):
@@ -322,7 +330,8 @@ class LMJudgeVerifier(VerifierFunction):
             float: Score between 0 and 1
         """
         # Clean prediction if needed
-        answer = prediction.split("<|assistant|>\n")[-1].strip() if "<|assistant|>" in prediction else prediction.strip()
+        answer = extract_final_answer(prediction)
+        # answer = prediction.split("<|assistant|>\n")[-1].strip() if "<|assistant|>" in prediction else prediction.strip()
         
         # # Determine proper prompt template
         # if self.judge_type is None:

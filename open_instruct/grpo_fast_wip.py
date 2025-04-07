@@ -188,7 +188,7 @@ class Args:
     """The number of unique prompts during rollout"""
     num_samples_per_prompt_rollout: int = 4
     """the number of samples to generate per prompt during rollout, useful for easy-star"""
-    stop_strings: Optional[List[str]] = None
+    stop_strings: Optional[List[str]] = "</answer>"
     """List of strings that stop the generation when they are generated.
     The returned output will not contain the stop strings."""
 
@@ -308,7 +308,7 @@ class Args:
             self.vllm_gpu_memory_utilization = 0.3
         assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
         assert (
-            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
+            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty or self.apply_llm_verifier_reward
         ), "At least one reward must be applied!"
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
@@ -1069,6 +1069,7 @@ def data_preparation_thread(
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
 ):
+
     for training_step in range(1, num_training_steps + 1):
         # Get next batch of prompts and responses
         items = queries_prompt_Q.get()
@@ -1103,6 +1104,7 @@ def data_preparation_thread(
         # breakpoint()
         with Timer("💰 [Data Preparation Thread] Calculating rewards"):
             scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons, decoded_queries)
+            # total_api_cost.append(reward_metrics.get("total_api_cost", 0))
             # # print api_cost
             # print(f"[Reward Preparation Thread] ${api_cost=}")
 
@@ -1301,6 +1303,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             "max_prompt_token_length": args.max_prompt_token_length,
         },
     ]
+
     train_dataset = get_cached_dataset_tulu(
         dataset_mixer_list=args.dataset_mixer_list,
         dataset_mixer_list_splits=args.dataset_mixer_list_splits,
@@ -1454,6 +1457,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     num_total_tokens = 0
     start_time = time.time()
     eval_futures = []
+    total_api_cost = []
+
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
             print("-" * 100)
@@ -1537,6 +1542,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     ]
                 )
                 average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
+            
                 metrics = {
                     "episode": episode,
                     "training_step": training_step,
@@ -1546,9 +1552,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     **data_thread_metrics,
                     **average_metrics,
                 }
+
                 print_rich_single_line_metrics(metrics)
                 for key, value in metrics.items():
                     writer.add_scalar(key, value, episode)
+                total_api_cost.append(metrics.get("total_api_cost", 0))
 
                 if args.save_freq > 0 and training_step % args.save_freq == 0:
                     with Timer("[Main Thread] 🗡️ Saving model"):
@@ -1580,6 +1588,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                         for i in range(args.world_size)
                     ]
                 )
+
+        print("[Main Thread] total_api_cost", np.mean(total_api_cost))
 
     except Exception as e:
         print(f"Training error occurred: {str(e)}")
@@ -1692,11 +1702,12 @@ if __name__ == "__main__":
                     raise ValueError(f"{len(llm_judge_rewards)=} != {len(scores)=}")
                 for i in range(len(llm_judge_rewards)):
                     scores[i] = llm_judge_rewards[i] + scores[i]
+
                 np_llm_judge_rewards = np.array(llm_judge_rewards)
                 np_api_cost = np.array(api_cost)
                 metrics["objective/llm_judge_reward"] = np_llm_judge_rewards.mean()
-                metrics["objective/llm_judge_correct_rate"] = (np_llm_judge_rewards > 0.0).mean()
-                metrics["api_cost"] = np_api_cost.mean()
+                metrics["objective/llm_judge_correct_rate"] = (np_llm_judge_rewards > 0.0).mean() if "rubric" in args.llm_judge_type else (np_llm_judge_rewards > 5.0).mean()
+                metrics["total_api_cost"] = np_api_cost.sum()
 
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.

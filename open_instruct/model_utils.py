@@ -272,6 +272,7 @@ def apply_llm_verifier_reward(
     per_func_rewards = []
     total_cost = []
     total_response_time = []
+    # breakpoint()
     for tok_prediction, prediction, ground_truth, dataset, query in zip(
         responses, decoded_responses, ground_truths, datasets, queries
     ):
@@ -299,20 +300,21 @@ def apply_llm_verifier_reward(
             reward_weight = reward_func.weight
             # cuse llm as judge
             # sometimes we need the tokenized pred.
-            reward_result, cost, response_time = reward_func(
+            reward_result, api_cost, response_time = reward_func(
                 tokenized_prediction=tok_prediction,
                 prediction=prediction,
                 label=gt,
                 query=query,
             )
             logger.info("Applying rubric-based or llm grader reward 🤗")
-            reward_mult = 10 if "rubric" in judge_type else reward_mult
+            reward_mult = 10.0 if "rubric" in judge_type else reward_mult
             reward += reward_mult * reward_result * reward_weight
             per_func_reward[ds] = per_func_reward.get(ds, 0) + (reward_mult * reward_result * reward_weight)
 
-            cost += cost
+            cost += api_cost
             total_response_time.append(response_time)
 
+        # breakpoint()
         rewards.append(reward)
         per_func_rewards.append(per_func_reward)
         total_cost.append(cost)

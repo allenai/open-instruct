@@ -59,6 +59,7 @@ class JudgeQuality(BaseJudge):
             user_prompt=user_prompt,
             system_prompt=system_prompt,
         )
+        # breakpoint()
         return Judgment(reasoning=reasoning, score=score, cost=cost, response_time=response_time)
     
 
@@ -310,21 +311,18 @@ def extract_score_from_string(score_str: str) -> float:
     # Handle rating formats like "4/5"
     ratio_matches = re.findall(r'(\d+)\/(\d+)', score_str)
     if ratio_matches:
-        print("ratio matches", ratio_matches)
         numerator, denominator = ratio_matches[0]
         return float(numerator) / float(denominator)
        
     # Try to handle percentage expressions
     percent_matches = re.findall(r'(\d+\.?\d*|\.\d+)%', score_str)
     if percent_matches:
-        print("percenatge matches", percent_matches)
         return float(percent_matches[0]) / 100.0
 
     
     # Try to find numerical values in the string
     matches = re.findall(r'(\d+\.?\d*|\.\d+)', score_str)
     if matches:
-        print("numerical matches", matches)
         return float(matches[0])
     
     # If parsing fails, check for binary indicators
@@ -335,6 +333,26 @@ def extract_score_from_string(score_str: str) -> float:
     else:
         logger.warning(f"Could not parse score from: {score_str}, defaulting to 0.0")
         return 0.0
+
+
+def extract_final_answer(prediction: str) -> str:
+    """
+    Extract the substring between <answer> and </answer>.
+    If no match is found, clean the prediction by removing the <|assistant|> tag.
+    If neither condition matches, return the original string.
+
+    Args:
+        prediction (str): The input string.
+
+    Returns:
+        str: The extracted substring or the cleaned/original string.
+    """
+    # Handle <|assistant|> tag
+    answer = prediction.split("<|assistant|>\n")[-1].strip() if "<|assistant|>" in prediction else prediction.strip()
+    
+    # Extract substring between <answer> and </answer>
+    match = re.search(r"<answer>(.*?)</answer>", answer, re.DOTALL)
+    return match.group(1).strip() if match else answer
 
 
 JUDGE_CLASS_MAP = {
