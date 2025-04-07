@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 
 from abc import abstractmethod
 from dataclasses import dataclass
@@ -145,12 +146,29 @@ class BaseJudge:
             response_model=None,
             response_format={"type": "json_object"}
         )
-        # breakpoint()
+        
         data = json.loads(completion.choices[0].message.content)
-        reasoning = data["REASONING"]
-        score = data["SCORE"]
-        cost = completion.cost
-        response_time = completion.response_time
+        reasoning = data.get("REASONING", "")
+        score = data.get("SCORE", 0.0)
+
+        # try:
+        #     # if the model is not using the correct format, it will throw an error
+        #     score = data.get("SCORE", 0.0)
+        # except AssertionError:
+        #     print(
+        #         f"Model did not return a valid JSON response. Response: {completion.choices[0].message.content}")
+        #     score = extract_score_from_string(completion.choices[0].message.content)
+
+        # check if cost/response_time is available
+        try:
+            cost = completion.cost
+            response_time = completion.response_time
+        except AttributeError:
+            # set to some average cost score
+            print("no api cost or response time attribute found")
+            cost = 0.0001
+            response_time = 0.0
+            pass
         return reasoning, score, cost, response_time
 
     @abstractmethod
@@ -253,3 +271,32 @@ class Jury:
         scores = [judgment.score for judgment in judgments]
         score = self.voting_method(scores=scores)
         return Verdict(score=score, judgments=judgments)
+
+
+def extract_score_from_string(score_str: str) -> float:
+    """Extract numerical score from string response.""" 
+    # Handle rating formats like "4/5"
+    ratio_matches = re.findall(r'(\d+)\/(\d+)', score_str)
+    if ratio_matches:
+        numerator, denominator = ratio_matches[0]
+        return min(float(numerator) / float(denominator), 10)
+       
+    # Try to handle percentage expressions
+    percent_matches = re.findall(r'(\d+\.?\d*|\.\d+)%', score_str)
+    if percent_matches:
+        return min(float(percent_matches[0]) / 100.0, 10)
+
+    
+    # Try to find numerical values in the string
+    matches = re.findall(r'(\d+\.?\d*|\.\d+)', score_str)
+    if matches:
+        return min(float(matches[0]), 10)
+    
+    # If parsing fails, check for binary indicators
+    if any(word in score_str.lower() for word in ["yes", "correct", "good", "true", "pass"]):
+        return 1.0
+    elif any(word in score_str.lower() for word in ["no", "incorrect", "bad", "false", "fail"]):
+        return 0.0
+    else:
+        print(f"Could not parse score from: {score_str}, defaulting to 0.0")
+        return 0.0
