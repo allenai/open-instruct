@@ -147,9 +147,16 @@ class BaseJudge:
             response_format={"type": "json_object"}
         )
         
-        data = json.loads(completion.choices[0].message.content)
-        reasoning = data.get("REASONING", "")
-        score = data.get("SCORE", 0.0)
+        try:
+            data = json.loads(completion.choices[0].message.content)
+            reasoning = data.get("REASONING", "")
+            score = data.get("SCORE", 0.0)
+        except json.JSONDecodeError:
+            print(
+                f"Model did not return a valid JSON response. Response: {completion.choices[0].message.content}")
+            reasoning = completion.choices[0].message.content
+            reasoning = ""
+            score = extract_score_from_string(completion.choices[0].message.content)
 
         # try:
         #     # if the model is not using the correct format, it will throw an error
@@ -294,7 +301,7 @@ def extract_score_from_string(score_str: str) -> float:
     
     # If parsing fails, check for binary indicators
     if any(word in score_str.lower() for word in ["yes", "correct", "good", "true", "pass"]):
-        return 1.0
+        return 10.0
     elif any(word in score_str.lower() for word in ["no", "incorrect", "bad", "false", "fail"]):
         return 0.0
     else:
