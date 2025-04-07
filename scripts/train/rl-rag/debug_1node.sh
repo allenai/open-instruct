@@ -1,0 +1,47 @@
+export MASSIVE_DS_URL='xxx'
+export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+# runs on one node.
+python open_instruct/grpo_vllm_thread_ray_gtrl.py \
+    --exp_name rl_rag_testing \
+    --dataset_mixer_list hamishivi/SimpleQA-RLVR 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list hamishivi/SimpleQA-RLVR 32 \
+    --dataset_mixer_eval_list_splits test \
+    --max_token_length 512 \
+    --max_prompt_token_length 2048 \
+    --response_length 4196 \
+    --model_name_or_path ai2-adapt-dev/tulu_3_long_finetune_qwen_7b_reg \
+    --number_samples_per_prompt 8 \
+    --non_stop_penalty \
+    --stop_token eos \
+    --temperature 1.0 \
+    --ground_truths_key ground_truth \
+    --chat_template_name tulu \
+    --sft_messages_key messages \
+    --learning_rate 3e-7 \
+    --stop_strings '</query>' \
+    --total_episodes 10000 \
+    --penalty_reward_value -10.0 \
+    --deepspeed_stage 3 \
+    --per_device_train_batch_size 1 \
+    --local_rollout_forward_batch_size 1 \
+    --local_mini_batch_size 1 \
+    --local_rollout_batch_size 1 \
+    --num_epochs 1 \
+    --actor_num_gpus_per_node 1 \
+    --vllm_tensor_parallel_size 1 \
+    --beta 0.05 \
+    --mask_snippet_loss true \
+    --apply_verifiable_reward true \
+    --output_dir output_rl_rag_test \
+    --seed 3 \
+    --num_evals 1000 \
+    --save_freq 100 \
+    --reward_model_multiplier 0.0 \
+    --gradient_checkpointing \
+    --actor_num_gpus_per_node 7 \
+    --vllm_enforce_eager \
+    --with_tracking \
+    --mask_snippet_loss true \
+    --use_search_actor true \
+    --add_query_reward
