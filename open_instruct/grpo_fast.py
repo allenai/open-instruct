@@ -1551,7 +1551,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             # Sync weights and send the next batch of prompts to vLLM
             if args.async_mode:
                 if training_step != 1:
-                    dataset_idxs_logits = 1 - np.where(online_sample_success_rate >= args.dataset_sampling_threshold, 1.0, online_sample_success_rate)
+                    dataset_idxs_logits = 1 - np.where(online_sample_success_rate >= args.dataset_sampling_threshold, 1.0, 0.0)
                     data_next_idxs = gumbel_sample_without_replacement(
                         dataset_idxs_logits,
                         args.num_unique_prompts_rollout,
@@ -1569,7 +1569,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 if training_step != 1:
                     # NOTE: important: the indent here is different for sync mode
                     # we also set to use `queries = queries_next` immediately
-                    dataset_idxs_logits = 1 - np.where(online_sample_success_rate >= args.dataset_sampling_threshold, 1.0, online_sample_success_rate)
+                    dataset_idxs_logits = 1 - np.where(online_sample_success_rate >= args.dataset_sampling_threshold, 1.0, 0.0)
                     data_next_idxs = gumbel_sample_without_replacement(
                         dataset_idxs_logits,
                         args.num_unique_prompts_rollout,
