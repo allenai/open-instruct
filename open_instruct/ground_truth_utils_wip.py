@@ -41,7 +41,7 @@ from open_instruct.math_utils import (
 logger = logging.getLogger(__name__)
 
 # define openai client reading openai_api-key from env
-client = OpenAI(api_key=os.environ.get("faezeb_OPENAI_API_KEY"))
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 class VerifierFunction(ABC):
     """
@@ -389,6 +389,59 @@ class LMJudgeVerifier(VerifierFunction):
             score = 0.0
 
         return score, judgment.cost, judgment.response_time
+    
+    async def async_call(
+        self, 
+        tokenized_prediction: List[int], 
+        prediction: str, 
+        label: Any,
+        query: Optional[str] = None,
+    ) -> Tuple[float, float, float]:
+        """
+        Async version of __call__ that directly awaits _judge without using asyncio.run()
+
+        Args:
+            tokenized_prediction (List[int]): Tokenized representation (unused)
+            prediction (str): The model output
+            label (Any): Ground truth or evaluation criteria
+            query (str, optional): Original user query
+
+        Returns:
+            Tuple[float, float, float]: (score, cost, response_time)
+        """
+        # Clean prediction if needed
+        answer = extract_final_answer(prediction)
+        
+        # Ensure judge_type is valid
+        if self.judge_type not in JUDGE_PROMPT_MAP:
+            logger.warning(f"Subtask prompt not found: {self.judge_type}, falling back to general")
+            self.judge_type = "general"
+        
+        # Get user prompt (this is what get_judgement would format)
+        user_prompt = JUDGE_PROMPT_MAP[self.judge_type]
+        user_prompt = dedent(user_prompt).format(
+            input=query,
+            output=answer,
+            label=label if isinstance(label, str) else json.dumps(label)
+        )
+        
+        # Directly await the _judge method instead of using asyncio.run
+        reasoning, score, cost, response_time = await self.judge._judge(
+            user_prompt=user_prompt,
+            system_prompt=None
+        )
+        
+        # Process the score same as in __call__
+        if isinstance(score, (int, float)):
+            final_score = score
+        elif isinstance(score, str):
+            final_score = extract_score_from_string(score)
+        else:
+            logger.warning(f"Unexpected score type: {type(score)}, defaulting to 0.0")
+            final_score = 0.0
+        
+        return final_score, cost, response_time
+
         
     def get_judgement(
         self,

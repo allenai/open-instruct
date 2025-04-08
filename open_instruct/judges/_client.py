@@ -1,5 +1,5 @@
 import logging
-
+import asyncio
 import instructor
 import openai
 import litellm
@@ -39,12 +39,15 @@ class CompletionWithMetadata:
 
 def llm_client():
     try:
+        # Attempt to import litellm
         import litellm
     except ImportError:
-        # fallback to openai
-        client = openai.OpenAI()
+        # fallback to async openai if litellm is not available
+        print("litellm not found, falling back to openai.AsyncOpenAI")
+        client = openai.AsyncOpenAI()
         return client
     else:
+        # Return litellm module object if import succeeds
         return litellm
 
 ### V2 of async completion with retry
@@ -78,25 +81,25 @@ async def async_get_completion(
     response_format: dict = None,
     response_model: BaseModel = None,
 ):
-    # for attempt in AsyncRetrying(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(5), reraise=True):
-    #     async for attempt_state in attempt:
-    #         try:
+    client_or_module = llm_client() # Returns openai.AsyncOpenAI or litellm module
+    
     async for attempt in AsyncRetrying(
         wait=wait_random_exponential(min=1, max=60),
         stop=stop_after_attempt(5),
         reraise=True,
     ):
         with attempt:
-            client = llm_client()
             start_time = time.time()
 
             if response_format and response_model:
                 raise Exception("response_format and response_model cannot both be provided. please provide only one.")
 
+            # --- Case 1: Using instructor with a response_model ---
             if response_model and response_format is None:
-                if client.__class__.__name__ == "OpenAI":
-                    client = instructor.from_openai(client)
-                    response = await client.chat.completions.create(
+                if isinstance(client_or_module, openai.AsyncOpenAI):
+                    # Use instructor with the already async OpenAI client
+                    instructor_client = instructor.patch(client_or_module) # Use instructor.patch for async client
+                    response = await instructor_client.chat.completions.create(
                         model=model,
                         max_tokens=max_tokens,
                         temperature=temperature,
@@ -104,9 +107,10 @@ async def async_get_completion(
                         seed=seed,
                         response_model=response_model,
                     )
-                elif hasattr(client, "__name__") and client.__name__ == "litellm":
-                    client = instructor.from_litellm(litellm.acompletion)
-                    response = await client.chat.completions.create(
+                elif hasattr(client_or_module, "__name__") and client_or_module.__name__ == "litellm":
+                    # Use instructor with litellm's async completion
+                    instructor_client = instructor.from_litellm(litellm.acompletion)
+                    response = await instructor_client.chat.completions.create(
                         model=model,
                         max_tokens=max_tokens,
                         temperature=temperature,
@@ -115,10 +119,13 @@ async def async_get_completion(
                         response_model=response_model,
                     )
                 else:
-                    raise Exception("unknown client. please create an issue on GitHub if you see this message.")
+                    raise Exception("unknown client type for response_model handling.")
+
+            # --- Case 2: Not using instructor (no response_model) ---
             else:
-                if client.__class__.__name__ == "OpenAI":
-                    response = await client.chat.completions.create(
+                if isinstance(client_or_module, openai.AsyncOpenAI):
+                    # Use AsyncOpenAI client directly
+                    response = await client_or_module.chat.completions.create(
                         model=model,
                         max_tokens=max_tokens,
                         temperature=temperature,
@@ -126,8 +133,9 @@ async def async_get_completion(
                         seed=seed,
                         response_format=response_format,
                     )
-                elif hasattr(client, "__name__") and client.__name__ == "litellm":
-                    response = await litellm.acompletion(
+                elif hasattr(client_or_module, "__name__") and client_or_module.__name__ == "litellm":
+                    # litellm.acompletion is already async
+                    response = await client_or_module.acompletion(
                         model=model,
                         max_tokens=max_tokens,
                         temperature=temperature,
@@ -135,14 +143,13 @@ async def async_get_completion(
                         seed=seed,
                         response_format=response_format,
                     )
+                else:
+                    raise Exception("unknown client type for standard completion handling.")
 
             end_time = time.time()
             track_cost_callback({"model": model}, response, start_time, end_time)
 
             return response
-
-            # except Exception as e:
-            #     raise e
 
 @retry(
     wait=wait_random_exponential(min=1, max=60),

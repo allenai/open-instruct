@@ -16,6 +16,7 @@
 
 import itertools
 import logging
+import asyncio
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -267,60 +268,121 @@ def apply_llm_verifier_reward(
     reward_mult: int = 10,
     judge_type: str = "quality",
 ):
+    """Apply LLM-based verification to calculate rewards for responses.
+    
+    This function is synchronous but internally uses asyncio for concurrent execution.
+    """
+    return asyncio.run(_apply_llm_verifier_reward_async(
+        responses,
+        decoded_responses,
+        ground_truths,
+        datasets,
+        queries,
+        reward_mult,
+        judge_type
+    ))
+
+async def _apply_llm_verifier_reward_async(
+    responses: List[torch.Tensor],
+    decoded_responses: List[str],
+    ground_truths: List[str],
+    datasets: List[Union[str, List[str]]],
+    queries: List[str],
+    reward_mult: int = 10,
+    judge_type: str = "quality",
+):
+    """Async implementation of apply_llm_verifier_reward that executes judgments concurrently."""
     rewards = []
     per_func_rewards = []
     total_cost = []
-    total_response_time = []
-    # breakpoint()
+    
+    # Create tasks for each response
+    tasks = []
     for tok_prediction, prediction, ground_truth, dataset, query in zip(
         responses, decoded_responses, ground_truths, datasets, queries
     ):
-        # allow multiple ground truths and datasets for a single response
+        # Process the same initial logic as before
         if isinstance(ground_truth, str):
             ground_truth_list = [ground_truth]
         else:
             ground_truth_list = ground_truth
+            
         if isinstance(dataset, str):
             dataset_list = [dataset]
         else:
             dataset_list = dataset
+            
         assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
-        # for now, we just assume rewards are additive, rather than more complex functions.
-        reward = 0
-        per_func_reward = {}
-        cost = 0
-        response_time = 0 # in seconds
-        # breakpoint()
-        for gt, ds in zip(ground_truth_list, dataset_list):
-            reward_func = LMJudgeVerifier(judge_type=judge_type) #TODO: later add "general" and "judge_type" inputs # REWARD_FN_MAPPING.get(ds.lower())
-            if reward_func is None:
-                logger.warning("No judge verifier found for dataset %s. Skipping reward.", ds)
-                continue
-            reward_weight = reward_func.weight
-            # cuse llm as judge
-            # sometimes we need the tokenized pred.
-            reward_result, api_cost, response_time = reward_func(
-                tokenized_prediction=tok_prediction,
-                prediction=prediction,
-                label=gt,
-                query=query,
-            )
-            logger.info("Applying rubric-based or llm grader reward 🤗")
-            reward_mult = 10.0 if "rubric" in judge_type else reward_mult
-            reward += reward_mult * reward_result * reward_weight
-            per_func_reward[ds] = per_func_reward.get(ds, 0) + (reward_mult * reward_result * reward_weight)
-
-            cost += api_cost
-            # total_response_time.append(response_time)
-
-        # breakpoint()
+        
+        # Create a task for processing this response
+        task = asyncio.create_task(_process_single_response(
+            tok_prediction, 
+            prediction, 
+            ground_truth_list, 
+            dataset_list, 
+            query, 
+            reward_mult, 
+            judge_type
+        ))
+        tasks.append(task)
+    
+    # Wait for all tasks to complete
+    results = await asyncio.gather(*tasks)
+    
+    # Process results
+    for reward, per_func_reward, cost in results:
         rewards.append(reward)
         per_func_rewards.append(per_func_reward)
         total_cost.append(cost)
-
-    # breakpoint()
-    # avg_response_time = sum(total_response_time) / len(total_response_time) if total_response_time else 0
+    
     return rewards, per_func_rewards, total_cost
+
+async def _process_single_response(
+    tok_prediction,
+    prediction,
+    ground_truth_list,
+    dataset_list,
+    query,
+    reward_mult,
+    judge_type
+):
+    """Process a single response with potentially multiple ground truths and datasets."""
+    reward = 0
+    per_func_reward = {}
+    cost = 0
+    
+    reward_func = LMJudgeVerifier(judge_type=judge_type)
+    
+    # For each ground truth and dataset combination, create tasks
+    judgment_tasks = []
+    for gt, ds in zip(ground_truth_list, dataset_list):
+        if reward_func is None:
+            logger.warning("No judge verifier found for dataset %s. Skipping reward.", ds)
+            continue
+            
+        # Create a task for this judgment
+        task = asyncio.create_task(reward_func.async_call(
+            tokenized_prediction=tok_prediction,
+            prediction=prediction,
+            label=gt,
+            query=query,
+        ))
+        judgment_tasks.append((task, ds, reward_func.weight))
+    
+    # Wait for all judgments to complete concurrently
+    judgment_results = await asyncio.gather(*[task for task, _, _ in judgment_tasks])
+    
+    # Process the results
+    for (reward_result, api_cost, response_time), (_, ds, weight) in zip(judgment_results, judgment_tasks):
+        logger.info("Applying rubric-based or llm grader reward 🤗")
+        actual_reward_mult = 10.0 if "rubric" in judge_type else reward_mult
+        reward_value = actual_reward_mult * reward_result * weight
+        
+        reward += reward_value
+        per_func_reward[ds] = per_func_reward.get(ds, 0) + reward_value
+        cost += api_cost
+    
+    return reward, per_func_reward, cost
 
 
 def forward(

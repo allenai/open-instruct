@@ -1,7 +1,6 @@
 from textwrap import dedent
 import re
 import logging
-import asyncio
 
 from judges.base import BaseJudge, Judgment
 from judge_prompts import JUDGE_PROMPT_MAP
@@ -35,7 +34,7 @@ class JudgeQuality(BaseJudge):
         super().__init__(model)
         self.judge_type = judge_type
 
-    def judge(
+    async def judge(
         self,
         input: str,
         output: str,
@@ -56,10 +55,11 @@ class JudgeQuality(BaseJudge):
             label=expected,
         )
         
-        reasoning, score, cost, response_time = asyncio.run(self._judge(
+        # Properly await the async _judge method
+        reasoning, score, cost, response_time = await self._judge(
             user_prompt=user_prompt,
             system_prompt=system_prompt,
-        ))
+        )
         # breakpoint()
         return Judgment(reasoning=reasoning, score=score, cost=cost, response_time=response_time)
     
