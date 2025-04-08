@@ -112,7 +112,7 @@ from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
-
+MAX_SCORE_NORMALIZED = 11 # 11 is verifierable score + 1 for format score
 
 @dataclass
 class Args:
@@ -214,6 +214,10 @@ class Args:
     """the length of the pack (you should prob set to the max length of the model)"""
     masked_mean_axis: Optional[int] = None
     """the axis to compute the mean of the masked values"""
+    dataset_sampling_temperature: float = 0.4
+    """the temperature for the dataset sampling"""
+    dataset_sampling_threshold: float = 0.85
+    """the threshold for considering a prompt solved and marking it 1.0 for sampling purposes."""
 
     # Reward
     # -- r1 style format reward
@@ -1078,7 +1082,7 @@ def data_preparation_thread(
     for training_step in range(1, num_training_steps + 1):
         # Get next batch of prompts and responses
         items = queries_prompt_Q.get()
-        queries, ground_truths, datasets = items
+        data_idxs, queries, ground_truths, datasets = items
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -1092,26 +1096,14 @@ def data_preparation_thread(
                 if finish_reasons[i] == "stop" and responses[i][-1] != tokenizer.eos_token_id:
                     responses[i].append(tokenizer.eos_token_id)
 
-        with Timer("📦 [Data Preparation Thread] Packing sequences"):
-            packed_sequences = pack_sequences(
-                queries=queries,
-                responses=responses,
-                pack_length=args.pack_length,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-            num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
-
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
-        with Timer("💰 [Data Preparation Thread] Calculating rewards"):
+        with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
             scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons)
-
-        with Timer("🎆 [Data Preparation Thread] Calculating advantages"):
-            # Calculate advantages
             scores = np.array(scores)
-            print(f"[Data Preparation Thread] {len(scores)=}")
+            # Calculate advantages
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
             global_mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
             global_mean_grouped_rewards = np.repeat(
@@ -1123,6 +1115,30 @@ def data_preparation_thread(
             )
             global_advantages = (scores - global_mean_grouped_rewards) / (global_std_grouped_rewards + 1e-8)
 
+        with Timer("📦 [Data Preparation Thread] Filtering sequences"):
+            # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
+            # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
+            non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
+            real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
+            unsolved_prompts = (scores_per_prompt.std(axis=-1) != 0) & (scores_per_prompt.mean(axis=-1) < MAX_SCORE_NORMALIZED)
+            unsolved_batch_size_ratio = unsolved_prompts.sum() * args.num_samples_per_prompt_rollout / len(scores)
+            expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
+            non_zero_gradient_index = np.where(expanded_mask)[0]
+            global_advantages = global_advantages[non_zero_gradient_index]
+            scores = scores[non_zero_gradient_index]
+            responses = [responses[i] for i in non_zero_gradient_index]
+            queries = [queries[i] for i in non_zero_gradient_index]
+            ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
+            datasets = [datasets[i] for i in non_zero_gradient_index]
+
+        with Timer("📦 [Data Preparation Thread] Packing sequences"):
+            packed_sequences = pack_sequences(
+                queries=queries,
+                responses=responses,
+                pack_length=args.pack_length,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+            num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
             # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
             # and each value is the corresponding advantage score: index 0 is set to 0 since response masks start from 1 (1-indexed)
             lookup_advantages = np.zeros(len(global_advantages) + 1, dtype=np.float32)
@@ -1185,6 +1201,9 @@ def data_preparation_thread(
         sequence_lengths = np.array([len(response) for response in responses])
         metrics = {
             "scores": np.array(scores).mean(),
+            "real_batch_size_ratio": real_batch_size_ratio,
+            "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
+            "packed_ratio": len(packed_sequences.query_responses) / len(responses),
             "val/sequence_lengths": sequence_lengths.mean(),
             "val/sequence_lengths_min": sequence_lengths.min(),
             "val/sequence_lengths_max": sequence_lengths.max(),
@@ -1213,12 +1232,51 @@ def data_preparation_thread(
             {
                 "packed_sequences": packed_sequences,  # for debugging purposes
                 "collated_data": collated_data,
+                "data_idxs": data_idxs,
+                "scores_per_prompt": scores_per_prompt,
                 "metrics": metrics,
                 "responses_count": len(responses),
                 "num_new_tokens": num_new_tokens,
                 "B": B,
             }
         )
+
+def gumbel_sample_without_replacement(logits, n: int, temperature=1.0, eps=1e-10):
+    """
+    Sample n items without replacement using the Gumbel-max trick.
+    
+    Args:
+        logits: Unnormalized log probabilities
+        n: Number of items to sample (must be <= len(logits))
+        temperature: Temperature parameter (lower = more deterministic)
+        eps: Small constant for numerical stability
+    
+    Returns:
+        Array of n indices sampled from the categorical distribution without replacement
+    """
+    if n > len(logits):
+        raise ValueError(f"Cannot sample {n} items from a distribution of size {len(logits)}")
+    
+    # Scale logits by temperature
+    scaled_logits = logits / max(temperature, eps)
+    
+    # Sample from Gumbel(0, 1)
+    u = np.random.random(scaled_logits.shape)
+    g = -np.log(-np.log(u + eps) + eps)
+    
+    # Add Gumbel noise to logits
+    noisy_logits = scaled_logits + g
+    
+    # Get the indices of the n largest values
+    # This gives us n samples without replacement
+    indices = np.argpartition(noisy_logits, -n)[-n:]
+    
+    # Sort the indices by their noisy logit values (highest to lowest)
+    # This maintains the correct sampling probabilities
+    sorted_indices = indices[np.argsort(-noisy_logits[indices])]
+    
+    return sorted_indices
+
 
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
@@ -1394,8 +1452,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         n=1,  # since we are doing greedy sampling, don't need to generate more
         stop=args.stop_strings,
     )
-    train_dataset_idxs = np.arange(len(train_dataset))
-    iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
 
     inference_results_Q = Queue(maxsize=1)
     param_prompt_Q = Queue(maxsize=1)
@@ -1444,11 +1500,21 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     print("======== ✅ data preparation thread starts =========")
 
     # Send initial data to both threads
-    data_next = train_dataset[next(iter_dataloader)]
+    online_sample_count = np.zeros(len(train_dataset))
+    online_sample_scores = np.zeros(len(train_dataset))
+    online_sample_success_rate = np.zeros(len(train_dataset))
+
+    # Do "priority sampling", where we sample prompts with lower success rate more often
+    data_next_idxs = gumbel_sample_without_replacement(
+        1 - online_sample_success_rate,
+        args.num_unique_prompts_rollout,
+        args.dataset_sampling_temperature,
+    )
+    data_next = train_dataset[data_next_idxs]
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
     datasets_next = data_next[DATASET_SOURCE_KEY]
-    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
+    queries_prompt_Q.put((data_next_idxs, queries_next, ground_truths_next, datasets_next))
     param_prompt_Q.put((None, queries_next))
 
     episode = 0
@@ -1485,44 +1551,59 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             # Sync weights and send the next batch of prompts to vLLM
             if args.async_mode:
                 if training_step != 1:
-                    data_next = train_dataset[next(iter_dataloader)]
+                    dataset_idxs_logits = 1 - np.where(online_sample_success_rate >= args.dataset_sampling_threshold, 1.0, 0.0)
+                    data_next_idxs = gumbel_sample_without_replacement(
+                        dataset_idxs_logits,
+                        args.num_unique_prompts_rollout,
+                        args.dataset_sampling_temperature,
+                    )
+                    data_next = train_dataset[data_next_idxs]
                     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
                     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
                     datasets_next = data_next[DATASET_SOURCE_KEY]
                     with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
                         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-                queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
+                queries_prompt_Q.put((data_next_idxs, queries_next, ground_truths_next, datasets_next))
                 param_prompt_Q.put((None, queries_next))
             else:
                 if training_step != 1:
                     # NOTE: important: the indent here is different for sync mode
                     # we also set to use `queries = queries_next` immediately
-                    data_next = train_dataset[next(iter_dataloader)]
+                    dataset_idxs_logits = 1 - np.where(online_sample_success_rate >= args.dataset_sampling_threshold, 1.0, 0.0)
+                    data_next_idxs = gumbel_sample_without_replacement(
+                        dataset_idxs_logits,
+                        args.num_unique_prompts_rollout,
+                        args.dataset_sampling_temperature,
+                    )
+                    data_next = train_dataset[data_next_idxs]
                     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
                     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
                     datasets_next = data_next[DATASET_SOURCE_KEY]
                     with Timer("🔄 Loading weights using shared memory"):
                         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-                    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
+                    queries_prompt_Q.put((data_next_idxs, queries_next, ground_truths_next, datasets_next))
                     param_prompt_Q.put((None, queries_next))
+            print(f"data_next_idxs: {data_next_idxs}")
+            print(f"sampled online_sample_success_rate: {online_sample_success_rate[data_next_idxs].round(2).tolist()}")
 
             # ------------------------------------------------------------------------------------------------
             # Get the packed sequences with advantages from the packing thread
             with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
                 packed_data = packed_sequences_Q.get()
-                packed_sequences = packed_data["packed_sequences"]
                 data_thread_metrics = packed_data["metrics"]
                 B = packed_data["B"]
                 collated_data = packed_data["collated_data"]
                 num_total_tokens += packed_data["num_new_tokens"]
-
-            # Log info about the packed sequences
-            print(
-                f"Number of training examples per device: {B=}, packed sequence fraction of original sequences: {len(packed_sequences.query_responses) / packed_data['responses_count']}"
-            )
-            if B == 0:
-                print("[Main Thread] 🤡 After packing, there is not enough data to train")
-                continue
+                data_idxs = packed_data["data_idxs"]
+                scores_per_prompt = packed_data["scores_per_prompt"]
+                online_sample_count[data_idxs] += args.num_samples_per_prompt_rollout
+                online_sample_scores[data_idxs] += scores_per_prompt.sum(1) / MAX_SCORE_NORMALIZED
+                online_sample_success_rate[data_idxs] = online_sample_scores[data_idxs] / online_sample_count[data_idxs]
+                print(f"data_idxs: {data_idxs}")
+                print(f"updated online_sample_success_rate: {online_sample_success_rate[data_idxs].round(2).tolist()}")
+                if B == 0:
+                    print("[Main Thread] 🤡 After packing, there is not enough data to train")
+                    continue
 
             # ------------------------------------------------------------------------------------------------
             # Train the model
@@ -1542,6 +1623,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     "episode": episode,
                     "training_step": training_step,
                     "val/num_total_tokens": num_total_tokens,
+                    "train/percent_of_dataset_success_geq_80p": np.mean(online_sample_success_rate >= 0.8),
+                    "train/percent_of_dataset_success_geq_100p": np.mean(online_sample_success_rate >= 1.0),
                     "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
                     "tokens_per_second": num_total_tokens / (time.time() - start_time),
                     **data_thread_metrics,
