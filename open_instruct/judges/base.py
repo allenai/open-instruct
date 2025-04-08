@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Optional
 
 from judges.voting_methods import AVAILABLE_VOTING_METHODS
 
-from judges._client import get_completion
+from judges._client import get_completion, async_get_completion
+import asyncio
 
 if TYPE_CHECKING:
     import pydantic
@@ -119,7 +120,7 @@ class BaseJudge:
         messages.append({"role": "user", "content": user_prompt})
         return messages
 
-    def _judge(self, user_prompt: str, system_prompt: Optional[str] = None):
+    async def _judge(self, user_prompt: str, system_prompt: Optional[str] = None):
         """
         Perform the judgment process using the configured model.
 
@@ -137,7 +138,17 @@ class BaseJudge:
         """
         messages = self._build_messages(user_prompt, system_prompt)
 
-        completion = get_completion(
+        # completion = get_completion(
+        #     model=self.model,
+        #     messages=messages,
+        #     max_tokens=None,
+        #     temperature=1,
+        #     seed=None,
+        #     response_model=None,
+        #     response_format={"type": "json_object"}
+        # )
+
+        completion = await async_get_completion(
             model=self.model,
             messages=messages,
             max_tokens=None,

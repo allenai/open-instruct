@@ -1,6 +1,7 @@
 from textwrap import dedent
 import re
 import logging
+import asyncio
 
 from judges.base import BaseJudge, Judgment
 from judge_prompts import JUDGE_PROMPT_MAP
@@ -55,10 +56,10 @@ class JudgeQuality(BaseJudge):
             label=expected,
         )
         
-        reasoning, score, cost, response_time = self._judge(
+        reasoning, score, cost, response_time = asyncio.run(self._judge(
             user_prompt=user_prompt,
             system_prompt=system_prompt,
-        )
+        ))
         # breakpoint()
         return Judgment(reasoning=reasoning, score=score, cost=cost, response_time=response_time)
     
