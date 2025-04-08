@@ -178,10 +178,6 @@ class FlatArguments:
         default=None,
         metadata={"help": "The configuration name of the dataset to use (via the datasets library)."},
     )
-    train_file: Optional[str] = field(
-        default=None,
-        metadata={"help": "The input training data file (a json/jsonl file)."},
-    )
     max_train_samples: Optional[int] = field(
         default=None,
         metadata={
@@ -397,21 +393,13 @@ class FlatArguments:
             raise ValueError("reduce_loss must be either 'mean' or 'sum'")
         if (
             self.dataset_name is None
-            and self.train_file is None
             and self.dataset_mixer is None
             and self.dataset_mixer_list is None
         ):
             raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
-        else:
-            if self.train_file is not None:
-                extension = self.train_file.split(".")[-1]
-                assert extension in ["json", "jsonl"], "`train_file` should be a json or a jsonl file."
         if (
             (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
-            or (self.dataset_name is not None and self.train_file is not None)
-            or (
-                (self.dataset_mixer is not None or self.dataset_mixer_list is not None) and self.train_file is not None
-            )
+            or (self.dataset_name is not None)
             or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")
