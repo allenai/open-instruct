@@ -216,6 +216,8 @@ class Args:
     """the axis to compute the mean of the masked values"""
     dataset_sampling_temperature: float = 0.4
     """the temperature for the dataset sampling"""
+    dataset_sampling_threshold: float = 0.85
+    """the threshold for considering a prompt solved and marking it 1.0 for sampling purposes."""
 
     # Reward
     # -- r1 style format reward
@@ -1117,8 +1119,9 @@ def data_preparation_thread(
             # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
             # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
             non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
-            real_batch_size = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout
-            real_batch_size_ratio = real_batch_size / len(scores)
+            real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
+            unsolved_prompts = (scores_per_prompt.std(axis=-1) != 0) & (scores_per_prompt.mean(axis=-1) < MAX_SCORE_NORMALIZED)
+            unsolved_batch_size_ratio = unsolved_prompts.sum() * args.num_samples_per_prompt_rollout / len(scores)
             expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
             non_zero_gradient_index = np.where(expanded_mask)[0]
             global_advantages = global_advantages[non_zero_gradient_index]
@@ -1199,6 +1202,7 @@ def data_preparation_thread(
         metrics = {
             "scores": np.array(scores).mean(),
             "real_batch_size_ratio": real_batch_size_ratio,
+            "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
             "packed_ratio": len(packed_sequences.query_responses) / len(responses),
             "val/sequence_lengths": sequence_lengths.mean(),
             "val/sequence_lengths_min": sequence_lengths.min(),
@@ -1547,8 +1551,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             # Sync weights and send the next batch of prompts to vLLM
             if args.async_mode:
                 if training_step != 1:
+                    dataset_idxs_logits = 1 - np.where(online_sample_success_rate >= args.dataset_sampling_threshold, 1.0, online_sample_success_rate)
                     data_next_idxs = gumbel_sample_without_replacement(
-                        1 - online_sample_success_rate,
+                        dataset_idxs_logits,
                         args.num_unique_prompts_rollout,
                         args.dataset_sampling_temperature,
                     )
@@ -1564,8 +1569,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 if training_step != 1:
                     # NOTE: important: the indent here is different for sync mode
                     # we also set to use `queries = queries_next` immediately
+                    dataset_idxs_logits = 1 - np.where(online_sample_success_rate >= args.dataset_sampling_threshold, 1.0, online_sample_success_rate)
                     data_next_idxs = gumbel_sample_without_replacement(
-                        1 - online_sample_success_rate,
+                        dataset_idxs_logits,
                         args.num_unique_prompts_rollout,
                         args.dataset_sampling_temperature,
                     )
