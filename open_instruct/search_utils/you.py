@@ -33,4 +33,4 @@ def get_snippets_for_query(query: str) -> List[str]:
         for snippet in hit.get("snippets", []):
             snippets.append(snippet)
     # Return only the first snippet if available
-    return snippets[:1]
+    return ["\n".join(["Document: " + snippet for snippet in snippets[:2]])]
