@@ -59,7 +59,7 @@ sampling_params = SamplingParams(
     max_tokens=args.model_len,
     include_stop_str_in_output=True,
     n=1,
-    stop=["</query>"],  # needed for search actor (TODO: make this api nicer)
+    stop=["</query>", "</answer>"],
 )
 
 # Generate output using the actor.
