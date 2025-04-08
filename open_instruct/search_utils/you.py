@@ -28,6 +28,10 @@ def get_snippets_for_query(query: str) -> List[str]:
     except requests.exceptions.RequestException as e:
         print(f"Error: {e}")
     
+    if 'error_code' in data:
+        print("Error from API:", data['error_code'])
+        raise ValueError("API error occurred.")
+    
     snippets = []
     for hit in data.get("hits", []):
         for snippet in hit.get("snippets", []):
