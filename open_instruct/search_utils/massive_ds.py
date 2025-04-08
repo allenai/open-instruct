@@ -27,7 +27,7 @@ def create_session_with_retries(
     session.mount("https://", adapter)
     return session
 
-def get_snippets_for_query(query):
+def get_snippets_for_query(query, number_of_results=10):
     url = os.environ.get("MASSIVE_DS_URL")
     if not url:
         raise ValueError("Missing MASSIVE_DS_URL environment variable.")
@@ -44,7 +44,7 @@ def get_snippets_for_query(query):
         res.raise_for_status()  # Raises HTTPError for bad responses
         data = res.json()
         passages = data.get("results", []).get("passages", [])[0]  # passages is a list of lists
-        passages = passages[:2]
+        passages = passages[:number_of_results]
         passages = ["Document: " + passage for passage in passages]
         return ["\n".join(passages)]
     except requests.exceptions.RequestException as e:
