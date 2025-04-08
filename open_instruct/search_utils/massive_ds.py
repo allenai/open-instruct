@@ -37,7 +37,7 @@ def get_snippets_for_query(query, number_of_results=10):
     try:
         res = session.post(
             url,
-            json={"n_docs": 2, "query": query, "domains": "massive_ds"},  # domains is meaningless for now
+            json={"n_docs": number_of_results, "query": query, "domains": "massive_ds"},  # domains is meaningless for now
             headers={"Content-Type": "application/json"},
             timeout=60,  # extended timeout for long queries
         )
