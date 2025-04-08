@@ -10,11 +10,11 @@ python mason.py \
     --max_retries 0 \
     --secret YOUCOM_API_KEY=hamishi_youcom_api_key \
     --secret S2_API_KEY=hamishi_s2_api_key \
-    --env MASSIVE_DS_URL='http://ceres-cs-aus-445.reviz.ai2.in:45489/search' \
+    --env MASSIVE_DS_URL='http://ceres-cs-aus-441.reviz.ai2.in:56843/search' \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
     --budget ai2/oe-adapt \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_vllm_thread_ray_gtrl.py \
-    --exp_name 0704_testing_rl_rag \
+    --exp_name 0704_testing_rl_rag_no_query_fixed_synth_datastore \
     --beta 0.0 \
     --local_mini_batch_size 64 \
     --number_samples_per_prompt 16 \
@@ -57,4 +57,4 @@ python mason.py \
     --with_tracking \
     --mask_snippet_loss true \
     --use_search_actor true \
-    --add_query_reward
+    --stop_strings "'</query>'" "'</answer>'" \
