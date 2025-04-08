@@ -1,5 +1,6 @@
 import os
 import requests
+from typing import List
 
 from open_instruct.search_utils.s2 import create_session_with_retries
 
