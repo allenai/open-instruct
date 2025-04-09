@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --gres=gpu:a100l:1
-#SBATCH --mem=24G
+#SBATCH --mem=48G
 #SBATCH -c 4
 #SBATCH --time=8:00:00
 #SBATCH -p main
@@ -19,8 +19,8 @@ uv run open_instruct/grpo_tinyzero.py \
     --response_length 1024 \
     --pack_length 4096 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 8 \
-    --num_samples_per_prompt_rollout 8 \
+    --num_unique_prompts_rollout 16 \
+    --num_samples_per_prompt_rollout 4 \
     --total_episodes 64000 \
     --model_name_or_path Qwen/Qwen2.5-3B \
     --base_prompt \
@@ -31,7 +31,7 @@ uv run open_instruct/grpo_tinyzero.py \
     --verification_reward 0.9 \
     --non_stop_penalty False \
     --temperature 0.7 \
-    --learning_rate 1e-6 \
+    --learning_rate 5e-7 \
     --num_epochs 1 \
     --beta 0.001 \
     --seed 3 \
@@ -47,7 +47,7 @@ uv run open_instruct/grpo_tinyzero.py \
     --liger_kernel \
     --vllm_sync_backend gloo \
     --gradient_checkpointing \
-    --vllm_sleep_level 2 \
+    --vllm_sleep_level 1 \
     --offload_ref \
     --fused_optimizer \
     --with_tracking $@

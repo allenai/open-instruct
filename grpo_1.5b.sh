@@ -21,7 +21,7 @@ uv run open_instruct/grpo_tinyzero.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 8 \
-    --total_episodes 128000 \
+    --total_episodes 64000 \
     --model_name_or_path Qwen/Qwen2.5-1.5B \
     --base_prompt \
     --stop_strings "<|endoftext|>" "User:" "</answer>" "Assistant:" \
@@ -35,6 +35,7 @@ uv run open_instruct/grpo_tinyzero.py \
     --num_epochs 1 \
     --num_learners_per_node 1 \
     --vllm_tensor_parallel_size 1 \
+    --vllm_enable_prefix_caching \
     --beta 0.001 \
     --seed 3 \
     --num_evals 4 \
