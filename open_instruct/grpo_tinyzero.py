@@ -760,10 +760,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     **eval_reward_metrics,
                 }
                 table = {}
+                eval_ground_truths_str = [
+                    f"{nums[0][1]},{nums[0][2]},{nums[0][3]} --> {nums[0][0]}" for nums in eval_ground_truths
+                ]
                 table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
                 table["response"] = tokenizer.batch_decode(eval_responses)
                 table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
-                table["ground_truth"] = eval_ground_truths
+                table["score"] = eval_np_scores
+                table["ground_truth"] = eval_ground_truths_str
                 df = pd.DataFrame(table)
                 if args.with_tracking:
                     wandb.log({"sample_completions": wandb.Table(dataframe=df)})
