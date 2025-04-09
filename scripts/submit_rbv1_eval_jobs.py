@@ -183,5 +183,5 @@ for model in models_to_evaluate:
     yaml.dump(d, file, default_flow_style=True)
     file.close()
 
-    cmd = "beaker experiment create {} --workspace ai2/rewardbench".format(fn)
+    cmd = "beaker experiment create {} --workspace ai2/reward-bench-v2".format(fn)
     subprocess.Popen(cmd, shell=True)

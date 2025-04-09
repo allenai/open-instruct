@@ -11,7 +11,7 @@ allenai/open_instruct_dev:
   tokenizer: 'allenai/open_instruct_dev'
   chat_template: 'tulu'
   batch_size: 16
-  trust_remote_code: True
+  trust_remote_code: False
   quantized: False
   dpo: False
 OpenAssistant/oasst-rm-2.1-pythia-1.4b-epoch-2.5:
