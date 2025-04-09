@@ -1105,7 +1105,7 @@ def vllm_generate_thread(
 
         # Evaluate the model
 
-        if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0 and training_step > 1:
+        if eval_prompt_token_ids is not None and training_step % eval_freq == 0:
             with Timer("🔥 Generating Eval"):
                 response_ids, finish_reasons = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
                 evaluation_inference_results_Q.put((response_ids, finish_reasons))
@@ -1158,6 +1158,15 @@ def data_preparation_thread(
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards"):
             scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons)
+
+        if args.print_samples:
+            table = {}
+            table["ground_truth"] = ground_truths[:3]
+            table["prompt"] = tokenizer.batch_decode(queries[:3])
+            table["response"] = decoded_responses[:3]
+            table["reward"] = scores[:3]
+            df = pd.DataFrame(table)
+            print_rich_table(df)
 
         with Timer("🎆 [Data Preparation Thread] Calculating advantages"):
             # Calculate advantages
@@ -1234,12 +1243,18 @@ def data_preparation_thread(
 
         # Create a result package with metrics and data
         sequence_lengths = np.array([len(response) for response in responses])
+        np_scores = np.array(scores)
+
         metrics = {
-            "scores": np.array(scores).mean(),
+            "scores": np_scores.mean(),
             "val/sequence_lengths": sequence_lengths.mean(),
             "val/sequence_lengths_min": sequence_lengths.min(),
             "val/sequence_lengths_max": sequence_lengths.max(),
             "val/stop_rate": stop_rate,
+            "val/correct_lengths": sequence_lengths[np_scores == 1].mean(),
+            "val/incorrect_lengths": sequence_lengths[np_scores == 0.1].mean(),
+            "val/long_answer_correct": np_scores[sequence_lengths > 100].mean(),
+            "val/short_answer_correct": np_scores[sequence_lengths <= 100].mean(),
             **reward_metrics,
         }
 

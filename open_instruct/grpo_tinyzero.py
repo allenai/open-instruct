@@ -251,6 +251,8 @@ class Args:
     """If toggled, this experiment will be tracked with Weights and Biases"""
     with_logging: bool = True
     """Whether to do debug print logging"""
+    print_samples: bool = False
+    """Whether to do debug print logging of samples at each step"""
     wandb_project_name: str = None
     """The wandb's project name"""
     wandb_entity: Optional[str] = None
@@ -437,7 +439,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     tokenizer = tc.tokenizer
     # ------------------------------------------------------------
     # Set up runtime variables
-    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    job_id = os.environ.get("SLURM_JOB_ID", None)
+    run_name_suffix = job_id if job_id is not None else f"{args.seed}__{int(time.time())}"
+    args.run_name = f"{args.exp_name}__{run_name_suffix}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     # args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
     # if is_beaker_job():
@@ -724,7 +728,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             # ------------------------------------------------------------------------------------------------
             # Optionally evaluate the model
             try:
-                eval_responses, eval_finish_reasons = evaluation_inference_results_Q.get(timeout=0.01)
+                timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else None
+                eval_responses, eval_finish_reasons = evaluation_inference_results_Q.get(timeout=timeout)
+                logger.info("[Main Thread] 📊 Evaluation responses received")
 
                 eval_sequence_lengths = np.array([len(response) for response in eval_responses])
                 eval_decoded_responses = tokenizer.batch_decode(eval_responses, skip_special_tokens=True)
@@ -740,15 +746,19 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     eval_finish_reasons,
                 )
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
+                eval_np_scores = np.array(eval_scores)
                 eval_metrics = {
-                    "eval/scores": np.array(eval_scores).mean(),
+                    "eval/scores": eval_np_scores.mean(),
                     "eval/sequence_lengths": eval_sequence_lengths.mean(),
                     "eval/sequence_lengths_min": eval_sequence_lengths.min(),
                     "eval/sequence_lengths_max": eval_sequence_lengths.max(),
                     "eval/stop_rate": eval_stop_rate,
+                    "val/correct_lengths": eval_sequence_lengths[eval_np_scores == 1].mean(),
+                    "val/incorrect_lengths": eval_sequence_lengths[eval_np_scores == 0.1].mean(),
+                    "val/long_answer_correct": eval_np_scores[eval_sequence_lengths > 100].mean(),
+                    "val/short_answer_correct": eval_np_scores[eval_sequence_lengths <= 100].mean(),
                     **eval_reward_metrics,
                 }
-                logger.info("[Main Thread] 📊 Evaluation responses received")
                 table = {}
                 table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
                 table["response"] = tokenizer.batch_decode(eval_responses)
@@ -766,19 +776,20 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             except Empty:
                 logger.info("[Main Thread] 🙈 Evaluation responses not received")
 
-        logger.info(f"Saving final model at step {training_step} to {args.output_dir}")
-        with Timer("[Main Thread] 🗡️ Saving model"):
-            ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
-            if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
-                leaderboard_name = args.hf_repo_revision
-                eval_futures.extend(
-                    [
-                        policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                            args.output_dir, leaderboard_name, wandb_url, training_step
-                        )
-                        for i in range(args.world_size)
-                    ]
-                )
+        if args.save_freq > 0:
+            logger.info(f"Saving final model at step {training_step} to {args.output_dir}")
+            with Timer("[Main Thread] 🗡️ Saving model"):
+                ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
+                if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
+                    leaderboard_name = args.hf_repo_revision
+                    eval_futures.extend(
+                        [
+                            policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                                args.output_dir, leaderboard_name, wandb_url, training_step
+                            )
+                            for i in range(args.world_size)
+                        ]
+                    )
 
     except Exception as e:
         logger.error(f"Training error occurred: {str(e)}")
