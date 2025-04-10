@@ -78,8 +78,15 @@ predictions = [x.split("<answer>")[-1].split("</answer>")[0].lower() for x in ge
 labels = [data["ground_truth"].lower() for data in ds]
 # calculate string f1
 f1_scores = [f1_score(predictions[i], labels[i]) for i in range(len(predictions))]
+f1s = [x['f1'] for x in f1_scores]
+recalls = [x['recall'] for x in f1_scores]
+precisions = [x['precision'] for x in f1_scores]
 avg_f1 = sum(f1_scores) / len(f1_scores)
 print(f"Average F1: {avg_f1}")
+avg_recall = sum(recalls) / len(recalls)
+print(f"Average Recall: {avg_recall}")
+avg_precision = sum(precisions) / len(precisions)
+print(f"Average Precision: {avg_precision}")
 # save predictions with sample data.
 os.makedirs(args.output_dir, exist_ok=True)
 with open(f"{args.output_dir}/predictions.jsonl", "w") as f:

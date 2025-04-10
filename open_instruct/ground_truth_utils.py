@@ -197,11 +197,11 @@ def f1_score(prediction, ground_truth):
     common = Counter(prediction_tokens) & Counter(ground_truth_tokens)
     num_same = sum(common.values())
     if num_same == 0:
-        return 0
+        return {'f1': 0, 'precision': 0, 'recall': 0}
     precision = 1.0 * num_same / len(prediction_tokens)
     recall = 1.0 * num_same / len(ground_truth_tokens)
     f1 = (2 * precision * recall) / (precision + recall)
-    return f1
+    return {'f1': f1, 'precision': precision, 'recall': recall}
 
 
 class FlanVerifier(VerifierFunction):
@@ -254,7 +254,7 @@ class ReSearchVerifier(VerifierFunction):
         # check answer non-empty
         if not answer_string:
             return 0.0
-        f1 = f1_score(answer_string, label)
+        f1 = f1_score(answer_string, label)['f1']
         # if f1 is 0, but format is correct, return 0.1
         if f1 == 0:
             return 0.1
