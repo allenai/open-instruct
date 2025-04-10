@@ -1574,6 +1574,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                                     for i in range(args.world_size)
                                 ]
                             )
+            # print total api cost so far in 3 precision
+            print(f"[Main Thread] total_api_cost so far ${sum(total_api_cost):.3f}")
 
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):
@@ -1589,7 +1591,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     ]
                 )
 
-        print("[Main Thread] total_api_cost", np.mean(total_api_cost))
+        print(f"[Main Thread] total_api_cost ${sum(total_api_cost):.3f}")
 
     except Exception as e:
         print(f"Training error occurred: {str(e)}")

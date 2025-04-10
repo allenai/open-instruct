@@ -330,6 +330,7 @@ class LMJudgeVerifier(VerifierFunction):
             float: Score between 0 and 1
         """
         # Clean prediction if needed
+
         answer = extract_final_answer(prediction)
         # answer = prediction.split("<|assistant|>\n")[-1].strip() if "<|assistant|>" in prediction else prediction.strip()
         
@@ -411,7 +412,7 @@ class LMJudgeVerifier(VerifierFunction):
         """
         # Clean prediction if needed
         answer = extract_final_answer(prediction)
-        
+
         # Ensure judge_type is valid
         if self.judge_type not in JUDGE_PROMPT_MAP:
             logger.warning(f"Subtask prompt not found: {self.judge_type}, falling back to general")

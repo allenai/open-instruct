@@ -295,7 +295,7 @@ async def _apply_llm_verifier_reward_async(
     rewards = []
     per_func_rewards = []
     total_cost = []
-    
+
     # Create tasks for each response
     tasks = []
     for tok_prediction, prediction, ground_truth, dataset, query in zip(

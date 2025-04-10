@@ -30,6 +30,7 @@ ENV HF_HUB_ENABLE_HF_TRANSFER=1
 RUN pip install --upgrade pip "setuptools<70.0.0" wheel 
 RUN pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
 RUN pip install packaging
+RUN pip install --upgrade pip setuptools wheel packaging
 RUN pip install flash-attn==2.7.2.post1 --no-build-isolation
 COPY requirements.txt .
 RUN pip install -r requirements.txt

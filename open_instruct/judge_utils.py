@@ -336,11 +336,32 @@ def extract_score_from_string(score_str: str) -> float:
         return 0.0
 
 
+# def extract_final_answer(prediction: str) -> str:
+#     """
+#     Extract the substring between <answer> and </answer>.
+#     If no match is found, clean the prediction by removing the <|assistant|> tag.
+#     If neither condition matches, return the original string.
+
+#     Args:
+#         prediction (str): The input string.
+
+#     Returns:
+#         str: The extracted substring or the cleaned/original string.
+#     """
+#     # Handle <|assistant|> tag
+#     answer = prediction.split("<|assistant|>\n")[-1].strip() if "<|assistant|>" in prediction else prediction.strip()
+    
+#     # Extract substring between <answer> and </answer>
+#     match = re.search(r"<answer>(.*?)</answer>", answer, re.DOTALL)
+#     return match.group(1).strip() if match else answer
+
+
 def extract_final_answer(prediction: str) -> str:
     """
     Extract the substring between <answer> and </answer>.
-    If no match is found, clean the prediction by removing the <|assistant|> tag.
-    If neither condition matches, return the original string.
+    If no match is found, extract the substring after </think>.
+    If neither condition matches, clean the prediction by removing the <|assistant|> tag.
+    If none of the above applies, return the original string.
 
     Args:
         prediction (str): The input string.
@@ -351,9 +372,21 @@ def extract_final_answer(prediction: str) -> str:
     # Handle <|assistant|> tag
     answer = prediction.split("<|assistant|>\n")[-1].strip() if "<|assistant|>" in prediction else prediction.strip()
     
-    # Extract substring between <answer> and </answer>
+    # Try to extract substring between <answer> and </answer>
     match = re.search(r"<answer>(.*?)</answer>", answer, re.DOTALL)
-    return match.group(1).strip() if match else answer
+    if match:
+        return match.group(1).strip()
+    
+    # If no <answer>...</answer>, try to extract substring after </think>
+    think_match = re.search(r"</think>\s*(.*)", answer, re.DOTALL)
+    if think_match:
+        # remove any </answer> or <answer> tags that might be present
+        think_match = re.sub(r"<answer>", "", think_match.group(1))
+        think_match = re.sub(r"</answer>", "", think_match)
+        return think_match #.group(1).strip()
+    
+    # Fallback to the cleaned or original string
+    return answer
 
 
 JUDGE_CLASS_MAP = {
