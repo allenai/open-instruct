@@ -20,8 +20,8 @@ for sample in data:
     ground_truth = sample['ground_truth']
     generation = sample['generation']
     # extract text in snippets
-    snippets = generation.split("<snippet>")[1:]
-    snippets = [snippet.split("</snippet>")[0] for snippet in snippets]
+    snippets = generation.split("<document>")[1:]
+    snippets = [snippet.split("</document>")[0] for snippet in snippets]
     # check if ground truth is in any of the snippets
     metrics = [f1_score(s, ground_truth) for s in snippets]
     if not metrics:

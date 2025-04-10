@@ -45,7 +45,7 @@ def get_snippets_for_query(query, number_of_results=10):
         data = res.json()
         passages = data.get("results", []).get("passages", [])[0]  # passages is a list of lists
         passages = passages[:number_of_results]
-        passages = ["Document: " + passage for passage in passages]
+        passages = ["\n" + passage for passage in passages]
         return ["\n".join(passages)]
     except requests.exceptions.RequestException as e:
         print(f"Error: {e}")

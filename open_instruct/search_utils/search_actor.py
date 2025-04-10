@@ -34,9 +34,9 @@ def process_vllm_output_for_search(text: str) -> str:
     print(f"Searching: {query}")
     snippets = get_snippets_for_query(query)
     if not snippets:
-        return "<snippet>Query failed.</snippet>"
+        return "<document>Query failed.</document>"
     
-    return f"<snippet>{snippets[0]}</snippet>"
+    return f"<document>{snippets[0]}</document>"
 
 
 @dataclass
@@ -249,7 +249,7 @@ if __name__ == "__main__":
                 "content": (
                     "How much money, in euros, was the surgeon held responsible for Stella Obasanjo\'s death ordered to pay her son? "
                     "Search the web by wrapping a query in query tags like so: <query>{query}</query> "
-                    "Then, based on the snippet, provide the answer, or another query if you need."
+                    "Then, based on the document, provide the answer, or another query if you need."
                 ),
             }
         ],

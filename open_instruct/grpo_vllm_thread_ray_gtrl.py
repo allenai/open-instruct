@@ -337,7 +337,7 @@ class Args:
     use_search_actor: bool = False
     """Whether to use the search actor for RL-RAG"""
     mask_snippet_loss: bool = False
-    """Whether to mask the loss for tokens within <snippet>...</snippet> tags.
+    """Whether to mask the loss for tokens within <document>...</document> tags.
     This is useful for training with search functionality where snippets should not contribute to the loss."""
 
     def __post_init__(self):
@@ -479,8 +479,8 @@ def create_snippet_mask(input_ids, tokenizer):
     """
 
     # Define snippet tag strings.
-    start_tag = "<snippet>"
-    end_tag = "</snippet>"
+    start_tag = "<document>"
+    end_tag = "</document>"
     
     # Compile a regex pattern that captures snippet blocks (non-greedy match).
     pattern = re.compile(re.escape(start_tag) + r".*?" + re.escape(end_tag), re.DOTALL)
