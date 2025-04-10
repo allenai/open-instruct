@@ -43,7 +43,6 @@ def llm_client():
         import litellm
     except ImportError:
         # fallback to async openai if litellm is not available
-        print("litellm not found, falling back to openai.AsyncOpenAI")
         client = openai.AsyncOpenAI()
         return client
     else:
