@@ -1,20 +1,20 @@
 #!/bin/bash
 
 # saurab command:
-exp_name="0410_qwen2.5_7B_thinker_grpo_fast_llm_judge_gpt4o-mini_quality_ref_${RANDOM}_gpt-4o"
+exp_name="0410_qwen2.5_7B_thinker_grpo_fast_llm_judge__gpt-4o_quality_ref_${RANDOM}"
 
 python mason.py \
     --description $exp_name \
     --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-3-dev \
-    --image saurabhs/async_llm_judges --pure_docker_mode \
+    --image ai2/cuda11.8-cudnn8-dev-ubuntu20.04 \
     --priority high \
     --preemptible \
     --num_nodes 4 \
     --max_retries 0 \
     --budget ai2/oe-adapt \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast_wip.py \
-    --dataset_mixer_list faezeb/tulu-3-sft-t3-70b-thinker-sampled 20000 \
+    --dataset_mixer_list faezeb/tulu-3-sft-t3-70b-thinker-sampled 100000 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list faezeb/tulu-3-sft-t3-70b-thinker-sampled 64 \
     --dataset_mixer_eval_list_splits train \
@@ -26,7 +26,7 @@ python mason.py \
     --num_unique_prompts_rollout 128 \
     --num_samples_per_prompt_rollout 8 \
     --model_name_or_path Qwen/Qwen2.5-7B \
-    --oe_eval_tasks minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,alpaca_eval_v2::tulu \
+    --oe_eval_tasks minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,alpaca_eval_v2::tulu,ifeval::tulu,popqa::tulu \
     --output_dir /weka/oe-adapt-default/faezeb/model_checkpoints/${exp_name} \
     --apply_llm_verifier_reward true \
     --apply_verifiable_reward false \
@@ -39,7 +39,7 @@ python mason.py \
     --chat_template_name tulu_thinker_r1_style \
     --kl_estimator kl3 \
     --learning_rate 5e-6 \
-    --total_episodes 2000000 \
+    --total_episodes 1000000 \
     --deepspeed_stage 2 \
     --per_device_train_batch_size 1 \
     --num_mini_batches 1 \
@@ -59,6 +59,7 @@ python mason.py \
     --wandb_entity ai2-llm
 
     # --beaker_datasets /models:01JQAWR48DRN9XCHX6YQCG9RF8 \
+    # saurabhs/async_llm_judges
 
 
 # # add date to the experiment name

@@ -36,6 +36,7 @@ python open_instruct/grpo_fast_wip.py \
     --single_gpu_mode \
     --push_to_hub false \
     --vllm_sync_backend gloo \
+    --llm_judge_model "gpt-4o"
     # --with_tracking
 
     # --chat_template_name r1_simple_chat_postpend_think \ Qwen/Qwen2.5-0.5B

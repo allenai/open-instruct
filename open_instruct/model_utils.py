@@ -267,6 +267,7 @@ def apply_llm_verifier_reward(
     queries: List[str],
     reward_mult: int = 10,
     judge_type: str = "quality",
+    judge_model: str = "gpt-4o-mini",
 ):
     """Apply LLM-based verification to calculate rewards for responses.
     
@@ -279,7 +280,8 @@ def apply_llm_verifier_reward(
         datasets,
         queries,
         reward_mult,
-        judge_type
+        judge_type,
+        judge_model
     ))
 
 async def _apply_llm_verifier_reward_async(
@@ -290,6 +292,7 @@ async def _apply_llm_verifier_reward_async(
     queries: List[str],
     reward_mult: int = 10,
     judge_type: str = "quality",
+    judge_model: str = "gpt-4o-mini",
 ):
     """Async implementation of apply_llm_verifier_reward that executes judgments concurrently."""
     rewards = []
@@ -322,7 +325,8 @@ async def _apply_llm_verifier_reward_async(
             dataset_list, 
             query, 
             reward_mult, 
-            judge_type
+            judge_type,
+            judge_model
         ))
         tasks.append(task)
     
@@ -344,14 +348,15 @@ async def _process_single_response(
     dataset_list,
     query,
     reward_mult,
-    judge_type
+    judge_type,
+    judge_model
 ):
     """Process a single response with potentially multiple ground truths and datasets."""
     reward = 0
     per_func_reward = {}
     cost = 0
     
-    reward_func = LMJudgeVerifier(judge_type=judge_type)
+    reward_func = LMJudgeVerifier(judge_type=judge_type, model_name=judge_model)
     
     # For each ground truth and dataset combination, create tasks
     judgment_tasks = []

@@ -233,8 +233,9 @@ class Args:
     apply_llm_verifier_reward: bool = False
     """whether to apply llm verifiers as reward"""
     llm_verification_reward: float = 1.0
-    llm_judge_type: str = "quality_ref"
     """the reward value for non/partially-verifiable responses"""
+    llm_judge_type: str = "quality_ref"
+    llm_judge_model: str = "gpt-4o-mini"
 
     # -- arithmetic reward
     apply_arithmetic_reward: bool = False
@@ -1699,6 +1700,7 @@ if __name__ == "__main__":
                     queries=queries,
                     reward_mult=args.llm_verification_reward,
                     judge_type=args.llm_judge_type,
+                    judge_model=args.llm_judge_model,
                 )
                 if len(llm_judge_rewards) != len(scores):
                     raise ValueError(f"{len(llm_judge_rewards)=} != {len(scores)=}")
