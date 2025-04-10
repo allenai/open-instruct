@@ -15,10 +15,66 @@ export AZURE_OPENAI_ENDPOINT="..."
 ```bash
 python open_instruct/experimental/oai_generate.py --input_file open_instruct/experimental/test.jsonl --output_file test_oai_output.jsonl
 ```
+```
+Using `AZURE_OPENAI_API_KEY` from environment variable
+Using `AZURE_OPENAI_ENDPOINT` from environment variable
+100%|██████████████████████████████████████████████████████████████████████████| 3/3 [00:03<00:00,  1.30s/it]
+/home/costa/Documents/go/github.com/vwxyzjn/open-instruct/open_instruct/experimental/oai_generate.py:127: PydanticDeprecatedSince20: The `dict` method is deprecated; use `model_dump` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.10/migration/
+  "body": response.dict(),
+Output saved to test_oai_output.jsonl
+```
 
 ## Batch
+
+This will run for quite a while. You should only run this in a CPU-only machine and come back in a few hours.
 ```bash
 python open_instruct/experimental/oai_generate.py --input_file open_instruct/experimental/test.jsonl --output_file test_oai_output.jsonl --batch
+```
+```
+{
+  "id": "file-522e90e573a342f4a91f956d5eb273e8",
+  "bytes": 800,
+  "created_at": 1744306253,
+  "filename": "test.jsonl",
+  "object": "file",
+  "purpose": "batch",
+  "status": "processed",
+  "status_details": null
+}
+{
+  "id": "batch_b369f218-0d56-4922-af13-88aa97916d21",
+  "completion_window": "24h",
+  "created_at": 1744306254,
+  "endpoint": "/chat/completions",
+  "input_file_id": "file-522e90e573a342f4a91f956d5eb273e8",
+  "object": "batch",
+  "status": "validating",
+  "cancelled_at": null,
+  "cancelling_at": null,
+  "completed_at": null,
+  "error_file_id": "",
+  "errors": null,
+  "expired_at": null,
+  "expires_at": 1744392654,
+  "failed_at": null,
+  "finalizing_at": null,
+  "in_progress_at": null,
+  "metadata": null,
+  "output_file_id": "",
+  "request_counts": {
+    "completed": 0,
+    "failed": 0,
+    "total": 0
+  }
+}
+2025-04-10 13:30:59.888211 Batch Id: batch_b369f218-0d56-4922-af13-88aa97916d21,  Status: validating
+...
+2025-04-10 13:35:10.416338 Batch Id: batch_b369f218-0d56-4922-af13-88aa97916d21,  Status: in_progress
+...
+2025-04-10 13:37:23.851718 Batch Id: batch_b369f218-0d56-4922-af13-88aa97916d21,  Status: finalizing
+...
+2025-04-10 13:40:43.572143 Batch Id: batch_b369f218-0d56-4922-af13-88aa97916d21,  Status: completed
+Output saved to test_oai_output.jsonl
 ```
 """
 
