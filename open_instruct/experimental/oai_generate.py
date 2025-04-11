@@ -193,7 +193,7 @@ def main(args: Args):
                 for idx, response in enumerate(responses):
                     outfile.write(
                         json.dumps({
-                            "custom_id": f"task_{idx}",
+                            "custom_id": f"task-{idx}",
                             "response": {
                                 "body": response.model_dump(),
                             },
