@@ -28,7 +28,9 @@ def modify_command(content, new_args):
     
     # For each new argument
     for arg, value in new_args.items():
-        arg_pattern = f"--{arg} [^ ]+"
+        # Create a pattern that matches the argument and its value
+        # This pattern handles values that may contain spaces
+        arg_pattern = f"--{arg} [^ ]+(?: [^ ]+)*"
         if re.search(arg_pattern, command):
             # Replace existing argument
             command = re.sub(arg_pattern, f"--{arg} {value}", command)
@@ -47,22 +49,45 @@ def modify_command(content, new_args):
     
     return formatted
 
-def main():
+def parse_args():
+    """Parse command line arguments manually to handle values with spaces."""
     if len(sys.argv) < 2:
-        print("Usage: python launch.py <shell_script> [--arg value ...]")
+        print("Usage: python update_command_args.py <shell_script> [--arg value ...]")
         sys.exit(1)
     
     script_file = sys.argv[1]
+    new_args = {}
     
-    # Parse remaining arguments as key-value pairs
-    parser = argparse.ArgumentParser()
-    for i in range(2, len(sys.argv), 2):
-        if i + 1 < len(sys.argv):
-            arg = sys.argv[i].lstrip('-')
-            parser.add_argument(f"--{arg}")
+    i = 2
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        if not arg.startswith('--'):
+            print(f"Error: Expected argument starting with '--', got '{arg}'")
+            sys.exit(1)
+        
+        arg_name = arg[2:]  # Remove the '--' prefix
+        
+        # Find the value for this argument
+        if i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith('--'):
+            # The next argument is the value
+            value = sys.argv[i + 1]
+            i += 2
+        else:
+            # No value provided
+            value = ""
+            i += 1
+        
+        # Check if there are more values (for arguments that take multiple values)
+        while i < len(sys.argv) and not sys.argv[i].startswith('--'):
+            value += " " + sys.argv[i]
+            i += 1
+        
+        new_args[arg_name] = value
     
-    args = parser.parse_args(sys.argv[2:])
-    new_args = {k: v for k, v in vars(args).items() if v is not None}
+    return script_file, new_args
+
+def main():
+    script_file, new_args = parse_args()
     
     # Read and modify the script
     content = read_shell_script(script_file)
