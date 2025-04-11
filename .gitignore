@@ -147,3 +147,6 @@ dmypy.json
 .idea/
 .vscode
 .DS_Store
+
+**/open_ai_responses/**
+**/batch_files/**
