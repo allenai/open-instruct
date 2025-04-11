@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import json
 import time
 from typing import Optional
+from rich.pretty import pprint
 
 import datasets
 from huggingface_hub import HfApi
@@ -52,10 +53,10 @@ def main(args: Args):
                 "and <answer> </answer> tags, respectively, "
                 "i.e., <think> reasoning process here </think> "
                 "<answer> answer here </answer>. When given a coding question,"
-                "you should think about test cases <think> tag. For your final <answer> tag, "
-                "make sure to write assert-based test cases first (without the actual implementation) in a ```python block, "
-                "then the actual implementation in a separate second ```python block, and finally calling the test cases "
-                "in a separate third ```python block."
+                "you should think about test cases <think> tag. In the <think> tag, "
+                "you should also include a ```python block that contains assert-based test cases first "
+                "(without the actual implementation) and run the tests. "
+                "Then, in the <answer> tag, you should include the actual implementation (without the test cases)."
             )},
             {"role": "user", "content": example["question"]},
         ]
@@ -87,6 +88,7 @@ def main(args: Args):
             input_file=args.output_jsonl,
             output_file=oai_output_jsonl,
             batch=args.batch,
+            batch_check_interval=120,
         )
     )
     data = []
@@ -101,13 +103,17 @@ def main(args: Args):
     print(f"{len(dataset_dict['messages'])=}")
     print(f"{len(data)=}")
     completed_idxs = set()
-    for d in data:
-        task_idx = int(d["custom_id"].split("-")[-1])
+    for item in data:
+        task_idx = int(item["custom_id"].split("-")[-1])
         completed_idxs.add(task_idx)
-        dataset_dict["messages"][task_idx].append({
-            "role": "assistant",
-            "content": d["response"]["body"]["choices"][0]["message"]["content"]
-        })
+        try:
+            dataset_dict["messages"][task_idx].append({
+                "role": "assistant",
+                "content": item["response"]["body"]["choices"][0]["message"]["content"]
+            })
+        except Exception as e:
+            print(f"Error at task {task_idx}: {e}")
+            pprint(item)
     dataset = datasets.Dataset.from_dict(dataset_dict)
 
     # Filter out the incomplete examples
@@ -117,21 +123,32 @@ def main(args: Args):
     after_dataset_len = len(dataset)
     print(f"Filtered {before_dataset_len - after_dataset_len} examples")
 
-    # Filter to make sure there are 3 ```python blocks
-    print("Filtering to make sure there are 3 ```python blocks")
+    # Filter to make sure there are 2 ```python blocks
+    print("Filtering to make sure there are 2 ```python blocks")
     before_dataset_len = len(dataset)
-    dataset = dataset.filter(lambda x: x["messages"][-1]["content"].count("```python") == 3)
+    dataset = dataset.filter(lambda x: x["messages"][-1]["content"].count("```python") == 2)
     after_dataset_len = len(dataset)
     print(f"Filtered {before_dataset_len - after_dataset_len} examples")
     print("Example output:")
-    print(dataset[0]["messages"][-1]["content"])
+
+    if not args.full_dataset:
+        idx = 0
+        while True:
+            print(dataset[idx]["messages"][-1]["content"])
+            stop = input("Press Enter to continue or 'q' to quit...")
+            if stop == "q":
+                break
+            idx += 1
+
+    # remove the system message
+    dataset = dataset.map(lambda x: {"messages": x["messages"][1:]}, num_proc=10)
 
     # Push to Hub
     if args.push_to_hub:
         api = HfApi()
         if not args.hf_entity:
             args.hf_entity = HfApi().whoami()["name"]
-        repo_id = f"{args.hf_entity}/acecoder_sft_gpt4o_test_cases_then_impl"
+        repo_id = f"{args.hf_entity}/acecoder_sft_gpt4o_test_cases_then_impl1"
         print(f"Pushing dataset to Hub: {repo_id}")
         dataset.push_to_hub(repo_id)
         api.upload_file(
