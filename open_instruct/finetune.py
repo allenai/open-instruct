@@ -19,6 +19,7 @@ import math
 import os
 import shutil
 import time
+import datetime
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import List, Literal, Optional, Union
@@ -415,7 +416,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     # ------------------------------------------------------------
     # Set up runtime variables
-    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    now = datetime.now().strftime("%m%d%Y%H%M%S")
+    args.run_name = f"{args.exp_name}__{args.seed}__{now}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
     if is_beaker_job():
