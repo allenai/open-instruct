@@ -21,7 +21,7 @@ from typing import List, Dict, Tuple, Any
 from open_instruct.search_utils.massive_ds import get_snippets_for_query
 
 
-def process_vllm_output_for_search(text: str) -> str:
+def process_vllm_output_for_search(text: str, number_documents_to_search: int = 10) -> str:
     """
     Extracts a query from the given text and returns a snippet wrapped in a tag.
     If no query is found or no snippet is returned, an empty string is returned.
@@ -32,7 +32,7 @@ def process_vllm_output_for_search(text: str) -> str:
     
     query = query_match.group(1).strip()
     print(f"Searching: {query}")
-    snippets = get_snippets_for_query(query)
+    snippets = get_snippets_for_query(query, number_of_results=number_documents_to_search)
     if not snippets:
         return "<document>Query failed.</document>"
     
@@ -53,6 +53,8 @@ class LLMSearchRayActor:
     def __init__(self, *args, bundle_indices: list = None, **kwargs):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         self.max_output_length =   kwargs.pop("max_output_len", 8192)
+        self.max_searches = kwargs.pop("max_searches", 5)
+        self.number_documents_to_search = kwargs.pop("number_documents_to_search", 10)
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
             # stop ray from manipulating *_VISIBLE_DEVICES
@@ -82,7 +84,8 @@ class LLMSearchRayActor:
         prompt_token_ids: List[List[int]],
         use_tqdm: bool,
     ) -> List[List[GenerationOutput]]:
-        max_searches = 5
+        max_searches = self.max_searches
+        number_documents_to_search = self.number_documents_to_search
 
         # If num samples > 1, duplicate prompts and set sampling_params.n to 1.
         original_n = sampling_params.n
@@ -132,7 +135,10 @@ class LLMSearchRayActor:
                     query_token_counts[idx] += len(output_tokens)
 
                 # Process potential snippet.
-                snippet_response = process_vllm_output_for_search(output_text)
+                snippet_response = process_vllm_output_for_search(
+                    output_text,
+                    number_documents_to_search=number_documents_to_search
+                )
 
                 if snippet_response:
                     snippet_tokens = self.tokenizer.encode(snippet_response)

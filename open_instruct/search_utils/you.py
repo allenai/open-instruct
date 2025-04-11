@@ -4,7 +4,7 @@ from typing import List
 
 from open_instruct.search_utils.s2 import create_session_with_retries
 
-def get_snippets_for_query(query: str) -> List[str]:
+def get_snippets_for_query(query: str, number_of_results=10) -> List[str]:
     """
     Retrieves the first snippet from a web search API for the given query.
     Raises a ValueError if the API key is missing.
@@ -38,4 +38,4 @@ def get_snippets_for_query(query: str) -> List[str]:
         for snippet in hit.get("snippets", []):
             snippets.append(snippet)
     # Return only the first snippet if available
-    return ["\n".join(["\n" + snippet for snippet in snippets[:2]])]
+    return ["\n".join(["\n" + snippet for snippet in snippets[:number_of_results]])]

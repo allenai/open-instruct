@@ -178,11 +178,11 @@ def create_vllm_engines(
     seed: int,
     enable_prefix_caching: bool,
     max_model_len: int,
-    max_output_len: int,
     vllm_gpu_memory_utilization: float = 0.9,
     single_gpu_mode: bool = False,
     pg: Optional[ray.util.placement_group] = None,
     ray_actor_class: Any = LLMRayActor,
+    additional_ray_actor_kwargs: Optional[dict] = None,
     vllm_enable_sleep=False,
 ):
     import vllm
@@ -242,7 +242,7 @@ def create_vllm_engines(
                 num_gpus=0.2 if use_hybrid_engine else 1,
                 enable_sleep_mode=vllm_enable_sleep,
                 noset_visible_devices=ray_noset_visible_devices(),
-                max_output_len=max_output_len,
+                **(additional_ray_actor_kwargs if additional_ray_actor_kwargs else {}),
             )
         )
 

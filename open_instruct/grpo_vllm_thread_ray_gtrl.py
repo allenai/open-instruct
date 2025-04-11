@@ -339,6 +339,10 @@ class Args:
     mask_snippet_loss: bool = False
     """Whether to mask the loss for tokens within <document>...</document> tags.
     This is useful for training with search functionality where snippets should not contribute to the loss."""
+    max_searches: int = 5
+    """The maximum number of searches to perform for each query."""
+    number_documents_to_search: int = 10
+    """The maximum number of documents to retrieve for each query."""
 
     def __post_init__(self):
         assert self.number_samples_per_prompt > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
@@ -1799,6 +1803,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url) for model in policy_group.models
     )
     max_len = args.max_prompt_token_length + args.response_length
+    additional_ray_actor_kwargs = {}
+    if args.use_search_actor:
+        additional_ray_actor_kwargs = {
+            "max_output_len": args.response_length,
+            "max_searches": args.max_searches,
+            "number_documents_to_search": args.number_documents_to_search,
+        }
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
@@ -1808,11 +1819,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         args.seed,
         args.enable_prefix_caching,
         max_len,
-        args.response_length,
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
         ray_actor_class=LLMSearchRayActor if args.use_search_actor else LLMRayActor,
+        additional_ray_actor_kwargs=additional_ray_actor_kwargs,
     )
 
     metrics_queue = RayQueue()

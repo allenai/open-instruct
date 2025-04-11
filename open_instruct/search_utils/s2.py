@@ -27,7 +27,7 @@ def create_session_with_retries(
     session.mount("https://", adapter)
     return session
 
-def get_snippets_for_query(query):
+def get_snippets_for_query(query, number_of_results=10):
     api_key = os.environ.get("S2_API_KEY")
     if not api_key:
         raise ValueError("Missing S2_API_KEY environment variable.")
@@ -37,14 +37,13 @@ def get_snippets_for_query(query):
     try:
         res = session.get(
             "https://api.semanticscholar.org/graph/v1/snippet/search",
-            params={"limit": 20, "query": query},
+            params={"limit": number_of_results, "query": query},
             headers={"x-api-key": api_key},
             timeout=60,  # extended timeout for long queries
         )
         res.raise_for_status()  # Raises HTTPError for bad responses
         data = res.json().get('data', [])
         snippets = [item['snippet']['text'] for item in data if item.get('snippet')]
-        snippets = snippets[:2]
         return ["\n".join(snippets)]
     except requests.exceptions.RequestException as e:
         print(f"Error: {e}")
