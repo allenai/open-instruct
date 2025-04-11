@@ -52,7 +52,7 @@ sampling_params = SamplingParams(
     max_tokens=args.model_len,
     include_stop_str_in_output=True,
     n=1,
-    stop=["</query>", "</answer>"],  # needed for search actor (TODO: make this api nicer)
+    stop=["</query>", "</finish>"],  # needed for search actor (TODO: make this api nicer)
 )
 
 result = model.generate(
@@ -62,7 +62,7 @@ result = model.generate(
 # grab text answers
 generations = [x.outputs[0].text for x in result]
 # parse out answer
-predictions = [x.split("<answer>")[-1].split("</answer>")[0].lower() for x in generations]
+predictions = [x.split("<finish>")[-1].split("</finish>")[0].lower() for x in generations]
 labels = [data["ground_truth"].lower() for data in ds]
 # calculate string f1
 f1_scores = [f1_score(predictions[i], labels[i]) for i in range(len(predictions))]

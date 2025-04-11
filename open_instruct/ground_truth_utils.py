@@ -244,13 +244,15 @@ class ReSearchVerifier(VerifierFunction):
     Uses F1 score + format. If format is achieved but f1 is 0, returns 0.1. Otherwise returns F1.
     """
     def __init__(self) -> None:
+        self.answer_start_tag = "<finish>"
+        self.answer_end_tag = "</finish>"
         super().__init__("re_search", weight=1.0)
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> float:
         # extract answer
-        if "<answer>" not in prediction and "</answer>" not in prediction:
+        if self.answer_start_tag not in prediction and self.answer_end_tag not in prediction:
             return 0.0
-        answer_string = prediction.split("<answer>")[-1].split("</answer>")[0]
+        answer_string = prediction.split(self.answer_start_tag)[-1].split(self.answer_end_tag)[0]
         # check answer non-empty
         if not answer_string:
             return 0.0

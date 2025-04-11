@@ -59,7 +59,7 @@ sampling_params = SamplingParams(
     max_tokens=args.model_len,
     include_stop_str_in_output=True,
     n=1,
-    stop=["</query>", "</answer>"],
+    stop=["</query>", "</finish>"],
 )
 
 # Generate output using the actor.
@@ -73,7 +73,7 @@ result = ray.get(
 # grab text answers
 generations = [x.outputs[0].text for x in result]
 # parse out answer
-predictions = [x.split("<answer>")[-1].split("</answer>")[0].lower() for x in generations]
+predictions = [x.split("<finish>")[-1].split("</finish>")[0].lower() for x in generations]
 labels = [data["ground_truth"].lower() for data in ds]
 # calculate accuracy
 accuracy = sum([1 if predictions[i] == labels[i] else 0 for i in range(len(predictions))]) / len(predictions)
