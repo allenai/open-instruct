@@ -1,16 +1,16 @@
 '''
-Eval GPQA using the search actor.
+Naive simpleQA RAG baseline: query using the question, and then generate the answer.
 '''
 import os
 import argparse
 import ray
 import json
+import vllm
 from vllm import SamplingParams
 from datasets import load_dataset
 from transformers import AutoTokenizer
-from open_instruct.search_utils.search_actor import LLMSearchRayActor
 from open_instruct.ground_truth_utils import f1_score
-from open_instruct.vllm_utils2 import ray_noset_visible_devices
+from open_instruct.search_utils.massive_ds import get_snippets_for_query
 ray.init()
 
 parser = argparse.ArgumentParser(description="Eval SimpleQA using the search actor.")
@@ -24,34 +24,26 @@ args = parser.parse_args()
 # Load the tokenizer
 tokenizer = AutoTokenizer.from_pretrained(args.model_path, revision=args.tokenizer_revision)
 
-actor = LLMSearchRayActor.options(
-    num_cpus=4,
-    num_gpus=1,
-    # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
-    runtime_env=ray.runtime_env.RuntimeEnv(env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}),
-).remote(
+model = vllm.LLM(
     model=args.model_path,
     revision=args.model_revision,
     tokenizer_revision=args.tokenizer_revision,
-    worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
-    distributed_executor_backend="uni",
-    bundle_indices=None,
-    trust_remote_code=True,
-    tensor_parallel_size=1,
-    enforce_eager=True,
-    dtype="bfloat16",
-    seed=42,
-    enable_prefix_caching=True,
-    max_output_len=args.model_len,  # Explicitly set a custom max context length
-    gpu_memory_utilization=0.95,
-    num_gpus=1,
-    enable_sleep_mode=False,
-    noset_visible_devices=ray_noset_visible_devices(),
 )
 
 # load the GPQA test subsplit (gpqa diamond).
 ds = load_dataset("hamishivi/SimpleQA-RLVR", split="test")
-prompt_token_ids = [tokenizer.apply_chat_template(data["messages"], add_generation_prompt=True) for data in ds]
+queries = [x[0]['content'].split("Search the web")[0].strip() for x in ds["messages"]]
+# manually do the search
+query_results = [get_snippets_for_query(query) for query in queries]
+
+prompt_strings = [tokenizer.apply_chat_template(x['messages'], add_generation_prompt=True) for x in ds]
+# add the snippets and query in
+for i, prompt in enumerate(prompt_strings):
+    # add the snippets and query in
+    snippets = query_results[i]
+    query = queries[i]
+    # add the query and snippets to the prompt
+    prompt_strings[i] = prompt + f"<query>{query}</query><document>{snippets}</document>"
 
 # use greedy decoding
 sampling_params = SamplingParams(
@@ -63,13 +55,9 @@ sampling_params = SamplingParams(
     stop=["</query>", "</answer>"],  # needed for search actor (TODO: make this api nicer)
 )
 
-# Generate output using the actor.
-result = ray.get(
-    actor.generate.remote(
-        sampling_params=sampling_params,  # Uses default dummy sampling params.
-        prompt_token_ids=prompt_token_ids,
-        use_tqdm=False,
-    )
+result = model.generate(
+    prompt_strings,
+    sampling_params=sampling_params,
 )
 # grab text answers
 generations = [x.outputs[0].text for x in result]
