@@ -214,6 +214,13 @@ class Args:
     """the length of the pack (you should prob set to the max length of the model)"""
     masked_mean_axis: Optional[int] = None
     """the axis to compute the mean of the masked values"""
+    alpha: float = 0.6
+    """The alpha value for doing polyak updates (ref_param = alpha * param + (1 - alpha) * ref_param)
+    reference: [TR-DPO](https://huggingface.co/papers/2404.09656), but it's actually pretty commonly
+    used. E.g., [TD3](https://arxiv.org/abs/1802.09477) uses https://github.com/vwxyzjn/cleanrl/blob/dcc289fc6f0bda492fa7360a155262cf826b12a5/cleanrl/td3_continuous_action.py#L269
+    """
+    ref_policy_update_freq: Optional[int] = None
+    """The frequency to update the reference policy"""
 
     # Reward
     # -- r1 style format reward
@@ -743,6 +750,16 @@ class PolicyTrainerRayProcess(RayProcess):
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
         if torch.distributed.get_rank() == 0:
             ray.get(refss)
+
+    def update_ref_policy(self):
+        for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
+            with deepspeed.zero.GatheredParameters(
+                [param, ref_param], 
+                enabled=self.args.deepspeed_stage == 3,
+                modifier_rank=0,
+            ):
+                if torch.distributed.get_rank() == 0:
+                    ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
 
     def train(
         self,
@@ -1542,6 +1559,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                         for i in range(args.world_size)
                     ]
                 )
+
                 average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
                 metrics = {
                     "episode": episode,
@@ -1572,6 +1590,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                                     for i in range(args.world_size)
                                 ]
                             )
+
+            if args.ref_policy_update_freq is not None and training_step % args.ref_policy_update_freq == 0 and args.alpha > 0:
+                with Timer("[Main Thread] 🔃 Updating reference policy"):
+                    ray.get([policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)])
 
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):
