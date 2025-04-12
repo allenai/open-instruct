@@ -2,7 +2,7 @@ import json
 import datasets
 
 
-no_prompt = True
+no_prompt = False
 if no_prompt:
     prompt = ""
 else:   
@@ -36,7 +36,7 @@ def convert_hotpotqa_to_rlvr_format():
     dataset.push_to_hub("rulins/hotpotqa_rlvr" + ("_no_prompt" if no_prompt else ""), split="train")
     
     # Prepare test set
-    hotpotqa_test_data = hotpotqa_dataset["test"]
+    hotpotqa_test_data = hotpotqa_dataset["validation"]
     rlvr_data = []
     for example in hotpotqa_test_data:
         question = example["question"]
@@ -111,7 +111,7 @@ def convert_tqa_to_rlvr_format():
     dataset.push_to_hub("rulins/tqa_rlvr" + ("_no_prompt" if no_prompt else ""), split="train")
     
     # Prepare test set
-    tqa_test_data = tqa_dataset["test"]
+    tqa_test_data = tqa_dataset["validation"]
     rlvr_data = []
     for example in tqa_test_data:
         question = example["question"]
