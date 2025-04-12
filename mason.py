@@ -523,8 +523,6 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
         # Save the runtime `whoami` calls
         command.append("--hf_entity")
         command.append("allenai")
-        command.append("--wandb_entity")
-        command.append("ai2-llm")
         
         dataset_cache_paths = []
         dataset_config_hashes = []
