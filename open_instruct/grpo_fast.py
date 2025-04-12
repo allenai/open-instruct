@@ -754,7 +754,7 @@ class PolicyTrainerRayProcess(RayProcess):
     def update_ref_policy(self):
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
             with deepspeed.zero.GatheredParameters(
-                [param, ref_param], 
+                [param, ref_param],
                 enabled=self.args.deepspeed_stage == 3,
                 modifier_rank=0,
             ):
@@ -1591,7 +1591,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                                 ]
                             )
 
-            if args.ref_policy_update_freq is not None and training_step % args.ref_policy_update_freq == 0 and args.alpha > 0:
+            if (
+                args.ref_policy_update_freq is not None
+                and training_step % args.ref_policy_update_freq == 0
+                and args.alpha > 0
+            ):
                 with Timer("[Main Thread] 🔃 Updating reference policy"):
                     ray.get([policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)])
 
