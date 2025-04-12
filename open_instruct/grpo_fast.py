@@ -753,13 +753,15 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def update_ref_policy(self):
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
-            with deepspeed.zero.GatheredParameters(
-                [param, ref_param],
-                enabled=self.args.deepspeed_stage == 3,
-                modifier_rank=0,
-            ):
-                if torch.distributed.get_rank() == 0:
-                    ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
+            if self.args.deepspeed_stage == 3:
+                with deepspeed.zero.GatheredParameters(
+                    [param, ref_param],
+                    modifier_rank=0,
+                ):
+                    if deepspeed.comm.get_rank() == 0:
+                        ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
+            else:
+                ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
 
     def train(
         self,
@@ -1548,6 +1550,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
             # ------------------------------------------------------------------------------------------------
             # Train the model
+            update_ref_policy_future = []
             with Timer("[Main Thread] 🗡️ Training"):
                 metrics_list: List[dict[str, float]] = ray.get(
                     [
@@ -1559,6 +1562,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                         for i in range(args.world_size)
                     ]
                 )
+                if (
+                    args.ref_policy_update_freq is not None
+                    and training_step % args.ref_policy_update_freq == 0
+                    and args.alpha > 0
+                ):
+                    update_ref_policy_future.extend(
+                        [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
+                    )
 
                 average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
                 metrics = {
@@ -1591,13 +1602,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                                 ]
                             )
 
-            if (
-                args.ref_policy_update_freq is not None
-                and training_step % args.ref_policy_update_freq == 0
-                and args.alpha > 0
-            ):
+            if len(update_ref_policy_future) > 0:
                 with Timer("[Main Thread] 🔃 Updating reference policy"):
-                    ray.get([policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)])
+                    ray.get(update_ref_policy_future)
 
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):
