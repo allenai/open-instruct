@@ -5,14 +5,14 @@ exp_name="0411_qwen2.5_7B_thinker_grpo_fast_llm_judge__gpt-4o_quality_ref_${RAND
 
 python mason.py \
     --description $exp_name \
-    --cluster ai2/augusta-google-1 ai2/jupiter-cirrascale-2 \
+    --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-3-dev \
-    --image ai2/cuda11.8-cudnn8-dev-ubuntu20.04 \
     --priority high \
     --preemptible \
     --num_nodes 4 \
     --max_retries 0 \
     --budget ai2/oe-adapt \
+    --image ai2/cuda11.8-cudnn8-dev-ubuntu20.04 \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast_wip.py \
     --dataset_mixer_list faezeb/tulu-3-sft-t3-70b-thinker-sampled 20000 \
     --dataset_mixer_list_splits train \
@@ -39,7 +39,7 @@ python mason.py \
     --chat_template_name tulu_thinker_r1_style \
     --kl_estimator kl3 \
     --learning_rate 5e-6 \
-    --total_episodes 5120 \
+    --total_episodes 10000 \
     --deepspeed_stage 2 \
     --per_device_train_batch_size 1 \
     --num_mini_batches 1 \
@@ -56,7 +56,8 @@ python mason.py \
     --gradient_checkpointing \
     --with_tracking \
     --hf_entity allenai \
-    --wandb_entity ai2-llm
+    --wandb_entity ai2-llm \
+    --llm_judge_model "gpt-4o"
 
     # --image faezeb/open_instruct_llm_judge_async --pure_docker_mode \
     # --beaker_datasets /models:01JQAWR48DRN9XCHX6YQCG9RF8 \

@@ -1,5 +1,5 @@
 python open_instruct/grpo_fast_wip.py \
-    --dataset_mixer_list faezeb/tulu-3-sft-t3-70b-thinker-sampled 128 \
+    --dataset_mixer_list faezeb/tulu-3-sft-t3-70b-thinker-sampled 512 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list faezeb/tulu-3-sft-t3-70b-thinker-sampled 16 \
     --dataset_mixer_eval_list_splits train \
@@ -8,9 +8,9 @@ python open_instruct/grpo_fast_wip.py \
     --response_length 512 \
     --pack_length 1024 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 16 \
+    --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path Qwen/Qwen2.5-0.5B-Instruct \
+    --model_name_or_path Qwen/Qwen2.5-0.5B \
     --stop_strings "</answer>" \
     --apply_llm_verifier_reward true \
     --apply_verifiable_reward false \
@@ -19,9 +19,9 @@ python open_instruct/grpo_fast_wip.py \
     --non_stop_penalty_value 0.0 \
     --temperature 0.7 \
     --ground_truths_key ground_truth \
-    --chat_template_name r1_simple_chat_postpend_think \
+    --chat_template_name tulu_thinker_r1_style \
     --learning_rate 3e-7 \
-    --total_episodes 200 \
+    --total_episodes 1000 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 1 \

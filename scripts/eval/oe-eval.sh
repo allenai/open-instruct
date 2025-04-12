@@ -138,27 +138,27 @@ fi
 # Define default tasks if no custom tasks provided
 DEFAULT_TASKS=(
     "gsm8k::tulu"
-    "bbh:cot-v1::tulu"
-    "drop::llama3"
-    "minerva_math::tulu"
-    "codex_humaneval::tulu"
-    "codex_humanevalplus::tulu"
-    "ifeval::tulu"
-    "popqa::tulu"
-    "mmlu:mc::tulu"
-    "mmlu:cot::summarize"
-    "alpaca_eval_v2::tulu"
-    "truthfulqa::tulu"
+    # "bbh:cot-v1::tulu"
+    # "drop::llama3"
+    # "minerva_math::tulu"
+    # "codex_humaneval::tulu"
+    # "codex_humanevalplus::tulu"
+    # "ifeval::tulu"
+    # "popqa::tulu"
+    # "mmlu:mc::tulu"
+    # "mmlu:cot::summarize"
+    # "alpaca_eval_v2::tulu"
+    # "truthfulqa::tulu"
 )
 UNSEEN_TASKS=(
     "agi_eval_english:0shot_cot::tulu3"
-    "gpqa:0shot_cot::tulu3"
-    "mmlu_pro:0shot_cot::tulu3"
-    "deepmind_math:0shot_cot-v3::tulu3"
-    "bigcodebench_hard::tulu"
-    "gpqa:0shot_cot::llama3.1"
-    "mmlu_pro:cot::llama3.1"
-    "bigcodebench::tulu"
+    # "gpqa:0shot_cot::tulu3"
+    # "mmlu_pro:0shot_cot::tulu3"
+    # "deepmind_math:0shot_cot-v3::tulu3"
+    # "bigcodebench_hard::tulu"
+    # "gpqa:0shot_cot::llama3.1"
+    # "mmlu_pro:cot::llama3.1"
+    # "bigcodebench::tulu"
 )
 
 # If custom tasks provided, convert comma-separated string to array
@@ -198,11 +198,11 @@ for TASK in "${TASKS[@]}"; do
             --task "$TASK" \
             $MODEL_TYPE \
             --batch-size "$BATCH_SIZE" \
-            --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
+            --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"process_output\": \"r1_style\"}" \
             --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
-            --beaker-image "costah/oe-eval-0305_gs_olmo32b" \
+            --beaker-image "oe-eval-beaker/oe_eval_auto--afc8233-14272973339--prev" \
             --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1"}' \
             ${REVISION_ARG} \
             --cluster ai2/neptune-cirrascale,ai2/saturn-cirrascale,ai2/jupiter-cirrascale-2 \
@@ -218,11 +218,11 @@ for TASK in "${TASKS[@]}"; do
         --task "$TASK" \
         $MODEL_TYPE \
         --batch-size "$BATCH_SIZE" \
-        --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
+        --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"process_output\": \"r1_style\"}" \
         --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
         ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT" \
-        --beaker-image "costah/oe-eval-0305_gs_olmo32b" \
+        --beaker-image "oe-eval-beaker/oe_eval_auto--afc8233-14272973339--prev" \
         --gantry-args "{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"}" \
         ${REVISION_ARG} \
         --cluster ai2/augusta-google-1 \
