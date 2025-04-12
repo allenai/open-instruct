@@ -249,6 +249,11 @@ class ReSearchVerifier(VerifierFunction):
         super().__init__("re_search", weight=1.0)
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> float:
+        try:
+            label = json.loads(label)
+        except json.JSONDecodeError:
+            label = label.strip()
+        print(f"label: {label}")
         # extract answer
         if self.answer_start_tag not in prediction and self.answer_end_tag not in prediction:
             return 0.0
@@ -256,7 +261,11 @@ class ReSearchVerifier(VerifierFunction):
         # check answer non-empty
         if not answer_string:
             return 0.0
-        f1 = f1_score(answer_string, label)['f1']
+        # if label is list, max over labels
+        if isinstance(label, list):
+            f1 = max(f1_score(answer_string, l)['f1'] for l in label)
+        else:
+            f1 = f1_score(answer_string, label)['f1']
         # if f1 is 0, but format is correct, return 0.1
         if f1 == 0:
             return 0.1
