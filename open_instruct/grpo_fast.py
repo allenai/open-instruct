@@ -220,7 +220,7 @@ class Args:
     used. E.g., [TD3](https://arxiv.org/abs/1802.09477) uses https://github.com/vwxyzjn/cleanrl/blob/dcc289fc6f0bda492fa7360a155262cf826b12a5/cleanrl/td3_continuous_action.py#L269
     """
     ref_policy_update_freq: Optional[int] = None
-    """The frequency to update the reference policy"""
+    """How many training steps to take before updating the reference policy."""
 
     # Reward
     # -- r1 style format reward
