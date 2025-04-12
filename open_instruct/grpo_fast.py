@@ -214,6 +214,13 @@ class Args:
     """the length of the pack (you should prob set to the max length of the model)"""
     masked_mean_axis: Optional[int] = None
     """the axis to compute the mean of the masked values"""
+    alpha: float = 0.6
+    """The alpha value for doing polyak updates (ref_param = alpha * param + (1 - alpha) * ref_param)
+    reference: [TR-DPO](https://huggingface.co/papers/2404.09656), but it's actually pretty commonly
+    used. E.g., [TD3](https://arxiv.org/abs/1802.09477) uses https://github.com/vwxyzjn/cleanrl/blob/dcc289fc6f0bda492fa7360a155262cf826b12a5/cleanrl/td3_continuous_action.py#L269
+    """
+    ref_policy_update_freq: Optional[int] = None
+    """How many training steps to take before updating the reference policy."""
 
     # Reward
     # -- r1 style format reward
@@ -744,6 +751,18 @@ class PolicyTrainerRayProcess(RayProcess):
         if torch.distributed.get_rank() == 0:
             ray.get(refss)
 
+    def update_ref_policy(self):
+        for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
+            if self.args.deepspeed_stage == 3:
+                with deepspeed.zero.GatheredParameters(
+                    [param, ref_param],
+                    modifier_rank=0,
+                ):
+                    if deepspeed.comm.get_rank() == 0:
+                        ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
+            else:
+                ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
+
     def train(
         self,
         collated_query_responses,
@@ -1092,26 +1111,13 @@ def data_preparation_thread(
                 if finish_reasons[i] == "stop" and responses[i][-1] != tokenizer.eos_token_id:
                     responses[i].append(tokenizer.eos_token_id)
 
-        with Timer("📦 [Data Preparation Thread] Packing sequences"):
-            packed_sequences = pack_sequences(
-                queries=queries,
-                responses=responses,
-                pack_length=args.pack_length,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-            num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
-
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
-        with Timer("💰 [Data Preparation Thread] Calculating rewards"):
+        with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
             scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons)
-
-        with Timer("🎆 [Data Preparation Thread] Calculating advantages"):
-            # Calculate advantages
             scores = np.array(scores)
-            print(f"[Data Preparation Thread] {len(scores)=}")
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
             global_mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
             global_mean_grouped_rewards = np.repeat(
@@ -1123,6 +1129,28 @@ def data_preparation_thread(
             )
             global_advantages = (scores - global_mean_grouped_rewards) / (global_std_grouped_rewards + 1e-8)
 
+        with Timer("📦 [Data Preparation Thread] Filtering sequences"):
+            # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
+            # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
+            non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
+            real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
+            expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
+            non_zero_gradient_index = np.where(expanded_mask)[0]
+            global_advantages = global_advantages[non_zero_gradient_index]
+            scores = scores[non_zero_gradient_index]
+            responses = [responses[i] for i in non_zero_gradient_index]
+            queries = [queries[i] for i in non_zero_gradient_index]
+            ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
+            datasets = [datasets[i] for i in non_zero_gradient_index]
+
+        with Timer("📦 [Data Preparation Thread] Packing sequences"):
+            packed_sequences = pack_sequences(
+                queries=queries,
+                responses=responses,
+                pack_length=args.pack_length,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+            num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
             # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
             # and each value is the corresponding advantage score: index 0 is set to 0 since response masks start from 1 (1-indexed)
             lookup_advantages = np.zeros(len(global_advantages) + 1, dtype=np.float32)
@@ -1185,6 +1213,8 @@ def data_preparation_thread(
         sequence_lengths = np.array([len(response) for response in responses])
         metrics = {
             "scores": np.array(scores).mean(),
+            "real_batch_size_ratio": real_batch_size_ratio,
+            "packed_ratio": len(packed_sequences.query_responses) / len(responses),
             "val/sequence_lengths": sequence_lengths.mean(),
             "val/sequence_lengths_min": sequence_lengths.min(),
             "val/sequence_lengths_max": sequence_lengths.max(),
@@ -1510,22 +1540,17 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             # Get the packed sequences with advantages from the packing thread
             with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
                 packed_data = packed_sequences_Q.get()
-                packed_sequences = packed_data["packed_sequences"]
                 data_thread_metrics = packed_data["metrics"]
                 B = packed_data["B"]
                 collated_data = packed_data["collated_data"]
                 num_total_tokens += packed_data["num_new_tokens"]
-
-            # Log info about the packed sequences
-            print(
-                f"Number of training examples per device: {B=}, packed sequence fraction of original sequences: {len(packed_sequences.query_responses) / packed_data['responses_count']}"
-            )
-            if B == 0:
-                print("[Main Thread] 🤡 After packing, there is not enough data to train")
-                continue
+                if B == 0:
+                    print("[Main Thread] 🤡 After packing, there is not enough data to train")
+                    continue
 
             # ------------------------------------------------------------------------------------------------
             # Train the model
+            update_ref_policy_future = []
             with Timer("[Main Thread] 🗡️ Training"):
                 metrics_list: List[dict[str, float]] = ray.get(
                     [
@@ -1537,6 +1562,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                         for i in range(args.world_size)
                     ]
                 )
+                if (
+                    args.ref_policy_update_freq is not None
+                    and training_step % args.ref_policy_update_freq == 0
+                    and args.alpha > 0
+                ):
+                    update_ref_policy_future.extend(
+                        [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
+                    )
+
                 average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
                 metrics = {
                     "episode": episode,
@@ -1567,6 +1601,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                                     for i in range(args.world_size)
                                 ]
                             )
+
+            if len(update_ref_policy_future) > 0:
+                with Timer("[Main Thread] 🔃 Updating reference policy"):
+                    ray.get(update_ref_policy_future)
 
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):
