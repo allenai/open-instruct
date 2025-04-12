@@ -15,7 +15,7 @@ for data in dataset['train']:
                     f"{data['problem']} "
                     "Search the web by wrapping a query in query tags like so: <query></query> "
                     "Then, based on the snippet, provide the answer, or another query if you need. "
-                    "Finally, output your answer wrapped in answer tags: <answer></answer>."
+                    "Finally, output your answer wrapped in answer tags: <finish></finish>."
                 )
             },
         ],
@@ -33,7 +33,7 @@ for data in dataset['test']:
                     f"{data['problem']} "
                     "Search the web by wrapping a query in query tags like so: <query></query> "
                     "Then, based on the snippet, provide the answer, or another query if you need. "
-                    "Finally, output your answer wrapped in answer tags: <answer></answer>."
+                    "Finally, output your answer wrapped in answer tags: <finish></finish>."
                 )
             },
         ],

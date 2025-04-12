@@ -468,7 +468,7 @@ def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[bool] =
         return (values * mask).sum() / mask.sum()
 
 
-def create_snippet_mask(input_ids, tokenizer):
+def create_snippet_mask(input_ids, tokenizer, start_tag="<document>", end_tag="</document>"):
     """
     Creates a boolean mask where True indicates tokens to include in loss calculation
     and False indicates tokens to exclude (tokens inside <snippet>...</snippet> tags).
@@ -476,16 +476,13 @@ def create_snippet_mask(input_ids, tokenizer):
     Args:
         input_ids: Tensor of token IDs [batch_size, seq_len]
         tokenizer: The tokenizer used to encode the inputs
+        start_tag: The starting tag of the snippet block
+        end_tag: The ending tag of the snippet block
         
     Returns:
         Tensor of shape [batch_size, seq_len] with False for tokens to ignore in loss
         calculation (tokens within and including <snippet>...</snippet> tags)
     """
-
-    # Define snippet tag strings.
-    start_tag = "<document>"
-    end_tag = "</document>"
-    
     # Compile a regex pattern that captures snippet blocks (non-greedy match).
     pattern = re.compile(re.escape(start_tag) + r".*?" + re.escape(end_tag), re.DOTALL)
     
