@@ -35,7 +35,10 @@ Figure taken from [this discord thread by @the_real_jrb](https://discord.com/cha
 You can run the script in a single GPU mode to debug the training process.
 
 ```bash
-bash scripts/train/debug/grpo_fast_mini.sh
+# single GPU
+bash scripts/train/debug/grpo_fast.sh
+# 3 GPU: 2 for training, 1 for inference (a more realistic setting for async training)
+bash scripts/train/debug/grpo_fast_3_gpu.sh
 ```
 
 ### Reproduce `allenai/Llama-3.1-Tulu-3.1-8B` (1 Nodes)
