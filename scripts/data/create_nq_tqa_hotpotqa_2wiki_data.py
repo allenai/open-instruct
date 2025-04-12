@@ -2,10 +2,15 @@ import json
 import datasets
 
 
+no_prompt = True
+if no_prompt:
+    prompt = ""
+else:   
+    prompt = " Search the web by wrapping a query in query tags like so: <query></query> Then, based on the snippet, provide the answer, or another query if you need. Finally, output your answer wrapped in answer tags: <final></final>."
 
 example_data = [
     {
-        "messages": [ { "content": "Who played Creon in Antigone at the Epidaurus Festival 2022? Search the web by wrapping a query in query tags like so: <query></query> Then, based on the snippet, provide the answer, or another query if you need. Finally, output your answer wrapped in answer tags: <final></final>.", "role": "user" } ],
+        "messages": [ { "content": f"Who played Creon in Antigone at the Epidaurus Festival 2022?{prompt}", "role": "user" } ],
         "ground_truth": "Vasilis Bisbikis played Creon in Antigone at the Epidaurus Festival in 2022.",
         "dataset": "re_search",
     }
@@ -20,7 +25,7 @@ def convert_hotpotqa_to_rlvr_format():
     rlvr_data = []
     for example in hotpotqa_data:
         question = example["question"]
-        message = [ { "content": f"{question} Search the web by wrapping a query in query tags like so: <query></query> Then, based on the snippet, provide the answer, or another query if you need. Finally, output your answer wrapped in answer tags: <final></final>.", "role": "user" } ]
+        message = [ { "content": f"{question}{prompt}", "role": "user" } ]
         rlvr_data.append({
             "messages": message,
             "ground_truth": str(example["answer"]), # Convert to string to match schema
@@ -28,14 +33,14 @@ def convert_hotpotqa_to_rlvr_format():
     
     # upload to huggingface
     dataset = datasets.Dataset.from_list(rlvr_data)
-    dataset.push_to_hub("rulins/hotpotqa_rlvr", split="train")
+    dataset.push_to_hub("rulins/hotpotqa_rlvr" + ("_no_prompt" if no_prompt else ""), split="train")
     
     # Prepare test set
     hotpotqa_test_data = hotpotqa_dataset["test"]
     rlvr_data = []
     for example in hotpotqa_test_data:
         question = example["question"]
-        message = [ { "content": f"{question}? Search the web by wrapping a query in query tags like so: <query></query> Then, based on the snippet, provide the answer, or another query if you need. Finally, output your answer wrapped in answer tags: <final></final>.", "role": "user" } ]
+        message = [ { "content": f"{question}{prompt}", "role": "user" } ]
         rlvr_data.append({
             "messages": message,
             "ground_truth": str(example["answer"]), # Convert to string to match schema
@@ -43,7 +48,7 @@ def convert_hotpotqa_to_rlvr_format():
     
     # upload to huggingface
     dataset = datasets.Dataset.from_list(rlvr_data)
-    dataset.push_to_hub("rulins/hotpotqa_rlvr", split="test")
+    dataset.push_to_hub("rulins/hotpotqa_rlvr" + ("_no_prompt" if no_prompt else ""), split="test")
 
 
 def convert_nq_to_rlvr_format_with_context():
@@ -54,7 +59,7 @@ def convert_nq_to_rlvr_format_with_context():
     rlvr_data = []
     for example in nq_data:
         question = example["question"]
-        message = [ { "content": f"{question}? Search the web by wrapping a query in query tags like so: <query></query> Then, based on the snippet, provide the answer, or another query if you need. Finally, output your answer wrapped in answer tags: <final></final>.", "role": "user" } ]
+        message = [ { "content": f"{question}?{prompt}", "role": "user" } ]
         rlvr_data.append({
             "messages": message,
             "ground_truth": json.dumps(example["answer"]),
@@ -62,14 +67,14 @@ def convert_nq_to_rlvr_format_with_context():
     
     # upload to huggingface
     dataset = datasets.Dataset.from_list(rlvr_data)
-    dataset.push_to_hub("rulins/nq_rlvr", split="train")
+    dataset.push_to_hub("rulins/nq_rlvr" + ("_no_prompt" if no_prompt else ""), split="train")
     
     # Prepare test set
     nq_test_data = nq_dataset["validation"]
     rlvr_data = []
     for example in nq_test_data:
         question = example["question"]
-        message = [ { "content": f"{question}? Search the web by wrapping a query in query tags like so: <query></query> Then, based on the snippet, provide the answer, or another query if you need. Finally, output your answer wrapped in answer tags: <final></final>.", "role": "user" } ]
+        message = [ { "content": f"{question}?{prompt}", "role": "user" } ]
         rlvr_data.append({
             "messages": message,
             "ground_truth": json.dumps(example["answer"]),
@@ -77,7 +82,7 @@ def convert_nq_to_rlvr_format_with_context():
     
     # upload to huggingface
     dataset = datasets.Dataset.from_list(rlvr_data)
-    dataset.push_to_hub("rulins/nq_rlvr", split="test")
+    dataset.push_to_hub("rulins/nq_rlvr" + ("_no_prompt" if no_prompt else ""), split="test")
 
 
 def check_nq_rlvr_dataset():
@@ -95,7 +100,7 @@ def convert_tqa_to_rlvr_format():
     rlvr_data = []
     for example in tqa_data:
         question = example["question"]
-        message = [ { "content": f"{question} Search the web by wrapping a query in query tags like so: <query></query> Then, based on the snippet, provide the answer, or another query if you need. Finally, output your answer wrapped in answer tags: <final></final>.", "role": "user" } ]
+        message = [ { "content": f"{question}{prompt}", "role": "user" } ]
         rlvr_data.append({
             "messages": message,
             "ground_truth": json.dumps(example["answer"]["aliases"]),
@@ -103,14 +108,14 @@ def convert_tqa_to_rlvr_format():
     
     # upload to huggingface
     dataset = datasets.Dataset.from_list(rlvr_data)
-    dataset.push_to_hub("rulins/tqa_rlvr", split="train")
+    dataset.push_to_hub("rulins/tqa_rlvr" + ("_no_prompt" if no_prompt else ""), split="train")
     
     # Prepare test set
     tqa_test_data = tqa_dataset["test"]
     rlvr_data = []
     for example in tqa_test_data:
         question = example["question"]
-        message = [ { "content": f"{question} Search the web by wrapping a query in query tags like so: <query></query> Then, based on the snippet, provide the answer, or another query if you need. Finally, output your answer wrapped in answer tags: <final></final>.", "role": "user" } ]
+        message = [ { "content": f"{question}{prompt}", "role": "user" } ]
         rlvr_data.append({
             "messages": message,
             "ground_truth": json.dumps(example["answer"]["aliases"]),
@@ -118,7 +123,7 @@ def convert_tqa_to_rlvr_format():
         
     # upload to huggingface
     dataset = datasets.Dataset.from_list(rlvr_data)
-    dataset.push_to_hub("rulins/tqa_rlvr", split="test")
+    dataset.push_to_hub("rulins/tqa_rlvr" + ("_no_prompt" if no_prompt else ""), split="test")
 
 
 def convert_2wiki_to_rlvr_format():
@@ -129,7 +134,7 @@ def convert_2wiki_to_rlvr_format():
     rlvr_data = []
     for example in two_wiki_data:
         question = example["problem"]
-        message = [ { "content": f"{question} Search the web by wrapping a query in query tags like so: <query></query> Then, based on the snippet, provide the answer, or another query if you need. Finally, output your answer wrapped in answer tags: <final></final>.", "role": "user" } ]
+        message = [ { "content": f"{question}{prompt}", "role": "user" } ]
         rlvr_data.append({
             "messages": message,
             "ground_truth": example["golden_answers"][0],
@@ -137,14 +142,14 @@ def convert_2wiki_to_rlvr_format():
     
     # upload to huggingface
     dataset = datasets.Dataset.from_list(rlvr_data)
-    dataset.push_to_hub("rulins/2wiki_rlvr", split="train")
+    dataset.push_to_hub("rulins/2wiki_rlvr" + ("_no_prompt" if no_prompt else ""), split="train")
     
     # Prepare test set
     two_wiki_test_data = two_wiki_dataset["test"]
     rlvr_data = []
     for example in two_wiki_test_data:
         question = example["problem"]
-        message = [ { "content": f"{question} Search the web by wrapping a query in query tags like so: <query></query> Then, based on the snippet, provide the answer, or another query if you need. Finally, output your answer wrapped in answer tags: <final></final>.", "role": "user" } ]
+        message = [ { "content": f"{question}{prompt}", "role": "user" } ]
         rlvr_data.append({
             "messages": message,
             "ground_truth": example["golden_answers"][0],
@@ -152,8 +157,11 @@ def convert_2wiki_to_rlvr_format():
     
     # upload to huggingface
     dataset = datasets.Dataset.from_list(rlvr_data)
-    dataset.push_to_hub("rulins/2wiki_rlvr", split="test")
+    dataset.push_to_hub("rulins/2wiki_rlvr" + ("_no_prompt" if no_prompt else ""), split="test")
 
 
 if __name__ == "__main__":
+    convert_hotpotqa_to_rlvr_format()
+    convert_nq_to_rlvr_format_with_context()
+    convert_tqa_to_rlvr_format()
     convert_2wiki_to_rlvr_format()
