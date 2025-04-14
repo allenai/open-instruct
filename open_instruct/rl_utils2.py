@@ -77,6 +77,7 @@ def pack_sequences(
     responses: List[List[int]],
     pack_length: int,
     pad_token_id: int,
+    pad_to_pack_length: bool = False,
 ) -> PackedSequences:
     # assert padding token does not exist in queries and responses
     assert not any(pad_token_id in query for query in queries)
@@ -103,6 +104,13 @@ def pack_sequences(
         response = [t for t in response if t != pad_token_id]
         query_response = query + response
         if len(query_response) + len(cur_data) > pack_length:
+            if pad_to_pack_length:
+                cur_data = cur_data + [pad_token_id] * (pack_length - len(cur_data))
+                cur_response_mask = cur_response_mask + [0] * (pack_length - len(cur_response_mask))
+                cur_attention_mask = cur_attention_mask + [0] * (pack_length - len(cur_attention_mask))
+                cur_num_actions = cur_num_actions + [0] * (pack_length - len(cur_num_actions))
+                cur_packed_seq_lens = cur_packed_seq_lens + [0] * (pack_length - len(cur_packed_seq_lens))
+                cur_dones = cur_dones + [0] * (pack_length - len(cur_dones))
             query_responses.append(cur_data)
             response_masks.append(cur_response_mask)
             attention_masks.append(cur_attention_mask)
@@ -125,7 +133,16 @@ def pack_sequences(
         cur_response_mask.extend([0 for _ in range(len(query))] + [i + 1 for _ in range(len(response))])
         cur_attention_mask.extend([i + 1 - offset for _ in range(len(query_response))])
         cur_dones.extend([0 for _ in range(len(query) + len(response) - 1)] + [i + 1])
+
+    # Handle leftover data
     if len(cur_data) > 0:
+        if pad_to_pack_length:
+            cur_data = cur_data + [pad_token_id] * (pack_length - len(cur_data))
+            cur_response_mask = cur_response_mask + [0] * (pack_length - len(cur_response_mask))
+            cur_attention_mask = cur_attention_mask + [0] * (pack_length - len(cur_attention_mask))
+            cur_num_actions = cur_num_actions + [0] * (pack_length - len(cur_num_actions))
+            cur_packed_seq_lens = cur_packed_seq_lens + [0] * (pack_length - len(cur_packed_seq_lens))
+            cur_dones = cur_dones + [0] * (pack_length - len(cur_dones))
         query_responses.append(cur_data)
         response_masks.append(cur_response_mask)
         attention_masks.append(cur_attention_mask)
@@ -287,7 +304,7 @@ def calculate_advantages(values: np.ndarray, rewards: np.ndarray, gamma: float, 
     return advantages, returns
 
 
-def calculate_advantages_packed(values: torch.Tensor, rewards: torch.Tensor, gamma: float, lam: float, dones: torch.Tensor, response_masks: torch.Tensor):
+def calculate_advantages_packed(values: np.ndarray, rewards: np.ndarray, gamma: float, lam: float, dones: np.ndarray, response_masks: np.ndarray):
     """Packed implementation of GAE. Each row is a packed sequence.
     The `dones` specifies the sequence boundaries, and the `response_masks` specifies the query boundaries.
     """
@@ -301,7 +318,7 @@ def calculate_advantages_packed(values: torch.Tensor, rewards: torch.Tensor, gam
         delta = rewards[:, t] + gamma * nextvalues * nonterminal * nonquery - values[:, t]
         lastgaelam = delta + gamma * lam * lastgaelam * nonterminal * nonquery
         advantages_reversed.append(lastgaelam)
-    advantages = torch.stack(advantages_reversed[::-1], dim=1)
+    advantages = np.stack(advantages_reversed[::-1], axis=1)
     returns = advantages + values
     return advantages, returns
 
