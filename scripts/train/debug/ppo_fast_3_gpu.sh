@@ -11,7 +11,6 @@ python open_instruct/ppo_fast.py \
     --num_unique_prompts_rollout 16 \
     --num_samples_per_prompt_rollout 4 \
     --model_name_or_path HuggingFaceTB/SmolLM2-135M \
-    --reward_model_name_or_path HuggingFaceTB/SmolLM2-135M \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
@@ -22,15 +21,14 @@ python open_instruct/ppo_fast.py \
     --total_episodes 400 \
     --deepspeed_stage 3 \
     --num_epochs 1 \
-    --num_learners_per_node 1 \
+    --num_learners_per_node 2 \
     --vllm_tensor_parallel_size 1 \
     --beta 0.01 \
     --seed 3 \
     --num_evals 20 \
-    --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.5 \
+    --vllm_sync_backend nccl \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
-    --single_gpu_mode \
+    --push_to_hub False \
     # --with_tracking

@@ -111,6 +111,7 @@ from open_instruct.utils import (
     get_eval_ds_config,
     get_train_ds_config,
     RayProcess,
+    _z3_params_to_fetch,
 )
 from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
 
@@ -449,14 +450,15 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
+        from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
         # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
-        # AdamOptimizer = FusedAdam
+        AdamOptimizer = FusedAdam
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
             optim_params = self.policy.parameters()
-        # self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
-        self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
+        self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
+        # self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
         if args.warmup_ratio > 0.0:
@@ -500,7 +502,8 @@ class PolicyTrainerRayProcess(RayProcess):
             optim_params = get_optimizer_grouped_parameters(self.value_model, args.weight_decay)
         else:
             optim_params = self.value_model.parameters()
-        self.value_optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
+        # self.value_optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
+        self.value_optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
         value_scheduler = get_scheduler(
             args.lr_scheduler_type,
             optimizer=self.value_optimizer,
@@ -541,6 +544,9 @@ class PolicyTrainerRayProcess(RayProcess):
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
         self.ref_policy.eval()
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
+
+        self.offload_to_cpu(self.model)
+        self.offload_to_cpu(self.value_model)
 
     def forward(
         self,
@@ -631,6 +637,10 @@ class PolicyTrainerRayProcess(RayProcess):
         model = self.model.module
         count, num_params = 0, len(list(model.named_parameters()))
         refss = []
+        # @vwxyzjn: magic taken from https://github.com/huggingface/trl/issues/2840#issuecomment-2662747485
+        # to avoid assert not param.ds_active_sub_modules, param.ds_summary()
+        for param in self.model.parameters():
+            param.ds_active_sub_modules.clear()
         if self.args.gather_whole_model:
             with deepspeed.zero.GatheredParameters(model.parameters(), enabled=self.args.deepspeed_stage == 3):
                 for name, param in model.named_parameters():
@@ -691,28 +701,28 @@ class PolicyTrainerRayProcess(RayProcess):
         lam: float,
     ):
         args = self.args
+        # Flatten tensors to cpu list for adv calculation
+        cpu_collated_dones = sum([item.clamp(0, 1).tolist() for item in collated_dones], [])
+        cpu_collated_rewards = sum([item.tolist() for item in collated_rewards], [])
+        cpu_collated_response_masks = sum([item.clamp(0, 1).tolist() for item in collated_response_masks], [])
+        max_len = max([len(item) for item in cpu_collated_dones])
+
+        # Put to device
         to_device_inplace(collated_query_responses, self.device)
         to_device_inplace(collated_attention_masks, self.device)
         to_device_inplace(collated_position_ids, self.device)
         to_device_inplace(collated_response_masks, self.device)
-        to_device_inplace(collated_dones, self.device)
-        to_device_inplace(collated_rewards, self.device)
         accumulation_steps = len(collated_query_responses) // (num_mini_batches)
 
         # Calculate the logprob of the reference policy
-        collated_ref_logprobs = []
-        collated_values = []
-        collated_advantages = []
-        collated_returns = []
-        with Timer("Inference Calculation", noop=self.rank != 0):
+        with Timer("Ref Logprob Calculation", noop=self.rank != 0):
+            collated_ref_logprobs = []
             with torch.no_grad():
                 for i in range(len(collated_query_responses)):
                     query_response = collated_query_responses[i]
                     attention_mask = collated_attention_masks[i]
                     position_id = collated_position_ids[i]
                     response_mask = collated_response_masks[i]
-                    reward = collated_rewards[i]
-                    done = collated_dones[i]
                     ref_logprob = self.forward(
                         self.ref_policy,
                         query_response,
@@ -724,7 +734,16 @@ class PolicyTrainerRayProcess(RayProcess):
                     ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:].bool(), INVALID_LOGPROB)
                     collated_ref_logprobs.append(ref_logprob)
                     torch.cuda.empty_cache()
-
+        with Timer("Backload Value Model", noop=self.rank != 0):
+            self.backload_to_gpu(self.value_model)
+        with Timer("Value Calculation", noop=self.rank != 0):
+            collated_values = []
+            with torch.no_grad():
+                for i in range(len(collated_query_responses)):
+                    query_response = collated_query_responses[i]
+                    attention_mask = collated_attention_masks[i]
+                    position_id = collated_position_ids[i]
+                    response_mask = collated_response_masks[i]
                     value = self.forward_value(
                         self.value_model,
                         query_response,
@@ -734,18 +753,39 @@ class PolicyTrainerRayProcess(RayProcess):
                     ).squeeze(-1)
                     value = torch.masked_fill(value, ~response_mask.bool(), INVALID_VALUE)
                     collated_values.append(value)
-                    adv, ret = calculate_advantages_packed(
-                        value,
-                        reward,
-                        gamma,
-                        lam,
-                        # important to clamp here; otherwise we get nan values
-                        done.clamp(0, 1),
-                        response_mask.clamp(0, 1),
-                    )
-                    collated_advantages.append(adv)
-                    collated_returns.append(ret)
 
+        with Timer("Advantage Calculation", noop=self.rank != 0):
+            # Pad cpu lists to max_len; then do advantage calculation
+            cpu_collated_values = sum([item.cpu().tolist() for item in collated_values], [])
+            cpu_collated_dones = [item + [0] * (max_len - len(item)) for item in cpu_collated_dones]
+            cpu_collated_rewards = [item + [0] * (max_len - len(item)) for item in cpu_collated_rewards]
+            cpu_collated_response_masks = [item + [0] * (max_len - len(item)) for item in cpu_collated_response_masks]
+            cpu_collated_values = [item + [INVALID_VALUE] * (max_len - len(item)) for item in cpu_collated_values]
+            adv, ret = calculate_advantages_packed(
+                np.stack(cpu_collated_values),
+                np.stack(cpu_collated_rewards),
+                gamma,
+                lam,
+                np.stack(cpu_collated_dones),
+                np.stack(cpu_collated_response_masks),
+            )
+            adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+            collated_advantages = []
+            collated_returns = []
+            offset = 0
+            for i in range(len(collated_query_responses)):
+                batch_size, seq_len = collated_query_responses[i].shape
+                collated_advantages.append(torch.from_numpy(adv[offset:offset+batch_size, :seq_len]))
+                collated_returns.append(torch.from_numpy(ret[offset:offset+batch_size, :seq_len]))
+                offset += batch_size
+            to_device_inplace(collated_advantages, self.device)
+            to_device_inplace(collated_returns, self.device)
+
+        with Timer("Offload Value Model", noop=self.rank != 0):
+            self.offload_to_cpu(self.value_model)
+
+        with Timer("Backload Model", noop=self.rank != 0):
+            self.backload_to_gpu(self.model)
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
@@ -848,7 +888,11 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("val/ratio", ratio_stats.mean())
                 self.local_metrics.add("val/ratio_var", ratio_stats.var())
                 self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
-                return self.local_metrics.get_metrics_list()
+                metrics_list = self.local_metrics.get_metrics_list()
+
+        with Timer("Offload Model", noop=self.rank != 0):
+            self.offload_to_cpu(self.model)
+        return metrics_list
 
     def save_model(self, output_dir: str) -> None:
         model_to_save = self.model

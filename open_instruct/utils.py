@@ -1072,7 +1072,7 @@ def get_train_ds_config(
     max_norm=1.0,
     zpg=8,
     grad_accum_dtype=None,
-    disable_trace_cache=True,
+    disable_trace_cache=False,
 ):
     device = "cpu" if offload else "none"
     zero_opt_dict = {
@@ -1088,10 +1088,10 @@ def get_train_ds_config(
         "stage3_param_persistence_threshold": "auto",
         "stage3_prefetch_bucket_size": "auto",
         "reduce_bucket_size": "auto",
-        # # ZeRO++
-        # "zero_hpz_partition_size": zpg,
-        # "zero_quantized_weights": False,
-        # "zero_quantized_gradients": False,
+        # ZeRO++
+        "zero_hpz_partition_size": zpg,
+        "zero_quantized_weights": False,
+        "zero_quantized_gradients": False,
     }
     if disable_trace_cache:
         zero_opt_dict["stage3_prefetch_bucket_size"] = 0
@@ -1171,6 +1171,8 @@ def get_ray_address() -> Optional[str]:
     """Get the Ray address from the environment variable."""
     return os.environ.get("RAY_ADDRESS")
 
+
+_SET_AFFINITY = False
 
 
 class RayProcess:
@@ -1254,7 +1256,7 @@ class RayProcess:
 
         numa_nodes = LIBNUMA.numa_num_configured_nodes()
         num_gpu_pre_numa_node = 8 // numa_nodes
-        numa_bind(self._local_rank // num_gpu_pre_numa_node)
+        numa_bind(self.local_rank // num_gpu_pre_numa_node)
         _SET_AFFINITY = True
 
     def offload_to_cpu(self, model, pin_memory=True, non_blocking=True):
