@@ -24,7 +24,7 @@ def convert_deepseek_long_form_reasoning_to_rl_format():
         "glaiveai/reasoning-v1-20m",
         # cache_dir="/checkpoint/comem/rulin/cache/huggingface",
         # download_timeout=1000
-    )["train"]
+    )["train"].select(range(1000000))
     dataset = dataset.train_test_split(test_size=0.1, seed=42)
     train_data = dataset["train"]
     test_data = dataset["test"]
@@ -41,7 +41,7 @@ def convert_deepseek_long_form_reasoning_to_rl_format():
     
     # upload to huggingface
     dataset = datasets.Dataset.from_list(rl_data)
-    dataset.push_to_hub("rulins/reasoning-v1-20m_rl" + ("_no_prompt" if no_prompt else ""), split="train")
+    dataset.push_to_hub("rulins/reasoning-v1-1m_rl" + ("_no_prompt" if no_prompt else ""), split="train")
     
     # Prepare test set
     rl_data = []
@@ -56,7 +56,7 @@ def convert_deepseek_long_form_reasoning_to_rl_format():
     
     # upload to huggingface
     dataset = datasets.Dataset.from_list(rl_data)
-    dataset.push_to_hub("rulins/reasoning-v1-20m_rl" + ("_no_prompt" if no_prompt else ""), split="test")
+    dataset.push_to_hub("rulins/reasoning-v1-1m_rl" + ("_no_prompt" if no_prompt else ""), split="test")
 
 
 def convert_os_to_rl_format():
