@@ -265,6 +265,7 @@ class ReSearchVerifier(VerifierFunction):
         if isinstance(label, list):
             f1 = max(f1_score(answer_string, l)['f1'] for l in label)
         else:
+            label = str(label)  # safety.
             f1 = f1_score(answer_string, label)['f1']
         # if f1 is 0, but format is correct, return 0.1
         if f1 == 0:
