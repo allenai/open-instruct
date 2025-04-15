@@ -64,7 +64,8 @@ prompt_strings = []
 for i, sample in enumerate(ds):
     msgs = sample["messages"]
     msgs[0]['content'] = PROMPT + msgs[0]['content']
-    tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+    s = tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+    prompt_strings.append(s)
 
 # add the snippets and query in
 for i, prompt in enumerate(prompt_strings):
