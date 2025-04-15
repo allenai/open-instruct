@@ -214,7 +214,7 @@ class MaxLenVerifier(VerifierFunction):
     """
 
     def __init__(self) -> None:
-        super().__init__("max_length", weight=1.0)
+        super().__init__("max_length", weight=5.0)
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
         desired_length = float(label)
