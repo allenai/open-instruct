@@ -40,7 +40,7 @@ model = vllm.LLM(
 if args.dataset_name == "simpleqa":
     ds = load_dataset("hamishivi/SimpleQA-RLVR-noprompt", split="test")
 else:
-    ds = load_dataset(f"hamishivi/{args.dataset_name}_rlvr_no_prompt", split="test")
+    ds = load_dataset(f"rulins/{args.dataset_name}_rlvr_no_prompt", split="test")
 
 if args.max_eval_samples > -1 and args.max_eval_samples < len(ds):
     ds = ds.shuffle(42).select(range(args.max_eval_samples))
