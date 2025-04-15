@@ -238,22 +238,58 @@ class StringMatcherVerifier(VerifierFunction):
 
 
 
-class ReSearchVerifier(VerifierFunction):
+# class ReSearchVerifier(VerifierFunction):
+#     """
+#     Verifier from ReSearch paper (https://arxiv.org/abs/2503.19470)
+#     Uses F1 score + format. If format is achieved but f1 is 0, returns 0.1. Otherwise returns F1.
+#     """
+#     def __init__(self) -> None:
+#         self.answer_start_tag = "<finish>"
+#         self.answer_end_tag = "</finish>"
+#         super().__init__("re_search", weight=1.0)
+
+#     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> float:
+#         try:
+#             label = json.loads(label)
+#         except json.JSONDecodeError:
+#             label = label.strip()
+#         print(f"label: {label}")
+#         # extract answer
+#         if self.answer_start_tag not in prediction and self.answer_end_tag not in prediction:
+#             return 0.0
+#         answer_string = prediction.split(self.answer_start_tag)[-1].split(self.answer_end_tag)[0]
+#         # check answer non-empty
+#         if not answer_string:
+#             return 0.0
+#         # if label is list, max over labels
+#         if isinstance(label, list):
+#             f1 = max(f1_score(answer_string, l)['f1'] for l in label)
+#         else:
+#             label = str(label)  # safety.
+#             f1 = f1_score(answer_string, label)['f1']
+#         # if f1 is 0, but format is correct, return 0.1
+#         if f1 == 0:
+#             return 0.1
+#         # otherwise return f1
+#         return f1
+
+
+class R1SearchVerifier(VerifierFunction):
     """
-    Verifier from ReSearch paper (https://arxiv.org/abs/2503.19470)
-    Uses F1 score + format. If format is achieved but f1 is 0, returns 0.1. Otherwise returns F1.
+    Verifier from Search-R1 paper (https://github.com/PeterGriffinJin/Search-R1)
+    Uses exact match (normalized). If match, returns 1.0, else 0.0.
+    Note that the name is 're_search' more for historical reasons.
     """
     def __init__(self) -> None:
         self.answer_start_tag = "<finish>"
         self.answer_end_tag = "</finish>"
-        super().__init__("re_search", weight=1.0)
+        super().__init__("r1_search", weight=1.0)
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> float:
         try:
             label = json.loads(label)
         except json.JSONDecodeError:
             label = label.strip()
-        print(f"label: {label}")
         # extract answer
         if self.answer_start_tag not in prediction and self.answer_end_tag not in prediction:
             return 0.0
@@ -263,15 +299,14 @@ class ReSearchVerifier(VerifierFunction):
             return 0.0
         # if label is list, max over labels
         if isinstance(label, list):
-            f1 = max(f1_score(answer_string, l)['f1'] for l in label)
+            for l in label:
+                if normalize_answer(answer_string) == normalize_answer(l):
+                    return 1.0
         else:
             label = str(label)  # safety.
-            f1 = f1_score(answer_string, label)['f1']
-        # if f1 is 0, but format is correct, return 0.1
-        if f1 == 0:
-            return 0.1
-        # otherwise return f1
-        return f1
+            if normalize_answer(answer_string) == normalize_answer(label):
+                return 1.0
+        return 0.0
 
 
 class MaxLenVerifier(VerifierFunction):

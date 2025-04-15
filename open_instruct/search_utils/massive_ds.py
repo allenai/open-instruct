@@ -27,7 +27,7 @@ def create_session_with_retries(
     session.mount("https://", adapter)
     return session
 
-def get_snippets_for_query(query, number_of_results=10):
+def get_snippets_for_query(query, number_of_results=3):
     url = os.environ.get("MASSIVE_DS_URL")
     if not url:
         raise ValueError("Missing MASSIVE_DS_URL environment variable.")
