@@ -54,7 +54,10 @@ actor = LLMSearchRayActor.options(
 
 # load the GPQA test subsplit (gpqa diamond).
 if args.dataset_name == "simpleqa":
-    ds = load_dataset("hamishivi/SimpleQA-RLVR", split="test")
+    if args.no_prompt:
+        ds = load_dataset("hamishivi/SimpleQA-RLVR-noprompt", split="test")
+    else:
+        ds = load_dataset("hamishivi/SimpleQA-RLVR", split="test")
 else:
     ds = load_dataset(f"hamishivi/{args.dataset_name}_rlvr{'_no_prompt' if args.no_prompt else ''}", split="test")
 prompt_token_ids = [tokenizer.apply_chat_template(data["messages"], add_generation_prompt=True) for data in ds]
