@@ -17,6 +17,16 @@ from open_instruct.ground_truth_utils import f1_score
 from open_instruct.search_utils.massive_ds import get_snippets_for_query
 ray.init()
 
+PROMPT = "Answer the given question. You must conduct reasoning "
+"inside <think> and </think> first every time you get new information. "
+"After reasoning, if you find you lack some knowledge, you can call a "
+"search engine by <query> query </query>, and it will return the top "
+"searched results between <document> and </document>. You can search as "
+"many times as you want. If you find no further external knowledge needed, "
+"you can directly provide the answer inside <finish> and </finish> without "
+"detailed illustrations. For example, <finish> xxx </finish>. Question: "
+
+
 parser = argparse.ArgumentParser(description="Eval SimpleQA using the search actor.")
 parser.add_argument("--dataset_name", type=str, choices=["hotpotqa", "nq", "tqa", "2wiki", "simpleqa"], help="Dataset name.")
 parser.add_argument("--model_path", type=str, help="Path to the model.")
@@ -25,6 +35,7 @@ parser.add_argument("--tokenizer_revision", type=str, default="main", help="Toke
 parser.add_argument("--model_len", type=int, default=8192, help="Max model length.")
 parser.add_argument("--output_dir", type=str, default="tmp", help="Output directory.")
 parser.add_argument("--max_eval_samples", type=int, default=2000, help="Max eval samples.")
+parser.add_argument("--add_finish", action="store_true", help="Whether to forcibly add the finish tag to the end of the prompt.")
 args = parser.parse_args()
 
 # Load the tokenizer
@@ -49,7 +60,12 @@ queries = [x[0]['content'].strip() for x in ds["messages"]]
 # manually do the search
 query_results = [get_snippets_for_query(query)[0] for query in queries]
 
-prompt_strings = [tokenizer.apply_chat_template(x['messages'], tokenize=False, add_generation_prompt=True) for x in ds]
+prompt_strings = []
+for i, sample in enumerate(ds):
+    msgs = sample["messages"]
+    msgs[0]['content'] = PROMPT + msgs[0]['content']
+    tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+
 # add the snippets and query in
 for i, prompt in enumerate(prompt_strings):
     # add the snippets and query in
@@ -57,6 +73,9 @@ for i, prompt in enumerate(prompt_strings):
     query = queries[i]
     # add the query and snippets to the prompt
     prompt_strings[i] = prompt + f"<query>{query}</query><document>{snippets}</document>"
+    # manually force the finish tag to be added.
+    if args.add_finish:
+        prompt_strings[i] += "<finish>"
 
 # use greedy decoding
 sampling_params = SamplingParams(
@@ -75,7 +94,11 @@ result = model.generate(
 # grab text answers
 generations = [x.outputs[0].text for x in result]
 # parse out answer
-predictions = [x.split("<finish>")[-1].split("</finish>")[0].lower() for x in generations]
+if not args.add_finish:
+    predictions = [x.split("<finish>")[-1].split("</finish>")[0].lower() for x in generations]
+else:
+    # if we manually added the finish tag, just assume the answer is the whole generation.
+    predictions = [x.replace("<finish>", "").replace("</finish>", "") for x in generations]
 labels = [data["ground_truth"].lower() for data in ds]
 # calculate string f1
 f1_scores = [f1_score(predictions[i], labels[i]) for i in range(len(predictions))]
