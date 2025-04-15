@@ -56,7 +56,7 @@ from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
-from typing import Callable, Iterator, List, Literal, Optional
+from typing import Callable, Dict, Iterator, List, Literal, Optional
 
 import numpy as np
 import pandas as pd
@@ -101,12 +101,16 @@ from open_instruct.rl_utils2 import pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
+    clean_last_n_checkpoints_deepspeed,
+    download_latest_checkpoint_from_gs,
+    get_beaker_whoami,
     get_wandb_tags,
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
+    sync_gs_bucket,
 )
 from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
 
@@ -293,6 +297,14 @@ class Args:
     """Whether to save learning data traces"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
+    keep_last_n_checkpoints: int = 3
+    """How many checkpoints to keep in the output directory. -1 for all."""
+    checkpoint_state_freq: int = -1
+    """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
+    checkpoint_state_dir: Optional[str] = None
+    """Where to save the model checkpoint (if applicable)"""
+    gs_checkpoint_state_dir: Optional[str] = None
+    """The actual `checkpoint_state_dir` to use (handling the case where gs_bucket_path is provided)"""
 
     # Ai2 specific settings
     try_launch_beaker_eval_jobs_on_weka: bool = False
@@ -316,6 +328,19 @@ class Args:
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
         ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+        if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
+            raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
+        if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
+            raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
+        if self.gs_bucket_path is not None:
+            beaker_users = get_beaker_whoami()
+            if beaker_users is not None:
+                self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{beaker_users}/{self.checkpoint_state_dir}"
+            else:
+                self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{self.checkpoint_state_dir}"
+
+            # Download the model checkpoint from GCS if it exists
+            download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
 
 
 def get_train_ds_config(
@@ -564,6 +589,20 @@ class PolicyTrainerRayProcess(RayProcess):
         wandb_url: str,
         tokenizer: PreTrainedTokenizer,
     ):
+        # ------------------------------------------------------------
+        # Monkey patch to load checkpoints with `weights_only=False`
+        # otherwise it errors out with: 
+        # `_pickle.UnpicklingError: Weights only load failed. ` with pytorch 2.6.0
+        from deepspeed.utils import logger
+        from deepspeed.runtime.checkpoint_engine import torch_checkpoint_engine
+        def load(self, path: str, map_location=None):
+            logger.info(f"[Torch] Loading checkpoint from {path}...")
+            partition = torch.load(path, map_location=map_location, weights_only=False)
+            logger.info(f"[Torch] Loaded checkpoint from {path}.")
+            return partition
+        torch_checkpoint_engine.TorchCheckpointEngine.load = load
+
+        # ------------------------------------------------------------
         self.args = args
         self.tokenizer = tokenizer
         self.model_config = model_config
@@ -624,6 +663,23 @@ class PolicyTrainerRayProcess(RayProcess):
             lr_scheduler=scheduler,
             dist_init_required=True,
         )
+        optimization_steps_done = 0
+        if args.checkpoint_state_dir:
+            # check if the dir exists
+            if not os.path.exists(args.checkpoint_state_dir):
+                print(f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!")
+            else:
+                path, states = self.model.load_checkpoint(
+                    args.checkpoint_state_dir,
+                    load_module_strict=True,
+                    load_optimizer_states=True,
+                    load_lr_scheduler_states=True,
+                    load_module_only=False,
+                )
+                if path is None:
+                    raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
+                optimization_steps_done = states["training_step"]
+                print(f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}")
         self.model.train()
 
         # reference model
@@ -651,6 +707,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
         self.ref_policy.eval()
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
+        return optimization_steps_done
 
     def forward(
         self,
@@ -905,6 +962,22 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
                 return self.local_metrics.get_metrics_list()
 
+    def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: Dict[str, str]) -> None:
+        args = self.args
+        self.model.save_checkpoint(checkpoint_state_dir, client_state=client_state)
+        # `save_checkpoint` needs to be called on all ranks, only rank 0 will have all the states
+        if self.rank == 0:
+            if args.keep_last_n_checkpoints >= 0:
+                clean_last_n_checkpoints_deepspeed(checkpoint_state_dir, args.keep_last_n_checkpoints)
+            
+            if args.gs_bucket_path is not None:
+                ray.remote(sync_gs_bucket) \
+                    .options(num_cpus=1) \
+                    .remote(
+                        checkpoint_state_dir,
+                        args.gs_checkpoint_state_dir,
+                    )
+
     def save_model(self, output_dir: str) -> None:
         model_to_save = self.model
         if self.rank == 0:
@@ -963,24 +1036,19 @@ class PolicyTrainerRayProcess(RayProcess):
     def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
         args = self.args
         if self.rank == 0:
-            future = (
-                ray.remote(launch_ai2_evals_on_weka)
-                .options(num_cpus=1)
-                .remote(
-                    step_dir,
-                    leaderboard_name,
-                    args.oe_eval_max_length,
-                    wandb_url,
-                    training_step,
-                    args.oe_eval_tasks,
-                    args.stop_strings,
-                    args.gs_bucket_path,
-                    args.eval_priority,
-                )
+            ray.remote(launch_ai2_evals_on_weka) \
+            .options(num_cpus=1) \
+            .remote(
+                step_dir,
+                leaderboard_name,
+                args.oe_eval_max_length,
+                wandb_url,
+                training_step,
+                args.oe_eval_tasks,
+                args.stop_strings,
+                args.gs_bucket_path,
+                args.eval_priority,
             )
-        else:
-            future = None
-        return future
 
 
 class ModelGroup:
@@ -1360,7 +1428,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             dataset_local_cache_dir=args.dataset_local_cache_dir,
             dataset_skip_cache=args.dataset_skip_cache,
         )
-        eval_dataset = eval_dataset.shuffle(seed=args.seed)
+        # NOTE: eval dataset should not be shuffled
     if args.cache_dataset_only:
         return
 
@@ -1401,7 +1469,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
     )
-    ray.get(inits)
+    resume_training_step = ray.get(inits)[0] + 1
+    episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     print("======== ✅ all models and vLLM engines initialized =========")
 
     ray.get([m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models])
@@ -1439,7 +1508,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     if eval_dataset is not None:
         eval_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
         eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
-    resume_training_step = 1
+        eval_dataset_names = eval_dataset[:num_eval_samples][DATASET_SOURCE_KEY]
     thread = threading.Thread(
         target=vllm_generate_thread,
         args=(
@@ -1481,35 +1550,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
     param_prompt_Q.put((None, queries_next))
 
-    episode = 0
     num_total_tokens = 0
     start_time = time.time()
-    eval_futures = []
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
             print("-" * 100)
             episode += (
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
             )  # each sample is an episode
-
-            # ------------------------------------------------------------------------------------------------
-            # Optionally evaluate the model
-            try:
-                evaluation_responses, _ = evaluation_inference_results_Q.get(timeout=0.01)
-                print("[Main Thread] 📊 Evaluation responses received")
-                table = {}
-                table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
-                table["response"] = tokenizer.batch_decode(evaluation_responses)
-                table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
-                table["ground_truth"] = eval_ground_truths
-                df = pd.DataFrame(table)
-                if args.with_tracking:
-                    wandb.log({"sample_completions": wandb.Table(dataframe=df)})
-                else:
-                    print_rich_table(df.iloc[:1])
-                del table
-            except Empty:
-                print("[Main Thread] 🙈 Evaluation responses not received")
 
             # ------------------------------------------------------------------------------------------------
             # Sync weights and send the next batch of prompts to vLLM
@@ -1593,32 +1641,79 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                         ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
                         if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                             leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
-                            eval_futures.extend(
-                                [
-                                    policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                                        step_dir, leaderboard_name, wandb_url, training_step
-                                    )
-                                    for i in range(args.world_size)
-                                ]
-                            )
+                            for i in range(args.world_size):
+                                policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                                    step_dir, leaderboard_name, wandb_url, training_step
+                                )
+                if args.checkpoint_state_freq > 0 and training_step % args.checkpoint_state_freq == 0 and args.checkpoint_state_dir is not None:
+                    with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
+                        client_state = {"training_step": training_step}
+                        ray.get([policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state) for i in range(args.world_size)])
+                        print(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
             if len(update_ref_policy_future) > 0:
                 with Timer("[Main Thread] 🔃 Updating reference policy"):
                     ray.get(update_ref_policy_future)
+
+            # ------------------------------------------------------------------------------------------------
+            # Optionally evaluate the model
+            try:
+                # timeout 0.01 if this is the last training step or we're not evaluating
+                # otherwise, wait to get the last evaluation generations
+                timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else None
+                eval_responses, eval_finish_reasons = evaluation_inference_results_Q.get(timeout=timeout)
+                print("[Main Thread] 📊 Evaluation responses received")
+
+                eval_sequence_lengths = np.array([len(response) for response in eval_responses])
+                eval_decoded_responses = tokenizer.batch_decode(eval_responses, skip_special_tokens=True)
+                eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_finish_reasons) / len(
+                    eval_finish_reasons
+                )
+
+                # get and log evaluation metrics
+                eval_scores, eval_reward_metrics = reward_fn(
+                    eval_responses,
+                    eval_decoded_responses,
+                    eval_ground_truths,
+                    eval_dataset_names,
+                    eval_finish_reasons,
+                )
+                eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
+                eval_metrics = {
+                    "eval/scores": np.array(eval_scores).mean(),
+                    "eval/sequence_lengths": eval_sequence_lengths.mean(),
+                    "eval/sequence_lengths_min": eval_sequence_lengths.min(),
+                    "eval/sequence_lengths_max": eval_sequence_lengths.max(),
+                    "eval/stop_rate": eval_stop_rate,
+                    **eval_reward_metrics,
+                }
+                print_rich_single_line_metrics(eval_metrics)
+                for key, value in eval_metrics.items():
+                    writer.add_scalar(key, value, episode)
+                table = {}
+                table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
+                table["response"] = eval_decoded_responses
+                table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
+                table["scores"] = eval_scores
+                table["ground_truth"] = eval_ground_truths
+                df = pd.DataFrame(table)
+                if args.with_tracking:
+                    wandb.log({"sample_completions": wandb.Table(dataframe=df)})
+                else:
+                    print_rich_table(df.iloc[:1])
+                del table
+            except Empty:
+                print("[Main Thread] 🙈 Evaluation responses not received")
 
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):
             ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
             if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                 leaderboard_name = args.hf_repo_revision
-                eval_futures.extend(
-                    [
-                        policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                            args.output_dir, leaderboard_name, wandb_url, training_step
-                        )
-                        for i in range(args.world_size)
-                    ]
-                )
+                for i in range(args.world_size):
+                    policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                        args.output_dir, leaderboard_name, wandb_url, training_step
+                    )
 
     except Exception as e:
         print(f"Training error occurred: {str(e)}")

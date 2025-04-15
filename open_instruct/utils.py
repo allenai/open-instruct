@@ -700,6 +700,32 @@ def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> N
     logger.info("Remaining files:" + str(os.listdir(output_dir)))
 
 
+
+def clean_last_n_checkpoints_deepspeed(output_dir: str, keep_last_n_checkpoints: int) -> None:
+    # Identify checkpoint files that follow the pattern global_step{number}
+    all_files = os.listdir(output_dir)
+    checkpoint_files = []
+    for file in all_files:
+        if file.startswith("global_step") and file[len("global_step"):].isdigit():
+            checkpoint_files.append(file)
+    
+    # Sort checkpoints by step number
+    checkpoints = sorted(checkpoint_files, key=lambda x: int(x[len("global_step"):]), reverse=True)
+    
+    # Keep the N most recent checkpoints and remove the rest
+    if keep_last_n_checkpoints >= 0 and len(checkpoints) > keep_last_n_checkpoints:
+        for checkpoint in checkpoints[keep_last_n_checkpoints:]:
+            print(f"Removing checkpoint {checkpoint}")
+            checkpoint_path = os.path.join(output_dir, checkpoint)
+            if os.path.isdir(checkpoint_path):
+                shutil.rmtree(checkpoint_path)
+            elif os.path.isfile(checkpoint_path):
+                os.remove(checkpoint_path)
+    
+    # Keep special files like zero_to_fp32.py and latest
+    print("Remaining files:" + str(os.listdir(output_dir)))
+
+
 # ----------------------------------------------------------------------------
 # Ai2 user utilities
 @dataclass
@@ -872,6 +898,37 @@ def upload_to_gs_bucket(src_path: str, dest_path: str) -> None:
     cmd = ["gsutil", "-o", "GSUtil:parallel_composite_upload_threshold=150M", "cp", "-r", src_path, dest_path]
     print(f"Copying model to GS bucket with command: {cmd}")
     live_subprocess_output(cmd)
+
+
+def sync_gs_bucket(src_path: str, dest_path: str) -> None:
+    cmd = ["gsutil", "-o", "GSUtil:parallel_composite_upload_threshold=150M", "-m", "rsync", "-r", "-d", src_path, dest_path]
+    print(f"Copying model to GS bucket with command: {cmd}")
+    live_subprocess_output(cmd)
+
+
+def download_latest_checkpoint_from_gs(gs_checkpoint_state_dir: str, checkpoint_state_dir: str) -> None:
+    """Download the latest checkpoint from GCS and update the latest file."""
+    if gs_folder_exists(gs_checkpoint_state_dir):
+        os.makedirs(checkpoint_state_dir, exist_ok=True)
+        print(f"Downloading model checkpoint from GCS to {checkpoint_state_dir}")
+        sync_gs_bucket(gs_checkpoint_state_dir, checkpoint_state_dir)
+
+        # Edge case: it's possible sometimes the checkpoint upload failed, so we should fall back to
+        # a checkpoint that actually exists. The folders look like this:
+        # checkpoint_state_dir/global_step14
+        # checkpoint_state_dir/global_step15
+        # ...
+        # checkpoint_state_dir/global_step20
+        # you need to sort the folder by picking its latest name, then override the checkpoint_state_dir/`latest` file
+        # with the latest global_step number.
+        checkpoint_dirs = [d for d in os.listdir(checkpoint_state_dir) if d.startswith("global_step")]
+        if checkpoint_dirs:
+            checkpoint_dirs.sort(key=lambda x: int(x.replace("global_step", "")))
+            latest_checkpoint = checkpoint_dirs[-1]
+            latest_step = latest_checkpoint.replace("global_step", "")
+            with open(os.path.join(checkpoint_state_dir, "latest"), "w") as f:
+                f.write(f"global_step{latest_step}")
+            print(f"Found latest checkpoint: {latest_checkpoint}, updated 'latest' file to global_step{latest_step}")
 
 
 def launch_ai2_evals_on_weka(
