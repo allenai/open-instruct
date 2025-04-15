@@ -283,7 +283,7 @@ class R1SearchVerifier(VerifierFunction):
     def __init__(self) -> None:
         self.answer_start_tag = "<finish>"
         self.answer_end_tag = "</finish>"
-        super().__init__("r1_search", weight=1.0)
+        super().__init__("re_search", weight=1.0)
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> float:
         try:
