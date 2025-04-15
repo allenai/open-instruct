@@ -60,10 +60,11 @@ if args.dataset_name == "simpleqa":
         ds = load_dataset("hamishivi/SimpleQA-RLVR", split="test")
 else:
     ds = load_dataset(f"hamishivi/{args.dataset_name}_rlvr{'_no_prompt' if args.no_prompt else ''}", split="test")
-prompt_token_ids = [tokenizer.apply_chat_template(data["messages"], add_generation_prompt=True) for data in ds]
 
 if args.max_eval_samples > -1:
     ds = ds.shuffle(42).select(range(args.max_eval_samples))
+
+prompt_token_ids = [tokenizer.apply_chat_template(data["messages"], add_generation_prompt=True) for data in ds]
 
 # use greedy decoding
 sampling_params = SamplingParams(
