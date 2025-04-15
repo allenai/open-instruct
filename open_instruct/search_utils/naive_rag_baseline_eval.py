@@ -47,7 +47,7 @@ if args.max_eval_samples > -1 and args.max_eval_samples < len(ds):
 
 queries = [x[0]['content'].strip() for x in ds["messages"]]
 # manually do the search
-query_results = [get_snippets_for_query(query) for query in queries]
+query_results = [get_snippets_for_query(query)[0] for query in queries]
 
 prompt_strings = [tokenizer.apply_chat_template(x['messages'], add_generation_prompt=True) for x in ds]
 # add the snippets and query in
