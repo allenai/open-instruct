@@ -14,13 +14,14 @@ from open_instruct.vllm_utils2 import ray_noset_visible_devices
 ray.init()
 
 parser = argparse.ArgumentParser(description="Eval SimpleQA using the search actor.")
-parser.add_argument("--dataset_name", type=str, choices=["hotpotqa", "nq", "tqa", "2wiki"], help="Dataset name.")
+parser.add_argument("--dataset_name", type=str, choices=["hotpotqa", "nq", "tqa", "2wiki", "simpleqa"], help="Dataset name.")
 parser.add_argument("--no_prompt", action="store_true", help="Whether to use no prompt.")
 parser.add_argument("--model_path", type=str, help="Path to the model.")
 parser.add_argument("--model_revision", type=str, default="main", help="Model revision.")
 parser.add_argument("--tokenizer_revision", type=str, default="main", help="Tokenizer revision.")
 parser.add_argument("--model_len", type=int, default=8192, help="Max model length.")
 parser.add_argument("--output_dir", type=str, default="tmp", help="Output directory.")
+parser.add_argument("--max_eval_samples", type=int, default=2000, help="Max eval samples.")
 args = parser.parse_args()
 
 # Load the tokenizer
@@ -52,8 +53,14 @@ actor = LLMSearchRayActor.options(
 )
 
 # load the GPQA test subsplit (gpqa diamond).
-ds = load_dataset(f"hamishivi/{args.dataset_name}_rlvr_{'no_prompt' if args.no_prompt else ''}", split="test")
+if args.dataset_name == "simpleqa":
+    ds = load_dataset("hamishivi/SimpleQA-RLVR", split="test")
+else:
+    ds = load_dataset(f"hamishivi/{args.dataset_name}_rlvr{'_no_prompt' if args.no_prompt else ''}", split="test")
 prompt_token_ids = [tokenizer.apply_chat_template(data["messages"], add_generation_prompt=True) for data in ds]
+
+if args.max_eval_samples > -1:
+    ds = ds.shuffle(42).select(range(args.max_eval_samples))
 
 # use greedy decoding
 sampling_params = SamplingParams(
