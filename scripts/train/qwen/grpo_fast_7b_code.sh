@@ -25,8 +25,8 @@ python mason.py \
     --stop_strings '"</answer>"' \
     --apply_r1_style_format_reward True \
     --apply_verifiable_reward false \
-    --apply_ace_coder_reward true \
-    --ace_coder_api_url \$CODE_API_URL/test_program \
+    --apply_code_reward true \
+    --code_api_url \$CODE_API_URL/test_program \
     --non_stop_penalty True \
     --non_stop_penalty_value 0.0 \
     --chat_template_name r1_simple_chat_postpend_think \

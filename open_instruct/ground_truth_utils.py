@@ -225,7 +225,7 @@ class MaxLenVerifier(VerifierFunction):
 
 
 def extract_python_code(model_output: str) -> str:
-    """Extract the first code block between ``` markers from the model output."""
+    """Extract the last code block between ``` markers from the model output."""
     # Find content between ``` markers
     pattern = r"```(?:python)?(.*?)```"
     matches = re.findall(pattern, model_output, re.DOTALL)
@@ -234,10 +234,10 @@ def extract_python_code(model_output: str) -> str:
         return model_output
         
     # Return the first match, stripped of whitespace
-    return matches[0].strip()
+    return matches[-1].strip()
 
 
-async def _verify_ace_coder_sample_async(model_output: str, tests: List[str], api_url: str, max_execution_time: float = 1.0) -> float:
+async def _verify_code_sample_async(model_output: str, tests: List[str], api_url: str, max_execution_time: float = 1.0) -> float:
     """Async helper to verify a single code sample against test cases."""
     # Extract the python code from the model output
     python_code = extract_python_code(model_output)
@@ -260,15 +260,15 @@ async def _verify_ace_coder_sample_async(model_output: str, tests: List[str], ap
         logger.warning(f"Error verifying code sample: {e}")
         return 0.0
 
-async def _verify_ace_coder_samples_async(model_outputs: List[str], tests_list: List[List[str]], api_url: str, max_execution_time: float = 1.0) -> List[float]:
+async def _verify_code_samples_async(model_outputs: List[str], tests_list: List[List[str]], api_url: str, max_execution_time: float = 1.0) -> List[float]:
     """Async function to verify multiple code samples against their respective test cases."""
     tasks = []
     for model_output, tests in zip(model_outputs, tests_list):
-        tasks.append(_verify_ace_coder_sample_async(model_output, tests, api_url, max_execution_time))
+        tasks.append(_verify_code_sample_async(model_output, tests, api_url, max_execution_time))
     
     return await asyncio.gather(*tasks)
 
-def verify_ace_coder_sample(model_outputs: List[str], tests: List[List[str]], api_url: str, max_execution_time: float = 1.0) -> List[float]:
+def verify_code_sample(model_outputs: List[str], tests: List[List[str]], api_url: str, max_execution_time: float = 1.0) -> List[float]:
     """First extract the python code from the model outputs, then run them against their respective test cases.
     
     Args:
@@ -293,7 +293,7 @@ def verify_ace_coder_sample(model_outputs: List[str], tests: List[List[str]], ap
         raise ValueError(f"Length mismatch: {len(model_outputs)} model outputs vs {len(tests)} test sets")
     
     # Run async verification
-    return asyncio.run(_verify_ace_coder_samples_async(model_outputs, tests, api_url, max_execution_time))
+    return asyncio.run(_verify_code_samples_async(model_outputs, tests, api_url, max_execution_time))
 
 def get_all_verifiers() -> Dict[str, VerifierFunction]:
     """
@@ -322,10 +322,10 @@ def soft_format_reward_func(responses: List[str], reward_scale: float = 1.0) -> 
     return [reward_scale if match else 0.0 for match in matches]
 
 
-def test_verify_ace_coder_sample():
+def test_verify_code_sample():
     model_outputs = [
         "```python\nprint('Hello, world!')\n```",
         "```python\nprint('Hello, world!')\n```"
     ]
     tests = [["print('Hello, world!')"], ["print('Hello, world!')"]]
-    print(verify_ace_coder_sample(model_outputs, tests))
+    print(verify_code_sample(model_outputs, tests))

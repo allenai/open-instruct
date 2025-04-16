@@ -15,7 +15,7 @@ python open_code_reasoning_upload_batch.py <batch_id>
 import json
 import os
 import sys
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
 import requests
 from datasets import Dataset, load_dataset
 from pydantic import BaseModel
@@ -26,6 +26,8 @@ client = AzureOpenAI(
     api_version="2025-03-01-preview",
     azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
 )
+
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 DATASET_NAME = "saurabh5/open-code-reasoning-rlvr"
 ORIGINAL_DATASET = "nvidia/OpenCodeReasoning"
@@ -40,6 +42,7 @@ def check_batch_status(batch_id: str) -> bool:
     """Check if the batch job is complete."""
     try:
         batch = client.batches.retrieve(batch_id)
+        print(batch)
         print(f"Batch status: {batch.status}")
         return batch.status == "completed"
     except Exception as e:

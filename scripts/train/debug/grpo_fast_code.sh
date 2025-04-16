@@ -14,8 +14,8 @@ python open_instruct/grpo_fast.py \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward false \
-    --apply_ace_coder_reward true \
-    --ace_coder_api_url http://0.0.0.0:1234/test_program \
+    --apply_code_reward true \
+    --code_api_url http://0.0.0.0:1234/test_program \
     --temperature 0.7 \
     --ground_truths_key ground_truth \
     --chat_template_name r1_simple_chat_postpend_think \

@@ -8,7 +8,7 @@ python open_code_reasoning_create_batch.py
 import json
 import os
 import time
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
 from datasets import load_dataset
 from pydantic import BaseModel
 from typing import List
@@ -21,7 +21,8 @@ client = AzureOpenAI(
     azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
 )
 
-MODEL = "gpt-4o"
+
+MODEL = "gpt-4.1"
 NUM_SAMPLES = 20000
 WD = os.getcwd()
 TIMESTAMP = int(time.time())
@@ -101,17 +102,17 @@ def find_cached_results(id: str):
     return None
 
 def main():
-    dataset = load_dataset("nvidia/OpenCodeReasoning", 'split_0', split="split_0")
+    ocr_ds_split_0 = load_dataset("nvidia/OpenCodeReasoning", 'split_0', split="split_0")
     
     # First get all unique IDs
     unique_ids = set()
     unique_rows = []
-    for row in dataset:
+    for row in ocr_ds_split_0:
         if row['id'] not in unique_ids:
             unique_ids.add(row['id'])
             unique_rows.append(row)
     
-    print(f"Found {len(unique_rows)} unique rows out of {len(dataset)} total rows")
+    print(f"Found {len(unique_rows)} unique rows out of {len(ocr_ds_split_0)} total rows")
     
     # Now sample from unique rows
     random.seed(42)
@@ -122,15 +123,15 @@ def main():
     master_prompt = r"""\
 I am creating a dataset of input, test cases, and a solution. 
 I want you to rewrite the solution so that the test cases can call one function with arguements.
-The solution should not use input() to get the input, it should use the arguments passed to the function.
+The solution should not use input() to get the input. It should use the arguments passed to the function.
 Also, rewrite the input so that a person or an LLM reading it can write a program with the correct signature.
 The input should ask for a program of a certain signature. The solution should be a program of that signature.
 The test cases should be a python list of executable assert code which calls the program in the solution.
-Extract the test cases from the input and feel free to add new test cases in addition to extracting the existing ones.
+Extract the test cases from the input and add new test cases in addition to extracting the existing ones.
 
 The test cases should be a python list of executable assert code. 
 The reference solution aims to be correct, so the rewritten solution should be close to the reference solution.
-The rewrtiten input should also be close to the original input, but it should specific the signature of the program and the examples should use that program signature instead of the original input method.
+The rewritten input should also be close to the original input, but it should specify the signature of the program and the examples should use that program signature instead of the original input method.
 The test cases should be as comprehensive as possible, covering all edge cases.
 
 You should return in json format like below. I should be able to parse it directly using json.loads, so

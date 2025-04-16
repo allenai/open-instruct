@@ -87,7 +87,7 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
-from open_instruct.ground_truth_utils import soft_format_reward_func, verify_ace_coder_sample
+from open_instruct.ground_truth_utils import soft_format_reward_func, verify_code_sample
 from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
@@ -229,12 +229,12 @@ class Args:
     """the reward value for verifiable responses"""
 
     # -- ace coder reward
-    apply_ace_coder_reward: bool = False
-    """whether to apply ace coder reward"""
-    ace_coder_reward: float = 10.0
-    """the reward value for ace coder responses"""
-    ace_coder_api_url: Optional[str] = None
-    """the URL of the ace coder API"""
+    apply_code_reward: bool = False
+    """whether to apply code reward"""
+    code_reward: float = 10.0
+    """the reward value for code responses"""
+    code_api_url: Optional[str] = None
+    """the URL of the code API"""
 
     # -- non stop penalty
     non_stop_penalty: bool = False
@@ -317,8 +317,8 @@ class Args:
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
         ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
-        if self.apply_ace_coder_reward:
-            assert self.ace_coder_api_url is not None, "The ace coder API URL must be provided!"
+        if self.apply_code_reward:
+            assert self.code_api_url is not None, "The code API URL must be provided!"
 
 
 def get_train_ds_config(
@@ -1673,19 +1673,18 @@ if __name__ == "__main__":
                     metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
 
 
-        if args.apply_ace_coder_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying ace coder reward"):
-                ace_coder_rewards = verify_ace_coder_sample(
+        if args.apply_code_reward:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying code reward"):
+                code_rewards = verify_code_sample(
                     decoded_responses,
                     ground_truths,
-                    args.ace_coder_api_url,
+                    args.code_api_url,
                 )
-                # ace_coder_rewards *= args.ace_coder_reward
-                ace_coder_rewards = [item * args.ace_coder_reward for item in ace_coder_rewards]
-                for i in range(len(ace_coder_rewards)):
-                    scores[i] = ace_coder_rewards[i] + scores[i]
-                metrics["objective/ace_coder_reward"] = np.array(ace_coder_rewards).mean()
-                metrics["objective/ace_coder_correct_rate"] = (np.array(ace_coder_rewards) > 0.0).mean()
+                code_rewards = [item * args.code_reward for item in code_rewards]
+                for i in range(len(code_rewards)):
+                    scores[i] = code_rewards[i] + scores[i]
+                metrics["objective/code_reward"] = np.array(code_rewards).mean()
+                metrics["objective/code_correct_rate"] = (np.array(code_rewards) > 0.0).mean()
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:
