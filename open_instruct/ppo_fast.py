@@ -159,6 +159,8 @@ class Args:
     # Optimizer
     learning_rate: float = 2e-5
     """The initial learning rate for AdamW optimizer."""
+    value_learning_rate: float = 2e-5
+    """The initial learning rate for AdamW optimizer for the value function"""
     lr_scheduler_type: Literal[
         "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
     ] = "linear"
@@ -210,10 +212,14 @@ class Args:
     """the number of epochs to train"""
     num_mini_batches: int = 1
     """Number of minibatches to split a batch into"""
+    value_num_mini_batches: int = 1
+    """Number of minibatches to split a batch into for the value function"""
     beta: float = 0.05
     """the beta value of the RLHF objective (KL coefficient)"""
     cliprange: float = 0.2
     """the clip range"""
+    cliprange_value: float = 0.2
+    """the clip range for the value function"""
     gamma: float = 1.0
     """the discount factor"""
     lam: float = 1.0
@@ -450,15 +456,12 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
-        from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
-        # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
-        AdamOptimizer = FusedAdam
+        from deepspeed.ops.adam import FusedAdam # DeepSpeedCPUAdam
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
             optim_params = self.policy.parameters()
-        self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
-        # self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
+        self.optimizer = FusedAdam(optim_params, lr=args.learning_rate, betas=(0.9, 0.95), weight_decay=args.weight_decay)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
         if args.warmup_ratio > 0.0:
@@ -502,8 +505,7 @@ class PolicyTrainerRayProcess(RayProcess):
             optim_params = get_optimizer_grouped_parameters(self.value_model, args.weight_decay)
         else:
             optim_params = self.value_model.parameters()
-        # self.value_optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
-        self.value_optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
+        self.value_optimizer = FusedAdam(optim_params, lr=args.value_learning_rate, betas=(0.9, 0.95), weight_decay=args.weight_decay)
         value_scheduler = get_scheduler(
             args.lr_scheduler_type,
             optimizer=self.value_optimizer,
@@ -697,6 +699,7 @@ class PolicyTrainerRayProcess(RayProcess):
         collated_rewards: torch.Tensor,
         pad_token_id: int,
         num_mini_batches: int,
+        value_num_mini_batches: int,
         gamma: float,
         lam: float,
     ):
@@ -712,7 +715,8 @@ class PolicyTrainerRayProcess(RayProcess):
         to_device_inplace(collated_attention_masks, self.device)
         to_device_inplace(collated_position_ids, self.device)
         to_device_inplace(collated_response_masks, self.device)
-        accumulation_steps = len(collated_query_responses) // (num_mini_batches)
+        accumulation_steps = max(1, len(collated_query_responses) // (num_mini_batches))
+        value_accumulation_steps = max(1, len(collated_query_responses) // (value_num_mini_batches))
 
         # Calculate the logprob of the reference policy
         with Timer("Ref Logprob Calculation", noop=self.rank != 0):
@@ -780,15 +784,55 @@ class PolicyTrainerRayProcess(RayProcess):
                 offset += batch_size
             to_device_inplace(collated_advantages, self.device)
             to_device_inplace(collated_returns, self.device)
+            to_device_inplace(collated_values, self.device)
 
+        with Timer("[Training Processes] Value Loss calculation", noop=self.rank != 0):
+            value_losses = torch.zeros(len(collated_query_responses))
+            local_step = 0
+            value_optimizer_step = 0
+            for epoch_idx in range(args.num_epochs):
+                for i in range(len(collated_query_responses)):
+                    mb_query_responses = collated_query_responses[i]
+                    mb_response_masks = collated_response_masks[i]
+                    mb_response_masks_bool = mb_response_masks[:, 1:].bool()
+                    mb_attention_mask = collated_attention_masks[i]
+                    mb_position_id = collated_position_ids[i]
+                    mb_values = collated_values[i]
+                    mb_return = collated_returns[i]
+                    vpred = self.forward_value(
+                        self.value_model,
+                        mb_query_responses,
+                        mb_attention_mask,
+                        mb_position_id,
+                        pad_token_id,
+                    ).squeeze(-1)
+                    vpred = torch.masked_fill(vpred, ~mb_response_masks_bool, INVALID_VALUE)
+                    vpredclipped = torch.clamp(
+                        vpred,
+                        mb_values - args.cliprange_value,
+                        mb_values + args.cliprange_value,
+                    )
+                    vf_losses1 = torch.square(vpred - mb_return)
+                    vf_losses2 = torch.square(vpredclipped - mb_return)
+                    vf_loss_max = torch.max(vf_losses1, vf_losses2)
+                    loss = 0.5 * masked_mean(vf_loss_max, ~mb_response_masks_bool)
+                    loss = loss / value_accumulation_steps
+                    self.value_model.backward(loss)
+                    with torch.no_grad():
+                        value_losses[i] = loss
+                    if (local_step + 1) % value_accumulation_steps == 0:
+                        self.value_model.step()
+                        value_optimizer_step += 1
+                    local_step += 1
         with Timer("Offload Value Model", noop=self.rank != 0):
             self.offload_to_cpu(self.value_model)
 
         with Timer("Backload Model", noop=self.rank != 0):
             self.backload_to_gpu(self.model)
-        local_step = 0
-        # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
-        with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
+
+        with Timer("[Training Processes] Policy Loss calculation", noop=self.rank != 0):
+            local_step = 0
+            policy_optimizer_step = 0
             old_logprobs = [None for _ in range(len(collated_query_responses))]
             kl1_stats = torch.zeros(len(collated_query_responses))
             kl2_stats = torch.zeros(len(collated_query_responses))
@@ -854,6 +898,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
                         self.model.step()
+                        policy_optimizer_step += 1
                     local_step += 1
                     with torch.no_grad():
                         # NOTE: in packed implementation, kl calculation are averages over response tokens
@@ -888,6 +933,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("val/ratio", ratio_stats.mean())
                 self.local_metrics.add("val/ratio_var", ratio_stats.var())
                 self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
+                self.local_metrics.add("lr_value", self.value_scheduler.get_last_lr()[0])
+                self.local_metrics.add("policy_optimizer_step", policy_optimizer_step)
+                self.local_metrics.add("value_optimizer_step", value_optimizer_step)
                 metrics_list = self.local_metrics.get_metrics_list()
 
         with Timer("Offload Model", noop=self.rank != 0):
@@ -1531,6 +1579,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                             **collated_data[i],
                             pad_token_id=tokenizer.pad_token_id,
                             num_mini_batches=args.num_mini_batches,
+                            value_num_mini_batches=args.value_num_mini_batches,
                             gamma=args.gamma,
                             lam=args.lam,
                         )
