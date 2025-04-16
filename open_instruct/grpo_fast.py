@@ -342,6 +342,7 @@ class Args:
             download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
         calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
 
+
 def get_train_ds_config(
     offload,
     adam_offload=False,
@@ -590,15 +591,17 @@ class PolicyTrainerRayProcess(RayProcess):
     ):
         # ------------------------------------------------------------
         # Monkey patch to load checkpoints with `weights_only=False`
-        # otherwise it errors out with: 
+        # otherwise it errors out with:
         # `_pickle.UnpicklingError: Weights only load failed. ` with pytorch 2.6.0
-        from deepspeed.utils import logger
         from deepspeed.runtime.checkpoint_engine import torch_checkpoint_engine
+        from deepspeed.utils import logger
+
         def load(self, path: str, map_location=None):
             logger.info(f"[Torch] Loading checkpoint from {path}...")
             partition = torch.load(path, map_location=map_location, weights_only=False)
             logger.info(f"[Torch] Loaded checkpoint from {path}.")
             return partition
+
         torch_checkpoint_engine.TorchCheckpointEngine.load = load
 
         # ------------------------------------------------------------
@@ -678,7 +681,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
                 optimization_steps_done = states["training_step"]
-                print(f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}")
+                print(
+                    f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
+                )
         self.model.train()
 
         # reference model
@@ -968,14 +973,12 @@ class PolicyTrainerRayProcess(RayProcess):
         if self.rank == 0:
             if args.keep_last_n_checkpoints >= 0:
                 clean_last_n_checkpoints_deepspeed(checkpoint_state_dir, args.keep_last_n_checkpoints)
-            
+
             if args.gs_bucket_path is not None:
-                ray.remote(sync_gs_bucket) \
-                    .options(num_cpus=1) \
-                    .remote(
-                        checkpoint_state_dir,
-                        args.gs_checkpoint_state_dir,
-                    )
+                ray.remote(sync_gs_bucket).options(num_cpus=1).remote(
+                    checkpoint_state_dir,
+                    args.gs_checkpoint_state_dir,
+                )
 
     def save_model(self, output_dir: str) -> None:
         model_to_save = self.model
@@ -1035,9 +1038,7 @@ class PolicyTrainerRayProcess(RayProcess):
     def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
         args = self.args
         if self.rank == 0:
-            ray.remote(launch_ai2_evals_on_weka) \
-            .options(num_cpus=1) \
-            .remote(
+            ray.remote(launch_ai2_evals_on_weka).options(num_cpus=1).remote(
                 step_dir,
                 leaderboard_name,
                 args.oe_eval_max_length,
@@ -1187,13 +1188,9 @@ def data_preparation_thread(
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-            mean_grouped_rewards = np.repeat(
-                mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0
-            )
+            mean_grouped_rewards = np.repeat(mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
             std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            std_grouped_rewards = np.repeat(
-                std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0
-            )
+            std_grouped_rewards = np.repeat(std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
             if args.advantage_normalization_type == "standard":
                 advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
             elif args.advantage_normalization_type == "centered":
@@ -1290,8 +1287,12 @@ def data_preparation_thread(
 
         # Create a result package with metrics and data
         sequence_lengths = np.array([len(response) for response in responses])
-        sequence_length_solved = np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == max_possible_score])
-        sequence_length_unsolved = np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
+        sequence_length_solved = (
+            np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == max_possible_score])
+        )
+        sequence_length_unsolved = (
+            np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
+        )
         metrics = {
             "scores": np.array(scores).mean(),
             "real_batch_size_ratio": real_batch_size_ratio,
@@ -1300,7 +1301,9 @@ def data_preparation_thread(
             "val/sequence_lengths": sequence_lengths.mean(),
             "val/sequence_lengths_min": sequence_lengths.min(),
             "val/sequence_lengths_max": sequence_lengths.max(),
-            "val/sequence_lengths_unsolved": 0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean(),
+            "val/sequence_lengths_unsolved": (
+                0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
+            ),
             "val/sequence_lengths_solved": 0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean(),
             "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
             "val/sequence_lengths_solved_hist": sequence_length_solved,
@@ -1671,10 +1674,21 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                                 policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
                                     step_dir, leaderboard_name, wandb_url, training_step
                                 )
-                if args.checkpoint_state_freq > 0 and training_step % args.checkpoint_state_freq == 0 and args.checkpoint_state_dir is not None:
+                if (
+                    args.checkpoint_state_freq > 0
+                    and training_step % args.checkpoint_state_freq == 0
+                    and args.checkpoint_state_dir is not None
+                ):
                     with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
                         client_state = {"training_step": training_step}
-                        ray.get([policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state) for i in range(args.world_size)])
+                        ray.get(
+                            [
+                                policy_group.models[i].save_checkpoint_state.remote(
+                                    args.checkpoint_state_dir, client_state
+                                )
+                                for i in range(args.world_size)
+                            ]
+                        )
                         print(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
             if len(update_ref_policy_future) > 0:
