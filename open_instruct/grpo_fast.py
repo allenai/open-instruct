@@ -331,7 +331,7 @@ class Args:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
             raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
-        if self.gs_bucket_path is not None:
+        if self.gs_bucket_path is not None and self.gs_checkpoint_state_dir is None:
             beaker_users = get_beaker_whoami()
             if beaker_users is not None:
                 self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{beaker_users}/{self.checkpoint_state_dir}"
