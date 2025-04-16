@@ -80,21 +80,22 @@ Output saved to test_oai_output.jsonl
 ```
 """
 
-
 import asyncio
-from dataclasses import dataclass
+import datetime
 import json
 import os
-from typing import Optional
-from openai import AzureOpenAI, AsyncAzureOpenAI
 import time
-import datetime 
+from dataclasses import dataclass
+from typing import Optional
+
+import tiktoken
+from openai import AsyncAzureOpenAI, AzureOpenAI
+from rich.console import Console
 from tqdm.asyncio import tqdm_asyncio
 from transformers import HfArgumentParser
-import tiktoken
-from rich.console import Console
 
 console = Console()
+
 
 @dataclass
 class Args:
@@ -142,19 +143,14 @@ def main(args: Args):
             input_token_count += len(enc.encode(data["body"]["messages"][-1]["content"]))
     console.print(f"[bold green]Input token count: {input_token_count}[/bold green]")
     estimated_input_token_cost = input_token_count * input_price_per_token
-    console.print(f"[bold green]Estimated input token cost (based on GPT-4o): ${estimated_input_token_cost:.6f}[/bold green]")
-    
+    console.print(
+        f"[bold green]Estimated input token cost (based on GPT-4o): ${estimated_input_token_cost:.6f}[/bold green]"
+    )
+
     if args.batch:
-        client = AzureOpenAI(
-            api_key=args.api_key,  
-            api_version=args.api_version,
-            azure_endpoint = args.azure_endpoint
-        )
+        client = AzureOpenAI(api_key=args.api_key, api_version=args.api_version, azure_endpoint=args.azure_endpoint)
         # Upload a file with a purpose of "batch"
-        file = client.files.create(
-            file=open(args.input_file, "rb"), 
-            purpose="batch"
-        )
+        file = client.files.create(file=open(args.input_file, "rb"), purpose="batch")
 
         print(file.model_dump_json(indent=2))
         file_id = file.id
@@ -179,7 +175,7 @@ def main(args: Args):
             print(f"{datetime.datetime.now()} Batch Id: {batch_id},  Status: {status}")
 
         if batch_response.status == "failed":
-            for error in batch_response.errors.data:  
+            for error in batch_response.errors.data:
                 print(f"Error code {error.code} Message {error.message}")
 
         # Retrieve batch job output file
@@ -188,18 +184,17 @@ def main(args: Args):
             output_file_id = batch_response.error_file_id
         if output_file_id:
             file_response = client.files.content(output_file_id)
-            raw_responses = file_response.text.strip().split('\n')
+            raw_responses = file_response.text.strip().split("\n")
             # Save the output to x30_output.jsonl
             with open(args.output_file, "w") as outfile:
                 for raw_response in raw_responses:
-                    outfile.write(raw_response + '\n')
+                    outfile.write(raw_response + "\n")
             console.print(f"[bold green]Output saved to {args.output_file}[/bold green]")
     else:
         client = AsyncAzureOpenAI(
-            api_key=args.api_key,  
-            api_version=args.api_version,
-            azure_endpoint = args.azure_endpoint
+            api_key=args.api_key, api_version=args.api_version, azure_endpoint=args.azure_endpoint
         )
+
         async def async_main():
             tasks = []
 
@@ -220,12 +215,16 @@ def main(args: Args):
             with open(args.output_file, "w") as outfile:
                 for idx, response in enumerate(responses):
                     outfile.write(
-                        json.dumps({
-                            "custom_id": f"task-{idx}",
-                            "response": {
-                                "body": response.model_dump(),
-                            },
-                        }) + '\n')
+                        json.dumps(
+                            {
+                                "custom_id": f"task-{idx}",
+                                "response": {
+                                    "body": response.model_dump(),
+                                },
+                            }
+                        )
+                        + "\n"
+                    )
             console.print(f"[bold green]Output saved to {args.output_file}[/bold green]")
 
         asyncio.run(async_main())
@@ -238,7 +237,10 @@ def main(args: Args):
             output_token_count += len(enc.encode(data["response"]["body"]["choices"][0]["message"]["content"]))
     console.print(f"[bold green]Output token count: {output_token_count}[/bold green]")
     estimated_output_token_cost = output_token_count * output_price_per_token
-    console.print(f"[bold green]Estimated output token cost (based on GPT-4o): ${estimated_output_token_cost:.6f}[/bold green]")
+    console.print(
+        f"[bold green]Estimated output token cost (based on GPT-4o): ${estimated_output_token_cost:.6f}[/bold green]"
+    )
+
 
 if __name__ == "__main__":
     parser = HfArgumentParser(Args)
