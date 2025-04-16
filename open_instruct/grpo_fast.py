@@ -227,7 +227,7 @@ class Args:
     ref_policy_update_freq: Optional[int] = None
     """How many training steps to take before updating the reference policy."""
     advantage_normalization_type: Literal["standard", "centered"] = "standard"
-    """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and 
+    """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
     divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
 
