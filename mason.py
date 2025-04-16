@@ -532,6 +532,13 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                     return i
             return -1
 
+        def remove_arg_from_list(lst: List[str], item: str, remove_value: bool = False):
+            idx = find_list_idx(lst, item)
+            if idx != -1 and idx + 1 < len(lst):
+                if remove_value:
+                    lst.pop(idx + 1)
+                lst.pop(idx)
+
         # Save the runtime `whoami` calls
         command.append("--hf_entity")
         command.append("allenai")
@@ -547,8 +554,10 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                 if idx != -1:
                     # then try executing the same command with 
                     caching_command = command.copy()
-                    if "--with_tracking" in caching_command:
-                        caching_command.remove("--with_tracking")
+                    remove_arg_from_list(caching_command, "--with_tracking", False)
+                    remove_arg_from_list(caching_command, "--checkpoint_state_freq", True)
+                    remove_arg_from_list(caching_command, "--checkpoint_state_dir", True)
+                    remove_arg_from_list(caching_command, "--gs_checkpoint_state_dir", True)
                     caching_command = "python " + " ".join(caching_command[idx:]) + " --cache_dataset_only"
                     console.log(f"📦📦📦 Running the caching command with `--cache_dataset_only`")
                     import subprocess
