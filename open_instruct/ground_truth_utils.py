@@ -214,13 +214,34 @@ class MaxLenVerifier(VerifierFunction):
     """
 
     def __init__(self) -> None:
-        super().__init__("max_length", weight=5.0)
+        super().__init__("max_length", weight=1.0)
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
         desired_length = float(label)
         # return absolute difference between the length of the prediction and the max length
         # make sure to disallow negative rewards
         length_diff = abs(len(tokenized_prediction) - desired_length)
+        return 1 - ( length_diff / 4196 )
+    
+
+class UpToMaxLenVerifier(VerifierFunction):
+    """
+    Verifier that checks if the length of the prediction is within the maximum allowed length.
+
+    The ground truth (label) is interpreted as the maximum length.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("up_to_max_length", weight=1.0)
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
+        desired_length = float(label)
+        length_diff = len(tokenized_prediction) - desired_length
+        # if we were too short, its fine! return 1.0
+        if length_diff < 0:
+            return 1.0
+        # if we were too long, return the difference
+        # make sure to disallow negative rewards
         return 1 - ( length_diff / 4196 )
 
 
