@@ -18,10 +18,12 @@ python open_instruct/experimental/oai_generate.py --input_file open_instruct/exp
 ```
 Using `AZURE_OPENAI_API_KEY` from environment variable
 Using `AZURE_OPENAI_ENDPOINT` from environment variable
-100%|██████████████████████████████████████████████████████████████████████████| 3/3 [00:03<00:00,  1.30s/it]
-/home/costa/Documents/go/github.com/vwxyzjn/open-instruct/open_instruct/experimental/oai_generate.py:127: PydanticDeprecatedSince20: The `dict` method is deprecated; use `model_dump` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.10/migration/
-  "body": response.dict(),
+Input token count: 19
+Estimated input token cost (based on GPT-4o): $0.000038
+100%|██████████████████████████████████████████████████████| 3/3 [00:07<00:00,  2.38s/it]
 Output saved to test_oai_output.jsonl
+Output token count: 619
+Estimated output token cost (based on GPT-4o): $0.004952
 ```
 
 ## Batch
@@ -89,6 +91,10 @@ import time
 import datetime 
 from tqdm.asyncio import tqdm_asyncio
 from transformers import HfArgumentParser
+import tiktoken
+from rich.console import Console
+
+console = Console()
 
 @dataclass
 class Args:
@@ -115,7 +121,29 @@ class Args:
         assert self.azure_endpoint is not None, "Azure endpoint is required"
 
 
+# @vwxyzjn: price per 1M input tokens
+# https://platform.openai.com/docs/pricing#latest-models
+# as of 2025-04-16
+PRICE_PER_1M_INPUT_TOKENS_GPT_4O = 2.00
+PRICE_PER_1M_OUTPUT_TOKENS_GPT_4O = 8.00
+
+
 def main(args: Args):
+    enc = tiktoken.encoding_for_model("gpt-4o")
+    input_price_per_token = PRICE_PER_1M_INPUT_TOKENS_GPT_4O / 1000000
+    output_price_per_token = PRICE_PER_1M_OUTPUT_TOKENS_GPT_4O / 1000000
+    if args.batch:
+        input_price_per_token /= 2
+        output_price_per_token /= 2
+    input_token_count = 0
+    with open(args.input_file, "r") as infile:
+        for line in infile:
+            data = json.loads(line)
+            input_token_count += len(enc.encode(data["body"]["messages"][-1]["content"]))
+    console.print(f"[bold green]Input token count: {input_token_count}[/bold green]")
+    estimated_input_token_cost = input_token_count * input_price_per_token
+    console.print(f"[bold green]Estimated input token cost (based on GPT-4o): ${estimated_input_token_cost:.6f}[/bold green]")
+    
     if args.batch:
         client = AzureOpenAI(
             api_key=args.api_key,  
@@ -165,7 +193,7 @@ def main(args: Args):
             with open(args.output_file, "w") as outfile:
                 for raw_response in raw_responses:
                     outfile.write(raw_response + '\n')
-            print(f"Output saved to {args.output_file}")
+            console.print(f"[bold green]Output saved to {args.output_file}[/bold green]")
     else:
         client = AsyncAzureOpenAI(
             api_key=args.api_key,  
@@ -198,9 +226,19 @@ def main(args: Args):
                                 "body": response.model_dump(),
                             },
                         }) + '\n')
-            print(f"Output saved to {args.output_file}")
+            console.print(f"[bold green]Output saved to {args.output_file}[/bold green]")
 
         asyncio.run(async_main())
+
+    # estimate output token cost
+    output_token_count = 0
+    with open(args.output_file, "r") as infile:
+        for line in infile:
+            data = json.loads(line)
+            output_token_count += len(enc.encode(data["response"]["body"]["choices"][0]["message"]["content"]))
+    console.print(f"[bold green]Output token count: {output_token_count}[/bold green]")
+    estimated_output_token_cost = output_token_count * output_price_per_token
+    console.print(f"[bold green]Estimated output token cost (based on GPT-4o): ${estimated_output_token_cost:.6f}[/bold green]")
 
 if __name__ == "__main__":
     parser = HfArgumentParser(Args)
