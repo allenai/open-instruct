@@ -101,6 +101,7 @@ from open_instruct.rl_utils2 import pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
+    calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
     download_latest_checkpoint_from_gs,
     get_beaker_whoami,
@@ -225,6 +226,10 @@ class Args:
     """
     ref_policy_update_freq: Optional[int] = None
     """How many training steps to take before updating the reference policy."""
+    advantage_normalization_type: Literal["standard", "centered"] = "standard"
+    """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and 
+    divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
+    DR.GRPO https://arxiv.org/pdf/2503.20783)."""
 
     # Reward
     # -- r1 style format reward
@@ -244,12 +249,6 @@ class Args:
     """whether to penalize responses which did not finish generation"""
     non_stop_penalty_value: float = 0.0
     """the reward value for responses which did not finish generation"""
-
-    # -- arithmetic reward
-    apply_arithmetic_reward: bool = False
-    """whether to apply arithmetic reward"""
-    arithmetic_reward: float = 10.0
-    """the reward value for arithmetic responses"""
 
     # Ray
     single_gpu_mode: bool = False
@@ -341,7 +340,7 @@ class Args:
 
             # Download the model checkpoint from GCS if it exists
             download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
-
+        calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
 
 def get_train_ds_config(
     offload,
@@ -1187,24 +1186,36 @@ def data_preparation_thread(
             scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons)
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
-            global_mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-            global_mean_grouped_rewards = np.repeat(
-                global_mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0
+            mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
+            mean_grouped_rewards = np.repeat(
+                mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0
             )
-            global_std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            global_std_grouped_rewards = np.repeat(
-                global_std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0
+            std_grouped_rewards = scores_per_prompt.std(axis=-1)
+            std_grouped_rewards = np.repeat(
+                std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0
             )
-            global_advantages = (scores - global_mean_grouped_rewards) / (global_std_grouped_rewards + 1e-8)
+            if args.advantage_normalization_type == "standard":
+                advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
+            elif args.advantage_normalization_type == "centered":
+                advantages = scores - mean_grouped_rewards
+            else:
+                raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
+            # Here we get the max possible score for each prompt, and see how many prompts are unsolved
+            max_possible_score = 0
+            if args.apply_verifiable_reward:
+                max_possible_score += args.verification_reward
+            if args.apply_r1_style_format_reward:
+                max_possible_score += args.r1_style_format_reward
+            unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
             # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
             # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
             non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
             real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
             expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
             non_zero_gradient_index = np.where(expanded_mask)[0]
-            global_advantages = global_advantages[non_zero_gradient_index]
+            advantages = advantages[non_zero_gradient_index]
             scores = scores[non_zero_gradient_index]
             responses = [responses[i] for i in non_zero_gradient_index]
             queries = [queries[i] for i in non_zero_gradient_index]
@@ -1221,8 +1232,8 @@ def data_preparation_thread(
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
             # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
             # and each value is the corresponding advantage score: index 0 is set to 0 since response masks start from 1 (1-indexed)
-            lookup_advantages = np.zeros(len(global_advantages) + 1, dtype=np.float32)
-            lookup_advantages[1:] = global_advantages
+            lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
+            lookup_advantages[1:] = advantages
             packed_advantages = [
                 torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
                 for packed_mask in packed_sequences.response_masks
@@ -1279,14 +1290,25 @@ def data_preparation_thread(
 
         # Create a result package with metrics and data
         sequence_lengths = np.array([len(response) for response in responses])
+        sequence_length_solved = np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == max_possible_score])
+        sequence_length_unsolved = np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
         metrics = {
             "scores": np.array(scores).mean(),
             "real_batch_size_ratio": real_batch_size_ratio,
+            "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
             "packed_ratio": len(packed_sequences.query_responses) / len(responses),
             "val/sequence_lengths": sequence_lengths.mean(),
             "val/sequence_lengths_min": sequence_lengths.min(),
             "val/sequence_lengths_max": sequence_lengths.max(),
+            "val/sequence_lengths_unsolved": 0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean(),
+            "val/sequence_lengths_solved": 0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean(),
+            "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
+            "val/sequence_lengths_solved_hist": sequence_length_solved,
             "val/stop_rate": stop_rate,
+            "val/advantages_mean": advantages.mean(),
+            "val/advantages_min": advantages.min(),
+            "val/advantages_max": advantages.max(),
+            "val/advantages_hist": advantages,
             **reward_metrics,
         }
 
@@ -1631,7 +1653,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 }
                 print_rich_single_line_metrics(metrics)
                 for key, value in metrics.items():
-                    writer.add_scalar(key, value, episode)
+                    if isinstance(value, float):
+                        writer.add_scalar(key, value, episode)
+                    if isinstance(value, np.ndarray) or isinstance(value, list):
+                        if len(value) > 0:
+                            writer.add_histogram(key, value, episode)
 
                 if args.save_freq > 0 and training_step % args.save_freq == 0:
                     with Timer("[Main Thread] 🗡️ Saving model"):
@@ -1812,30 +1838,6 @@ if __name__ == "__main__":
                 for i in range(len(finish_reasons)):
                     if finish_reasons[i] != "stop":
                         scores[i] = args.non_stop_penalty_value
-
-        # @nouha: handle arithmetic reward
-        if args.apply_arithmetic_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating arithmetic reward"):
-                arithmetic_rewards = []
-                for i in range(len(decoded_responses)):
-                    # extract the string between <answer> and </answer>
-                    decoded_response = decoded_responses[i]
-                    answer_start = decoded_response.find("<answer>") + len("<answer>")
-                    answer_end = decoded_response.find("</answer>")
-                    # normalize the number (e.g., 1,000 -> 1000)
-                    try:
-                        answer = decoded_response[answer_start:answer_end]
-                        answer = answer.replace(",", "").strip()
-                        if float(answer) == float(ground_truths[i]):
-                            arithmetic_rewards.append(args.arithmetic_reward)
-                            scores[i] += args.arithmetic_reward
-                        else:
-                            arithmetic_rewards.append(0)
-                    except:  # noqa
-                        arithmetic_rewards.append(0)
-                        pass  # it's ok if things went wrong
-                metrics["objective/arithmetic_score"] = np.array(arithmetic_rewards).mean()
-                metrics["objective/arithmetic_correct_rate"] = (np.array(arithmetic_rewards) > 0.0).mean()
 
         return scores, metrics
 
