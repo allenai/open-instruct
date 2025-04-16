@@ -337,11 +337,10 @@ class Args:
                 self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{beaker_users}/{self.checkpoint_state_dir}"
             else:
                 self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{self.checkpoint_state_dir}"
-
-            # Download the model checkpoint from GCS if it exists
+        if self.gs_checkpoint_state_dir is not None:
             download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
-        calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
-
+        if self.checkpoint_state_dir is not None:
+            calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
 
 def get_train_ds_config(
     offload,
@@ -1654,13 +1653,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     **data_thread_metrics,
                     **average_metrics,
                 }
-                print_rich_single_line_metrics(metrics)
+                scalar_metrics = {}
                 for key, value in metrics.items():
                     if isinstance(value, float):
                         writer.add_scalar(key, value, episode)
+                        scalar_metrics[key] = value
                     if isinstance(value, np.ndarray) or isinstance(value, list):
                         if len(value) > 0:
                             writer.add_histogram(key, value, episode)
+                print_rich_single_line_metrics(scalar_metrics)
 
                 if args.save_freq > 0 and training_step % args.save_freq == 0:
                     with Timer("[Main Thread] 🗡️ Saving model"):
