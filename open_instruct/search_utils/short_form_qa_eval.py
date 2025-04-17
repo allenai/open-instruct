@@ -22,6 +22,7 @@ parser.add_argument("--tokenizer_revision", type=str, default="main", help="Toke
 parser.add_argument("--model_len", type=int, default=8192, help="Max model length.")
 parser.add_argument("--output_dir", type=str, default="tmp", help="Output directory.")
 parser.add_argument("--max_eval_samples", type=int, default=2000, help="Max eval samples.")
+parser.add_argument("--num_docs", type=int, default=3, help="Number of documents to retrieve.")
 args = parser.parse_args()
 
 # Load the tokenizer
@@ -50,6 +51,7 @@ actor = LLMSearchRayActor.options(
     num_gpus=1,
     enable_sleep_mode=False,
     noset_visible_devices=ray_noset_visible_devices(),
+    number_documents_to_search=args.num_docs,
 )
 
 # load the GPQA test subsplit (gpqa diamond).
