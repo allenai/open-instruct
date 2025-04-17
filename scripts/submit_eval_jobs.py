@@ -118,7 +118,6 @@ parser.add_argument("--oe_eval_tasks", type=str, default=None, help="Evaluate OE
 parser.add_argument("--step", type=int, default=None, help="Step number for postgresql logging.")
 parser.add_argument("--run_id", type=str, default=None, help="A unique run ID for postgresql logging.")
 parser.add_argument("--oe_eval_stop_sequences", type=str, default=None, help="Comma-separated list of stop sequences for OE eval.")
-parser.add_argument("--oe_eval_cluster", type=str, default=None, help="Comma-separated list of clusters for OE eval.")
 args = parser.parse_args()
 
 
