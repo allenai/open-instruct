@@ -84,7 +84,9 @@ parser.add_argument("--workspace", type=str, default="oe-adapt-general")
 parser.add_argument("--model_name", type=str, default="hf-opt-7B")
 parser.add_argument("--hf_revision", type=str, default=None)
 parser.add_argument("--location", type=str, default=None)
-parser.add_argument("--beaker_image", type=str, default="nathanl/open_instruct_auto", help="If given, use this Beaker image.")
+parser.add_argument("--beaker_image", type=str, default="oe-eval-beaker/oe_eval_auto", help="If given, use this Beaker image.")
+# image refernece: https://github.com/allenai/oe-eval-internal/blob/493660aca07d05384c6bd1860c4180860ccc7d53/oe_eval_internal/utilities/launch_utils.py#L143
+# image: https://legacy.beaker.org/im/01JRZWRN4FSGK7FWKV1DRPP1R1/details
 parser.add_argument("--beaker_subfolder", type=str, default=None)
 parser.add_argument("--cluster", nargs='+', default=[
     "ai2/allennlp-cirrascale",
@@ -120,6 +122,7 @@ parser.add_argument("--oe_eval_tasks", type=str, default=None, help="Evaluate OE
 parser.add_argument("--step", type=int, default=None, help="Step number for postgresql logging.")
 parser.add_argument("--run_id", type=str, default=None, help="A unique run ID for postgresql logging.")
 parser.add_argument("--oe_eval_stop_sequences", type=str, default=None, help="Comma-separated list of stop sequences for OE eval.")
+parser.add_argument("--oe_eval_cluster", type=str, default=None, help="Comma-separated list of clusters for OE eval.")
 args = parser.parse_args()
 
 
@@ -150,6 +153,7 @@ if all(c in WEKA_CLUSTERS for c in cluster):
     weka_available = True
 
 
+# NOTE: Remove in the future, not sure if this effects oe-eval jobs
 # Use a different image if requested.
 if args.beaker_image is not None:
     d1['tasks'][0]['image']['beaker'] = args.beaker_image
@@ -642,6 +646,16 @@ if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
     if args.oe_eval_stop_sequences:
         oe_eval_cmd += f" --stop-sequences '{args.oe_eval_stop_sequences}'"
         
+    # Add beaker image from existing argument
+    if args.beaker_image:
+        oe_eval_cmd += f" --beaker-image {args.beaker_image}"
+        
+    # Add cluster parameter - use the existing cluster argument
+    # Join the list with commas since oe-eval.sh expects a comma-separated string
+    if args.cluster and len(args.cluster) > 0:
+        cluster_str = ",".join(args.cluster)
+        oe_eval_cmd += f" --cluster '{cluster_str}'"
+    
     print(f"Running OE eval with command: {oe_eval_cmd}")
     subprocess.Popen(oe_eval_cmd, shell=True)
 
