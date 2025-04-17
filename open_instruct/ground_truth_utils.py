@@ -248,8 +248,13 @@ class F1Verifier(VerifierFunction):
         super().__init__("string_f1", weight=1.0)
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> float:
-        f1 = f1_score(prediction, label)['f1']
-        return f1
+        # remove thinking section from the prediction
+        prediction = prediction.split("</think>")[-1]
+        # remove answer tags from the prediction
+        prediction = prediction.replace("<answer>", "").replace("</answer>", "")
+        # TODO: should I add a format reward-type thing? See what happens with RL.
+        # return f1 score
+        return f1_score(prediction, label)['f1']
 
 
 class MaxLenVerifier(VerifierFunction):
