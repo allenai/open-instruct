@@ -11,6 +11,7 @@ import re
 import string
 from collections import Counter
 from abc import ABC, abstractmethod
+from collections import Counter
 from typing import Any, Dict, List, Union
 
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
@@ -290,6 +291,24 @@ class UpToMaxLenVerifier(VerifierFunction):
         return 1 - ( length_diff / 4196 )
 
 
+class TuluThinkerVerifier(VerifierFunction):
+    """
+    A generalist verifier that just uses F1 score to compare the prediction to the ground truth.
+    In future will replace this with more sophisticated verifiers.
+    """
+    def __init__(self) -> None:
+        super().__init__("tulu_thinker", weight=1.0)
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
+        # remove thinking section from the prediction
+        prediction = prediction.split("</think>")[-1]
+        # remove answer tags from the prediction
+        prediction = prediction.replace("<answer>", "").replace("</answer>", "")
+        # TODO: should I add a format reward-type thing? See what happens with RL.
+        # return f1 score
+        return f1_score(prediction, label)['f1']
+
+
 def get_all_verifiers() -> Dict[str, VerifierFunction]:
     """
     Auto-generate a dictionary mapping verifier names to their instances.
@@ -299,6 +318,7 @@ def get_all_verifiers() -> Dict[str, VerifierFunction]:
         instance = subclass()
         verifiers[instance.name.lower()] = instance
     return verifiers
+
 
 
 # Auto-generate the mappings.
