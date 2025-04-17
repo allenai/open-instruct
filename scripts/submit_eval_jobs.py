@@ -69,7 +69,6 @@ WEKA_CLUSTERS = [
     "ai2/jupiter-cirrascale-2",
     "ai2/saturn-cirrascale",
     "ai2/neptune-cirrascale",
-    "ai2/allennlp-elara-cirrascale",
     "ai2/ceres-cirrascale"
 ]
 GCP_CLUSTERS = [
@@ -89,11 +88,8 @@ parser.add_argument("--beaker_image", type=str, default="oe-eval-beaker/oe_eval_
 # image: https://legacy.beaker.org/im/01JRZWRN4FSGK7FWKV1DRPP1R1/details
 parser.add_argument("--beaker_subfolder", type=str, default=None)
 parser.add_argument("--cluster", nargs='+', default=[
-    "ai2/allennlp-cirrascale",
-    "ai2/general-cirrascale",
-    "ai2/s2-cirrascale-l40",
-    "ai2/allennlp-elara-cirrascale",
-    "ai2/pluto-cirrascale",
+    # "ai2/s2-cirrascale-l40",
+    "ai2/ceres-cirrascale",
     "ai2/neptune-cirrascale",
     "ai2/saturn-cirrascale",
     "ai2/jupiter-cirrascale-2",
