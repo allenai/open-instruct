@@ -207,7 +207,7 @@ for TASK in "${TASKS[@]}"; do
             --gpus "$GPU_COUNT" \
             --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1"}' \
             ${REVISION_ARG} \
-            --cluster ai2/neptune-cirrascale,ai2/saturn-cirrascale,ai2/jupiter-cirrascale-2 \
+            --cluster ai2/neptune-cirrascale,ai2/saturn-cirrascale,ai2/jupiter-cirrascale-2,ai2/ceres-cirrascale \
             --beaker-retries 2 \
             --beaker-image "$BEAKER_IMAGE" \
             --beaker-priority "$PRIORITY" \
