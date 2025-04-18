@@ -207,7 +207,7 @@ for TASK in "${TASKS[@]}"; do
             --gpus "$GPU_COUNT" \
             --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1"}' \
             ${REVISION_ARG} \
-            --cluster ai2/neptune-cirrascale,ai2/saturn-cirrascale,ai2/jupiter-cirrascale-2,ai2/ceres-cirrascale \
+            --cluster "$CLUSTER" \
             --beaker-retries 2 \
             --beaker-image "$BEAKER_IMAGE" \
             --beaker-priority "$PRIORITY" \
@@ -227,7 +227,7 @@ for TASK in "${TASKS[@]}"; do
         --gpus "$GPU_COUNT" \
         --gantry-args "{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"}" \
         ${REVISION_ARG} \
-        --cluster "$CLUSTER" \
+        --cluster ai2/augusta-google-1 \
         --beaker-retries 2 \
         --beaker-image "$BEAKER_IMAGE" \
         --beaker-priority  "$PRIORITY" \
