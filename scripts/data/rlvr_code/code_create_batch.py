@@ -8,26 +8,38 @@ python open_code_reasoning_create_batch.py
 import json
 import os
 import time
-from openai import AzureOpenAI, OpenAI
+from openai import OpenAI
 from datasets import load_dataset
 from pydantic import BaseModel
 from typing import List
 from collections import Counter
 import random
+from open_instruct.ground_truth_utils import extract_python_code
 # Initialize the client with your API key
-client = AzureOpenAI(
-    api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
-    api_version="2025-03-01-preview",
-    azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
-)
-
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 MODEL = "gpt-4.1"
-NUM_SAMPLES = 20000
+SAMPLE_LIMIT = None 
 WD = os.getcwd()
 TIMESTAMP = int(time.time())
 BATCH_FILE_NAME = f"{WD}/batch_files/{TIMESTAMP}.jsonl"
 os.makedirs(f"{WD}/batch_files", exist_ok=True)
+
+
+INPUT_HF_DATASET = "allenai/tulu-3-sft-personas-code"
+OUTPUT_HF_DATASET = "saurabh5/tulu-3-personas-code-rlvr"
+
+def get_input(row):
+    return row['prompt']
+
+def get_solution(row):
+    for message in row['messages']:
+        if message['role'] == 'assistant':
+            return message['content']
+    return None
+
+def get_id(row):
+    return row['id']
 
 class OpenAIStructuredOutput(BaseModel):
     rewritten_input: str
@@ -43,7 +55,7 @@ def create_batch_file(prompts):
             batch_request = {
                 "custom_id": f"{TIMESTAMP}_{id}",
                 "method": "POST",
-                "url": "/chat/completions",
+                "url": "/v1/chat/completions",
                 "body": {
                     "model": MODEL,
                     "messages": [
@@ -102,7 +114,8 @@ def find_cached_results(id: str):
     return None
 
 def main():
-    ocr_ds_split_0 = load_dataset("nvidia/OpenCodeReasoning", 'split_0', split="split_0")
+    global SAMPLE_LIMIT
+    ocr_ds_split_0 = load_dataset(INPUT_HF_DATASET, split="train")
     
     # First get all unique IDs
     unique_ids = set()
@@ -116,32 +129,37 @@ def main():
     
     # Now sample from unique rows
     random.seed(42)
-    sampled_rows = random.sample(unique_rows, min(NUM_SAMPLES, len(unique_rows)))
+    if SAMPLE_LIMIT is None:
+        SAMPLE_LIMIT = len(unique_rows)
+    sampled_rows = random.sample(unique_rows, min(SAMPLE_LIMIT, len(unique_rows)))
     
     print(f"Processing {len(sampled_rows)} unique rows")
 
-    master_prompt = r"""\
-I am creating a dataset of input, test cases, and a solution. 
-I want you to rewrite the solution so that the test cases can call one function with arguements.
-The solution should not use input() to get the input. It should use the arguments passed to the function.
-Also, rewrite the input so that a person or an LLM reading it can write a program with the correct signature.
-The input should ask for a program of a certain signature. The solution should be a program of that signature.
-The test cases should be a python list of executable assert code which calls the program in the solution.
-Extract the test cases from the input and add new test cases in addition to extracting the existing ones.
+    master_prompt = r"""
+# Instructions
+Your task is to transform coding problems into a structured dataset format with function-based solutions and test cases.
 
-The test cases should be a python list of executable assert code. 
-The reference solution aims to be correct, so the rewritten solution should be close to the reference solution.
-The rewritten input should also be close to the original input, but it should specify the signature of the program and the examples should use that program signature instead of the original input method.
-The test cases should be as comprehensive as possible, covering all edge cases.
+## Response Rules
+- Return only a JSON object with no additional text
+- The JSON must include: rewritten_input, rewritten_solution, test_cases, and good_program
+- Set good_program to False if the solution is incorrect or the problem is unsuitable
 
-You should return in json format like below. I should be able to parse it directly using json.loads, so
-in your response, please do not include any other text than the json.
+## Transformation Process
+1. Convert the input problem to specify a function signature
+2. Rewrite the solution to use function parameters instead of input()
+3. Create test cases as executable assert statements
+4. Package everything in the required JSON format
 
-If you don't think the solution is correct, or the problem is not a good candidate for this dataset, you can set the "good_program" to False.
-The tests cases should be a list of assert statements. Do not put any comments in the test cases, as they will break the json parsing.
-The test cases should call the rewritten solution that you provide.
-The rewritten_input should be a string similar to the original <INPUT>, but it should specify the signature of the program and the examples should use that program signature instead of the original input method.
-The rewritten_input should not be a json object. It should be about the same length as the original <INPUT>, and it should mention the name of the function and the parameters it takes. If the original input includes examples, the rewritten input should include examples that use the new function signature.
+## Input Requirements
+- Keep the rewritten_input similar in length to the original
+- Clearly specify the function name and parameters
+- Update any examples to use the new function signature
+
+## Test Case Requirements
+- Extract test cases from the input when available
+- Add new test cases to cover edge cases
+- Format as executable Python assert statements
+- Do not include comments in test cases
 
 Here is the file input:
 <INPUT>
@@ -153,17 +171,18 @@ Here is a reference solution:
 {solution}
 ```
 
-Output should be a json object like this:
+Output should be a JSON object with this structure:
 {
-    "rewritten_input": ...,
-    "rewritten_solution": ...,
-    "test_cases": [...],
-    "good_program": ...,
-}"""
+    "rewritten_input": "...",
+    "rewritten_solution": "...",
+    "test_cases": ["...", "..."],
+    "good_program": true/false
+}
+"""
 
     prompts = []
     for row in sampled_rows:
-        prompts.append((row['id'], master_prompt.replace("{input}", row['input']).replace("{solution}", row['solution'])))
+        prompts.append((get_id(row), master_prompt.replace("{input}", get_input(row)).replace("{solution}", get_solution(row))))
 
     print(f"Creating batch file with {len(prompts)} prompts...")
     create_batch_file(prompts)
@@ -178,7 +197,7 @@ Output should be a json object like this:
 
     batch_job = client.batches.create(
         input_file_id=batch_file.id,
-        endpoint="/chat/completions",
+        endpoint="/v1/chat/completions",
         completion_window="24h"
     )
 

@@ -21,16 +21,10 @@ from datasets import Dataset, load_dataset
 from pydantic import BaseModel
 from typing import List
 
-client = AzureOpenAI(
-    api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
-    api_version="2025-03-01-preview",
-    azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
-)
-
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-DATASET_NAME = "saurabh5/open-code-reasoning-rlvr"
-ORIGINAL_DATASET = "nvidia/OpenCodeReasoning"
+INPUT_HF_DATASET = "allenai/tulu-3-sft-personas-code"
+OUTPUT_HF_DATASET = "saurabh5/tulu-3-personas-code-rlvr"
 
 class OpenAIStructuredOutput(BaseModel):
     rewritten_input: str
@@ -103,7 +97,7 @@ def process_batch_results(batch_id: str):
     # Filter and validate results
     url = "http://localhost:1234/test_program"
     new_results = []
-    original_dataset = load_dataset(ORIGINAL_DATASET, 'split_0', split="split_0")
+    original_dataset = load_dataset(INPUT_HF_DATASET, 'train', split="train")
     
     # Create a lookup dictionary for O(1) access
     id_to_row = {row['id']: row for row in original_dataset}
@@ -135,21 +129,16 @@ def process_batch_results(batch_id: str):
                 passed_test_cases = [test_cases[j] for j in range(len(test_cases)) if response_json['results'][j] == 1]
                 
                 new_results.append({
+                    **original_dataset_row,
                     "messages": [{
                         "role": "user",
                         "content": result['rewritten_input']
                     }],
                     "ground_truth": passed_test_cases,
-                    "dataset": DATASET_NAME,
+                    "dataset": OUTPUT_HF_DATASET,
                     "good_program": result["good_program"],
                     "rewritten_solution": rewritten_solution,
                     "rewritten_input": result['rewritten_input'],
-                    "original_solution": original_dataset_row['solution'],
-                    "original_input": original_dataset_row['input'],
-                    "reasoning-output": original_dataset_row['output'],
-                    "source": original_dataset_row['source'],
-                    "difficulty": original_dataset_row['difficulty'],
-                    "id": original_dataset_row['id']
                 })
             else:
                 print(f"Not adding. Test results: {response_json}")
@@ -162,8 +151,8 @@ def process_batch_results(batch_id: str):
     # Upload to Hugging Face
     if new_results:
         dataset = Dataset.from_list(new_results)
-        dataset.push_to_hub(DATASET_NAME)
-        print(f"Uploaded {len(new_results)} examples to {DATASET_NAME}")
+        dataset.push_to_hub(OUTPUT_HF_DATASET)
+        print(f"Uploaded {len(new_results)} examples to {OUTPUT_HF_DATASET}")
     else:
         print("No valid results to upload")
 
