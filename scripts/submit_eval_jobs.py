@@ -114,6 +114,9 @@ parser.add_argument("--oe_eval_max_length", type=int, default=4096, help="Max le
 parser.add_argument("--oe_eval_unseen_evals", action="store_true", help="Run unseen task evals instead of dev task evals on OE Eval.")
 parser.add_argument("--use_alternate_safety_image", type=str, default=None, help="Use a different image for safety eval.")
 parser.add_argument("--evaluate_on_weka", action="store_true", help="Evaluate OE eval on Beaker.")
+# NOTE: evaluate on weka is expected to be on by default. If not, the evals will run on the google augusta cluster.
+# TODO: fix this logic at a future date
+
 parser.add_argument("--oe_eval_tasks", type=str, default=None, help="Evaluate OE eval on Beaker.")
 parser.add_argument("--step", type=int, default=None, help="Step number for postgresql logging.")
 parser.add_argument("--run_id", type=str, default=None, help="A unique run ID for postgresql logging.")
@@ -613,20 +616,8 @@ if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
         oe_eval_cmd += f" --model-location beaker://{model_info[1]}"
     if args.hf_revision:
         oe_eval_cmd += f" --revision {args.hf_revision}"
-
-    cluster_triggered_weka = False
-    # Add cluster parameter - use the existing cluster argument
-    # Join the list with commas since oe-eval.sh expects a comma-separated string
-    if args.cluster and len(args.cluster) > 0:
-        cluster_str = ",".join(args.cluster)
-        oe_eval_cmd += f" --cluster '{cluster_str}'"
-        # if augusta not in cluster, force weka eval
-        if "ai2/augusta-google-1" not in args.cluster:
-            cluster_triggered_weka = True
-
-    if args.evaluate_on_weka or cluster_triggered_weka:
+    if args.evaluate_on_weka:
         oe_eval_cmd += " --evaluate_on_weka"
-        
     if args.oe_eval_tasks:
         oe_eval_cmd += f" --tasks {args.oe_eval_tasks}"
     if args.run_id:
@@ -656,7 +647,13 @@ if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
     # Add beaker image from existing argument
     if args.beaker_image:
         oe_eval_cmd += f" --beaker-image {args.beaker_image}"
-            
+        
+    # Add cluster parameter - use the existing cluster argument
+    # Join the list with commas since oe-eval.sh expects a comma-separated string
+    if args.cluster and len(args.cluster) > 0:
+        cluster_str = ",".join(args.cluster)
+        oe_eval_cmd += f" --cluster '{cluster_str}'"
+    
     print(f"Running OE eval with command: {oe_eval_cmd}")
     subprocess.Popen(oe_eval_cmd, shell=True)
 
