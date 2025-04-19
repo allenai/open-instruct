@@ -112,6 +112,8 @@ class MathVerifier(VerifierFunction):
         # Fallback to the full output.
         if not all_answers:
             all_answers.append(normalize_final_answer(prediction))
+            # also provide original string in case normalization fails
+            all_answers.append(prediction)
 
         # Compare each candidate answer to the ground truth.
         for answer in all_answers:
@@ -237,6 +239,18 @@ class StringMatcherVerifier(VerifierFunction):
         return float(normalize_answer(answer_string) == normalize_answer(label))
 
 
+class F1Verifier(VerifierFunction):
+    """
+    Verifier that computes the string F1 score between the prediction and the label.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("string_f1", weight=1.0)
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> float:
+        f1 = f1_score(prediction, label)['f1']
+        return f1
+
 
 # class ReSearchVerifier(VerifierFunction):
 #     """
@@ -276,36 +290,58 @@ class StringMatcherVerifier(VerifierFunction):
 
 class R1SearchVerifier(VerifierFunction):
     """
-    Verifier from Search-R1 paper (https://github.com/PeterGriffinJin/Search-R1)
-    Uses exact match (normalized). If match, returns 1.0, else 0.0.
-    Note that the name is 're_search' more for historical reasons.
+    Verifier based on the Search-R1 paper (https://github.com/PeterGriffinJin/Search-R1).
+    Uses normalized exact match: returns 1.0 if answer matches any label, else 0.0.
+    Answer extraction is done via a case-insensitive regex on <finish>...</finish> tags.
     """
-    def __init__(self) -> None:
-        self.answer_start_tag = "<finish>"
-        self.answer_end_tag = "</finish>"
-        super().__init__("re_search", weight=1.0)
+    # Precompile a case-insensitive regex to extract answer text
+    TAG_PATTERN = re.compile(r"<finish>(.*?)</finish>", re.IGNORECASE | re.DOTALL)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> float:
+    def __init__(self) -> None:
+        super().__init__(name="re_search", weight=1.0)
+
+    def __call__(
+        self,
+        tokenized_prediction: List[int],
+        prediction: str,
+        label: Union[str, List[str]]
+    ) -> float:
+        # 1. Parse JSON label safely
+        parsed_labels: Union[List, str]
         try:
-            label = json.loads(label)
-        except json.JSONDecodeError:
-            label = label.strip()
-        # extract answer
-        if self.answer_start_tag not in prediction and self.answer_end_tag not in prediction:
+            parsed = json.loads(label)
+            parsed_labels = parsed if isinstance(parsed, list) else [parsed]
+        except (json.JSONDecodeError, TypeError):
+            # Fallback: treat label as raw string or list-of-strings
+            if isinstance(label, list):
+                parsed_labels = label
+            else:
+                parsed_labels = [str(label).strip()]
+
+        # 2. Extract answer between tags
+        match = self.TAG_PATTERN.search(prediction)
+        if not match:
+            logging.debug("No <finish> tags found in prediction")
             return 0.0
-        answer_string = prediction.split(self.answer_start_tag)[-1].split(self.answer_end_tag)[0]
-        # check answer non-empty
-        if not answer_string:
+
+        answer_text = match.group(-1).strip()
+        if not answer_text:
+            logging.debug("Extracted answer is empty after stripping whitespace")
             return 0.0
-        # if label is list, max over labels
-        if isinstance(label, list):
-            for l in label:
-                if normalize_answer(answer_string) == normalize_answer(l):
+
+        # 3. Normalize once
+        norm_answer = normalize_answer(answer_text)
+
+        # 4. Compare against each label
+        for lbl in parsed_labels:
+            try:
+                lbl_str = normalize_answer(str(lbl))
+                if norm_answer == lbl_str:
                     return 1.0
-        else:
-            label = str(label)  # safety.
-            if normalize_answer(answer_string) == normalize_answer(label):
-                return 1.0
+            except Exception as e:
+                logging.warning(f"Error normalizing label '{lbl}': {e}")
+
+        # 5. No match found
         return 0.0
 
 

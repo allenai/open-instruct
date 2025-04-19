@@ -12,10 +12,14 @@ for data in dataset['train']:
             {
                 "role": "user",
                 "content": (
-                    f"{data['problem']} "
-                    "Search the web by wrapping a query in query tags like so: <query></query> "
-                    "Then, based on the snippet, provide the answer, or another query if you need. "
-                    "Finally, output your answer wrapped in answer tags: <finish></finish>."
+                    "Answer the given question. You must conduct reasoning inside <think> and </think> "
+                    "first every time you get new information. After reasoning, if you find you lack some "
+                    "knowledge, you can call a search engine by <query> query </query>, and it will return "
+                    "the top searched results between <document> and </document>. You can search as many "
+                    "times as you want. If you find no further external knowledge needed, you can directly "
+                    "provide the answer inside <finish> and </finish> without detailed illustrations. "
+                    "For example, <finish> xxx </finish>. Question: "
+                    f"{data['problem']}"
                 )
             },
         ],
@@ -30,10 +34,14 @@ for data in dataset['test']:
             {
                 "role": "user",
                 "content": (
-                    f"{data['problem']} "
-                    "Search the web by wrapping a query in query tags like so: <query></query> "
-                    "Then, based on the snippet, provide the answer, or another query if you need. "
-                    "Finally, output your answer wrapped in answer tags: <finish></finish>."
+                    "Answer the given question. You must conduct reasoning inside <think> and </think> "
+                    "first every time you get new information. After reasoning, if you find you lack some "
+                    "knowledge, you can call a search engine by <query> query </query>, and it will return "
+                    "the top searched results between <document> and </document>. You can search as many "
+                    "times as you want. If you find no further external knowledge needed, you can directly "
+                    "provide the answer inside <finish> and </finish> without detailed illustrations. "
+                    "For example, <finish> xxx </finish>. Question: "
+                    f"{data['problem']}"
                 )
             },
         ],
