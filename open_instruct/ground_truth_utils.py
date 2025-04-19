@@ -324,7 +324,7 @@ class R1SearchVerifier(VerifierFunction):
             logging.debug("No <finish> tags found in prediction")
             return 0.0
 
-        answer_text = match.group(-1).strip()
+        answer_text = match.group(len(match.groups())).strip()
         if not answer_text:
             logging.debug("Extracted answer is empty after stripping whitespace")
             return 0.0
