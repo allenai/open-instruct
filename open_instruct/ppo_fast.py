@@ -118,6 +118,7 @@ from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
 api = HfApi()
 INVALID_LOGPROB = 1.0
 INVALID_VALUE = -1.111 # to play nicely with debugging output
+# torch.set_printoptions(precision=2, sci_mode=False)
 
 
 @dataclass
@@ -815,7 +816,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     vf_losses1 = torch.square(vpred - mb_return)
                     vf_losses2 = torch.square(vpredclipped - mb_return)
                     vf_loss_max = torch.max(vf_losses1, vf_losses2)
-                    loss = 0.5 * masked_mean(vf_loss_max, ~mb_response_masks_bool)
+                    loss = 0.5 * masked_mean(vf_loss_max, mb_response_masks_bool)
                     loss = loss / value_accumulation_steps
                     self.value_model.backward(loss)
                     with torch.no_grad():
@@ -823,7 +824,12 @@ class PolicyTrainerRayProcess(RayProcess):
                     if (local_step + 1) % value_accumulation_steps == 0:
                         self.value_model.step()
                         value_optimizer_step += 1
+                    if (local_step + 1) // value_accumulation_steps == value_num_mini_batches:
+                        break
                     local_step += 1
+
+            with torch.no_grad():
+                self.local_metrics.add("loss/value", value_losses.mean())
         with Timer("Offload Value Model", noop=self.rank != 0):
             self.offload_to_cpu(self.value_model)
 
@@ -920,7 +926,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
                         loss_stats[i] = loss
                         ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
-
             with torch.no_grad():
                 self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
                 self.local_metrics.add("objective/kl2_avg", kl2_stats.mean())
