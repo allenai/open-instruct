@@ -138,27 +138,27 @@ fi
 # Define default tasks if no custom tasks provided
 DEFAULT_TASKS=(
     "gsm8k::tulu"
-    # "bbh:cot-v1::tulu"
-    # "drop::llama3"
-    # "minerva_math::tulu"
-    # "codex_humaneval::tulu"
-    # "codex_humanevalplus::tulu"
-    # "ifeval::tulu"
-    # "popqa::tulu"
-    # "mmlu:mc::tulu"
-    # "mmlu:cot::summarize"
-    # "alpaca_eval_v2::tulu"
-    # "truthfulqa::tulu"
+    "bbh:cot-v1::tulu"
+    "drop::llama3"
+    "minerva_math::tulu"
+    "codex_humaneval::tulu"
+    "codex_humanevalplus::tulu"
+    "ifeval::tulu"
+    "popqa::tulu"
+    "mmlu:mc::tulu"
+    "mmlu:cot::summarize"
+    "alpaca_eval_v2::tulu"
+    "truthfulqa::tulu"
 )
 UNSEEN_TASKS=(
     "agi_eval_english:0shot_cot::tulu3"
-    # "gpqa:0shot_cot::tulu3"
-    # "mmlu_pro:0shot_cot::tulu3"
-    # "deepmind_math:0shot_cot-v3::tulu3"
-    # "bigcodebench_hard::tulu"
-    # "gpqa:0shot_cot::llama3.1"
-    # "mmlu_pro:cot::llama3.1"
-    # "bigcodebench::tulu"
+    "gpqa:0shot_cot::tulu3"
+    "mmlu_pro:0shot_cot::tulu3"
+    "deepmind_math:0shot_cot-v3::tulu3"
+    "bigcodebench_hard::tulu"
+    "gpqa:0shot_cot::llama3.1"
+    "mmlu_pro:cot::llama3.1"
+    "bigcodebench::tulu"
 )
 
 # If custom tasks provided, convert comma-separated string to array
@@ -198,7 +198,7 @@ for TASK in "${TASKS[@]}"; do
             --task "$TASK" \
             $MODEL_TYPE \
             --batch-size "$BATCH_SIZE" \
-            --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"process_output\": \"r1_style\"}" \
+            --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
             --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
@@ -218,7 +218,7 @@ for TASK in "${TASKS[@]}"; do
         --task "$TASK" \
         $MODEL_TYPE \
         --batch-size "$BATCH_SIZE" \
-        --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"process_output\": \"r1_style\"}" \
+        --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
         --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
         ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT" \

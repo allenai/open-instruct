@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # saurab command:
-exp_name="0411_qwen2.5_7B_thinker_grpo_fast_llm_judge__gpt-4o_quality_ref_${RANDOM}_small_v2"
+exp_name="0412_qwen2.5_7B_thinker_grpo_fast_llm_judge__gpt-4o_quality_ref_${RANDOM}_large"
 
 python mason.py \
     --description $exp_name \
@@ -24,7 +24,7 @@ python mason.py \
     --pack_length 16384 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 128 \
-    --num_samples_per_prompt_rollout 8 \
+    --num_samples_per_prompt_rollout 16 \
     --model_name_or_path Qwen/Qwen2.5-7B \
     --oe_eval_tasks minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,alpaca_eval_v2::tulu,ifeval::tulu,popqa::tulu,drop::llama3 \
     --output_dir /weka/oe-adapt-default/faezeb/model_checkpoints/${exp_name} \
@@ -39,7 +39,7 @@ python mason.py \
     --chat_template_name tulu_thinker_r1_style \
     --kl_estimator kl3 \
     --learning_rate 5e-6 \
-    --total_episodes 10000 \
+    --total_episodes 120000 \
     --deepspeed_stage 2 \
     --per_device_train_batch_size 1 \
     --num_mini_batches 1 \
