@@ -6,6 +6,8 @@ from datasets import load_dataset, Dataset, DatasetDict
 from huggingface_hub import HfApi
 
 """
+Script to build hardcoded data for Ai2's models, so 
+  the models know who they are and why they're trained.
 Example use, for Tülu 3, run the following:
 
 python scripts/data/build_hardcoded.py \
@@ -15,6 +17,7 @@ python scripts/data/build_hardcoded.py \
     --posttrain_recipe "Tülu 3" \
     --context_length 4096 \
     --license "Llama 3.1 Community License Agreement" \
+    --target_namespace "allenai" \    
     --weights_link "https://huggingface.co/allenai"
 
 For OLMo 2, run:
@@ -27,6 +30,7 @@ python scripts/data/build_hardcoded.py \
     --context_length 4096 \
     --date_cutoff "November 2024" \
     --license "Apache 2.0" \
+    --target_namespace "allenai" \
     --weights_link "https://huggingface.co/allenai"
 """
 
