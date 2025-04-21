@@ -25,6 +25,9 @@ parser.add_argument("--max_eval_samples", type=int, default=2000, help="Max eval
 parser.add_argument("--num_docs", type=int, default=3, help="Number of documents to retrieve.")
 args = parser.parse_args()
 
+# make output directory
+os.makedirs(args.output_dir, exist_ok=True)
+
 # Load the tokenizer
 tokenizer = AutoTokenizer.from_pretrained(args.model_path, revision=args.tokenizer_revision)
 
