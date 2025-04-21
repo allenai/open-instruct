@@ -1175,9 +1175,10 @@ def data_preparation_thread(
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             responses, finish_reasons = inference_results_Q.get()
-            for i in range(len(finish_reasons)):
-                if finish_reasons[i] == "stop" and responses[i][-1] != tokenizer.eos_token_id:
-                    responses[i].append(tokenizer.eos_token_id)
+            # let's remove this
+            # for i in range(len(finish_reasons)):
+            #     if finish_reasons[i] == "stop" and responses[i][-1] != tokenizer.eos_token_id:
+            #         responses[i].append(tokenizer.eos_token_id)
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
@@ -1200,11 +1201,13 @@ def data_preparation_thread(
 
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved
-            max_possible_score = 0
-            if args.apply_verifiable_reward:
-                max_possible_score += args.verification_reward
-            if args.apply_r1_style_format_reward:
-                max_possible_score += args.r1_style_format_reward
+            # max_possible_score = 0
+            # if args.apply_verifiable_reward:
+            #     max_possible_score += args.verification_reward
+            # if args.apply_r1_style_format_reward:
+            #     max_possible_score += args.r1_style_format_reward
+            # vwxyzjn: quick hack
+            max_possible_score = args.verification_reward
             unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
             # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
             # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
@@ -1507,6 +1510,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         top_p=1.0,
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
+        skip_special_tokens=False,
         n=args.num_samples_per_prompt_rollout,
         stop=args.stop_strings,
     )
@@ -1515,6 +1519,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         top_p=1.0,
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
+        skip_special_tokens=False,
         n=1,  # since we are doing greedy sampling, don't need to generate more
         stop=args.stop_strings,
     )
@@ -1656,7 +1661,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 }
                 scalar_metrics = {}
                 for key, value in metrics.items():
-                    if isinstance(value, float):
+                    if isinstance(value, float) or isinstance(value, int):
                         writer.add_scalar(key, value, episode)
                         scalar_metrics[key] = value
                     if isinstance(value, np.ndarray) or isinstance(value, list):
@@ -1831,8 +1836,10 @@ if __name__ == "__main__":
                 )
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
+                # @vwxyzjn: quick experiment
                 for i in range(len(verifiable_rewards)):
-                    scores[i] = verifiable_rewards[i] + scores[i]
+                    # scores[i] = verifiable_rewards[i] + scores[i]
+                    scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
