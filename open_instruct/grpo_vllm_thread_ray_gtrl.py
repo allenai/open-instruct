@@ -1129,6 +1129,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 scores = []
                 verifiable_counts = []
                 sequence_lengths = []
+                rm_rewards_only = []
                 per_func_rewards = {k: [] for k in reward_types}
                 if self.rank == 0:
                     g_response_token_ids = response_ids_Q.get()
@@ -1179,6 +1180,27 @@ class PolicyTrainerRayProcess(RayProcess):
                     #postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
                     score = torch.zeros(query.shape[0], device=query.device)
+                    if args.apply_verifiable_reward:
+                        # we need to batch the gt to match query.
+                        ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
+                        dataset = datasets[i : i + args.local_rollout_forward_batch_size]
+                        decoded_response = tokenizer.batch_decode(postprocessed_response)
+                        verifiable_reward, per_func_reward = apply_verifiable_reward(
+                            responses=postprocessed_response,
+                            decoded_responses=decoded_response,
+                            ground_truths=ground_truth,
+                            datasets=dataset,
+                            reward_mult=args.verification_reward,
+                        )
+                        verifiable_reward = torch.tensor(verifiable_reward, device=score.device)
+                        print(f"verifiable_reward: {verifiable_reward}")
+                        print("DEBUGGING")
+                        verifiable_count = verifiable_reward > 0
+                        score += verifiable_reward
+                        # For each sample, aggregate each per-function reward into a single dict.
+                        for reward_dict in per_func_reward:
+                            for key, value in reward_dict.items():
+                                per_func_rewards[key].append(value)
                     if args.reward_model_multiplier:
                         response_txts = tokenizer.batch_decode(postprocessed_response, skip_special_tokens=True)
                         reward_model_tokens = []
@@ -1196,25 +1218,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             self.reward_model, reward_model_tokens, self.reward_model_tokenizer.pad_token_id, 0
                         )
                         score *= args.reward_model_multiplier
-                    if args.apply_verifiable_reward:
-                        # we need to batch the gt to match query.
-                        ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
-                        dataset = datasets[i : i + args.local_rollout_forward_batch_size]
-                        decoded_response = tokenizer.batch_decode(postprocessed_response)
-                        verifiable_reward, per_func_reward = apply_verifiable_reward(
-                            responses=postprocessed_response,
-                            decoded_responses=decoded_response,
-                            ground_truths=ground_truth,
-                            datasets=dataset,
-                            reward_mult=args.verification_reward,
-                        )
-                        verifiable_reward = torch.tensor(verifiable_reward, device=score.device)
-                        verifiable_count = verifiable_reward > 0
-                        score += verifiable_reward
-                        # For each sample, aggregate each per-function reward into a single dict.
-                        for reward_dict in per_func_reward:
-                            for key, value in reward_dict.items():
-                                per_func_rewards[key].append(value)
+                        rm_rewards_only.append(score)
                     if args.add_r1_style_format_reward:
                         score += format_scores[i : i + args.local_rollout_forward_batch_size]
                     if args.apply_verifiable_reward and args.reward_model_multiplier:
@@ -1232,6 +1236,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
                 verifiable_counts = torch.cat(verifiable_counts, 0)
+                rm_rewards_only = torch.cat(rm_rewards_only, 0) if rm_rewards_only else None
                 verifiable_correct_rate = verifiable_counts.sum() / queries.shape[0]
                 del (ref_logprob, score)
                 gc.collect()
@@ -1371,6 +1376,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics.add("objective/scores_mean", reward_mean.mean())
                 local_metrics.add("objective/reward_std", reward_std.mean())
                 local_metrics.add("objective/verifiable_correct_rate", verifiable_correct_rate)
+                local_metrics.add("objective/rm_reward_only", rm_rewards_only.mean() if rm_rewards_only is not None else 0)
                 local_metrics.add("loss/policy_avg", pg_loss_stats.mean())
                 local_metrics.add("loss/policy_avg", loss_stats.mean())
                 local_metrics.add("policy/approxkl_avg", approxkl_stats.mean())
