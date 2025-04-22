@@ -199,11 +199,11 @@ def f1_score(prediction, ground_truth):
     common = Counter(prediction_tokens) & Counter(ground_truth_tokens)
     num_same = sum(common.values())
     if num_same == 0:
-        return {'f1': 0, 'precision': 0, 'recall': 0}
+        return {"f1": 0, "precision": 0, "recall": 0}
     precision = 1.0 * num_same / len(prediction_tokens)
     recall = 1.0 * num_same / len(ground_truth_tokens)
     f1 = (2 * precision * recall) / (precision + recall)
-    return {'f1': f1, 'precision': precision, 'recall': recall}
+    return {"f1": f1, "precision": precision, "recall": recall}
 
 
 class FlanVerifier(VerifierFunction):
@@ -238,6 +238,7 @@ class StringMatcherVerifier(VerifierFunction):
         # normalize
         return float(normalize_answer(answer_string) == normalize_answer(label))
 
+
 class F1Verifier(VerifierFunction):
     """
     Verifier that computes the string F1 score between the prediction and the label.
@@ -253,7 +254,7 @@ class F1Verifier(VerifierFunction):
         prediction = prediction.replace("<answer>", "").replace("</answer>", "")
         # TODO: should I add a format reward-type thing? See what happens with RL.
         # return f1 score
-        return f1_score(prediction, label)['f1']
+        return f1_score(prediction, label)["f1"]
 
 
 class MaxLenVerifier(VerifierFunction):
@@ -271,7 +272,7 @@ class MaxLenVerifier(VerifierFunction):
         # return absolute difference between the length of the prediction and the max length
         # make sure to disallow negative rewards
         length_diff = abs(len(tokenized_prediction) - desired_length)
-        return 1 - ( length_diff / 8192 )
+        return 1 - (length_diff / 8192)
 
 
 class UpToMaxLenVerifier(VerifierFunction):
@@ -292,7 +293,7 @@ class UpToMaxLenVerifier(VerifierFunction):
             return 1.0
         # if we were too long, return the difference
         # make sure to disallow negative rewards
-        return 1 - ( length_diff / 8192 )
+        return 1 - (length_diff / 8192)
 
 
 def get_all_verifiers() -> Dict[str, VerifierFunction]:
@@ -304,7 +305,6 @@ def get_all_verifiers() -> Dict[str, VerifierFunction]:
         instance = subclass()
         verifiers[instance.name.lower()] = instance
     return verifiers
-
 
 
 # Auto-generate the mappings.
