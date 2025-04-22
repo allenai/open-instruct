@@ -7,7 +7,7 @@ import torch
 from rich.pretty import pprint
 
 T = TypeVar("T")
-
+# torch.set_printoptions(precision=2, sci_mode=False)
 
 class Timer:
     """A context manager for timing code blocks"""
@@ -226,69 +226,6 @@ def print_diff(actual: torch.Tensor, expected: torch.Tensor):
     print(f"{atol.mean()=}, {rtol.mean()=}")
 
 
-@torch.no_grad()
-def test_pack_sequences_logits():
-    import torch
-    from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
-
-    model = AutoModelForCausalLM.from_pretrained(
-        "EleutherAI/pythia-14m",
-        attn_implementation="eager",
-        torch_dtype=torch.bfloat16,
-    )
-    # set seed for reproducibility
-    torch.manual_seed(0)
-    value_model = AutoModelForSequenceClassification.from_pretrained("EleutherAI/pythia-14m", num_labels=1)
-    value_model.save_pretrained("pythia-14m-critic")
-    queries, responses, pad_token_id = get_test_data()
-    query_responses = [q + r for q, r in zip(queries, responses)]
-    pack_length = 40
-    with Timer("pack_sequences"):
-        packed_sequences = pack_sequences(
-            queries=queries, responses=responses, pack_length=pack_length, pad_token_id=pad_token_id
-        )
-    # NOTE: it's very important to use [:, :-1] here, because the produced tokens's index is shifted by 1
-    s = model.forward(
-        input_ids=packed_sequences.query_responses[0].unsqueeze(0)[:, :-1],
-        attention_mask=packed_sequences.attention_masks[0].unsqueeze(0)[:, :-1],
-        position_ids=packed_sequences.position_ids[0].unsqueeze(0)[:, :-1],
-    )
-    lm_backbone = getattr(value_model, value_model.base_model_prefix)
-    _ = lm_backbone(
-        input_ids=packed_sequences.query_responses[0].unsqueeze(0),
-        attention_mask=packed_sequences.attention_masks[0].unsqueeze(0),
-        position_ids=packed_sequences.position_ids[0].unsqueeze(0),
-        return_dict=True,
-        output_hidden_states=True,
-    )
-    # scalar_logits = value_model.score(v.hidden_states[-1]).squeeze(-1)
-    # scalar_logits = torch.where(packed_sequences.response_masks[0].unsqueeze(0) == 0, float('-inf'), scalar_logits)
-    # pprint("scalar_logits")
-    # pprint(scalar_logits)
-
-    # apply softmax to get logprobs
-    all_logprobs = torch.nn.functional.log_softmax(s.logits, dim=-1)
-    logprobs = torch.gather(
-        all_logprobs, 2, packed_sequences.query_responses[0].unsqueeze(0).unsqueeze(-1)[:, 1:]
-    ).squeeze(-1)
-    logprobs = torch.where(packed_sequences.response_masks[0].unsqueeze(0)[:, 1:] == 0, 1.0, logprobs)
-    pprint("logprobs")
-    pprint(logprobs)
-
-    logprobs = []
-    for i in range(len(query_responses)):
-        query_response = query_responses[i]
-        query = queries[i]
-        s2 = model.forward(
-            input_ids=torch.tensor([query_response])[:, :-1],
-            attention_mask=torch.tensor([query_response])[:, :-1] != pad_token_id,
-        )
-        all_logprobs = torch.nn.functional.log_softmax(s2.logits, dim=-1)
-        logprob = torch.gather(all_logprobs, 2, torch.tensor([query_response]).unsqueeze(-1)[:, 1:]).squeeze(-1)
-        logprobs.append(logprob[:, len(query) - 1 :])
-    pprint(logprobs)
-
-
 def calculate_advantages(values: np.ndarray, rewards: np.ndarray, gamma: float, lam: float):
     """Vanilla implementation of GAE. Each row is a separate padded sequence."""
     lastgaelam = 0
@@ -308,6 +245,8 @@ def calculate_advantages_packed(values: np.ndarray, rewards: np.ndarray, gamma: 
     """Packed implementation of GAE. Each row is a packed sequence.
     The `dones` specifies the sequence boundaries, and the `response_masks` specifies the query boundaries.
     """
+    response_masks = response_masks.clip(0, 1)
+    dones = dones.clip(0, 1)
     lastgaelam = 0
     advantages_reversed = []
     gen_length = values.shape[1]
@@ -317,14 +256,19 @@ def calculate_advantages_packed(values: np.ndarray, rewards: np.ndarray, gamma: 
         nextvalues = values[:, t + 1] if t < gen_length - 1 else 0.0
         delta = rewards[:, t] + gamma * nextvalues * nonterminal * nonquery - values[:, t]
         lastgaelam = delta + gamma * lam * lastgaelam * nonterminal * nonquery
+        # print(
+        #     f"t: {t}, rewards: {rewards[:, t]}, nextvalues: {nextvalues}, nonterminal: {nonterminal}, "
+        #     f"delta: {delta}, lastgaelam: {lastgaelam}"
+        # )
         advantages_reversed.append(lastgaelam)
     advantages = np.stack(advantages_reversed[::-1], axis=1)
     returns = advantages + values
     return advantages, returns
 
+
 def test_calculate_advantages_packed():
-    gamma = 0.99
-    lam = 0.98
+    gamma = 1
+    lam = 1
     values = np.array([
         [1, 1, 1, 1, 1, 0, 0, 0 ,0, 0, 0, 0],
         [2, 2, 2, 2, 2, 2, 0, 0 ,0, 0, 0, 0],
@@ -336,7 +280,6 @@ def test_calculate_advantages_packed():
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30],
     ])
     adv, ret = calculate_advantages(values, rewards, gamma, lam)
-
     # here we assume -1 is the prompt token that should be ignored
     # 50256 is the pad token
     packed_values = np.array([[
@@ -380,7 +323,86 @@ def test_calculate_advantages_packed():
     np.testing.assert_allclose(adv[2, :12], packed_adv[0, 24:36])
 
 
+
+@torch.no_grad()
+def test_pack_sequences_logits():
+    import torch
+    from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
+
+    model = AutoModelForCausalLM.from_pretrained(
+        "EleutherAI/pythia-14m",
+        attn_implementation="eager",
+        torch_dtype=torch.bfloat16,
+    )
+    # set seed for reproducibility
+    torch.manual_seed(2)
+    value_model = AutoModelForSequenceClassification.from_pretrained("EleutherAI/pythia-14m", num_labels=1)
+    config = value_model.config
+    value_model.save_pretrained("pythia-14m-critic")
+    queries, responses, pad_token_id = get_test_data()
+    query_responses = [q + r for q, r in zip(queries, responses)]
+    pack_length = 40
+    with Timer("pack_sequences"):
+        packed_sequences = pack_sequences(
+            queries=queries, responses=responses, pack_length=pack_length, pad_token_id=pad_token_id
+        )
+    # NOTE: it's very important to use [:, :-1] here, because the produced tokens's index is shifted by 1
+    s = model.forward(
+        input_ids=packed_sequences.query_responses[0].unsqueeze(0)[:, :-1],
+        attention_mask=packed_sequences.attention_masks[0].unsqueeze(0)[:, :-1],
+        position_ids=packed_sequences.position_ids[0].unsqueeze(0)[:, :-1],
+    )
+    lm_backbone = getattr(value_model, value_model.base_model_prefix)
+    v = lm_backbone(
+        input_ids=packed_sequences.query_responses[0].unsqueeze(0),
+        attention_mask=packed_sequences.attention_masks[0].unsqueeze(0),
+        position_ids=packed_sequences.position_ids[0].unsqueeze(0),
+    )
+    torch.nn.init.normal_(value_model.score.weight, std=1 / (value_model.config.hidden_size + 1))
+    scalar_logits = value_model.score(v.last_hidden_state).squeeze(-1)
+    scalar_logits = torch.where(packed_sequences.response_masks[0].unsqueeze(0) == 0, 0, scalar_logits)
+    pprint("scalar_logits")
+    pprint(scalar_logits)
+
+    # apply softmax to get logprobs
+    all_logprobs = torch.nn.functional.log_softmax(s.logits, dim=-1)
+    logprobs = torch.gather(
+        all_logprobs, 2, packed_sequences.query_responses[0].unsqueeze(0).unsqueeze(-1)[:, 1:]
+    ).squeeze(-1)
+    logprobs = torch.where(packed_sequences.response_masks[0].unsqueeze(0)[:, 1:] == 0, 1.0, logprobs)
+    pprint({"logprobs": logprobs})
+
+    logprobs = []
+    for i in range(len(query_responses)):
+        query_response = query_responses[i]
+        query = queries[i]
+        s2 = model.forward(
+            input_ids=torch.tensor([query_response])[:, :-1],
+            attention_mask=torch.tensor([query_response])[:, :-1] != pad_token_id,
+        )
+        all_logprobs = torch.nn.functional.log_softmax(s2.logits, dim=-1)
+        logprob = torch.gather(all_logprobs, 2, torch.tensor([query_response]).unsqueeze(-1)[:, 1:]).squeeze(-1)
+        logprobs.append(logprob[:, len(query) - 1 :])
+    pprint(logprobs)
+    
+    rewards = np.zeros_like(scalar_logits.numpy())
+    rewards[:, 21] = 10
+    rewards[:, -1] = 20
+    adv, ret = calculate_advantages_packed(
+        values=scalar_logits.numpy(),
+        rewards=rewards,
+        gamma=1.0,
+        lam=1.0,
+        dones=packed_sequences.dones[0].unsqueeze(0).numpy(),
+        response_masks=packed_sequences.response_masks[0].unsqueeze(0).numpy(),
+    )
+    
+    pprint({"adv": adv})
+    pprint({"ret": ret})
+    print("hah")
+
+
 if __name__ == "__main__":
     test_pack_sequences()
-    # test_pack_sequences_logits()
+    test_pack_sequences_logits()
     test_calculate_advantages_packed()
