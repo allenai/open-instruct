@@ -1,23 +1,27 @@
 """
-python open_instruct/tool_utils/tool_vllm4.py
+python open_instruct/tool_utils/tool_vllm2.py
 """
 
-from collections import defaultdict
-from dataclasses import dataclass
 import re
-import requests
 import traceback
-from vllm import LLM, SamplingParams, RequestOutput, PoolingRequestOutput, TokensPrompt
-from tqdm import tqdm
-from typing import Union
-from rich.console import Console
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor  # add import for async execution
+from dataclasses import dataclass
+from typing import Union
+
+import requests
+from rich.console import Console
+from tqdm import tqdm
+from transformers import AutoTokenizer
+from vllm import LLM, PoolingRequestOutput, RequestOutput, SamplingParams, TokensPrompt
+
 
 @dataclass
 class ToolOutput:
     output: str
     called: bool
     success: bool
+
 
 class Tool:
     def __init__(self, start_str: str, end_str: str):
@@ -26,19 +30,20 @@ class Tool:
 
     def __call__(self, prompt: str) -> ToolOutput:
         raise NotImplementedError("Subclasses must implement this method")
-    
+
 
 class PythonCodeTool(Tool):
     """@vwxyzjn: I recommend using something like a FastAPI for this kind of stuff; way easier to
     parallelize via load balancing."""
+
     def __call__(self, prompt: str) -> ToolOutput:
         # Find Python code blocks using regex
-        re_str = r'<tool>\s*(.*?)\s*</tool>'
-        re_str = re_str.replace('<tool>', self.start_str).replace('</tool>', self.end_str)
+        re_str = r"<tool>\s*(.*?)\s*</tool>"
+        re_str = re_str.replace("<tool>", self.start_str).replace("</tool>", self.end_str)
 
         code_blocks = re.findall(re_str, prompt, re.DOTALL)
         all_outputs = []
-        
+
         if len(code_blocks) == 0:
             return ToolOutput(output="", called=False, success=False)
 
@@ -46,19 +51,16 @@ class PythonCodeTool(Tool):
         code = code_blocks[-1]
         try:
             # Call the FastAPI endpoint to execute the code
-            response = requests.post(
-                "http://phobos-cs-aus-453:1212/execute",
-                json={"code": code, "timeout": 10}
-            )
-            
+            response = requests.post("http://phobos-cs-aus-453:1212/execute", json={"code": code, "timeout": 10})
+
             # Parse the response
             result = response.json()
-            
+
             # Handle the response based on success/failure
             if result["success"]:
                 output = result["output"]
                 error = result.get("error", "")
-                
+
                 # Combine output and error if both exist
                 if error:
                     if output:
@@ -71,31 +73,27 @@ class PythonCodeTool(Tool):
                 # Handle execution failure
                 error_message = result.get("error", "Unknown error occurred")
                 all_outputs.append(error_message)
-                
+
         except Exception as e:
             # Capture any exceptions that occur during the API call
             error_message = f"Error calling API: {str(e)}\n"
             error_traceback = traceback.format_exc()
             all_outputs.append(error_message + error_traceback)
-        
-        # Return all captured outputs as a single string
-        return ToolOutput(output='\n'.join(all_outputs), called=True, success=True)
 
+        # Return all captured outputs as a single string
+        return ToolOutput(output="\n".join(all_outputs), called=True, success=True)
 
 
 class ToolUseLLM(LLM):
     def __init__(self, tools: dict[str, Tool] = None, sampling_params: SamplingParams = None, *args, **kwargs):
         self.tools = tools
         self.sampling_params = sampling_params
-        assert sampling_params.n == 1, "ToolUseLLM only supports n=1, because we could potentially do multiple too calls"
         # Initialize executor and store for pending tool calls
         self.executor = ThreadPoolExecutor(max_workers=20)
         self.pending_tool_futures = {}
         super().__init__(*args, **kwargs)
 
-    def _run_engine(
-            self, *, use_tqdm: bool
-    ) -> list[Union[RequestOutput, PoolingRequestOutput]]:
+    def _run_engine(self, *, use_tqdm: bool) -> list[Union[RequestOutput, PoolingRequestOutput]]:
         # Initialize tqdm.
         if use_tqdm:
             num_requests = self.llm_engine.get_num_unfinished_requests()
@@ -103,8 +101,7 @@ class ToolUseLLM(LLM):
                 total=num_requests,
                 desc="Processed prompts",
                 dynamic_ncols=True,
-                postfix=(f"est. speed input: {0:.2f} toks/s, "
-                         f"output: {0:.2f} toks/s"),
+                postfix=(f"est. speed input: {0:.2f} toks/s, " f"output: {0:.2f} toks/s"),
             )
 
         # Run the engine.
@@ -121,36 +118,42 @@ class ToolUseLLM(LLM):
             for req_id, (future, last_o, last_output) in self.pending_tool_futures.items():
                 if future.done():
                     tool_result = future.result()
-                    last_prompt_token_ids = last_output.prompt_token_ids
+                    last_prompt = (
+                        last_output.prompt if last_output.prompt is not None else last_output.prompt_token_ids
+                    )
+                    tokenizer.encode(last_prompt)
+                    last_text = last_o.text
                     last_token_ids = last_o.token_ids
-                    tool_output_token_ids = tokenizer.encode("\n<output>\n" + tool_result.output + "</output>\n\n", add_special_tokens=False)
-                    prompt_and_tool_output_token = last_prompt_token_ids + last_token_ids + tool_output_token_ids
+                    prompt_and_tool_output = (
+                        last_prompt + last_text + "\n<output>\n" + tool_result.output + "</output>\n\n"
+                    )
+                    prompt_and_tool_output_token = tokenizer.encode(prompt_and_tool_output)
                     # Handle the edge case: if the prompt + output + tool output is too long,
                     # we append the tool output to the last output and use it for the final results
-                    num_calls[req_id] += 1
-                    if len(prompt_and_tool_output_token) >= self.llm_engine.model_config.max_model_len:
-                        try:
-                            last_output.outputs[0].token_ids = last_token_ids + tool_output_token_ids
-                            outputs.append(last_output)
-                        except Exception as e:
-                            print("Error:", e)
-                            breakpoint()
-                            print("last_output:", last_output)
+                    if len(prompt_and_tool_output_token) > self.llm_engine.model_config.max_model_len:
+                        last_output.outputs.text = last_text + "\n<output>\n" + tool_result.output + "</output>\n\n"
+                        last_output.outputs.token_ids = tokenizer.encode(
+                            last_text + "\n<output>\n" + tool_result.output + "</output>\n\n"
+                        )
+                        outputs.append(last_output)
                     else:
-                        try:
+                        # Inject tool output when ready
+                        if isinstance(last_prompt, str):
                             self.llm_engine.add_request(
                                 req_id,
-                                TokensPrompt(prompt_token_ids=prompt_and_tool_output_token),
+                                prompt + last_text + "\n<output>\n" + tool_result.output + "</output>\n\n",
                                 self.sampling_params,
                             )
-                        except Exception as e:
-                            print("Error:", e)
-                            print("prompt_and_tool_output_token:", prompt_and_tool_output_token)
-                            print("last_prompt_token_ids:", last_prompt_token_ids)
-                            print("last_token_ids:", last_token_ids)
-                            print("tool_output_token_ids:", tool_output_token_ids)
-                            breakpoint()
-                            print("end")
+                        else:  # prompt_token_ids
+                            tool_output_tokens = tokenizer.encode(
+                                "\n<output>\n" + tool_result.output + "</output>\n\n"
+                            )
+                            self.llm_engine.add_request(
+                                req_id,
+                                TokensPrompt(prompt_token_ids=prompt + last_token_ids + tool_output_tokens),
+                                self.sampling_params,
+                            )
+                    num_calls[req_id] += 1
                     dict_keys_to_delete.append(req_id)
             for req_id in dict_keys_to_delete:
                 del self.pending_tool_futures[req_id]
@@ -158,21 +161,24 @@ class ToolUseLLM(LLM):
                 step_outputs = self.llm_engine.step()
                 for output in step_outputs:
                     if output.finished:
-                        # @vwxyzjn: ToolUseLLM change 2: if the output is a tool call, 
+                        # @vwxyzjn: ToolUseLLM change 2: if the output is a tool call,
                         # we submit the tool to a thread pool and wait for the result.
-                        assert len(output.outputs) <= 1 # because sampling_params.n == 1
-                        o = output.outputs[0]
-                        # for o in output.outputs:
-                        output_processed = False
-                        for stop_str in self.sampling_params.stop:
-                            if o.text.endswith(stop_str) and stop_str in self.tools:
-                                # Schedule tool call asynchronously
-                                tool = self.tools[stop_str]
-                                future = self.executor.submit(tool, o.text)
-                                self.pending_tool_futures[output.request_id] = (future, o, output)
-                                output_processed = True
-                                break
-                        if not output_processed:
+                        remaining_outputs = []
+                        for o in output.outputs:
+                            output_processed = False
+                            for stop_str in self.sampling_params.stop:
+                                if o.text.endswith(stop_str) and stop_str in self.tools:
+                                    # Schedule tool call asynchronously
+                                    tool = self.tools[stop_str]
+                                    future = self.executor.submit(tool, o.text)
+                                    output.prompt if output.prompt is not None else output.prompt_token_ids
+                                    self.pending_tool_futures[output.request_id] = (future, o, output)
+                                    output_processed = True
+                                    break
+                            if not output_processed:
+                                remaining_outputs.append(o)
+                        output.outputs = remaining_outputs
+                        if len(remaining_outputs) > 0:
                             outputs.append(output)
                             if use_tqdm:
                                 if isinstance(output, RequestOutput):
@@ -181,19 +187,17 @@ class ToolUseLLM(LLM):
                                     assert output.prompt_token_ids is not None
                                     total_in_toks += len(output.prompt_token_ids) * n
                                     in_spd = total_in_toks / pbar.format_dict["elapsed"]
-                                    total_out_toks += sum(
-                                        len(stp.token_ids) for stp in output.outputs)
-                                    out_spd = (total_out_toks /
-                                            pbar.format_dict["elapsed"])
+                                    total_out_toks += sum(len(stp.token_ids) for stp in output.outputs)
+                                    out_spd = total_out_toks / pbar.format_dict["elapsed"]
                                     pbar.postfix = (
-                                        f"est. speed input: {in_spd:.2f} toks/s, "
-                                        f"output: {out_spd:.2f} toks/s")
+                                        f"est. speed input: {in_spd:.2f} toks/s, " f"output: {out_spd:.2f} toks/s"
+                                    )
                                     pbar.update(n)
                                 else:
                                     pbar.update(1)
             if not self.llm_engine.has_unfinished_requests() and len(self.pending_tool_futures) == 0:
                 break
-        
+
         if use_tqdm:
             pbar.close()
         # Sort the outputs by request ID.
@@ -204,12 +208,9 @@ class ToolUseLLM(LLM):
 
 if __name__ == "__main__":
     console = Console()
-    from transformers import AutoTokenizer
-
 
     # Sample prompts.
-    system_prompt = (
-"""Below is a conversation between an user and an assitant. The assistant helps with the user's tasks. When the task is completed, the assistant ends the conversation with <endoftext>. The assistant can also use a tool for multiple times. The assitant has the following tools:
+    system_prompt = """Below is a conversation between an user and an assitant. The assistant helps with the user's tasks. When the task is completed, the assistant ends the conversation with <endoftext>. The assistant can also use a tool for multiple times. The assitant has the following tools:
 
 1. `<code>`: Python execution service:
 You could run python code by putting your code between <code> and </code> tags. For example, it could be 
@@ -218,7 +219,6 @@ print("Hello, world!")
 </code>
 and you will get the output between the <output> and </output> tags.
 """
-    )
 
     console.print(f"system_prompt: {system_prompt}")
     prompts = [
@@ -252,45 +252,61 @@ and you will get the output between the <output> and </output> tags.
         max_model_len=1024,
     )
 
-    # Tokenization generation
-    tok = AutoTokenizer.from_pretrained(model_name)
-    prompt_token_ids = [tok.encode(p) for p in prompts]
-    outputs = llm.generate(prompt_token_ids=prompt_token_ids, sampling_params=sampling_params)
+    # Text generation
+    outputs = llm.generate(prompts, sampling_params)
     for i, output in enumerate(outputs):
-        prompt = tok.decode(output.prompt_token_ids)
+        prompt = output.prompt
         generated_text = output.outputs[0].text
         console.rule(f"Conversation {i}")
         console.rule("Prompt")
         console.print(prompt)
         console.rule("Generated text")
         console.print(generated_text)
-    
+
+    breakpoint()
+    print("debugging tests all done")
+
+    # Tokenization generation
+    tok = AutoTokenizer.from_pretrained(model_name)
+    prompt_token_ids = [tok.encode(p) for p in prompts]
+    outputs = llm.generate(prompt_token_ids=prompt_token_ids, sampling_params=sampling_params)
+    for i, output in enumerate(outputs):
+        prompt = output.prompt
+        generated_text = output.outputs[0].text
+        console.rule(f"Conversation {i}")
+        console.rule("Prompt")
+        console.print(prompt)
+        console.rule("Generated text")
+        console.print(generated_text)
+
     print("debugging tests 2 all done")
     breakpoint()
 
     # More serious benchmarks
-    
+
     from datasets import load_dataset
+
     tok = AutoTokenizer.from_pretrained(model_name)
     ds = load_dataset("vwxyzjn/rlvr_acecoder", split="train")
-    ds = ds.select(range(200))
+    ds = ds.select(range(1000))
+
     def process(example):
         messages = [{"role": "system", "content": system_prompt}] + example["messages"]
         example["input_ids_prompt"] = tok.apply_chat_template(messages, add_generation_prompt=True)
         return example
+
     ds = ds.map(process, remove_columns=["messages"])
-        
+
     print("ds:", ds)
     outputs = llm.generate(prompt_token_ids=ds["input_ids_prompt"], sampling_params=sampling_params)
-    print(f"len(outputs): {len(outputs)}")
-    # for i, output in enumerate(outputs):
-    #     prompt = output.prompt
-    #     generated_text = output.outputs[0].text
-    #     console.rule(f"Conversation {i}")
-    #     console.rule("Prompt")
-    #     console.print(prompt)
-    #     console.rule("Generated text")
-    #     console.print(generated_text)
+    for i, output in enumerate(outputs):
+        prompt = output.prompt
+        generated_text = output.outputs[0].text
+        console.rule(f"Conversation {i}")
+        console.rule("Prompt")
+        console.print(prompt)
+        console.rule("Generated text")
+        console.print(generated_text)
 
     breakpoint()
     print("debugging tests all done")
