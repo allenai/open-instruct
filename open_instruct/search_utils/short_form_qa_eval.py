@@ -2,6 +2,7 @@
 Eval short-form QA using the search actor.
 '''
 import os
+import re
 import argparse
 import ray
 import json
@@ -23,6 +24,7 @@ parser.add_argument("--model_len", type=int, default=8192, help="Max model lengt
 parser.add_argument("--output_dir", type=str, default="tmp", help="Output directory.")
 parser.add_argument("--max_eval_samples", type=int, default=2000, help="Max eval samples.")
 parser.add_argument("--num_docs", type=int, default=3, help="Number of documents to retrieve.")
+parser.add_argument("--analyse_existing", type=str, default=None, help="Path to existing predictions to analyze. If specified, will not run the model again.")
 args = parser.parse_args()
 
 # make output directory
@@ -81,19 +83,31 @@ sampling_params = SamplingParams(
     stop=["</query>", "</finish>"],  # needed for search actor (TODO: make this api nicer)
 )
 
-# Generate output using the actor.
-result = ray.get(
-    actor.generate.remote(
-        sampling_params=sampling_params,  # Uses default dummy sampling params.
-        prompt_token_ids=prompt_token_ids,
-        use_tqdm=False,
+if not args.analyse_existing:
+    # Generate output using the actor.
+    result = ray.get(
+        actor.generate.remote(
+            sampling_params=sampling_params,  # Uses default dummy sampling params.
+            prompt_token_ids=prompt_token_ids,
+            use_tqdm=False,
+        )
     )
-)
-# grab text answers
-generations = [x.outputs[0].text for x in result]
-# parse out answer
-predictions = [x.split("<finish>")[-1].split("</finish>")[0].lower() for x in generations]
-labels = [data["ground_truth"].lower() for data in ds]
+    # grab text answers
+    generations = [x.outputs[0].text for x in result]
+    # parse out answer
+    predictions = [x.split("<finish>")[-1].split("</finish>")[0].lower() for x in generations]
+    labels = [data["ground_truth"].lower() for data in ds]
+else:
+    # Load existing predictions
+    with open(args.analyse_existing, "r") as f:
+        lines = f.readlines()
+    generations = []
+    predictions = []
+    labels = [d["ground_truth"].lower() for d in ds]
+    for line in lines:
+        data = json.loads(line)
+        generations.append(data["generation"])
+        predictions.append(data["prediction"])
 
 # Check if labels are JSON strings that need to be parsed
 try:
@@ -115,6 +129,34 @@ avg_recall = sum(recalls) / len(recalls)
 print(f"Average Recall: {avg_recall}")
 avg_precision = sum(precisions) / len(precisions)
 print(f"Average Precision: {avg_precision}")
+
+# some additional useful analyses:
+# 1. how many predictions actually finished?
+finished = [1 if x.lower().endswith("</finish>") in x else 0 for x in generations]
+print(f"Finished: {sum(finished) / len(finished)}")
+# 2. Of the predictions that finished, what is the f1 score?
+f1_finished = [
+    max([f1_score(predictions[i], label) for label in labels[i]], key=lambda x: x['f1']) for i in range(len(predictions)) if finished[i]
+]
+f1s_finished = [x['f1'] for x in f1_finished]
+avg_f1_finished = sum(f1s_finished) / len(f1s_finished)
+print(f"Average F1 (finished only): {avg_f1_finished}")
+# 3. How many predictions searched?
+query_regex = r"<search>(.*?)</search>"
+searched = [1 if re.search(query_regex, x) else 0 for x in generations]
+print(f"Sent a query: {sum(searched) / len(searched)}")
+# 3. Of the predictions that searched, what is the f1 score?
+f1_searched = [
+    max([f1_score(predictions[i], label) for label in labels[i]], key=lambda x: x['f1']) for i in range(len(predictions)) if searched[i]
+]
+f1s_searched = [x['f1'] for x in f1_searched]
+avg_f1_searched = sum(f1s_searched) / len(f1s_searched)
+print(f"Average F1 (searched only): {avg_f1_searched}")
+# What is the average number of times we search?
+searches = [len(re.findall(query_regex, x)) for x in generations]
+avg_searches = sum(searches) / len(searches)
+print(f"Average no. searches: {avg_searches}")
+
 # save predictions with sample data.
 os.makedirs(args.output_dir, exist_ok=True)
 with open(f"{args.output_dir}/predictions.jsonl", "w") as f:
