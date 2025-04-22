@@ -145,6 +145,8 @@ class Args:
     """The hash of the dataset configuration for evaluation."""
     dataset_skip_cache: bool = False
     """Whether to skip the cache."""
+    shuffle_eval_dataset: bool = False
+    """Whether to shuffle the evaluation dataset."""
     max_token_length: int = 512
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
@@ -250,6 +252,8 @@ class Args:
     """whether to add the R1 style format reward"""
     r1_style_format_reward: float = 1.0
     """the reward value for R1 style format reward"""
+    additive_format_reward: bool = False
+    """whether to add the format reward to the final reward"""
 
     # -- verifiable reward
     apply_verifiable_reward: bool = True
@@ -262,12 +266,6 @@ class Args:
     """whether to penalize responses which did not finish generation"""
     non_stop_penalty_value: float = 0.0
     """the reward value for responses which did not finish generation"""
-
-    # -- arithmetic reward
-    apply_arithmetic_reward: bool = False
-    """whether to apply arithmetic reward"""
-    arithmetic_reward: float = 10.0
-    """the reward value for arithmetic responses"""
 
     # Ray
     single_gpu_mode: bool = False
@@ -1155,9 +1153,9 @@ def data_preparation_thread(
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             responses, finish_reasons = inference_results_Q.get()
-            # for i in range(len(finish_reasons)):
-            #     if finish_reasons[i] == "stop" and responses[i][-1] != tokenizer.eos_token_id:
-            #         responses[i].append(tokenizer.eos_token_id)
+            for i in range(len(finish_reasons)):
+                if finish_reasons[i] == "stop" and responses[i][-1] != tokenizer.eos_token_id:
+                    responses[i].append(tokenizer.eos_token_id)
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
@@ -1178,7 +1176,6 @@ def data_preparation_thread(
                 pad_token_id=tokenizer.pad_token_id,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
-
             lookup_rewards = np.zeros(len(scores) + 1, dtype=np.float32)
             lookup_rewards[1:] = scores
             packed_rewards = [
@@ -1242,7 +1239,11 @@ def data_preparation_thread(
                 )
 
         # Create a result package with metrics and data
-        max_possible_score = args.verification_reward
+        max_possible_score = 0
+        if args.apply_verifiable_reward:
+            max_possible_score += args.verification_reward
+        if args.apply_r1_style_format_reward and args.additive_format_reward:
+            max_possible_score += args.r1_style_format_reward
         sequence_lengths = np.array([len(response) for response in responses])
         sequence_length_solved = (
             np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == max_possible_score])
@@ -1405,7 +1406,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             dataset_local_cache_dir=args.dataset_local_cache_dir,
             dataset_skip_cache=args.dataset_skip_cache,
         )
-        # NOTE: eval dataset should not be shuffled
+        if args.shuffle_eval_dataset:
+            eval_dataset = eval_dataset.shuffle(seed=args.seed)
     if args.cache_dataset_only:
         return
 
