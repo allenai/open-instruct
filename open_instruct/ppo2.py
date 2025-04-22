@@ -63,7 +63,6 @@ from collections import defaultdict, deque
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
-from collections import defaultdict
 
 import numpy as np
 import pandas as pd
