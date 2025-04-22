@@ -71,6 +71,7 @@ from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
 from transformers import (
     AutoModelForCausalLM,
+    AutoConfig,
     AutoModelForSequenceClassification,
     PreTrainedModel,
     PreTrainedTokenizer,
@@ -383,7 +384,6 @@ def to_device_inplace(tensors_list: List[torch.Tensor], device: torch.device):
         tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
 
 
-
 class ShufflingIterator:
     def __init__(self, data: np.ndarray, batch_size: int, seed: Optional[int] = None):
         self.data = data.copy()
@@ -408,8 +408,6 @@ class ShufflingIterator:
         self.index = end_index
 
         return batch
-
-
 
 
 @ray.remote(num_gpus=1)
@@ -500,6 +498,17 @@ class PolicyTrainerRayProcess(RayProcess):
             attn_implementation="flash_attention_2",
             use_cache=False,
         )
+
+        value_head = self.value_model.score
+        config = AutoConfig.from_pretrained(args.reward_model_name_or_path, revision=args.reward_model_revision, trust_remote_code=True)
+        print("initialize value_head for ZeRO-3 reward model training.")
+        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
+            with deepspeed.zero.GatheredParameters([value_head.weight], modifier_rank=0):
+                if torch.distributed.get_rank() == 0:
+                    value_head.weight.data.normal_(mean=0.0, std=1 / (config.hidden_size + 1))
+        else:
+            value_head.weight.data.normal_(mean=0.0, std=1 / (config.hidden_size + 1))
+        
         disable_dropout_in_model(self.value_model)
         self.value_model.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
@@ -575,7 +584,6 @@ class PolicyTrainerRayProcess(RayProcess):
         logits /= temperature + 1e-7
         logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
         return logprob
-
 
     def forward_value(
         self,
@@ -786,7 +794,7 @@ class PolicyTrainerRayProcess(RayProcess):
             to_device_inplace(collated_advantages, self.device)
             to_device_inplace(collated_returns, self.device)
             to_device_inplace(collated_values, self.device)
-
+        breakpoint()
         with Timer("[Training Processes] Value Loss calculation", noop=self.rank != 0):
             value_losses = torch.zeros(len(collated_query_responses))
             local_step = 0
@@ -942,6 +950,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("policy_optimizer_step", policy_optimizer_step)
                 self.local_metrics.add("value_optimizer_step", value_optimizer_step)
                 metrics_list = self.local_metrics.get_metrics_list()
+                metrics_list["val/advantages_mean"] = adv.mean()
+                metrics_list["val/advantages_min"] = adv.min()
+                metrics_list["val/advantages_max"] = adv.max()
+                metrics_list["val/advantages_std"] = adv.std()
 
         with Timer("Offload Model", noop=self.rank != 0):
             self.offload_to_cpu(self.model)
@@ -1005,24 +1017,17 @@ class PolicyTrainerRayProcess(RayProcess):
     def launch_ai2_evals_on_weka_wrapper(self, step_dir, leaderboard_name, wandb_url, training_step):
         args = self.args
         if self.rank == 0:
-            future = (
-                ray.remote(launch_ai2_evals_on_weka)
-                .options(num_cpus=1)
-                .remote(
-                    step_dir,
-                    leaderboard_name,
-                    args.oe_eval_max_length,
-                    wandb_url,
-                    training_step,
-                    args.oe_eval_tasks,
-                    args.stop_strings,
-                    args.gs_bucket_path,
-                    args.eval_priority,
-                )
+            ray.remote(launch_ai2_evals_on_weka).options(num_cpus=1).remote(
+                step_dir,
+                leaderboard_name,
+                args.oe_eval_max_length,
+                wandb_url,
+                training_step,
+                args.oe_eval_tasks,
+                args.stop_strings,
+                args.gs_bucket_path,
+                args.eval_priority,
             )
-        else:
-            future = None
-        return future
 
 
 class ModelGroup:
@@ -1149,9 +1154,9 @@ def data_preparation_thread(
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             responses, finish_reasons = inference_results_Q.get()
-            for i in range(len(finish_reasons)):
-                if finish_reasons[i] == "stop" and responses[i][-1] != tokenizer.eos_token_id:
-                    responses[i].append(tokenizer.eos_token_id)
+            # for i in range(len(finish_reasons)):
+            #     if finish_reasons[i] == "stop" and responses[i][-1] != tokenizer.eos_token_id:
+            #         responses[i].append(tokenizer.eos_token_id)
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
@@ -1225,7 +1230,7 @@ def data_preparation_thread(
                         collate_fn([per_device_packed_rewards[idx] for idx in micro_range], 0)
                     )
                 collated_data.append(
-                    {   
+                    {
                         "collated_query_responses": collated_query_responses,
                         "collated_attention_masks": collated_attention_masks,
                         "collated_position_ids": collated_position_ids,
@@ -1236,7 +1241,14 @@ def data_preparation_thread(
                 )
 
         # Create a result package with metrics and data
+        max_possible_score = args.verification_reward
         sequence_lengths = np.array([len(response) for response in responses])
+        sequence_length_solved = (
+            np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == max_possible_score])
+        )
+        sequence_length_unsolved = (
+            np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
+        )
         metrics = {
             "scores": np.array(scores).mean(),
             "real_batch_size_ratio": real_batch_size_ratio,
@@ -1244,6 +1256,12 @@ def data_preparation_thread(
             "val/sequence_lengths": sequence_lengths.mean(),
             "val/sequence_lengths_min": sequence_lengths.min(),
             "val/sequence_lengths_max": sequence_lengths.max(),
+            "val/sequence_lengths_unsolved": (
+                0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
+            ),
+            "val/sequence_lengths_solved": 0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean(),
+            "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
+            "val/sequence_lengths_solved_hist": sequence_length_solved,
             "val/stop_rate": stop_rate,
             **reward_metrics,
         }
@@ -1386,7 +1404,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             dataset_local_cache_dir=args.dataset_local_cache_dir,
             dataset_skip_cache=args.dataset_skip_cache,
         )
-        eval_dataset = eval_dataset.shuffle(seed=args.seed)
+        # NOTE: eval dataset should not be shuffled
     if args.cache_dataset_only:
         return
 
@@ -1439,6 +1457,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         top_p=1.0,
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
+        skip_special_tokens=False,
         n=args.num_samples_per_prompt_rollout,
         stop=args.stop_strings,
     )
@@ -1447,6 +1466,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         top_p=1.0,
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
+        skip_special_tokens=False,
         n=1,  # since we are doing greedy sampling, don't need to generate more
         stop=args.stop_strings,
     )
@@ -1465,6 +1485,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     if eval_dataset is not None:
         eval_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
         eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
+        eval_dataset_names = eval_dataset[:num_eval_samples][DATASET_SOURCE_KEY]
     resume_training_step = 1
     thread = threading.Thread(
         target=vllm_generate_thread,
@@ -1510,32 +1531,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     episode = 0
     num_total_tokens = 0
     start_time = time.time()
-    eval_futures = []
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
             print("-" * 100)
             episode += (
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
             )  # each sample is an episode
-
-            # ------------------------------------------------------------------------------------------------
-            # Optionally evaluate the model
-            try:
-                evaluation_responses, _ = evaluation_inference_results_Q.get(timeout=0.01)
-                print("[Main Thread] 📊 Evaluation responses received")
-                table = {}
-                table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
-                table["response"] = tokenizer.batch_decode(evaluation_responses)
-                table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
-                table["ground_truth"] = eval_ground_truths
-                df = pd.DataFrame(table)
-                if args.with_tracking:
-                    wandb.log({"sample_completions": wandb.Table(dataframe=df)})
-                else:
-                    print_rich_table(df.iloc[:1])
-                del table
-            except Empty:
-                print("[Main Thread] 🙈 Evaluation responses not received")
 
             # ------------------------------------------------------------------------------------------------
             # Sync weights and send the next batch of prompts to vLLM
@@ -1610,9 +1611,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     **data_thread_metrics,
                     **average_metrics,
                 }
-                print_rich_single_line_metrics(metrics)
+                scalar_metrics = {}
                 for key, value in metrics.items():
-                    writer.add_scalar(key, value, episode)
+                    if isinstance(value, float) or isinstance(value, int):
+                        writer.add_scalar(key, value, episode)
+                        scalar_metrics[key] = value
+                    if isinstance(value, np.ndarray) or isinstance(value, list):
+                        if len(value) > 0:
+                            writer.add_histogram(key, value, episode)
+                print_rich_single_line_metrics(scalar_metrics)
 
                 if args.save_freq > 0 and training_step % args.save_freq == 0:
                     with Timer("[Main Thread] 🗡️ Saving model"):
@@ -1622,32 +1629,74 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                         ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
                         if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                             leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
-                            eval_futures.extend(
-                                [
-                                    policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                                        step_dir, leaderboard_name, wandb_url, training_step
-                                    )
-                                    for i in range(args.world_size)
-                                ]
-                            )
+                            for i in range(args.world_size):
+                                policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                                    step_dir, leaderboard_name, wandb_url, training_step
+                                )
 
             if len(update_ref_policy_future) > 0:
                 with Timer("[Main Thread] 🔃 Updating reference policy"):
                     ray.get(update_ref_policy_future)
+
+            # ------------------------------------------------------------------------------------------------
+            # Optionally evaluate the model
+            try:
+                # timeout 0.01 if this is the last training step or we're not evaluating
+                # otherwise, wait to get the last evaluation generations
+                timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else None
+                eval_responses, eval_finish_reasons = evaluation_inference_results_Q.get(timeout=timeout)
+                print("[Main Thread] 📊 Evaluation responses received")
+
+                eval_sequence_lengths = np.array([len(response) for response in eval_responses])
+                eval_decoded_responses = tokenizer.batch_decode(eval_responses, skip_special_tokens=True)
+                eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_finish_reasons) / len(
+                    eval_finish_reasons
+                )
+
+                # get and log evaluation metrics
+                eval_scores, eval_reward_metrics = reward_fn(
+                    eval_responses,
+                    eval_decoded_responses,
+                    eval_ground_truths,
+                    eval_dataset_names,
+                    eval_finish_reasons,
+                )
+                eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
+                eval_metrics = {
+                    "eval/scores": np.array(eval_scores).mean(),
+                    "eval/sequence_lengths": eval_sequence_lengths.mean(),
+                    "eval/sequence_lengths_min": eval_sequence_lengths.min(),
+                    "eval/sequence_lengths_max": eval_sequence_lengths.max(),
+                    "eval/stop_rate": eval_stop_rate,
+                    **eval_reward_metrics,
+                }
+                print_rich_single_line_metrics(eval_metrics)
+                for key, value in eval_metrics.items():
+                    writer.add_scalar(key, value, episode)
+                table = {}
+                table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
+                table["response"] = eval_decoded_responses
+                table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
+                table["scores"] = eval_scores
+                table["ground_truth"] = eval_ground_truths
+                df = pd.DataFrame(table)
+                if args.with_tracking:
+                    wandb.log({"sample_completions": wandb.Table(dataframe=df)})
+                else:
+                    print_rich_table(df.iloc[:1])
+                del table
+            except Empty:
+                print("[Main Thread] 🙈 Evaluation responses not received")
 
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):
             ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
             if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                 leaderboard_name = args.hf_repo_revision
-                eval_futures.extend(
-                    [
-                        policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                            args.output_dir, leaderboard_name, wandb_url, training_step
-                        )
-                        for i in range(args.world_size)
-                    ]
-                )
+                for i in range(args.world_size):
+                    policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                        args.output_dir, leaderboard_name, wandb_url, training_step
+                    )
 
     except Exception as e:
         print(f"Training error occurred: {str(e)}")
@@ -1723,8 +1772,10 @@ if __name__ == "__main__":
                 )
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
+                # @vwxyzjn: quick experiment
                 for i in range(len(verifiable_rewards)):
-                    scores[i] = verifiable_rewards[i] + scores[i]
+                    # scores[i] = verifiable_rewards[i] + scores[i]
+                    scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
@@ -1746,30 +1797,6 @@ if __name__ == "__main__":
                 for i in range(len(finish_reasons)):
                     if finish_reasons[i] != "stop":
                         scores[i] = args.non_stop_penalty_value
-
-        # @nouha: handle arithmetic reward
-        if args.apply_arithmetic_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating arithmetic reward"):
-                arithmetic_rewards = []
-                for i in range(len(decoded_responses)):
-                    # extract the string between <answer> and </answer>
-                    decoded_response = decoded_responses[i]
-                    answer_start = decoded_response.find("<answer>") + len("<answer>")
-                    answer_end = decoded_response.find("</answer>")
-                    # normalize the number (e.g., 1,000 -> 1000)
-                    try:
-                        answer = decoded_response[answer_start:answer_end]
-                        answer = answer.replace(",", "").strip()
-                        if float(answer) == float(ground_truths[i]):
-                            arithmetic_rewards.append(args.arithmetic_reward)
-                            scores[i] += args.arithmetic_reward
-                        else:
-                            arithmetic_rewards.append(0)
-                    except:  # noqa
-                        arithmetic_rewards.append(0)
-                        pass  # it's ok if things went wrong
-                metrics["objective/arithmetic_score"] = np.array(arithmetic_rewards).mean()
-                metrics["objective/arithmetic_correct_rate"] = (np.array(arithmetic_rewards) > 0.0).mean()
 
         return scores, metrics
 
