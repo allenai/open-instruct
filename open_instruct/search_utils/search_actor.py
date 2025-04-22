@@ -43,6 +43,7 @@ def process_vllm_output_for_search(text: str, number_documents_to_search: int = 
 class GenerationOutput:
     token_ids: List[int]
     text: str
+    finish_reason: str = "stop"
 
 @dataclass
 class CompletionList:
@@ -182,11 +183,13 @@ class LLMSearchRayActor:
         final_texts = [self.tokenizer.decode(tokens) for tokens in encoded_outputs]
         # Recreate the outputs based on the original `n` value.
         generation_outputs = []
+
+        # just hardcoding things as stop finish for now... TODO: also add length finish reason.
         for i in range(0, len(encoded_outputs), original_n):
             start, stop = i, i + original_n
             generation_outputs.append(
                 CompletionList([
-                    GenerationOutput(token_ids=tokens, text=text)
+                    GenerationOutput(token_ids=tokens, text=text, finish_reason="stop")
                     for tokens, text in zip(encoded_outputs[start:stop], final_texts[start:stop])
                 ])
             )
