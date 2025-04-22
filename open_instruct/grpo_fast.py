@@ -1195,8 +1195,9 @@ def data_preparation_thread(
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             responses, finish_reasons = inference_results_Q.get()
             for i in range(len(finish_reasons)):
-                if finish_reasons[i] == "stop" and responses[i][-1] != tokenizer.eos_token_id:
-                    responses[i].append(tokenizer.eos_token_id)
+                if finish_reasons[i] == "stop":
+                    if responses[i][-1] != tokenizer.eos_token_id:
+                        responses[i].append(tokenizer.eos_token_id)
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
