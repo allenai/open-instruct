@@ -132,7 +132,7 @@ print(f"Average Precision: {avg_precision}")
 
 # some additional useful analyses:
 # 1. how many predictions actually finished?
-finished = [1 if x.lower().endswith("</finish>") in x else 0 for x in generations]
+finished = [1 if x.lower().endswith("</finish>") else 0 for x in generations]
 print(f"Finished: {sum(finished) / len(finished)}")
 # 2. Of the predictions that finished, what is the f1 score?
 f1_finished = [
@@ -142,7 +142,7 @@ f1s_finished = [x['f1'] for x in f1_finished]
 avg_f1_finished = sum(f1s_finished) / len(f1s_finished)
 print(f"Average F1 (finished only): {avg_f1_finished}")
 # 3. How many predictions searched?
-query_regex = r"<search>(.*?)</search>"
+query_regex = r"<query>(.*?)</query>"
 searched = [1 if re.search(query_regex, x) else 0 for x in generations]
 print(f"Sent a query: {sum(searched) / len(searched)}")
 # 3. Of the predictions that searched, what is the f1 score?
