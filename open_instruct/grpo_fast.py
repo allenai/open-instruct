@@ -1656,7 +1656,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 }
                 scalar_metrics = {}
                 for key, value in metrics.items():
-                    if isinstance(value, float):
+                    if isinstance(value, float) or isinstance(value, int):
                         writer.add_scalar(key, value, episode)
                         scalar_metrics[key] = value
                     if isinstance(value, np.ndarray) or isinstance(value, list):
