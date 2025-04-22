@@ -252,7 +252,6 @@ class F1Verifier(VerifierFunction):
         prediction = prediction.split("</think>")[-1]
         # remove answer tags from the prediction
         prediction = prediction.replace("<answer>", "").replace("</answer>", "")
-        # TODO: should I add a format reward-type thing? See what happens with RL.
         # return f1 score
         return f1_score(prediction, label)["f1"]
 
