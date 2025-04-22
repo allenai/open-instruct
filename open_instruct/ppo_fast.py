@@ -118,7 +118,7 @@ from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
-INVALID_VALUE = -1.111 # to play nicely with debugging output
+INVALID_VALUE = 0.0 # to play nicely with debugging output
 # torch.set_printoptions(precision=2, sci_mode=False)
 
 
@@ -782,7 +782,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 np.stack(cpu_collated_dones),
                 np.stack(cpu_collated_response_masks),
             )
-            adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+            # @vwxyzjn: TODO: adv norm does not work yet because of the masks
+            # adv = (adv - adv.mean()) / (adv.std() + 1e-8) # 
             collated_advantages = []
             collated_returns = []
             offset = 0
@@ -794,7 +795,7 @@ class PolicyTrainerRayProcess(RayProcess):
             to_device_inplace(collated_advantages, self.device)
             to_device_inplace(collated_returns, self.device)
             to_device_inplace(collated_values, self.device)
-        breakpoint()
+
         with Timer("[Training Processes] Value Loss calculation", noop=self.rank != 0):
             value_losses = torch.zeros(len(collated_query_responses))
             local_step = 0
