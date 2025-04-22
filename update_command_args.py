@@ -105,5 +105,20 @@ def main():
     
     print(modified_content)
 
+
+def test_modify_command():
+    content = "python train.py --dataset_mixer_list xxx 1.0 --cluster ai2/augusta-google-1 --priority normal"
+    new_args = {
+        "dataset_mixer_list": ["xxx", "1.0"],
+        "cluster": "ai2/augusta-google-1",
+        "priority": "normal",
+        "image": "costah/open_instruct_dev0320_11"
+    }
+    modified_content = modify_command(content, new_args)
+    normalized_content = " ".join(modified_content.replace("\\\n", "").split())
+    assert normalized_content == "python train.py --dataset_mixer_list xxx 1.0 --cluster ai2/augusta-google-1 --priority normal --priority normal --image costah/open_instruct_dev0320_11"
+
+
 if __name__ == "__main__":
-    main() 
+    test_modify_command()
+    main()
