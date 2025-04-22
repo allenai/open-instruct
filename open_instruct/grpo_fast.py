@@ -142,6 +142,8 @@ class Args:
     """The hash of the dataset configuration for evaluation."""
     dataset_skip_cache: bool = False
     """Whether to skip the cache."""
+    shuffle_eval_dataset: bool = False
+    """Whether to shuffle the evaluation dataset."""
     max_token_length: int = 512
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
@@ -237,6 +239,8 @@ class Args:
     """whether to add the R1 style format reward"""
     r1_style_format_reward: float = 1.0
     """the reward value for R1 style format reward"""
+    additive_format_reward: bool = False
+    """whether to add the format reward to the final reward"""
 
     # -- verifiable reward
     apply_verifiable_reward: bool = True
@@ -1175,10 +1179,9 @@ def data_preparation_thread(
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             responses, finish_reasons = inference_results_Q.get()
-            # let's remove this
-            # for i in range(len(finish_reasons)):
-            #     if finish_reasons[i] == "stop" and responses[i][-1] != tokenizer.eos_token_id:
-            #         responses[i].append(tokenizer.eos_token_id)
+            for i in range(len(finish_reasons)):
+                if finish_reasons[i] == "stop" and responses[i][-1] != tokenizer.eos_token_id:
+                    responses[i].append(tokenizer.eos_token_id)
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
@@ -1201,13 +1204,11 @@ def data_preparation_thread(
 
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved
-            # max_possible_score = 0
-            # if args.apply_verifiable_reward:
-            #     max_possible_score += args.verification_reward
-            # if args.apply_r1_style_format_reward:
-            #     max_possible_score += args.r1_style_format_reward
-            # vwxyzjn: quick hack
-            max_possible_score = args.verification_reward
+            max_possible_score = 0
+            if args.apply_verifiable_reward:
+                max_possible_score += args.verification_reward
+            if args.apply_r1_style_format_reward and args.additive_format_reward:
+                max_possible_score += args.r1_style_format_reward
             unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
             # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
             # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
@@ -1456,7 +1457,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             dataset_local_cache_dir=args.dataset_local_cache_dir,
             dataset_skip_cache=args.dataset_skip_cache,
         )
-        # NOTE: eval dataset should not be shuffled
+        if args.shuffle_eval_dataset:
+            eval_dataset = eval_dataset.shuffle(seed=args.seed)
     if args.cache_dataset_only:
         return
 
@@ -1503,6 +1505,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
     ray.get([m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models])
     print("======== ✅ model update group setup successfully =========")
+    if resume_training_step > 1:
+        print(f"Resuming training from step {resume_training_step}... Broadcasting weights to vLLM engines.")
+        with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
+            ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
     # Setup training
     generation_config = SamplingParams(
@@ -1836,10 +1842,11 @@ if __name__ == "__main__":
                 )
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
-                # @vwxyzjn: quick experiment
                 for i in range(len(verifiable_rewards)):
-                    # scores[i] = verifiable_rewards[i] + scores[i]
-                    scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
+                    if args.additive_format_reward:
+                        scores[i] = verifiable_rewards[i] + scores[i]
+                    else:
+                        scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
