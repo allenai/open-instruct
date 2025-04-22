@@ -107,8 +107,10 @@ from open_instruct.utils import (
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
+    create_snippet_mask,
 )
-from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
+from open_instruct.search_utils.search_actor import LLMSearchRayActor
+from open_instruct.vllm_utils2 import LLMRayActor, create_vllm_engines, init_process_group
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -300,6 +302,17 @@ class Args:
     """the max generation length for evaluation for oe-eval"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
+
+    # rl-rag settings
+    use_search_actor: bool = False
+    """Whether to use the search actor for RL-RAG"""
+    mask_snippet_loss: bool = False
+    """Whether to mask the loss for tokens within <document>...</document> tags.
+    This is useful for training with search functionality where snippets should not contribute to the loss."""
+    max_searches: int = 5
+    """The maximum number of searches to perform for each query."""
+    number_documents_to_search: int = 3
+    """The maximum number of documents to retrieve for each query."""
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
@@ -802,6 +815,10 @@ class PolicyTrainerRayProcess(RayProcess):
                     mb_advantages = collated_advantages[i]
                     mb_response_masks = collated_response_masks[i]
                     mb_response_masks_bool = mb_response_masks[:, 1:].bool()
+                    # if masking snippets, do it here.
+                    if args.mask_snippet_loss:
+                        snippet_mask = create_snippet_mask(mb_query_responses, self.tokenizer)
+                        mb_response_masks_bool = mb_response_masks[:, 1:].bool() & snippet_mask
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
                     mb_new_logprobs = self.forward(
@@ -1358,6 +1375,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         for model in policy_group.models
     )
     max_len = args.max_prompt_token_length + args.response_length
+    additional_ray_actor_kwargs = {}
+    if args.use_search_actor:
+        additional_ray_actor_kwargs = {
+            "max_output_len": args.response_length,
+            "max_searches": args.max_searches,
+            "number_documents_to_search": args.number_documents_to_search,
+        }
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
@@ -1370,6 +1394,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
+        ray_actor_class=LLMSearchRayActor if args.use_search_actor else LLMRayActor,
+        additional_ray_actor_kwargs=additional_ray_actor_kwargs,
     )
     ray.get(inits)
     print("======== ✅ all models and vLLM engines initialized =========")

@@ -118,6 +118,7 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     upload_metadata_to_hf,
+    create_snippet_mask,
 )
 from open_instruct.vllm_utils2 import LLMRayActor, create_vllm_engines, init_process_group
 from open_instruct.search_utils.search_actor import LLMSearchRayActor
@@ -466,58 +467,6 @@ def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[bool] =
         return (values * mask).sum(axis=axis) / mask.sum(axis=axis)
     else:
         return (values * mask).sum() / mask.sum()
-
-
-def create_snippet_mask(input_ids, tokenizer, start_tag="<document>", end_tag="</document>"):
-    """
-    Creates a boolean mask where True indicates tokens to include in loss calculation
-    and False indicates tokens to exclude (tokens inside <snippet>...</snippet> tags).
-    
-    Args:
-        input_ids: Tensor of token IDs [batch_size, seq_len]
-        tokenizer: The tokenizer used to encode the inputs
-        start_tag: The starting tag of the snippet block
-        end_tag: The ending tag of the snippet block
-        
-    Returns:
-        Tensor of shape [batch_size, seq_len] with False for tokens to ignore in loss
-        calculation (tokens within and including <snippet>...</snippet> tags)
-    """
-    # Compile a regex pattern that captures snippet blocks (non-greedy match).
-    pattern = re.compile(re.escape(start_tag) + r".*?" + re.escape(end_tag), re.DOTALL)
-    
-    batch_size, seq_len = input_ids.shape
-    mask = torch.ones_like(input_ids, dtype=torch.bool)
-    
-    # Process each sequence in the batch.
-    for i in range(batch_size):
-        seq = input_ids[i].clone().cpu()
-        non_pad_mask = seq != tokenizer.pad_token_id
-        if not torch.any(non_pad_mask):
-            continue  # Skip empty sequences.
-        
-        # Decode only the non-padding tokens.
-        text = tokenizer.decode(seq[non_pad_mask], skip_special_tokens=False)
-        
-        # Find all snippet blocks using the compiled regex.
-        for match in pattern.finditer(text):
-            snippet_start, snippet_end = match.span()
-            
-            # Compute the token position for the start of the snippet.
-            prefix_text = text[:snippet_start]
-            prefix_token_count = len(tokenizer.encode(prefix_text, add_special_tokens=False))
-            
-            # Compute the token position for the end of the snippet.
-            snippet_end_token_count = len(tokenizer.encode(text[:snippet_end], add_special_tokens=False))
-            
-            # Map the token positions to positions in the original padded sequence.
-            pad_indices = torch.arange(seq_len)[non_pad_mask]
-            if prefix_token_count < len(pad_indices) and snippet_end_token_count <= len(pad_indices):
-                start_idx = pad_indices[prefix_token_count].item()
-                end_idx = pad_indices[snippet_end_token_count - 1].item() + 1  # Include end token.
-                mask[i, start_idx:end_idx] = False
-    
-    return mask
 
 
 def masked_var(values: torch.Tensor, mask: torch.Tensor, unbiased: bool = True) -> torch.Tensor:
