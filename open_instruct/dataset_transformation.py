@@ -144,6 +144,17 @@ def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
     console.print(rich_text)
 
 
+def visualize_token_role(tokens: list[int], masks: list[int], tokenizer: PreTrainedTokenizer):
+    i = 0
+    console = Console()
+    rich_text = Text()
+    for i, token in enumerate(tokens):
+        color = COLORS[masks[i] % len(COLORS)]
+        decoded_token = tokenizer.decode(token)
+        rich_text.append(f"{decoded_token}", style=color)
+    console.print(rich_text)
+
+
 # ----------------------------------------------------------------------------
 # Tokenization
 # Chat templates
