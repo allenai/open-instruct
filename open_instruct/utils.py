@@ -1036,7 +1036,6 @@ python scripts/submit_eval_jobs.py \
 --priority {eval_priority} \
 --preemptible \
 --use_hf_tokenizer_template \
---beaker_image "nathanl/open_instruct_auto" \
 --run_oe_eval_experiments \
 --skip_oi_evals"""
     if wandb_url is not None:
