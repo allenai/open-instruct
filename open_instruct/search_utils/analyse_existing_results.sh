@@ -10,6 +10,7 @@ for dataset in hotpotqa nq tqa 2wiki simpleqa; do
         --dataset_name "$dataset" \
         --model_path "$MODEL_PATH" \
         --num_docs 3 \
-        --output_dir "$outdir" \
+        --output_dir tmp \
         --analyse_existing ${MODEL_PATH}/${dataset}_results/predictions.jsonl
 done
+rm -rf tmp

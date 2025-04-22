@@ -33,32 +33,6 @@ os.makedirs(args.output_dir, exist_ok=True)
 # Load the tokenizer
 tokenizer = AutoTokenizer.from_pretrained(args.model_path, revision=args.tokenizer_revision)
 
-actor = LLMSearchRayActor.options(
-    num_cpus=4,
-    num_gpus=1,
-    # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
-    runtime_env=ray.runtime_env.RuntimeEnv(env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}),
-).remote(
-    model=args.model_path,
-    revision=args.model_revision,
-    tokenizer_revision=args.tokenizer_revision,
-    worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
-    distributed_executor_backend="uni",
-    bundle_indices=None,
-    trust_remote_code=True,
-    tensor_parallel_size=1,
-    enforce_eager=True,
-    dtype="bfloat16",
-    seed=42,
-    enable_prefix_caching=True,
-    max_output_len=args.model_len,  # Explicitly set a custom max context length
-    gpu_memory_utilization=0.95,
-    num_gpus=1,
-    enable_sleep_mode=False,
-    noset_visible_devices=ray_noset_visible_devices(),
-    number_documents_to_search=args.num_docs,
-)
-
 # load the GPQA test subsplit (gpqa diamond).
 if args.dataset_name == "simpleqa":
     if args.no_prompt:
@@ -84,6 +58,32 @@ sampling_params = SamplingParams(
 )
 
 if not args.analyse_existing:
+    # make actor.
+    actor = LLMSearchRayActor.options(
+        num_cpus=4,
+        num_gpus=1,
+        # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
+        runtime_env=ray.runtime_env.RuntimeEnv(env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}),
+    ).remote(
+        model=args.model_path,
+        revision=args.model_revision,
+        tokenizer_revision=args.tokenizer_revision,
+        worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
+        distributed_executor_backend="uni",
+        bundle_indices=None,
+        trust_remote_code=True,
+        tensor_parallel_size=1,
+        enforce_eager=True,
+        dtype="bfloat16",
+        seed=42,
+        enable_prefix_caching=True,
+        max_output_len=args.model_len,  # Explicitly set a custom max context length
+        gpu_memory_utilization=0.95,
+        num_gpus=1,
+        enable_sleep_mode=False,
+        noset_visible_devices=ray_noset_visible_devices(),
+        number_documents_to_search=args.num_docs,
+    )
     # Generate output using the actor.
     result = ray.get(
         actor.generate.remote(
