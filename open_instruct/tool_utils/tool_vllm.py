@@ -27,8 +27,8 @@ class Tool:
         raise NotImplementedError("Subclasses must implement this method")
 
 class PythonCodeTool(Tool):
-    """@vwxyzjn: I recommend using something like a FastAPI for this kind of stuff; way easier to
-    parallelize via load balancing."""
+    """@vwxyzjn: I recommend using something like a FastAPI for this kind of stuff; 1) you 
+    won't accidentally block the main vLLM process and 2) way easier to parallelize via load balancing."""
     def __call__(self, prompt: str) -> ToolOutput:
         # Find Python code blocks using regex
         re_str = r'<tool>\s*(.*?)\s*</tool>'
