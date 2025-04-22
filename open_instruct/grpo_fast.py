@@ -1498,15 +1498,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         pg=pg if args.single_gpu_mode else None,
     )
     resume_training_step = ray.get(inits)[0] + 1
-    if resume_training_step > 1:
-        print(f"Resuming training from step {resume_training_step}... Broadcasting weights to vLLM engines.")
-        with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
-            ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     print("======== ✅ all models and vLLM engines initialized =========")
 
     ray.get([m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models])
     print("======== ✅ model update group setup successfully =========")
+    if resume_training_step > 1:
+        print(f"Resuming training from step {resume_training_step}... Broadcasting weights to vLLM engines.")
+        with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
+            ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
     # Setup training
     generation_config = SamplingParams(
