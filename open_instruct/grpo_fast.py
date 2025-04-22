@@ -900,7 +900,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     # if masking snippets, do it here.
                     if args.mask_snippet_loss:
                         snippet_mask = create_snippet_mask(mb_query_responses, self.tokenizer)
-                        mb_response_masks_bool = mb_response_masks[:, 1:].bool() & snippet_mask
+                        mb_response_masks_bool = mb_response_masks[:, 1:].bool() & snippet_mask[:, 1:]
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
                     mb_new_logprobs = self.forward(
