@@ -11,7 +11,6 @@ import re
 import string
 from collections import Counter
 from abc import ABC, abstractmethod
-from collections import Counter
 from typing import Any, Dict, List, Union
 
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
