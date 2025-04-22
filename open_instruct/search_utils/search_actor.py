@@ -184,6 +184,12 @@ class LLMSearchRayActor:
         # Recreate the outputs based on the original `n` value.
         generation_outputs = []
 
+        # debug
+        for i, text in enumerate(final_texts):
+            if not final_texts[i]:
+                print(f"Empty text for index {i}: {text}")
+                print(f"Original query: {original_queries.get(i, '')}")
+
         # just hardcoding things as stop finish for now... TODO: also add length finish reason.
         for i in range(0, len(encoded_outputs), original_n):
             start, stop = i, i + original_n
