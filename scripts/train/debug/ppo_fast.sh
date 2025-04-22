@@ -10,9 +10,8 @@ python open_instruct/ppo_fast.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 16 \
     --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path HuggingFaceTB/SmolLM2-135M \
-    --reward_model_name_or_path HuggingFaceTB/SmolLM2-135M \
-    --stop_strings "</answer>" \
+    --model_name_or_path HuggingFaceTB/SmolLM2-135M-Instruct \
+    --reward_model_name_or_path HuggingFaceTB/SmolLM2-135M-Instruct \
     --apply_r1_style_format_reward \
     --apply_verifiable_reward true \
     --temperature 0.7 \
