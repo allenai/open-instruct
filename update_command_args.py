@@ -5,6 +5,7 @@ This script is used to add or update arguments in a shell script. For example,
 python update_command_args.py scripts/train/tulu3/grpo_fast_8b.sh \
     --cluster ai2/augusta-google-1 \
     --priority normal \
+    --dataset_mixer_list allenai/RLVR-GSM 1.0 allenai/RLVR-MATH 1.0 \
     --image costah/open_instruct_dev0320_11 | uv run bash
 ```
 
@@ -79,7 +80,6 @@ def main():
     script_file = sys.argv[1]
     
     # Parse remaining arguments as key-value pairs
-    # NOTE: we need to handle `nargs` for cases like `--dataset_mixer_list xxx 1.0`
     parser = argparse.ArgumentParser()
     num_values = 0
     last_arg = None
