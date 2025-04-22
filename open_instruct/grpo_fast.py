@@ -142,6 +142,8 @@ class Args:
     """The hash of the dataset configuration for evaluation."""
     dataset_skip_cache: bool = False
     """Whether to skip the cache."""
+    shuffle_eval_dataset: bool = False
+    """Whether to shuffle the evaluation dataset."""
     max_token_length: int = 512
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
@@ -1453,7 +1455,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             dataset_local_cache_dir=args.dataset_local_cache_dir,
             dataset_skip_cache=args.dataset_skip_cache,
         )
-        # NOTE: eval dataset should not be shuffled
+        if args.shuffle_eval_dataset:
+            eval_dataset = eval_dataset.shuffle(seed=args.seed)
     if args.cache_dataset_only:
         return
 
