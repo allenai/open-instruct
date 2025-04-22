@@ -1196,6 +1196,7 @@ def data_preparation_thread(
             responses, finish_reasons = inference_results_Q.get()
             for i in range(len(finish_reasons)):
                 if finish_reasons[i] == "stop":
+                    print(f"Len response: {len(responses[i])}, finish reason: {finish_reasons[i]}")
                     if responses[i][-1] != tokenizer.eos_token_id:
                         responses[i].append(tokenizer.eos_token_id)
 
