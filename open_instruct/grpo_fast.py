@@ -1195,9 +1195,10 @@ def data_preparation_thread(
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             responses, finish_reasons = inference_results_Q.get()
             for i in range(len(finish_reasons)):
-                if finish_reasons[i] == "stop":
-                    print(f"Len response: {len(responses[i])}, finish reason: {finish_reasons[i]}")
-                    if responses[i][-1] != tokenizer.eos_token_id:
+                # edge case with RL-rag agent: sometimes it outputs eos immediately, and we get an empty response
+                # in that case, we need to add the eos token to the response
+                # note that this also adds eos to the end of reponses that stopped for other reasons.
+                if finish_reasons[i] == "stop" and (len(responses[i]) == 0 or responses[i][-1] != tokenizer.eos_token_id):
                         responses[i].append(tokenizer.eos_token_id)
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
