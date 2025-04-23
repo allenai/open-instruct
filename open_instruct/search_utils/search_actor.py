@@ -188,6 +188,7 @@ class LLMSearchRayActor:
         for i, text in enumerate(final_texts):
             if not final_texts[i]:
                 print(f"Empty text for index {i}: {text}")
+                print(f"Output tokens: {encoded_outputs[i]}")
                 print(f"Original query: {original_queries.get(i, '')}")
 
         # just hardcoding things as stop finish for now... TODO: also add length finish reason.
