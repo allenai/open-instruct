@@ -2,13 +2,20 @@
 python open_instruct/tool_utils/tool_vllm.py
 """
 from collections import defaultdict
+from collections.abc import Sequence
+import copy
 from dataclasses import dataclass
 import re
+import warnings
 import requests
 import traceback
-from vllm import LLM, SamplingParams, RequestOutput, PoolingRequestOutput, TokensPrompt
+from vllm import LLM, SamplingParams, RequestOutput, PoolingRequestOutput, TokensPrompt, PromptType, PoolingParams
+from vllm.prompt_adapter.request import PromptAdapterRequest
+from vllm.model_executor.guided_decoding.guided_fields import (GuidedDecodingRequest)
+from vllm.sampling_params import RequestOutputKind
+from vllm.lora.request import LoRARequest
 from tqdm import tqdm
-from typing import Union
+from typing import Union, Optional
 from rich.console import Console
 from concurrent.futures import ThreadPoolExecutor  # add import for async execution
 
@@ -90,19 +97,78 @@ class ToolUseLLM(LLM):
     def __init__(
             self,
             tools: dict[str, Tool] = None,
-            sampling_params: SamplingParams = None,
             max_tool_calls: int = 4,
             *args,
             **kwargs
         ):
         self.tools = tools
-        self.sampling_params = sampling_params
         self.max_tool_calls = max_tool_calls
-        assert sampling_params.n == 1, "ToolUseLLM only supports n=1, because we could potentially do multiple too calls"
         # Initialize executor and store for pending tool calls
         self.executor = ThreadPoolExecutor(max_workers=20)
         self.pending_tool_futures = {}
         super().__init__(*args, **kwargs)
+
+
+    def _validate_and_add_requests(
+        self,
+        prompts: Union[PromptType, Sequence[PromptType]],
+        params: Union[SamplingParams, Sequence[SamplingParams], PoolingParams,
+                      Sequence[PoolingParams]],
+        lora_request: Optional[Union[Sequence[LoRARequest], LoRARequest]],
+        prompt_adapter_request: Optional[PromptAdapterRequest],
+        guided_options: Optional[GuidedDecodingRequest] = None,
+        priority: Optional[list[int]] = None,
+    ) -> None:
+        """@vwxyzjn: we keep everything the same except override the sampling params to have n=1 for `ToolUseLLM`"""
+        if guided_options is not None:
+            warnings.warn(
+                "guided_options_request is deprecated, use "
+                "SamplingParams.guided_decoding instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+        if isinstance(prompts, (str, dict)):
+            # Convert a single prompt to a list.
+            prompts = [prompts]
+
+        num_requests = len(prompts)
+        if isinstance(params, list) and len(params) != num_requests:
+            raise ValueError("The lengths of prompts and params "
+                             "must be the same.")
+        if isinstance(lora_request,
+                      list) and len(lora_request) != num_requests:
+            raise ValueError("The lengths of prompts and lora_request "
+                             "must be the same.")
+
+        for sp in params if isinstance(params, list) else (params, ):
+            if isinstance(sp, SamplingParams):
+                self._add_guided_params(sp, guided_options)
+
+                # We only care about the final output
+                sp.output_kind = RequestOutputKind.FINAL_ONLY
+
+        # @vwxyzjn: ToolUseLLM change 1: override the sampling params to have n=1
+        assert not isinstance(params, list)
+        self.original_n = params.n
+        params.n = 1
+        self.sampling_params = copy.deepcopy(params)
+        # Add requests to the engine.
+        for i, prompt in enumerate(prompts):
+            for j in range(self.original_n):
+                request_id = f"{i}-{j}"
+                print(f"request_id: {request_id}")
+                self.llm_engine.add_request(
+                    request_id,
+                    prompt,
+                    params,
+                    lora_request=lora_request[i] if isinstance(
+                        lora_request, Sequence) else lora_request,
+                    prompt_adapter_request=prompt_adapter_request,
+                    priority=priority[i] if priority else 0,
+                )
+
+
 
     def _run_engine(
             self, *, use_tqdm: bool
@@ -178,9 +244,8 @@ class ToolUseLLM(LLM):
                         # @vwxyzjn: ToolUseLLM change 2: if the output is a tool call, 
                         # we submit the tool to a thread pool and wait for the result.
                         original_outputs[output.request_id].append(output)
-                        assert len(output.outputs) <= 1 # because sampling_params.n == 1
+                        assert len(output.outputs) <= 1 # because with tool calls, the (overriden) sampling_params.n == 1
                         o = output.outputs[0]
-                        # for o in output.outputs:
                         output_processed = False
                         if output.request_id not in combined_outputs:
                             combined_outputs[output.request_id] = output
@@ -227,7 +292,17 @@ class ToolUseLLM(LLM):
             assert req_id in combined_outputs
             setattr(combined_outputs[req_id].outputs[0], "mask", masks[req_id])
 
-        final_outputs = sorted(combined_outputs.values(), key=lambda x: int(x.request_id))
+        # Merge n completions into the same outputs of the same prompt
+        merged_outputs = {}
+        for req_id in combined_outputs:
+            real_req_id, _ = req_id.split("-")
+            if real_req_id not in merged_outputs:
+                merged_outputs[real_req_id] = combined_outputs[req_id]
+            else:
+                print("merging outputs")
+                merged_outputs[real_req_id].outputs.append(combined_outputs[req_id].outputs[0])
+
+        final_outputs = sorted(merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1])))
         return final_outputs
 
 
@@ -253,7 +328,6 @@ and you will get the output between the <output> and </output> tags.
     prompts = [
         "User: Write a python program which calculates the sum of 1 3 4. Then write another separate program to calculate the product of 1 3 4.\nAssistant:",
         "User: Write a python program which prints 'Hello, Costa!'.\nAssistant:",
-        "User: Write a python program which prints 'Hello, world!'.\nAssistant:",
     ]
     prompts = [system_prompt + "\n\n" + p for p in prompts]
 
@@ -267,6 +341,7 @@ and you will get the output between the <output> and </output> tags.
         temperature=0.8,
         top_p=0.95,
         stop=[item.end_str for item in tools.values()] + ["<endoftext>"],
+        n=3,
         max_tokens=1000,
         include_stop_str_in_output=True,
     )
@@ -274,7 +349,6 @@ and you will get the output between the <output> and </output> tags.
     model_name = "meta-llama/Llama-3.1-8B-Instruct"
     llm = ToolUseLLM(
         tools=tools,
-        sampling_params=sampling_params,
         model=model_name,
         tensor_parallel_size=1,
         gpu_memory_utilization=0.9,
@@ -288,21 +362,22 @@ and you will get the output between the <output> and </output> tags.
     outputs = llm.generate(prompt_token_ids=prompt_token_ids, sampling_params=sampling_params)
     for i, output in enumerate(outputs):
         prompt = tok.decode(output.prompt_token_ids)
-        generated_text = tok.decode(output.outputs[0].token_ids)
-        output.outputs[0].mask
-        assert len(output.outputs[0].mask) == len(output.outputs[0].token_ids)
         console.rule(f"Conversation {i}")
         console.rule("Prompt")
         console.print(prompt)
-        console.rule("Generated text w/ masks")
-        visualize_token_role(output.outputs[0].token_ids, output.outputs[0].mask, tok)
-        console.rule("Generated text")
-        visualize_token(output.outputs[0].token_ids, tok)
+        for j, o in enumerate(output.outputs):
+            generated_text = tok.decode(o.token_ids)
+            assert len(o.mask) == len(o.token_ids)
+            console.rule(f"Generated text {j}")
+            console.rule("Generated text w/ masks")
+            visualize_token_role(o.token_ids, o.mask, tok)
+            console.rule("Generated text")
+            visualize_token(o.token_ids, tok)
     
     print("debugging tests 2 all done")
     breakpoint()
     # More serious benchmarks
-    
+
     from datasets import load_dataset
     tok = AutoTokenizer.from_pretrained(model_name)
     ds = load_dataset("vwxyzjn/rlvr_acecoder", split="train")
@@ -312,7 +387,7 @@ and you will get the output between the <output> and </output> tags.
         example["input_ids_prompt"] = tok.apply_chat_template(messages, add_generation_prompt=True)
         return example
     ds = ds.map(process, remove_columns=["messages"])
-        
+
     print("ds:", ds)
     outputs = llm.generate(prompt_token_ids=ds["input_ids_prompt"], sampling_params=sampling_params)
     print(f"len(outputs): {len(outputs)}")
