@@ -122,6 +122,9 @@ class LLMSearchRayActor:
             # Process each query and update its text.
             for (idx, current_text), output in zip(queries, outputs):
                 output_text = output.outputs[0].text
+                if not output_text:
+                    print(f"Empty output for query {idx}: {current_text}")
+                    print(f"Output: {output}")
                 output_tokens = self.tokenizer.encode(output_text)
                 remaining_tokens = self.max_output_length - query_token_counts[idx]
 
