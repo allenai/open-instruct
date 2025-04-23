@@ -1183,6 +1183,23 @@ def data_preparation_thread(
                 for packed_done in packed_sequences.dones
             ]
             packed_sequences.rewards = packed_rewards
+            # index_of_first_reward = scores.tolist().index(10)
+            # print("index of the first reward", index_of_first_reward)
+            # for i in range(len(packed_sequences.response_masks)):
+            #     if index_of_first_reward + 1 in packed_sequences.response_masks[i].tolist():
+            #         print("response_masks index of the first reward", i)
+            #         index_of_packed_first_reward = i
+            #         break
+            # print("-" * 20)
+            # print(tokenizer.decode(queries[index_of_first_reward]))
+            # print("-" * 20)
+            # print(tokenizer.decode(responses[index_of_first_reward]))
+            # print("-" * 20)
+            # print(ground_truths[index_of_first_reward])
+            # print("-" * 20)
+            # print(f"{index_of_packed_first_reward=}")
+            # print(tokenizer.decode(packed_sequences.query_responses[index_of_packed_first_reward]))
+            # breakpoint()
 
         with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
             B = (
@@ -1198,7 +1215,8 @@ def data_preparation_thread(
                 per_device_packed_rewards = packed_sequences.rewards[B * i : B * (i + 1)]
 
                 # Shuffle the batch and collate the data
-                b_inds = np.random.permutation(len(per_device_packed_query_responses))
+                # b_inds = np.random.permutation(len(per_device_packed_query_responses))
+                b_inds = np.arange(len(per_device_packed_query_responses))
                 collated_query_responses = []
                 collated_attention_masks = []
                 collated_position_ids = []
@@ -1778,7 +1796,8 @@ if __name__ == "__main__":
                 # @vwxyzjn: quick experiment
                 for i in range(len(verifiable_rewards)):
                     # scores[i] = verifiable_rewards[i] + scores[i]
-                    scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
+                    scores[i] = verifiable_rewards[i]
+                print(scores)
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
