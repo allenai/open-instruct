@@ -157,7 +157,6 @@ class ToolUseLLM(LLM):
         for i, prompt in enumerate(prompts):
             for j in range(self.original_n):
                 request_id = f"{i}-{j}"
-                print(f"request_id: {request_id}")
                 self.llm_engine.add_request(
                     request_id,
                     prompt,
