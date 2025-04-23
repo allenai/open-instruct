@@ -29,9 +29,14 @@ class Tool:
 class PythonCodeTool(Tool):
     """@vwxyzjn: I recommend using something like a FastAPI for this kind of stuff; 1) you 
     won't accidentally block the main vLLM process and 2) way easier to parallelize via load balancing."""
+    
+    def __init__(self, api_endpoint: str, *args, **kwargs):
+        self.api_endpoint = api_endpoint
+        super().__init__(*args, **kwargs)
+
     def __call__(self, prompt: str) -> ToolOutput:
         # Find Python code blocks using regex
-        re_str = r'<tool>\s*(.*?)\s*</tool>'
+        re_str = r'<tool>\s*(.*?)\s*</tool>' # we replace <tool> immediately with the custom start_str
         re_str = re_str.replace('<tool>', self.start_str).replace('</tool>', self.end_str)
 
         code_blocks = re.findall(re_str, prompt, re.DOTALL)
@@ -45,7 +50,7 @@ class PythonCodeTool(Tool):
         try:
             # Call the FastAPI endpoint to execute the code
             response = requests.post(
-                "http://phobos-cs-aus-453:1212/execute",
+                self.api_endpoint,
                 json={"code": code, "timeout": 10}
             )
             
@@ -82,9 +87,17 @@ class PythonCodeTool(Tool):
 
 
 class ToolUseLLM(LLM):
-    def __init__(self, tools: dict[str, Tool] = None, sampling_params: SamplingParams = None, *args, **kwargs):
+    def __init__(
+            self,
+            tools: dict[str, Tool] = None,
+            sampling_params: SamplingParams = None,
+            max_tool_calls: int = 4,
+            *args,
+            **kwargs
+        ):
         self.tools = tools
         self.sampling_params = sampling_params
+        self.max_tool_calls = max_tool_calls
         assert sampling_params.n == 1, "ToolUseLLM only supports n=1, because we could potentially do multiple too calls"
         # Initialize executor and store for pending tool calls
         self.executor = ThreadPoolExecutor(max_workers=20)
@@ -111,6 +124,7 @@ class ToolUseLLM(LLM):
         total_out_toks = 0
         tokenizer = self.get_tokenizer()
         original_outputs = defaultdict(list)
+        num_calls = defaultdict(int)
         combined_outputs = {}
         masks = defaultdict(list)
         while True:
@@ -127,6 +141,7 @@ class ToolUseLLM(LLM):
                     prompt_and_tool_output_token = last_prompt_token_ids + last_token_ids + tool_output_token_ids
                     combined_outputs[req_id].outputs[0].token_ids.extend(tool_output_token_ids)
                     masks[req_id].extend([0] * len(tool_output_token_ids))
+                    num_calls[req_id] += 1
                     # Handle the edge case: if the prompt + output + tool output is too long,
                     # we append the tool output to the last output and use it for the final results
                     if len(prompt_and_tool_output_token) >= self.llm_engine.model_config.max_model_len:
@@ -173,7 +188,7 @@ class ToolUseLLM(LLM):
                             combined_outputs[output.request_id].outputs[0].token_ids.extend(o.token_ids)
                         masks[output.request_id].extend([1] * len(o.token_ids))
                         for stop_str in self.sampling_params.stop:
-                            if o.text.endswith(stop_str) and stop_str in self.tools:
+                            if o.text.endswith(stop_str) and stop_str in self.tools and num_calls[output.request_id] <= self.max_tool_calls:
                                 # Schedule tool call asynchronously
                                 tool = self.tools[stop_str]
                                 future = self.executor.submit(tool, o.text)
@@ -202,7 +217,7 @@ class ToolUseLLM(LLM):
             if not self.llm_engine.has_unfinished_requests() and len(self.pending_tool_futures) == 0:
                 break
 
-        print(f"number of calls per request ids", [len(item) for item in original_outputs.values()])
+        print(f"number of calls per request ids", num_calls)
         # print(tokenizer.decode(combined_outputs["0"].prompt_token_ids))
         # print(tokenizer.decode(combined_outputs["0"].outputs[0].token_ids))
         if use_tqdm:
@@ -243,7 +258,7 @@ and you will get the output between the <output> and </output> tags.
     prompts = [system_prompt + "\n\n" + p for p in prompts]
 
     # Create a tool.
-    python_code_tool = PythonCodeTool("<code>", "</code>")
+    python_code_tool = PythonCodeTool(api_endpoint="http://phobos-cs-aus-453:1212/execute", start_str="<code>", end_str="</code>")
     tools = {
         python_code_tool.end_str: python_code_tool,
     }
