@@ -13,7 +13,7 @@ class SearchTool(Tool):
     def __call__(self, prompt: str) -> ToolOutput:
         # Find Python code blocks using regex
         re_str = r'<tool>\s*(.*?)\s*</tool>' # we replace <tool> immediately with the custom start_str
-        query_string = re_str.replace('<tool>', self.start_str).replace('</tool>', self.end_str)
+        re_str = re_str.replace('<tool>', self.start_str).replace('</tool>', self.end_str)
 
         query_blocks = re.findall(re_str, prompt, re.DOTALL)
         
