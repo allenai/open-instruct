@@ -304,17 +304,14 @@ class ToolUseLLM(LLM):
 if __name__ == "__main__":
     console = Console()
     from transformers import AutoTokenizer
+    from open_instruct.search_utils.search_tool import SearchTool
 
 
     # Sample prompts.
     system_prompt = (
 """Below is a conversation between an user and an assitant. The assistant helps with the user's tasks. When the task is completed, the assistant ends the conversation with <endoftext>. The assistant can also use a tool for multiple times. The assitant has the following tools:
 
-1. `<code>`: Python execution service:
-You could run python code by putting your code between <code> and </code> tags. For example, it could be 
-<code>
-print("Hello, world!")
-</code>
+search <query>...</query>: Search for the query in the massive DS API. The assistant will get the output between the <document> and </document> tags.
 and you will get the output between the <output> and </output> tags.
 """
     )
@@ -327,7 +324,7 @@ and you will get the output between the <output> and </output> tags.
     prompts = [system_prompt + "\n\n" + p for p in prompts]
 
     # Create a tool.
-    python_code_tool = PythonCodeTool(api_endpoint="http://phobos-cs-aus-453:1212/execute", start_str="<code>", end_str="</code>")
+    python_code_tool = SearchTool(api_endpoint="http://saturn-cs-aus-233.reviz.ai2.in:38387/search", start_str="<query>", end_str="</query>")
     tools = {
         python_code_tool.end_str: python_code_tool,
     }
