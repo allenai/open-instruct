@@ -325,7 +325,7 @@ class Args:
     """the priority of auto-launched evaluation jobs"""
 
     # tool settings
-    tool: Optional[List[str]] = None
+    tools: Optional[List[str]] = None
     """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
     max_tool_use: int = 5
     """What tools to use"""
