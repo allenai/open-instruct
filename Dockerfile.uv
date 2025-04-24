@@ -1,7 +1,4 @@
 FROM ghcr.io/allenai/oi-cuda-no-conda:12.1-cudnn8-dev-ubuntu20.04
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-ENV HF_HUB_ENABLE_HF_TRANSFER=1
-ENV UV_COMPILE_BYTECODE=1
 
 # Set default cache directory but allow override from environment
 ARG CACHE_DIR=/root/.cache/uv
@@ -12,7 +9,21 @@ RUN echo "UV_CACHE_DIR: ${UV_CACHE_DIR}"
 # setup files
 WORKDIR /stage/
 
-# Install the project's dependencies using the lockfile and settings
+# Install uv first
+# COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
+ADD https://astral.sh/uv/install.sh /uv-installer.sh
+RUN sh /uv-installer.sh && rm /uv-installer.sh
+ENV PATH="/root/.local/bin/:$PATH"
+
+
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
+ENV UV_COMPILE_BYTECODE=1
+
+# Copy only dependency-related files first
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
@@ -21,23 +32,23 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-install-project --extra compile
+RUN --mount=type=cache,target=${UV_CACHE_DIR} \
+    uv sync --frozen --extra compile
 
+WORKDIR /stage/
+
+# install google cloud sdk
+RUN apt-get update && apt-get install -y gnupg curl
+RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && apt-get update -y && apt-get install google-cloud-cli -y
+
+
+# Copy all runtime files directly to final stage
 COPY open_instruct open_instruct
 COPY eval eval
 COPY configs configs
 COPY scripts scripts
-# hack: only copy oe-eval-internal if it exists
 COPY mason.py oe-eval-internal* /stage/
 COPY .git/ ./.git/
-COPY pyproject.toml uv.lock .
-RUN chmod +x scripts/*
 
-# install dependencies
-RUN --mount=type=cache,target=${UV_CACHE_DIR} \
-    uv sync --frozen --extra compile
-
-# for interactive session
-RUN chmod -R 777 /stage/
-
-# uv dockerfile magic: place executables in the environment at the front of the path
+# Set up the environment
 ENV PATH=/stage/.venv/bin:$PATH

@@ -27,10 +27,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+# isort: off
 import os
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
+try:
+    import deepspeed
+    from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
+
+    # @vwxyzjn: when importing on CPU-only machines, we get the following error:
+    # RuntimeError: 0 active drivers ([]). There should only be one.
+    # so we need to catch the exception and do nothing
+    # https://github.com/deepspeedai/DeepSpeed/issues/7028
+except Exception:
+    pass
+# isort: on
 
 import gc
 import json
@@ -47,8 +58,8 @@ from collections import deque
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
+from itertools import chain
 
-import deepspeed
 import numpy as np
 import pandas as pd
 import ray
@@ -57,7 +68,6 @@ import torch.distributed as dist
 import torch.utils
 import torch.utils.data
 from datasets import Dataset
-from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util.placement_group import PlacementGroup, placement_group
@@ -790,7 +800,10 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # get list of all reward types in dataset, used for logging
         # sorted to make sure the order is consistent
-        reward_types = sorted(list(set(train_dataset.unique("dataset"))))
+        # have to handle case where dataset is a list of values.
+        dataset_column = train_dataset["dataset"]
+        all_datasets = chain.from_iterable(d if isinstance(d, list) else [d] for d in dataset_column)
+        reward_types = sorted(set(all_datasets))
 
         args = self.args
         self.tokenizer = tokenizer
@@ -1163,7 +1176,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
                         decoded_response = tokenizer.batch_decode(postprocessed_response)
                         verifiable_reward, per_func_reward = apply_verifiable_reward(
-                            responses=postprocessed_response,
+                            responses=[seq[seq != tokenizer.pad_token_id].tolist() for seq in postprocessed_response],
                             decoded_responses=decoded_response,
                             ground_truths=ground_truth,
                             datasets=dataset,
@@ -1352,7 +1365,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     "episode": episode,
                     "training_step": training_step,
                     "lr": self.scheduler.get_last_lr()[0],
-                    "epoch": episode / len(train_dataset),
+                    "epoch": episode / args.number_samples_per_prompt / len(train_dataset),
                     "time/from_scratch": time.time() - start_time,
                     "time/training": time.time() - training_time_start,
                     **local_metrics.get_reduced_metrics_correctness(),

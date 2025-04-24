@@ -21,13 +21,24 @@ This implementation has the following features:
 
 In simpler tasks, we see 2x faster training, and even 10x faster for more complex tasks. With `grpo_fast.py`, we can run crank up `number_samples_per_prompt` and train on really large batch sizes.
 
+It implements additional optimizations:
+
+* `grpo_fast.py` also implements an optimization to skip zero gradient batches. If we solve a prompt 100% correct or 0% correct, the std of the group is 0. So `adv = (score - score.mean()) / (score.std + 1e-5) = 0 / 1e-5 = 0`, causing 0 gradients. `grpo_fast.py` will skip these batches before packing the sequences.
+
+![](grpo/grpo_fast_gradient.png)
+
+Figure taken from [this discord thread by @the_real_jrb](https://discord.com/channels/1179127597926469703/1208183216843005962/1357712190957682839)
+
 
 ### Debug (Single GPU)
 
 You can run the script in a single GPU mode to debug the training process.
 
 ```bash
-bash scripts/train/debug/grpo_fast_mini.sh
+# single GPU
+bash scripts/train/debug/grpo_fast.sh
+# 3 GPU: 2 for training, 1 for inference (a more realistic setting for async training)
+bash scripts/train/debug/grpo_fast_3_gpu.sh
 ```
 
 ### Reproduce `allenai/Llama-3.1-Tulu-3.1-8B` (1 Nodes)
@@ -68,6 +79,102 @@ bash scripts/train/tulu3/grpo_fast_8b_single_node.sh
     We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
 
 
+### (🧪 Experimental) Qwen 2.5 7B GRPO Fast Zero-style
+
+We have
+
+```bash
+bash scripts/train/qwen/grpo_fast_7b.sh
+```
+
+
+![grpo_qwen2.5_7B_works](grpo/qwen2.5_7b_grpo_fast_zero.png)
+![grpo_qwen2.5_7B_works_time](grpo/qwen2.5_7b_grpo_fast_zero-time.png)
+
+
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+    
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Qwen2-5-7B-GRPO-Fast-Zero--VmlldzoxMjA2NDExMA" style="width:100%; height:500px" title="Qwen2.5-7B-GRPO-Fast-Zero"></iframe>
+
+
+???+ info
+
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+
+    ![grpo_plot](grpo/qwen2.5_7b_grpo_fast_zero_eval_curve.png)
+
+???+ info
+
+    We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
+
+
+
+
+### (🧪 Experimental) Olmo2 7B GRPO Fast Zero-style
+
+We have
+
+```bash
+bash scripts/train/olmo2/grpo_fast_7b_zero.sh
+```
+
+
+![grpo_olmo2_7b_zero](grpo/olmo2_7b_grpo_fast_zero.png)
+![grpo_olmo2_7b_zero_time](grpo/olmo2_7b_grpo_fast_zero-time.png)
+
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+    
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-7B-GRPO-Fast-Zero--VmlldzoxMjA0MjU4MQ" style="width:100%; height:500px" title="OLMo2-7B-GRPO-Fast-Zero"></iframe>
+
+???+ info
+
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+
+    ![grpo_plot](grpo/olmo2_7b_grpo_fast_zero_eval_curve.png)
+
+
+???+ info
+
+    We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
+
+
+### (🧪 Experimental) Olmo2 13B GRPO Fast Zero-style
+
+We have
+
+```bash
+bash scripts/train/olmo2/grpo_fast_13b_zero.sh
+```
+
+
+![grpo_olmo2_13b_zero](grpo/olmo2_13b_grpo_fast_zero.png)
+![grpo_olmo2_13b_zero_time](grpo/olmo2_13b_grpo_fast_zero-time.png)
+
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+    
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/OLMo-2-13B-GRPO-Fast-Zero--VmlldzoxMjA0MjU4Mw" style="width:100%; height:500px" title="OLMo2-13B-GRPO-Fast-Zero"></iframe>
+
+???+ info
+
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+
+    ![grpo_plot](grpo/olmo2_13b_grpo_fast_zero_eval_curve.png)
+
+
+???+ info
+
+    We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
+
+
+
+
+### Training Metrics
+
+See the Training Metrics for `grpo_vllm_thread_ray_gtrl.py` below for general metrics. `grpo_fast.py` includes the following additional metrics:
+
+
+* `other/real_batch_size_ratio`: In GRPO, as we train we actually get smaller and smaller batch sizes. This is because if we solve a prompt 100% correct or 0% correct, the std of the group is 0. So `adv = (score - score.mean()) / (score.std + 1e-5) = 0 / 1e-5 = 0`, causing 0 gradients. This metric is the ratio of the samples that have gradients vs the total number of samples,
+* `other/packed_ratio`: The ratio of the packed sequences vs the total number of sequences. The lower the ratio, the more efficiently we have packed the sequences. E.g., if we have 100 sequences and the ratio is 0.1, it means we only have to do 10% of the forward passes than if we didn't pack.
 
 
 ## `grpo_vllm_thread_ray_gtrl.py`
@@ -151,7 +258,7 @@ bash scripts/train/olmo2/grpo_7b.sh
 
 
 
-### Qwen 2.5 7B Zero-style (🧪 Experimental)
+### (🧪 Experimental) Qwen 2.5 7B Zero-style
 
 Here is a command to run GRPO on the `Qwen/Qwen2.5-7B` on [ai2-adapt-dev/math_ground_truth_zs](https://huggingface.co/datasets/ai2-adapt-dev/math_ground_truth_zs), which is simply a zero-shot version of the RLVR MATH dataset. The training is done starting from a base model, similar to how [DeepSeek R1](https://arxiv.org/abs/2501.12948) does it.
 
@@ -163,12 +270,20 @@ bash scripts/train/qwen/grpo_7b.sh
 ![grpo_qwen2.5_7B_works_time](grpo/qwen2.5_7b_grpo_zero-time.png)
 
 
-The results look quite reasonable: with format score, score all going up, and sequence length seems stable (at least at first)
+??? note "👉 Tracked WandB Experiments (Click to expand)"
+    
+    <iframe loading="lazy" src="https://wandb.ai/ai2-llm/open_instruct_public/reports/Qwen2-5-7B-GRPO-Zero--VmlldzoxMjA0MjY5OA" style="width:100%; height:500px" title="Qwen2.5-7B-GRPO-Zero"></iframe>
+
+???+ info
+
+    Below are some learning curves for the evaluation metrics during training. Basically, ifeval, gsm8k, and math:flex all go up. 
+
+    ![grpo_plot](grpo/qwen2.5_7b_grpo_zero_eval_curve.png)
 
 
-The corresponding evals look good as well:
+???+ info
 
-![grpo_qwen2.5_7B_works_evals](static/grpo_qwen2.5_7B_works_evals.png)
+    We haven't quite figured out how to make our internal evaluation toolchains more open yet. Stay tuned!
 
 
 ### Training Metrics
@@ -202,6 +317,8 @@ During training, the following metrics are logged:
 * `val/ratio_var`: the variance of the ratio of the new policy to the old policy, indicating the variability in policy updates
 * `val/stop_token_rate`: the rate at which stop tokens appear in the responses, providing a measure of response termination
 * `val/format_scores`: the mean format scores, indicating the quality of response formatting (only logged if `add_r1_style_format_reward` is enabled)
+* `other/real_batch_size_ratio`: In GRPO, as we train we actually get smaller and smaller batch sizes. This is because if we solve a prompt 100% correct or 0% correct, the std of the group is 0. So `adv = (score - score.mean()) / (score.std + 1e-5) = 0 / 1e-5 = 0`, causing 0 gradients. This metric is the ratio of the samples that have gradients vs the total number of samples,
+* `other/packed_ratio`: The ratio of the packed sequences vs the total number of sequences. The lower the ratio, the more efficiently we have packed the sequences. E.g., if we have 100 sequences and the ratio is 0.1, it means we only have to do 10% of the forward passes than if we didn't pack.
 
 
 

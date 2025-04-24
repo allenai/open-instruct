@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import string
+from collections import Counter
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Union
 
@@ -111,6 +112,8 @@ class MathVerifier(VerifierFunction):
         # Fallback to the full output.
         if not all_answers:
             all_answers.append(normalize_final_answer(prediction))
+            # also provide original string in case normalization fails
+            all_answers.append(prediction)
 
         # Compare each candidate answer to the ground truth.
         for answer in all_answers:
@@ -190,6 +193,19 @@ def normalize_answer(s: str) -> str:
     return white_space_fix(remove_articles(remove_punc(s.lower())))
 
 
+def f1_score(prediction, ground_truth):
+    prediction_tokens = normalize_answer(prediction).split()
+    ground_truth_tokens = normalize_answer(ground_truth).split()
+    common = Counter(prediction_tokens) & Counter(ground_truth_tokens)
+    num_same = sum(common.values())
+    if num_same == 0:
+        return {"f1": 0, "precision": 0, "recall": 0}
+    precision = 1.0 * num_same / len(prediction_tokens)
+    recall = 1.0 * num_same / len(ground_truth_tokens)
+    f1 = (2 * precision * recall) / (precision + recall)
+    return {"f1": f1, "precision": precision, "recall": recall}
+
+
 class FlanVerifier(VerifierFunction):
     """
     Verifier for Flan tasks that extracts the answer after "The answer is:"
@@ -204,6 +220,42 @@ class FlanVerifier(VerifierFunction):
         return float(normalize_answer(answer_string) == normalize_answer(label))
 
 
+class StringMatcherVerifier(VerifierFunction):
+    """
+    Verifier for tasks that require string matching.
+
+    It checks if the model output matches the ground truth answer.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("string_matcher", weight=1.0)
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
+        if "<answer>" not in prediction or "</answer>" not in prediction:
+            return False
+        # extract out of answer tag
+        answer_string = prediction.split("<answer>")[-1].split("</answer>")[0]
+        # normalize
+        return float(normalize_answer(answer_string) == normalize_answer(label))
+
+
+class F1Verifier(VerifierFunction):
+    """
+    Verifier that computes the string F1 score between the prediction and the label.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("string_f1", weight=1.0)
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> float:
+        # remove thinking section from the prediction
+        prediction = prediction.split("</think>")[-1]
+        # remove answer tags from the prediction
+        prediction = prediction.replace("<answer>", "").replace("</answer>", "")
+        # return f1 score
+        return f1_score(prediction, label)["f1"]
+
+
 class MaxLenVerifier(VerifierFunction):
     """
     Verifier that checks if the length of the prediction is within the maximum allowed length.
@@ -212,12 +264,35 @@ class MaxLenVerifier(VerifierFunction):
     """
 
     def __init__(self) -> None:
-        super().__init__("max_length", weight=0.5)
+        super().__init__("max_length", weight=1.0)
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
-        max_length = float(label)
-        # linear func that hits 1 at max_length and 0 after
-        return 0 if len(tokenized_prediction) > max_length else len(tokenized_prediction) / max_length
+        desired_length = float(label)
+        # return absolute difference between the length of the prediction and the max length
+        # make sure to disallow negative rewards
+        length_diff = abs(len(tokenized_prediction) - desired_length)
+        return 1 - (length_diff / 8192)
+
+
+class UpToMaxLenVerifier(VerifierFunction):
+    """
+    Verifier that checks if the length of the prediction is within the maximum allowed length.
+
+    The ground truth (label) is interpreted as the maximum length.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("up_to_max_length", weight=1.0)
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
+        desired_length = float(label)
+        length_diff = len(tokenized_prediction) - desired_length
+        # if we were too short, its fine! return 1.0
+        if length_diff < 0:
+            return 1.0
+        # if we were too long, return the difference
+        # make sure to disallow negative rewards
+        return 1 - (length_diff / 8192)
 
 
 def get_all_verifiers() -> Dict[str, VerifierFunction]:

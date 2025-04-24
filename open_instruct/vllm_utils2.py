@@ -16,8 +16,9 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 
+import os
 from datetime import timedelta
-from typing import Any, Optional, Union
+from typing import Any, List, Optional, Union
 
 import ray
 import torch
@@ -34,29 +35,26 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
-# monkey patch for olmo2 32B
-from vllm.model_executor.models.olmo2 import AttentionMetadata, Olmo2Attention
-from vllm.worker.worker import Worker
 
-
-def custom_forward(
-    self,
-    positions: torch.Tensor,
-    hidden_states: torch.Tensor,
-    kv_cache: torch.Tensor,
-    attn_metadata: AttentionMetadata,
-) -> torch.Tensor:
-    qkv, _ = self.qkv_proj(hidden_states)
-    # q, k, v = qkv.chunk(chunks=3, dim=-1)
-    q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
-    q, k = self._apply_qk_norm(q, k)
-    q, k = self.rotary_emb(positions, q, k)
-    attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
-    output, _ = self.o_proj(attn_output)
-    return output
-
-
-Olmo2Attention.forward = custom_forward
+def ray_noset_visible_devices(env_vars=os.environ):
+    # Refer to
+    # https://github.com/ray-project/ray/blob/161849364a784442cc659fb9780f1a6adee85fce/python/ray/_private/accelerators/nvidia_gpu.py#L95-L96
+    # https://github.com/ray-project/ray/blob/161849364a784442cc659fb9780f1a6adee85fce/python/ray/_private/accelerators/amd_gpu.py#L102-L103
+    # https://github.com/ray-project/ray/blob/161849364a784442cc659fb9780f1a6adee85fce/python/ray/_private/accelerators/npu.py#L94-L95
+    # https://github.com/ray-project/ray/blob/161849364a784442cc659fb9780f1a6adee85fce/python/ray/_private/accelerators/hpu.py#L116-L117
+    # https://github.com/ray-project/ray/blob/161849364a784442cc659fb9780f1a6adee85fce/python/ray/_private/accelerators/neuron.py#L108-L109
+    # https://github.com/ray-project/ray/blob/161849364a784442cc659fb9780f1a6adee85fce/python/ray/_private/accelerators/tpu.py#L171-L172
+    # https://github.com/ray-project/ray/blob/161849364a784442cc659fb9780f1a6adee85fce/python/ray/_private/accelerators/intel_gpu.py#L97-L98
+    NOSET_VISIBLE_DEVICES_ENV_VARS_LIST = [
+        "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES",
+        "RAY_EXPERIMENTAL_NOSET_ROCR_VISIBLE_DEVICES",
+        "RAY_EXPERIMENTAL_NOSET_ASCEND_RT_VISIBLE_DEVICES",
+        "RAY_EXPERIMENTAL_NOSET_HABANA_VISIBLE_MODULES",
+        "RAY_EXPERIMENTAL_NOSET_NEURON_RT_VISIBLE_CORES",
+        "RAY_EXPERIMENTAL_NOSET_TPU_VISIBLE_CHIPS",
+        "RAY_EXPERIMENTAL_NOSET_ONEAPI_DEVICE_SELECTOR",
+    ]
+    return any(env_vars.get(env_var) for env_var in NOSET_VISIBLE_DEVICES_ENV_VARS_LIST)
 
 
 # Copy from pytorch to allow creating multiple main groups.
@@ -97,6 +95,10 @@ def init_process_group(
         # different systems (e.g. RPC) in case the store is multi-tenant.
         store = PrefixStore(group_name, store)
 
+    # NOTE: The pg_options parameter was renamed into backend_options in PyTorch 2.6.0
+    # https://github.com/pytorch/pytorch/commit/a0c7029a75628cd5fa8df83c0de0ea98ee7fd844
+    # We need to determine the appropriate parameter name based on PyTorch version
+    pg_options_param_name = "backend_options" if str(torch.__version__) >= "2.6" else "pg_options"
     pg, _ = _new_process_group_helper(
         world_size,
         rank,
@@ -104,7 +106,7 @@ def init_process_group(
         backend,
         store,
         group_name=group_name,
-        pg_options=pg_options,
+        **{pg_options_param_name: pg_options},
         timeout=timeout,
     )
 
@@ -113,111 +115,58 @@ def init_process_group(
     return pg
 
 
-class WorkerWrap(Worker):
-    def init_process_group(self, master_address, master_port, rank_offset, world_size, group_name, backend="nccl"):
-        """Init torch process group for model weights update"""
-        assert torch.distributed.is_initialized(), "default torch process group must be initialized"
-        assert group_name != "", "group name must not be empty"
-
-        rank = torch.distributed.get_rank() + rank_offset
-        self._model_update_group = init_process_group(
-            backend=backend,
-            init_method=f"tcp://{master_address}:{master_port}",
-            world_size=world_size,
-            rank=rank,
-            group_name=group_name,
-        )
-        print(
-            f"init_process_group: master_address={master_address}, master_port={master_port}, ",
-            f"rank={rank}, world_size={world_size}, group_name={group_name}",
-        )
-
-    def update_weight(self, name, dtype, shape, empty_cache=False):
-        """Broadcast weight to all vllm workers from source rank 0 (actor model)"""
-        # print(f"update_weight: {name}, dtype: {dtype}, shape: {shape}, rank: {torch.distributed.get_rank()}, world_size: {torch.distributed.get_world_size()}")
-        # if torch.distributed.get_rank() == 0:
-        #     print(f"update weight: {name}, dtype: {dtype}, shape: {shape}")
-
-        assert dtype == self.model_config.dtype, f"mismatch dtype: src {dtype}, dst {self.model_config.dtype}"
-        weight = torch.empty(shape, dtype=dtype, device="cuda")
-        torch.distributed.broadcast(weight, 0, group=self._model_update_group)
-
-        self.model_runner.model.load_weights(weights=[(name, weight)])
-
-        del weight
-        # TODO: should we empty cache if all weights have updated?
-        # if empty_cache:
-        #     torch.cuda.empty_cache()
-
-
 @ray.remote
 class LLMRayActor:
-    def __init__(self, *args, **kwargs):
-        import vllm
 
-        self.__version__ = vllm.__version__
-        assert self.__version__ >= "0.4.1", "OpenRLHF only supports vLLM >= 0.4.1"
+    def __init__(self, *args, bundle_indices: list = None, **kwargs):
+        noset_visible_devices = kwargs.pop("noset_visible_devices")
+        if kwargs.get("distributed_executor_backend") == "ray":
+            # a hack to make the script work.
+            # stop ray from manipulating *_VISIBLE_DEVICES
+            # at the top-level when the distributed_executor_backend is ray.
+            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+            os.environ.pop("ROCR_VISIBLE_DEVICES", None)
+        elif noset_visible_devices:
+            # We need to set CUDA_VISIBLE_DEVICES to the ray assigned GPU
+            # when the distributed_executor_backend is not ray and
+            # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
 
-        self.use_gpu_executor = kwargs["tensor_parallel_size"] == 1
+        num_gpus = kwargs.pop("num_gpus")
+        if bundle_indices is not None:
+            os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
+            os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
+            print(f"creating LLM with bundle_indices={bundle_indices}")
 
-        # See https://github.com/vllm-project/vllm/blob/main/vllm/executor/gpu_executor.py
-        if self.use_gpu_executor:
+        from vllm import LLM
 
-            vllm.worker.worker.Worker = WorkerWrap
-        else:
-            # RayGPUExecutor
-            # See the patch https://github.com/vllm-project/vllm/commit/479d69fad0538f04cb22bf13e76ff91cfeb8a4e5
-            kwargs["worker_use_ray"] = True
-
-            if vllm.__version__ > "0.4.1":
-                RayWorkerWrapperPath = vllm.executor.ray_utils
-            else:
-                RayWorkerWrapperPath = vllm.engine.ray_utils
-
-            # patch for newer vllm from openrlhf:
-            # https://github.com/OpenRLHF/OpenRLHF/blob/main/openrlhf/trainer/ray/vllm_engine.py#L40
-            if vllm.__version__ > "0.6.4.post1":
-                # https://github.com/vllm-project/vllm/pull/10555
-                kwargs["worker_cls"] = "open_instruct.vllm_utils2.WorkerWrap"
-            else:
-                RayWorkerWrapperPath = vllm.executor.ray_utils
-
-                class RayWorkerWrapper(RayWorkerWrapperPath.RayWorkerWrapper):
-                    def __init__(self, *args, **kwargs) -> None:
-                        kwargs["worker_module_name"] = "open_instruct.vllm_utils2"
-                        kwargs["worker_class_name"] = "WorkerWrap"
-                        super().__init__(*args, **kwargs)
-
-                RayWorkerWrapperPath.RayWorkerWrapper = RayWorkerWrapper
-
-        self.llm = vllm.LLM(*args, **kwargs)
+        self.llm = LLM(*args, **kwargs)
 
     def generate(self, *args, **kwargs):
         return self.llm.generate(*args, **kwargs)
 
-    def init_process_group(self, master_address, master_port, rank_offset, world_size, group_name, backend):
-        if self.use_gpu_executor:
-            return self.llm.llm_engine.model_executor.driver_worker.init_process_group(
-                master_address, master_port, rank_offset, world_size, group_name, backend
-            )
-        else:
-            return self.llm.llm_engine.model_executor._run_workers(
-                "init_process_group", master_address, master_port, rank_offset, world_size, group_name, backend
-            )
+    def init_process_group(
+        self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
+    ):
+        return self.llm.collective_rpc(
+            "init_process_group",
+            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
+        )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        self.stop_remote_worker_execution_loop()
+        return self.llm.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
-        if self.use_gpu_executor:
-            return self.llm.llm_engine.model_executor.driver_worker.update_weight(name, dtype, shape, empty_cache)
-        else:
-            return self.llm.llm_engine.model_executor._run_workers("update_weight", name, dtype, shape, empty_cache)
+    def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
+        return self.llm.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
 
-    def stop_remote_worker_execution_loop(self):
-        # Fix error for using 2 communication group
-        # https://github.com/vllm-project/vllm/commit/eb6d3c264d0cd8e44dec16bca7947fbe96415ce9#diff-e1ad69e38e033accddfa5480ec808c4740eb39244d1ef51cc3407e20dde8cfd4
-        if self.__version__ > "0.4.2":
-            self.llm.llm_engine.model_executor.stop_remote_worker_execution_loop()
+    def reset_prefix_cache(self):
+        self.llm.llm_engine.reset_prefix_cache()
+
+    def sleep(self, level=1):
+        self.llm.sleep(level=level)
+
+    def wake_up(self):
+        self.llm.wake_up()
 
 
 def create_vllm_engines(
@@ -232,49 +181,138 @@ def create_vllm_engines(
     vllm_gpu_memory_utilization: float = 0.9,
     single_gpu_mode: bool = False,
     pg: Optional[ray.util.placement_group] = None,
+    vllm_enable_sleep=False,
 ):
-    vllm_engines = []
-    for i in range(num_engines):
-        # When tensor_parallel_size=1, vLLM init model in LLMEngine directly, assign 1 GPU for it.
-        num_gpus = int(tensor_parallel_size == 1)
-        scheduling_strategy = None
-        if pg is not None:
-            scheduling_strategy = PlacementGroupSchedulingStrategy(
-                placement_group=pg, placement_group_capture_child_tasks=True
-            )
-        elif tensor_parallel_size > 1:
-            bundles = [{"GPU": 1, "CPU": 4}] * tensor_parallel_size
-            pg = placement_group(bundles)
-            ray.get(pg.ready())
+    import vllm
 
-            scheduling_strategy = PlacementGroupSchedulingStrategy(
-                placement_group=pg, placement_group_capture_child_tasks=True, placement_group_bundle_index=0
-            )
-        print(f"vllm: {num_gpus=}, {num_engines=}")
+    assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
+
+    vllm_engines = []
+    distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "ray"
+    use_hybrid_engine = pg is not None
+    num_gpus = int(tensor_parallel_size == 1)
+    if use_hybrid_engine and tensor_parallel_size == 1 and single_gpu_mode:
+        # every worker will use 0.5 GPU, so that we can schedule
+        # 2 instances on the same GPUs.
+        num_gpus = 0.5
+
+    print(f"num_gpus: {num_gpus}")
+
+    if not use_hybrid_engine:
+        # Create a big placement group to ensure that all engines are packed
+        bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_engines * tensor_parallel_size)]
+        pg = placement_group(bundles, strategy="PACK")
+        ray.get(pg.ready())
+
+    for i in range(num_engines):
+        bundle_indices = None
+        if tensor_parallel_size > 1:
+            bundle_indices = list(range(i * tensor_parallel_size, (i + 1) * tensor_parallel_size))
+
+        scheduling_strategy = PlacementGroupSchedulingStrategy(
+            placement_group=pg,
+            placement_group_capture_child_tasks=True,
+            placement_group_bundle_index=i * tensor_parallel_size,
+        )
+
         vllm_engines.append(
             LLMRayActor.options(
-                num_cpus=4,
-                num_gpus=0.48 if single_gpu_mode else num_gpus,
+                num_cpus=num_gpus,
+                num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
+                # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
+                runtime_env=ray.runtime_env.RuntimeEnv(env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}),
             ).remote(
-                pretrain,
+                model=pretrain,
                 revision=revision,
                 tokenizer_revision=revision,
                 trust_remote_code=True,
+                worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
                 tensor_parallel_size=tensor_parallel_size,
                 enforce_eager=enforce_eager,
                 dtype="bfloat16",
                 seed=seed + i,
+                distributed_executor_backend=distributed_executor_backend,
                 enable_prefix_caching=enable_prefix_caching,
                 max_model_len=max_model_len,
                 gpu_memory_utilization=vllm_gpu_memory_utilization,
+                bundle_indices=bundle_indices,
+                num_gpus=0.2 if use_hybrid_engine else 1,
+                enable_sleep_mode=vllm_enable_sleep,
+                noset_visible_devices=ray_noset_visible_devices(),
             )
         )
+
+    if vllm_enable_sleep:
+        batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)
 
     return vllm_engines
 
 
+def batch_vllm_engine_call(engines: List[Any], method_name: str, *args, rank_0_only: bool = True, **kwargs):
+    """
+    Batch call a method on multiple vLLM engines.
+    Args:
+        engines: List of vLLM engine instances
+        method_name: Name of the method to call
+        rank_0_only: Only execute on rank 0 if True
+        *args: Positional arguments to pass to the method
+        **kwargs: Keyword arguments to pass to the method
+    Returns:
+        List of results from ray.get() if on rank 0, None otherwise
+    """
+    import torch
+
+    if rank_0_only and torch.distributed.get_rank() != 0:
+        return None
+
+    refs = []
+    for engine in engines:
+        method = getattr(engine, method_name)
+        refs.append(method.remote(*args, **kwargs))
+
+    return ray.get(refs)
+
+
 if __name__ == "__main__":
-    llm = LLMRayActor.remote("Qwen/Qwen2.5-7B", tensor_parallel_size=2)
+    num_engines = 1
+    tensor_parallel_size = 1
+    world_size = num_engines * tensor_parallel_size + 1
+    vllm_engines = create_vllm_engines(
+        num_engines=num_engines,
+        tensor_parallel_size=tensor_parallel_size,
+        enforce_eager=True,
+        pretrain="facebook/opt-125m",
+        revision="main",
+        seed=42,
+        enable_prefix_caching=False,
+        max_model_len=1024,
+    )
+    llm = vllm_engines[0]
+    from vllm.utils import get_ip, get_open_port
+
+    master_address = get_ip()
+    master_port = get_open_port()
+    backend = "gloo"
+
+    refs = [
+        engine.init_process_group.remote(
+            master_address,
+            master_port,
+            i * tensor_parallel_size + 1,
+            world_size,
+            "openrlhf",
+            backend=backend,
+        )
+        for i, engine in enumerate(vllm_engines)
+    ]
+    model_update_group = init_process_group(
+        backend=backend,
+        init_method=f"tcp://{master_address}:{master_port}",
+        world_size=world_size,
+        rank=0,
+        group_name="openrlhf",
+    )
+    ray.get(refs)
     output = ray.get(llm.generate.remote("San Franciso is a"))
     print(f"output: {output}")

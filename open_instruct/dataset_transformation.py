@@ -63,17 +63,38 @@ from transformers import (
     LlamaTokenizerFast,
     PreTrainedTokenizer,
 )
-from transformers.utils.hub import cached_file, extract_commit_hash
+from transformers.utils.hub import (
+    _CACHED_NO_EXIST,
+    TRANSFORMERS_CACHE,
+    extract_commit_hash,
+    try_to_load_from_cache,
+)
 
 from open_instruct.utils import hf_whoami
 
 
 # ----------------------------------------------------------------------------
 # Utilities
+def custom_cached_file(model_name_or_path: str, filename: str, revision: str = None, repo_type: str = "model"):
+    """@vwxyzjn: HF's `cached_file` no longer works for `repo_type="dataset"`."""
+    # local_file = os.path.join(model_name_or_path, filename)
+
+    if os.path.isdir(model_name_or_path):
+        resolved_file = os.path.join(model_name_or_path, filename)
+        if os.path.isfile(resolved_file):
+            return resolved_file
+        else:
+            return None
+    else:
+        return try_to_load_from_cache(
+            model_name_or_path, filename, cache_dir=TRANSFORMERS_CACHE, revision=revision, repo_type=repo_type
+        )
+
+
 def get_commit_hash(
     model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
 ) -> str:
-    file = cached_file(model_name_or_path, revision=revision, filename=filename, repo_type=repo_type)
+    file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     commit_hash = extract_commit_hash(file, None)
     return commit_hash
 
@@ -81,12 +102,16 @@ def get_commit_hash(
 def get_file_hash(
     model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
 ) -> str:
-    try:
-        file = cached_file(model_name_or_path, revision=revision, filename=filename, repo_type=repo_type)
+    file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
+    if isinstance(file, str):
         with open(file, "rb") as f:
             return hashlib.sha256(f.read()).hexdigest()
-    except OSError:
+    elif file is _CACHED_NO_EXIST:
         return f"{filename} not found"
+    elif file is None:
+        return f"{filename} not found"
+    else:
+        raise ValueError(f"Unexpected file type: {type(file)}")
 
 
 def get_files_hash_if_exists(
@@ -183,6 +208,56 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% if loop.last and add_generation_prompt %}"
         "{{ '<|assistant|>\n' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "tulu_thinker_r1_style": (
+        "A conversation between User and Assistant. "
+        "The user asks a question, and the Assistant solves it. "
+        "The assistant first thinks about the reasoning process in "
+        "the mind and then provides the user with the answer. "
+        "The reasoning process and answer are enclosed within <think> </think> "
+        "and <answer> </answer> tags, respectively, "
+        "i.e., <think> reasoning process here </think> "
+        "<answer> answer here </answer>."
+        "\n\n"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|system|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'user' %}"
+        "{{ '<|user|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{% set content = message['content'] %}"
+        "{% if '</think>' in content %}"
+        "{% set content = content.split('</think>')[-1] %}"
+        "{% endif %}"
+        "{% if not loop.last %}"
+        "{{ '<|assistant|>\n' + content + eos_token + '\n' }}"
+        "{% else %}"
+        "{{ '<|assistant|>\n' + content + eos_token }}"
+        "{% endif %}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|assistant|>\n<think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "tulu_thinker": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|system|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'user' %}"
+        "{{ '<|user|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{% set content = message['content'] %}"
+        "{% if not loop.last %}"
+        "{{ '<|assistant|>\n' + content + eos_token + '\n' }}"
+        "{% else %}"
+        "{{ '<|assistant|>\n' + content + eos_token }}"
+        "{% endif %}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|assistant|>\n<think>' }}"
         "{% endif %}"
         "{% endfor %}"
     ),
@@ -1094,7 +1169,7 @@ class LocalDatasetTransformationCache:
         # Check if the cache exists
         if os.path.exists(cache_path) and not dataset_skip_cache:
             print(f"✅ Found cached dataset at {cache_path}")
-            return Dataset.load_from_disk(cache_path)
+            return Dataset.load_from_disk(cache_path, keep_in_memory=True)
 
         print(f"Cache not found or invalid, transforming datasets...")
 
@@ -1114,7 +1189,7 @@ class LocalDatasetTransformationCache:
         self.save_config(self.config_hash, dcs, tc)
         print(f"🚀 Saved transformed dataset to {cache_path}")
         print(f"✅ Found cached dataset at {cache_path}")
-        return combined_dataset
+        return Dataset.load_from_disk(cache_path, keep_in_memory=True)
 
 
 def get_cached_dataset(

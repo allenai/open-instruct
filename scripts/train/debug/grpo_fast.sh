@@ -29,13 +29,13 @@ python open_instruct/grpo_fast_wip.py \
     --beta 0.01 \
     --seed 3 \
     --num_evals 20 \
-    --vllm_gpu_memory_utilization 0.2 \
+    --vllm_sync_backend gloo \
+    --vllm_gpu_memory_utilization 0.5 \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
     --single_gpu_mode \
     --push_to_hub false \
-    --vllm_sync_backend gloo \
     --llm_judge_model "gpt-4o"
     # --with_tracking
 
