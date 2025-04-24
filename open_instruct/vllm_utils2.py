@@ -118,7 +118,7 @@ def init_process_group(
 @ray.remote
 class LLMRayActor:
 
-    def __init__(self, *args, bundle_indices: list = None, **kwargs):
+    def __init__(self, *args, bundle_indices: list = None, tool_use: bool = False, **kwargs):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
@@ -138,9 +138,13 @@ class LLMRayActor:
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             print(f"creating LLM with bundle_indices={bundle_indices}")
 
-        from vllm import LLM
-
-        self.llm = LLM(*args, **kwargs)
+        if tool_use:
+            # use tool vllm
+            from open_instruct.tool_utils.tool_vllm import ToolUseLLM
+            self.llm = ToolUseLLM(*args, **kwargs)
+        else:
+            from vllm import LLM
+            self.llm = LLM(*args, **kwargs)
 
     def generate(self, *args, **kwargs):
         return self.llm.generate(*args, **kwargs)
@@ -181,8 +185,8 @@ def create_vllm_engines(
     vllm_gpu_memory_utilization: float = 0.9,
     single_gpu_mode: bool = False,
     pg: Optional[ray.util.placement_group] = None,
-    ray_actor_class: Any = LLMRayActor,
-    additional_ray_actor_kwargs: Optional[dict] = None,
+    tools: Optional[List[Any]] = None,
+    max_tool_calls: int = 5,
     vllm_enable_sleep=False,
 ):
     import vllm
@@ -217,8 +221,18 @@ def create_vllm_engines(
             placement_group_bundle_index=i * tensor_parallel_size,
         )
 
+        additional_ray_actor_kwargs = {}
+        tool_use = False
+        if tools is not None and len(tools) > 0:
+            # use tool vllm
+            additional_ray_actor_kwargs = {
+                "tools": tools,
+                "max_tool_calls": max_tool_calls,
+            }
+            tool_use = True
+
         vllm_engines.append(
-            ray_actor_class.options(
+            LLMRayActor.options(
                 num_cpus=num_gpus,
                 num_gpus=num_gpus,
                 scheduling_strategy=scheduling_strategy,
@@ -242,7 +256,8 @@ def create_vllm_engines(
                 num_gpus=0.2 if use_hybrid_engine else 1,
                 enable_sleep_mode=vllm_enable_sleep,
                 noset_visible_devices=ray_noset_visible_devices(),
-                **(additional_ray_actor_kwargs if additional_ray_actor_kwargs else {}),
+                tool_use=tool_use,
+                **additional_ray_actor_kwargs,
             )
         )
 

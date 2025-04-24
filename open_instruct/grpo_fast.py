@@ -116,6 +116,7 @@ from open_instruct.utils import (
 )
 from open_instruct.search_utils.search_actor import LLMSearchRayActor
 from open_instruct.vllm_utils2 import LLMRayActor, create_vllm_engines, init_process_group
+from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -323,16 +324,23 @@ class Args:
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
 
-    # rl-rag settings
-    use_search_actor: bool = False
-    """Whether to use the search actor for RL-RAG"""
-    mask_snippet_loss: bool = False
-    """Whether to mask the loss for tokens within <document>...</document> tags.
-    This is useful for training with search functionality where snippets should not contribute to the loss."""
-    max_searches: int = 5
-    """The maximum number of searches to perform for each query."""
+    # tool settings
+    tool: Optional[List[str]] = None
+    """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
+    max_tool_use: int = 5
+    """What tools to use"""
+    mask_tool_use: bool = True
+    """Whether to mask the tool output. By default on."""
+
+    # rl-rag specific settngs
     number_documents_to_search: int = 3
     """The maximum number of documents to retrieve for each query."""
+    search_api_endpoint: Optional[str] = None
+    """The API endpoint for the search engine."""
+
+    # code-tool specific settings
+    code_tool_api_endpoint: Optional[str] = None
+
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
@@ -356,6 +364,11 @@ class Args:
             download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
         if self.checkpoint_state_dir is not None:
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
+        if self.tool is not None and len(self.tool) > 0:
+            for tool in self.tool:
+                if tool not in ["search", "code"]:
+                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
+            assert len(self.tool) == len(set(self.tool)), "Duplicate tools are not allowed"
 
 
 def get_train_ds_config(
@@ -842,6 +855,7 @@ class PolicyTrainerRayProcess(RayProcess):
     def train(
         self,
         collated_query_responses,
+        collated_tool_masks,
         collated_attention_masks,
         collated_position_ids,
         collated_advantages,
@@ -851,6 +865,7 @@ class PolicyTrainerRayProcess(RayProcess):
     ):
         args = self.args
         to_device_inplace(collated_query_responses, self.device)
+        to_device_inplace(collated_tool_masks, self.device)
         to_device_inplace(collated_attention_masks, self.device)
         to_device_inplace(collated_position_ids, self.device)
         to_device_inplace(collated_advantages, self.device)
@@ -863,6 +878,7 @@ class PolicyTrainerRayProcess(RayProcess):
             with torch.no_grad():
                 for i in range(len(collated_query_responses)):
                     query_response = collated_query_responses[i]
+                    tool_mask = collated_tool_masks[i]
                     attention_mask = collated_attention_masks[i]
                     position_id = collated_position_ids[i]
                     response_mask = collated_response_masks[i]
@@ -874,7 +890,12 @@ class PolicyTrainerRayProcess(RayProcess):
                         pad_token_id,
                         args.temperature,
                     )
-                    ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:].bool(), INVALID_LOGPROB)
+                    if args.mask_tool_use and args.tool_use:
+                        # mask logprobs for tool tokens
+                        response_mask = response_mask.bool() & tool_mask.bool()
+                    else:
+                        response_mask = response_mask.bool()
+                    ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
                     collated_ref_logprobs.append(ref_logprob)
                     torch.cuda.empty_cache()
         local_step = 0
@@ -894,13 +915,13 @@ class PolicyTrainerRayProcess(RayProcess):
                 for i in range(len(collated_query_responses)):
                     mb_ref_logprob = collated_ref_logprobs[i]
                     mb_query_responses = collated_query_responses[i]
+                    mb_tool_mask = collated_tool_masks[i]
                     mb_advantages = collated_advantages[i]
                     mb_response_masks = collated_response_masks[i]
                     mb_response_masks_bool = mb_response_masks[:, 1:].bool()
                     # if masking snippets, do it here.
-                    if args.mask_snippet_loss:
-                        snippet_mask = create_snippet_mask(mb_query_responses, self.tokenizer)
-                        mb_response_masks_bool = mb_response_masks[:, 1:].bool() & snippet_mask[:, 1:]
+                    if args.mask_tool_use and args.tool_use:
+                        mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
                     mb_new_logprobs = self.forward(
@@ -1151,10 +1172,16 @@ def vllm_generate_thread(
         all_outputs = ray.get(futures)
         response_ids = []
         finish_reasons = []  # either "stop" or "length"
+        masks = []
         for outputs in all_outputs:
             response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
             finish_reasons.extend([out.finish_reason for output in outputs for out in output.outputs])
-        return response_ids, finish_reasons
+            if args.tool_use:
+                masks.extend([out.mask for output in outputs for out in output.outputs])
+        # if not using the tool, mask is all 1s
+        if not args.tool_use:
+            masks = [1] * len(response_ids)
+        return response_ids, finish_reasons, masks
 
     for training_step in range(resume_training_step, num_training_steps + 1):
         items = param_prompt_Q.get()
@@ -1163,13 +1190,13 @@ def vllm_generate_thread(
         _, g_queries_list = items
 
         with Timer("🔥 Generation time"):
-            response_ids, finish_reasons = generate_with_engines(g_queries_list, generation_config)
-        inference_results_Q.put((response_ids, finish_reasons))
+            response_ids, finish_reasons, masks = generate_with_engines(g_queries_list, generation_config)
+        inference_results_Q.put((response_ids, finish_reasons, masks))
 
         # Evaluate the model
         if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-            response_ids, finish_reasons = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
-            evaluation_inference_results_Q.put((response_ids, finish_reasons))
+            response_ids, finish_reasons, masks = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
+            evaluation_inference_results_Q.put((response_ids, finish_reasons, masks))
 
 
 def data_preparation_thread(
@@ -1193,13 +1220,14 @@ def data_preparation_thread(
             ground_truths = [item for item in ground_truths for _ in range(args.num_samples_per_prompt_rollout)]
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            responses, finish_reasons = inference_results_Q.get()
+            responses, finish_reasons, masks = inference_results_Q.get()
             for i in range(len(finish_reasons)):
                 # edge case with RL-rag agent: sometimes it outputs eos immediately, and we get an empty response
                 # in that case, we need to add the eos token to the response
                 # note that this also adds eos to the end of reponses that stopped for other reasons.
                 if finish_reasons[i] == "stop" and (len(responses[i]) == 0 or responses[i][-1] != tokenizer.eos_token_id):
                         responses[i].append(tokenizer.eos_token_id)
+                        masks[i].append(1) # never mask the eos token for now?
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
@@ -1245,6 +1273,7 @@ def data_preparation_thread(
             packed_sequences = pack_sequences(
                 queries=queries,
                 responses=responses,
+                masks=masks,
                 pack_length=args.pack_length,
                 pad_token_id=tokenizer.pad_token_id,
             )
@@ -1266,6 +1295,7 @@ def data_preparation_thread(
             collated_data = []
             for i in range(args.world_size):
                 per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
+                per_device_packed_tool_masks = packed_sequences.tool_masks[B * i : B * (i + 1)]
                 per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
                 per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
                 per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
@@ -1274,6 +1304,7 @@ def data_preparation_thread(
                 # Shuffle the batch and collate the data
                 b_inds = np.random.permutation(len(per_device_packed_query_responses))
                 collated_query_responses = []
+                collated_tool_masks = []
                 collated_attention_masks = []
                 collated_position_ids = []
                 collated_response_masks = []
@@ -1284,6 +1315,9 @@ def data_preparation_thread(
                         collate_fn(
                             [per_device_packed_query_responses[idx] for idx in micro_range], tokenizer.pad_token_id
                         )
+                    )
+                    collated_tool_masks.append(
+                        collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0)
                     )
                     collated_attention_masks.append(
                         collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0)
@@ -1300,6 +1334,7 @@ def data_preparation_thread(
                 collated_data.append(
                     {
                         "collated_query_responses": collated_query_responses,
+                        "collated_tool_masks": collated_tool_masks,
                         "collated_attention_masks": collated_attention_masks,
                         "collated_position_ids": collated_position_ids,
                         "collated_advantages": collated_advantages,
@@ -1412,6 +1447,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     if args.with_tracking:
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
+    args.tool_use = args.tools is not None and len(args.tools) > 0
 
     # ------------------------------------------------------------
     # Setup experiment tracking and seeds
@@ -1504,13 +1540,28 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         for model in policy_group.models
     )
     max_len = args.max_prompt_token_length + args.response_length
-    additional_ray_actor_kwargs = {}
-    if args.use_search_actor:
-        additional_ray_actor_kwargs = {
-            "max_output_len": args.response_length,
-            "max_searches": args.max_searches,
-            "number_documents_to_search": args.number_documents_to_search,
-        }
+    # make tool list
+    tool_objects = []
+    for tool in args.tools:
+        if tool.lower() = "search":
+            from open_instruct.search_utils.search_tool import SearchTool
+            tool_objects.append(SearchTool(
+                start_str="<query>",
+                end_str="</query>",
+                api_endpoint=args.search_api_endpoint,
+                number_documents_to_search=args.number_documents_to_search,
+            ))
+        elif tool.lower() == "code":
+            from open_instruct.tool_utils.tool_vllm import PythonCodeTool
+            tool_objects.append(PythonCodeTool(
+                start_str="<code>",
+                end_str="</code>",
+                api_endpoint=args.code_api_endpoint,
+                max_tool_calls=args.max_tool_calls,
+            ))
+        else:
+            raise ValueError(f"Unknown tool: {tool}")
+
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
@@ -1523,8 +1574,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
-        ray_actor_class=LLMSearchRayActor if args.use_search_actor else LLMRayActor,
-        additional_ray_actor_kwargs=additional_ray_actor_kwargs,
+        tools=tool_objects,
+        max_tool_calls=args.max_tool_calls,
     )
     resume_training_step = ray.get(inits)[0] + 1
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
@@ -1740,7 +1791,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 # otherwise, wait to get the last evaluation generations
                 #timeout = 0.01 if ((training_step < args.num_training_steps or args.eval_freq < 0) and (training_step - 1) % args.eval_freq == 0) else None
                 timeout = 0.01
-                eval_responses, eval_finish_reasons = evaluation_inference_results_Q.get(timeout=timeout)
+                eval_responses, eval_finish_reasons, masks = evaluation_inference_results_Q.get(timeout=timeout)
                 print("[Main Thread] 📊 Evaluation responses received")
 
                 eval_sequence_lengths = np.array([len(response) for response in eval_responses])
