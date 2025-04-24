@@ -3,6 +3,7 @@ import asyncio
 import instructor
 import openai
 import litellm
+from openai import AzureOpenAI
 
 import time
 
@@ -46,6 +47,12 @@ def llm_client():
         print("litellm not found, falling back to openai.AsyncOpenAI")
         client = openai.AsyncOpenAI()
         return client
+        # # fall back to azure openai if litellm is not available
+        # client = AzureOpenAI(
+        #     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+        #     api_version="2025-04-14",
+        #     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+        # )
     else:
         # Return litellm module object if import succeeds
         return litellm
