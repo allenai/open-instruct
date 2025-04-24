@@ -1594,6 +1594,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
     # Setup training
+    if args.tool_use:
+        args.stop_strings += tool_objects.keys()
     generation_config = SamplingParams(
         temperature=args.temperature,
         top_p=1.0,

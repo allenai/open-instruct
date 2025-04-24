@@ -24,6 +24,8 @@ class ToolOutput:
     output: str
     called: bool
     success: bool
+    start_str: str = "<output>\n"
+    end_str: str = "\n</output>"
 
 class Tool:
     def __init__(self, start_str: str, end_str: str):
@@ -202,7 +204,7 @@ class ToolUseLLM(LLM):
                     tool_result = future.result()
                     last_prompt_token_ids = last_output.prompt_token_ids
                     last_token_ids = last_o.token_ids
-                    tool_output_token_ids = tokenizer.encode("<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False)
+                    tool_output_token_ids = tokenizer.encode(tool_result.start_str + tool_result.output + tool_result.end_str, add_special_tokens=False)
                     prompt_and_tool_output_token = last_prompt_token_ids + last_token_ids + tool_output_token_ids
                     combined_outputs[req_id].outputs[0].token_ids.extend(tool_output_token_ids)
                     masks[req_id].extend([0] * len(tool_output_token_ids))
