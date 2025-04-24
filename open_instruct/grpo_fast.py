@@ -1843,10 +1843,12 @@ if __name__ == "__main__":
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
                 for i in range(len(verifiable_rewards)):
-                    if args.additive_format_reward:
+                    if args.apply_r1_style_format_reward and args.additive_format_reward:
                         scores[i] = verifiable_rewards[i] + scores[i]
-                    else:
+                    elif args.apply_r1_style_format_reward and not args.additive_format_reward:
                         scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
+                    else:
+                        scores[i] = verifiable_rewards[i]
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
