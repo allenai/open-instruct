@@ -364,11 +364,11 @@ class Args:
             download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
         if self.checkpoint_state_dir is not None:
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
-        if self.tool is not None and len(self.tool) > 0:
-            for tool in self.tool:
+        if self.tools is not None and len(self.tools) > 0:
+            for tool in self.tools:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
-            assert len(self.tool) == len(set(self.tool)), "Duplicate tools are not allowed"
+            assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
 
 
 def get_train_ds_config(
