@@ -1125,6 +1125,7 @@ def vllm_generate_thread(
     eval_prompt_token_ids: Optional[List[int]],
     evaluation_inference_results_Q: Queue,
     eval_freq: int,
+    num_evals: int,
     resume_training_step: int = 1,
 ):
     def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
@@ -1156,7 +1157,7 @@ def vllm_generate_thread(
         inference_results_Q.put((response_ids, finish_reasons))
 
         # Evaluate the model
-        if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
+        if eval_prompt_token_ids is not None and num_evals > 0 and ((training_step - 1) % eval_freq == 0 or training_step == num_training_steps):
             response_ids, finish_reasons = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
             evaluation_inference_results_Q.put((response_ids, finish_reasons))
 
@@ -1561,6 +1562,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             eval_prompt_token_ids,
             evaluation_inference_results_Q,
             args.eval_freq,
+            args.num_evals,
             resume_training_step,
         ),
     )
