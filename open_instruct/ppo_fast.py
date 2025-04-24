@@ -63,6 +63,7 @@ import ray
 import torch
 import torch.utils
 import torch.utils.data
+from torch import distributed as dist
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util.placement_group import PlacementGroup, placement_group
@@ -766,33 +767,48 @@ class PolicyTrainerRayProcess(RayProcess):
                     collated_values.append(value)
 
         with Timer("Advantage Calculation", noop=self.rank != 0):
-            # Pad cpu lists to max_len; then do advantage calculation
-            cpu_collated_values = sum([item.cpu().tolist() for item in collated_values], [])
-            cpu_collated_dones = [item + [0] * (max_len - len(item)) for item in cpu_collated_dones]
-            cpu_collated_rewards = [item + [0] * (max_len - len(item)) for item in cpu_collated_rewards]
-            cpu_collated_response_masks = [item + [0] * (max_len - len(item)) for item in cpu_collated_response_masks]
-            cpu_collated_values = [item + [INVALID_VALUE] * (max_len - len(item)) for item in cpu_collated_values]
-            adv, ret = calculate_advantages_packed(
-                np.stack(cpu_collated_values),
-                np.stack(cpu_collated_rewards),
-                gamma,
-                lam,
-                np.stack(cpu_collated_dones),
-                np.stack(cpu_collated_response_masks),
-            )
-            # @vwxyzjn: TODO: adv norm does not work yet because of the masks
-            # adv = (adv - adv.mean()) / (adv.std() + 1e-8) # 
-            collated_advantages = []
-            collated_returns = []
-            offset = 0
-            for i in range(len(collated_query_responses)):
-                batch_size, seq_len = collated_query_responses[i].shape
-                collated_advantages.append(torch.from_numpy(adv[offset:offset+batch_size, :seq_len]))
-                collated_returns.append(torch.from_numpy(ret[offset:offset+batch_size, :seq_len]))
-                offset += batch_size
-            to_device_inplace(collated_advantages, self.device)
-            to_device_inplace(collated_returns, self.device)
-            to_device_inplace(collated_values, self.device)
+            with torch.no_grad():
+                # Pad cpu lists to max_len; then do advantage calculation
+                cpu_collated_values = sum([item.cpu().tolist() for item in collated_values], [])
+                cpu_collated_dones = [item + [0] * (max_len - len(item)) for item in cpu_collated_dones]
+                cpu_collated_rewards = [item + [0] * (max_len - len(item)) for item in cpu_collated_rewards]
+                cpu_collated_response_masks = [item + [0] * (max_len - len(item)) for item in cpu_collated_response_masks]
+                cpu_collated_values = [item + [INVALID_VALUE] * (max_len - len(item)) for item in cpu_collated_values]
+                adv, ret = calculate_advantages_packed(
+                    np.stack(cpu_collated_values),
+                    np.stack(cpu_collated_rewards),
+                    gamma,
+                    lam,
+                    np.stack(cpu_collated_dones),
+                    np.stack(cpu_collated_response_masks),
+                )
+                
+                # Calculate the mean and std of the advantages
+                adv_gpu = torch.from_numpy(adv).to(self.device)
+                response_masks_gpu = torch.from_numpy(np.stack(cpu_collated_response_masks)).to(self.device)
+                adv_sum = (adv_gpu * response_masks_gpu).sum()
+                mask_sum = response_masks_gpu.sum()
+                dist.all_reduce(adv_sum, op=dist.ReduceOp.SUM)
+                dist.all_reduce(mask_sum, op=dist.ReduceOp.SUM)
+                adv_mean = adv_sum / mask_sum
+                adv_variance = (torch.square(adv_gpu - adv_mean) * response_masks_gpu).sum()
+                dist.all_reduce(adv_variance, op=dist.ReduceOp.SUM)
+                adv_variance /= mask_sum
+                adv_std = torch.sqrt(adv_variance)
+                
+                # Normalize the advantages
+                adv = (adv_gpu - adv_mean) / (adv_std + 1e-8)
+                collated_advantages = []
+                collated_returns = []
+                offset = 0
+                for i in range(len(collated_query_responses)):
+                    batch_size, seq_len = collated_query_responses[i].shape
+                    collated_advantages.append(adv[offset:offset+batch_size, :seq_len])
+                    collated_returns.append(torch.from_numpy(ret[offset:offset+batch_size, :seq_len]))
+                    offset += batch_size
+                to_device_inplace(collated_advantages, self.device)
+                to_device_inplace(collated_returns, self.device)
+                to_device_inplace(collated_values, self.device)
 
         with Timer("[Training Processes] Value Loss calculation", noop=self.rank != 0):
             value_losses = torch.zeros(len(collated_query_responses))
