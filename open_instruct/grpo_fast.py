@@ -922,8 +922,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     # if masking snippets, do it here.
                     if args.mask_tool_use and args.tool_use:
                         mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
-                        from open_instruct.dataset_transformation import visualize_token_role
-                        visualize_token_role(mb_query_responses, mb_response_masks_bool, self.tokenizer)
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
                     mb_new_logprobs = self.forward(
