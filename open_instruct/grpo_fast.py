@@ -1543,7 +1543,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     # make tool list
     tool_objects = []
     for tool in args.tools:
-        if tool.lower() = "search":
+        if tool.lower() == "search":
             from open_instruct.search_utils.search_tool import SearchTool
             tool_objects.append(SearchTool(
                 start_str="<query>",
