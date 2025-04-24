@@ -326,9 +326,7 @@ class Args:
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
-            print(
-                "WARNING: num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE. "
-            )
+            print("WARNING: num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE. ")
         assert (
             self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
         ), "At least one reward must be applied!"
@@ -1157,7 +1155,11 @@ def vllm_generate_thread(
         inference_results_Q.put((response_ids, finish_reasons))
 
         # Evaluate the model
-        if eval_prompt_token_ids is not None and num_evals > 0 and ((training_step - 1) % eval_freq == 0 or training_step == num_training_steps):
+        if (
+            eval_prompt_token_ids is not None
+            and num_evals > 0
+            and ((training_step - 1) % eval_freq == 0 or training_step == num_training_steps)
+        ):
             response_ids, finish_reasons = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
             evaluation_inference_results_Q.put((response_ids, finish_reasons))
 
