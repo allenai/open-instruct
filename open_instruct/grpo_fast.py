@@ -922,6 +922,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     # if masking snippets, do it here.
                     if args.mask_tool_use and args.tool_use:
                         mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
+                        from open_instruct.dataset_transformation import visualize_token_role
+                        visualize_token_role(mb_query_responses, mb_response_masks_bool, self.tokenizer)
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
                     mb_new_logprobs = self.forward(
@@ -1542,24 +1544,26 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     )
     max_len = args.max_prompt_token_length + args.response_length
     # make tool list
-    tool_objects = []
+    tool_objects = {}
     for tool in args.tools:
         if tool.lower() == "search":
             from open_instruct.search_utils.search_tool import SearchTool
-            tool_objects.append(SearchTool(
+            tool = SearchTool(
                 start_str="<query>",
                 end_str="</query>",
                 api_endpoint=args.search_api_endpoint,
                 number_documents_to_search=args.number_documents_to_search,
-            ))
+            )
+            tool_objects[tool.end_str] = tool
         elif tool.lower() == "code":
             from open_instruct.tool_utils.tool_vllm import PythonCodeTool
-            tool_objects.append(PythonCodeTool(
+            tool = PythonCodeTool(
                 start_str="<code>",
                 end_str="</code>",
                 api_endpoint=args.code_api_endpoint,
                 max_tool_calls=args.max_tool_calls,
-            ))
+            )
+            tool_objects[tool.end_str] = tool
         else:
             raise ValueError(f"Unknown tool: {tool}")
 
