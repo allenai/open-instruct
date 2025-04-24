@@ -281,9 +281,6 @@ class ToolUseLLM(LLM):
             if not self.llm_engine.has_unfinished_requests() and len(self.pending_tool_futures) == 0:
                 break
 
-        print(f"number of calls per request ids", num_calls)
-        # print(tokenizer.decode(combined_outputs["0"].prompt_token_ids))
-        # print(tokenizer.decode(combined_outputs["0"].outputs[0].token_ids))
         if use_tqdm:
             pbar.close()
         # Add the masks to the outputs.
@@ -298,7 +295,6 @@ class ToolUseLLM(LLM):
             if real_req_id not in merged_outputs:
                 merged_outputs[real_req_id] = combined_outputs[req_id]
             else:
-                print("merging outputs")
                 merged_outputs[real_req_id].outputs.append(combined_outputs[req_id].outputs[0])
 
         final_outputs = sorted(merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1])))

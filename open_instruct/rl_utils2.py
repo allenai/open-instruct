@@ -96,10 +96,12 @@ def pack_sequences(
         response = responses[i]
         mask = masks[i]
         # remove padding (but using vllm so this should not be needed, but just in case)
+        query_tool_mask = [1 for t in query if t != pad_token_id]
         query = [t for t in query if t != pad_token_id]
-        mask = [t for i, t in enumerate(mask) if response[t] != pad_token_id]
+        response_tool_mask = [t for i, t in enumerate(mask) if response[t] != pad_token_id]
         response = [t for t in response if t != pad_token_id]
         query_response = query + response
+        mask = query_tool_mask + response_tool_mask
         if len(query_response) + len(cur_data) > pack_length:
             query_responses.append(cur_data)
             tool_masks.append(mask)
