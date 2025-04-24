@@ -24,14 +24,15 @@ class SearchTool(Tool):
         query_string = query_blocks[-1]
 
         if not query_string:
-            return ToolOutput(output="Empty Query.", called=True, success=False, start_str="<document>", end_str="</document>")
+            return ToolOutput(output="Empty Query.", called=True, success=False, start_str="<document>\n", end_str="\n</document>")
         
         snippets = get_snippets_for_query(query_string, api_endpoint=self.api_endpoint, number_of_results=self.number_documents_to_search)
 
         if not snippets or len(snippets) == 0:
-            return ToolOutput(output="Query failed.", called=True, success=False, start_str="<document>", end_str="</document>")
+            return ToolOutput(output="Query failed.", called=True, success=False, start_str="<document>\n", end_str="\n</document>")
 
         # for now, we just join all snippets.
-        all_snippets = "\n".join(snippets)
+        snippets = [snippet.strip() for snippet in snippets]
+        all_snippets = "\n".join(snippets).strip()
 
-        return ToolOutput(output=all_snippets, called=True, success=True, start_str="<document>", end_str="</document>")
+        return ToolOutput(output=all_snippets, called=True, success=True, start_str="<document>\n", end_str="\n</document>")
