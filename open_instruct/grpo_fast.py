@@ -239,6 +239,8 @@ class Args:
     """whether to add the R1 style format reward"""
     r1_style_format_reward: float = 1.0
     """the reward value for R1 style format reward"""
+    additive_format_reward: bool = False
+    """whether to add the format reward to the final reward"""
 
     # -- verifiable reward
     apply_verifiable_reward: bool = True
@@ -1205,7 +1207,7 @@ def data_preparation_thread(
             max_possible_score = 0
             if args.apply_verifiable_reward:
                 max_possible_score += args.verification_reward
-            if args.apply_r1_style_format_reward:
+            if args.apply_r1_style_format_reward and args.additive_format_reward:
                 max_possible_score += args.r1_style_format_reward
             unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
             # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
@@ -1514,6 +1516,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         top_p=1.0,
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
+        skip_special_tokens=False,
         n=args.num_samples_per_prompt_rollout,
         stop=args.stop_strings,
     )
@@ -1522,6 +1525,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         top_p=1.0,
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
+        skip_special_tokens=False,
         n=1,  # since we are doing greedy sampling, don't need to generate more
         stop=args.stop_strings,
     )
@@ -1839,7 +1843,12 @@ if __name__ == "__main__":
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
                 for i in range(len(verifiable_rewards)):
-                    scores[i] = verifiable_rewards[i] + scores[i]
+                    if args.apply_r1_style_format_reward and args.additive_format_reward:
+                        scores[i] = verifiable_rewards[i] + scores[i]
+                    elif args.apply_r1_style_format_reward and not args.additive_format_reward:
+                        scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
+                    else:
+                        scores[i] = verifiable_rewards[i]
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
