@@ -20,8 +20,6 @@ read -r -a MASON_CMD <<< \
 # ensure output dirs exist
 for dataset in hotpotqa nq tqa 2wiki simpleqa; do
   outdir="${MODEL_PATH}/${dataset}_results"
-    "${MASON_CMD[@]}" \
-        mkdir -p "$outdir"
     "${MASON_CMD[@]}" \python -m open_instruct.search_utils.short_form_qa_eval \
         --dataset_name "$dataset" \
         --model_path "$MODEL_PATH" \
