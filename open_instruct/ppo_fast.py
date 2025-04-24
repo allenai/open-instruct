@@ -29,6 +29,7 @@
 # limitations under the License.
 # isort: off
 import os
+import re
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
@@ -1442,13 +1443,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         )
         if args.shuffle_eval_dataset:
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
+    visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
     if args.cache_dataset_only:
         return
 
     # ------------------------------------------------------------
     # Runtime setups and quick logging
     pprint([args, model_config])
-    visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
+    
 
     # ------------------------------------------------------------
     # Create the model and optimizer
@@ -1794,26 +1796,31 @@ if __name__ == "__main__":
                 format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
                 if len(format_scores) != len(scores):
                     raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
-                for i in range(len(format_scores)):
-                    scores[i] = format_scores[i] + scores[i]
                 metrics["val/format_scores"] = np.array(format_scores).mean()
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
+                # @vwxyzjn: quick orz-style experiment
+                pattern = re.compile(r"<answer>.*?(\\boxed{.*}).*?</answer>", re.DOTALL)
+                final_answers = []
+                for decoded_response in decoded_responses:
+                    matches = re.findall(pattern, decoded_response)
+                    if len(matches) > 0:
+                        final_answers.append(matches[-1])
+                    else:
+                        final_answers.append("")
                 verifiable_rewards, per_func_rewards = apply_verifiable_reward(
                     responses,
-                    decoded_responses,
+                    final_answers,
                     ground_truths,
                     datasets,
                     reward_mult=args.verification_reward,
                 )
+                print(verifiable_rewards)
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
-                # @vwxyzjn: quick experiment
                 for i in range(len(verifiable_rewards)):
-                    # scores[i] = verifiable_rewards[i] + scores[i]
                     scores[i] = verifiable_rewards[i]
-                print(scores)
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
@@ -1835,6 +1842,9 @@ if __name__ == "__main__":
                 for i in range(len(finish_reasons)):
                     if finish_reasons[i] != "stop":
                         scores[i] = args.non_stop_penalty_value
+        
+        metrics["objective/scores"] = np.array(scores).mean()
+        metrics["objective/scores"] = scores
 
         return scores, metrics
 
