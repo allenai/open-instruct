@@ -313,15 +313,15 @@ if __name__ == "__main__":
     system_prompt = (
 """Below is a conversation between an user and an assitant. The assistant helps with the user's tasks. When the task is completed, the assistant ends the conversation with <endoftext>. The assistant can also use a tool for multiple times. The assitant has the following tools:
 
-search <query>...</query>: Search for the query in the massive DS API. The assistant will get the output between the <document> and </document> tags.
-and you will get the output between the <output> and </output> tags.
+1. search <query>...</query>: Search for the query in the massive DS API. The assistant will get the output between the <document> and </document> tags.
+and you will get the output between the <document> and </document> tags.
 """
     )
 
     console.print(f"system_prompt: {system_prompt}")
     prompts = [
-        "User: Write a python program which calculates the sum of 1 3 4. Then write another separate program to calculate the product of 1 3 4.\nAssistant:",
-        "User: Write a python program which prints 'Hello, Costa!'.\nAssistant:",
+        "User: What claimed the life of singer Kathleen Ferrier?\nAssistant:",
+        "User: When did John V, Prince Of Anhalt-Zerbst's father die?\nAssistant:",
     ]
     prompts = [system_prompt + "\n\n" + p for p in prompts]
 
