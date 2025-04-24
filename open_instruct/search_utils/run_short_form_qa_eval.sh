@@ -6,7 +6,7 @@ MODEL_PATH=$1
 # define mason command as an array for safety
 read -r -a MASON_CMD <<< \
   "python mason.py \
-    --env MASSIVE_DS_URL=http://saturn-cs-aus-234.reviz.ai2.in:40155/search \
+    --env MASSIVE_DS_URL=http://saturn-cs-aus-233.reviz.ai2.in:38387/search \
     --image hamishivi/1904_rl_rag \
     --pure_docker_mode \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
