@@ -108,7 +108,7 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
 )
-from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
+from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -1388,6 +1388,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         for model in policy_group.models
     )
     max_len = args.max_prompt_token_length + args.response_length
+
+    from open_instruct.tool_utils.tool_vllm import PythonCodeTool
+    python_code_tool = PythonCodeTool(api_endpoint="http://0.0.0.0:1212", start_str="<code>", end_str="</code>")
+    tools = {
+        python_code_tool.end_str: python_code_tool,
+    }
+    stop_strings = [item.end_str for item in tools.values()]
+    if args.stop_strings is not None:
+        stop_strings += args.stop_strings
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
@@ -1400,6 +1409,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
+        tools=tools,
     )
     ray.get(inits)
     print("======== ✅ all models and vLLM engines initialized =========")
@@ -1414,7 +1424,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         n=args.num_samples_per_prompt_rollout,
-        stop=args.stop_strings,
+        stop=stop_strings,
     )
     eval_generation_config = SamplingParams(
         temperature=0.0,
@@ -1422,7 +1432,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         n=1,  # since we are doing greedy sampling, don't need to generate more
-        stop=args.stop_strings,
+        stop=stop_strings,
     )
     train_dataset_idxs = np.arange(len(train_dataset))
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
