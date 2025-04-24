@@ -1,3 +1,4 @@
+import re
 from open_instruct.tool_utils.tool_vllm import Tool, ToolOutput
 from open_instruct.search_utils.massive_ds import get_snippets_for_query
 
@@ -13,6 +14,14 @@ class SearchTool(Tool):
         # Find Python code blocks using regex
         re_str = r'<tool>\s*(.*?)\s*</tool>' # we replace <tool> immediately with the custom start_str
         query_string = re_str.replace('<tool>', self.start_str).replace('</tool>', self.end_str)
+
+        query_blocks = re.findall(re_str, prompt, re.DOTALL)
+        
+        if len(query_blocks) == 0:
+            return ToolOutput(output="", called=False, success=False)
+
+        # Only execute the last code block
+        query_string = query_blocks[-1]
 
         if not query_string:
             return ToolOutput(output="<document>Empty Query.</document>", called=False, success=False)
