@@ -1136,12 +1136,12 @@ def data_preparation_thread(
             real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
             expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
             non_zero_gradient_index = np.where(expanded_mask)[0]
-            global_advantages = global_advantages[non_zero_gradient_index]
-            scores = scores[non_zero_gradient_index]
-            responses = [responses[i] for i in non_zero_gradient_index]
-            queries = [queries[i] for i in non_zero_gradient_index]
-            ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
-            datasets = [datasets[i] for i in non_zero_gradient_index]
+            # global_advantages = global_advantages[non_zero_gradient_index]
+            # scores = scores[non_zero_gradient_index]
+            # responses = [responses[i] for i in non_zero_gradient_index]
+            # queries = [queries[i] for i in non_zero_gradient_index]
+            # ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
+            # datasets = [datasets[i] for i in non_zero_gradient_index]
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
@@ -1361,13 +1361,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             dataset_skip_cache=args.dataset_skip_cache,
         )
         eval_dataset = eval_dataset.shuffle(seed=args.seed)
+    visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
     if args.cache_dataset_only:
         return
 
     # ------------------------------------------------------------
     # Runtime setups and quick logging
     pprint([args, model_config])
-    visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
 
     # ------------------------------------------------------------
     # Create the model and optimizer
