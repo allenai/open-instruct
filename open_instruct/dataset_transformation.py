@@ -66,7 +66,6 @@ from transformers import (
 from transformers.utils.hub import (
     _CACHED_NO_EXIST,
     TRANSFORMERS_CACHE,
-    _CACHED_NO_EXIST,
     extract_commit_hash,
     try_to_load_from_cache,
 )

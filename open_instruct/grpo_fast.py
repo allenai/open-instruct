@@ -1720,8 +1720,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             # Optionally evaluate the model
             try:
                 # timeout 0.01 if this is the last training step or we're not evaluating
-                # otherwise, wait to get the last evaluation generations
-                timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else None
+                # otherwise, wait to get the last evaluation generations (long timeout just in case)
+                timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else 100
                 eval_responses, eval_finish_reasons = evaluation_inference_results_Q.get(timeout=timeout)
                 print("[Main Thread] 📊 Evaluation responses received")
 
