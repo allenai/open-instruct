@@ -30,7 +30,7 @@ python mason.py \
     --penalty_reward_value 0.0 \
     --deepspeed_stage 2 \
     --per_device_train_batch_size 2 \
-    --local_rollout_forward_batch_size 1 \
+    --local_rollout_forward_batch_size 2 \
     --actor_num_gpus_per_node 4 8 \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
@@ -39,7 +39,7 @@ python mason.py \
     --apply_verifiable_reward true \
     --seed 1 \
     --num_evals 100 \
-    --save_freq 40 \
+    --save_freq 100 \
     --reward_model_multiplier 1.0 \
     --reward_model_path allenai/Llama-3.1-Tulu-3-8B-RM \
     --no_try_launch_beaker_eval_jobs \
