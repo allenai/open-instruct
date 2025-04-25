@@ -2,7 +2,7 @@ python mason.py \
     --cluster ai2/augusta-google-1 \
     --workspace ai2/scaling-rl \
     --priority high \
-    --image valpy/open_instruct_dev_multi --pure_docker_mode \
+    --image valpy/open_instruct_dev_multi_rm --pure_docker_mode \
     --preemptible \
     --num_nodes 4 \
     --budget ai2/oe-adapt \
