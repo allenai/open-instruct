@@ -1202,7 +1202,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         for reward_dict in per_func_reward:
                             for key, value in reward_dict.items():
                                 per_func_rewards[key].append(value)
-                    if args.reward_model_multiplier and verifiable_reward.it() > 0:
+                    if args.reward_model_multiplier and verifiable_reward.item() > 0:
                         print("APPLYING REWARD MODEL")
                         response_txts = tokenizer.batch_decode(postprocessed_response, skip_special_tokens=True)
                         reward_model_tokens = []
