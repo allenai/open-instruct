@@ -1,6 +1,6 @@
 python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
-    --workspace ai2/tulu-3-dev \
+    --workspace ai2/scaling-rl \
     --priority urgent \
     --image valpy/open_instruct_dev_multi --pure_docker_mode \
     --preemptible \
@@ -14,9 +14,9 @@ python mason.py \
     --local_rollout_batch_size 4 \
     --kl_estimator kl3 \
     --learning_rate 5e-7 \
-    --dataset_mixer_list valpy/tulu3-sft-if-new-multi 1.0 \
+    --dataset_mixer_list valpy/if_multi_no_detectable 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list valpy/tulu3-sft-if-new-multi 16 \
+    --dataset_mixer_eval_list valpy/if_multi_no_detectable 16 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
