@@ -2,6 +2,10 @@
 This script sets up a FastAPI server that allows users to execute Python code snippets
 
 python open_instruct/tool_utils/tool_server.py
+
+
+docker build -t tool-server -f open_instruct/tool_utils/Dockerfile .
+docker run -p 1212:1212 tool-server
 """
 
 import io

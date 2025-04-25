@@ -298,7 +298,7 @@ class ToolUseLLM(LLM):
             if real_req_id not in merged_outputs:
                 merged_outputs[real_req_id] = combined_outputs[req_id]
             else:
-                print("merging outputs")
+                # print("merging outputs")
                 merged_outputs[real_req_id].outputs.append(combined_outputs[req_id].outputs[0])
 
         final_outputs = sorted(merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1])))
