@@ -1197,7 +1197,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         #print("DEBUGGING")
                         #print(f"decoded_response: {verifiable_reward.item()}")
                         verifiable_count = verifiable_reward > 0
+                        #print(f"score beginning: {score}")
                         score += verifiable_reward
+                        #print(f"score after: {score}")
                         # For each sample, aggregate each per-function reward into a single dict.
                         for reward_dict in per_func_reward:
                             for key, value in reward_dict.items():
@@ -1217,11 +1219,11 @@ class PolicyTrainerRayProcess(RayProcess):
                             for item in reward_model_tokens
                         ]
                         reward_model_tokens = torch.tensor(reward_model_tokens, device=device)
-                        _, score, _ = get_reward(
+                        _, rm_score, _ = get_reward(
                             self.reward_model, reward_model_tokens, self.reward_model_tokenizer.pad_token_id, 0
                         )
-                        score *= args.reward_model_multiplier
-                        rm_rewards_only.append(score)
+                        rm_score *= args.reward_model_multiplier
+                        rm_rewards_only.append(rm_score)
                     else:
                         print("NO REWARD APPLIED")
                     if args.add_r1_style_format_reward:
