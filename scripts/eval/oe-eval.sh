@@ -150,7 +150,7 @@ DEFAULT_TASKS=(
     "popqa::tulu"
     "mmlu:mc::tulu"
     "mmlu:cot::summarize"
-    "alpaca_eval_v2::tulu"
+#    "alpaca_eval_v2::tulu" # TEMPORARILY remove alpacaeval from eval suite until we update to cheaper model
     "truthfulqa::tulu"
 )
 UNSEEN_TASKS=(
