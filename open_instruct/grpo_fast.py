@@ -324,7 +324,9 @@ class Args:
     """the priority of auto-launched evaluation jobs"""
 
     def __post_init__(self):
-        assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
+        assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
+        if self.num_samples_per_prompt_rollout == 1:
+            print("WARNING: num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE. ")
         assert (
             self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
         ), "At least one reward must be applied!"
@@ -1121,6 +1123,7 @@ def vllm_generate_thread(
     eval_prompt_token_ids: Optional[List[int]],
     evaluation_inference_results_Q: Queue,
     eval_freq: int,
+    num_evals: int,
     resume_training_step: int = 1,
 ):
     def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
@@ -1152,7 +1155,11 @@ def vllm_generate_thread(
         inference_results_Q.put((response_ids, finish_reasons))
 
         # Evaluate the model
-        if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
+        if (
+            eval_prompt_token_ids is not None
+            and num_evals > 0
+            and ((training_step - 1) % eval_freq == 0 or training_step == num_training_steps)
+        ):
             response_ids, finish_reasons = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
             evaluation_inference_results_Q.put((response_ids, finish_reasons))
 
@@ -1557,6 +1564,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             eval_prompt_token_ids,
             evaluation_inference_results_Q,
             args.eval_freq,
+            args.num_evals,
             resume_training_step,
         ),
     )
@@ -1712,8 +1720,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             # Optionally evaluate the model
             try:
                 # timeout 0.01 if this is the last training step or we're not evaluating
-                # otherwise, wait to get the last evaluation generations
-                timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else None
+                # otherwise, wait to get the last evaluation generations (long timeout just in case)
+                timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else 100
                 eval_responses, eval_finish_reasons = evaluation_inference_results_Q.get(timeout=timeout)
                 print("[Main Thread] 📊 Evaluation responses received")
 

@@ -31,9 +31,9 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --extra compile
+    uv sync --frozen --no-install-project --extra compile --extra liger
 RUN --mount=type=cache,target=${UV_CACHE_DIR} \
-    uv sync --frozen --extra compile
+    uv sync --frozen --extra compile --extra liger
 
 WORKDIR /stage/
 
