@@ -54,11 +54,14 @@ class PythonCodeTool(Tool):
 
         # Only execute the last code block
         code = code_blocks[-1]
+        # Define timeout in seconds
+        timeout_seconds = 3
         try:
-            # Call the FastAPI endpoint to execute the code
+            # Call the FastAPI endpoint to execute the code with client-side timeout
             response = requests.post(
                 self.api_endpoint,
-                json={"code": code, "timeout": 10}
+                json={"code": code, "timeout": timeout_seconds},  # Server-side timeout (keeping this)
+                timeout=timeout_seconds  # Client-side timeout
             )
             
             # Parse the response
@@ -82,8 +85,12 @@ class PythonCodeTool(Tool):
                 error_message = result.get("error", "Unknown error occurred")
                 all_outputs.append(error_message)
                 
+        except requests.Timeout:
+            # Handle client-side timeout specifically
+            all_outputs.append(f"Timeout after {timeout_seconds} seconds")
+            
         except Exception as e:
-            # Capture any exceptions that occur during the API call
+            # Capture any other exceptions that occur during the API call
             error_message = f"Error calling API: {str(e)}\n"
             error_traceback = traceback.format_exc()
             all_outputs.append(error_message + error_traceback)
@@ -204,16 +211,14 @@ class ToolUseLLM(LLM):
                     last_token_ids = last_o.token_ids
                     tool_output_token_ids = tokenizer.encode("<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False)
                     prompt_and_tool_output_token = last_prompt_token_ids + last_token_ids + tool_output_token_ids
-                    combined_outputs[req_id].outputs[0].token_ids.extend(tool_output_token_ids)
-                    masks[req_id].extend([0] * len(tool_output_token_ids))
                     num_calls[req_id] += 1
                     # Handle the edge case: if the prompt + output + tool output is too long,
                     # we append the tool output to the last output and use it for the final results
                     if len(prompt_and_tool_output_token) >= self.llm_engine.model_config.max_model_len:
                         try:
-                            last_output.outputs[0].token_ids = last_token_ids + tool_output_token_ids
-                            outputs.append(last_output)
-                            original_outputs[req_id].append(output)
+                            # print("too long")
+                            num_truncated_tokens_needed = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len + 1
+                            tool_output_token_ids = tool_output_token_ids[:num_truncated_tokens_needed]
                         except Exception as e:
                             print("Error:", e)
                             breakpoint()
@@ -233,6 +238,8 @@ class ToolUseLLM(LLM):
                             print("tool_output_token_ids:", tool_output_token_ids)
                             breakpoint()
                             print("end")
+                    combined_outputs[req_id].outputs[0].token_ids.extend(tool_output_token_ids)
+                    masks[req_id].extend([0] * len(tool_output_token_ids))
                     dict_keys_to_delete.append(req_id)
             for req_id in dict_keys_to_delete:
                 del self.pending_tool_futures[req_id]
@@ -290,6 +297,13 @@ class ToolUseLLM(LLM):
         for req_id in masks:
             assert req_id in combined_outputs
             setattr(combined_outputs[req_id].outputs[0], "mask", masks[req_id])
+            if len(masks[req_id]) != len(combined_outputs[req_id].outputs[0].token_ids):
+                visualize_token_role(combined_outputs[req_id].outputs[0].token_ids, masks[req_id], tokenizer)
+                breakpoint()
+                raise ValueError(
+                    f"Mask length {len(masks[req_id])} does not match "
+                    f"token IDs length {len(combined_outputs[req_id].outputs[0].token_ids)}"
+                )
 
         # Merge n completions into the same outputs of the same prompt
         merged_outputs = {}
@@ -298,7 +312,7 @@ class ToolUseLLM(LLM):
             if real_req_id not in merged_outputs:
                 merged_outputs[real_req_id] = combined_outputs[req_id]
             else:
-                print("merging outputs")
+                # print("merging outputs")
                 merged_outputs[real_req_id].outputs.append(combined_outputs[req_id].outputs[0])
 
         final_outputs = sorted(merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1])))
