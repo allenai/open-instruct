@@ -3,9 +3,56 @@ This script sets up a FastAPI server that allows users to execute Python code sn
 
 python open_instruct/tool_utils/tool_server.py
 
-
+```bash
 docker build -t tool-server -f open_instruct/tool_utils/Dockerfile .
+# Ai2 build:
+beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
+beaker image delete $beaker_user/tool-server
+beaker image create tool-server -n tool-server -w ai2/$beaker_user
+
+# Run the server
 docker run -p 1212:1212 tool-server
+
+# Ai2 run:
+python mason.py \
+    --cluster ai2/phobos-cirrascale \
+    --workspace ai2/scaling-rl \
+    --image $beaker_user/tool-server --pure_docker_mode \
+    --priority high \
+    --budget ai2/oe-adapt \
+    --gpus 0 -- python tool_server.py
+# https://beaker.allen.ai/orgs/ai2/workspaces/scaling-rl/work/01JSSQVFP00CPJ4RKB2QW1GNTC?taskId=01JSSQVFP4VNZ93EAAZHC4ZJ39&jobId=01JSSQVFVJA6SXB19PF6PF77B1
+```
+
+
+You can test with the following. You prob want to test to make sure the
+
+1) the timeout works
+2) the timeout in the first curl does not block the second curl
+
+```
+curl -X POST http://localhost:1212/execute \
+     -H "Content-Type: application/json" \
+     -d '{"code": "import time;time.sleep(4)", "timeout": 3}' \
+     -w '\nTotal time: %{time_total}s\n'
+
+
+curl -X POST http://localhost:1212/execute \
+     -H "Content-Type: application/json" \
+     -d '{"code": "print(1)", "timeout": 3}' \
+     -w '\nTotal time: %{time_total}s\n'
+
+curl -X POST http://localhost:1212/execute \
+     -H "Content-Type: application/json" \
+     -d '{"code": "import sympy", "timeout": 3}' \
+     -w '\nTotal time: %{time_total}s\n'
+
+curl -X POST http://localhost:1212/execute \
+     -H "Content-Type: application/json" \
+     -d '{"code": "import sympy", "timeout": 3}' \
+     -w '\nTotal time: %{time_total}s\n'
+```
+
 """
 
 import io
@@ -13,9 +60,36 @@ import traceback
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from contextlib import redirect_stdout, redirect_stderr
+import multiprocessing
 from typing import Optional
+import asyncio
+import concurrent.futures
+import signal
+import os
+import threading
 
 app = FastAPI(title="Python Code Executor API")
+
+# Process pool and lock for safe recreation
+process_pool = None
+pool_lock = threading.Lock()
+
+def get_process_pool():
+    """Get the current process pool or create a new one if necessary."""
+    global process_pool
+    with pool_lock:
+        if process_pool is None:
+            process_pool = concurrent.futures.ProcessPoolExecutor(max_workers=5)
+        return process_pool
+
+def reset_process_pool():
+    """Safely reset the process pool when it breaks."""
+    global process_pool
+    with pool_lock:
+        if process_pool is not None:
+            process_pool.shutdown(wait=False)
+            process_pool = concurrent.futures.ProcessPoolExecutor(max_workers=5)
+        return process_pool
 
 class CodeRequest(BaseModel):
     code: str
@@ -26,39 +100,116 @@ class CodeResponse(BaseModel):
     error: Optional[str] = None
     success: bool
 
-@app.post("/execute", response_model=CodeResponse)
-async def execute_code(request: CodeRequest):
-    """
-    Execute a Python code snippet and return the output or error.
-    """
-    # Capture both stdout and stderr
+def run_code_in_process(code, result_queue):
+    """Execute code and put the result in the queue."""
     stdout = io.StringIO()
     stderr = io.StringIO()
     
     try:
-        # Redirect both stdout and stderr
         with redirect_stdout(stdout), redirect_stderr(stderr):
-            # Execute the code
-            exec(request.code)
+            exec(code)
         
-        # Get the captured output
         output = stdout.getvalue()
         error = stderr.getvalue()
         
-        # Combine output and error if both exist
-        if error:
-            if output:
-                return CodeResponse(output=output, error=error, success=True)
-            else:
-                return CodeResponse(output="", error=error, success=True)
-        else:
-            return CodeResponse(output=output, success=True)
-            
+        result = {
+            "output": output,
+            "error": error if error else None,
+            "success": True
+        }
+        
     except Exception as e:
-        # Capture any exceptions that occur during execution
         error_message = f"Error executing code: {str(e)}\n"
         error_traceback = traceback.format_exc()
-        return CodeResponse(output="", error=error_message + error_traceback, success=False)
+        result = {
+            "output": "",
+            "error": error_message + error_traceback,
+            "success": False
+        }
+    
+    # Put the result in the queue
+    result_queue.put(result)
+
+def execute_with_timeout(code, timeout):
+    """Execute code with timeout and return result."""
+    # Create a queue for the result
+    result_queue = multiprocessing.Queue()
+    
+    # Create process with the queue
+    process = multiprocessing.Process(
+        target=run_code_in_process,
+        args=(code, result_queue)
+    )
+    
+    # Start the process and wait for timeout
+    process.start()
+    process.join(timeout=timeout)
+    
+    # Handle timeout
+    if process.is_alive():
+        # Terminate process if it's still running
+        process.terminate()
+        process.join(timeout=1)  # Give it a second to terminate
+        
+        # Force kill if still alive (uncommon but possible)
+        if process.is_alive():
+            os.kill(process.pid, signal.SIGKILL)
+            process.join(timeout=1)
+        
+        return {"output": "", "error": f"Execution timed out after {timeout} seconds", "success": False}
+    
+    # Return result from completed process
+    if not result_queue.empty():
+        return result_queue.get()
+    else:
+        return {"output": "", "error": "Process completed but produced no output", "success": False}
+
+@app.post("/execute", response_model=CodeResponse)
+async def execute_code(request: CodeRequest):
+    """
+    Execute a Python code snippet with timeout and return the output or error.
+    """
+    loop = asyncio.get_event_loop()
+    
+    # Get the current process pool
+    pool = get_process_pool()
+    
+    try:
+        # Execute in process pool with timeout
+        result = await loop.run_in_executor(
+            pool,
+            execute_with_timeout,
+            request.code,
+            request.timeout
+        )
+        return CodeResponse(**result)
+    except concurrent.futures.BrokenProcessPool:
+        # Handle broken pool by recreating it
+        pool = reset_process_pool()
+        
+        try:
+            # Retry once with the new pool
+            result = await loop.run_in_executor(
+                pool,
+                execute_with_timeout,
+                request.code,
+                request.timeout
+            )
+            return CodeResponse(**result)
+        except Exception as e:
+            # If retry fails, return an error
+            return CodeResponse(
+                output="",
+                error=f"Server error during code execution: {str(e)}",
+                success=False
+            )
+    except Exception as e:
+        # Handle other exceptions
+        return CodeResponse(
+            output="",
+            error=f"Error executing code: {str(e)}",
+            success=False
+        )
 
 @app.get("/")
 async def root():
@@ -66,4 +217,6 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=1212) 
+    # Initialize the process pool
+    get_process_pool()
+    uvicorn.run(app, host="0.0.0.0", port=1212)
