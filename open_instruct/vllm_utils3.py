@@ -183,6 +183,7 @@ def create_vllm_engines(
     pg: Optional[ray.util.placement_group] = None,
     vllm_enable_sleep=False,
     tools: Optional[List[Any]] = None,
+    max_tool_calls: int = 4,
 ):
     import vllm
 
@@ -242,6 +243,7 @@ def create_vllm_engines(
                 enable_sleep_mode=vllm_enable_sleep,
                 noset_visible_devices=ray_noset_visible_devices(),
                 tools=tools,
+                max_tool_calls=max_tool_calls,
             )
         )
 

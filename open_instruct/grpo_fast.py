@@ -97,7 +97,7 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.rl_utils2 import pack_sequences
+from open_instruct.rl_utils2 import pack_sequences_with_masks
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
@@ -1272,7 +1272,7 @@ def data_preparation_thread(
             datasets = [datasets[i] for i in non_zero_gradient_index]
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
-            packed_sequences = pack_sequences(
+            packed_sequences = pack_sequences_with_masks(
                 queries=queries,
                 responses=responses,
                 masks=masks,
@@ -1356,7 +1356,7 @@ def data_preparation_thread(
             "scores": np.array(scores).mean(),
             "real_batch_size_ratio": real_batch_size_ratio,
             "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
-            "packed_ratio": len(packed_sequences.query_responses) / len(responses),
+            "packed_ratio": len(packed_sequences.query_responses) / max(len(responses), 1),
             "val/sequence_lengths": sequence_lengths.mean(),
             "val/sequence_lengths_min": sequence_lengths.min(),
             "val/sequence_lengths_max": sequence_lengths.max(),
@@ -1565,9 +1565,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         else:
             raise ValueError(f"Unknown tool: {tool}")
 
-    stop_strings = [item.end_str for item in tool_objects.values()]
-    if args.stop_strings is not None:
-        stop_strings += args.stop_strings
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
@@ -1595,8 +1592,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
     # Setup training
+    stop_strings = [] if args.stop_strings is None else args.stop_strings
     if args.tool_use:
-        args.stop_strings += list(tool_objects.keys())
+        stop_strings += list(tool_objects.keys())
     generation_config = SamplingParams(
         temperature=args.temperature,
         top_p=.98,  # prevent rare out-of-vocab tokens with qwen
@@ -1604,7 +1602,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         include_stop_str_in_output=True,
         skip_special_tokens=False,
         n=args.num_samples_per_prompt_rollout,
-        stop=args.stop_strings,
+        stop=stop_strings,
     )
     eval_generation_config = SamplingParams(
         temperature=0.0,
@@ -1613,7 +1611,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         include_stop_str_in_output=True,
         skip_special_tokens=False,
         n=1,  # since we are doing greedy sampling, don't need to generate more
-        stop=args.stop_strings,
+        stop=stop_strings,
     )
     train_dataset_idxs = np.arange(len(train_dataset))
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
