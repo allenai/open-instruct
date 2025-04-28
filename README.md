@@ -62,7 +62,7 @@ python -m nltk.downloader punkt
 * **Local installation with uv (preview)**: We are experimenting with using [uv](https://docs.astral.sh/uv/). You can install via
 ```bash
 uv sync
-uv sync --extra compile # to install flash attention
+uv sync --extra compile --extra liger # to install flash attention and liger-kernel
 ```
 
 
