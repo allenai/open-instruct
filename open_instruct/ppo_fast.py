@@ -965,11 +965,13 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("lr_value", self.value_scheduler.get_last_lr()[0])
                 self.local_metrics.add("policy_optimizer_step", policy_optimizer_step)
                 self.local_metrics.add("value_optimizer_step", value_optimizer_step)
+                self.local_metrics.add("val/adv_mean", adv_mean)
+                self.local_metrics.add("val/adv_std", adv_std)
                 metrics_list = self.local_metrics.get_metrics_list()
-                metrics_list["val/advantages_mean"] = adv.mean()
-                metrics_list["val/advantages_min"] = adv.min()
-                metrics_list["val/advantages_max"] = adv.max()
-                metrics_list["val/advantages_std"] = adv.std()
+                # metrics_list["val/advantages_mean"] = adv.mean()
+                # metrics_list["val/advantages_min"] = adv.min()
+                # metrics_list["val/advantages_max"] = adv.max()
+                # metrics_list["val/advantages_std"] = adv.std()
 
         with Timer("Offload Model", noop=self.rank != 0):
             self.offload_to_cpu(self.model)
@@ -1844,7 +1846,7 @@ if __name__ == "__main__":
                         scores[i] = args.non_stop_penalty_value
         
         metrics["objective/scores"] = np.array(scores).mean()
-        metrics["objective/scores"] = scores
+        # metrics["objective/scores"] = np.array(scores)
 
         return scores, metrics
 
