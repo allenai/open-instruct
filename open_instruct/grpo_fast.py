@@ -1560,7 +1560,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 start_str="<code>",
                 end_str="</code>",
                 api_endpoint=args.code_tool_api_endpoint,
-                max_tool_calls=args.max_tool_calls,
             )
             tool_objects[tool.end_str] = tool
         else:
