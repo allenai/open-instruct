@@ -148,7 +148,9 @@ def visualize_token_role(tokens: list[int], masks: list[int], tokenizer: PreTrai
     i = 0
     console = Console()
     rich_text = Text()
-    for i, token in enumerate(tokens):
+    # for i, token in enumerate():
+    for i in range(min(len(tokens), len(masks))):
+        token = tokens[i]
         color = COLORS[masks[i] % len(COLORS)]
         decoded_token = tokenizer.decode(token)
         rich_text.append(f"{decoded_token}", style=color)
@@ -278,6 +280,36 @@ CHAT_TEMPLATES = {
         "print('Hello, world!')\n"
         "</code>\n"
         "The assistant will get the output between the <output> and </output> tags. "
+        "The assistant may use the tool multiple times.\n"
+        "\n\n"
+        "{% for message in messages %}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['role'].capitalize() + ': ' + message['content'] + '\n' }}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ 'Assistant: <think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "r1_simple_chat_postpend_think_tools1": (
+        "A conversation between User and Assistant. "
+        "The user asks a question, and the Assistant solves it. "
+        "The assistant first thinks about the reasoning process in "
+        "the mind and then provides the user with the answer. "
+        "The reasoning process and answer are enclosed within <think> </think> "
+        "and <answer> </answer> tags, respectively, "
+        "i.e., <think> reasoning process here </think> "
+        "<answer> answer here </answer>."
+        "\n\n"
+        "The assistant are given tools to use during the <think> process. Here are them:\n"
+        "1. `<code>`: Python execution service:\n"
+        "The assistant could execute python code by surrounding them with "
+        "the `<code>` and `</code>` tags. "
+        "For example, it could be\n"
+        "<code>\n"
+        "print('Hello, world!')\n"
+        "</code>\n"
+        "The assistant will get the stdout and stderr in the <output> and </output> tags, "
+        "so the assistant will use `print` to receive the output. "
         "The assistant may use the tool multiple times.\n"
         "\n\n"
         "{% for message in messages %}"
