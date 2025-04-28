@@ -324,6 +324,7 @@ class ToolUseLLM(LLM):
         for req_id in masks:
             assert req_id in concat_outputs
             setattr(concat_outputs[req_id].outputs[0], "mask", masks[req_id])
+            setattr(concat_outputs[req_id].outputs[0], "num_calls", num_calls[req_id])
             if len(masks[req_id]) != len(concat_outputs[req_id].outputs[0].token_ids):
                 visualize_token_role(concat_outputs[req_id].outputs[0].token_ids, masks[req_id], tokenizer)
                 breakpoint()

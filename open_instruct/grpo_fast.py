@@ -1173,16 +1173,19 @@ def vllm_generate_thread(
         all_outputs = ray.get(futures)
         response_ids = []
         finish_reasons = []  # either "stop" or "length"
+        num_calls = []
         masks = []
         for outputs in all_outputs:
             response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
             finish_reasons.extend([out.finish_reason for output in outputs for out in output.outputs])
             if args.tool_use:
                 masks.extend([out.mask for output in outputs for out in output.outputs])
+                num_calls.extend([out.num_calls for output in outputs for out in output.outputs])
         # if not using the tool, mask is all 1s
         if not args.tool_use:
             masks = [1] * len(response_ids)
-        return response_ids, finish_reasons, masks
+            num_calls = [0] * len(response_ids)
+        return response_ids, finish_reasons, masks, num_calls
 
     for training_step in range(resume_training_step, num_training_steps + 1):
         items = param_prompt_Q.get()
@@ -1191,13 +1194,13 @@ def vllm_generate_thread(
         _, g_queries_list = items
 
         with Timer("🔥 Generation time"):
-            response_ids, finish_reasons, masks = generate_with_engines(g_queries_list, generation_config)
-        inference_results_Q.put((response_ids, finish_reasons, masks))
+            response_ids, finish_reasons, masks, num_calls = generate_with_engines(g_queries_list, generation_config)
+        inference_results_Q.put((response_ids, finish_reasons, masks, num_calls))
 
         # Evaluate the model
         if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-            response_ids, finish_reasons, masks = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
-            evaluation_inference_results_Q.put((response_ids, finish_reasons, masks))
+            response_ids, finish_reasons, masks, num_calls = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
+            evaluation_inference_results_Q.put((response_ids, finish_reasons, masks, num_calls))
 
 
 def data_preparation_thread(
@@ -1221,7 +1224,8 @@ def data_preparation_thread(
             ground_truths = [item for item in ground_truths for _ in range(args.num_samples_per_prompt_rollout)]
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            responses, finish_reasons, masks = inference_results_Q.get()
+            responses, finish_reasons, masks, num_calls = inference_results_Q.get()
+            print(f"num_calls: {num_calls}")
             for i in range(len(finish_reasons)):
                 # edge case with RL-rag agent: sometimes it outputs eos immediately, and we get an empty response
                 # in that case, we need to add the eos token to the response
@@ -1356,7 +1360,7 @@ def data_preparation_thread(
             "scores": np.array(scores).mean(),
             "real_batch_size_ratio": real_batch_size_ratio,
             "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
-            "packed_ratio": len(packed_sequences.query_responses) / max(len(responses), 1),
+            "packed_ratio": len(packed_sequences.query_responses) / len(responses),
             "val/sequence_lengths": sequence_lengths.mean(),
             "val/sequence_lengths_min": sequence_lengths.min(),
             "val/sequence_lengths_max": sequence_lengths.max(),
@@ -1798,7 +1802,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 # timeout 0.01 if this is the last training step or we're not evaluating
                 # otherwise, wait to get the last evaluation generations (long timeout just in case)
                 timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else 100
-                eval_responses, eval_finish_reasons, masks = evaluation_inference_results_Q.get(timeout=timeout)
+                eval_responses, eval_finish_reasons, masks, num_calls = evaluation_inference_results_Q.get(timeout=timeout)
                 print("[Main Thread] 📊 Evaluation responses received")
 
                 eval_sequence_lengths = np.array([len(response) for response in eval_responses])
