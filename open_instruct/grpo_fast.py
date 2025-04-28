@@ -113,7 +113,7 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     sync_gs_bucket,
 )
-from open_instruct.vllm_utils2 import LLMRayActor, create_vllm_engines, init_process_group
+from open_instruct.vllm_utils3 import LLMRayActor, create_vllm_engines, init_process_group
 from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 
 api = HfApi()
@@ -1596,7 +1596,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
     # Setup training
     if args.tool_use:
-        args.stop_strings += tool_objects.keys()
+        args.stop_strings += list(tool_objects.keys())
     generation_config = SamplingParams(
         temperature=args.temperature,
         top_p=.98,  # prevent rare out-of-vocab tokens with qwen
