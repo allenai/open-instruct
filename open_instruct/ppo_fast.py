@@ -29,6 +29,7 @@
 # limitations under the License.
 # isort: off
 import os
+import re
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
@@ -964,11 +965,13 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("lr_value", self.value_scheduler.get_last_lr()[0])
                 self.local_metrics.add("policy_optimizer_step", policy_optimizer_step)
                 self.local_metrics.add("value_optimizer_step", value_optimizer_step)
+                self.local_metrics.add("val/adv_mean", adv_mean)
+                self.local_metrics.add("val/adv_std", adv_std)
                 metrics_list = self.local_metrics.get_metrics_list()
-                metrics_list["val/advantages_mean"] = adv.mean()
-                metrics_list["val/advantages_min"] = adv.min()
-                metrics_list["val/advantages_max"] = adv.max()
-                metrics_list["val/advantages_std"] = adv.std()
+                # metrics_list["val/advantages_mean"] = adv.mean()
+                # metrics_list["val/advantages_min"] = adv.min()
+                # metrics_list["val/advantages_max"] = adv.max()
+                # metrics_list["val/advantages_std"] = adv.std()
 
         with Timer("Offload Model", noop=self.rank != 0):
             self.offload_to_cpu(self.model)
@@ -1794,26 +1797,30 @@ if __name__ == "__main__":
                 format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
                 if len(format_scores) != len(scores):
                     raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
-                for i in range(len(format_scores)):
-                    scores[i] = format_scores[i] + scores[i]
                 metrics["val/format_scores"] = np.array(format_scores).mean()
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
+                # @vwxyzjn: quick orz-style experiment
+                pattern = re.compile(r"<answer>.*?(\\boxed{.*}).*?</answer>", re.DOTALL)
+                final_answers = []
+                for decoded_response in decoded_responses:
+                    matches = re.findall(pattern, decoded_response)
+                    if len(matches) > 0:
+                        final_answers.append(matches[-1])
+                    else:
+                        final_answers.append("")
                 verifiable_rewards, per_func_rewards = apply_verifiable_reward(
                     responses,
-                    decoded_responses,
+                    final_answers,
                     ground_truths,
                     datasets,
                     reward_mult=args.verification_reward,
                 )
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
-                # @vwxyzjn: quick experiment
                 for i in range(len(verifiable_rewards)):
-                    # scores[i] = verifiable_rewards[i] + scores[i]
                     scores[i] = verifiable_rewards[i]
-                print(scores)
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
@@ -1835,6 +1842,9 @@ if __name__ == "__main__":
                 for i in range(len(finish_reasons)):
                     if finish_reasons[i] != "stop":
                         scores[i] = args.non_stop_penalty_value
+        
+        metrics["objective/scores"] = np.array(scores).mean()
+        # metrics["objective/scores"] = np.array(scores)
 
         return scores, metrics
 
