@@ -57,6 +57,7 @@ curl -X POST http://localhost:1212/execute \
 
 import io
 import traceback
+import ast
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from contextlib import redirect_stdout, redirect_stderr
@@ -100,19 +101,63 @@ class CodeResponse(BaseModel):
     error: Optional[str] = None
     success: bool
 
+class REPLPrinter(ast.NodeTransformer):
+    """AST transformer that converts bare expressions into print statements."""
+    
+    def visit_Expr(self, node):
+        """Convert expression statements to print statements."""
+        # Create a print call for the expression
+        return ast.fix_missing_locations(
+            ast.Expr(
+                ast.Call(
+                    func=ast.Name(id='print', ctx=ast.Load()),
+                    args=[node.value],
+                    keywords=[ast.keyword(arg='flush', value=ast.Constant(value=True))]
+                )
+            )
+        )
+
+def transform_code_for_repl(code_str):
+    """Transform code to automatically print expressions like a REPL."""
+    try:
+        # Parse the code into an AST
+        tree = ast.parse(code_str)
+        
+        # Transform expression statements to print statements
+        transformer = REPLPrinter()
+        transformed_tree = transformer.visit(tree)
+        
+        # Convert back to code
+        transformed_code = compile(transformed_tree, '<string>', 'exec')
+        return transformed_code
+    except SyntaxError:
+        # If there's a syntax error, return the original code
+        return code_str
+
 def run_code_in_process(code, result_queue):
     """Execute code in a separate process and put results in queue."""
     stdout = io.StringIO()
     stderr = io.StringIO()
-    
+
     try:
         # Create a shared global namespace for the executed code
-        # This is the key fix - providing both globals and locals to exec
         global_namespace = {}
         
         with redirect_stdout(stdout), redirect_stderr(stderr):
-            # Execute with explicit global namespace so recursive functions work
-            exec(code, global_namespace)
+            # Transform the code to add REPL-like behavior
+            try:
+                # First try to transform the code
+                transformed_code = transform_code_for_repl(code)
+                # Execute with explicit global namespace
+                if isinstance(transformed_code, str):
+                    # If transformation returned a string, it failed to parse
+                    exec(code, global_namespace)
+                else:
+                    # If transformation succeeded, execute the transformed code
+                    exec(transformed_code, global_namespace)
+            except:
+                # If transformation failed, execute the original code
+                exec(code, global_namespace)
         
         output = stdout.getvalue()
         error = stderr.getvalue()
