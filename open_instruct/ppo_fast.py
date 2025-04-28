@@ -100,6 +100,7 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
+from open_instruct.orz_math_utils import is_equal_sync, solution2answer
 from open_instruct.rl_utils2 import pack_sequences, calculate_advantages_packed, Timer
 from open_instruct.utils import (
     ArgumentParserPlus,
@@ -1811,14 +1812,16 @@ if __name__ == "__main__":
                         final_answers.append(matches[-1])
                     else:
                         final_answers.append("")
-                verifiable_rewards, per_func_rewards = apply_verifiable_reward(
-                    responses,
-                    final_answers,
-                    ground_truths,
-                    datasets,
-                    reward_mult=args.verification_reward,
-                )
-                print(verifiable_rewards)
+                is_corrects = []
+                for gt, final_answer in zip(ground_truths, final_answers):
+                    is_corrects.append(is_equal_sync(solution2answer(gt), solution2answer(final_answer)))
+                verifiable_rewards = []
+                for is_correct, stop_reason in zip(is_corrects, finish_reasons):
+                    if stop_reason == "stop":
+                        verifiable_reward = 1.0 if is_correct else 0.0
+                    else:
+                        verifiable_reward = 0.0
+                    verifiable_rewards.append(verifiable_reward)
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
                 for i in range(len(verifiable_rewards)):
@@ -1826,16 +1829,16 @@ if __name__ == "__main__":
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
-                # reshuffle around per_func rewards
-                per_func_lists = defaultdict(list)
-                for reward_dict in per_func_rewards:
-                    for key, value in reward_dict.items():
-                        per_func_lists[key].append(value)
-                # log per function rewards
-                for key, value in per_func_lists.items():
-                    np_value = np.array(value)
-                    metrics[f"objective/{key}_reward"] = np_value.mean()
-                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
+                # # reshuffle around per_func rewards
+                # per_func_lists = defaultdict(list)
+                # for reward_dict in per_func_rewards:
+                #     for key, value in reward_dict.items():
+                #         per_func_lists[key].append(value)
+                # # log per function rewards
+                # for key, value in per_func_lists.items():
+                #     np_value = np.array(value)
+                #     metrics[f"objective/{key}_reward"] = np_value.mean()
+                #     metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:

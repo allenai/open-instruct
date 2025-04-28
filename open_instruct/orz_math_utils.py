@@ -202,6 +202,24 @@ async def is_latex_equal(str1, str2, executor, math_mode="legacy"):
         raise NotImplementedError(f"Math mode {math_mode} is not implemented")
 
 
+
+def is_latex_equal_sync(str1, str2, math_mode="legacy"):
+    if math_mode == "legacy":
+        if (len(str1) > 128 and repeatness(str1)) or (len(str2) > 128 and repeatness(str2)):
+            return False
+
+        try:
+            return _is_latex_equal(str1, str2)
+        except Exception:  # noqa
+            return False
+    elif math_mode == "math_verify":
+        try:
+            return verify(parse(str1), parse(str2))
+        except Exception:  # noqa
+            return False
+    else:
+        raise NotImplementedError(f"Math mode {math_mode} is not implemented")
+
 def _fix_fracs(string):
     substrs = string.split("\\frac")
     new_str = substrs[0]
@@ -416,6 +434,13 @@ async def is_equal(str1, str2, executor, math_mode="legacy"):
     if first_equal:
         return True
     return await is_latex_equal(str1, str2, executor, math_mode)
+
+
+def is_equal_sync(str1, str2, math_mode="legacy"):
+    first_equal = is_equiv(str1, str2)
+    if first_equal:
+        return True
+    return is_latex_equal_sync(str1, str2, math_mode)
 
 
 def solution2answer(solution: str, math_mode="eval_peeking") -> str:
