@@ -21,7 +21,7 @@ python mason.py \
     --priority high \
     --budget ai2/oe-adapt \
     --gpus 0 -- python tool_server.py
-# https://beaker.allen.ai/orgs/ai2/workspaces/scaling-rl/work/01JSSQVFP00CPJ4RKB2QW1GNTC?taskId=01JSSQVFP4VNZ93EAAZHC4ZJ39&jobId=01JSSQVFVJA6SXB19PF6PF77B1
+# https://beaker.org/ex/01JSSTZG7111M8T1CA2D9S662N
 ```
 
 
@@ -101,13 +101,18 @@ class CodeResponse(BaseModel):
     success: bool
 
 def run_code_in_process(code, result_queue):
-    """Execute code and put the result in the queue."""
+    """Execute code in a separate process and put results in queue."""
     stdout = io.StringIO()
     stderr = io.StringIO()
     
     try:
+        # Create a shared global namespace for the executed code
+        # This is the key fix - providing both globals and locals to exec
+        global_namespace = {}
+        
         with redirect_stdout(stdout), redirect_stderr(stderr):
-            exec(code)
+            # Execute with explicit global namespace so recursive functions work
+            exec(code, global_namespace)
         
         output = stdout.getvalue()
         error = stderr.getvalue()
@@ -127,47 +132,57 @@ def run_code_in_process(code, result_queue):
             "success": False
         }
     
-    # Put the result in the queue
     result_queue.put(result)
 
 def execute_with_timeout(code, timeout):
     """Execute code with timeout and return result."""
-    # Create a queue for the result
+    # Create a queue to get the result from the process
     result_queue = multiprocessing.Queue()
     
-    # Create process with the queue
+    # Create and start the process
     process = multiprocessing.Process(
-        target=run_code_in_process,
+        target=run_code_in_process, 
         args=(code, result_queue)
     )
-    
-    # Start the process and wait for timeout
     process.start()
+    
+    # Wait for the process to finish with timeout
     process.join(timeout=timeout)
     
-    # Handle timeout
+    # If process is still alive after timeout, terminate it
     if process.is_alive():
-        # Terminate process if it's still running
         process.terminate()
         process.join(timeout=1)  # Give it a second to terminate
         
         # Force kill if still alive (uncommon but possible)
         if process.is_alive():
-            os.kill(process.pid, signal.SIGKILL)
+            try:
+                os.kill(process.pid, signal.SIGKILL)
+            except:
+                pass  # Process might have terminated between check and kill
             process.join(timeout=1)
         
-        return {"output": "", "error": f"Execution timed out after {timeout} seconds", "success": False}
+        return {
+            "output": "",
+            "error": f"Execution timed out after {timeout} seconds",
+            "success": False
+        }
     
-    # Return result from completed process
+    # Process completed within timeout, get the result
     if not result_queue.empty():
         return result_queue.get()
     else:
-        return {"output": "", "error": "Process completed but produced no output", "success": False}
+        return {
+            "output": "",
+            "error": "Execution completed but produced no result",
+            "success": False
+        }
 
 @app.post("/execute", response_model=CodeResponse)
 async def execute_code(request: CodeRequest):
     """
     Execute a Python code snippet with timeout and return the output or error.
+    Uses a process pool for better performance while maintaining isolation.
     """
     loop = asyncio.get_event_loop()
     

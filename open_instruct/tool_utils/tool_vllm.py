@@ -42,9 +42,30 @@ class PythonCodeTool(Tool):
         super().__init__(*args, **kwargs)
 
     def __call__(self, prompt: str) -> ToolOutput:
-        # Find Python code blocks using regex
-        re_str = r'<tool>\s*(.*?)\s*</tool>' # we replace <tool> immediately with the custom start_str
-        re_str = re_str.replace('<tool>', self.start_str).replace('</tool>', self.end_str)
+        """
+        NOTE: We avoid using `r'<tool>\s*(.*?)\s*</tool>'` because it will fail in this case
+        Let's implement this in Python using the `<code>` tag to execute the code and get the result.
+        </think>
+
+        <code>
+        def find_sum_of_a():
+            total_sum = 0
+            for n in range(100):  # Arbitrary large range for n
+                for m in range(100):  # Arbitrary large range for m
+                    a = 2**n * 3**m
+                    if 6*n > a or 6*m > a:
+                        continue
+                    total_sum += a
+            return total_sum
+
+        result = find_sum_of_a()
+        print(result)
+        </code>
+
+        Instead, Use negative look-behind approach to find the code block.
+        """
+        re_str = r'(?s)(?<!`)<tool>\s*(.*?)\s*</tool>'
+        re_str = re_str.replace('<tool>', "<code>").replace('</tool>', "</code>")
 
         code_blocks = re.findall(re_str, prompt, re.DOTALL)
         all_outputs = []
@@ -195,9 +216,8 @@ class ToolUseLLM(LLM):
         total_in_toks = 0
         total_out_toks = 0
         tokenizer = self.get_tokenizer()
-        original_outputs = defaultdict(list)
         num_calls = defaultdict(int)
-        combined_outputs = {}
+        concat_outputs = {}  # concat multi-turn response token ids, tool token ids
         masks = defaultdict(list)
         while True:
             # @vwxyzjn: ToolUseLLM change 1: append tool output to the prompt and
@@ -210,25 +230,34 @@ class ToolUseLLM(LLM):
                     last_prompt_token_ids = last_output.prompt_token_ids
                     last_token_ids = last_o.token_ids
                     tool_output_token_ids = tokenizer.encode("<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False)
+                    # Edge case 1: clip against model context length
                     prompt_and_tool_output_token = last_prompt_token_ids + last_token_ids + tool_output_token_ids
                     num_calls[req_id] += 1
-                    # Handle the edge case: if the prompt + output + tool output is too long,
-                    # we append the tool output to the last output and use it for the final results
-                    if len(prompt_and_tool_output_token) >= self.llm_engine.model_config.max_model_len:
-                        try:
-                            # print("too long")
-                            num_truncated_tokens_needed = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len + 1
-                            tool_output_token_ids = tool_output_token_ids[:num_truncated_tokens_needed]
-                        except Exception as e:
-                            print("Error:", e)
-                            breakpoint()
-                            print("last_output:", last_output)
+                    excess = len(prompt_and_tool_output_token) - self.llm_engine.model_config.max_model_len
+                    if excess > 0:
+                        tool_output_token_ids = tool_output_token_ids[:-excess]
+                        can_make_new_request = False
                     else:
+                        can_make_new_request = True
+
+                    # Edge case 2: clip against per-request max_tokens
+                    remaining = self.sampling_params.max_tokens - len(masks[req_id])
+                    if remaining <= 0:
+                        tool_output_token_ids = []
+                    elif len(tool_output_token_ids) > remaining:
+                        tool_output_token_ids = tool_output_token_ids[:remaining]
+                    concat_outputs[req_id].outputs[0].token_ids.extend(tool_output_token_ids)
+                    masks[req_id].extend([0] * len(tool_output_token_ids))
+                    new_sample_tokens = self.sampling_params.max_tokens - len(masks[req_id])
+                    can_make_new_request = can_make_new_request and new_sample_tokens > 0
+                    if can_make_new_request:
                         try:
+                            new_sampling_params = copy.deepcopy(self.sampling_params)
+                            new_sampling_params.max_tokens = new_sample_tokens
                             self.llm_engine.add_request(
                                 req_id,
                                 TokensPrompt(prompt_token_ids=prompt_and_tool_output_token),
-                                self.sampling_params,
+                                new_sampling_params,
                             )
                         except Exception as e:
                             print("Error:", e)
@@ -238,25 +267,23 @@ class ToolUseLLM(LLM):
                             print("tool_output_token_ids:", tool_output_token_ids)
                             breakpoint()
                             print("end")
-                    combined_outputs[req_id].outputs[0].token_ids.extend(tool_output_token_ids)
-                    masks[req_id].extend([0] * len(tool_output_token_ids))
                     dict_keys_to_delete.append(req_id)
             for req_id in dict_keys_to_delete:
                 del self.pending_tool_futures[req_id]
+
             if self.llm_engine.has_unfinished_requests():
                 step_outputs = self.llm_engine.step()
                 for output in step_outputs:
                     if output.finished:
-                        # @vwxyzjn: ToolUseLLM change 2: if the output is a tool call, 
+                        # @vwxyzjn: ToolUseLLM change 2: if the output is a tool call,
                         # we submit the tool to a thread pool and wait for the result.
-                        original_outputs[output.request_id].append(output)
                         assert len(output.outputs) <= 1 # because with tool calls, the (overriden) sampling_params.n == 1
                         o = output.outputs[0]
                         output_processed = False
-                        if output.request_id not in combined_outputs:
-                            combined_outputs[output.request_id] = output
+                        if output.request_id not in concat_outputs:
+                            concat_outputs[output.request_id] = output
                         else:
-                            combined_outputs[output.request_id].outputs[0].token_ids.extend(o.token_ids)
+                            concat_outputs[output.request_id].outputs[0].token_ids.extend(o.token_ids)
                         masks[output.request_id].extend([1] * len(o.token_ids))
                         for stop_str in self.sampling_params.stop:
                             if o.text.endswith(stop_str) and stop_str in self.tools and num_calls[output.request_id] <= self.max_tool_calls:
@@ -289,32 +316,34 @@ class ToolUseLLM(LLM):
                 break
 
         print(f"number of calls per request ids", num_calls)
-        # print(tokenizer.decode(combined_outputs["0"].prompt_token_ids))
-        # print(tokenizer.decode(combined_outputs["0"].outputs[0].token_ids))
+        # print(tokenizer.decode(concat_outputs["0"].prompt_token_ids))
+        # print(tokenizer.decode(concat_outputs["0"].outputs[0].token_ids))
         if use_tqdm:
             pbar.close()
         # Add the masks to the outputs.
         for req_id in masks:
-            assert req_id in combined_outputs
-            setattr(combined_outputs[req_id].outputs[0], "mask", masks[req_id])
-            if len(masks[req_id]) != len(combined_outputs[req_id].outputs[0].token_ids):
-                visualize_token_role(combined_outputs[req_id].outputs[0].token_ids, masks[req_id], tokenizer)
+            assert req_id in concat_outputs
+            setattr(concat_outputs[req_id].outputs[0], "mask", masks[req_id])
+            if len(masks[req_id]) != len(concat_outputs[req_id].outputs[0].token_ids):
+                visualize_token_role(concat_outputs[req_id].outputs[0].token_ids, masks[req_id], tokenizer)
                 breakpoint()
                 raise ValueError(
                     f"Mask length {len(masks[req_id])} does not match "
-                    f"token IDs length {len(combined_outputs[req_id].outputs[0].token_ids)}"
+                    f"token IDs length {len(concat_outputs[req_id].outputs[0].token_ids)}"
                 )
 
         # Merge n completions into the same outputs of the same prompt
         merged_outputs = {}
-        for req_id in combined_outputs:
+        for req_id in concat_outputs:
+            assert (
+                len(concat_outputs[req_id].outputs[0].token_ids)
+                <= self.sampling_params.max_tokens
+            ), "ToolUseLLM generated more response tokens than max_tokens!"
             real_req_id, _ = req_id.split("-")
             if real_req_id not in merged_outputs:
-                merged_outputs[real_req_id] = combined_outputs[req_id]
+                merged_outputs[real_req_id] = concat_outputs[req_id]
             else:
-                # print("merging outputs")
-                merged_outputs[real_req_id].outputs.append(combined_outputs[req_id].outputs[0])
-
+                merged_outputs[real_req_id].outputs.append(concat_outputs[req_id].outputs[0])
         final_outputs = sorted(merged_outputs.values(), key=lambda x: (int(x.request_id.split("-")[0]), int(x.request_id.split("-")[1])))
         return final_outputs
 
@@ -345,7 +374,7 @@ and you will get the output between the <output> and </output> tags.
     prompts = [system_prompt + "\n\n" + p for p in prompts]
 
     # Create a tool.
-    python_code_tool = PythonCodeTool(api_endpoint="http://phobos-cs-aus-453:1212/execute", start_str="<code>", end_str="</code>")
+    python_code_tool = PythonCodeTool(api_endpoint="http://phobos-cs-aus-452:1212/execute", start_str="<code>", end_str="</code>")
     tools = {
         python_code_tool.end_str: python_code_tool,
     }
