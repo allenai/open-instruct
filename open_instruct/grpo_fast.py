@@ -1064,10 +1064,12 @@ def vllm_generate_thread(
         all_outputs = ray.get(futures)
         response_ids = []
         finish_reasons = []  # either "stop" or "length"
+        tool_masks = []
         for outputs in all_outputs:
             response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
             finish_reasons.extend([out.finish_reason for output in outputs for out in output.outputs])
-        return response_ids, finish_reasons
+            tool_masks.extend([out.mask for output in outputs for out in output.outputs])
+        return response_ids, tool_masks, finish_reasons
 
     for training_step in range(resume_training_step, num_training_steps + 1):
         items = param_prompt_Q.get()
@@ -1076,13 +1078,13 @@ def vllm_generate_thread(
         _, g_queries_list = items
 
         with Timer("🔥 Generation time"):
-            response_ids, finish_reasons = generate_with_engines(g_queries_list, generation_config)
-        inference_results_Q.put((response_ids, finish_reasons))
+            response_ids, tool_masks, finish_reasons = generate_with_engines(g_queries_list, generation_config)
+        inference_results_Q.put((response_ids, tool_masks, finish_reasons))
 
         # Evaluate the model
         if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-            response_ids, finish_reasons = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
-            evaluation_inference_results_Q.put((response_ids, finish_reasons))
+            response_ids, tool_masks, finish_reasons = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
+            evaluation_inference_results_Q.put((response_ids, tool_masks, finish_reasons))
 
 
 def data_preparation_thread(
@@ -1106,10 +1108,11 @@ def data_preparation_thread(
             ground_truths = [item for item in ground_truths for _ in range(args.num_samples_per_prompt_rollout)]
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            responses, finish_reasons = inference_results_Q.get()
-            for i in range(len(finish_reasons)):
-                if finish_reasons[i] == "stop" and responses[i][-1] != tokenizer.eos_token_id:
-                    responses[i].append(tokenizer.eos_token_id)
+            responses, tool_masks, finish_reasons = inference_results_Q.get()
+            print(f"{len(responses)=}, {len(tool_masks)=}, {len(finish_reasons)=}")
+            # for i in range(len(finish_reasons)):
+            #     if finish_reasons[i] == "stop" and responses[i][-1] != tokenizer.eos_token_id:
+            #         responses[i].append(tokenizer.eos_token_id)
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
@@ -1136,12 +1139,13 @@ def data_preparation_thread(
             real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
             expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
             non_zero_gradient_index = np.where(expanded_mask)[0]
-            # global_advantages = global_advantages[non_zero_gradient_index]
-            # scores = scores[non_zero_gradient_index]
-            # responses = [responses[i] for i in non_zero_gradient_index]
-            # queries = [queries[i] for i in non_zero_gradient_index]
-            # ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
-            # datasets = [datasets[i] for i in non_zero_gradient_index]
+            global_advantages = global_advantages[non_zero_gradient_index]
+            scores = scores[non_zero_gradient_index]
+            responses = [responses[i] for i in non_zero_gradient_index]
+            queries = [queries[i] for i in non_zero_gradient_index]
+            ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
+            datasets = [datasets[i] for i in non_zero_gradient_index]
+            tool_masks = [tool_masks[i] for i in non_zero_gradient_index]
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
@@ -1149,6 +1153,7 @@ def data_preparation_thread(
                 responses=responses,
                 pack_length=args.pack_length,
                 pad_token_id=tokenizer.pad_token_id,
+                tool_masks=tool_masks,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
             # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
@@ -1214,7 +1219,7 @@ def data_preparation_thread(
         metrics = {
             "scores": np.array(scores).mean(),
             "real_batch_size_ratio": real_batch_size_ratio,
-            "packed_ratio": len(packed_sequences.query_responses) / len(responses),
+            "packed_ratio": len(packed_sequences.query_responses) / max(1, len(responses)),
             "val/sequence_lengths": sequence_lengths.mean(),
             "val/sequence_lengths_min": sequence_lengths.min(),
             "val/sequence_lengths_max": sequence_lengths.max(),
@@ -1390,7 +1395,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     max_len = args.max_prompt_token_length + args.response_length
 
     from open_instruct.tool_utils.tool_vllm import PythonCodeTool
-    python_code_tool = PythonCodeTool(api_endpoint="http://0.0.0.0:1212", start_str="<code>", end_str="</code>")
+    python_code_tool = PythonCodeTool(api_endpoint="http://phobos-cs-aus-452.reviz.ai2.in:1212/execute", start_str="<code>", end_str="</code>")
     tools = {
         python_code_tool.end_str: python_code_tool,
     }
@@ -1505,7 +1510,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             # ------------------------------------------------------------------------------------------------
             # Optionally evaluate the model
             try:
-                evaluation_responses, _ = evaluation_inference_results_Q.get(timeout=0.01)
+                evaluation_responses, _, _ = evaluation_inference_results_Q.get(timeout=0.01)
                 print("[Main Thread] 📊 Evaluation responses received")
                 table = {}
                 table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
