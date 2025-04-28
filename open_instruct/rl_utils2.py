@@ -70,6 +70,7 @@ def pack_sequences(
     responses: List[List[int]],
     pack_length: int,
     pad_token_id: int,
+    tool_masks: Optional[List[List[int]]] = None,
 ) -> PackedSequences:
     # assert padding token does not exist in queries and responses
     assert not any(pad_token_id in query for query in queries)
@@ -89,6 +90,7 @@ def pack_sequences(
     for i in range(len(queries)):
         query = queries[i]
         response = responses[i]
+        tool_mask = tool_masks[i] if tool_masks is not None else None
         # remove padding (but using vllm so this should not be needed, but just in case)
         query = [t for t in query if t != pad_token_id]
         response = [t for t in response if t != pad_token_id]
@@ -109,9 +111,14 @@ def pack_sequences(
         cur_num_actions.append(len(response))
         cur_packed_seq_lens.append(len(query_response))
 
-        # @vwxyzjn: here we use i + 1 to avoid 0 as a response mask token; the actual number should corresponds to
-        # the response's index
-        cur_response_mask.extend([0 for _ in range(len(query))] + [i + 1 for _ in range(len(response))])
+        # @vwxyzjn: here we use i + 1 to avoid 0 as a response mask token; 
+        #the actual number should corresponds to the response's index
+        if tool_mask is not None:
+            assert len(tool_mask) == len(response)
+            actual_response_mask = [(i + 1) * item for item in tool_mask]
+        else:
+            actual_response_mask = [i + 1 for _ in range(len(response))]
+        cur_response_mask.extend([0 for _ in range(len(query))] + actual_response_mask)
         cur_attention_mask.extend([i + 1 - offset for _ in range(len(query_response))])
     if len(cur_data) > 0:
         query_responses.append(cur_data)
