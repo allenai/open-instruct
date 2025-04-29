@@ -11,7 +11,7 @@ When running our training scripts, the model will get uploaded to several places
 
 ## Hugging Face
 
-Let's use [https://wandb.ai/ai2-llm/open_instruct_public/runs/tyfe1095](https://wandb.ai/ai2-llm/open_instruct_public/runs/tyfe1095) as an example. If you go to its wandb's Overview page -> config -> search for `hf`, then you can find this `hf_repo_url`. You ca
+Let's use [https://wandb.ai/ai2-llm/open_instruct_public/runs/tyfe1095](https://wandb.ai/ai2-llm/open_instruct_public/runs/tyfe1095) as an example. If you go to its wandb's Overview page -> config -> search for `hf`, then you can find this `hf_repo_url`. 
 
 ![](trained_model_location/hf.png)
 ![](trained_model_location/hf2.png)
