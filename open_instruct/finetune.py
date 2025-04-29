@@ -13,7 +13,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# isort: off
+import os
 
+os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
+try:
+    import deepspeed
+
+    # @vwxyzjn: when importing on CPU-only machines, we get the following error:
+    # RuntimeError: 0 active drivers ([]). There should only be one.
+    # so we need to catch the exception and do nothing
+    # https://github.com/deepspeedai/DeepSpeed/issues/7028
+except Exception:
+    pass
+# isort: on
 import logging
 import math
 import os
@@ -24,7 +37,6 @@ from datetime import timedelta, datetime
 from typing import List, Literal, Optional, Union
 
 import datasets
-import deepspeed
 import torch
 import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
@@ -139,10 +151,6 @@ class FlatArguments:
     dataset_config_name: Optional[str] = field(
         default=None,
         metadata={"help": "The configuration name of the dataset to use (via the datasets library)."},
-    )
-    train_file: Optional[str] = field(
-        default=None,
-        metadata={"help": "The input training data file (a json/jsonl file)."},
     )
     max_train_samples: Optional[int] = field(
         default=None,
@@ -355,23 +363,11 @@ class FlatArguments:
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
             raise ValueError("reduce_loss must be either 'mean' or 'sum'")
-        if (
-            self.dataset_name is None
-            and self.train_file is None
-            and self.dataset_mixer is None
-            and self.dataset_mixer_list is None
-        ):
-            raise ValueError("Need either a dataset name, dataset mixer, or a training file.")
-        else:
-            if self.train_file is not None:
-                extension = self.train_file.split(".")[-1]
-                assert extension in ["json", "jsonl"], "`train_file` should be a json or a jsonl file."
+        if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
+            raise ValueError("Need either a dataset name, dataset mixer, or dataset mixer list.")
         if (
             (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
-            or (self.dataset_name is not None and self.train_file is not None)
-            or (
-                (self.dataset_mixer is not None or self.dataset_mixer_list is not None) and self.train_file is not None
-            )
+            or (self.dataset_name is not None)
             or (self.dataset_mixer is not None and self.dataset_mixer_list is not None)
         ):
             raise ValueError("Cannot provide two dataset selection mechanisms.")

@@ -81,6 +81,7 @@ jsonschema==4.23.0
 jsonschema-specifications==2024.10.1
 kiwisolver==1.4.8
 lark==1.2.2
+liger-kernel==0.5.4
 llguidance==0.7.9 ; platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
 llvmlite==0.43.0
 lm-format-enforcer==0.10.11
