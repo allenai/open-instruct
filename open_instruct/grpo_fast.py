@@ -196,6 +196,8 @@ class Args:
     stop_strings: Optional[List[str]] = None
     """List of strings that stop the generation when they are generated.
     The returned output will not contain the stop strings."""
+    overlong_filtering: bool = False
+    """If True, filter out sequences that hit a length limit"""
 
     # Algorithm
     async_mode: bool = True
@@ -1091,6 +1093,23 @@ def data_preparation_thread(
             for i in range(len(finish_reasons)):
                 if finish_reasons[i] == "stop" and responses[i][-1] != tokenizer.eos_token_id:
                     responses[i].append(tokenizer.eos_token_id)
+        
+        if args.overlong_filtering:
+            with Timer("📦 [Data Preparation Thread] Filtering sequences without stop tokens"):
+                # Filter out sequences that don't terminate with a stop token
+                valid_indices = [i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"]
+                if len(valid_indices) < len(finish_reasons):
+                    print(f"[Data Preparation Thread] Filtering out {len(finish_reasons) - len(valid_indices)} sequences without stop tokens")
+                    responses = [responses[i] for i in valid_indices]
+                    queries = [queries[i] for i in valid_indices]
+                    ground_truths = [ground_truths[i] for i in valid_indices]
+                    datasets = [datasets[i] for i in valid_indices]
+                    finish_reasons = [finish_reasons[i] for i in valid_indices]
+                    
+                # Skip this batch if there are no valid sequences left
+                if len(responses) == 0:
+                    print("🤡 [Data Preparation Thread] No valid sequences left after filtering, skipping this batch")
+                    continue
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
@@ -1103,7 +1122,12 @@ def data_preparation_thread(
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
-            stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
+            if args.overlong_filtering:
+                # this should be 1, but want to be make filtering is working.
+                num_stopped = sum(int(finish_reason == "stop") for i, finish_reason in enumerate(finish_reasons) if i in valid_indices)
+                stop_rate = num_stopped / len(valid_indices)
+            else:
+                stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards"):
             scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons)
