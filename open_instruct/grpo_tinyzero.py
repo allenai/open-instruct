@@ -170,6 +170,10 @@ class Args:
     """the length of the response"""
     temperature: float = 0.7
     """the sampling temperature"""
+    eval_temperature: float = 0.0
+    """the sampling temperature"""
+    top_p: float = 1.0
+    """the sampling temperature"""
     num_unique_prompts_rollout: int = 16
     """The number of unique prompts during rollout"""
     num_samples_per_prompt_rollout: int = 4
@@ -551,15 +555,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     # Setup training
     generation_config = SamplingParams(
         temperature=args.temperature,
-        top_p=1.0,
+        top_p=args.top_p,
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         n=args.num_samples_per_prompt_rollout,
         stop=args.stop_strings,
     )
     eval_generation_config = SamplingParams(
-        temperature=0.0,
-        top_p=1.0,
+        temperature=args.eval_temperature,
+        top_p=args.top_p,
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         n=1,  # since we are doing greedy sampling, don't need to generate more

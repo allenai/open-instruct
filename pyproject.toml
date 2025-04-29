@@ -22,7 +22,7 @@ dependencies = [
     "setuptools>=75.6.0",
     "tensorboard>=2.18.0",
     "torch>=2.6.0",
-    "transformers>=4.46.3",
+    "transformers>=4.51.0",
     "vllm>=0.8.2",
     "wandb==0.18.1",
     "liger-kernel",
@@ -53,7 +53,7 @@ explicit = true
 
 # flash-attn related setups
 [project.optional-dependencies]
-compile = ["flash-attn>=2.7.2.post1"]
+compile = ["flash-attn>=2.7.4.post1"]
 liger = ["liger-kernel>=0.5.4"]
 
 [tool.uv]
@@ -62,7 +62,7 @@ no-build-isolation-package = ["flash-attn"]
 
 [[tool.uv.dependency-metadata]]
 name = "flash-attn"
-version = "2.7.2.post1"
+version = "2.7.4.post1"
 requires-dist = ["torch", "setuptools"]
 
 [dependency-groups]

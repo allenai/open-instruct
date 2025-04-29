@@ -147,3 +147,4 @@ dmypy.json
 .idea/
 .vscode
 .DS_Store
+slurm-*
