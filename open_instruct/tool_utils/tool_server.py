@@ -1,10 +1,14 @@
 """
+# https://chatgpt.com/share/681146aa-d850-8011-a959-19a2c1caee5d, tldr: performance optimization by o3
+
 This script sets up a FastAPI server that allows users to execute Python code snippets
 
-python open_instruct/tool_utils/tool_server.py
+cd open_instruct/tool_utils
+
+PREIMPORT_PKGS=pandas,numpy,sympy,time,math,networkx uv run uvicorn tool_server:app --host 0.0.0.0 --port 1212
 
 ```bash
-docker build -t tool-server -f open_instruct/tool_utils/Dockerfile .
+docker build -t tool-server .
 # Ai2 build:
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 beaker image delete $beaker_user/tool-server
@@ -13,14 +17,11 @@ beaker image create tool-server -n tool-server -w ai2/$beaker_user
 docker build -t ghcr.io/allenai/open-instruct/python-code-executor -f open_instruct/tool_utils/Dockerfile .
 docker push ghcr.io/allenai/open-instruct/python-code-executor
 
-docker tag tool-server gcr.io/ai2-allennlp/open-instruct-tool-server
-docker push gcr.io/ai2-allennlp/open-instruct-tool-server
-
-gcloud run deploy open-instruct-tool-server --project ai2-allennlp --region us-central1 --source .
-
-
 # Run the server
-docker run -p 1212:1212 tool-server
+docker run -p 1212:8080 tool-server
+
+# gcloud run deploy:
+gcloud run deploy open-instruct-tool-server --project ai2-allennlp --region us-central1 --source .
 
 # Ai2 run:
 python mason.py \
@@ -40,23 +41,23 @@ You can test with the following. You prob want to test to make sure the
 2) the timeout in the first curl does not block the second curl
 
 ```
-curl -X POST http://localhost:1212/execute \
+curl -X POST https://open-instruct-tool-server-10554368204.us-central1.run.app/execute \
      -H "Content-Type: application/json" \
      -d '{"code": "import time;time.sleep(4)", "timeout": 3}' \
      -w '\nTotal time: %{time_total}s\n'
 
 
-curl -X POST http://localhost:1212/execute \
+curl -X POST https://open-instruct-tool-server-10554368204.us-central1.run.app/execute \
      -H "Content-Type: application/json" \
      -d '{"code": "print(1)", "timeout": 3}' \
      -w '\nTotal time: %{time_total}s\n'
 
-curl -X POST http://localhost:1212/execute \
+curl -X POST https://open-instruct-tool-server-10554368204.us-central1.run.app/execute \
      -H "Content-Type: application/json" \
      -d '{"code": "import sympy", "timeout": 3}' \
      -w '\nTotal time: %{time_total}s\n'
 
-curl -X POST http://localhost:1212/execute \
+curl -X POST https://open-instruct-tool-server-10554368204.us-central1.run.app/execute \
      -H "Content-Type: application/json" \
      -d '{"code": "import sympy", "timeout": 3}' \
      -w '\nTotal time: %{time_total}s\n'
@@ -64,235 +65,199 @@ curl -X POST http://localhost:1212/execute \
 
 """
 
-import io
-import traceback
+###############################################################################
+# Imports & global config
+###############################################################################
 import ast
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from contextlib import redirect_stdout, redirect_stderr
-import multiprocessing
-from typing import Optional
 import asyncio
-import concurrent.futures
-import signal
+import importlib
+import io
+import logging
 import os
-import threading
+import signal
+import time
+import traceback
+from contextlib import redirect_stdout, redirect_stderr
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
+from typing import Optional
 
-app = FastAPI(title="Python Code Executor API")
+from fastapi import FastAPI
+from pydantic import BaseModel
 
-# Process pool and lock for safe recreation
-process_pool = None
-pool_lock = threading.Lock()
+###############################################################################
+# Configure logging (Cloud Run uses stdout/stderr)
+###############################################################################
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S%z",
+)
+logger = logging.getLogger(__name__)
 
-def get_process_pool():
-    """Get the current process pool or create a new one if necessary."""
-    global process_pool
-    with pool_lock:
-        if process_pool is None:
-            process_pool = concurrent.futures.ProcessPoolExecutor(max_workers=5)
-        return process_pool
+###############################################################################
+# Pre‑import heavy libraries *before* the fork so children share memory
+###############################################################################
+DEFAULT_PKGS = ["pandas", "numpy", "sympy", "time", "math", "networkx"]
+PREIMPORT_PKGS = [pkg.strip() for pkg in os.getenv("PREIMPORT_PKGS", ",".join(DEFAULT_PKGS)).split(",") if pkg.strip()]
 
-def reset_process_pool():
-    """Safely reset the process pool when it breaks."""
-    global process_pool
-    with pool_lock:
-        if process_pool is not None:
-            process_pool.shutdown(wait=False)
-            process_pool = concurrent.futures.ProcessPoolExecutor(max_workers=5)
-        return process_pool
+for _pkg in PREIMPORT_PKGS:
+    try:
+        importlib.import_module(_pkg)
+        logger.info("Pre‑imported package: %s", _pkg)
+    except ModuleNotFoundError:
+        logger.warning("Package not found for pre‑import: %s", _pkg)
 
+###############################################################################
+# Pool initialiser (runs in each worker process)
+###############################################################################
+
+def _worker_init():  # noqa: D401
+    """Run in every worker process to ensure packages are imported."""
+    for _pkg in PREIMPORT_PKGS:
+        try:
+            importlib.import_module(_pkg)
+        except ModuleNotFoundError:
+            pass  # already warned in parent
+
+###############################################################################
+# Create a single, long‑lived pool
+###############################################################################
+POOL_SIZE = int(os.getenv("POOL_SIZE", os.cpu_count() or 1))
+process_pool: ProcessPoolExecutor | None = ProcessPoolExecutor(
+    max_workers=POOL_SIZE, initializer=_worker_init
+)
+logger.info("Process pool started with %s workers", POOL_SIZE)
+
+app = FastAPI(title="Python Code Executor (Optimised, Logged)")
+
+###############################################################################
+# REPL‑style transformation
+###############################################################################
+class _ReplPrinter(ast.NodeTransformer):
+    def visit_Expr(self, node: ast.Expr):  # noqa: N802
+        if (
+            isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+            and node.value.func.id == "print"
+        ):
+            return node
+        return ast.copy_location(
+            ast.Expr(
+                ast.Call(
+                    func=ast.Name(id="print", ctx=ast.Load()),
+                    args=[node.value],
+                    keywords=[ast.keyword(arg="flush", value=ast.Constant(True))],
+                )
+            ),
+            node,
+        )
+
+def _compile_repl(code: str):
+    try:
+        tree = ast.parse(code, mode="exec")
+        tree = _ReplPrinter().visit(tree)
+        ast.fix_missing_locations(tree)
+        return compile(tree, "<user-snippet>", "exec")
+    except SyntaxError:
+        return code
+
+###############################################################################
+# Worker function (executes user code)
+###############################################################################
+
+def _run_user_code(code: str, timeout: int = 5):
+    def _timeout_handler(signum, frame):  # noqa: D401, ANN001, ARG001
+        raise TimeoutError("execution timed out")
+
+    signal.signal(signal.SIGALRM, _timeout_handler)
+    signal.alarm(timeout)
+
+    stdout, stderr = io.StringIO(), io.StringIO()
+
+    try:
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            compiled = _compile_repl(code)
+            namespace: dict[str, object] = {}
+            if isinstance(compiled, str):
+                exec(compiled, namespace)  # type: ignore[arg-type]
+            else:
+                exec(compiled, namespace)
+        result = {
+            "output": stdout.getvalue(),
+            "error": stderr.getvalue() or None,
+            "success": True,
+        }
+    except Exception as exc:  # pylint: disable=broad-except
+        result = {
+            "output": "",
+            "error": f"{exc}\n{traceback.format_exc()}",
+            "success": False,
+        }
+    finally:
+        signal.alarm(0)
+
+    return result
+
+###############################################################################
+# FastAPI schema
+###############################################################################
 class CodeRequest(BaseModel):
     code: str
-    timeout: Optional[int] = 5  # Default timeout in seconds
+    timeout: Optional[int] = 5
 
 class CodeResponse(BaseModel):
     output: str
     error: Optional[str] = None
     success: bool
 
-class REPLPrinter(ast.NodeTransformer):
-    """AST transformer that converts bare expressions into print statements,
-    but avoids double-printing print statements."""
-    
-    def visit_Expr(self, node):
-        """Convert expression statements to print statements,
-        but skip if it's already a print call."""
-        # Check if this is already a print statement
-        if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name) and node.value.func.id == 'print':
-            # Leave print statements alone
-            return node
-        
-        # Create a print call for other expressions
-        return ast.fix_missing_locations(
-            ast.Expr(
-                ast.Call(
-                    func=ast.Name(id='print', ctx=ast.Load()),
-                    args=[node.value],
-                    keywords=[ast.keyword(arg='flush', value=ast.Constant(value=True))]
-                )
-            )
-        )
-
-def transform_code_for_repl(code_str):
-    """Transform code to automatically print expressions like a REPL."""
-    try:
-        # Parse the code into an AST
-        tree = ast.parse(code_str)
-        
-        # Transform expression statements to print statements
-        transformer = REPLPrinter()
-        transformed_tree = transformer.visit(tree)
-        
-        # Convert back to code
-        transformed_code = compile(transformed_tree, '<string>', 'exec')
-        return transformed_code
-    except SyntaxError:
-        # If there's a syntax error, return the original code
-        return code_str
-
-def run_code_in_process(code, result_queue):
-    """Execute code in a separate process and put results in queue."""
-    stdout = io.StringIO()
-    stderr = io.StringIO()
-    
-    try:
-        # Create a shared global namespace for the executed code
-        global_namespace = {}
-        
-        with redirect_stdout(stdout), redirect_stderr(stderr):
-            # Transform the code to add REPL-like behavior
-            try:
-                # First try to transform the code
-                transformed_code = transform_code_for_repl(code)
-                # Execute with explicit global namespace
-                if isinstance(transformed_code, str):
-                    # If transformation returned a string, it failed to parse
-                    exec(code, global_namespace)
-                else:
-                    # If transformation succeeded, execute the transformed code
-                    exec(transformed_code, global_namespace)
-            except:
-                # If transformation failed, execute the original code
-                exec(code, global_namespace)
-        
-        output = stdout.getvalue()
-        error = stderr.getvalue()
-        
-        result = {
-            "output": output,
-            "error": error if error else None,
-            "success": True
-        }
-        
-    except Exception as e:
-        error_message = f"Error executing code: {str(e)}\n"
-        error_traceback = traceback.format_exc()
-        result = {
-            "output": "",
-            "error": error_message + error_traceback,
-            "success": False
-        }
-    
-    result_queue.put(result)
-
-def execute_with_timeout(code, timeout):
-    """Execute code with timeout and return result."""
-    # Create a queue to get the result from the process
-    result_queue = multiprocessing.Queue()
-    
-    # Create and start the process
-    process = multiprocessing.Process(
-        target=run_code_in_process, 
-        args=(code, result_queue)
-    )
-    process.start()
-    
-    # Wait for the process to finish with timeout
-    process.join(timeout=timeout)
-    
-    # If process is still alive after timeout, terminate it
-    if process.is_alive():
-        process.terminate()
-        process.join(timeout=1)  # Give it a second to terminate
-        
-        # Force kill if still alive (uncommon but possible)
-        if process.is_alive():
-            try:
-                os.kill(process.pid, signal.SIGKILL)
-            except:
-                pass  # Process might have terminated between check and kill
-            process.join(timeout=1)
-        
-        return {
-            "output": "",
-            "error": f"Execution timed out after {timeout} seconds",
-            "success": False
-        }
-    
-    # Process completed within timeout, get the result
-    if not result_queue.empty():
-        return result_queue.get()
-    else:
-        return {
-            "output": "",
-            "error": "Execution completed but produced no result",
-            "success": False
-        }
-
+###############################################################################
+# Endpoints
+###############################################################################
 @app.post("/execute", response_model=CodeResponse)
-async def execute_code(request: CodeRequest):
-    """
-    Execute a Python code snippet with timeout and return the output or error.
-    Uses a process pool for better performance while maintaining isolation.
-    """
-    loop = asyncio.get_event_loop()
-    
-    # Get the current process pool
-    pool = get_process_pool()
-    
+async def execute_code(req: CodeRequest):  # noqa: D401
+    global process_pool  # noqa: PLW0603
+
+    # Log input (truncate to 200 chars to avoid huge logs)
+    truncated_code = (req.code[:197] + "...") if len(req.code) > 200 else req.code
+    logger.info("📥 Received request (timeout=%s s): \n%s", req.timeout, truncated_code)
+
+    start = time.perf_counter()
+    loop = asyncio.get_running_loop()
+    fut = loop.run_in_executor(process_pool, _run_user_code, req.code, req.timeout)
+
     try:
-        # Execute in process pool with timeout
-        result = await loop.run_in_executor(
-            pool,
-            execute_with_timeout,
-            request.code,
-            request.timeout
-        )
-        return CodeResponse(**result)
-    except concurrent.futures.BrokenProcessPool:
-        # Handle broken pool by recreating it
-        pool = reset_process_pool()
-        
-        try:
-            # Retry once with the new pool
-            result = await loop.run_in_executor(
-                pool,
-                execute_with_timeout,
-                request.code,
-                request.timeout
-            )
-            return CodeResponse(**result)
-        except Exception as e:
-            # If retry fails, return an error
-            return CodeResponse(
-                output="",
-                error=f"Server error during code execution: {str(e)}",
-                success=False
-            )
-    except Exception as e:
-        # Handle other exceptions
-        return CodeResponse(
-            output="",
-            error=f"Error executing code: {str(e)}",
-            success=False
-        )
+        result = await asyncio.wait_for(fut, timeout=req.timeout + 1)
+    except asyncio.TimeoutError:
+        fut.cancel()
+        result = {
+            "output": "",
+            "error": f"Execution timed out after {req.timeout} seconds (outer)",
+            "success": False,
+        }
+    except BrokenProcessPool:
+        logger.error("Pool broken — recreating")
+        process_pool = ProcessPoolExecutor(max_workers=POOL_SIZE, initializer=_worker_init)
+        result = {
+            "output": "",
+            "error": "Worker pool crashed and was restarted. Please retry.",
+            "success": False,
+        }
+
+    latency_ms = (time.perf_counter() - start) * 1000
+    logger.info(
+        "📤 Responding success=%s latency=%.1f ms output_len=%s error=%s, output=\n%s",
+        result["success"],
+        latency_ms,
+        len(result["output"] or ""),
+        bool(result["error"]),
+        result["output"],
+    )
+    if result["error"] is not None:
+        logger.debug("Error: %s", result["error"])
+
+    return CodeResponse(**result)
 
 @app.get("/")
-async def root():
-    return {"message": "Python Code Executor API. Use /execute endpoint to run Python code."}
-
-if __name__ == "__main__":
-    import uvicorn
-    # Initialize the process pool
-    get_process_pool()
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+async def root():  # noqa: D401
+    return {"message": "Python Code Executor API — POST /execute {code, timeout}"}

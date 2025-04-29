@@ -375,7 +375,7 @@ and you will get the output between the <output> and </output> tags.
     prompts = [system_prompt + "\n\n" + p for p in prompts]
 
     # Create a tool.
-    python_code_tool = PythonCodeTool(api_endpoint="http://phobos-cs-aus-452:1212/execute", start_str="<code>", end_str="</code>")
+    python_code_tool = PythonCodeTool(api_endpoint="https://open-instruct-tool-server-10554368204.us-central1.run.app/execute", start_str="<code>", end_str="</code>")
     tools = {
         python_code_tool.end_str: python_code_tool,
     }
@@ -389,13 +389,13 @@ and you will get the output between the <output> and </output> tags.
         include_stop_str_in_output=True,
     )
     # Create an LLM.
-    model_name = "meta-llama/Llama-3.1-8B-Instruct"
+    model_name = "Qwen/Qwen2.5-7B"
     llm = ToolUseLLM(
         tools=tools,
         model=model_name,
         tensor_parallel_size=1,
         gpu_memory_utilization=0.9,
-        max_model_len=1024,
+        max_model_len=10000,
     )
 
     # Tokenization generation
@@ -418,21 +418,45 @@ and you will get the output between the <output> and </output> tags.
             visualize_token(o.token_ids, tok)
     
     print("debugging tests 2 all done")
-    breakpoint()
+    # breakpoint()
     # More serious benchmarks
 
-    from datasets import load_dataset
-    tok = AutoTokenizer.from_pretrained(model_name)
-    ds = load_dataset("vwxyzjn/rlvr_acecoder", split="train")
-    ds = ds.select(range(200))
-    def process(example):
-        messages = [{"role": "system", "content": system_prompt}] + example["messages"]
-        example["input_ids_prompt"] = tok.apply_chat_template(messages, add_generation_prompt=True)
-        return example
-    ds = ds.map(process, remove_columns=["messages"])
+    # from datasets import load_dataset
+    # tok = AutoTokenizer.from_pretrained(model_name)
+    # ds = load_dataset("ai2-adapt-dev/rlvr_open_reasoner_math", split="train")
+    # ds = ds.select(range(8192))
+    # def process(example):
+    #     messages = [{"role": "system", "content": system_prompt}] + example["messages"]
+    #     example["input_ids_prompt"] = tok.apply_chat_template(messages, add_generation_prompt=True)
+    #     return example
+    # ds = ds.map(process, remove_columns=["messages"])
 
-    print("ds:", ds)
-    outputs = llm.generate(prompt_token_ids=ds["input_ids_prompt"], sampling_params=sampling_params)
-    print(f"len(outputs): {len(outputs)}")
+    # print("ds:", ds)
+    # outputs = llm.generate(prompt_token_ids=ds["input_ids_prompt"], sampling_params=sampling_params)
+    # print(f"len(outputs): {len(outputs)}")
+    # print("debugging tests all done")
+    # # need to handle the case the response length actually goes down overtime
+    from open_instruct.dataset_transformation import get_cached_dataset_tulu
+    from open_instruct.dataset_transformation import TokenizerConfig
+    
+    tc = TokenizerConfig(tokenizer_name_or_path=model_name, chat_template_name="r1_simple_chat_postpend_think_tools2")
+    transform_fn_args = [
+        {},
+        {
+            "max_token_length": 8192,
+            "max_prompt_token_length": 2048,
+        },
+    ]
+    train_dataset = get_cached_dataset_tulu(
+        dataset_mixer_list=["ai2-adapt-dev/rlvr_open_reasoner_math", "1.0"],
+        dataset_mixer_list_splits=["train"],
+        tc=tc,
+        dataset_transform_fn=["rlvr_tokenize_v1", "rlvr_filter_v1"],
+        transform_fn_args=transform_fn_args,
+        dataset_cache_mode="local",
+        hf_entity="allenai",
+        dataset_local_cache_dir="/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache",
+    )
+    outputs = llm.generate(prompt_token_ids=train_dataset["input_ids_prompt"], sampling_params=sampling_params)
+    # breakpoint()
     print("debugging tests all done")
-    # need to handle the case the response length actually goes down overtime
