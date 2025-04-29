@@ -178,17 +178,16 @@ class ToolUseLLM(LLM):
 
         # @vwxyzjn: ToolUseLLM change 1: override the sampling params to have n=1
         assert not isinstance(params, list)
-        self.original_n = params.n
-        params.n = 1
-        self.sampling_params = copy.deepcopy(params)
+        self.single_n_sampling_params = copy.deepcopy(params)
+        self.single_n_sampling_params.n = 1
         # Add requests to the engine.
         for i, prompt in enumerate(prompts):
-            for j in range(self.original_n):
+            for j in range(params.n):
                 request_id = f"{i}-{j}"
                 self.llm_engine.add_request(
                     request_id,
                     prompt,
-                    params,
+                    self.single_n_sampling_params,
                     lora_request=lora_request[i] if isinstance(
                         lora_request, Sequence) else lora_request,
                     prompt_adapter_request=prompt_adapter_request,
@@ -241,18 +240,18 @@ class ToolUseLLM(LLM):
                         can_make_new_request = True
 
                     # Edge case 2: clip against per-request max_tokens
-                    remaining = self.sampling_params.max_tokens - len(masks[req_id])
+                    remaining = self.single_n_sampling_params.max_tokens - len(masks[req_id])
                     if remaining <= 0:
                         tool_output_token_ids = []
                     elif len(tool_output_token_ids) > remaining:
                         tool_output_token_ids = tool_output_token_ids[:remaining]
                     concat_outputs[req_id].outputs[0].token_ids.extend(tool_output_token_ids)
                     masks[req_id].extend([0] * len(tool_output_token_ids))
-                    new_sample_tokens = self.sampling_params.max_tokens - len(masks[req_id])
+                    new_sample_tokens = self.single_n_sampling_params.max_tokens - len(masks[req_id])
                     can_make_new_request = can_make_new_request and new_sample_tokens > 0
                     if can_make_new_request:
                         try:
-                            new_sampling_params = copy.deepcopy(self.sampling_params)
+                            new_sampling_params = copy.deepcopy(self.single_n_sampling_params)
                             new_sampling_params.max_tokens = new_sample_tokens
                             self.llm_engine.add_request(
                                 req_id,
@@ -285,7 +284,7 @@ class ToolUseLLM(LLM):
                         else:
                             concat_outputs[output.request_id].outputs[0].token_ids.extend(o.token_ids)
                         masks[output.request_id].extend([1] * len(o.token_ids))
-                        for stop_str in self.sampling_params.stop:
+                        for stop_str in self.single_n_sampling_params.stop:
                             if o.text.endswith(stop_str) and stop_str in self.tools and num_calls[output.request_id] <= self.max_tool_calls:
                                 # Schedule tool call asynchronously
                                 tool = self.tools[stop_str]
@@ -338,7 +337,7 @@ class ToolUseLLM(LLM):
         for req_id in concat_outputs:
             assert (
                 len(concat_outputs[req_id].outputs[0].token_ids)
-                <= self.sampling_params.max_tokens
+                <= self.single_n_sampling_params.max_tokens
             ), "ToolUseLLM generated more response tokens than max_tokens!"
             real_req_id, _ = req_id.split("-")
             if real_req_id not in merged_outputs:
@@ -388,6 +387,7 @@ and you will get the output between the <output> and </output> tags.
         max_tokens=1000,
         include_stop_str_in_output=True,
     )
+    print(f"{sampling_params.n=}")
     # Create an LLM.
     model_name = "Qwen/Qwen2.5-7B"
     llm = ToolUseLLM(
@@ -414,10 +414,11 @@ and you will get the output between the <output> and </output> tags.
             console.rule(f"Generated text {j}")
             console.rule("Generated text w/ masks")
             visualize_token_role(o.token_ids, o.mask, tok)
-            console.rule("Generated text")
-            visualize_token(o.token_ids, tok)
-    
+            # console.rule("Generated text")
+            # visualize_token(o.token_ids, tok)
+    print(f"{sampling_params.n=}")
     print("debugging tests 2 all done")
+    breakpoint()
     # breakpoint()
     # More serious benchmarks
 
@@ -457,6 +458,25 @@ and you will get the output between the <output> and </output> tags.
         hf_entity="allenai",
         dataset_local_cache_dir="/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache",
     )
-    outputs = llm.generate(prompt_token_ids=train_dataset["input_ids_prompt"], sampling_params=sampling_params)
+    outputs = llm.generate(prompt_token_ids=train_dataset["input_ids_prompt"][:30], sampling_params=sampling_params)
+    print_samples = True
+    if print_samples:
+        for i, output in enumerate(outputs):
+            prompt = tok.decode(output.prompt_token_ids)
+            console.rule(f"Conversation {i}")
+            console.rule("Prompt")
+            console.print(prompt)
+            console.rule("Ground truth")
+            console.print(train_dataset["messages"][i])
+            for j, o in enumerate(output.outputs):
+                generated_text = tok.decode(o.token_ids)
+                assert len(o.mask) == len(o.token_ids)
+                console.rule(f"Generated text {j}")
+                console.rule("Generated text w/ masks")
+                visualize_token_role(o.token_ids, o.mask, tok)
+                # console.rule("Generated text")
+                # visualize_token(o.token_ids, tok)
+            breakpoint()
+            
     # breakpoint()
     print("debugging tests all done")
