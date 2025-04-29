@@ -9,6 +9,15 @@ docker build -t tool-server -f open_instruct/tool_utils/Dockerfile .
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 beaker image delete $beaker_user/tool-server
 beaker image create tool-server -n tool-server -w ai2/$beaker_user
+# ghcr build:
+docker build -t ghcr.io/allenai/open-instruct/python-code-executor -f open_instruct/tool_utils/Dockerfile .
+docker push ghcr.io/allenai/open-instruct/python-code-executor
+
+docker tag tool-server gcr.io/ai2-allennlp/open-instruct-tool-server
+docker push gcr.io/ai2-allennlp/open-instruct-tool-server
+
+gcloud run deploy open-instruct-tool-server --project ai2-allennlp --region us-central1 --source .
+
 
 # Run the server
 docker run -p 1212:1212 tool-server
@@ -102,11 +111,18 @@ class CodeResponse(BaseModel):
     success: bool
 
 class REPLPrinter(ast.NodeTransformer):
-    """AST transformer that converts bare expressions into print statements."""
+    """AST transformer that converts bare expressions into print statements,
+    but avoids double-printing print statements."""
     
     def visit_Expr(self, node):
-        """Convert expression statements to print statements."""
-        # Create a print call for the expression
+        """Convert expression statements to print statements,
+        but skip if it's already a print call."""
+        # Check if this is already a print statement
+        if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name) and node.value.func.id == 'print':
+            # Leave print statements alone
+            return node
+        
+        # Create a print call for other expressions
         return ast.fix_missing_locations(
             ast.Expr(
                 ast.Call(
@@ -138,7 +154,7 @@ def run_code_in_process(code, result_queue):
     """Execute code in a separate process and put results in queue."""
     stdout = io.StringIO()
     stderr = io.StringIO()
-
+    
     try:
         # Create a shared global namespace for the executed code
         global_namespace = {}
@@ -279,4 +295,4 @@ if __name__ == "__main__":
     import uvicorn
     # Initialize the process pool
     get_process_pool()
-    uvicorn.run(app, host="0.0.0.0", port=1212)
+    uvicorn.run(app, host="0.0.0.0", port=8080)

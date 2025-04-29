@@ -374,6 +374,36 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    "r1_simple_chat_postpend_think_tools2": (
+        "A conversation between User and Assistant. "
+        "The User asks a question, and the Assistant solves it. "
+        "The Assistant first thinks about the reasoning process in "
+        "the mind and then provides the User with the answer. "
+        "\n\n"
+        "When given a question, the Assistant must conduct reasoning inside the <think> "
+        "and </think> tags. During reasoning, the Assistant may write and execute python "
+        "code in a <code> </code> tag, in order to solve the problem or verify the answer. "
+        "Then the Assistant will get the repl of last variable, stdout, and stderr in the <output> and </output> tags. "
+        "For example, it could be\n"
+        "<code>\n"
+        "x, y = 1, 2\n"
+        "x + y\n"
+        "</code>\n"
+        "<output>\n"
+        "3\n"
+        "</output>\n"
+        "The Assistant may write and execute multiple python codes as needed. "
+        "When the Assistant is done reasoning, it should provide the answer inside the <answer> "
+        "and </answer> tag."
+        "\n\n"
+        "{% for message in messages %}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['role'].capitalize() + ': ' + message['content'] + '\n' }}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ 'Assistant: <think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
 }
 # flake8: noqa
 

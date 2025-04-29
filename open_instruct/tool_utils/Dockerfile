@@ -5,13 +5,13 @@ FROM python:3.10-slim
 WORKDIR /app
 
 # Copy requirements first to leverage Docker cache
-COPY open_instruct/tool_utils/requirements.txt requirements.txt
+COPY requirements.txt requirements.txt
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application
-COPY open_instruct/tool_utils/ .
+COPY . .
 
 # Create cache directory for code execution
 RUN mkdir -p cache && chmod 777 cache
@@ -20,7 +20,7 @@ RUN mkdir -p cache && chmod 777 cache
 ENV PYTHONUNBUFFERED=1
 
 # Expose the port the app runs on
-EXPOSE 1234
+EXPOSE 8080
 
 # Command to run the application
 CMD ["python", "tool_server.py"]
