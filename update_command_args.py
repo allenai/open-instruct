@@ -68,13 +68,13 @@ def modify_command(content: str, new_args: List[str]) -> str:
         if isinstance(value, list):
             new_content.extend(value)
         else:
-            new_content.append(value)
-        new_content.extend(["\\\n", "", "", ""])
-    return " ".join(new_content)
+            formatted += f" --{part}"
+    
+    return formatted
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python launch.py <shell_script> [--arg value ...]")
+        print("Usage: python update_command_args.py <shell_script> [--arg value ...]")
         sys.exit(1)
     
     script_file = sys.argv[1]
