@@ -1255,7 +1255,7 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-            scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons)
+            scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons, infos)
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
@@ -1824,7 +1824,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 # timeout 0.01 if this is the last training step or we're not evaluating
                 # otherwise, wait to get the last evaluation generations (long timeout just in case)
                 timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else 100
-                eval_responses, eval_finish_reasons, masks, infos = evaluation_inference_results_Q.get(timeout=timeout)
+                eval_responses, eval_finish_reasons, masks, eval_infos = evaluation_inference_results_Q.get(timeout=timeout)
                 print("[Main Thread] 📊 Evaluation responses received")
 
                 eval_sequence_lengths = np.array([len(response) for response in eval_responses])
@@ -1840,6 +1840,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     eval_ground_truths,
                     eval_dataset_names,
                     eval_finish_reasons,
+                    eval_infos,
                 )
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
                 eval_metrics = {
@@ -1928,7 +1929,10 @@ if __name__ == "__main__":
         ground_truths: List[str],
         datasets: List[str],
         finish_reasons: List[str],
+        infos: List[List[int]],
     ) -> List[float]:
+        num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
+        empty_tool_outputs = [len(tool_outputs[i]) == 0 and tool_calleds[i] for i in range(len(tool_outputs))]
         scores = [0] * len(decoded_responses)
         metrics = {}
 
@@ -1950,14 +1954,8 @@ if __name__ == "__main__":
                     datasets,
                     reward_mult=args.verification_reward,
                 )
-                if len(verifiable_rewards) != len(scores):
-                    raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
                 for i in range(len(verifiable_rewards)):
-                    if args.apply_r1_style_format_reward and args.additive_format_reward:
-                        scores[i] = verifiable_rewards[i] + scores[i]
-                    elif args.apply_r1_style_format_reward and not args.additive_format_reward:
-                        scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
-                    else:
+                    if not empty_tool_outputs[i]:
                         scores[i] = verifiable_rewards[i]
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
