@@ -1,7 +1,10 @@
+# try rubric-based eval using this dataset: ai2-adapt-dev/tulu-3-sft-30174-criteria-gpt4o-classified
+# previous tested dataset: faezeb/tulu-3-sft-t3-70b-thinker-sampled
+
 python open_instruct/grpo_fast_wip.py \
-    --dataset_mixer_list faezeb/tulu-3-sft-t3-70b-thinker-sampled 512 \
+    --dataset_mixer_list ai2-adapt-dev/tulu-3-sft-50k-criteria-gpt4o-classified 512 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list faezeb/tulu-3-sft-t3-70b-thinker-sampled 16 \
+    --dataset_mixer_eval_list ai2-adapt-dev/tulu-3-sft-50k-criteria-gpt4o-classified 16 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 512 \
     --max_prompt_token_length 512 \
@@ -36,7 +39,8 @@ python open_instruct/grpo_fast_wip.py \
     --gradient_checkpointing \
     --single_gpu_mode \
     --push_to_hub false \
-    --llm_judge_model "gpt-4o"
+    --llm_judge_model "gpt-4o-mini" \
+    --llm_judge_type "quality_rubric"
     # --with_tracking
 
     # --chat_template_name r1_simple_chat_postpend_think \ Qwen/Qwen2.5-0.5B

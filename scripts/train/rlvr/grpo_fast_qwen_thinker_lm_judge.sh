@@ -6,7 +6,7 @@ exp_name="0412_qwen2.5_7B_thinker_grpo_fast_llm_judge__gpt-4o_quality_ref_${RAND
 python mason.py \
     --description $exp_name \
     --cluster ai2/jupiter-cirrascale-2 \
-    --workspace ai2/tulu-3-dev \
+    --workspace ai2/tulu-3-results \
     --priority high \
     --preemptible \
     --num_nodes 4 \

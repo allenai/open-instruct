@@ -136,6 +136,8 @@ class Args:
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
     """The maximum prompt token length to use for the dataset"""
+    # chat_template_name: str = "tulu"
+    # """The name of the chat template to use for the dataset"""
 
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -1104,7 +1106,7 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
         # breakpoint()
         with Timer("💰 [Data Preparation Thread] Calculating rewards"):
-            scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons, decoded_queries)
+            scores, reward_metrics, lm_judge_reason_traces = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons, decoded_queries)
             # total_api_cost.append(reward_metrics.get("total_api_cost", 0))
             # # print api_cost
             # print(f"[Reward Preparation Thread] ${api_cost=}")
@@ -1202,6 +1204,7 @@ def data_preparation_thread(
                 "ground_truths": ground_truths,
                 "datasets": datasets,
                 "training_step": training_step,
+                "lm_judge_reason_traces": lm_judge_reason_traces,
                 **reward_metrics,
             }
             os.makedirs(args.output_dir, exist_ok=True)
@@ -1647,6 +1650,7 @@ if __name__ == "__main__":
         queries: Optional[List[str]] = None,
     ) -> List[float]:
         scores = [0] * len(decoded_responses)
+        judge_reasonings = [""] * len(decoded_responses)
         metrics = {}
         # breakpoint()
 
@@ -1691,8 +1695,7 @@ if __name__ == "__main__":
             if not queries:
                 raise ValueError("Queries must be provided for llm judge reward.")
             with Timer("[Data Preparation Thread] Calculating rewards -- 🤖 Applying llm judge reward"):
-                # breakpoint()
-                llm_judge_rewards, per_func_rewards, api_cost = apply_llm_verifier_reward(
+                llm_judge_rewards, per_func_rewards, api_cost, judge_reasoning = apply_llm_verifier_reward(
                     responses,
                     decoded_responses,
                     ground_truths,
@@ -1706,6 +1709,7 @@ if __name__ == "__main__":
                     raise ValueError(f"{len(llm_judge_rewards)=} != {len(scores)=}")
                 for i in range(len(llm_judge_rewards)):
                     scores[i] = llm_judge_rewards[i] + scores[i]
+                    judge_reasonings[i] = judge_reasoning
 
                 np_llm_judge_rewards = np.array(llm_judge_rewards)
                 np_api_cost = np.array(api_cost)
@@ -1746,6 +1750,6 @@ if __name__ == "__main__":
                 metrics["objective/arithmetic_score"] = np.array(arithmetic_rewards).mean()
                 metrics["objective/arithmetic_correct_rate"] = (np.array(arithmetic_rewards) > 0.0).mean()
 
-        return scores, metrics
+        return scores, metrics, judge_reasonings
 
     main(args, tokenizer_config, model_config, reward_fn)

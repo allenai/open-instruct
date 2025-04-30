@@ -1153,10 +1153,17 @@ def upload_metadata_to_hf(
     os.remove("tmp.json")
 
 
-def extract_user_query(conversation: str) -> str:
+def extract_user_query(conversation: str, chat_template_name: str = None) -> str:
     # Define the regex pattern
-    pattern = r"<answer>.*?</answer>\.\n\nUser: (.*?)\nAssistant: <think>"
-    # Search for the pattern in the input string
+    # if chat_template_name == "tulu_thinker":
+    #     pattern = r"<answer>.*?</answer>\.\n\nUser: (.*?)\nAssistant: <think>"
+    # elif chat_template_name == "tulu_thinker_r1_style":
+    #     pattern = r"<answer>.*?</answer>\.\n\nUser: (.*?)\n<|assistant|>\n<think>"
+    # else:
+    #     # runtime error, the template is not supported
+    #     raise ValueError(f"Can not extract user query for template {chat_template_name}.")
+    pattern = r"\n\n<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
+
     match = re.search(pattern, conversation, re.DOTALL)
     # Return the captured group if found, else return None
     return match.group(1).strip() if match else None

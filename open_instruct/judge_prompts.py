@@ -53,7 +53,7 @@ Notes:
 general_quality_rubric_template = """
 ### Task Description
 Please act as an impartial judge and evaluate the quality of the response provided by an
-AI assistant to the user query displayed below. You are shown the user query, assistant response, and the evaluation criteria.
+AI assistant to the user query displayed below. You are shown the user query, assistant response, and an evaluation criteria.
 
 Notes:
 - Each response must be evaluated against these criteria independently.

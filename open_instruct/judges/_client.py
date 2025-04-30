@@ -6,6 +6,7 @@ import litellm
 from openai import AzureOpenAI
 
 import time
+import os
 
 from pydantic import BaseModel
 from tenacity import retry, wait_random_exponential, stop_after_attempt, AsyncRetrying
@@ -39,23 +40,25 @@ class CompletionWithMetadata:
         return getattr(self.response, name, None)
 
 def llm_client():
+    
     try:
-        # Attempt to import litellm
+        # # Attempt to import litellm
         import litellm
+        # fall back to azure openai if litellm is not available
+        # client = AzureOpenAI(
+        #     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+        #     api_version="2024-12-01-preview", #"2024-07-18", # 2024-11-20 for gpt-4o
+        #     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+        # )
     except ImportError:
         # fallback to async openai if litellm is not available
         print("litellm not found, falling back to openai.AsyncOpenAI")
         client = openai.AsyncOpenAI()
         return client
-        # # fall back to azure openai if litellm is not available
-        # client = AzureOpenAI(
-        #     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        #     api_version="2025-04-14",
-        #     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
-        # )
+
     else:
-        # Return litellm module object if import succeeds
-        return litellm
+        # Return client/litellm module object if import succeeds
+        return litellm # client #litellm
 
 ### V2 of async completion with retry
 def track_cost_callback(kwargs, completion_response, start_time, end_time):
@@ -130,6 +133,7 @@ async def async_get_completion(
 
             # --- Case 2: Not using instructor (no response_model) ---
             else:
+                # breakpoint()
                 if isinstance(client_or_module, openai.AsyncOpenAI):
                     # Use AsyncOpenAI client directly
                     response = await client_or_module.chat.completions.create(
@@ -140,6 +144,18 @@ async def async_get_completion(
                         seed=seed,
                         response_format=response_format,
                     )
+
+                elif isinstance(client_or_module, openai.lib.azure.AzureOpenAI):
+                    # Use AsyncOpenAI client directly
+                    response = await client_or_module.chat.completions.create(
+                        model=f"{model}-standard",
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        messages=messages,
+                        seed=seed,
+                        response_format=response_format,
+                    )
+
                 elif hasattr(client_or_module, "__name__") and client_or_module.__name__ == "litellm":
                     # litellm.acompletion is already async
                     response = await client_or_module.acompletion(

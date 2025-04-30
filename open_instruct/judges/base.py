@@ -186,6 +186,7 @@ class BaseJudge:
             cost = 0.0001
             response_time = 0.0
             pass
+
         return reasoning, score, cost, response_time
 
     @abstractmethod

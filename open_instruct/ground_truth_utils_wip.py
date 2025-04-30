@@ -10,8 +10,9 @@ import logging
 import re
 import os
 import string
+from collections import Counter
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Union, Optional, Tuple, Literal
+from typing import Any, Dict, List, Union, Optional, Tuple, Literal, Callable
 
 from openai import OpenAI
 from textwrap import dedent
@@ -56,7 +57,7 @@ class VerifierFunction(ABC):
         self.weight = weight
 
     @abstractmethod
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: Any) -> float:
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None) -> Tuple[float, float, str]:
         """
         Evaluate the given prediction against the ground truth (or constraint).
 
@@ -82,11 +83,12 @@ class GSM8KVerifier(VerifierFunction):
     def __init__(self) -> None:
         super().__init__("gsm8k", weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> float:
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> float:
+        api_cost = 0.0
         response = re.sub(r"(\d),(\d)", r"\1\2", prediction)
         numbers = re.findall(r"[-+]?\d*\.\d+|\d+", response)
         extracted = numbers[-1] if numbers else response
-        return float(str(extracted).lower() == str(label).lower())
+        return float(str(extracted).lower() == str(label).lower()), api_cost
 
 
 class MathVerifier(VerifierFunction):
@@ -97,10 +99,11 @@ class MathVerifier(VerifierFunction):
     last LaTeX answer) and compares the extracted answers to the ground truth.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, judge_type=None, model_name=None) -> None:
         super().__init__("math", weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str,  query: Optional[str] = None) -> bool:
+        api_cost = 0.0
         raw_answer = prediction
         all_answers = []
 
@@ -133,8 +136,49 @@ class MathVerifier(VerifierFunction):
         # Compare each candidate answer to the ground truth.
         for answer in all_answers:
             if is_equiv(answer, label) or hendrycks_is_equiv(answer, label):
-                return 1.0
+                return 1.0, api_cost
         return 0.0
+
+    async def async_call(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> bool:
+        """
+        Async version of __call__ that directly awaits _judge without using asyncio.run()
+        """
+        api_cost = 0.0
+        reasoning = None
+        raw_answer = prediction
+        all_answers = []
+
+        # Attempt extraction from \boxed{}.
+        boxed_answer = last_boxed_only_string(raw_answer)
+        if boxed_answer is not None:
+            try:
+                boxed_answer = remove_boxed(boxed_answer)
+            except AssertionError:
+                boxed_answer = None
+        if boxed_answer is not None:
+            all_answers.append(boxed_answer)
+
+        # Attempt extraction via Minerva format.
+        minerva_answer = normalize_final_answer(get_unnormalized_answer(raw_answer))
+        if minerva_answer is not None and minerva_answer != "[invalidanswer]":
+            all_answers.append(minerva_answer)
+
+        # Attempt extraction from the last LaTeX-formatted answer.
+        if not all_answers:
+            dollars = [m.start() for m in re.finditer(r"\$", raw_answer)]
+            if len(dollars) > 1:
+                answer = normalize_final_answer(raw_answer[dollars[-2] + 1 : dollars[-1]])
+                all_answers.append(answer)
+
+        # Fallback to the full output.
+        if not all_answers:
+            all_answers.append(normalize_final_answer(prediction))
+        breakpoint()
+        # Compare each candidate answer to the ground truth.
+        for answer in all_answers:
+            if is_equiv(answer, label) or hendrycks_is_equiv(answer, label):
+                return 1.0, api_cost, reasoning
+        return 0.0, api_cost, reasoning
 
 
 class StrictMathVerifier(VerifierFunction):
@@ -145,7 +189,7 @@ class StrictMathVerifier(VerifierFunction):
     def __init__(self) -> None:
         super().__init__("strict_math", weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> Tuple[float, float, str]:
         raw_answer = prediction
         all_answers = []
         minerva_answer = normalize_final_answer(get_unnormalized_answer(raw_answer))
@@ -157,6 +201,25 @@ class StrictMathVerifier(VerifierFunction):
             if is_equiv(answer, label) or hendrycks_is_equiv(answer, label):
                 return 1.0
         return 0.0
+    
+    async def async_call(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> Tuple[float, float, str]:
+        """
+        Async version of __call__ that directly awaits _judge without using asyncio.run()
+        """
+        api_cost = 0.0
+        reasoning = None
+        raw_answer = prediction
+        all_answers = []
+        minerva_answer = normalize_final_answer(get_unnormalized_answer(raw_answer))
+        if minerva_answer is not None and minerva_answer != "[invalidanswer]":
+            all_answers.append(minerva_answer)
+        if not all_answers:
+            all_answers.append(normalize_final_answer(prediction))
+        breakpoint()
+        for answer in all_answers:
+            if is_equiv(answer, label) or hendrycks_is_equiv(answer, label):
+                return 1.0, api_cost, reasoning
+        return 0.0, api_cost, reasoning
 
 
 class IFEvalVerifier(VerifierFunction):
@@ -171,7 +234,9 @@ class IFEvalVerifier(VerifierFunction):
     def __init__(self) -> None:
         super().__init__("ifeval", weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict]) -> bool:
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], query: Optional[str] = None) -> bool:
+        api_cost = 0.0
+        reasoning = None
         constraint = label
         answer = prediction.split("<|assistant|>\n")[-1].strip()
         if isinstance(constraint, str):
@@ -186,79 +251,58 @@ class IFEvalVerifier(VerifierFunction):
             return func(prediction)
         return float(func(answer, **non_none_args))
     
-
-# class LMJudgeVerifier(VerifierFunction):
-#     """
-#     Verifier for general tasks that delegates evaluation to LLM Judges (classifier or grader)
-#     specified in the label.
-
-#     The rubrics may be a JSON string or a dictionary containing criteria based on which
-#     the response can be evaluated.
-#     """
-
-#     def __init__(self) -> None:
-#         super().__init__("general", weight=1.0)
-
-#     def __call__(self, query: str, prediction: str, label: Union[str, List], subtask: str = None) -> bool:
-#         """
-#         Evaluate the given prediction against the ground truth (and an optional rubric).
-
-#         Args:
-#             query (str): The user query.
-#             prediction (str): The model output.
-#             label (Any): The ground truth answer or evaluation rubric.
-#             subtask (str): Optional subtask name for the selecting evaluation prompt.
-
-#         Returns:
-#             int: Reward score. Can be binary (0/1) or continuous.
-#         """
-#         answer = prediction.split("<|assistant|>\n")[-1].strip()
-#         if subtask is None:
-#             subtask = "general"
-#         if subtask not in JUDGE_PROMPT_MAP:
-#             raise ValueError(f"Not found the subtask prompt: {subtask}")
-        
-#         user_prompt = JUDGE_PROMPT_MAP[subtask]
-#         user_prompt = dedent(user_prompt).format(input=query, output=answer)
-        
-
+    async def async_call(self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], query: Optional[str] = None) -> Tuple[float, float, str]:
+        """
+        Async version of __call__ that directly awaits _judge without using asyncio.run()
+        """
+        api_cost = 0.0
+        reasoning = None
+        constraint = label
+        answer = prediction.split("<|assistant|>\n")[-1].strip()
+        if isinstance(constraint, str):
+            constraint = json.loads(constraint)
+        if "func_name" not in constraint:
+            logger.warning("Constraint missing 'func_name': %s", constraint)
+            return 0.0, api_cost, reasoning
+        func_name = constraint.pop("func_name")
+        func = IF_FUNCTIONS_MAP[func_name]
+        non_none_args = {k: v for k, v in constraint.items() if v is not None}
+        if not constraint:
+            return func(prediction), api_cost, reasoning
+        return float(func(answer, **non_none_args)), api_cost, reasoning
     
-#     def get_judgement(
-#         self,
-#         judge_prompt: str,
-#         input: str,
-#         output: str = None,
-#         expected: str = None,
-#     ) -> Judgment:
-#         """
-#         Judge the input and return a verdict.
-#         """
-#         system_prompt = None
-#         user_prompt = dedent(judge_prompt)
-#         # select the judge class based on the subtask
 
+def f1_score(prediction, ground_truth):
+    prediction_tokens = normalize_answer(prediction).split()
+    ground_truth_tokens = normalize_answer(ground_truth).split()
+    common = Counter(prediction_tokens) & Counter(ground_truth_tokens)
+    num_same = sum(common.values())
+    if num_same == 0:
+        return {"f1": 0, "precision": 0, "recall": 0}
+    precision = 1.0 * num_same / len(prediction_tokens)
+    recall = 1.0 * num_same / len(ground_truth_tokens)
+    f1 = (2 * precision * recall) / (precision + recall)
+    return {"f1": f1, "precision": precision, "recall": recall}
 
-#         reasoning, score, cost, response_time = self._judge(
-#             user_prompt=user_prompt,
-#             system_prompt=system_prompt,
-#         )
-#         return Judgment(reasoning=reasoning, score=score, cost=cost, response_time=response_time)
+def normalize_answer(s: str) -> str:
+    """
+    Normalize the answer by lowercasing, removing punctuation, articles,
+    and extra whitespace.
 
-    
-# class LMJudgeVerifierGrader(VerifierFunction):
-#     """
-#     Verifier for general tasks that delegates evaluation to LLM Judges (classifier or grader)
-#     specified in the constraint.
+    Based on:
+    https://github.com/huggingface/evaluate/blob/main/metrics/squad/compute_score.py
+    """
 
-#     The rubrics may be a JSON string or a dictionary containing criteria based on which
-#     the response can be evaluated.
-#     """
+    def remove_articles(text: str) -> str:
+        return re.sub(r"\b(a|an|the)\b", " ", text)
 
-#     def __init__(self) -> None:
-#         super().__init__("general", weight=1.0)
+    def white_space_fix(text: str) -> str:
+        return " ".join(text.split())
 
-#     def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], rubric: Union[str, List] = None) -> bool:
-#         ### TODO: raise notimplemented error
+    def remove_punc(text: str) -> str:
+        return "".join(ch for ch in text if ch not in set(string.punctuation))
+
+    return white_space_fix(remove_articles(remove_punc(s.lower())))
 
 
 class LMJudgeVerifier(VerifierFunction):
@@ -272,9 +316,9 @@ class LMJudgeVerifier(VerifierFunction):
 
     def __init__(
         self,
-        name: str = "general",
+        # name: str = "general",
         judge_type: str = "quality",
-        weight: float = 1.0,
+        # weight: float = 1.0,
         model_name: str = "gpt-4o-mini",
         threshold: float = 0.5,
     ) -> None:
@@ -288,19 +332,10 @@ class LMJudgeVerifier(VerifierFunction):
             model_name (str): LLM model to use for judging
             threshold (float): Threshold for binary decisions (0/1)
         """
-        super().__init__(name, weight)
+        super().__init__("general", weight=1.0)
         self.judge_type = judge_type
         self.model_name = model_name
         self.threshold = threshold
-        # self.judge_map = {
-        #     "quality": JudgeQuality,
-        #     # Add more judge types here as needed
-        #     "factuality": JudgeFactuality,
-        #     "relevance": JudgeRelevance,
-        #     "correctness": JudgeCorrectness,
-        #     "groundedness": JudgeGroundedness,
-        #     "harmfulness": JudgeHarmfulness,
-        # }
         
         if judge_type not in JUDGE_CLASS_MAP:
             raise ValueError(f"Unsupported judge type: {judge_type}. Available types: {list(JUDGE_CLASS_MAP.keys())}")
@@ -314,7 +349,7 @@ class LMJudgeVerifier(VerifierFunction):
         label: Any,
         query: Optional[str] = None,
         # criteria: Optional[Union[str, List]] = None
-    ) -> float:
+    ) -> Tuple[float, float]:
         """
         Evaluate the given prediction against criteria using an LLM judge.
 
@@ -330,47 +365,12 @@ class LMJudgeVerifier(VerifierFunction):
             float: Score between 0 and 1
         """
         # Clean prediction if needed
-
         answer = extract_final_answer(prediction)
-        # answer = prediction.split("<|assistant|>\n")[-1].strip() if "<|assistant|>" in prediction else prediction.strip()
-        
-        # # Determine proper prompt template
-        # if self.judge_type is None:
-        #     subtask = "general"
+
+        # Ensure judge_type is valid
         if self.judge_type not in JUDGE_PROMPT_MAP:
             logger.warning(f"Subtask prompt not found: {self.judge_type}, falling back to general")
-            self.judge_type = "general"
-        
-        # # Format judge prompt with appropriate inputs
-        # judge_prompt = JUDGE_PROMPT_MAP[self.judge_type]
-        
-        # # Handle criteria if provided
-        # if criteria:
-        #     if isinstance(criteria, str):
-        #         criteria_str = json.loads(criteria, indent=2)
-        #     else:
-        #         criteria_str = criteria
-            
-        #     # Add criteria to prompt if template supports it
-        #     if "{rubric}" in judge_prompt:
-        #         judge_prompt = dedent(judge_prompt).format(
-        #             input=query, 
-        #             output=answer,
-        #             criteria=criteria_str
-        #         )
-        #     else:
-        #         # Append criteria to prompt if no placeholder exists
-        #         judge_prompt = dedent(judge_prompt).format(
-        #             input=query, 
-        #             output=answer
-        #         )
-        #         judge_prompt += f"\n\nPlease evaluate based on the following criteria: {criteria_str}"
-        # else:
-        #     judge_prompt = dedent(judge_prompt).format(
-        #         input=query, 
-        #         output=answer
-        #     )
-
+            self.judge_type = "quality"
         
             
         # Get judgment from appropriate judge
@@ -389,7 +389,7 @@ class LMJudgeVerifier(VerifierFunction):
             logger.warning(f"Unexpected score type: {type(judgment.score)}, defaulting to 0.0")
             score = 0.0
 
-        return score, judgment.cost, judgment.response_time
+        return score, judgment.cost #, judgment.response_time
     
     async def async_call(
         self, 
@@ -397,7 +397,7 @@ class LMJudgeVerifier(VerifierFunction):
         prediction: str, 
         label: Any,
         query: Optional[str] = None,
-    ) -> Tuple[float, float, float]:
+    ) -> Tuple[float, float, str]:
         """
         Async version of __call__ that directly awaits _judge without using asyncio.run()
 
@@ -431,6 +431,7 @@ class LMJudgeVerifier(VerifierFunction):
             user_prompt=user_prompt,
             system_prompt=None
         )
+
         
         # Process the score same as in __call__
         if isinstance(score, (int, float)):
@@ -441,7 +442,7 @@ class LMJudgeVerifier(VerifierFunction):
             logger.warning(f"Unexpected score type: {type(score)}, defaulting to 0.0")
             final_score = 0.0
         
-        return final_score, cost, response_time
+        return final_score, cost, f"{reasoning} [SCORE]: {final_score}" #, response_time
 
         
     def get_judgement(
@@ -496,29 +497,47 @@ class LMJudgeVerifier(VerifierFunction):
             return float(matches[0])
     
             
-        raise ValueError(f"Could not extract score from string: {score_str}")     
-        
+        raise ValueError(f"Could not extract score from string: {score_str}")
 
 
-def normalize_answer(s: str) -> str:
+class StringMatcherVerifier(VerifierFunction):
     """
-    Normalize the answer by lowercasing, removing punctuation, articles,
-    and extra whitespace.
+    Verifier for tasks that require string matching.
 
-    Based on:
-    https://github.com/huggingface/evaluate/blob/main/metrics/squad/compute_score.py
+    It checks if the model output matches the ground truth answer.
     """
 
-    def remove_articles(text: str) -> str:
-        return re.sub(r"\b(a|an|the)\b", " ", text)
+    def __init__(self) -> None:
+        super().__init__("string_matcher", weight=1.0)
 
-    def white_space_fix(text: str) -> str:
-        return " ".join(text.split())
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> Tuple[bool, float, str]:
+        api_cost = 0.0
+        reasoning = None
+        if "<answer>" not in prediction or "</answer>" not in prediction:
+            return False, api_cost, reasoning
+        # extract out of answer tag
+        answer_string = prediction.split("<answer>")[-1].split("</answer>")[0]
+        # normalize
+        return float(normalize_answer(answer_string) == normalize_answer(label)), api_cost, reasoning
 
-    def remove_punc(text: str) -> str:
-        return "".join(ch for ch in text if ch not in set(string.punctuation))
 
-    return white_space_fix(remove_articles(remove_punc(s.lower())))
+class F1Verifier(VerifierFunction):
+    """
+    Verifier that computes the string F1 score between the prediction and the label.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("string_f1", weight=1.0)
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> Tuple[bool, float, str]:
+        api_cost = 0.0
+        reasoning = None
+        # remove thinking section from the prediction
+        prediction = prediction.split("</think>")[-1]
+        # remove answer tags from the prediction
+        prediction = prediction.replace("<answer>", "").replace("</answer>", "")
+        # return f1 score
+        return f1_score(prediction, label)["f1"], api_cost, reasoning
 
 
 class FlanVerifier(VerifierFunction):
@@ -551,14 +570,32 @@ class MaxLenVerifier(VerifierFunction):
         return 0 if len(tokenized_prediction) > max_length else len(tokenized_prediction) / max_length
 
 
-def get_all_verifiers() -> Dict[str, VerifierFunction]:
+# def get_all_verifiers() -> Dict[str, VerifierFunction]:
+#     """
+#     Auto-generate a dictionary mapping verifier names to their instances.
+#     """
+#     verifiers: Dict[str, VerifierFunction] = {}
+#     for subclass in VerifierFunction.__subclasses__():
+#         instance = subclass()
+#         verifiers[instance.name.lower()] = instance
+#     return verifiers
+
+def get_all_verifiers() -> Dict[str, Callable[..., VerifierFunction]]:
     """
-    Auto-generate a dictionary mapping verifier names to their instances.
+    Auto-generate a dictionary mapping verifier names to factory functions
+    that create instances of verifier classes.
     """
-    verifiers: Dict[str, VerifierFunction] = {}
+    verifiers = {}
+    
     for subclass in VerifierFunction.__subclasses__():
-        instance = subclass()
-        verifiers[instance.name.lower()] = instance
+        # Create a factory function for each subclass
+        def factory_func(cls=subclass, **kwargs):
+            return cls(**kwargs)
+        
+        # Get a temporary instance just to get the name
+        temp_instance = subclass()
+        verifiers[temp_instance.name.lower()] = factory_func
+        
     return verifiers
 
 

@@ -40,8 +40,8 @@ from rich.table import Table
 from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
-from open_instruct.ground_truth_utils import REWARD_FN_MAPPING
-from open_instruct.ground_truth_utils_wip import LMJudgeVerifier
+# from open_instruct.ground_truth_utils import REWARD_FN_MAPPING
+from open_instruct.ground_truth_utils_wip import LMJudgeVerifier, REWARD_FN_MAPPING
 from open_instruct.utils import retry_on_exception
 
 logger = logging.getLogger(__name__)
@@ -298,6 +298,7 @@ async def _apply_llm_verifier_reward_async(
     rewards = []
     per_func_rewards = []
     total_cost = []
+    judge_reasonings = []
 
     # Create tasks for each response
     tasks = []
@@ -334,12 +335,13 @@ async def _apply_llm_verifier_reward_async(
     results = await asyncio.gather(*tasks)
     
     # Process results
-    for reward, per_func_reward, cost in results:
+    for reward, per_func_reward, cost, judge_reason in results:
         rewards.append(reward)
         per_func_rewards.append(per_func_reward)
         total_cost.append(cost)
+        judge_reasonings.append(judge_reason)
     
-    return rewards, per_func_rewards, total_cost
+    return rewards, per_func_rewards, total_cost, judge_reasonings
 
 async def _process_single_response(
     tok_prediction,
@@ -355,12 +357,16 @@ async def _process_single_response(
     reward = 0
     per_func_reward = {}
     cost = 0
-    
-    reward_func = LMJudgeVerifier(judge_type=judge_type, model_name=judge_model)
+
+    # reward_func = LMJudgeVerifier(judge_type=judge_type, model_name=judge_model)
     
     # For each ground truth and dataset combination, create tasks
     judgment_tasks = []
     for gt, ds in zip(ground_truth_list, dataset_list):
+
+        verifier_name, judge_type = ds.lower().split("-")
+        # judge_type if ds.lower() not in ['factual information (general or professional), history or common practices', 'multilinguality or translation'] else "quality_ref"
+        reward_func = REWARD_FN_MAPPING.get(verifier_name)(judge_type=judge_type, model_name=judge_model)
         if reward_func is None:
             logger.warning("No judge verifier found for dataset %s. Skipping reward.", ds)
             continue
@@ -378,7 +384,7 @@ async def _process_single_response(
     judgment_results = await asyncio.gather(*[task for task, _, _ in judgment_tasks])
     
     # Process the results
-    for (reward_result, api_cost, response_time), (_, ds, weight) in zip(judgment_results, judgment_tasks):
+    for (reward_result, api_cost, reasoning), (_, ds, weight) in zip(judgment_results, judgment_tasks):
         logger.info("Applying rubric-based or llm grader reward 🤗")
         actual_reward_mult = 10.0 if "rubric" in judge_type else reward_mult
         reward_value = actual_reward_mult * reward_result * weight
@@ -386,8 +392,8 @@ async def _process_single_response(
         reward += reward_value
         per_func_reward[ds] = per_func_reward.get(ds, 0) + reward_value
         cost += api_cost
-    
-    return reward, per_func_reward, cost
+    # breakpoint()
+    return reward, per_func_reward, cost, reasoning
 
 
 def forward(

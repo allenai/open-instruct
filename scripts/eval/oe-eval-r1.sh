@@ -136,37 +136,37 @@ else
 fi
 
 # Define default tasks if no custom tasks provided
-# DEFAULT_TASKS=(
-#     "gsm8k::tulu"
-#     "bbh:cot-v1::tulu"
-#     "drop::llama3"
-#     "minerva_math::tulu"
-#     "codex_humaneval::tulu"
-#     "codex_humanevalplus::tulu"
-#     "ifeval::tulu"
-#     "popqa::tulu"
-#     "mmlu:mc::tulu"
-#     "mmlu:cot::summarize"
-#     "alpaca_eval_v2::tulu"
-#     "truthfulqa::tulu"
-# )
-
-# Hamish list of reasoning tasks:
 DEFAULT_TASKS=(
-    "gsm8k::hamish_zs_reasoning"
-    # "bbh:cot::hamish_zs_reasoning"
-    # "minerva_math::hamish_zs_reasoning"
+    "gsm8k::tulu"
+    "bbh:cot-v1::tulu"
+    "drop::llama3"
+    "minerva_math::tulu"
+    "codex_humaneval::tulu"
     # "codex_humanevalplus::tulu"
     # "ifeval::tulu"
     # "popqa::tulu"
+    "mmlu:mc::tulu"
     # "mmlu:cot::summarize"
     # "alpaca_eval_v2::tulu"
-    # "minerva_math_500::hamish_zs_reasoning"
-    # "aime::hamish_zs_reasoning"
-    # "zebralogic::hamish_zs_reasoning"
-    # "agi_eval_english:0shot_cot::hamish_zs_reasoning"
-    # "gpqa:0shot_cot::hamish_zs_reasoning"
+    "truthfulqa::tulu"
 )
+
+# Hamish list of reasoning tasks:
+# DEFAULT_TASKS=(
+#     "gsm8k::hamish_zs_reasoning"
+#     "bbh:cot::hamish_zs_reasoning"
+#     "minerva_math::hamish_zs_reasoning"
+#     "codex_humanevalplus::tulu"
+#     "ifeval::tulu"
+#     "popqa::tulu"
+#     "mmlu:cot::summarize"
+#     "alpaca_eval_v2::tulu"
+#     "minerva_math_500::hamish_zs_reasoning"
+#     "aime::hamish_zs_reasoning"
+#     "zebralogic::hamish_zs_reasoning"
+#     "agi_eval_english:0shot_cot::hamish_zs_reasoning"
+#     "gpqa:0shot_cot::hamish_zs_reasoning"
+# )
 UNSEEN_TASKS=(
     "agi_eval_english:0shot_cot::tulu3"
     "gpqa:0shot_cot::tulu3"
