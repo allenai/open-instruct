@@ -6,6 +6,7 @@ from collections.abc import Sequence
 import copy
 from dataclasses import dataclass
 import re
+import time
 import warnings
 import requests
 import traceback
@@ -23,7 +24,9 @@ from concurrent.futures import ThreadPoolExecutor  # add import for async execut
 class ToolOutput:
     output: str
     called: bool
-    success: bool
+    error: str
+    timeout: bool
+    runtime: float
 
 class Tool:
     def __init__(self, start_str: str, end_str: str):
@@ -69,14 +72,17 @@ class PythonCodeTool(Tool):
 
         code_blocks = re.findall(re_str, prompt, re.DOTALL)
         all_outputs = []
-        
+        timeout = False
+        error = ""
         if len(code_blocks) == 0:
-            return ToolOutput(output="", called=False, success=False)
+            return ToolOutput(output="", called=False, error="", timeout=False, runtime=0)
 
         # Only execute the last code block
         code = code_blocks[-1]
+
         # Define timeout in seconds
         timeout_seconds = 3
+        start_time = time.time()
         try:
             # Call the FastAPI endpoint to execute the code with client-side timeout
             response = requests.post(
@@ -88,27 +94,18 @@ class PythonCodeTool(Tool):
             # Parse the response
             result = response.json()
             
-            # Handle the response based on success/failure
-            if result["success"]:
-                output = result["output"]
-                error = result.get("error", "")
-                
-                # Combine output and error if both exist
-                if error:
-                    if output:
-                        all_outputs.append(output + "\n" + error)
-                    else:
-                        all_outputs.append(error)
-                else:
-                    all_outputs.append(output)
-            else:
-                # Handle execution failure
-                error_message = result.get("error", "Unknown error occurred")
-                all_outputs.append(error_message)
-                
+            # Process the API response
+            output = result["output"]
+            error = result.get("error") or ""
+            
+            all_outputs.append(output)
+            if len(error) > 0:
+                all_outputs.append("\n" + error)
+
         except requests.Timeout:
             # Handle client-side timeout specifically
             all_outputs.append(f"Timeout after {timeout_seconds} seconds")
+            timeout = True
             
         except Exception as e:
             # Capture any other exceptions that occur during the API call
@@ -117,7 +114,7 @@ class PythonCodeTool(Tool):
             all_outputs.append(error_message + error_traceback)
         
         # Return all captured outputs as a single string
-        return ToolOutput(output='\n'.join(all_outputs), called=True, success=True)
+        return ToolOutput(output='\n'.join(all_outputs), called=True, error=error, timeout=timeout, runtime=time.time() - start_time)
 
 
 
@@ -216,6 +213,11 @@ class ToolUseLLM(LLM):
         total_out_toks = 0
         tokenizer = self.get_tokenizer()
         num_calls = defaultdict(int)
+        timeout = defaultdict(bool)
+        tool_error = defaultdict(str)
+        tool_output = defaultdict(str)
+        tool_runtime = defaultdict(float)
+        tool_called = defaultdict(bool)
         concat_outputs = {}  # concat multi-turn response token ids, tool token ids
         masks = defaultdict(list)
         while True:
@@ -229,6 +231,11 @@ class ToolUseLLM(LLM):
                     last_prompt_token_ids = last_output.prompt_token_ids
                     last_token_ids = last_o.token_ids
                     tool_output_token_ids = tokenizer.encode("<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False)
+                    timeout[req_id] = tool_result.timeout
+                    tool_error[req_id] += "" if tool_result.error is None else tool_result.error
+                    tool_output[req_id] += tool_result.output
+                    tool_runtime[req_id] += tool_result.runtime
+                    tool_called[req_id] = True
                     # Edge case 1: clip against model context length
                     prompt_and_tool_output_token = last_prompt_token_ids + last_token_ids + tool_output_token_ids
                     num_calls[req_id] += 1
@@ -246,6 +253,12 @@ class ToolUseLLM(LLM):
                     elif len(tool_output_token_ids) > remaining:
                         tool_output_token_ids = tool_output_token_ids[:remaining]
                     concat_outputs[req_id].outputs[0].token_ids.extend(tool_output_token_ids)
+                    if len(concat_outputs[req_id].outputs[0].token_ids) > self.single_n_sampling_params.max_tokens:
+                        breakpoint()
+                        raise ValueError(
+                            f"ToolUseLLM generated more response tokens than max_tokens! "
+                            f"len(concat_outputs[req_id].outputs[0].token_ids): {len(concat_outputs[req_id].outputs[0].token_ids)}"
+                        )
                     masks[req_id].extend([0] * len(tool_output_token_ids))
                     new_sample_tokens = self.single_n_sampling_params.max_tokens - len(masks[req_id])
                     can_make_new_request = can_make_new_request and new_sample_tokens > 0
@@ -283,6 +296,12 @@ class ToolUseLLM(LLM):
                             concat_outputs[output.request_id] = output
                         else:
                             concat_outputs[output.request_id].outputs[0].token_ids.extend(o.token_ids)
+                            if len(concat_outputs[output.request_id].outputs[0].token_ids) > self.single_n_sampling_params.max_tokens:
+                                breakpoint()
+                                raise ValueError(
+                                    f"ToolUseLLM generated more response tokens than max_tokens! "
+                                    f"len(concat_outputs[output.request_id].outputs[0].token_ids): {len(concat_outputs[output.request_id].outputs[0].token_ids)}"
+                                )
                         masks[output.request_id].extend([1] * len(o.token_ids))
                         for stop_str in self.single_n_sampling_params.stop:
                             if o.text.endswith(stop_str) and stop_str in self.tools and num_calls[output.request_id] <= self.max_tool_calls:
@@ -324,6 +343,11 @@ class ToolUseLLM(LLM):
             assert req_id in concat_outputs
             setattr(concat_outputs[req_id].outputs[0], "mask", masks[req_id])
             setattr(concat_outputs[req_id].outputs[0], "num_calls", num_calls[req_id])
+            setattr(concat_outputs[req_id].outputs[0], "timeout", timeout[req_id])
+            setattr(concat_outputs[req_id].outputs[0], "tool_error", tool_error[req_id])
+            setattr(concat_outputs[req_id].outputs[0], "tool_output", tool_output[req_id])
+            setattr(concat_outputs[req_id].outputs[0], "tool_runtime", tool_runtime[req_id])
+            setattr(concat_outputs[req_id].outputs[0], "tool_called", tool_called[req_id])
             if len(masks[req_id]) != len(concat_outputs[req_id].outputs[0].token_ids):
                 visualize_token_role(concat_outputs[req_id].outputs[0].token_ids, masks[req_id], tokenizer)
                 breakpoint()
@@ -335,10 +359,12 @@ class ToolUseLLM(LLM):
         # Merge n completions into the same outputs of the same prompt
         merged_outputs = {}
         for req_id in concat_outputs:
-            assert (
-                len(concat_outputs[req_id].outputs[0].token_ids)
-                <= self.single_n_sampling_params.max_tokens
-            ), "ToolUseLLM generated more response tokens than max_tokens!"
+            if len(concat_outputs[req_id].outputs[0].token_ids) > self.single_n_sampling_params.max_tokens:
+                breakpoint()
+                raise ValueError(
+                    f"ToolUseLLM generated more response tokens than max_tokens! "
+                    f"len(concat_outputs[req_id].outputs[0].token_ids): {len(concat_outputs[req_id].outputs[0].token_ids)}"
+                )
             real_req_id, _ = req_id.split("-")
             if real_req_id not in merged_outputs:
                 merged_outputs[real_req_id] = concat_outputs[req_id]
@@ -418,7 +444,6 @@ and you will get the output between the <output> and </output> tags.
             # visualize_token(o.token_ids, tok)
     print(f"{sampling_params.n=}")
     print("debugging tests 2 all done")
-    breakpoint()
     # breakpoint()
     # More serious benchmarks
 
@@ -440,7 +465,10 @@ and you will get the output between the <output> and </output> tags.
     from open_instruct.dataset_transformation import get_cached_dataset_tulu
     from open_instruct.dataset_transformation import TokenizerConfig
     
-    tc = TokenizerConfig(tokenizer_name_or_path=model_name, chat_template_name="r1_simple_chat_postpend_think_tools2")
+    tc = TokenizerConfig(
+        tokenizer_name_or_path=model_name,
+        chat_template_name="r1_simple_chat_postpend_think_tools7",
+    )
     transform_fn_args = [
         {},
         {
@@ -459,6 +487,19 @@ and you will get the output between the <output> and </output> tags.
         dataset_local_cache_dir="/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache",
     )
     outputs = llm.generate(prompt_token_ids=train_dataset["input_ids_prompt"][:30], sampling_params=sampling_params)
+    # calculate the percentage of timeout
+    timeouts = [o for output in outputs for o in output.outputs if o.timeout]
+    print(f"Timeout percentage: {len(timeouts) / (len(outputs) * sampling_params.n)}")
+    empty_outputs = [o for output in outputs for o in output.outputs if len(o.tool_output) == 0 and o.tool_called]
+    print(f"Empty output percentage: {len(empty_outputs) / (len(outputs) * sampling_params.n)}")
+    errors = [o for output in outputs for o in output.outputs if len(o.tool_error) > 0]
+    print(f"Error percentage: {len(errors) / (len(outputs) * sampling_params.n)}")
+    tool_called = [o for output in outputs for o in output.outputs if o.tool_called]
+    print(f"Tool called percentage: {len(tool_called) / (len(outputs) * sampling_params.n)}")
+    tool_runtime = [o for output in outputs for o in output.outputs if o.tool_runtime > 0]
+    print(f"Tool runtime > 0 percentage: {len(tool_runtime) / (len(outputs) * sampling_params.n)}")
+    # print(tok.decode(empty_outputs[0].token_ids))
+
     print_samples = True
     if print_samples:
         for i, output in enumerate(outputs):
@@ -467,7 +508,7 @@ and you will get the output between the <output> and </output> tags.
             console.rule("Prompt")
             console.print(prompt)
             console.rule("Ground truth")
-            console.print(train_dataset["messages"][i])
+            console.print(train_dataset[i]["ground_truth"])
             for j, o in enumerate(output.outputs):
                 generated_text = tok.decode(o.token_ids)
                 assert len(o.mask) == len(o.token_ids)
