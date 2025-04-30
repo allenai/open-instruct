@@ -86,9 +86,13 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str = N
         else:
             return None
     else:
-        return try_to_load_from_cache(
+        resolved_file = try_to_load_from_cache(
             model_name_or_path, filename, cache_dir=TRANSFORMERS_CACHE, revision=revision, repo_type=repo_type
         )
+        # special return value from try_to_load_from_cache
+        if resolved_file == _CACHED_NO_EXIST:
+            return None
+        return resolved_file
 
 
 def get_commit_hash(
@@ -208,6 +212,56 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% if loop.last and add_generation_prompt %}"
         "{{ '<|assistant|>\n' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "tulu_thinker": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|system|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'user' %}"
+        "{{ '<|user|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{% set content = message['content'] %}"
+        "{% if not loop.last %}"
+        "{{ '<|assistant|>\n' + content + eos_token + '\n' }}"
+        "{% else %}"
+        "{{ '<|assistant|>\n' + content + eos_token }}"
+        "{% endif %}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|assistant|>\n<think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "tulu_thinker_r1_style": (
+        "A conversation between User and Assistant. "
+        "The user asks a question, and the Assistant solves it. "
+        "The assistant first thinks about the reasoning process in "
+        "the mind and then provides the user with the answer. "
+        "The reasoning process and answer are enclosed within <think> </think> "
+        "and <answer> </answer> tags, respectively, "
+        "i.e., <think> reasoning process here </think> "
+        "<answer> answer here </answer>."
+        "\n\n"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|system|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'user' %}"
+        "{{ '<|user|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{% set content = message['content'] %}"
+        "{% if '</think>' in content %}"
+        "{% set content = content.split('</think>')[-1] %}"
+        "{% endif %}"
+        "{% if not loop.last %}"
+        "{{ '<|assistant|>\n' + content + eos_token + '\n' }}"
+        "{% else %}"
+        "{{ '<|assistant|>\n' + content + eos_token }}"
+        "{% endif %}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|assistant|>\n<think>' }}"
         "{% endif %}"
         "{% endfor %}"
     ),
@@ -1088,7 +1142,7 @@ class LocalDatasetTransformationCache:
         # Check if the cache exists
         if os.path.exists(cache_path) and not dataset_skip_cache:
             print(f"✅ Found cached dataset at {cache_path}")
-            return Dataset.load_from_disk(cache_path)
+            return Dataset.load_from_disk(cache_path, keep_in_memory=True)
 
         print(f"Cache not found or invalid, transforming datasets...")
 
@@ -1108,7 +1162,7 @@ class LocalDatasetTransformationCache:
         self.save_config(self.config_hash, dcs, tc)
         print(f"🚀 Saved transformed dataset to {cache_path}")
         print(f"✅ Found cached dataset at {cache_path}")
-        return combined_dataset
+        return Dataset.load_from_disk(cache_path, keep_in_memory=True)
 
 
 def get_cached_dataset(
