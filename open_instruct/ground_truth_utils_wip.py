@@ -11,6 +11,7 @@ import re
 import os
 import string
 from collections import Counter
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Union, Optional, Tuple, Literal, Callable
 
@@ -69,6 +70,27 @@ class VerifierFunction(ABC):
         Returns:
             int: Reward score. Can be binary (0/1) or continuous.
         """
+
+    async def async_call(self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None) -> Tuple[float, float]:
+        """
+        Asynchronous version of __call__. By default, it runs the synchronous __call__ in a thread pool.
+        Subclasses can override this method for truly asynchronous implementation.
+
+        Args:
+            tokenized_prediction (List[int]): Tokenized representation (unused by most verifiers).
+            prediction (str): The model output.
+            label (Any): The ground truth answer or evaluation constraint.
+            query (Optional[str]): The original query.
+
+        Returns:
+            Tuple[float, float]: A tuple containing (score, cost)
+        """
+        # Run the synchronous __call__ in a thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, 
+            lambda: self.__call__(tokenized_prediction, prediction, label, query)
+        )
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(name={self.name}, weight={self.weight})"
@@ -185,7 +207,7 @@ class StrictMathVerifier(VerifierFunction):
     Strict verifier for math problems using only the Minerva format extraction.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, judge_type=None, model_name=None) -> None:
         super().__init__("strict_math", weight=1.0)
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> Tuple[float, float, str]:
@@ -230,7 +252,7 @@ class IFEvalVerifier(VerifierFunction):
     'func_name' used to lookup the evaluation function.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, judge_type=None, model_name=None) -> None:
         super().__init__("ifeval", weight=1.0)
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], query: Optional[str] = None) -> bool:
@@ -265,6 +287,7 @@ class IFEvalVerifier(VerifierFunction):
             return 0.0, api_cost, reasoning
         func_name = constraint.pop("func_name")
         func = IF_FUNCTIONS_MAP[func_name]
+        # breakpoint()
         non_none_args = {k: v for k, v in constraint.items() if v is not None}
         if not constraint:
             return func(prediction), api_cost, reasoning
@@ -506,10 +529,10 @@ class StringMatcherVerifier(VerifierFunction):
     It checks if the model output matches the ground truth answer.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, judge_type=None, model_name=None) -> None:
         super().__init__("string_matcher", weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> Tuple[bool, float, str]:
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> Tuple[bool, float, str]:
         api_cost = 0.0
         reasoning = None
         if "<answer>" not in prediction or "</answer>" not in prediction:
@@ -525,10 +548,10 @@ class F1Verifier(VerifierFunction):
     Verifier that computes the string F1 score between the prediction and the label.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, judge_type=None, model_name=None) -> None:
         super().__init__("string_f1", weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> Tuple[bool, float, str]:
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> Tuple[bool, float, str]:
         api_cost = 0.0
         reasoning = None
         # remove thinking section from the prediction
@@ -536,6 +559,7 @@ class F1Verifier(VerifierFunction):
         # remove answer tags from the prediction
         prediction = prediction.replace("<answer>", "").replace("</answer>", "")
         # return f1 score
+        # breakpoint()
         return f1_score(prediction, label)["f1"], api_cost, reasoning
 
 
@@ -545,7 +569,7 @@ class FlanVerifier(VerifierFunction):
     and compares it to the ground truth after normalization.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, judge_type=None, model_name=None) -> None:
         super().__init__("flan", weight=1.0)
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
@@ -560,7 +584,7 @@ class MaxLenVerifier(VerifierFunction):
     The ground truth (label) is interpreted as the maximum length.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, judge_type=None, model_name=None) -> None:
         super().__init__("max_length", weight=0.5)
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:

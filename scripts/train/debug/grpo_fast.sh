@@ -1,11 +1,12 @@
 # try rubric-based eval using this dataset: ai2-adapt-dev/tulu-3-sft-50k-criteria-gpt4o-classified
 # mix with hamish rewritten math problems: ai2-adapt-dev/tulu-3-sft-57k-criteria-gpt4o-classified-rewritten-math
+# mix with rewritten math, shortqa and tuu 3 ifeval rlvr: ai2-adapt-dev/tulu-3-sft-72k-criteria-gpt4o-classified-rewritten-math-shortqa-ifeval
 # previous tested dataset: faezeb/tulu-3-sft-t3-70b-thinker-sampled
 
 python open_instruct/grpo_fast_wip.py \
-    --dataset_mixer_list ai2-adapt-dev/tulu-3-sft-57k-criteria-gpt4o-classified-rewritten-math 512 \
+    --dataset_mixer_list ai2-adapt-dev/tulu-3-sft-72k-criteria-gpt4o-classified-rewritten-math-shortqa-ifeval 512 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list ai2-adapt-dev/tulu-3-sft-57k-criteria-gpt4o-classified-rewritten-math 16 \
+    --dataset_mixer_eval_list ai2-adapt-dev/tulu-3-sft-72k-criteria-gpt4o-classified-rewritten-math-shortqa-ifeval 16 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 512 \
     --max_prompt_token_length 512 \
