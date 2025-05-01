@@ -234,7 +234,7 @@ class Args:
     # -- llm verifiers reward
     apply_llm_verifier_reward: bool = False
     """whether to apply llm verifiers as reward"""
-    llm_verification_reward: float = 1.0
+    llm_verification_reward: float = 10.0
     """the reward value for non/partially-verifiable responses"""
     llm_judge_type: str = "quality_ref"
     llm_judge_model: str = "gpt-4o-mini"
@@ -1480,6 +1480,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 table["response"] = tokenizer.batch_decode(evaluation_responses)
                 table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
                 table["ground_truth"] = eval_ground_truths
+                # TODO: Faez change
                 df = pd.DataFrame(table)
                 if args.with_tracking:
                     wandb.log({"sample_completions": wandb.Table(dataframe=df)})
@@ -1714,8 +1715,19 @@ if __name__ == "__main__":
                 np_llm_judge_rewards = np.array(llm_judge_rewards)
                 np_api_cost = np.array(api_cost)
                 metrics["objective/llm_judge_reward"] = np_llm_judge_rewards.mean()
-                metrics["objective/llm_judge_correct_rate"] = (np_llm_judge_rewards > 0.0).mean() if "rubric" in args.llm_judge_type else (np_llm_judge_rewards > 5.0).mean()
+                # metrics["objective/llm_judge_correct_rate"] = (np_llm_judge_rewards > 0.0).mean() if "rubric" in args.llm_judge_type else (np_llm_judge_rewards > 5.0).mean()
                 metrics["total_api_cost"] = np_api_cost.sum()
+
+                # reshuffle around per_func rewards
+                per_func_lists = defaultdict(list)
+                for reward_dict in per_func_rewards:
+                    for key, value in reward_dict.items():
+                        per_func_lists[key].append(value)
+                # log per function rewards
+                for key, value in per_func_lists.items():
+                    np_value = np.array(value)
+                    metrics[f"objective/{key}_reward"] = np_value.mean()
+                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean() if "ref" not in key else (np_value > 5.0).mean()
 
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.

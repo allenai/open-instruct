@@ -39,17 +39,24 @@ class CompletionWithMetadata:
         # Delegate attribute access to the underlying response
         return getattr(self.response, name, None)
 
+import asyncio
+
+async def call_azure_sync(client, **kwargs):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: client.chat.completions.create(**kwargs))
+
+
 def llm_client():
     
     try:
         # # Attempt to import litellm
         import litellm
         # fall back to azure openai if litellm is not available
-        # client = AzureOpenAI(
-        #     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        #     api_version="2024-12-01-preview", #"2024-07-18", # 2024-11-20 for gpt-4o
-        #     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
-        # )
+        client = AzureOpenAI(
+            api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+            api_version="2024-12-01-preview", #"2024-07-18", # 2024-11-20 for gpt-4o
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+        )
     except ImportError:
         # fallback to async openai if litellm is not available
         print("litellm not found, falling back to openai.AsyncOpenAI")
@@ -58,29 +65,52 @@ def llm_client():
 
     else:
         # Return client/litellm module object if import succeeds
-        return litellm # client #litellm
+        return client #litellm # client #litellm
 
 ### V2 of async completion with retry
 def track_cost_callback(kwargs, completion_response, start_time, end_time):
+
     try:
-        model_name = kwargs.get("model", "gpt-4o-mini")
-        usage = getattr(completion_response, "usage", {})
+        model_name = kwargs.get("model", "")
+        prompt_tokens = getattr(completion_response.usage, "prompt_tokens", 0)
+        completion_tokens = getattr(completion_response.usage, "completion_tokens", 0)
 
-        prompt_tokens = usage.get("prompt_tokens", 0)
-        completion_tokens = usage.get("completion_tokens", 0)
+        # pricing
+        pricing = PRICING_PER_1M_TOKENS.get(model_name, {"input": 0.0, "output": 0.0})
+        cost = (
+            pricing.get("input", 0.0) * prompt_tokens
+            + pricing.get("output", 0.0) * completion_tokens
+        )
 
-        input_cost = (prompt_tokens) * PRICING_PER_1M_TOKENS.get(model_name, {}).get("input", 0)
-        output_cost = (completion_tokens) * PRICING_PER_1M_TOKENS.get(model_name, {}).get("output", 0)
-        total_cost = input_cost + output_cost
-
-        response_time = end_time - start_time
-
-        # Attach attributes directly
-        completion_response.cost = total_cost
-        completion_response.response_time = response_time
+        completion_response.cost = cost
+        completion_response.response_time = round(end_time - start_time, 4)
 
     except Exception as e:
         print(f"Callback error: {e}")
+        completion_response.cost = 0.0001
+        completion_response.response_time = 0.0
+
+    # try:
+    #     model_name = kwargs.get("model", "gpt-4o-mini")
+    #     usage = getattr(completion_response, "usage", {})
+
+    #     prompt_tokens = usage.get("prompt_tokens", 0)
+    #     completion_tokens = usage.get("completion_tokens", 0)
+
+    #     input_cost = (prompt_tokens) * PRICING_PER_1M_TOKENS.get(model_name, {}).get("input", 0)
+    #     output_cost = (completion_tokens) * PRICING_PER_1M_TOKENS.get(model_name, {}).get("output", 0)
+    #     total_cost = input_cost + output_cost
+
+    #     response_time = end_time - start_time
+
+    #     # Attach attributes directly
+    #     completion_response.cost = total_cost
+    #     completion_response.response_time = response_time
+
+    # except Exception as e:
+    #     print(f"Callback error: {e}")
+
+
 
 async def async_get_completion(
     messages: list[dict[str, str]],
@@ -145,9 +175,19 @@ async def async_get_completion(
                         response_format=response_format,
                     )
 
+                # elif isinstance(client_or_module, openai.lib.azure.AzureOpenAI):
+                #     # Use openai.lib.azure.AzureOpenAI client directly
+                #     response = await client_or_module.chat.completions.create(
+                #         model=f"{model}-standard",
+                #         max_tokens=max_tokens,
+                #         temperature=temperature,
+                #         messages=messages,
+                #         seed=seed,
+                #         response_format=response_format,
+                #     )
                 elif isinstance(client_or_module, openai.lib.azure.AzureOpenAI):
-                    # Use AsyncOpenAI client directly
-                    response = await client_or_module.chat.completions.create(
+                    response = await call_azure_sync(
+                        client_or_module,
                         model=f"{model}-standard",
                         max_tokens=max_tokens,
                         temperature=temperature,
@@ -155,6 +195,7 @@ async def async_get_completion(
                         seed=seed,
                         response_format=response_format,
                     )
+                    # breakpoint()
 
                 elif hasattr(client_or_module, "__name__") and client_or_module.__name__ == "litellm":
                     # litellm.acompletion is already async

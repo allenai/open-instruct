@@ -386,7 +386,7 @@ async def _process_single_response(
     # Process the results
     for (reward_result, api_cost, reasoning), (_, ds, weight) in zip(judgment_results, judgment_tasks):
         logger.info("Applying rubric-based or llm grader reward 🤗")
-        actual_reward_mult = 10.0 if "rubric" in judge_type else reward_mult
+        actual_reward_mult = 1.0 if "ref" in judge_type else reward_mult
         reward_value = actual_reward_mult * reward_result * weight
         
         reward += reward_value

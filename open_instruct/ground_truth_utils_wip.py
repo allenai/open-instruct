@@ -173,7 +173,6 @@ class MathVerifier(VerifierFunction):
         # Fallback to the full output.
         if not all_answers:
             all_answers.append(normalize_final_answer(prediction))
-        breakpoint()
         # Compare each candidate answer to the ground truth.
         for answer in all_answers:
             if is_equiv(answer, label) or hendrycks_is_equiv(answer, label):
@@ -215,7 +214,7 @@ class StrictMathVerifier(VerifierFunction):
             all_answers.append(minerva_answer)
         if not all_answers:
             all_answers.append(normalize_final_answer(prediction))
-        breakpoint()
+
         for answer in all_answers:
             if is_equiv(answer, label) or hendrycks_is_equiv(answer, label):
                 return 1.0, api_cost, reasoning
@@ -442,7 +441,7 @@ class LMJudgeVerifier(VerifierFunction):
             logger.warning(f"Unexpected score type: {type(score)}, defaulting to 0.0")
             final_score = 0.0
         
-        return final_score, cost, f"{reasoning} [SCORE]: {final_score}" #, response_time
+        return final_score, cost, f"[REASONING] {reasoning} [SCORE]: {final_score} [JUDGE] {self.judge_type}" #, response_time
 
         
     def get_judgement(
