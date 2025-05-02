@@ -57,9 +57,9 @@ import re
 from argparse import Namespace
 from collections import deque
 from dataclasses import asdict, dataclass, field
+from itertools import chain
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
-from itertools import chain
 
 import numpy as np
 import pandas as pd
@@ -347,7 +347,9 @@ class Args:
     """The maximum number of documents to retrieve for each query."""
 
     def __post_init__(self):
-        assert self.number_samples_per_prompt > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
+        assert self.number_samples_per_prompt > 0, "Number of samples per prompt must be greater than 0!"
+        if self.number_samples_per_prompt == 1:
+            print("WARNING: number_samples_per_prompt is 1. This reduces GRPO to REINFORCE. ")
 
 
 def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:

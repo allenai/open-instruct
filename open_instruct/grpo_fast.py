@@ -242,6 +242,8 @@ class Args:
     """whether to add the R1 style format reward"""
     r1_style_format_reward: float = 1.0
     """the reward value for R1 style format reward"""
+    additive_format_reward: bool = False
+    """whether to add the format reward to the final reward"""
 
     # -- verifiable reward
     apply_verifiable_reward: bool = True
@@ -343,7 +345,9 @@ class Args:
 
 
     def __post_init__(self):
-        assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
+        assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
+        if self.num_samples_per_prompt_rollout == 1:
+            print("WARNING: num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE. ")
         assert (
             self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
         ), "At least one reward must be applied!"
@@ -1157,6 +1161,7 @@ def vllm_generate_thread(
     eval_prompt_token_ids: Optional[List[int]],
     evaluation_inference_results_Q: Queue,
     eval_freq: int,
+    num_evals: int,
     resume_training_step: int = 1,
 ):
     def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
@@ -1194,9 +1199,13 @@ def vllm_generate_thread(
         inference_results_Q.put((response_ids, finish_reasons, masks))
 
         # Evaluate the model
-        if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-            response_ids, finish_reasons, masks = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
-            evaluation_inference_results_Q.put((response_ids, finish_reasons, masks))
+        if (
+            eval_prompt_token_ids is not None
+            and num_evals > 0
+            and ((training_step - 1) % eval_freq == 0 or training_step == num_training_steps)
+        ):
+            response_ids, finish_reasons = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
+            evaluation_inference_results_Q.put((response_ids, finish_reasons))
 
 
 def data_preparation_thread(
@@ -1253,7 +1262,7 @@ def data_preparation_thread(
             max_possible_score = 0
             if args.apply_verifiable_reward:
                 max_possible_score += args.verification_reward
-            if args.apply_r1_style_format_reward:
+            if args.apply_r1_style_format_reward and args.additive_format_reward:
                 max_possible_score += args.r1_style_format_reward
             unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
             # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
@@ -1599,6 +1608,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         top_p=.95,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
+        skip_special_tokens=False,
         n=args.num_samples_per_prompt_rollout,
         stop=args.stop_strings,
     )
@@ -1607,6 +1617,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         top_p=.95,   # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
+        skip_special_tokens=False,
         n=1,  # since we are doing greedy sampling, don't need to generate more
         stop=args.stop_strings,
     )
@@ -1638,6 +1649,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             eval_prompt_token_ids,
             evaluation_inference_results_Q,
             args.eval_freq,
+            args.num_evals,
             resume_training_step,
         ),
     )
@@ -1793,10 +1805,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             # Optionally evaluate the model
             try:
                 # timeout 0.01 if this is the last training step or we're not evaluating
-                # otherwise, wait to get the last evaluation generations
-                #timeout = 0.01 if ((training_step < args.num_training_steps or args.eval_freq < 0) and (training_step - 1) % args.eval_freq == 0) else None
-                timeout = 0.01
-                eval_responses, eval_finish_reasons, masks = evaluation_inference_results_Q.get(timeout=timeout)
+                # otherwise, wait to get the last evaluation generations (long timeout just in case)
+                timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else 100
+                eval_responses, eval_finish_reasons = evaluation_inference_results_Q.get(timeout=timeout)
                 print("[Main Thread] 📊 Evaluation responses received")
 
                 eval_sequence_lengths = np.array([len(response) for response in eval_responses])
@@ -1925,7 +1936,12 @@ if __name__ == "__main__":
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
                 for i in range(len(verifiable_rewards)):
-                    scores[i] = verifiable_rewards[i] + scores[i]
+                    if args.apply_r1_style_format_reward and args.additive_format_reward:
+                        scores[i] = verifiable_rewards[i] + scores[i]
+                    elif args.apply_r1_style_format_reward and not args.additive_format_reward:
+                        scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
+                    else:
+                        scores[i] = verifiable_rewards[i]
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()

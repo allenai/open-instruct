@@ -86,9 +86,13 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str = N
         else:
             return None
     else:
-        return try_to_load_from_cache(
+        resolved_file = try_to_load_from_cache(
             model_name_or_path, filename, cache_dir=TRANSFORMERS_CACHE, revision=revision, repo_type=repo_type
         )
+        # special return value from try_to_load_from_cache
+        if resolved_file == _CACHED_NO_EXIST:
+            return None
+        return resolved_file
 
 
 def get_commit_hash(
