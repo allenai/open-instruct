@@ -288,8 +288,6 @@ class ToolUseLLM(LLM):
                             print("tool_output_token_ids:", tool_output_token_ids)
                             breakpoint()
                             print("end")
-                    combined_outputs[req_id].outputs[0].token_ids.extend(tool_output_token_ids)
-                    masks[req_id].extend([0] * len(tool_output_token_ids))
                     dict_keys_to_delete.append(req_id)
             for req_id in dict_keys_to_delete:
                 del self.pending_tool_futures[req_id]
@@ -395,22 +393,25 @@ class ToolUseLLM(LLM):
 if __name__ == "__main__":
     console = Console()
     from transformers import AutoTokenizer
-    from open_instruct.search_utils.search_tool import SearchTool
 
 
     # Sample prompts.
     system_prompt = (
 """Below is a conversation between an user and an assitant. The assistant helps with the user's tasks. When the task is completed, the assistant ends the conversation with <endoftext>. The assistant can also use a tool for multiple times. The assitant has the following tools:
 
-1. search <query>...</query>: Search for the query in the massive DS API. The assistant will get the output between the <document> and </document> tags.
-and you will get the output between the <document> and </document> tags.
+1. `<code>`: Python execution service:
+You could run python code by putting your code between <code> and </code> tags. For example, it could be 
+<code>
+print("Hello, world!")
+</code>
+and you will get the output between the <output> and </output> tags.
 """
     )
 
     console.print(f"system_prompt: {system_prompt}")
     prompts = [
-        "User: What claimed the life of singer Kathleen Ferrier?\nAssistant:",
-        "User: When did John V, Prince Of Anhalt-Zerbst's father die?\nAssistant:",
+        "User: Write a python program which calculates the sum of 1 3 4. Then write another separate program to calculate the product of 1 3 4.\nAssistant:",
+        "User: Write a python program which prints 'Hello, Costa!'.\nAssistant:",
     ]
     prompts = [system_prompt + "\n\n" + p for p in prompts]
 
