@@ -1241,7 +1241,7 @@ def data_preparation_thread(
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             responses, finish_reasons, masks, infos = inference_results_Q.get()
             num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
-            empty_tool_outputs = [len(tool_outputs[i]) == 0 and tool_calleds[i] for i in range(len(tool_outputs))]
+            good_outputs = [len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i] for i in range(len(tool_outputs))]
             for i in range(len(finish_reasons)):
                 # edge case with RL-rag agent: sometimes it outputs eos immediately, and we get an empty response
                 # in that case, we need to add the eos token to the response
@@ -1391,12 +1391,12 @@ def data_preparation_thread(
             "val/advantages_min": advantages.min(),
             "val/advantages_max": advantages.max(),
             "val/advantages_hist": advantages,
-            "val/num_calls_rate": np.array(num_calls).float().mean(),
-            "val/timeouts_rate": np.array(timeouts).float().mean(),
-            "val/tool_errors_rate": np.array([len(item) > 0 for item in tool_errors]).float().mean(),
-            "val/empty_tool_outputs_rate": np.array(empty_tool_outputs).float().mean(),
+            "val/num_calls_rate": np.array(num_calls).mean(),
+            "val/timeouts_rate": np.array(timeouts).mean(),
+            "val/tool_errors_rate": np.array([len(item) > 0 for item in tool_errors]).mean(),
+            "val/good_outputs_rate": np.array(good_outputs).mean(),
             "val/tool_runtimes_rate": np.array(tool_runtimes).mean(),
-            "val/tool_calleds_rate": np.array(tool_calleds).float().mean(),
+            "val/tool_calleds_rate": np.array(tool_calleds).mean(),
             **reward_metrics,
         }
 
@@ -1551,6 +1551,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
     # ------------------------------------------------------------
     # Create the model and optimizer
+    ray.init(dashboard_host="0.0.0.0")
     pg = None
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
@@ -1570,26 +1571,27 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     max_len = args.max_prompt_token_length + args.response_length
     # make tool list
     tool_objects = {}
-    for tool in args.tools:
-        if tool.lower() == "search":
-            from open_instruct.search_utils.search_tool import SearchTool
-            tool = SearchTool(
-                start_str="<query>",
-                end_str="</query>",
-                api_endpoint=args.search_api_endpoint,
-                number_documents_to_search=args.number_documents_to_search,
-            )
-            tool_objects[tool.end_str] = tool
-        elif tool.lower() == "code":
-            from open_instruct.tool_utils.tool_vllm import PythonCodeTool
-            tool = PythonCodeTool(
-                start_str="<code>",
-                end_str="</code>",
-                api_endpoint=args.code_tool_api_endpoint,
-            )
-            tool_objects[tool.end_str] = tool
-        else:
-            raise ValueError(f"Unknown tool: {tool}")
+    if args.tools:
+        for tool in args.tools:
+            if tool.lower() == "search":
+                from open_instruct.search_utils.search_tool import SearchTool
+                tool = SearchTool(
+                    start_str="<query>",
+                    end_str="</query>",
+                    api_endpoint=args.search_api_endpoint,
+                    number_documents_to_search=args.number_documents_to_search,
+                )
+                tool_objects[tool.end_str] = tool
+            elif tool.lower() == "code":
+                from open_instruct.tool_utils.tool_vllm import PythonCodeTool
+                tool = PythonCodeTool(
+                    start_str="<code>",
+                    end_str="</code>",
+                    api_endpoint=args.code_tool_api_endpoint,
+                )
+                tool_objects[tool.end_str] = tool
+            else:
+                raise ValueError(f"Unknown tool: {tool}")
 
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
@@ -1932,7 +1934,7 @@ if __name__ == "__main__":
         infos: List[List[int]],
     ) -> List[float]:
         num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
-        empty_tool_outputs = [len(tool_outputs[i]) == 0 and tool_calleds[i] for i in range(len(tool_outputs))]
+        good_outputs = [len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i] for i in range(len(tool_outputs))]
         scores = [0] * len(decoded_responses)
         metrics = {}
 
@@ -1955,7 +1957,7 @@ if __name__ == "__main__":
                     reward_mult=args.verification_reward,
                 )
                 for i in range(len(verifiable_rewards)):
-                    if not empty_tool_outputs[i]:
+                    if good_outputs[i]:
                         scores[i] = verifiable_rewards[i]
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
