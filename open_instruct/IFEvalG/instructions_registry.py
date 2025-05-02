@@ -36,6 +36,12 @@ _CHANGE_CASES = "change_case:"
 
 _PUNCTUATION = "punctuation:"
 
+_NEW = "new:"
+
+_COPY = "copy:"
+
+_BASIC = "basic:"
+
 FUNCTION_DICT = {
     _KEYWORD + "existence": instructions.KeywordChecker,
     _KEYWORD + "frequency": instructions.KeywordFrequencyChecker,
@@ -74,6 +80,33 @@ FUNCTION_DICT = {
     + "english_lowercase": instructions.LowercaseLettersEnglishChecker,
     _PUNCTUATION + "no_comma": instructions.CommaChecker,
     _STARTEND + "quotation": instructions.QuotationChecker,
+    _NEW + "repeat_phrase": instructions.RepeatPhraseChecker,
+    _NEW + "copy": instructions.CopyChecker,
+    _NEW + "copy_span_idx": instructions.CopySpanIdxChecker,
+    _NEW + "sentence_hyphens": instructions.SentenceHyphenChecker,
+    _NEW + "no_adjacent_consecutive": instructions.AdjacentLetterChecker,
+    _NEW + "square_brackets" : instructions.SquareBracketChecker,
+    _BASIC + "word_once": instructions.KeywordFrequencyOnceChecker,
+    _BASIC + "word_count_different_numbers" : instructions.KeywordFrequencyCheckerDifferent,
+    _BASIC + "exclude_word_harder": instructions.ExcludeWordHarderChecker,
+    _BASIC + "paragraphs" : instructions.ParagraphBasicChecker,
+    _BASIC + "paragraphs2": instructions.ParagraphBasicChecker2,
+    _BASIC + "first_word_sent": instructions.FirstWordSentChecker,
+    _BASIC + "first_word_answer": instructions.FirstWordAnswerChecker,
+    _BASIC + "last_word_sent": instructions.LastWordSentChecker,
+    _BASIC + "bigram_wrapping": instructions.BiGramWrappingChecker,
+    _BASIC + "copying_simple" : instructions.CopyingSimpleChecker,
+    _BASIC + "copying_multiple" : instructions.CopyingMultipleChecker,
+    _BASIC + "punctuation_dot": instructions.PunctuationDotChecker,
+    _BASIC + "punctuation_exclamation": instructions.PunctuationExclamationChecker,
+    _BASIC + "lowercase_counting" : instructions.LowercaseCountingChecker,
+    _BASIC + "letter_counting": instructions.LetterCountingChecker,
+    _BASIC + "counting_composition": instructions.CountingCompositionChecker,
+    _BASIC + "count_unique": instructions.CountUniqueChecker,
+    _BASIC + "count_increment_word" : instructions.CountIncrementWordChecker,
+    _BASIC + "palindrome": instructions.PalindromeBasicChecker,
+    _BASIC + "keyword_specific_position": instructions.KeywordSpecificPositionChecker,
+    _BASIC + "start_end": instructions.StartEndChecker,
 }
 
 INSTRUCTION_DICT = {
@@ -114,6 +147,33 @@ INSTRUCTION_DICT = {
     + "english_lowercase": instructions.LowercaseLettersEnglishChecker,
     _PUNCTUATION + "no_comma": instructions.CommaChecker,
     _STARTEND + "quotation": instructions.QuotationChecker,
+    _NEW + "repeat_phrase": instructions.RepeatPhraseChecker,
+    _NEW + "copy": instructions.CopyChecker,
+    _NEW + "copy_span_idx": instructions.CopySpanIdxChecker,
+    _NEW + "sentence_hyphens" : instructions.SentenceHyphenChecker,
+    _NEW + "no_adjacent_consecutive" : instructions.AdjacentLetterChecker,
+    _NEW + "square_brackets": instructions.SquareBracketChecker,
+    _BASIC + "word_once": instructions.KeywordFrequencyOnceChecker,
+    _BASIC + "word_count_different_numbers": instructions.KeywordFrequencyCheckerDifferent,
+    _BASIC + "exclude_word_harder" : instructions.ExcludeWordHarderChecker,
+    _BASIC + "paragraphs": instructions.ParagraphBasicChecker,
+    _BASIC + "paragraphs2" : instructions.ParagraphBasicChecker2,
+    _BASIC + "first_word_sent" : instructions.FirstWordSentChecker,
+    _BASIC + "first_word_answer" : instructions.FirstWordAnswerChecker,
+    _BASIC + "last_word_sent": instructions.LastWordSentChecker,
+    _BASIC + "bigram_wrapping" : instructions.BiGramWrappingChecker,
+    _BASIC + "copying_simple": instructions.CopyingSimpleChecker,
+    _BASIC + "copying_multiple": instructions.CopyingMultipleChecker,
+    _BASIC + "punctuation_dot" : instructions.PunctuationDotChecker,
+    _BASIC + "punctuation_exclamation": instructions.PunctuationExclamationChecker,
+    _BASIC + "lowercase_counting": instructions.LowercaseCountingChecker,
+    _BASIC + "letter_counting": instructions.LetterCountingChecker,
+    _BASIC + "counting_composition" : instructions.CountingCompositionChecker,
+    _BASIC + "count_unique" : instructions.CountUniqueChecker,
+    _BASIC + "count_increment_word": instructions.CountIncrementWordChecker,
+    _BASIC + "palindrome" : instructions.PalindromeBasicChecker,
+    _BASIC + "keyword_specific_position" : instructions.KeywordSpecificPositionChecker,
+    _BASIC + "start_end" : instructions.StartEndChecker,
 }
 
 INSTRUCTION_CONFLICTS = {
@@ -195,6 +255,33 @@ INSTRUCTION_CONFLICTS = {
     },
     _PUNCTUATION + "no_comma": {_PUNCTUATION + "no_comma"},
     _STARTEND + "quotation": {_STARTEND + "quotation", _FORMAT + "title"},
+    _NEW + "repeat_phrase": instructions.RepeatPhraseChecker,
+    _NEW + "copy": instructions.CopyChecker,
+    _NEW + "copy_span_idx": instructions.CopySpanIdxChecker,
+    _NEW + "sentence_hyphens": instructions.SentenceHyphenChecker,
+    _NEW + "no_adjacent_consecutive": instructions.AdjacentLetterChecker,
+    _NEW + "square_brackets": instructions.SquareBracketChecker,
+    _BASIC + "word_once": instructions.KeywordFrequencyOnceChecker,
+    _BASIC + "word_count_different_numbers": instructions.KeywordFrequencyCheckerDifferent,
+    _BASIC + "exclude_word_harder": instructions.ExcludeWordHarderChecker,
+    _BASIC + "paragraphs": instructions.ParagraphBasicChecker,
+    _BASIC + "paragraphs2": instructions.ParagraphBasicChecker2,
+    _BASIC + "first_word_sent": instructions.FirstWordSentChecker,
+    _BASIC + "first_word_answer": instructions.FirstWordAnswerChecker,
+    _BASIC + "last_word_sent": instructions.LastWordSentChecker,
+    _BASIC + "bigram_wrapping": instructions.BiGramWrappingChecker,
+    _BASIC + "copying_simple": instructions.CopyingSimpleChecker,
+    _BASIC + "copying_multiple": instructions.CopyingMultipleChecker,
+    _BASIC + "punctuation_dot": instructions.PunctuationDotChecker,
+    _BASIC + "punctuation_exclamation": instructions.PunctuationExclamationChecker,
+    _BASIC + "lowercase_counting": instructions.LowercaseCountingChecker,
+    _BASIC + "letter_counting": instructions.LetterCountingChecker,
+    _BASIC + "counting_composition": instructions.CountingCompositionChecker,
+    _BASIC + "count_unique": instructions.CountUniqueChecker,
+    _BASIC + "count_increment_word": instructions.CountIncrementWordChecker,
+    _BASIC + "palindrome": instructions.PalindromeBasicChecker,
+    _BASIC + "keyword_specific_position": instructions.KeywordSpecificPositionChecker,
+    _BASIC + "start_end": instructions.StartEndChecker,
 }
 
 
