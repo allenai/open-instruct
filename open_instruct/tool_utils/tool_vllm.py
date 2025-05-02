@@ -35,6 +35,12 @@ class Tool:
     def __call__(self, prompt: str) -> ToolOutput:
         raise NotImplementedError("Subclasses must implement this method")
 
+
+class MaxCallsExceededTool(Tool):
+    def __call__(self, prompt: str) -> ToolOutput:
+        return ToolOutput(output=f"Max tool calls exceeded.", called=False, success=False)
+
+
 class PythonCodeTool(Tool):
     """@vwxyzjn: I recommend using something like a FastAPI for this kind of stuff; 1) you 
     won't accidentally block the main vLLM process and 2) way easier to parallelize via load balancing."""
@@ -264,6 +270,13 @@ class ToolUseLLM(LLM):
                             if o.text.endswith(stop_str) and stop_str in self.tools and num_calls[output.request_id] <= self.max_tool_calls:
                                 # Schedule tool call asynchronously
                                 tool = self.tools[stop_str]
+                                future = self.executor.submit(tool, o.text)
+                                self.pending_tool_futures[output.request_id] = (future, o, output)
+                                output_processed = True
+                                break
+                            elif o.text.endswith(stop_str) and stop_str in self.tools and num_calls[output.request_id] > self.max_tool_calls:
+                                # If the tool has been called too many times, we tell the model it has exceeded the limit.
+                                tool = MaxCallsExceededTool()
                                 future = self.executor.submit(tool, o.text)
                                 self.pending_tool_futures[output.request_id] = (future, o, output)
                                 output_processed = True
