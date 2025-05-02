@@ -24,11 +24,12 @@ from concurrent.futures import ThreadPoolExecutor  # add import for async execut
 class ToolOutput:
     output: str
     called: bool
-    start_str: str = "<output>\n"
-    end_str: str = "\n</output>"
     error: str
     timeout: bool
     runtime: float
+    start_str: str = "<output>\n"
+    end_str: str = "\n</output>"
+    
 
 class Tool:
     def __init__(self, start_str: str, end_str: str):
