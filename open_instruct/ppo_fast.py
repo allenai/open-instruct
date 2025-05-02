@@ -123,6 +123,7 @@ api = HfApi()
 INVALID_LOGPROB = 1.0
 INVALID_VALUE = 0.0 # to play nicely with debugging output
 # torch.set_printoptions(precision=2, sci_mode=False)
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 
 @dataclass
@@ -1159,6 +1160,7 @@ def data_preparation_thread(
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
+    executor: ThreadPoolExecutor,
 ):
     for training_step in range(1, num_training_steps + 1):
         # Get next batch of prompts and responses
@@ -1182,7 +1184,7 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards"):
-            scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons)
+            scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons, executor)
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
             non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
@@ -1453,7 +1455,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     # ------------------------------------------------------------
     # Runtime setups and quick logging
     pprint([args, model_config])
-    
 
     # ------------------------------------------------------------
     # Create the model and optimizer
@@ -1546,7 +1547,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     )
     thread.start()
     print("======== ✅ vllm generate thread starts =========")
-
+    executor = ThreadPoolExecutor(max_workers=64)
     packing_thread = threading.Thread(
         target=data_preparation_thread,
         args=(
@@ -1557,6 +1558,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             args,
             tokenizer,
             args.num_training_steps,
+            executor,
         ),
     )
     packing_thread.start()
@@ -1702,6 +1704,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     eval_ground_truths,
                     eval_dataset_names,
                     eval_finish_reasons,
+                    executor,
                 )
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
                 eval_metrics = {
@@ -1790,6 +1793,7 @@ if __name__ == "__main__":
         ground_truths: List[str],
         datasets: List[str],
         finish_reasons: List[str],
+        executor: ThreadPoolExecutor,
     ) -> List[float]:
         scores = [0] * len(decoded_responses)
         metrics = {}
@@ -1812,9 +1816,27 @@ if __name__ == "__main__":
                         final_answers.append(matches[-1])
                     else:
                         final_answers.append("")
+                is_correct_futures = [executor.submit(is_equal_sync, solution2answer(gt), solution2answer(fa)) for gt, fa in zip(ground_truths, final_answers)]
                 is_corrects = []
-                for gt, final_answer in zip(ground_truths, final_answers):
-                    is_corrects.append(is_equal_sync(solution2answer(gt), solution2answer(final_answer)))
+                timeouts = 0
+                remaining_timeout_budget = 5.0
+                for future in is_correct_futures:
+                    if remaining_timeout_budget > 0.0:
+                        start_time = time.time()
+                        try:
+                            is_corrects.append(future.result(timeout=remaining_timeout_budget))
+                        except TimeoutError:
+                            timeouts += 1
+                            is_corrects.append(False)
+                        remaining_timeout_budget -= time.time() - start_time
+                    else:
+                        try:
+                            is_corrects.append(future.result(timeout=0.001)) # a small timeout to still get result that finished
+                        except TimeoutError:
+                            is_corrects.append(False)
+                            timeouts += 1
+                timeout_ratio = timeouts / len(is_corrects)
+
                 verifiable_rewards = []
                 for is_correct, stop_reason in zip(is_corrects, finish_reasons):
                     if stop_reason == "stop":
@@ -1849,6 +1871,7 @@ if __name__ == "__main__":
                         scores[i] = args.non_stop_penalty_value
         
         metrics["objective/scores"] = np.array(scores).mean()
+        metrics["val/timeout_ratio"] = timeout_ratio
         # metrics["objective/scores"] = np.array(scores)
 
         return scores, metrics
