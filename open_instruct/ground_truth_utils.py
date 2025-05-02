@@ -221,6 +221,8 @@ class IFEvalVerifier(VerifierFunction):
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict]) -> bool:
         instruction_dict = instructions_registry.INSTRUCTION_DICT
         print(instruction_dict)
+        print("debuggggging")
+        sys.exit(0)
         constraint_dict = ast.literal_eval(label)
         constraint_dict = constraint_dict[0]
         #constraint_dict = label
