@@ -1596,7 +1596,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.stop_strings += tool_objects.keys()
     generation_config = SamplingParams(
         temperature=args.temperature,
-        top_p=.98,  # prevent rare out-of-vocab tokens with qwen
+        top_p=.95,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         n=args.num_samples_per_prompt_rollout,
@@ -1604,7 +1604,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     )
     eval_generation_config = SamplingParams(
         temperature=0.0,
-        top_p=.98,   # prevent rare out-of-vocab tokens with qwen
+        top_p=.95,   # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         n=1,  # since we are doing greedy sampling, don't need to generate more

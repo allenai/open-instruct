@@ -63,6 +63,7 @@ if not args.analyse_existing:
         tokenizer_revision=args.tokenizer_revision,
         tools={tool.end_str: tool},
         max_tool_calls=3,
+        max_model_len=args.model_len,
     )
     # use greedy decoding
     sampling_params = SamplingParams(
@@ -79,8 +80,9 @@ if not args.analyse_existing:
         prompt_token_ids=prompt_token_ids,
    
     )
-    # grab text answers
-    generations = [x.outputs[0].text for x in result]
+    # grab text answers - for tool vllm, we have to decode the output ids.
+    generations = [x.outputs[0].token_ids for x in result]
+    generations = [tokenizer.decode(x, skip_special_tokens=True) for x in generations]
     # parse out answer
     predictions = [x.split("<finish>")[-1].split("</finish>")[0].lower() for x in generations]
     labels = [data["ground_truth"].lower() for data in ds]
