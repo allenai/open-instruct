@@ -42,7 +42,7 @@ class Tool:
 
 class MaxCallsExceededTool(Tool):
     def __call__(self, prompt: str) -> ToolOutput:
-        return ToolOutput(output=f"Max tool calls exceeded.", called=False, success=False)
+        return ToolOutput(output="Max tool calls exceeded.", called=False, error="", timeout=False, runtime=0)
 
 
 class PythonCodeTool(Tool):
