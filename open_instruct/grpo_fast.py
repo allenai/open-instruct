@@ -1204,8 +1204,8 @@ def vllm_generate_thread(
             and num_evals > 0
             and ((training_step - 1) % eval_freq == 0 or training_step == num_training_steps)
         ):
-            response_ids, finish_reasons = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
-            evaluation_inference_results_Q.put((response_ids, finish_reasons))
+            response_ids, finish_reasons, masks = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
+            evaluation_inference_results_Q.put((response_ids, finish_reasons, masks))
 
 
 def data_preparation_thread(
@@ -1807,7 +1807,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 # timeout 0.01 if this is the last training step or we're not evaluating
                 # otherwise, wait to get the last evaluation generations (long timeout just in case)
                 timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else 100
-                eval_responses, eval_finish_reasons = evaluation_inference_results_Q.get(timeout=timeout)
+                eval_responses, eval_finish_reasons, _ = evaluation_inference_results_Q.get(timeout=timeout)
                 print("[Main Thread] 📊 Evaluation responses received")
 
                 eval_sequence_lengths = np.array([len(response) for response in eval_responses])
