@@ -1,6 +1,6 @@
 import time
 from dataclasses import dataclass
-from typing import Generic, List, Optional, TypeVar
+from typing import Generic, List, Optional, TypeVar, overload
 
 import numpy as np
 import torch
@@ -66,8 +66,85 @@ def reset_position_ids(attention_mask):
             position_ids[i, sample_mask] = torch.arange(sample_length, device=mask.device)
     return position_ids
 
-
 def pack_sequences(
+    queries: List[List[int]],
+    responses: List[List[int]],
+    masks: List[List[int]],
+    pack_length: int,
+    pad_token_id: int,
+) -> PackedSequences:
+    # assert padding token does not exist in queries and responses
+    assert not any(pad_token_id in query for query in queries)
+    # assert not any(pad_token_id in response for response in responses)
+
+    query_responses = []
+    tool_masks = []
+    attention_masks = []
+    response_masks = []
+    num_actions = []
+    packed_seq_lens = []
+    cur_data = []
+    cur_tool_mask = []
+    cur_response_mask = []
+    cur_num_actions = []
+    cur_packed_seq_lens = []
+    cur_attention_mask = []
+    offset = 0
+    for i in range(len(queries)):
+        query = queries[i]
+        response = responses[i]
+        mask = masks[i]
+        # remove padding (but using vllm so this should not be needed, but just in case)
+        query_tool_mask = [1 for t in query if t != pad_token_id]
+        query = [t for t in query if t != pad_token_id]
+        response_tool_mask = [t for i, t in enumerate(mask) if response[i] != pad_token_id]
+        response = [t for t in response if t != pad_token_id]
+        query_response = query + response
+        mask = query_tool_mask + response_tool_mask
+        if len(query_response) + len(cur_data) > pack_length:
+            query_responses.append(cur_data)
+            tool_masks.append(cur_tool_mask)
+            response_masks.append(cur_response_mask)
+            attention_masks.append(cur_attention_mask)
+            num_actions.append(cur_num_actions)
+            packed_seq_lens.append(cur_packed_seq_lens)
+            cur_data = []
+            cur_tool_mask = []
+            cur_response_mask = []
+            cur_attention_mask = []
+            cur_num_actions = []
+            cur_packed_seq_lens = []
+            offset = i
+        cur_data.extend(query_response)
+        cur_tool_mask.extend(mask)
+        cur_num_actions.append(len(response))
+        cur_packed_seq_lens.append(len(query_response))
+
+        # @vwxyzjn: here we use i + 1 to avoid 0 as a response mask token;
+        # the actual number should corresponds to the response's index.
+        cur_response_mask.extend([0 for _ in range(len(query))] + [i + 1 for _ in range(len(response))])
+        cur_attention_mask.extend([i + 1 - offset for _ in range(len(query_response))])
+    if len(cur_data) > 0:
+        query_responses.append(cur_data)
+        tool_masks.append(cur_tool_mask)
+        response_masks.append(cur_response_mask)
+        attention_masks.append(cur_attention_mask)
+        num_actions.append(cur_num_actions)
+        packed_seq_lens.append(cur_packed_seq_lens)
+    attention_masks_list = [torch.tensor(t) for t in attention_masks]
+    return PackedSequences(
+        query_responses=[torch.tensor(t) for t in query_responses],
+        tool_masks=[torch.tensor(t) for t in tool_masks],
+        attention_masks=attention_masks_list,
+        position_ids=[reset_position_ids(t.unsqueeze(0)).squeeze(0) for t in attention_masks_list],
+        response_masks=[torch.tensor(t) for t in response_masks],
+        original_responses=responses,
+        num_actions=[torch.tensor(t) for t in num_actions],
+        packed_seq_lens=[torch.tensor(t) for t in packed_seq_lens],
+    )
+
+
+def pack_sequences_with_masks(
     queries: List[List[int]],
     responses: List[List[int]],
     masks: List[List[int]],
