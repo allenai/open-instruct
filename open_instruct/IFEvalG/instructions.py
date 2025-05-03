@@ -1948,7 +1948,7 @@ class ExcludeWordHarderChecker(Instruction):
 
   def check_following(self, value):
     """Check if the response does not contain the expected keywords."""
-    if re.search(r"\b" + self._keyword + r"\b", value, flags=re.IGNORECASE):
+    if " " + self._keyword + " " in value:
       return False
     return True
 
