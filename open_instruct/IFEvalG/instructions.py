@@ -2162,11 +2162,10 @@ class LastWordSentChecker(Instruction):
       A string representing the instruction description.
       """
       if not last_word:
-        self._last_word = instructions_util.generate_keywords(
-          num_keywords=1)[0]
+        self._last_word = instructions_util.generate_keywords(num_keywords=1)[0]
       else:
         if not isinstance(last_word, str):
-          self._last_word == last_word[0].strip()
+          self._last_word = last_word[0].strip()
         else:
           self._last_word = last_word.strip()
 
