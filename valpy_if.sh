@@ -7,16 +7,16 @@ python mason.py \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_vllm_thread_ray_gtrl.py \
-    --exp_name valpy/if_multi_old_and_new_constraints  \
+    --exp_name valpy/if_multi_only_new_constraints  \
     --beta 0.01 \
     --local_mini_batch_size 32 \
     --number_samples_per_prompt 16 \
     --local_rollout_batch_size 4 \
     --kl_estimator kl3 \
     --learning_rate 5e-7 \
-    --dataset_mixer_list valpy/if_multi_old_and_new_constraints   1.0 \
+    --dataset_mixer_list valpy/if_multi_new_constraints   1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list valpy/if_multi_old_and_new_constraints  16 \
+    --dataset_mixer_eval_list valpy/if_multi_new_constraints  16 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
