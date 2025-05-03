@@ -600,10 +600,10 @@ class PolicyTrainerRayProcess(RayProcess):
         input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
         lm_backbone = getattr(model, model.base_model_prefix)
         output = lm_backbone(
-            input_ids=input_ids,
+            input_ids=input_ids[:, :-1],
             # @vwxyzjn: without clamp, we get index out of bounds errors; TODO: investigate
-            attention_mask=attention_mask.clamp(0, 1),
-            position_ids=position_ids,
+            attention_mask=attention_mask[:, :-1].clamp(0, 1),
+            position_ids=position_ids[:, :-1],
             return_dict=True,
             output_hidden_states=True,
         )
@@ -766,7 +766,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         position_id,
                         pad_token_id,
                     ).squeeze(-1)
-                    value = torch.masked_fill(value, ~response_mask.bool(), INVALID_VALUE)
+                    value = torch.masked_fill(value, ~response_mask[:, :-1].bool(), INVALID_VALUE)
                     collated_values.append(value)
 
         with Timer("Advantage Calculation", noop=self.rank != 0):
@@ -821,7 +821,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 for i in range(len(collated_query_responses)):
                     mb_query_responses = collated_query_responses[i]
                     mb_response_masks = collated_response_masks[i]
-                    mb_response_masks_bool = mb_response_masks.bool() # NOTE: different from policy; value can model the last token
+                    mb_response_masks_bool = mb_response_masks[:, :-1].bool()
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
                     mb_values = collated_values[i]
