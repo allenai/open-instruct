@@ -1630,11 +1630,14 @@ class RepeatPhraseChecker(Instruction):
       ref_phrase = self._phrase.split()
       differences = 0
       for i in range(len(phrase)):
-        if phrase[i] != ref_phrase [i]:
-          differences += 1
-          # Early exit if more than one difference found
-          if differences > 1:
-            return False
+        try:
+          if phrase[i] != ref_phrase [i]:
+            differences += 1
+            # Early exit if more than one difference found
+            if differences > 1:
+              return False
+        except IndexError:
+          return False
     if differences == 1:
       return True
 
