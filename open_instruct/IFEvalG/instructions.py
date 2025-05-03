@@ -2063,7 +2063,10 @@ class FirstWordSentChecker(Instruction):
         self._first_word = instructions_util.generate_keywords(
           num_keywords=1)[0]
       else:
-        self._first_word = first_word.strip()
+        if not isinstance(first_word, str):
+          self._first_word == first_word[0].strip()
+        else:
+          self._first_word = first_word.strip()
 
       self._description_pattern = (
           "The first word of each sentence should be the word {first_word}."
@@ -2160,9 +2163,12 @@ class LastWordSentChecker(Instruction):
       """
       if not last_word:
         self._last_word = instructions_util.generate_keywords(
-          num_keywords=1)
+          num_keywords=1)[0]
       else:
-        self._last_word = last_word.strip()
+        if not isinstance(last_word, str):
+          self._last_word == last_word[0].strip()
+        else:
+          self._last_word = last_word.strip()
 
       self._description_pattern = (
           "The last word of each sentence, before punctuation, should be the word {last_word}."
