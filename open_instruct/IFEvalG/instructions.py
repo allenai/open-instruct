@@ -2114,7 +2114,7 @@ class FirstWordAnswerChecker(Instruction):
       """
       if not first_word:
         self._first_word = instructions_util.generate_keywords(
-          num_keywords=1)
+          num_keywords=1)[0]
       else:
         self._first_word = first_word.strip()
 
