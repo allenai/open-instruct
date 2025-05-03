@@ -766,7 +766,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         position_id,
                         pad_token_id,
                     ).squeeze(-1)
-                    value = torch.masked_fill(value, ~response_mask[:, :-1].bool(), INVALID_VALUE)
+                    value = torch.masked_fill(value, ~response_mask[:, 1:].bool(), INVALID_VALUE)
                     collated_values.append(value)
 
         with Timer("Advantage Calculation", noop=self.rank != 0):
@@ -776,24 +776,28 @@ class PolicyTrainerRayProcess(RayProcess):
                 cpu_collated_dones = [item + [0] * (max_len - len(item)) for item in cpu_collated_dones]
                 cpu_collated_rewards = [item + [0] * (max_len - len(item)) for item in cpu_collated_rewards]
                 cpu_collated_response_masks = [item + [0] * (max_len - len(item)) for item in cpu_collated_response_masks]
-                cpu_collated_values = [item + [INVALID_VALUE] * (max_len - len(item)) for item in cpu_collated_values]
+                # minus 1 in `cpu_collated_values` because we already did the calculation based on [:-1] and masking on [1:]
+                cpu_collated_values = [item + [INVALID_VALUE] * (max_len - 1 - len(item)) for item in cpu_collated_values]
                 adv, ret = calculate_advantages_packed(
                     np.stack(cpu_collated_values),
-                    np.stack(cpu_collated_rewards),
+                    np.stack(cpu_collated_rewards)[:, 1:],
                     gamma,
                     lam,
-                    np.stack(cpu_collated_dones),
-                    np.stack(cpu_collated_response_masks),
+                    np.stack(cpu_collated_dones)[:, 1:],
+                    np.stack(cpu_collated_response_masks)[:, 1:],
                 )
                 
                 # Calculate the mean and std of the advantages
                 adv_gpu = torch.from_numpy(adv).to(self.device)
-                response_masks_gpu = torch.from_numpy(np.stack(cpu_collated_response_masks)).to(self.device)
+                response_masks_gpu = torch.from_numpy(np.stack(cpu_collated_response_masks)[:, 1:]).to(self.device)
                 adv_sum = (adv_gpu * response_masks_gpu).sum()
+                adv_abs_sum = (torch.abs(adv_gpu) * response_masks_gpu).sum()
                 mask_sum = response_masks_gpu.sum()
                 dist.all_reduce(adv_sum, op=dist.ReduceOp.SUM)
+                dist.all_reduce(adv_abs_sum, op=dist.ReduceOp.SUM)
                 dist.all_reduce(mask_sum, op=dist.ReduceOp.SUM)
                 adv_mean = adv_sum / mask_sum
+                adv_abs_mean = adv_abs_sum / mask_sum
                 adv_variance = (torch.square(adv_gpu - adv_mean) * response_masks_gpu).sum()
                 dist.all_reduce(adv_variance, op=dist.ReduceOp.SUM)
                 adv_variance /= mask_sum
@@ -806,8 +810,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 offset = 0
                 for i in range(len(collated_query_responses)):
                     batch_size, seq_len = collated_query_responses[i].shape
-                    collated_advantages.append(adv[offset:offset+batch_size, :seq_len])
-                    collated_returns.append(torch.from_numpy(ret[offset:offset+batch_size, :seq_len]))
+                    collated_advantages.append(adv[offset:offset+batch_size, :seq_len - 1])
+                    collated_returns.append(torch.from_numpy(ret[offset:offset+batch_size, :seq_len - 1]))
                     offset += batch_size
                 to_device_inplace(collated_advantages, self.device)
                 to_device_inplace(collated_returns, self.device)
@@ -821,7 +825,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 for i in range(len(collated_query_responses)):
                     mb_query_responses = collated_query_responses[i]
                     mb_response_masks = collated_response_masks[i]
-                    mb_response_masks_bool = mb_response_masks[:, :-1].bool()
+                    mb_response_masks_bool = mb_response_masks[:, 1:].bool()
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
                     mb_values = collated_values[i]
@@ -903,8 +907,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Calculate the policy's loss
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
                     ratio = torch.exp(logprobs_diff)
-                    pg_losses = -mb_advantages[:, 1:] * ratio
-                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
+                    pg_losses = -mb_advantages * ratio
+                    pg_losses2 = -mb_advantages * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
                     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
                     # Here we recalculate kl: we want the KL loss to backpropagate through the model
@@ -968,6 +972,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("policy_optimizer_step", policy_optimizer_step)
                 self.local_metrics.add("value_optimizer_step", value_optimizer_step)
                 self.local_metrics.add("val/adv_mean", adv_mean)
+                self.local_metrics.add("val/adv_abs_mean", adv_abs_mean)
                 self.local_metrics.add("val/adv_std", adv_std)
                 metrics_list = self.local_metrics.get_metrics_list()
                 # metrics_list["val/advantages_mean"] = adv.mean()
