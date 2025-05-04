@@ -3,7 +3,7 @@ import asyncio
 import instructor
 import openai
 import litellm
-from openai import AzureOpenAI
+from openai import AzureOpenAI, AsyncAzureOpenAI
 
 import time
 import os
@@ -14,6 +14,9 @@ from tenacity import retry, wait_random_exponential, stop_after_attempt, AsyncRe
 
 openai._utils._logs.logger.setLevel(logging.WARNING)
 openai._utils._logs.httpx_logger.setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)  # Or DEBUG, depending on verbosity
 
 PRICING_PER_1M_TOKENS = {
     "gpt-4": {"input": 0.00003, "output": 0.00006}, 
@@ -45,6 +48,28 @@ async def call_azure_sync(client, **kwargs):
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, lambda: client.chat.completions.create(**kwargs))
 
+def build_fallback_response(reason: str, elapsed_time: float = 0.0):
+    """Return a structured fallback response with a reasoning and zero score."""
+    logger.warning(f"Returning fallback response: {reason}")
+    return {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": f'{{"REASONING": "{reason}", "SCORE": 0}}'
+                }
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0
+        },
+        "cost": 0.0,
+        "response_time": elapsed_time,
+    }
+
+
 
 def llm_client():
     
@@ -52,9 +77,14 @@ def llm_client():
         # # Attempt to import litellm
         import litellm
         # fall back to azure openai if litellm is not available
-        client = AzureOpenAI(
+        # client = AzureOpenAI(
+        #     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+        #     api_version="2024-12-01-preview", #"2024-07-18", # 2024-11-20 for gpt-4o
+        #     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+        # )
+        client = AsyncAzureOpenAI(
             api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-            api_version="2024-12-01-preview", #"2024-07-18", # 2024-11-20 for gpt-4o
+            api_version="2024-12-01-preview",  # Use the latest appropriate API version
             azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
         )
     except ImportError:
@@ -66,6 +96,7 @@ def llm_client():
     else:
         # Return client/litellm module object if import succeeds
         return client #litellm # client #litellm
+
 
 ### V2 of async completion with retry
 def track_cost_callback(kwargs, completion_response, start_time, end_time):
@@ -120,8 +151,9 @@ async def async_get_completion(
     seed: int,
     response_format: dict = None,
     response_model: BaseModel = None,
+    client_or_module=None,
 ):
-    client_or_module = llm_client() # Returns openai.AsyncOpenAI or litellm module
+    # client_or_module = llm_client() # Returns openai.AsyncOpenAI or litellm module
     
     async for attempt in AsyncRetrying(
         wait=wait_random_exponential(min=1, max=60),
@@ -130,43 +162,64 @@ async def async_get_completion(
     ):
         with attempt:
             start_time = time.time()
+            
+            try:
+                if response_format and response_model:
+                    raise Exception("response_format and response_model cannot both be provided. please provide only one.")
 
-            if response_format and response_model:
-                raise Exception("response_format and response_model cannot both be provided. please provide only one.")
+                # --- Case 1: Using instructor with a response_model ---
+                if response_model and response_format is None:
+                    if isinstance(client_or_module, openai.AsyncOpenAI):
+                        # Use instructor with the already async OpenAI client
+                        instructor_client = instructor.patch(client_or_module) # Use instructor.patch for async client
+                        response = await instructor_client.chat.completions.create(
+                            model=model,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            messages=messages,
+                            seed=seed,
+                            response_model=response_model,
+                        )
+                    elif hasattr(client_or_module, "__name__") and client_or_module.__name__ == "litellm":
+                        # Use instructor with litellm's async completion
+                        instructor_client = instructor.from_litellm(litellm.acompletion)
+                        response = await instructor_client.chat.completions.create(
+                            model=model,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            messages=messages,
+                            seed=seed,
+                            response_model=response_model,
+                        )
+                    else:
+                        raise Exception("unknown client type for response_model handling.")
 
-            # --- Case 1: Using instructor with a response_model ---
-            if response_model and response_format is None:
-                if isinstance(client_or_module, openai.AsyncOpenAI):
-                    # Use instructor with the already async OpenAI client
-                    instructor_client = instructor.patch(client_or_module) # Use instructor.patch for async client
-                    response = await instructor_client.chat.completions.create(
-                        model=model,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        messages=messages,
-                        seed=seed,
-                        response_model=response_model,
-                    )
-                elif hasattr(client_or_module, "__name__") and client_or_module.__name__ == "litellm":
-                    # Use instructor with litellm's async completion
-                    instructor_client = instructor.from_litellm(litellm.acompletion)
-                    response = await instructor_client.chat.completions.create(
-                        model=model,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        messages=messages,
-                        seed=seed,
-                        response_model=response_model,
-                    )
+                # --- Case 2: Not using instructor (no response_model) ---
                 else:
-                    raise Exception("unknown client type for response_model handling.")
+                    if isinstance(client_or_module, openai.lib.azure.AsyncAzureOpenAI):
+                        response = await client_or_module.chat.completions.create(
+                            model=f"{model}-standard",
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            messages=messages,
+                            seed=seed,
+                            response_format=response_format,
+                        )
 
-            # --- Case 2: Not using instructor (no response_model) ---
-            else:
-                # breakpoint()
-                if isinstance(client_or_module, openai.AsyncOpenAI):
-                    # Use AsyncOpenAI client directly
-                    response = await client_or_module.chat.completions.create(
+                    elif isinstance(client_or_module, openai.AsyncOpenAI):
+                        # Use AsyncOpenAI client directly
+                        response = await client_or_module.chat.completions.create(
+                            model=model,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            messages=messages,
+                            seed=seed,
+                            response_format=response_format,
+                        )
+
+                    elif hasattr(client_or_module, "__name__") and client_or_module.__name__ == "litellm":
+                        # litellm.acompletion is already async
+                        response = client_or_module.completion(
                         model=model,
                         max_tokens=max_tokens,
                         temperature=temperature,
@@ -174,46 +227,37 @@ async def async_get_completion(
                         seed=seed,
                         response_format=response_format,
                     )
+                        # response = await client_or_module.acompletion(
+                        #     model=f"azure/{model}-standard",
+                        #     max_tokens=max_tokens,
+                        #     temperature=temperature,
+                        #     messages=messages,
+                        #     seed=seed,
+                        #     response_format=response_format,
+                        #     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+                        #     api_version="2024-12-01-preview", #"2024-07-18", # 2024-11-20 for gpt-4o
+                        #     api_base=os.getenv("AZURE_OPENAI_ENDPOINT"),
+                        # )
+                    else:
+                        raise Exception("unknown client type for standard completion handling.")
 
-                # elif isinstance(client_or_module, openai.lib.azure.AzureOpenAI):
-                #     # Use openai.lib.azure.AzureOpenAI client directly
-                #     response = await client_or_module.chat.completions.create(
-                #         model=f"{model}-standard",
-                #         max_tokens=max_tokens,
-                #         temperature=temperature,
-                #         messages=messages,
-                #         seed=seed,
-                #         response_format=response_format,
-                #     )
-                elif isinstance(client_or_module, openai.lib.azure.AzureOpenAI):
-                    response = await call_azure_sync(
-                        client_or_module,
-                        model=f"{model}-standard",
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        messages=messages,
-                        seed=seed,
-                        response_format=response_format,
-                    )
-                    # breakpoint()
+                end_time = time.time()
+                track_cost_callback({"model": model}, response, start_time, end_time)
+                
+                if response is None:
+                    breakpoint()
+                    # print("Warning: Response was None. Returning fallback response.")
+                    return build_fallback_response("No response received.", elapsed_time=end_time - start_time)
 
-                elif hasattr(client_or_module, "__name__") and client_or_module.__name__ == "litellm":
-                    # litellm.acompletion is already async
-                    response = await client_or_module.acompletion(
-                        model=model,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        messages=messages,
-                        seed=seed,
-                        response_format=response_format,
-                    )
+                return response
+            
+            except openai.BadRequestError as e:
+                if getattr(e, "status_code", None) == 400 and "content_filter" in str(e):
+                    # print("Azure OpenAI content filter triggered, returning empty fallback response.")
+                    return build_fallback_response("Azure OpenAI content filter triggered.", elapsed_time=0.0)
+
                 else:
-                    raise Exception("unknown client type for standard completion handling.")
-
-            end_time = time.time()
-            track_cost_callback({"model": model}, response, start_time, end_time)
-
-            return response
+                    raise  # re-raise if it's not a content filter error
 
 @retry(
     wait=wait_random_exponential(min=1, max=60),

@@ -24,6 +24,12 @@ import time
 import re
 from dataclasses import dataclass
 from typing import Any, List, NewType, Optional, Tuple, Union
+import asyncio
+from contextlib import asynccontextmanager
+import instructor
+import openai
+import litellm
+from openai import AzureOpenAI, AsyncAzureOpenAI
 
 import requests
 from accelerate.logging import get_logger
@@ -1167,3 +1173,43 @@ def extract_user_query(conversation: str, chat_template_name: str = None) -> str
     match = re.search(pattern, conversation, re.DOTALL)
     # Return the captured group if found, else return None
     return match.group(1).strip() if match else None
+
+
+def llm_client():
+    
+    try:
+        # # Attempt to import litellm
+        import litellm
+        # fall back to azure openai if litellm is not available
+        # client = AzureOpenAI(
+        #     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+        #     api_version="2024-12-01-preview", #"2024-07-18", # 2024-11-20 for gpt-4o
+        #     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+        # )
+        client = AsyncAzureOpenAI(
+            api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+            api_version="2024-12-01-preview",  # Use the latest appropriate API version
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+        )
+    except ImportError:
+        # fallback to async openai if litellm is not available
+        print("litellm not found, falling back to openai.AsyncOpenAI")
+        client = openai.AsyncOpenAI()
+        return client
+
+    else:
+        # Return client/litellm module object if import succeeds
+        return litellm #client #litellm # client #litellm
+    
+@asynccontextmanager
+async def get_llm_client():
+    """Async context manager for LLM client lifecycle management."""
+    client = llm_client()  # Returns openai.AsyncOpenAI or litellm module
+    try:
+        yield client
+    finally:
+        if hasattr(client, "aclose") and inspect.iscoroutinefunction(client.aclose):
+            try:
+                await client.aclose()
+            except RuntimeError as e:
+                logger.warning(f"Error closing client: {e}")

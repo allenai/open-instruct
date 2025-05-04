@@ -2,7 +2,7 @@
 # older data:  faezeb/tulu-3-sft-t3-70b-thinker-sampled
 
 # saurab command:
-exp_name="0412_qwen2.5_7B_thinker_grpo_fast_llm_judge__gpt-4o_quality_ref_${RANDOM}_large"
+exp_name="0205_qwen2.5_7B_thinker_grpo_fast_llm_judge__gpt-4o_mix_data_${RANDOM}_large"
 
 python mason.py \
     --description $exp_name \
@@ -15,9 +15,9 @@ python mason.py \
     --budget ai2/oe-adapt \
     --image ai2/cuda11.8-cudnn8-dev-ubuntu20.04 \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast_wip.py \
-    --dataset_mixer_list ai2-adapt-dev/tulu-3-sft-72k-criteria-gpt4o-classified-rewritten-math-shortqa-ifeval 1.0 \
+    --dataset_mixer_list ai2-adapt-dev/tulu-3-sft-92k-criteria-gpt4o-classified-rewritten-math-shortqa-ifeval 90000 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list ai2-adapt-dev/tulu-3-sft-72k-criteria-gpt4o-classified-rewritten-math-shortqa-ifeval 64 \
+    --dataset_mixer_eval_list ai2-adapt-dev/tulu-3-sft-92k-criteria-gpt4o-classified-rewritten-math-shortqa-ifeval 128 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 10240 \
     --max_prompt_token_length 2048 \
@@ -43,12 +43,12 @@ python mason.py \
     --total_episodes 260000 \
     --deepspeed_stage 2 \
     --per_device_train_batch_size 1 \
-    --num_mini_batches 1 \
-    --num_learners_per_node 8 8 \
+    --num_mini_batches 2 \
+    --num_learners_per_node 6 \
     --num_epochs 1 \
     --beta 0.01 \
     --vllm_tensor_parallel_size 1 \
-    --vllm_num_engines 16 \
+    --vllm_num_engines 10 \
     --lr_scheduler_type constant \
     --seed 1 \
     --num_evals 50 \
@@ -60,10 +60,17 @@ python mason.py \
     --wandb_entity ai2-llm \
     --llm_judge_model "gpt-4o"
 
+    # my previous runs:
+        # --num_mini_batches 1 \
+        # --vllm_num_engines 16 \
+        # --num_learners_per_node 8 8 \
+
+
     # --image faezeb/open_instruct_llm_judge_async --pure_docker_mode \
     # --beaker_datasets /models:01JQAWR48DRN9XCHX6YQCG9RF8 \
     # saurabhs/async_llm_judges
     # --image ai2/cuda11.8-cudnn8-dev-ubuntu20.04 \
+    #     --preemptible \
 
 
 # # add date to the experiment name

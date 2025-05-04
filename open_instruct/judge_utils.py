@@ -21,7 +21,8 @@ class JudgeQuality(BaseJudge):
     def __init__(
         self,
         model: str,
-        judge_type: str
+        judge_type: str,
+        client = None
     ):
         """
         Initialize the judge with a specific model.
@@ -33,6 +34,7 @@ class JudgeQuality(BaseJudge):
         """
         super().__init__(model)
         self.judge_type = judge_type
+        self.client = client  # Initialize the client here
 
     async def judge(
         self,
@@ -59,8 +61,9 @@ class JudgeQuality(BaseJudge):
         reasoning, score, cost, response_time = await self._judge(
             user_prompt=user_prompt,
             system_prompt=system_prompt,
+            client=self.client,
         )
-        # breakpoint()
+        breakpoint()
         return Judgment(reasoning=reasoning, score=score, cost=cost, response_time=response_time)
     
 

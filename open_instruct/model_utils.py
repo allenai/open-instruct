@@ -17,10 +17,12 @@
 import itertools
 import logging
 import asyncio
+import inspect
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple, Union
+from utils import llm_client, get_llm_client
 
 try:
     import deepspeed
@@ -300,48 +302,61 @@ async def _apply_llm_verifier_reward_async(
     total_cost = []
     judge_reasonings = []
 
-    # Create tasks for each response
-    tasks = []
-    for tok_prediction, prediction, ground_truth, dataset, query in zip(
-        responses, decoded_responses, ground_truths, datasets, queries
-    ):
-        # Process the same initial logic as before
-        if isinstance(ground_truth, str):
-            ground_truth_list = [ground_truth]
-        else:
-            ground_truth_list = ground_truth
+    # # create a client for the LLM
+    # client = llm_client() # Returns openai.AsyncOpenAI or litellm module
+
+    # try:
+    async with get_llm_client() as client:
+        # Create tasks for each response
+        # Create tasks for each response
+        tasks = []
+        for tok_prediction, prediction, ground_truth, dataset, query in zip(
+            responses, decoded_responses, ground_truths, datasets, queries
+        ):
+            # Process the same initial logic as before
+            if isinstance(ground_truth, str):
+                ground_truth_list = [ground_truth]
+            else:
+                ground_truth_list = ground_truth
+                
+            if isinstance(dataset, str):
+                dataset_list = [dataset]
+            else:
+                dataset_list = dataset
+                
+            assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
             
-        if isinstance(dataset, str):
-            dataset_list = [dataset]
-        else:
-            dataset_list = dataset
-            
-        assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
+            # Create a task for processing this response
+            # task = asyncio.create_task(_process_single_response(
+            ## suggested by claude
+            task = asyncio.create_task(_process_single_response(
+                tok_prediction, 
+                prediction, 
+                ground_truth_list, 
+                dataset_list, 
+                query, 
+                reward_mult, 
+                judge_type,
+                judge_model,
+                client=client
+            ))
+            tasks.append(task)
         
-        # Create a task for processing this response
-        task = asyncio.create_task(_process_single_response(
-            tok_prediction, 
-            prediction, 
-            ground_truth_list, 
-            dataset_list, 
-            query, 
-            reward_mult, 
-            judge_type,
-            judge_model
-        ))
-        tasks.append(task)
-    
-    # Wait for all tasks to complete
-    results = await asyncio.gather(*tasks)
-    
-    # Process results
-    for reward, per_func_reward, cost, judge_reason in results:
-        rewards.append(reward)
-        per_func_rewards.append(per_func_reward)
-        total_cost.append(cost)
-        judge_reasonings.append(judge_reason)
-    
-    return rewards, per_func_rewards, total_cost, judge_reasonings
+        # Wait for all tasks to complete
+        results = await asyncio.gather(*tasks)
+        
+        # Process results
+        for reward, per_func_reward, cost, judge_reason in results:
+            rewards.append(reward)
+            per_func_rewards.append(per_func_reward)
+            total_cost.append(cost)
+            judge_reasonings.append(judge_reason)
+        
+        return rewards, per_func_rewards, total_cost, judge_reasonings
+
+    # finally:
+    #     if hasattr(client, "aclose") and inspect.iscoroutinefunction(client.aclose):
+    #         await client.aclose()
 
 async def _process_single_response(
     tok_prediction,
@@ -351,7 +366,8 @@ async def _process_single_response(
     query,
     reward_mult,
     judge_type,
-    judge_model
+    judge_model,
+    client=None,
 ):
     """Process a single response with potentially multiple ground truths and datasets."""
     reward = 0
@@ -363,7 +379,7 @@ async def _process_single_response(
     # For each ground truth and dataset combination, create tasks
     judgment_tasks = []
     for gt, ds in zip(ground_truth_list, dataset_list):
-
+        
         verifier_name, judge_type = ds.lower().split("-")
         # judge_type if ds.lower() not in ['factual information (general or professional), history or common practices', 'multilinguality or translation'] else "quality_ref"
         reward_func = REWARD_FN_MAPPING.get(verifier_name)(judge_type=judge_type, model_name=judge_model)
@@ -377,6 +393,7 @@ async def _process_single_response(
             prediction=prediction,
             label=gt,
             query=query,
+            client=client,
         ))
         judgment_tasks.append((task, ds, reward_func.weight))
     

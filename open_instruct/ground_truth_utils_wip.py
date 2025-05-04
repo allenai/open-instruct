@@ -71,7 +71,7 @@ class VerifierFunction(ABC):
             int: Reward score. Can be binary (0/1) or continuous.
         """
 
-    async def async_call(self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None) -> Tuple[float, float]:
+    async def async_call(self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None, client=None) -> Tuple[float, float]:
         """
         Asynchronous version of __call__. By default, it runs the synchronous __call__ in a thread pool.
         Subclasses can override this method for truly asynchronous implementation.
@@ -161,7 +161,7 @@ class MathVerifier(VerifierFunction):
                 return 1.0, api_cost
         return 0.0
 
-    async def async_call(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> bool:
+    async def async_call(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None, client=None) -> bool:
         """
         Async version of __call__ that directly awaits _judge without using asyncio.run()
         """
@@ -223,7 +223,7 @@ class StrictMathVerifier(VerifierFunction):
                 return 1.0
         return 0.0
     
-    async def async_call(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> Tuple[float, float, str]:
+    async def async_call(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None, client=None) -> Tuple[float, float, str]:
         """
         Async version of __call__ that directly awaits _judge without using asyncio.run()
         """
@@ -272,7 +272,7 @@ class IFEvalVerifier(VerifierFunction):
             return func(prediction)
         return float(func(answer, **non_none_args))
     
-    async def async_call(self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], query: Optional[str] = None) -> Tuple[float, float, str]:
+    async def async_call(self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], query: Optional[str] = None, client=None) -> Tuple[float, float, str]:
         """
         Async version of __call__ that directly awaits _judge without using asyncio.run()
         """
@@ -342,7 +342,6 @@ class LMJudgeVerifier(VerifierFunction):
         judge_type: str = "quality",
         # weight: float = 1.0,
         model_name: str = "gpt-4o-mini",
-        threshold: float = 0.5,
     ) -> None:
         """
         Initialize LMJudgeVerifier with specified parameters.
@@ -357,12 +356,12 @@ class LMJudgeVerifier(VerifierFunction):
         super().__init__("general", weight=1.0)
         self.judge_type = judge_type
         self.model_name = model_name
-        self.threshold = threshold
+        # self.client = client
         
         if judge_type not in JUDGE_CLASS_MAP:
             raise ValueError(f"Unsupported judge type: {judge_type}. Available types: {list(JUDGE_CLASS_MAP.keys())}")
             
-        self.judge = JUDGE_CLASS_MAP[judge_type](model=model_name, judge_type=judge_type)
+        self.judge = JUDGE_CLASS_MAP[judge_type](model=model_name, judge_type=judge_type) #, client=self.client)
 
     def __call__(
         self, 
@@ -419,6 +418,7 @@ class LMJudgeVerifier(VerifierFunction):
         prediction: str, 
         label: Any,
         query: Optional[str] = None,
+        client=None,
     ) -> Tuple[float, float, str]:
         """
         Async version of __call__ that directly awaits _judge without using asyncio.run()
@@ -434,6 +434,9 @@ class LMJudgeVerifier(VerifierFunction):
         """
         # Clean prediction if needed
         answer = extract_final_answer(prediction)
+        if answer == "":
+            logger.warning("Empty answer string after extraction.")
+            return 0.0, 0.0, "Empty answer string"
 
         # Ensure judge_type is valid
         if self.judge_type not in JUDGE_PROMPT_MAP:
@@ -447,14 +450,14 @@ class LMJudgeVerifier(VerifierFunction):
             output=answer,
             label=label if isinstance(label, str) else json.dumps(label)
         )
-        
+
         # Directly await the _judge method instead of using asyncio.run
         reasoning, score, cost, response_time = await self.judge._judge(
             user_prompt=user_prompt,
-            system_prompt=None
+            system_prompt=None,
+            client=client,
         )
 
-        
         # Process the score same as in __call__
         if isinstance(score, (int, float)):
             final_score = score
@@ -551,7 +554,7 @@ class F1Verifier(VerifierFunction):
     def __init__(self, judge_type=None, model_name=None) -> None:
         super().__init__("string_f1", weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> Tuple[bool, float, str]:
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None, client=None) -> Tuple[bool, float, str]:
         api_cost = 0.0
         reasoning = None
         # remove thinking section from the prediction

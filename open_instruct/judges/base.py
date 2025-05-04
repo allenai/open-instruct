@@ -120,7 +120,7 @@ class BaseJudge:
         messages.append({"role": "user", "content": user_prompt})
         return messages
 
-    async def _judge(self, user_prompt: str, system_prompt: Optional[str] = None):
+    async def _judge(self, user_prompt: str, system_prompt: Optional[str] = None, client=None): 
         """
         Perform the judgment process using the configured model.
 
@@ -151,30 +151,30 @@ class BaseJudge:
         completion = await async_get_completion(
             model=self.model,
             messages=messages,
-            max_tokens=None,
+            max_tokens=1024,
             temperature=1,
             seed=None,
             response_model=None,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            client_or_module=client,
         )
-        
+        # breakpoint()
+        # check iif completion has attribute choices
+        if not hasattr(completion, "choices"):
+            print(f"Model did not return a valid response. Response: {completion}")
+            breakpoint()
+        completion_ = completion.choices[0].message.content
+
         try:
-            data = json.loads(completion.choices[0].message.content)
+            data = json.loads(completion_)
             reasoning = data.get("REASONING", "")
             score = data.get("SCORE", 0.0)
-        except json.JSONDecodeError:
-            print(
-                f"Model did not return a valid JSON response. Response: {completion.choices[0].message.content}")
-            reasoning = ""
-            score = extract_score_from_string(completion.choices[0].message.content)
+        except:
 
-        # try:
-        #     # if the model is not using the correct format, it will throw an error
-        #     score = data.get("SCORE", 0.0)
-        # except AssertionError:
-        #     print(
-        #         f"Model did not return a valid JSON response. Response: {completion.choices[0].message.content}")
-        #     score = extract_score_from_string(completion.choices[0].message.content)
+            print(f"Model did not return a valid JSON response. Response: {completion_}")
+            reasoning = ""
+            score = extract_score_from_string(completion_) if isinstance(completion_, str) else 0.0
+
 
         # check if cost/response_time is available
         try:
@@ -188,6 +188,10 @@ class BaseJudge:
             pass
 
         return reasoning, score, cost, response_time
+
+    # async def aclose(self):
+    #     if self.owns_client:
+    #         await self.client.aclose()
 
     @abstractmethod
     def judge(
