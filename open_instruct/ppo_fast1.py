@@ -1808,41 +1808,64 @@ if __name__ == "__main__":
                 format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
                 if len(format_scores) != len(scores):
                     raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
-                for i in range(len(format_scores)):
-                    scores[i] = format_scores[i] + scores[i]
                 metrics["val/format_scores"] = np.array(format_scores).mean()
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
-                verifiable_rewards, per_func_rewards = apply_verifiable_reward(
-                    responses,
-                    decoded_responses,
-                    ground_truths,
-                    datasets,
-                    reward_mult=args.verification_reward,
-                )
+                # @vwxyzjn: quick orz-style experiment
+                pattern = re.compile(r"<answer>.*?(\\boxed{.*}).*?</answer>", re.DOTALL)
+                final_answers = []
+                for decoded_response in decoded_responses:
+                    matches = re.findall(pattern, decoded_response)
+                    if len(matches) > 0:
+                        final_answers.append(matches[-1])
+                    else:
+                        final_answers.append("")
+                is_correct_futures = [executor.submit(is_equal_sync, solution2answer(gt), solution2answer(fa)) for gt, fa in zip(ground_truths, final_answers)]
+                is_corrects = []
+                timeouts = 0
+                remaining_timeout_budget = 5.0
+                for future in is_correct_futures:
+                    if remaining_timeout_budget > 0.0:
+                        start_time = time.time()
+                        try:
+                            is_corrects.append(future.result(timeout=remaining_timeout_budget))
+                        except TimeoutError:
+                            timeouts += 1
+                            is_corrects.append(False)
+                        remaining_timeout_budget -= time.time() - start_time
+                    else:
+                        try:
+                            is_corrects.append(future.result(timeout=0.001)) # a small timeout to still get result that finished
+                        except TimeoutError:
+                            is_corrects.append(False)
+                            timeouts += 1
+                timeout_ratio = timeouts / len(is_corrects)
+
+                verifiable_rewards = []
+                for is_correct, stop_reason in zip(is_corrects, finish_reasons):
+                    if stop_reason == "stop":
+                        verifiable_reward = 1.0 if is_correct else 0.0
+                    else:
+                        verifiable_reward = 0.0
+                    verifiable_rewards.append(verifiable_reward)
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
                 for i in range(len(verifiable_rewards)):
-                    if args.apply_r1_style_format_reward and args.additive_format_reward:
-                        scores[i] = verifiable_rewards[i] + scores[i]
-                    elif args.apply_r1_style_format_reward and not args.additive_format_reward:
-                        scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
-                    else:
-                        scores[i] = verifiable_rewards[i]
+                    scores[i] = verifiable_rewards[i]
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
-                # reshuffle around per_func rewards
-                per_func_lists = defaultdict(list)
-                for reward_dict in per_func_rewards:
-                    for key, value in reward_dict.items():
-                        per_func_lists[key].append(value)
-                # log per function rewards
-                for key, value in per_func_lists.items():
-                    np_value = np.array(value)
-                    metrics[f"objective/{key}_reward"] = np_value.mean()
-                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
+                # # reshuffle around per_func rewards
+                # per_func_lists = defaultdict(list)
+                # for reward_dict in per_func_rewards:
+                #     for key, value in reward_dict.items():
+                #         per_func_lists[key].append(value)
+                # # log per function rewards
+                # for key, value in per_func_lists.items():
+                #     np_value = np.array(value)
+                #     metrics[f"objective/{key}_reward"] = np_value.mean()
+                #     metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:
@@ -1851,6 +1874,10 @@ if __name__ == "__main__":
                 for i in range(len(finish_reasons)):
                     if finish_reasons[i] != "stop":
                         scores[i] = args.non_stop_penalty_value
+        
+        metrics["objective/scores"] = np.array(scores).mean()
+        metrics["val/timeout_ratio"] = timeout_ratio
+        # metrics["objective/scores"] = np.array(scores)
 
         return scores, metrics
 
