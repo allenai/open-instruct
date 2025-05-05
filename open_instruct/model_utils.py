@@ -41,8 +41,11 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 # from open_instruct.ground_truth_utils import REWARD_FN_MAPPING
-from open_instruct.ground_truth_utils_wip import LMJudgeVerifier, REWARD_FN_MAPPING
+from open_instruct.ground_truth_utils_wip import LMJudgeVerifier, REWARD_FN_MAPPING, VerifierFunction
 from open_instruct.utils import retry_on_exception
+import openai # For type hint
+from typing import Any # For client type hint
+from open_instruct.judges._client import llm_client # Need llm_client to create the client
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +270,6 @@ def apply_llm_verifier_reward(
     queries: List[str],
     local_judge: bool,
     reward_mult: int = 10,
-    judge_type: str = "quality",
     judge_model: str = "gpt-4o-mini",
 ):
     """Apply LLM-based verification to calculate rewards for responses.
@@ -282,8 +284,7 @@ def apply_llm_verifier_reward(
         queries,
         local_judge,
         reward_mult,
-        judge_type,
-        judge_model
+        judge_model,
     ))
 
 async def _apply_llm_verifier_reward_async(
@@ -294,7 +295,6 @@ async def _apply_llm_verifier_reward_async(
     queries: List[str],
     local_judge: bool,
     reward_mult: int = 10,
-    judge_type: str = "quality",
     judge_model: str = "gpt-4o-mini",
 ):
     """Async implementation of apply_llm_verifier_reward that executes judgments concurrently."""
@@ -303,48 +303,102 @@ async def _apply_llm_verifier_reward_async(
     total_cost = []
     judge_reasonings = []
 
-    # Create tasks for each response
-    tasks = []
-    for tok_prediction, prediction, ground_truth, dataset, query in zip(
-        responses, decoded_responses, ground_truths, datasets, queries
-    ):
-        # Process the same initial logic as before
-        if isinstance(ground_truth, str):
-            ground_truth_list = [ground_truth]
+    # --- Client Management --- 
+    # Create the client once here if any LMJudgeVerifier (general) will be used.
+    # We assume the judge_model applies to all LMJudge calls within this batch.
+    # Check if any dataset indicates the use of the 'general' verifier which needs the client.
+    needs_openai_client = False
+    overall_judge_type = "quality" # Default if not specified in dataset string
+    for ds_list in datasets:
+        if isinstance(ds_list, str):
+             ds_list = [ds_list]
+        for ds in ds_list:
+            verifier_name = ds.lower().split("-")[0]
+            if verifier_name == "general":
+                needs_openai_client = True
+                if len(ds.lower().split("-")) > 1:
+                    # Optionally capture the first judge_type seen, though it might vary per dataset
+                    overall_judge_type = ds.lower().split("-")[1]
+                break # Found one, no need to check further in this inner loop
+        if needs_openai_client:
+            break # Found one, no need to check further in the outer loop
+
+    client = None
+    try:
+        if needs_openai_client:
+            logger.info(f"Creating single OpenAI client for judge model: {judge_model}")
+            # Assuming judge_model is NOT a path like 'huggingface/...' for LMJudge
+            client = llm_client(model_type="huggingface" if '/' in judge_model else "openai") # Use the factory from _client
         else:
-            ground_truth_list = ground_truth
-            
-        if isinstance(dataset, str):
-            dataset_list = [dataset]
-        else:
-            dataset_list = dataset
-            
-        assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
-        
-        # Create a task for processing this response
-        task = asyncio.create_task(_process_single_response(
-            tok_prediction, 
-            prediction, 
-            ground_truth_list, 
-            dataset_list, 
-            query, 
-            local_judge,
-            reward_mult, 
-            judge_type,
-            judge_model
-        ))
-        tasks.append(task)
-    
-    # Wait for all tasks to complete
-    results = await asyncio.gather(*tasks)
-    
-    # Process results
-    for reward, per_func_reward, cost, judge_reason in results:
-        rewards.append(reward)
-        per_func_rewards.append(per_func_reward)
-        total_cost.append(cost)
-        judge_reasonings.append(judge_reason)
-    
+            logger.info("No 'general' verifier detected in datasets, skipping OpenAI client creation.")
+
+        # Create tasks for each response, passing the single client instance
+        tasks = []
+        for i, (tok_prediction, prediction, ground_truth, dataset, query) in enumerate(zip(
+            responses, decoded_responses, ground_truths, datasets, queries
+        )):
+            # Process the same initial logic as before
+            if isinstance(ground_truth, str):
+                ground_truth_list = [ground_truth]
+            else:
+                ground_truth_list = ground_truth
+
+            if isinstance(dataset, str):
+                dataset_list = [dataset]
+            else:
+                dataset_list = dataset
+
+            if len(ground_truth_list) != len(dataset_list):
+                 logger.error(f"Mismatch lengths for item {i}: {len(ground_truth_list)=} != {len(dataset_list)=}. Skipping.")
+                 # Append default/error values for this item
+                 rewards.append(0)
+                 per_func_rewards.append({})
+                 total_cost.append(0)
+                 judge_reasonings.append("Error: Mismatched ground truth and dataset lists.")
+                 continue # Skip creating a task for this item
+
+            # Create a task for processing this response, passing the client
+            task = asyncio.create_task(_process_single_response(
+                tok_prediction,
+                prediction,
+                ground_truth_list,
+                dataset_list,
+                query,
+                local_judge,
+                reward_mult,
+                overall_judge_type, # Pass default/detected judge_type
+                judge_model,
+                client # Pass the potentially created client
+            ))
+            tasks.append(task)
+
+        # Wait for all tasks to complete
+        # Use return_exceptions=True to handle failures gracefully
+        results_or_exceptions = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Process results
+        for result_or_exception in results_or_exceptions:
+            if isinstance(result_or_exception, Exception):
+                logger.error(f"Task failed in apply_llm_verifier_reward: {result_or_exception}", exc_info=result_or_exception)
+                # Append default/error values for failed tasks
+                rewards.append(0)
+                per_func_rewards.append({})
+                total_cost.append(0)
+                judge_reasonings.append(f"Error: {result_or_exception}")
+            else:
+                # Unpack successful result
+                reward, per_func_reward, cost, judge_reason = result_or_exception
+                rewards.append(reward)
+                per_func_rewards.append(per_func_reward)
+                total_cost.append(cost)
+                judge_reasonings.append(judge_reason)
+
+    finally:
+        # --- Client Cleanup --- Ensure client is closed if it was created
+        if client is not None and hasattr(client, 'aclose'):
+            logger.info("Closing the OpenAI client.")
+            await client.aclose()
+
     return rewards, per_func_rewards, total_cost, judge_reasonings
 
 async def _process_single_response(
@@ -356,57 +410,135 @@ async def _process_single_response(
     local_judge,
     reward_mult,
     judge_type,
-    judge_model
+    judge_model,
+    client: Optional[Union[openai.AsyncOpenAI, Any]] = None,
 ):
     """Process a single response with potentially multiple ground truths and datasets."""
     reward = 0
     per_func_reward = {}
     cost = 0
+    reasoning = "No judge applied." # Default reasoning
 
-    # reward_func = LMJudgeVerifier(judge_type=judge_type, model_name=judge_model)
-    
-    # For each ground truth and dataset combination, create tasks
     judgment_tasks = []
     for gt, ds in zip(ground_truth_list, dataset_list):
+        # Split dataset name, e.g., "general-quality" -> ["general", "quality"]
+        verifier_name_parts = ds.lower().split("-")
+        verifier_name = verifier_name_parts[0]
+        # Determine the specific judge type for LMJudgeVerifier if provided in ds name
+        current_judge_type = verifier_name_parts[1] if len(verifier_name_parts) > 1 else judge_type # Fallback to overall judge_type
 
-        verifier_name, judge_type = ds.lower().split("-")
         # Get the factory function for the verifier
         factory = REWARD_FN_MAPPING.get(verifier_name)
-        
+
         if factory is None:
-            logger.warning("No judge verifier found for dataset %s. Skipping reward.", ds)
+            logger.warning("No judge verifier factory found for verifier name %s (from dataset %s). Skipping reward.", verifier_name, ds)
             continue
-            
-        # Instantiate the verifier, passing extra args only if it's the LMJudgeVerifier (named 'general')
-        if verifier_name == "general": 
-            reward_func = factory(judge_type=judge_type, model_name=judge_model, local_judge=local_judge)
-        else:
-            # For other verifiers, assume they don't need these specific args
-            # Their __init__ might still accept judge_type/model_name if defined, but we rely on their defaults or specific logic
-            reward_func = factory() 
+
+        reward_func: VerifierFunction = None
+        is_lm_judge = False
+        try:
+            # Instantiate the verifier
+            if verifier_name == "general":
+                # Pass LMJudge specific args
+                reward_func = factory(judge_type=current_judge_type, model_name=judge_model, local_judge=local_judge)
+                # Check if the instantiated object is indeed an LMJudgeVerifier to confirm we need the client
+                is_lm_judge = isinstance(reward_func, LMJudgeVerifier)
+            else:
+                # For other verifiers, assume they don't need LMJudge specific args
+                reward_func = factory()
+                # Ensure it's not accidentally an LMJudgeVerifier instance
+                is_lm_judge = isinstance(reward_func, LMJudgeVerifier)
+
+        except Exception as e:
+             logger.error(f"Failed to instantiate verifier '{verifier_name}' for dataset '{ds}': {e}", exc_info=True)
+             continue
+
+        # Prepare arguments for async_call
+        call_args = {
+            "tokenized_prediction": tok_prediction,
+            "prediction": prediction,
+            "label": gt,
+            "query": query,
+        }
+        # Add client only if it's an LMJudgeVerifier instance
+        if is_lm_judge:
+            call_args["client"] = client
+            logger.debug(f"Passing client to LMJudgeVerifier for dataset {ds}")
+        elif client is not None:
+             logger.debug(f"Client provided but not passing to non-LMJudgeVerifier for dataset {ds}")
+
 
         # Create a task for this judgment
-        task = asyncio.create_task(reward_func.async_call(
-            tokenized_prediction=tok_prediction,
-            prediction=prediction,
-            label=gt,
-            query=query,
-        ))
-        judgment_tasks.append((task, ds, reward_func.weight))
-    
+        # Use try-except around create_task to handle potential immediate errors during task creation/submission
+        try:
+            # Ensure reward_func was successfully instantiated before creating task
+            if reward_func is None:
+                logger.error(f"Reward function was not instantiated for verifier '{verifier_name}', dataset '{ds}'. Skipping task creation.")
+                continue
+
+            task = asyncio.create_task(reward_func.async_call(**call_args))
+            # Store the type of the instantiated reward_func to check later
+            judgment_tasks.append((task, ds, reward_func.weight, current_judge_type, type(reward_func)))
+        except Exception as e:
+            logger.error(f"Failed to create judgment task for dataset {ds} with verifier {verifier_name}: {e}", exc_info=True)
+
+
     # Wait for all judgments to complete concurrently
-    judgment_results = await asyncio.gather(*[task for task, _, _ in judgment_tasks])
-    
+    # Use return_exceptions=True to prevent one failed task from stopping others
+    judgment_results_with_status = await asyncio.gather(*[task for task, _, _, _, _ in judgment_tasks], return_exceptions=True)
+
     # Process the results
-    for (reward_result, api_cost, reasoning), (_, ds, weight) in zip(judgment_results, judgment_tasks):
-        logger.info("Applying rubric-based or llm grader reward 🤗")
-        actual_reward_mult = 1.0 if "ref" in judge_type else reward_mult
+    for i, result_or_exception in enumerate(judgment_results_with_status):
+        # task is not directly needed here, but other info is
+        _, ds, weight, ds_judge_type, verifier_type = judgment_tasks[i] # Get corresponding task info
+
+        if isinstance(result_or_exception, Exception):
+            logger.error(f"Judgment task for dataset {ds} failed: {result_or_exception}", exc_info=result_or_exception)
+            # Optionally assign a default/penalty reward/cost here
+            continue # Skip processing this result
+
+        # Unpack successful result (assuming it returns tuple like (score, cost, reasoning))
+        try:
+             # Check the type of verifier that produced the result
+             if issubclass(verifier_type, LMJudgeVerifier):
+                 reward_result, api_cost, judge_reasoning = result_or_exception
+                 reasoning = judge_reasoning # Capture reasoning from the judge
+             else:
+                 # Assume others return (score, cost, reasoning_str) or similar
+                 # Adapt based on the actual return signature of non-LMJudge verifiers
+                 if isinstance(result_or_exception, tuple) and len(result_or_exception) >= 2:
+                      reward_result, api_cost = result_or_exception[:2]
+                      # Optionally capture reasoning if returned as third element
+                      judge_reasoning = result_or_exception[2] if len(result_or_exception) > 2 else f"Verifier {ds.lower().split('-')[0]} score: {reward_result}"
+                 elif isinstance(result_or_exception, (float, int)):
+                      reward_result = result_or_exception
+                      api_cost = 0 # Assume no cost if not returned
+                      judge_reasoning = f"Verifier {ds.lower().split('-')[0]} score: {reward_result}" # Basic reasoning for non-judges
+                 else:
+                      logger.warning(f"Unexpected result format from verifier for {ds}: {result_or_exception}. Assigning score=0, cost=0.")
+                      reward_result = 0
+                      api_cost = 0
+                      judge_reasoning = f"Verifier {ds.lower().split('-')[0]} failed to produce score."
+                 reasoning = judge_reasoning # Update overall reasoning
+
+        except ValueError as e:
+             logger.error(f"Error unpacking result for dataset {ds}: {e}. Result was: {result_or_exception}", exc_info=True)
+             continue # Skip processing this result
+        except TypeError as e:
+             logger.error(f"Type error unpacking result for dataset {ds}: {e}. Result was: {result_or_exception}", exc_info=True)
+             continue # Skip processing this result
+
+
+        logger.info("Applying reward for dataset %s (verifier: %s, judge_type: %s) 🤗", ds, verifier_name_parts[0], ds_judge_type)
+
+        # Determine reward multiplier (e.g., don't multiply reference scores)
+        actual_reward_mult = 1.0 if "ref" in ds_judge_type else reward_mult
         reward_value = actual_reward_mult * reward_result * weight
-        
+
         reward += reward_value
         per_func_reward[ds] = per_func_reward.get(ds, 0) + reward_value
         cost += api_cost
-    # breakpoint()
+
     return reward, per_func_reward, cost, reasoning
 
 

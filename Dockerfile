@@ -22,7 +22,11 @@ RUN /opt/miniconda3/bin/pip install --no-cache-dir \
 WORKDIR /stage/
 
 #install redis for easyapi
-RUN apt-get update && apt-get install -y redis-server
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        redis-server \
+        gnupg \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # install google cloud sdk
 RUN apt-get update && apt-get install -y gnupg curl

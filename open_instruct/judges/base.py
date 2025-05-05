@@ -4,13 +4,14 @@ import re
 
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union, Any
 
 from judges.voting_methods import AVAILABLE_VOTING_METHODS
 
-from judges._client import async_get_completion
+from judges._client import async_get_completion, llm_client
 import easyapi
 import asyncio
+import openai
 
 if TYPE_CHECKING:
     import pydantic
@@ -126,7 +127,12 @@ class BaseJudge:
         messages.append({"role": "user", "content": user_prompt})
         return messages
 
-    async def _judge(self, user_prompt: str, system_prompt: Optional[str] = None):
+    async def _judge(
+        self,
+        user_prompt: str,
+        system_prompt: Optional[str] = None,
+        client: Optional[Union[openai.AsyncOpenAI, Any]] = None
+    ):
         """
         Perform the judgment process using the configured model.
 
@@ -136,6 +142,8 @@ class BaseJudge:
             The input prompt for the user.
         system_prompt: Optional[str]
             The optional system-level prompt.
+        client: Optional[Union[openai.AsyncOpenAI, Any]]
+            The client to use for the model evaluation.
 
         Returns:
         --------
@@ -147,12 +155,13 @@ class BaseJudge:
         completion = await async_get_completion(
             model=self.model,
             messages=messages,
-            max_tokens=None,
+            max_tokens=2048,
             temperature=1,
             seed=None,
             response_model=None,
             response_format={"type": "json_object"},
-            easyapi=self.api
+            easyapi=self.api,
+            client=client
         )
         
         try:
@@ -168,14 +177,6 @@ class BaseJudge:
             print(f"Model returned JSON without REASONING or SCORE. Response: {completion.choices[0].message.content}")
             reasoning = ""
             score = extract_score_from_string(completion.choices[0].message.content)
-
-        # try:
-        #     # if the model is not using the correct format, it will throw an error
-        #     score = data.get("SCORE", 0.0)
-        # except AssertionError:
-        #     print(
-        #         f"Model did not return a valid JSON response. Response: {completion.choices[0].message.content}")
-        #     score = extract_score_from_string(completion.choices[0].message.content)
 
         # check if cost/response_time is available
         try:

@@ -1746,7 +1746,6 @@ if __name__ == "__main__":
                     queries=queries,
                     reward_mult=args.llm_verification_reward,
                     local_judge=args.local_judge,
-                    judge_type=args.llm_judge_type,
                     judge_model=args.llm_judge_model,
                 )
                 if len(llm_judge_rewards) != len(scores):

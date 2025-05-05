@@ -417,11 +417,12 @@ class LMJudgeVerifier(VerifierFunction):
         return score, judgment.cost #, judgment.response_time
     
     async def async_call(
-        self, 
-        tokenized_prediction: List[int], 
-        prediction: str, 
+        self,
+        tokenized_prediction: List[int],
+        prediction: str,
         label: Any,
         query: Optional[str] = None,
+        client: Optional[Union[OpenAI, Any]] = None
     ) -> Tuple[float, float, str]:
         """
         Async version of __call__ that directly awaits _judge without using asyncio.run()
@@ -431,6 +432,7 @@ class LMJudgeVerifier(VerifierFunction):
             prediction (str): The model output
             label (Any): Ground truth or evaluation criteria
             query (str, optional): Original user query
+            client (Optional[Union[OpenAI, Any]]): OpenAI client for type hint
 
         Returns:
             Tuple[float, float, float]: (score, cost, response_time)
@@ -454,7 +456,8 @@ class LMJudgeVerifier(VerifierFunction):
         # Directly await the _judge method instead of using asyncio.run
         reasoning, score, cost, response_time = await self.judge._judge(
             user_prompt=user_prompt,
-            system_prompt=None
+            system_prompt=None,
+            client=client
         )
 
         
