@@ -20,32 +20,59 @@ def read_shell_script(filename):
         return f.read()
 
 def modify_command(content, new_args):
-    # Split content into lines while preserving line continuations
-    lines = content.replace('\\\n', ' ').split('\n')
-    
-    # Join all non-empty lines to get the full command
-    command = ' '.join(line.strip() for line in lines if line.strip())
-    
-    # For each new argument
-    for arg, value in new_args.items():
-        arg_pattern = f"--{arg} [^ ]+"
-        if re.search(arg_pattern, command):
-            # Replace existing argument
-            command = re.sub(arg_pattern, f"--{arg} {value}", command)
+    split_content = content.split(" ")
+    new_content = []
+    flag_args = []
+    flag = None
+    for _, part in enumerate(split_content):
+        if flag is None:
+            if not part.startswith('--'):
+                new_content.append(part)
+            else:
+                flag = part.split('--')[1]
+                flag_args.append(part)
         else:
-            # Add new argument at the end
-            command = f"{command} --{arg} {value}"
-    
-    # Reformat with line continuations every 2 arguments
-    parts = command.split(' --')
-    formatted = parts[0]  # First part (python mason.py)
-    for i, part in enumerate(parts[1:], 1):
-        if i % 2 == 1:
-            formatted += f" \\\n    --{part}"
+            if not part.startswith('--'):
+                flag_args.append(part)
+            else:
+                if flag in new_args:
+                    new_content.append(f"--{flag}")
+                    new_args_values = new_args[flag]
+                    for i in range(len(new_args_values)):
+                        if "</" in new_args_values[i]:
+                            new_args_values[i] = f"'{new_args_values[i]}'"
+                    if isinstance(new_args_values, list):
+                        new_content.extend(new_args_values)
+                    else:
+                        new_content.append(new_args_values)
+                        # hack the convention to make the format nicer
+                    new_content.extend(["\\\n", "", "", ""])
+                    del new_args[flag]
+                else:
+                    new_content.append(f"--{flag}")
+                    if isinstance(flag_args, list):
+                        new_content.extend(flag_args)
+                    else:   
+                        new_content.append(flag_args)
+                flag = part.split('--')[1]
+                flag_args = []
+    if flag is not None:
+        new_content.append(f"--{flag}")
+        if isinstance(flag_args, list):
+            new_content.extend(flag_args)
         else:
-            formatted += f" --{part}"
-    
-    return formatted
+            new_content.append(flag_args)
+
+
+    # add the remaining args
+    for flag, value in new_args.items():
+        new_content.append(f"--{flag}")
+        if isinstance(value, list):
+            new_content.extend(value)
+        else:
+            new_content.append(value)
+        new_content.extend(["\\\n", "", "", ""])
+    return " ".join(new_content)
 
 def main():
     if len(sys.argv) < 2:
@@ -55,15 +82,26 @@ def main():
     script_file = sys.argv[1]
     
     # Parse remaining arguments as key-value pairs
+    # NOTE: we need to handle `nargs` for cases like `--dataset_mixer_list xxx 1.0`
     parser = argparse.ArgumentParser()
-    for i in range(2, len(sys.argv), 2):
-        if i + 1 < len(sys.argv):
+    num_values = 0
+    last_arg = None
+    for i in range(2, len(sys.argv)):
+        if sys.argv[i].startswith('--'):
             arg = sys.argv[i].lstrip('-')
-            parser.add_argument(f"--{arg}")
-    
+            nargs = "+" if num_values % 2 == 0 else "?"
+            if last_arg is not None:
+                parser.add_argument(f"--{last_arg}", nargs=nargs)
+            last_arg = arg
+            num_values = 0
+        else:
+            num_values += 1
+    nargs = "+" if num_values % 2 == 0 else "?"
+    if last_arg is not None:
+        parser.add_argument(f"--{last_arg}", nargs=nargs)
+
     args = parser.parse_args(sys.argv[2:])
     new_args = {k: v for k, v in vars(args).items() if v is not None}
-    
     # Read and modify the script
     content = read_shell_script(script_file)
     modified_content = modify_command(content, new_args)
