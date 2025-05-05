@@ -259,7 +259,8 @@ class IFEvalVerifier(VerifierFunction):
         api_cost = 0.0
         reasoning = None
         constraint = label
-        answer = prediction.split("<|assistant|>\n")[-1].strip()
+        answer = extract_final_answer(prediction)
+        # answer = prediction.split("<|assistant|>\n")[-1].strip()
         if isinstance(constraint, str):
             constraint = json.loads(constraint)
         if "func_name" not in constraint:
