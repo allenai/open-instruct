@@ -602,7 +602,7 @@ if not args.skip_oi_evals:
 
 if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
     # if so, run oe-eval. We assume it is cloned in the top-level repo directory.
-    oe_eval_cmd = f"scripts/eval/oe-eval.sh --model-name {model_name}"
+    oe_eval_cmd = f"scripts/eval/oe-eval-r1.sh --model-name {model_name}"
     if args.upload_to_hf:
         oe_eval_cmd += f" --upload_to_hf {args.upload_to_hf}"
     ## model location munging: if beaker, use beaker://. If hf, just name

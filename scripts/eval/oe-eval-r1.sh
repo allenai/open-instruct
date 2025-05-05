@@ -136,37 +136,44 @@ else
 fi
 
 # Define default tasks if no custom tasks provided
-DEFAULT_TASKS=(
-    "gsm8k::tulu"
-    "bbh:cot-v1::tulu"
-    "drop::llama3"
-    "minerva_math::tulu"
-    "codex_humaneval::tulu"
-    # "codex_humanevalplus::tulu"
-    # "ifeval::tulu"
-    # "popqa::tulu"
-    "mmlu:mc::tulu"
-    # "mmlu:cot::summarize"
-    # "alpaca_eval_v2::tulu"
-    "truthfulqa::tulu"
-)
-
-# Hamish list of reasoning tasks:
 # DEFAULT_TASKS=(
-#     "gsm8k::hamish_zs_reasoning"
-#     "bbh:cot::hamish_zs_reasoning"
-#     "minerva_math::hamish_zs_reasoning"
+#     "gsm8k::tulu"
+#     "bbh:cot-v1::tulu"
+#     "drop::llama3"
+#     "minerva_math::tulu"
+#     "codex_humaneval::tulu"
 #     "codex_humanevalplus::tulu"
 #     "ifeval::tulu"
 #     "popqa::tulu"
+#     "mmlu:mc::tulu"
 #     "mmlu:cot::summarize"
 #     "alpaca_eval_v2::tulu"
-#     "minerva_math_500::hamish_zs_reasoning"
-#     "aime::hamish_zs_reasoning"
-#     "zebralogic::hamish_zs_reasoning"
-#     "agi_eval_english:0shot_cot::hamish_zs_reasoning"
-#     "gpqa:0shot_cot::hamish_zs_reasoning"
+#     "truthfulqa::tulu"
 # )
+
+# Hamish list of reasoning tasks:
+DEFAULT_TASKS=(
+    "gsm8k::hamish_zs_reasoning"
+    "bbh:cot::hamish_zs_reasoning"
+    "minerva_math::hamish_zs_reasoning"
+    "minerva_math_500::hamish_zs_reasoning"
+    "aime::hamish_zs_reasoning"
+    "zebralogic::hamish_zs_reasoning"
+    "agi_eval_english:0shot_cot::hamish_zs_reasoning"
+    "gpqa:0shot_cot::hamish_zs_reasoning"
+    "gsm8k::tulu"
+    "bbh:cot-v1::tulu"
+    "drop::llama3"
+    "codex_humaneval::tulu"
+    "codex_humanevalplus::tulu"
+    "ifeval::tulu"
+    "popqa::tulu"
+    "mmlu:cot::summarize"
+    "alpaca_eval_v2::tulu"
+    "truthfulqa::tulu"
+)
+
+
 UNSEEN_TASKS=(
     "agi_eval_english:0shot_cot::tulu3"
     "gpqa:0shot_cot::tulu3"
@@ -219,7 +226,7 @@ for TASK in "${TASKS[@]}"; do
             --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
-            --beaker-image "oe-eval-beaker/oe_eval_auto" \
+            --beaker-image "$BEAKER_IMAGE" \
             --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1"}' \
             ${REVISION_ARG} \
             --cluster ai2/neptune-cirrascale,ai2/saturn-cirrascale,ai2/jupiter-cirrascale-2 \
@@ -239,7 +246,7 @@ for TASK in "${TASKS[@]}"; do
         --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
         ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT" \
-        --beaker-image "oe-eval-beaker/oe_eval_auto" \
+        --beaker-image "$BEAKER_IMAGE" \
         --gantry-args "{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"}" \
         ${REVISION_ARG} \
         --cluster ai2/augusta-google-1 \

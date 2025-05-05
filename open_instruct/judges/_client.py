@@ -15,6 +15,11 @@ from tenacity import retry, wait_random_exponential, stop_after_attempt, AsyncRe
 openai._utils._logs.logger.setLevel(logging.WARNING)
 openai._utils._logs.httpx_logger.setLevel(logging.WARNING)
 
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)  # Or DEBUG, depending on verbosity
+
+
 PRICING_PER_1M_TOKENS = {
     "gpt-4": {"input": 0.00003, "output": 0.00006}, 
     "gpt-3.5-turbo": {"input": 0.0000015, "output": 0.000002}, 
@@ -39,7 +44,26 @@ class CompletionWithMetadata:
         # Delegate attribute access to the underlying response
         return getattr(self.response, name, None)
 
-import asyncio
+def build_fallback_response(reason: str, elapsed_time: float = 0.0):
+    """Return a structured fallback response with a reasoning and zero score."""
+    logger.warning(f"Returning fallback response: {reason}")
+    return {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": f'{{"REASONING": "{reason}", "SCORE": 0}}'
+                }
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0
+        },
+        "cost": 0.0,
+        "response_time": elapsed_time,
+    }
 
 async def call_azure_sync(client, **kwargs):
     loop = asyncio.get_running_loop()
@@ -90,26 +114,6 @@ def track_cost_callback(kwargs, completion_response, start_time, end_time):
         completion_response.cost = 0.0001
         completion_response.response_time = 0.0
 
-    # try:
-    #     model_name = kwargs.get("model", "gpt-4o-mini")
-    #     usage = getattr(completion_response, "usage", {})
-
-    #     prompt_tokens = usage.get("prompt_tokens", 0)
-    #     completion_tokens = usage.get("completion_tokens", 0)
-
-    #     input_cost = (prompt_tokens) * PRICING_PER_1M_TOKENS.get(model_name, {}).get("input", 0)
-    #     output_cost = (completion_tokens) * PRICING_PER_1M_TOKENS.get(model_name, {}).get("output", 0)
-    #     total_cost = input_cost + output_cost
-
-    #     response_time = end_time - start_time
-
-    #     # Attach attributes directly
-    #     completion_response.cost = total_cost
-    #     completion_response.response_time = response_time
-
-    # except Exception as e:
-    #     print(f"Callback error: {e}")
-
 
 
 async def async_get_completion(
@@ -131,89 +135,100 @@ async def async_get_completion(
         with attempt:
             start_time = time.time()
 
-            if response_format and response_model:
-                raise Exception("response_format and response_model cannot both be provided. please provide only one.")
+            try: 
+                if response_format and response_model:
+                    raise Exception("response_format and response_model cannot both be provided. please provide only one.")
 
-            # --- Case 1: Using instructor with a response_model ---
-            if response_model and response_format is None:
-                if isinstance(client_or_module, openai.AsyncOpenAI):
-                    # Use instructor with the already async OpenAI client
-                    instructor_client = instructor.patch(client_or_module) # Use instructor.patch for async client
-                    response = await instructor_client.chat.completions.create(
-                        model=model,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        messages=messages,
-                        seed=seed,
-                        response_model=response_model,
-                    )
-                elif hasattr(client_or_module, "__name__") and client_or_module.__name__ == "litellm":
-                    # Use instructor with litellm's async completion
-                    instructor_client = instructor.from_litellm(litellm.acompletion)
-                    response = await instructor_client.chat.completions.create(
-                        model=model,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        messages=messages,
-                        seed=seed,
-                        response_model=response_model,
-                    )
+                # --- Case 1: Using instructor with a response_model ---
+                if response_model and response_format is None:
+                    if isinstance(client_or_module, openai.AsyncOpenAI):
+                        # Use instructor with the already async OpenAI client
+                        instructor_client = instructor.patch(client_or_module) # Use instructor.patch for async client
+                        response = await instructor_client.chat.completions.create(
+                            model=model,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            messages=messages,
+                            seed=seed,
+                            response_model=response_model,
+                        )
+                    elif hasattr(client_or_module, "__name__") and client_or_module.__name__ == "litellm":
+                        # Use instructor with litellm's async completion
+                        instructor_client = instructor.from_litellm(litellm.acompletion)
+                        response = await instructor_client.chat.completions.create(
+                            model=model,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            messages=messages,
+                            seed=seed,
+                            response_model=response_model,
+                        )
+                    else:
+                        raise Exception("unknown client type for response_model handling.")
+
+                # --- Case 2: Not using instructor (no response_model) ---
                 else:
-                    raise Exception("unknown client type for response_model handling.")
-
-            # --- Case 2: Not using instructor (no response_model) ---
-            else:
-                # breakpoint()
-                if isinstance(client_or_module, openai.AsyncOpenAI):
-                    # Use AsyncOpenAI client directly
-                    response = await client_or_module.chat.completions.create(
-                        model=model,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        messages=messages,
-                        seed=seed,
-                        response_format=response_format,
-                    )
-
-                # elif isinstance(client_or_module, openai.lib.azure.AzureOpenAI):
-                #     # Use openai.lib.azure.AzureOpenAI client directly
-                #     response = await client_or_module.chat.completions.create(
-                #         model=f"{model}-standard",
-                #         max_tokens=max_tokens,
-                #         temperature=temperature,
-                #         messages=messages,
-                #         seed=seed,
-                #         response_format=response_format,
-                #     )
-                elif isinstance(client_or_module, openai.lib.azure.AzureOpenAI):
-                    response = await call_azure_sync(
-                        client_or_module,
-                        model=f"{model}-standard",
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        messages=messages,
-                        seed=seed,
-                        response_format=response_format,
-                    )
                     # breakpoint()
+                    if isinstance(client_or_module, openai.AsyncOpenAI):
+                        # Use AsyncOpenAI client directly
+                        response = await client_or_module.chat.completions.create(
+                            model=model,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            messages=messages,
+                            seed=seed,
+                            response_format=response_format,
+                        )
 
-                elif hasattr(client_or_module, "__name__") and client_or_module.__name__ == "litellm":
-                    # litellm.acompletion is already async
-                    response = await client_or_module.acompletion(
-                        model=model,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        messages=messages,
-                        seed=seed,
-                        response_format=response_format,
-                    )
-                else:
-                    raise Exception("unknown client type for standard completion handling.")
+                    elif isinstance(client_or_module, openai.lib.azure.AzureOpenAI):
+                        response = await call_azure_sync(
+                            client_or_module,
+                            model=f"{model}-standard",
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            messages=messages,
+                            seed=seed,
+                            response_format=response_format,
+                        )
+                        # breakpoint()
 
-            end_time = time.time()
-            track_cost_callback({"model": model}, response, start_time, end_time)
+                    elif hasattr(client_or_module, "__name__") and client_or_module.__name__ == "litellm":
+                        # litellm.acompletion is already async
+                        response = await client_or_module.acompletion(
+                            model=model,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            messages=messages,
+                            seed=seed,
+                            response_format=response_format,
+                        )
+                    else:
+                        raise Exception("unknown client type for standard completion handling.")
 
-            return response
+                end_time = time.time()
+                track_cost_callback({"model": model}, response, start_time, end_time)
+                
+                if response is None:
+                    # print("Warning: Response was None. Returning fallback response.")
+                    return build_fallback_response("No response received.", elapsed_time=end_time - start_time)
+
+                return response
+            # except content filter error for openai and litellm
+            except Exception as e:
+                error_str = str(e).lower()
+                status_code = getattr(e, "status_code", None)
+
+                # Handle content filter errors from either client
+                if status_code == 400 and "content_filter" in error_str:
+                    return build_fallback_response("Content filter triggered by model.", elapsed_time=0.0)
+
+                # Optional: handle rate limit or other known error types here if needed
+                # elif status_code == 429:
+                #     ...
+
+                # Re-raise unknown errors
+                raise
+
 
 @retry(
     wait=wait_random_exponential(min=1, max=60),
