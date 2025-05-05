@@ -343,6 +343,7 @@ class LMJudgeVerifier(VerifierFunction):
         # weight: float = 1.0,
         model_name: str = "gpt-4o-mini",
         threshold: float = 0.5,
+        local_judge: bool = False,
     ) -> None:
         """
         Initialize LMJudgeVerifier with specified parameters.
@@ -353,16 +354,18 @@ class LMJudgeVerifier(VerifierFunction):
             weight (float): Weight for this verifier when combined with others
             model_name (str): LLM model to use for judging
             threshold (float): Threshold for binary decisions (0/1)
+            local_judge (bool): Whether to use a local judge model via easyapi
         """
         super().__init__("general", weight=1.0)
         self.judge_type = judge_type
         self.model_name = model_name
         self.threshold = threshold
+        self.local_judge = local_judge
         
         if judge_type not in JUDGE_CLASS_MAP:
             raise ValueError(f"Unsupported judge type: {judge_type}. Available types: {list(JUDGE_CLASS_MAP.keys())}")
             
-        self.judge = JUDGE_CLASS_MAP[judge_type](model=model_name, judge_type=judge_type)
+        self.judge = JUDGE_CLASS_MAP[judge_type](model=model_name, judge_type=judge_type, local_model=self.local_judge)
 
     def __call__(
         self, 

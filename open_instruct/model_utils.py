@@ -265,6 +265,7 @@ def apply_llm_verifier_reward(
     ground_truths: List[str],
     datasets: List[Union[str, List[str]]],
     queries: List[str],
+    local_judge: bool,
     reward_mult: int = 10,
     judge_type: str = "quality",
     judge_model: str = "gpt-4o-mini",
@@ -279,6 +280,7 @@ def apply_llm_verifier_reward(
         ground_truths,
         datasets,
         queries,
+        local_judge,
         reward_mult,
         judge_type,
         judge_model
@@ -290,6 +292,7 @@ async def _apply_llm_verifier_reward_async(
     ground_truths: List[str],
     datasets: List[Union[str, List[str]]],
     queries: List[str],
+    local_judge: bool,
     reward_mult: int = 10,
     judge_type: str = "quality",
     judge_model: str = "gpt-4o-mini",
@@ -325,6 +328,7 @@ async def _apply_llm_verifier_reward_async(
             ground_truth_list, 
             dataset_list, 
             query, 
+            local_judge,
             reward_mult, 
             judge_type,
             judge_model
@@ -349,6 +353,7 @@ async def _process_single_response(
     ground_truth_list,
     dataset_list,
     query,
+    local_judge,
     reward_mult,
     judge_type,
     judge_model
@@ -365,12 +370,21 @@ async def _process_single_response(
     for gt, ds in zip(ground_truth_list, dataset_list):
 
         verifier_name, judge_type = ds.lower().split("-")
-        # judge_type if ds.lower() not in ['factual information (general or professional), history or common practices', 'multilinguality or translation'] else "quality_ref"
-        reward_func = REWARD_FN_MAPPING.get(verifier_name)(judge_type=judge_type, model_name=judge_model)
-        if reward_func is None:
+        # Get the factory function for the verifier
+        factory = REWARD_FN_MAPPING.get(verifier_name)
+        
+        if factory is None:
             logger.warning("No judge verifier found for dataset %s. Skipping reward.", ds)
             continue
             
+        # Instantiate the verifier, passing extra args only if it's the LMJudgeVerifier (named 'general')
+        if verifier_name == "general": 
+            reward_func = factory(judge_type=judge_type, model_name=judge_model, local_judge=local_judge)
+        else:
+            # For other verifiers, assume they don't need these specific args
+            # Their __init__ might still accept judge_type/model_name if defined, but we rely on their defaults or specific logic
+            reward_func = factory() 
+
         # Create a task for this judgment
         task = asyncio.create_task(reward_func.async_call(
             tokenized_prediction=tok_prediction,

@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Optional
 
 from judges.voting_methods import AVAILABLE_VOTING_METHODS
 
-from judges._client import get_completion, async_get_completion
+from judges._client import async_get_completion
+import easyapi
 import asyncio
 
 if TYPE_CHECKING:
@@ -81,6 +82,7 @@ class BaseJudge:
     def __init__(
         self,
         model: str,
+        local_model: bool
     ):
         """
         Initialize the judge with a specific model.
@@ -91,6 +93,10 @@ class BaseJudge:
             The model identifier to be used for evaluations.
         """
         self.model = model
+        if local_model:
+            self.api = easyapi.Api()
+        else:
+            self.api = None
 
     def _build_messages(self, user_prompt: str, system_prompt: Optional[str] = None):
         """
@@ -138,16 +144,6 @@ class BaseJudge:
         """
         messages = self._build_messages(user_prompt, system_prompt)
 
-        # completion = get_completion(
-        #     model=self.model,
-        #     messages=messages,
-        #     max_tokens=None,
-        #     temperature=1,
-        #     seed=None,
-        #     response_model=None,
-        #     response_format={"type": "json_object"}
-        # )
-
         completion = await async_get_completion(
             model=self.model,
             messages=messages,
@@ -155,7 +151,8 @@ class BaseJudge:
             temperature=1,
             seed=None,
             response_model=None,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            easyapi=self.api
         )
         
         try:
@@ -165,6 +162,10 @@ class BaseJudge:
         except json.JSONDecodeError:
             print(
                 f"Model did not return a valid JSON response. Response: {completion.choices[0].message.content}")
+            reasoning = ""
+            score = extract_score_from_string(completion.choices[0].message.content)
+        except AttributeError:
+            print(f"Model returned JSON without REASONING or SCORE. Response: {completion.choices[0].message.content}")
             reasoning = ""
             score = extract_score_from_string(completion.choices[0].message.content)
 

@@ -12,6 +12,10 @@ echo PATH=$PATH
 
 BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
 
+# launch the easyapi server
+cd easyapi
+bash start_server.sh &
+
 RAY_NODE_PORT=8888
 ray stop --force
 

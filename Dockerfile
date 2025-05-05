@@ -21,6 +21,9 @@ RUN /opt/miniconda3/bin/pip install --no-cache-dir \
 
 WORKDIR /stage/
 
+#install redis for easyapi
+RUN apt-get update && apt-get install -y redis-server
+
 # install google cloud sdk
 RUN apt-get update && apt-get install -y gnupg curl
 RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && apt-get update -y && apt-get install google-cloud-cli -y
@@ -38,6 +41,8 @@ RUN python -m nltk.downloader punkt
 
 COPY open_instruct open_instruct
 COPY oe-eval-internal oe-eval-internal
+COPY easyapi easyapi
+RUN cd easyapi && pip install -r requirements.txt && pip install -e .
 
 # install the package in editable mode
 COPY pyproject.toml .
