@@ -142,7 +142,7 @@ async def async_get_completion(
                 raise Exception("response_format and response_model cannot both be provided. please provide only one.")
 
             # Check the type of the client_or_module *after* potential creation or reception
-            is_openai_client = isinstance(client_or_module, openai.AsyncOpenAI)
+            is_openai_client = isinstance(client_or_module, openai.AsyncOpenAI) or isinstance(client_or_module, AsyncAzureOpenAI)
             is_litellm_module = hasattr(client_or_module, "__name__") and client_or_module.__name__ == "litellm"
 
             if response_model and response_format is None:
