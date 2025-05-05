@@ -1061,9 +1061,7 @@ def upload_metadata_to_hf(
 
 # ----------------------------------------------------------------------------
 # Ray utilities
-
-
-
+# Taken from https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero
 def get_train_ds_config(
     offload,
     adam_offload=False,
@@ -1291,6 +1289,3 @@ class RayProcess:
             return
 
         raise NotImplementedError("Zero stage 2 is not supported yet")
-
-
-
