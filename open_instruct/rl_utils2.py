@@ -269,17 +269,67 @@ def calculate_advantages_packed(values: np.ndarray, rewards: np.ndarray, gamma: 
 def test_calculate_advantages_packed():
     gamma = 1
     lam = 1
+    # NOTE: We assume the values are obtained via `values = full_value[:, context_length - 1 : -1]`
+    # Here are two key things to note:
+    # 1. The first value corresponds to the last prompt token, not the first response token.
+    # This is because the value of the last prompt token is the sum of rewards following the current policy.
+    # 2. The last value corresponds to the second-to-last response token, since the actual last
+    # response token is an EOS token. By definition, the value of an EOS token is the sum of rewards
+    # following the current policy from the EOS token onwards, which is 0.
     values = np.array([
-        [1, 1, 1, 1, 1, 0, 0, 0 ,0, 0, 0, 0],
-        [2, 2, 2, 2, 2, 2, 0, 0 ,0, 0, 0, 0],
-        [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3],
+        [1, 1, 1, 1, 1, 1, 0, 0, 0 ,0, 0, 0, 0], # 6 response tokens (1 prompt token + 5 response tokens)
+        [2, 2, 2, 2, 2, 2, 2, 0, 0 ,0, 0, 0, 0], # 7 response tokens (1 prompt token + 6 response tokens)
+        [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3], # 13 response tokens (1 prompt token + 12 response tokens)
     ])
     rewards = np.array([
-        [0, 0, 0, 0, 10, 0, 0, 0 ,0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 20, 0, 0 ,0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30],
+        [0, 0, 0, 0, 0, 10, 0, 0, 0 ,0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 20, 0, 0 ,0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30],
     ])
     adv, ret = calculate_advantages(values, rewards, gamma, lam)
+
+    pprint({"adv": adv})
+    pprint({"ret": ret})
+    # breakpoint()
+    # as a result, we got to be careful about values when packing
+    # in particular, the response masks should be shifted by 1
+    # because the first value is the last prompt token
+    packed_response_masks = np.array([[
+        0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, # 5 prompt tokens, 6 response tokens
+        0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, # 4 prompt tokens, 7 response tokens
+        0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, # 7 prompt tokens, 13 response tokens
+    ]])
+    # Here we use 5 to signify invalid values
+    packed_values = np.array([[
+        5, 5, 5, 5, 1, 1, 1, 1, 1, 1, 5, # 1 prompt token + 5 response tokens
+        5, 5, 5, 2, 2, 2, 2, 2, 2, 2, 5, # 1 prompt token + 6 response tokens
+        5, 5, 5, 5, 5, 5, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3 # 1 prompt token + 12 response tokens, without the last EOS token 9
+    ]])
+    packed_values_masked = np.where(packed_response_masks[:, 1:] == 0, 0, packed_values)
+    pprint({"packed_values_masked": packed_values_masked})
+    packed_rewards = np.array([[
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, # 5 prompt tokens, 6 response tokens
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, # 4 prompt tokens, 7 response tokens
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30, # 7 prompt tokens, 13 response tokens
+    ]])
+    packed_dones = np.array([[
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, # 5 prompt tokens, 6 response tokens
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, # 4 prompt tokens, 7 response tokens
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, # 7 prompt tokens, 13 response tokens
+    ]])
+    packed_adv, packed_ret = calculate_advantages_packed(
+        packed_values_masked,
+        packed_rewards[:, 1:],
+        gamma,
+        lam,
+        packed_dones[:, 1:],
+        packed_response_masks[:, 1:]
+    )
+    pprint({"packed_adv": packed_adv})
+    pprint({"packed_ret": packed_ret})
+    breakpoint()
+
+
     # here we assume -1 is the prompt token that should be ignored
     # 50256 is the pad token
     packed_values = np.array([[
@@ -298,9 +348,9 @@ def test_calculate_advantages_packed():
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 50256,
     ]])
     packed_response_masks = np.array([[
+        0, 0, 0, 0, 0, 1, 1, 1, 1,
         0, 0, 0, 0, 1, 1, 1, 1, 1,
-        0, 0, 0, 1, 1, 1, 1, 1, 1,
-        0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 50256,
+        0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 50256,
     ]])
     packed_adv, packed_ret = calculate_advantages_packed(packed_values,
         packed_rewards,
@@ -324,10 +374,11 @@ def test_calculate_advantages_packed():
 
 
 
-@torch.no_grad()
+# @torch.no_grad()
 def test_pack_sequences_logits():
     import torch
-    from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
+    from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
 
     model = AutoModelForCausalLM.from_pretrained(
         "EleutherAI/pythia-14m",
@@ -335,9 +386,17 @@ def test_pack_sequences_logits():
         torch_dtype=torch.bfloat16,
     )
     # set seed for reproducibility
-    torch.manual_seed(2)
-    value_model = AutoModelForSequenceClassification.from_pretrained("EleutherAI/pythia-14m", num_labels=1)
+    value_model = AutoModelForSequenceClassification.from_pretrained(
+        "EleutherAI/pythia-14m",
+        num_labels=1,
+        torch_dtype=torch.bfloat16,
+    )
+    value_model.train()
+    value_head = value_model.score
     config = value_model.config
+    torch.manual_seed(2)
+    torch.nn.init.normal_(value_head.weight, std=1 / (config.hidden_size + 1))
+    print(value_head.weight)
     value_model.save_pretrained("pythia-14m-critic")
     queries, responses, pad_token_id = get_test_data()
     query_responses = [q + r for q, r in zip(queries, responses)]
@@ -347,24 +406,23 @@ def test_pack_sequences_logits():
             queries=queries, responses=responses, pack_length=pack_length, pad_token_id=pad_token_id
         )
     # NOTE: it's very important to use [:, :-1] here, because the produced tokens's index is shifted by 1
+    lm_backbone = getattr(value_model, value_model.base_model_prefix)
+    torch.manual_seed(2)
+    v = lm_backbone(
+        input_ids=packed_sequences.query_responses[0].unsqueeze(0),
+        attention_mask=packed_sequences.attention_masks[0].unsqueeze(0).clamp(0, 1),
+        position_ids=packed_sequences.position_ids[0].unsqueeze(0),
+    )
+    values = value_head(v.last_hidden_state).squeeze(-1)
+    values = torch.where(packed_sequences.response_masks[0].unsqueeze(0) == 0, 0, values)
+    pprint("values")
+    pprint(values)
+    # apply softmax to get logprobs
     s = model.forward(
         input_ids=packed_sequences.query_responses[0].unsqueeze(0)[:, :-1],
         attention_mask=packed_sequences.attention_masks[0].unsqueeze(0)[:, :-1],
         position_ids=packed_sequences.position_ids[0].unsqueeze(0)[:, :-1],
     )
-    lm_backbone = getattr(value_model, value_model.base_model_prefix)
-    v = lm_backbone(
-        input_ids=packed_sequences.query_responses[0].unsqueeze(0),
-        attention_mask=packed_sequences.attention_masks[0].unsqueeze(0),
-        position_ids=packed_sequences.position_ids[0].unsqueeze(0),
-    )
-    torch.nn.init.normal_(value_model.score.weight, std=1 / (value_model.config.hidden_size + 1))
-    scalar_logits = value_model.score(v.last_hidden_state).squeeze(-1)
-    scalar_logits = torch.where(packed_sequences.response_masks[0].unsqueeze(0) == 0, 0, scalar_logits)
-    pprint("scalar_logits")
-    pprint(scalar_logits)
-
-    # apply softmax to get logprobs
     all_logprobs = torch.nn.functional.log_softmax(s.logits, dim=-1)
     logprobs = torch.gather(
         all_logprobs, 2, packed_sequences.query_responses[0].unsqueeze(0).unsqueeze(-1)[:, 1:]
@@ -385,11 +443,11 @@ def test_pack_sequences_logits():
         logprobs.append(logprob[:, len(query) - 1 :])
     pprint(logprobs)
     
-    rewards = np.zeros_like(scalar_logits.numpy())
-    rewards[:, 21] = 10
-    rewards[:, -1] = 20
+    rewards = np.zeros_like(values.detach().float().numpy())
+    rewards[:, 21] = 0.1
+    rewards[:, -1] = 1
     adv, ret = calculate_advantages_packed(
-        values=scalar_logits.numpy(),
+        values=values.detach().float().numpy(),
         rewards=rewards,
         gamma=1.0,
         lam=1.0,
@@ -399,10 +457,11 @@ def test_pack_sequences_logits():
     
     pprint({"adv": adv})
     pprint({"ret": ret})
+    breakpoint()
     print("hah")
 
 
 if __name__ == "__main__":
     test_pack_sequences()
-    test_pack_sequences_logits()
     test_calculate_advantages_packed()
+    test_pack_sequences_logits()
