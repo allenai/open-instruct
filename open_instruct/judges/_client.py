@@ -65,7 +65,7 @@ def llm_client():
 
     else:
         # Return client/litellm module object if import succeeds
-        return client #litellm # client #litellm
+        return litellm # client #litellm
 
 ### V2 of async completion with retry
 def track_cost_callback(kwargs, completion_response, start_time, end_time):

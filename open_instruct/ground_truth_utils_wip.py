@@ -388,6 +388,9 @@ class LMJudgeVerifier(VerifierFunction):
         """
         # Clean prediction if needed
         answer = extract_final_answer(prediction)
+        if answer == "":
+            logger.warning("Empty answer string, returning 0.0")
+            return 0.0, 0.0
 
         # Ensure judge_type is valid
         if self.judge_type not in JUDGE_PROMPT_MAP:
@@ -434,6 +437,9 @@ class LMJudgeVerifier(VerifierFunction):
         """
         # Clean prediction if needed
         answer = extract_final_answer(prediction)
+        if answer == "":
+            logger.warning("Empty answer string, returning 0.0")
+            return 0.0, 0.0, "Empty answer string, returning 0.0"
 
         # Ensure judge_type is valid
         if self.judge_type not in JUDGE_PROMPT_MAP:

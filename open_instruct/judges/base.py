@@ -158,15 +158,20 @@ class BaseJudge:
             response_format={"type": "json_object"}
         )
         
-        try:
-            data = json.loads(completion.choices[0].message.content)
-            reasoning = data.get("REASONING", "")
-            score = data.get("SCORE", 0.0)
-        except json.JSONDecodeError:
-            print(
-                f"Model did not return a valid JSON response. Response: {completion.choices[0].message.content}")
+        if completion:
+            try:
+                data = json.loads(completion.choices[0].message.content)
+                reasoning = data.get("REASONING", "")
+                score = data.get("SCORE", 0.0)
+            except json.JSONDecodeError:
+                print(
+                    f"Model did not return a valid JSON response. Response: {completion.choices[0].message.content}")
+                reasoning = ""
+                score = extract_score_from_string(completion.choices[0].message.content) if isinstance(completion.choices[0].message.content, str) else 0.0
+        else:
+            print("No completion received from the model.")
             reasoning = ""
-            score = extract_score_from_string(completion.choices[0].message.content)
+            score = 0.0
 
         # try:
         #     # if the model is not using the correct format, it will throw an error
