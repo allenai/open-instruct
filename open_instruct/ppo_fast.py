@@ -28,6 +28,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # isort: off
+# ---------------------------------------------------------------------
+# The file referenced a lot of code from the ORZ project:
+# https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero
+
 import os
 import re
 
