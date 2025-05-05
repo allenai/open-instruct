@@ -31,9 +31,7 @@
 # ---------------------------------------------------------------------
 # The file referenced a lot of code from the ORZ project:
 # https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero
-
 import os
-import re
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
@@ -48,9 +46,7 @@ except Exception:
 # isort: on
 
 import json
-import logging
 import os
-import random
 import shutil
 import socket
 import threading
@@ -104,7 +100,6 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.orz_math_utils import is_equal_sync, solution2answer
 from open_instruct.rl_utils2 import pack_sequences, calculate_advantages_packed, Timer
 from open_instruct.utils import (
     ArgumentParserPlus,
