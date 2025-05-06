@@ -26,7 +26,7 @@ python mason.py \
     --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
     --tokenizer_revision main \
     --add_bos \
-    --stop_strings '"</answer>"' \
+    --stop_strings "</answer>" \
     --apply_r1_style_format_reward True \
     --apply_verifiable_reward True \
     --non_stop_penalty True \

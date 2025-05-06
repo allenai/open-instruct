@@ -19,7 +19,7 @@ python mason.py \
     --response_length 2048 \
     --number_samples_per_prompt 4 \
     --model_name_or_path meta-llama/Llama-3.1-8B \
-    --stop_strings '"</answer>"' \
+    --stop_strings "</answer>" \
     --add_r1_style_format_reward \
     --non_stop_penalty False \
     --stop_token eos \
