@@ -13,7 +13,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# isort: off
+import os
 
+os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
+try:
+    import deepspeed
+
+    # @vwxyzjn: when importing on CPU-only machines, we get the following error:
+    # RuntimeError: 0 active drivers ([]). There should only be one.
+    # so we need to catch the exception and do nothing
+    # https://github.com/deepspeedai/DeepSpeed/issues/7028
+except Exception:
+    pass
+# isort: on
 import logging
 import math
 import os
@@ -24,7 +37,6 @@ from datetime import timedelta
 from typing import List, Literal, Optional, Union
 
 import datasets
-import deepspeed
 import torch
 import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
@@ -351,11 +363,7 @@ class FlatArguments:
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
             raise ValueError("reduce_loss must be either 'mean' or 'sum'")
-        if (
-            self.dataset_name is None
-            and self.dataset_mixer is None
-            and self.dataset_mixer_list is None
-        ):
+        if self.dataset_name is None and self.dataset_mixer is None and self.dataset_mixer_list is None:
             raise ValueError("Need either a dataset name, dataset mixer, or dataset mixer list.")
         if (
             (self.dataset_name is not None and (self.dataset_mixer is not None or self.dataset_mixer_list is not None))
