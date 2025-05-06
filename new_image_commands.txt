@@ -2,4 +2,4 @@ docker build . -t open_instruct_dev_multi
 # if you are interally at AI2, you can create an image like this:
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 beaker image delete $beaker_user/open_instruct_dev_multi
-beaker image create open_instruct_dev_multi }≠{rt -n open_instruct_dev_multi  -w ai2/$beaker_user
+beaker image create open_instruct_dev_multi -n open_instruct_dev_multi  -w ai2/$beaker_user

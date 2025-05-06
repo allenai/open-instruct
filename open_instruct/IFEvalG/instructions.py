@@ -1687,7 +1687,7 @@ class CopySpanIdxChecker(Instruction):
       A string representing the instruction description.
       """
       if not prompt_to_repeat:
-        self._prompt_to_repeat = random.choice(_PHRASES)
+        raise ValueError("prompt_to_repeat must be set.")
       else:
         self._prompt_to_repeat = prompt_to_repeat
       if not n_start:
@@ -1766,6 +1766,8 @@ class AdjacentLetterChecker(Instruction):
     for i in range(len(words) - 1):
       first_letter = words[i][0].lower()
       second_letter = words[i + 1][0].lower()
+      if len(first_letter) != 1 or len(second_letter) != 1:
+        return False
       if ord(second_letter) - ord(first_letter) == 1:
         return False
     return True
@@ -2527,11 +2529,11 @@ class CountIncrementWordChecker(Instruction):
     A string representing the instruction description.
     """
     if not keyword1:
-      self._keyword1 = random.choice(_PHRASES)
+      self._keyword1 = instructions_util.generate_keywords(num_keywords=1)
     else:
       self._keyword1 = keyword1.strip()
     if not keyword2:
-      self._keyword2 = random.choice(_PHRASES)
+      self._keyword2 = instructions_util.generate_keywords(num_keywords=1)
     else:
       self._keyword2 = keyword2.strip()
 
@@ -2615,7 +2617,7 @@ class KeywordSpecificPositionChecker(Instruction):
       A string representing the instruction description.
     """
     if not keyword:
-      self._keyword = random.choice(_PHRASES)
+      self._keyword = instructions_util.generate_keywords(num_keywords=1)[0]
     else:
       self._keyword = keyword.strip()
     if not n:
