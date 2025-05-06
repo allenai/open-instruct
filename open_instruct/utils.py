@@ -16,7 +16,6 @@ import os
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
 try:
-    import deepspeed
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
     from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum
 
@@ -38,20 +37,20 @@ import socket
 import subprocess
 import sys
 import time
+from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from dataclasses import dataclass
 from typing import Any, List, NewType, Optional, Tuple, Union
-from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 
 import numpy as np
 import ray
 import requests
+import torch
 from accelerate.logging import get_logger
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
 from dateutil import parser
 from huggingface_hub import HfApi
 from rich.pretty import pprint
-import torch
 from transformers import MODEL_FOR_CAUSAL_LM_MAPPING, HfArgumentParser
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_CAUSAL_LM_MAPPING.keys())
@@ -1277,8 +1276,6 @@ def _z3_params_to_fetch(param_list):
     return [p for p in param_list if hasattr(p, "ds_id") and p.ds_status == ZeroParamStatus.NOT_AVAILABLE]
 
 
-
-
 def get_ray_address() -> Optional[str]:
     """Get the Ray address from the environment variable."""
     return os.environ.get("RAY_ADDRESS")
@@ -1328,7 +1325,6 @@ class RayProcess:
 
     def empty_cache(self) -> None:
         torch.cuda.empty_cache()
-
 
     def _set_numa_affinity(self, rank):
         def local_rank_to_real_gpu_id(local_rank):

@@ -64,16 +64,16 @@ import ray
 import torch
 import torch.utils
 import torch.utils.data
-from torch import distributed as dist
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
+from torch import distributed as dist
 from torch.utils.tensorboard import SummaryWriter
 from transformers import (
-    AutoModelForCausalLM,
     AutoConfig,
+    AutoModelForCausalLM,
     AutoModelForSequenceClassification,
     PreTrainedModel,
     PreTrainedTokenizer,
@@ -100,29 +100,29 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.rl_utils2 import pack_sequences, calculate_advantages_packed, Timer
+from open_instruct.rl_utils2 import Timer, calculate_advantages_packed, pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
+    RayProcess,
+    _z3_params_to_fetch,
+    get_eval_ds_config,
+    get_optimizer_grouped_parameters,
+    get_train_ds_config,
     get_wandb_tags,
     is_beaker_job,
     launch_ai2_evals_on_weka,
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
-    get_optimizer_grouped_parameters,
-    get_eval_ds_config,
-    get_train_ds_config,
-    RayProcess,
-    _z3_params_to_fetch,
 )
 from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
-INVALID_VALUE = 0.0 # to play nicely with debugging output
+INVALID_VALUE = 0.0  # to play nicely with debugging output
 # torch.set_printoptions(precision=2, sci_mode=False)
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from concurrent.futures import ThreadPoolExecutor
 
 
 @dataclass
@@ -340,6 +340,7 @@ class Args:
             self.pack_length >= self.max_prompt_token_length + self.response_length
         ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
 
+
 def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
     if axis is not None:
@@ -456,12 +457,15 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
-        from deepspeed.ops.adam import FusedAdam # DeepSpeedCPUAdam
+        from deepspeed.ops.adam import FusedAdam  # DeepSpeedCPUAdam
+
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
             optim_params = self.policy.parameters()
-        self.optimizer = FusedAdam(optim_params, lr=args.learning_rate, betas=(0.9, 0.95), weight_decay=args.weight_decay)
+        self.optimizer = FusedAdam(
+            optim_params, lr=args.learning_rate, betas=(0.9, 0.95), weight_decay=args.weight_decay
+        )
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
         if args.warmup_ratio > 0.0:
@@ -501,7 +505,9 @@ class PolicyTrainerRayProcess(RayProcess):
         )
 
         value_head = self.value_model.score
-        config = AutoConfig.from_pretrained(args.reward_model_name_or_path, revision=args.reward_model_revision, trust_remote_code=True)
+        config = AutoConfig.from_pretrained(
+            args.reward_model_name_or_path, revision=args.reward_model_revision, trust_remote_code=True
+        )
         print("initialize value_head for ZeRO-3 reward model training.")
         if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
             with deepspeed.zero.GatheredParameters([value_head.weight], modifier_rank=0):
@@ -509,14 +515,16 @@ class PolicyTrainerRayProcess(RayProcess):
                     value_head.weight.data.normal_(mean=0.0, std=1 / (config.hidden_size + 1))
         else:
             value_head.weight.data.normal_(mean=0.0, std=1 / (config.hidden_size + 1))
-        
+
         disable_dropout_in_model(self.value_model)
         self.value_model.gradient_checkpointing_enable()
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.value_model, args.weight_decay)
         else:
             optim_params = self.value_model.parameters()
-        self.value_optimizer = FusedAdam(optim_params, lr=args.value_learning_rate, betas=(0.9, 0.95), weight_decay=args.weight_decay)
+        self.value_optimizer = FusedAdam(
+            optim_params, lr=args.value_learning_rate, betas=(0.9, 0.95), weight_decay=args.weight_decay
+        )
         value_scheduler = get_scheduler(
             args.lr_scheduler_type,
             optimizer=self.value_optimizer,
@@ -774,9 +782,13 @@ class PolicyTrainerRayProcess(RayProcess):
                 cpu_collated_values = sum([item.cpu().tolist() for item in collated_values], [])
                 cpu_collated_dones = [item + [0] * (max_len - len(item)) for item in cpu_collated_dones]
                 cpu_collated_rewards = [item + [0] * (max_len - len(item)) for item in cpu_collated_rewards]
-                cpu_collated_response_masks = [item + [0] * (max_len - len(item)) for item in cpu_collated_response_masks]
+                cpu_collated_response_masks = [
+                    item + [0] * (max_len - len(item)) for item in cpu_collated_response_masks
+                ]
                 # minus 1 in `cpu_collated_values` because we already did the calculation based on [:-1] and masking on [1:]
-                cpu_collated_values = [item + [INVALID_VALUE] * (max_len - 1 - len(item)) for item in cpu_collated_values]
+                cpu_collated_values = [
+                    item + [INVALID_VALUE] * (max_len - 1 - len(item)) for item in cpu_collated_values
+                ]
                 adv, ret = calculate_advantages_packed(
                     np.stack(cpu_collated_values),
                     np.stack(cpu_collated_rewards)[:, 1:],
@@ -785,7 +797,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     np.stack(cpu_collated_dones)[:, 1:],
                     np.stack(cpu_collated_response_masks)[:, 1:],
                 )
-                
+
                 # Calculate the mean and std of the advantages
                 adv_gpu = torch.from_numpy(adv).to(self.device)
                 response_masks_gpu = torch.from_numpy(np.stack(cpu_collated_response_masks)[:, 1:]).to(self.device)
@@ -801,7 +813,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 dist.all_reduce(adv_variance, op=dist.ReduceOp.SUM)
                 adv_variance /= mask_sum
                 adv_std = torch.sqrt(adv_variance)
-                
+
                 # Normalize the advantages
                 adv = (adv_gpu - adv_mean) / (adv_std + 1e-8)
                 collated_advantages = []
@@ -809,8 +821,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 offset = 0
                 for i in range(len(collated_query_responses)):
                     batch_size, seq_len = collated_query_responses[i].shape
-                    collated_advantages.append(adv[offset:offset+batch_size, :seq_len - 1])
-                    collated_returns.append(torch.from_numpy(ret[offset:offset+batch_size, :seq_len - 1]))
+                    collated_advantages.append(adv[offset : offset + batch_size, : seq_len - 1])
+                    collated_returns.append(torch.from_numpy(ret[offset : offset + batch_size, : seq_len - 1]))
                     offset += batch_size
                 to_device_inplace(collated_advantages, self.device)
                 to_device_inplace(collated_returns, self.device)
@@ -1188,7 +1200,9 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards"):
-            scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons, executor)
+            scores, reward_metrics = reward_fn(
+                responses, decoded_responses, ground_truths, datasets, finish_reasons, executor
+            )
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
             non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
@@ -1265,12 +1279,8 @@ def data_preparation_thread(
                     collated_response_masks.append(
                         collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0)
                     )
-                    collated_dones.append(
-                        collate_fn([per_device_packed_dones[idx] for idx in micro_range], 0)
-                    )
-                    collated_rewards.append(
-                        collate_fn([per_device_packed_rewards[idx] for idx in micro_range], 0)
-                    )
+                    collated_dones.append(collate_fn([per_device_packed_dones[idx] for idx in micro_range], 0))
+                    collated_rewards.append(collate_fn([per_device_packed_rewards[idx] for idx in micro_range], 0))
                 collated_data.append(
                     {
                         "collated_query_responses": collated_query_responses,

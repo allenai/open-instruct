@@ -9,6 +9,7 @@ from rich.pretty import pprint
 T = TypeVar("T")
 # torch.set_printoptions(precision=2, sci_mode=False)
 
+
 class Timer:
     """A context manager for timing code blocks"""
 
@@ -201,21 +202,20 @@ def test_pack_sequences():
         pprint([q, r])
     pprint(packed_sequences)
 
-
     # assert first and second sequence is correct
     offset = 0
     np.testing.assert_allclose(
-        packed_sequences.query_responses[0][offset:offset + len(queries[0]) + len(responses[0])],
+        packed_sequences.query_responses[0][offset : offset + len(queries[0]) + len(responses[0])],
         np.array(sum([queries[0], responses[0]], [])),
     )
     offset += len(queries[0]) + len(responses[0])
     np.testing.assert_allclose(
-        packed_sequences.query_responses[0][offset:offset + len(queries[1]) + len(responses[1])],
+        packed_sequences.query_responses[0][offset : offset + len(queries[1]) + len(responses[1])],
         np.array(sum([queries[1], responses[1]], [])),
     )
     offset = 0
     np.testing.assert_allclose(
-        packed_sequences.query_responses[1][offset:offset + len(queries[2]) + len(responses[2])],
+        packed_sequences.query_responses[1][offset : offset + len(queries[2]) + len(responses[2])],
         np.array(sum([queries[2], responses[2]], [])),
     )
 
@@ -241,7 +241,9 @@ def calculate_advantages(values: np.ndarray, rewards: np.ndarray, gamma: float, 
     return advantages, returns
 
 
-def calculate_advantages_packed(values: np.ndarray, rewards: np.ndarray, gamma: float, lam: float, dones: np.ndarray, response_masks: np.ndarray):
+def calculate_advantages_packed(
+    values: np.ndarray, rewards: np.ndarray, gamma: float, lam: float, dones: np.ndarray, response_masks: np.ndarray
+):
     """Packed implementation of GAE. Each row is a packed sequence.
     The `dones` specifies the sequence boundaries, and the `response_masks` specifies the query boundaries.
     """
@@ -269,6 +271,7 @@ def calculate_advantages_packed(values: np.ndarray, rewards: np.ndarray, gamma: 
 def test_calculate_advantages_packed():
     gamma = 1
     lam = 1
+    # fmt: off
     # NOTE: We assume the values are obtained via `values = full_value[:, context_length - 1 : -1]`
     # Here are two key things to note:
     # 1. The first value corresponds to the last prompt token, not the first response token.
@@ -327,7 +330,6 @@ def test_calculate_advantages_packed():
     )
     pprint({"packed_adv": packed_adv})
     pprint({"packed_ret": packed_ret})
-    breakpoint()
 
 
     # here we assume -1 is the prompt token that should be ignored
@@ -359,6 +361,7 @@ def test_calculate_advantages_packed():
         packed_dones,
         packed_response_masks
     )
+    # fmt: on
     # uncomment to debug
     # print("vanilla GAE implementation")
     # print(adv.round(2))
@@ -373,12 +376,16 @@ def test_calculate_advantages_packed():
     np.testing.assert_allclose(adv[2, :12], packed_adv[0, 24:36])
 
 
-
 # @torch.no_grad()
 def test_pack_sequences_logits():
     import torch
-    from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer
-    tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoModelForSequenceClassification,
+        AutoTokenizer,
+    )
+
+    AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
 
     model = AutoModelForCausalLM.from_pretrained(
         "EleutherAI/pythia-14m",
@@ -442,7 +449,7 @@ def test_pack_sequences_logits():
         logprob = torch.gather(all_logprobs, 2, torch.tensor([query_response]).unsqueeze(-1)[:, 1:]).squeeze(-1)
         logprobs.append(logprob[:, len(query) - 1 :])
     pprint(logprobs)
-    
+
     rewards = np.zeros_like(values.detach().float().numpy())
     rewards[:, 21] = 0.1
     rewards[:, -1] = 1
@@ -454,10 +461,9 @@ def test_pack_sequences_logits():
         dones=packed_sequences.dones[0].unsqueeze(0).numpy(),
         response_masks=packed_sequences.response_masks[0].unsqueeze(0).numpy(),
     )
-    
+
     pprint({"adv": adv})
     pprint({"ret": ret})
-    breakpoint()
     print("hah")
 
 
