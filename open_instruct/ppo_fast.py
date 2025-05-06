@@ -244,10 +244,10 @@ class Args:
     """
     ref_policy_update_freq: Optional[int] = None
     """How many training steps to take before updating the reference policy."""
-    reward_model_name_or_path: str = "EleutherAI/pythia-160m"
-    """the name or path to the reward model"""
-    reward_model_revision: Optional[str] = None
-    """the revision of the reward model"""
+    value_model_name_or_path: str = "EleutherAI/pythia-160m"
+    """the name or path to the value model"""
+    value_model_revision: Optional[str] = None
+    """the revision of the value model"""
 
     # Reward
     # -- r1 style format reward
@@ -496,8 +496,8 @@ class PolicyTrainerRayProcess(RayProcess):
         AutoModelForSequenceClassification.register(Olmo2Config, Olmo2ForSequenceClassification)
         AutoModelForSequenceClassification.register(OlmoeConfig, OlmoeForSequenceClassification)
         self.value_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
-            args.reward_model_name_or_path,
-            revision=args.reward_model_revision,
+            args.value_model_name_or_path,
+            revision=args.value_model_revision,
             num_labels=1,
             torch_dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
@@ -506,7 +506,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         value_head = self.value_model.score
         config = AutoConfig.from_pretrained(
-            args.reward_model_name_or_path, revision=args.reward_model_revision, trust_remote_code=True
+            args.value_model_name_or_path, revision=args.value_model_revision, trust_remote_code=True
         )
         print("initialize value_head for ZeRO-3 reward model training.")
         if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:

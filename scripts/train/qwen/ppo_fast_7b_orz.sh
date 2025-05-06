@@ -23,7 +23,7 @@ python mason.py \
     --response_length 8192 \
     --pack_length 16384 \
     --model_name_or_path Qwen/Qwen2.5-7B \
-    --reward_model_name_or_path Qwen/Qwen2.5-7B \
+    --value_model_name_or_path Qwen/Qwen2.5-7B \
     --stop_strings "</answer>" "User:" "Human:" "Assistant:" \
     --verification_reward 1.0 \
     --apply_verifiable_reward True \
