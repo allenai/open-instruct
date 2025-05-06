@@ -23,7 +23,7 @@ python mason.py \
     --pack_length 4096 \
     --model_name_or_path allenai/OLMo-2-32B-JALLYRUN-SOUP \
     --add_bos \
-    --stop_strings '"</answer>"' \
+    --stop_strings "</answer>" \
     --apply_r1_style_format_reward True \
     --apply_verifiable_reward True \
     --non_stop_penalty True \
