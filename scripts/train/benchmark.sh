@@ -76,14 +76,24 @@ python update_command_args.py scripts/train/qwen/grpo_fast_7b.sh \
 python update_command_args.py scripts/train/qwen/grpo_fast_7b_orz.sh \
     --cluster ai2/augusta-google-1 \
     --wandb_project_name open_instruct_public \
-    --priority urgent | uv run bash
+    --image costah/open_instruct_dev_0405 \
+    --priority high | uv run bash
+
+# 3 nodes
+python update_command_args.py scripts/train/qwen/ppo_fast_7b_orz.sh \
+    --cluster ai2/augusta-google-1 \
+    --priority high \
+    --workspace ai2/scaling-rl \
+    --wandb_project_name open_instruct_public \
+    --image costah/open_instruct_dev_0427_ppo_17 | uv run bash
 
 # 2 nodes
 python update_command_args.py scripts/train/qwen/grpo_7b.sh \
     --cluster ai2/augusta-google-1 \
     --wandb_project_name open_instruct_public \
-    --priority normal \
-    --image costah/open_instruct_dev0320_11 | uv run bash
+    --priority high \
+    --workspace ai2/scaling-rl \
+    --image costah/open_instruct_dev_0410_ww_1 | uv run bash
 
 # 1 node
 python update_command_args.py scripts/train/qwen/grpo_fast_3b_single_node.sh \
