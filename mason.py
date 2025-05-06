@@ -22,8 +22,6 @@ OPEN_INSTRUCT_COMMANDS = [
     "open_instruct/dpo_tune_cache.py",
     "open_instruct/grpo_fast.py",
     "open_instruct/ppo_fast.py",
-    "open_instruct/ppo_fast1.py",
-    "open_instruct/grpo_fast_ps.py",
     "open_instruct/grpo_vllm_thread_ray_gtrl.py",
     "open_instruct/ppo2.py",
     "open_instruct/ppo_vllm_thread_ray_gtrl.py",
