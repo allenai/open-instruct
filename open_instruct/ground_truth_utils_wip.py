@@ -344,6 +344,7 @@ class LMJudgeVerifier(VerifierFunction):
         # weight: float = 1.0,
         model_name: str = "gpt-4o-mini",
         threshold: float = 0.5,
+        local_judge: bool = False,
     ) -> None:
         """
         Initialize LMJudgeVerifier with specified parameters.
@@ -354,16 +355,18 @@ class LMJudgeVerifier(VerifierFunction):
             weight (float): Weight for this verifier when combined with others
             model_name (str): LLM model to use for judging
             threshold (float): Threshold for binary decisions (0/1)
+            local_judge (bool): Whether to use a local judge model via easyapi
         """
         super().__init__("general", weight=1.0)
         self.judge_type = judge_type
         self.model_name = model_name
         self.threshold = threshold
+        self.local_judge = local_judge
         
         if judge_type not in JUDGE_CLASS_MAP:
             raise ValueError(f"Unsupported judge type: {judge_type}. Available types: {list(JUDGE_CLASS_MAP.keys())}")
             
-        self.judge = JUDGE_CLASS_MAP[judge_type](model=model_name, judge_type=judge_type)
+        self.judge = JUDGE_CLASS_MAP[judge_type](model=model_name, judge_type=judge_type, local_model=self.local_judge)
 
     def __call__(
         self, 
@@ -418,11 +421,12 @@ class LMJudgeVerifier(VerifierFunction):
         return score, judgment.cost #, judgment.response_time
     
     async def async_call(
-        self, 
-        tokenized_prediction: List[int], 
-        prediction: str, 
+        self,
+        tokenized_prediction: List[int],
+        prediction: str,
         label: Any,
         query: Optional[str] = None,
+        client: Optional[Union[OpenAI, Any]] = None
     ) -> Tuple[float, float, str]:
         """
         Async version of __call__ that directly awaits _judge without using asyncio.run()
@@ -432,6 +436,7 @@ class LMJudgeVerifier(VerifierFunction):
             prediction (str): The model output
             label (Any): Ground truth or evaluation criteria
             query (str, optional): Original user query
+            client (Optional[Union[OpenAI, Any]]): OpenAI client for type hint
 
         Returns:
             Tuple[float, float, float]: (score, cost, response_time)
@@ -458,7 +463,8 @@ class LMJudgeVerifier(VerifierFunction):
         # Directly await the _judge method instead of using asyncio.run
         reasoning, score, cost, response_time = await self.judge._judge(
             user_prompt=user_prompt,
-            system_prompt=None
+            system_prompt=None,
+            client=client
         )
 
         

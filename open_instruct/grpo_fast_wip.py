@@ -50,9 +50,11 @@ from queue import Empty, Queue
 from typing import Callable, Iterator, List, Literal, Optional
 
 import deepspeed
+import easyapi
 import numpy as np
 import pandas as pd
 import ray
+import re
 import torch
 import torch.utils
 import torch.utils.data
@@ -238,7 +240,8 @@ class Args:
     """the reward value for non/partially-verifiable responses"""
     llm_judge_type: str = "quality_ref"
     llm_judge_model: str = "gpt-4o-mini"
-
+    local_judge: bool = False 
+    """if using an HF model, setting this to True will launch the judge on our hardware instead of using HF inference API"""
     # -- arithmetic reward
     apply_arithmetic_reward: bool = False
     """whether to apply arithmetic reward"""
@@ -316,6 +319,8 @@ class Args:
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
         ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+
+        assert (not self.local_judge or '/' in self.llm_judge_model), "If using local judge, the model must be an HF model"
 
 
 def get_train_ds_config(
@@ -1634,6 +1639,36 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             args.hf_repo_revision,
         )
 
+def launch_model_and_wait(api: easyapi.Api, model: str):
+    num_gpus = 2 # Default for < 7B or unknown
+    # Parse the model string for size (e.g., '7b', '13b', '70b')
+    # Looking for patterns like '7b', '13b', '34b', '70b', ignoring case
+    match = re.search(r'(\d+)[bB]', model, re.IGNORECASE)
+
+    if match:
+        try:
+            params_b = int(match.group(1))
+            if params_b >= 7 and params_b <= 14:
+                num_gpus = 4
+            elif params_b > 14:
+                num_gpus = 8
+            # else: stays 2 (for < 7B)
+        except ValueError:
+            # Handle cases where the matched digits are not a valid integer
+            print(f"Warning: Could not parse parameter size from model name '{model}'. Using default GPUs: {num_gpus}")
+    else:
+        print(f"Warning: Could not find parameter size (e.g., '7b') in model name '{model}'. Using default GPUs: {num_gpus}")
+
+
+    print(f"Launching model '{model}' with {num_gpus} GPUs...")
+    api.launch_model(
+        model,
+        priority="high",
+        gpus=num_gpus,
+        sgl_args_string=f'--tp {num_gpus} --trust-remote-code --allow-auto-truncate --grammar-backend xgrammar'
+    )
+    api.wait_for_model(model)
+
 
 if __name__ == "__main__":
     parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
@@ -1641,6 +1676,8 @@ if __name__ == "__main__":
     assert isinstance(args, Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
+
+    easyapi = easyapi.Api()
 
     def reward_fn(
         responses: List[torch.Tensor],
@@ -1695,6 +1732,11 @@ if __name__ == "__main__":
         if args.apply_llm_verifier_reward:
             if not queries:
                 raise ValueError("Queries must be provided for llm judge reward.")
+            # check if the model is a huggingface model
+            if args.local_judge and '/' in args.llm_judge_model and not easyapi.has_model(args.llm_judge_model):
+                with Timer("[Data Preparation Thread] Calculating rewards -- 🤖↗️ Launching llm judge model"):
+                    launch_model_and_wait(easyapi, args.llm_judge_model)
+
             with Timer("[Data Preparation Thread] Calculating rewards -- 🤖 Applying llm judge reward"):
                 llm_judge_rewards, per_func_rewards, api_cost, judge_reasoning = apply_llm_verifier_reward(
                     responses,
@@ -1703,7 +1745,7 @@ if __name__ == "__main__":
                     datasets,
                     queries=queries,
                     reward_mult=args.llm_verification_reward,
-                    judge_type=args.llm_judge_type,
+                    local_judge=args.local_judge,
                     judge_model=args.llm_judge_model,
                 )
                 if len(llm_judge_rewards) != len(scores):
@@ -1716,7 +1758,7 @@ if __name__ == "__main__":
                 np_api_cost = np.array(api_cost)
                 metrics["objective/llm_judge_reward"] = np_llm_judge_rewards.mean()
                 # metrics["objective/llm_judge_correct_rate"] = (np_llm_judge_rewards > 0.0).mean() if "rubric" in args.llm_judge_type else (np_llm_judge_rewards > 5.0).mean()
-                metrics["total_api_cost"] = np_api_cost.sum()
+                metrics["total_api_cost"] = np_api_cost.sum() if not args.local_judge else 0.0 #local judges are free!
 
                 # reshuffle around per_func rewards
                 per_func_lists = defaultdict(list)
@@ -1726,7 +1768,7 @@ if __name__ == "__main__":
                 # log per function rewards
                 for key, value in per_func_lists.items():
                     np_value = np.array(value)
-                    metrics[f"objective/{key}_reward"] = np_value.mean()
+                    metrics[f"objective/{key}_reward"] = np_value.mean() 
                     metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean() if "ref" not in key else (np_value > 5.0).mean()
 
 

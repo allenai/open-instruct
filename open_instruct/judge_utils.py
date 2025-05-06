@@ -21,7 +21,8 @@ class JudgeQuality(BaseJudge):
     def __init__(
         self,
         model: str,
-        judge_type: str
+        judge_type: str,
+        local_model: bool = False
     ):
         """
         Initialize the judge with a specific model.
@@ -30,8 +31,10 @@ class JudgeQuality(BaseJudge):
         -----------
         judge_type: str
             The type of judge to be used for evaluations.
+        local_model: bool
+            Whether to use a local judge model.
         """
-        super().__init__(model)
+        super().__init__(model=model, local_model=local_model)
         self.judge_type = judge_type
 
     async def judge(
@@ -94,7 +97,8 @@ class JudgeFactuality(BaseJudge):
     def __init__(
         self,
         model: str,
-        judge_type: str
+        judge_type: str,
+        local_model: bool = False
     ):
         """
         Initialize the judge with a specific model.
@@ -103,8 +107,10 @@ class JudgeFactuality(BaseJudge):
         -----------
         judge_type: str
             The type of judge to be used for evaluations.
+        local_model: bool
+            Whether to use a local judge model.
         """
-        super().__init__(model)
+        super().__init__(model=model, local_model=local_model)
         self.judge_type = judge_type
     
     def judge(
@@ -140,7 +146,8 @@ class JudgeRelevance(BaseJudge):
     def __init__(
         self,
         model: str,
-        judge_type: str
+        judge_type: str,
+        local_model: bool = False
     ):
         """
         Initialize the judge with a specific model.
@@ -149,8 +156,10 @@ class JudgeRelevance(BaseJudge):
         -----------
         judge_type: str
             The type of judge to be used for evaluations.
+        local_model: bool
+            Whether to use a local judge model.
         """
-        super().__init__(model)
+        super().__init__(model=model, local_model=local_model)
         self.judge_type = judge_type
     
     def judge(
@@ -185,7 +194,8 @@ class JudgeCorrectness(BaseJudge):
     def __init__(
         self,
         model: str,
-        judge_type: str
+        judge_type: str,
+        local_model: bool = False
     ):
         """
         Initialize the judge with a specific model.
@@ -194,8 +204,10 @@ class JudgeCorrectness(BaseJudge):
         -----------
         judge_type: str
             The type of judge to be used for evaluations.
+        local_model: bool
+            Whether to use a local judge model.
         """
-        super().__init__(model)
+        super().__init__(model=model, local_model=local_model)
         self.judge_type = judge_type
     
     def judge(
@@ -230,7 +242,8 @@ class JudgeGroundedness(BaseJudge):
     def __init__(
         self,
         model: str,
-        judge_type: str
+        judge_type: str,
+        local_model: bool = False
     ):
         """
         Initialize the judge with a specific model.
@@ -239,8 +252,10 @@ class JudgeGroundedness(BaseJudge):
         -----------
         judge_type: str
             The type of judge to be used for evaluations.
+        local_model: bool
+            Whether to use a local judge model.
         """
-        super().__init__(model)
+        super().__init__(model=model, local_model=local_model)
         self.judge_type = judge_type
     
     def judge(
@@ -275,7 +290,8 @@ class JudgeHarmfulness(BaseJudge):
     def __init__(
         self,
         model: str,
-        judge_type: str
+        judge_type: str,
+        local_model: bool = False
     ):
         """
         Initialize the judge with a specific model.
@@ -284,8 +300,10 @@ class JudgeHarmfulness(BaseJudge):
         -----------
         judge_type: str
             The type of judge to be used for evaluations.
+        local_model: bool
+            Whether to use a local judge model.
         """
-        super().__init__(model)
+        super().__init__(model=model, local_model=local_model)
         self.judge_type = judge_type
     
     def judge(

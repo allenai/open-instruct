@@ -2,6 +2,7 @@ export CURRENT_DATETIME=$(python -c "import datetime; import pytz; print(datetim
 export PYTHONPATH=$REPO_PATH
 export PATH="/root/.local/bin:$PATH"
 export NCCL_CUMEM_ENABLE=0
+export SERVER_URL="http://localhost:5000"
 
 
 echo CURRENT_DATETIME=$CURRENT_DATETIME
@@ -11,6 +12,11 @@ echo PATH=$PATH
 # python3 -c "import os, ray; print(os.path.dirname(ray.__file__))"
 
 BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
+
+# launch the easyapi server
+cd easyapi
+bash start_server.sh &
+cd ..
 
 RAY_NODE_PORT=8888
 ray stop --force
