@@ -229,6 +229,10 @@ def apply_verifiable_reward(
             dataset_list = [dataset]
         else:
             dataset_list = dataset
+
+        if "code" in dataset_list:
+            ground_truth_list = [ground_truth_list]
+    
         assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
         # for now, we just assume rewards are additive, rather than more complex functions.
         reward = 0

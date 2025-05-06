@@ -13,6 +13,7 @@ import string
 from abc import ABC, abstractmethod
 from collections import Counter
 from typing import Any, Dict, List, Union
+import os
 
 import aiohttp
 
@@ -298,77 +299,88 @@ class UpToMaxLenVerifier(VerifierFunction):
         return 1 - (length_diff / 8192)
 
 
-
-def extract_python_code(model_output: str) -> str:
-    """Extract the last code block between ``` markers from the model output."""
-    # Find content between ``` markers
-    pattern = r"```(?:python)?(.*?)```"
-    matches = re.findall(pattern, model_output, re.DOTALL)
-    
-    if not matches:
-        return model_output
-        
-    # Return the first match, stripped of whitespace
-    return matches[-1].strip()
-
-
-async def _verify_code_sample_async(model_output: str, tests: List[str], api_url: str, max_execution_time: float = 1.0) -> float:
-    """Async helper to verify a single code sample against test cases."""
-    # Extract the python code from the model output
-    python_code = extract_python_code(model_output)
-
-    # Test data
-    payload = {
-        "program": python_code,
-        "tests": tests,
-        "max_execution_time": max_execution_time
-    }
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(api_url, json=payload) as response:
-                result = await response.json()
-                passes = result["results"]
-                pass_rate = sum(passes) / len(passes) if passes else 0.0
-                return pass_rate
-    except Exception as e:
-        logger.warning(f"Error verifying code sample: {e}")
-        return 0.0
-
-async def _verify_code_samples_async(model_outputs: List[str], tests_list: List[List[str]], api_url: str, max_execution_time: float = 1.0) -> List[float]:
-    """Async function to verify multiple code samples against their respective test cases."""
-    tasks = []
-    for model_output, tests in zip(model_outputs, tests_list):
-        tasks.append(_verify_code_sample_async(model_output, tests, api_url, max_execution_time))
-    
-    return await asyncio.gather(*tasks)
-
-def verify_code_sample(model_outputs: List[str], tests: List[List[str]], api_url: str, max_execution_time: float = 1.0) -> List[float]:
-    """First extract the python code from the model outputs, then run them against their respective test cases.
-    
-    Args:
-        model_outputs: A list of model output strings
-        tests: A list of lists of test cases, where each inner list corresponds to a model output
-        api_url: URL of the API endpoint for testing code
-        max_execution_time: Maximum execution time per test case in seconds
-        
-    Returns:
-        A list of pass rates for each model output
+class CodeVerifier(VerifierFunction):
     """
-    # Handle case where tests is a single list of strings (apply to all model outputs)
-    if tests and isinstance(tests[0], str):
-        tests = [tests] * len(model_outputs)
-    
-    # Ensure tests is a list of lists
-    if not all(isinstance(t, list) for t in tests):
-        raise ValueError("tests must be a list of lists of strings")
-    
-    # Ensure lengths match
-    if len(model_outputs) != len(tests):
-        raise ValueError(f"Length mismatch: {len(model_outputs)} model outputs vs {len(tests)} test sets")
-    
-    # Run async verification
-    return asyncio.run(_verify_code_samples_async(model_outputs, tests, api_url, max_execution_time))
+    Verifier for code generation tasks that executes the code against provided test cases
+    using an external API endpoint.
+
+    The ground truth (label) is expected to be a list of test case strings.
+    """
+    def __init__(self, max_execution_time: float = 1.0, weight: float = 1.0) -> None:
+        super().__init__("code", weight=weight)
+        self.api_url = f"{os.environ.get('CODE_API_URL')}/test_program"
+        self.max_execution_time = max_execution_time
+
+    def extract_python_code(self, model_output: str) -> str:
+        """Extract the last code block between ``` markers from the model output."""
+        # Find content between ``` markers
+        pattern = r"```(?:python)?(.*?)```"
+        matches = re.findall(pattern, model_output, re.DOTALL)
+        
+        if not matches:
+            return model_output
+            
+        # Return the first match, stripped of whitespace
+        return matches[-1].strip()
+
+    async def _verify_async(self, prediction: str, tests: List[str]) -> float:
+        """Async helper to verify a single code sample against test cases."""
+        python_code = self.extract_python_code(prediction)
+
+        payload = {
+            "program": python_code,
+            "tests": tests,
+            "max_execution_time": self.max_execution_time
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.api_url, json=payload) as response:
+                    response.raise_for_status() # Raise exceptions for bad responses (4xx or 5xx)
+                    result = await response.json()
+                    passes = result.get("results")
+                    if passes is None or not isinstance(passes, list):
+                        logger.warning(f"Invalid 'results' format in API response: {result}")
+                        return 0.0
+                    # Ensure boolean interpretation and safe division
+                    pass_rate = sum(1.0 for p in passes if p) / len(passes) if passes else 0.0
+                    return pass_rate
+        except aiohttp.ClientError as e:
+            logger.warning(f"HTTP Error verifying code sample ({self.api_url}): {e}")
+            return 0.0
+        except json.JSONDecodeError as e:
+             logger.warning(f"JSON Decode Error verifying code sample ({self.api_url}): {e}")
+             return 0.0
+        except Exception as e:
+            # Catch unexpected errors during the async operation
+            logger.warning(f"Unexpected error verifying code sample: {e}", exc_info=True)
+            return 0.0
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: Any) -> float:
+        """
+        Evaluate the code prediction against test cases (label).
+
+        Args:
+            tokenized_prediction: Unused by this verifier.
+            prediction: The model output string containing the code.
+            label: A list of strings, where each string is a test case.
+
+        Returns:
+            The pass rate (float between 0.0 and 1.0).
+        """
+        if not isinstance(label, list) or not all(isinstance(t, str) for t in label):
+            logger.warning(f"Invalid label format for CodeVerifier. Expected List[str], got: {type(label)}")
+            return 0.0 # Return 0 reward for invalid input format
+
+        try:
+            return asyncio.run(self._verify_async(prediction, label))
+        except RuntimeError as e:
+            logger.error(f"Asyncio loop issue in CodeVerifier: {e}. Consider async refactor of calling code.", exc_info=True)
+            return 0.0
+        except Exception as e:
+            logger.error(f"Unexpected error during asyncio.run in CodeVerifier: {e}", exc_info=True)
+            return 0.0
+
 
 def get_all_verifiers() -> Dict[str, VerifierFunction]:
     """
@@ -376,8 +388,11 @@ def get_all_verifiers() -> Dict[str, VerifierFunction]:
     """
     verifiers: Dict[str, VerifierFunction] = {}
     for subclass in VerifierFunction.__subclasses__():
-        instance = subclass()
-        verifiers[instance.name.lower()] = instance
+        try:
+            instance = subclass()
+            verifiers[instance.name.lower()] = instance
+        except Exception as e:
+            logger.error(f"Failed to instantiate verifier {subclass.__name__}: {e}", exc_info=True)
     return verifiers
 
 
@@ -395,12 +410,3 @@ def soft_format_reward_func(responses: List[str], reward_scale: float = 1.0) -> 
     pattern = r".*?</think>\s*<answer>.*?</answer>"
     matches = [re.match(pattern, r, re.DOTALL) for r in responses]
     return [reward_scale if match else 0.0 for match in matches]
-
-
-def test_verify_code_sample():
-    model_outputs = [
-        "```python\nprint('Hello, world!')\n```",
-        "```python\nprint('Hello, world!')\n```"
-    ]
-    tests = [["print('Hello, world!')"], ["print('Hello, world!')"]]
-    print(verify_code_sample(model_outputs, tests))
