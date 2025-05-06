@@ -1,3 +1,4 @@
+# flake8: noqa
 import time
 from dataclasses import dataclass
 from typing import Generic, List, Optional, TypeVar
