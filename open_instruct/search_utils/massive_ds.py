@@ -7,6 +7,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+
 def create_session_with_retries(
     retries=3,
     backoff_factor=0.3,
@@ -40,9 +41,9 @@ def get_snippets_for_query(query, api_endpoint=None, number_of_results=3):
     try:
         res = session.post(
             url,
-            json={"n_docs": number_of_results, "query": query, "domains": "massive_ds"},  # domains is meaningless for now
+            json={"query": query, "n_docs": number_of_results, "domains": "dpr_wiki_contriever"},  # domains is meaningless for now
             headers={"Content-Type": "application/json"},
-            timeout=60,  # extended timeout for long queries
+            timeout=(3, 15),
         )
         res.raise_for_status()  # Raises HTTPError for bad responses
         data = res.json()
@@ -57,4 +58,4 @@ def get_snippets_for_query(query, api_endpoint=None, number_of_results=3):
     return None
 
 if __name__ == "__main__":
-    print(get_snippets_for_query("Where was Marie Curie born?"))
+    print(get_snippets_for_query("Where was Marie Curie born?", api_endpoint="http://root@saturn-cs-aus-231.reviz.ai2.in:45479/search"))
