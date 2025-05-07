@@ -2619,7 +2619,10 @@ class KeywordSpecificPositionChecker(Instruction):
     if not keyword:
       self._keyword = instructions_util.generate_keywords(num_keywords=1)[0]
     else:
-      self._keyword = keyword.strip()
+      if not isinstance(keyword, str):
+        self._keyword = keyword[0].strip()
+      else:
+        self._keyword = keyword.strip()
     if not n:
       self._n = random.randint(1, 20)
     else:
