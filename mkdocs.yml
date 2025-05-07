@@ -75,6 +75,7 @@ nav:
     - get_started/ai2_internal_setup.md
   - Training:
     - algorithms/dataset_transformation.md
+    - algorithms/trained_model.md
     - algorithms/finetune.md
     - algorithms/dpo.md
     - algorithms/grpo.md

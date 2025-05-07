@@ -23,7 +23,7 @@ python mason.py \
     --response_length 2048 \
     --model_name_or_path allenai/OLMo-2-1124-7B-DPO \
     --model_revision main \
-    --tokenizer_name allenai/OLMo-2-1124-7B-DPO \
+    --tokenizer_name_or_path allenai/OLMo-2-1124-7B-DPO \
     --tokenizer_revision main \
     --use_slow_tokenizer False \
     --add_bos \
