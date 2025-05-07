@@ -5,13 +5,7 @@
 # just math: ai2-adapt-dev/tulu-3-thinker-rewritten-math-27k
 # general excluding math and string_f1: ai2-adapt-dev/tulu-3-thinker-classified-no_math-ifeval-ref-based-45k
 
-# saurab command:
-# exp_name="0504_qwen2.5_7B_thinker_grpo_fast_llm_judge__gpt-4o_quality_ref_${RANDOM}_large"
-# exp_name="0505_qwen2.5_7B_thinker_grpo_fast_llm_judge_gpt-4o_quality_ref_${RANDOM}_v2"
-# exp_name="0505_qwen2.5_7B_thinker_grpo_fast_llm_judge_gpt-4o_quality_ref_3188_v2/resume_math_from_step_250/"
-exp_name="beeg_tulu_3_think_rewrite/resume_from_step_500/"
-model_weka_path="/weka/oe-adapt-default/hamishi/model_checkpoints/rl_vs_sft/beeg_tulu_3_think_rewrite/step_500"
-#"/weka/oe-adapt-default/faezeb/model_checkpoints/0505_qwen2.5_7B_thinker_grpo_fast_llm_judge_gpt-4o_quality_ref_3188_v2/grpo_fast_wip__1__1746517521_checkpoints/step_250"
+exp_name="0504_qwen2.5_7B_thinker_grpo_fast_llm_judge__gpt-4o_quality_ref_${RANDOM}"
 python mason.py \
     --description $exp_name \
     --cluster ai2/jupiter-cirrascale-2 \
@@ -34,7 +28,7 @@ python mason.py \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 128 \
     --num_samples_per_prompt_rollout 8 \
-    --model_name_or_path $model_weka_path \
+    --model_name_or_path Qwen/Qwen2.5-7B \
     --oe_eval_tasks minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,alpaca_eval_v2::tulu,ifeval::tulu,popqa::tulu,drop::llama3,codex_humanevalplus::tulu,mmlu:cot::summarize \
     --output_dir /weka/oe-adapt-default/faezeb/model_checkpoints/${exp_name} \
     --apply_llm_verifier_reward true \
