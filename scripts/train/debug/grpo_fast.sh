@@ -1,6 +1,7 @@
 # try rubric-based eval using this dataset: ai2-adapt-dev/tulu-3-sft-50k-criteria-gpt4o-classified
 # mix with hamish rewritten math problems: ai2-adapt-dev/tulu-3-sft-57k-criteria-gpt4o-classified-rewritten-math
 # mix with rewritten math, shortqa and tuu 3 ifeval rlvr: ai2-adapt-dev/tulu-3-sft-72k-criteria-gpt4o-classified-rewritten-math-shortqa-ifeval
+# rubric+ref+math+shortqa_ifeval: ai2-adapt-dev/tulu-3-sft-92k-criteria-gpt4o-classified-rewritten-math-shortqa-ifeval-v2
 # previous tested dataset: faezeb/tulu-3-sft-t3-70b-thinker-sampled
 
 python open_instruct/grpo_fast_wip.py \
@@ -26,7 +27,7 @@ python open_instruct/grpo_fast_wip.py \
     --ground_truths_key ground_truth \
     --chat_template_name tulu_thinker_r1_style \
     --learning_rate 3e-7 \
-    --total_episodes 10000 \
+    --total_episodes 4000 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
@@ -41,7 +42,7 @@ python open_instruct/grpo_fast_wip.py \
     --gradient_checkpointing \
     --single_gpu_mode \
     --push_to_hub false \
-    --llm_judge_model "gpt-4o-mini" \
+    --llm_judge_model "gpt-4o-mini-standard" \
     --llm_judge_type "quality_rubric"
     # --with_tracking
 

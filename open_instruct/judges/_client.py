@@ -214,6 +214,7 @@ async def async_get_completion(
                             seed=seed,
                             response_format=response_format,
                         )
+
                     elif is_litellm_module:
                         # Litellm path remains mostly the same, using the module directly
                         if easyapi is not None: # Use sglang endpoint only if easyapi provided
@@ -246,9 +247,11 @@ async def async_get_completion(
                     end_time = time.time()
                     track_cost_callback({"model": model}, response, start_time, end_time)
 
-                    if response_model is None:
-                        response = CompletionWithMetadata(response)
-
+                if response_model is None:
+                    response = CompletionWithMetadata(response)
+                    # return build_fallback_response("No response received.", elapsed_time=end_time - start_time)
+                    
+                return response
 
             # except content filter error for openai and litellm
             except Exception as e:

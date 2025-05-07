@@ -163,7 +163,7 @@ class BaseJudge:
             easyapi=self.api,
             client=client
         )
-        
+        # breakpoint()
         if completion:
             try:
                 data = json.loads(completion.choices[0].message.content)
