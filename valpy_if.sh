@@ -39,7 +39,7 @@ python mason.py \
     --apply_verifiable_reward true \
     --seed 1 \
     --num_evals 100 \
-    --save_freq 10 \
+    --save_freq 100 \
     --reward_model_multiplier 0.0 \
     --no_try_launch_beaker_eval_jobs \
     --try_launch_beaker_eval_jobs_on_weka \
