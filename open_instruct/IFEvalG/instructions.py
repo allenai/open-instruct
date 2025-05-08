@@ -1629,6 +1629,8 @@ class RepeatPhraseChecker(Instruction):
       phrase = phrase.split()
       ref_phrase = self._phrase.split()
       differences = 0
+      if len(phrase) != len(ref_phrase):
+        return False
       for i in range(len(phrase)):
         try:
           if phrase[i] != ref_phrase [i]:
