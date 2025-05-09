@@ -327,7 +327,7 @@ CHAT_TEMPLATES = {
         "\n\n"
         "{% for message in messages %}"
         "{{ '\n\n' if not loop.first else '' }}"
-        "{{ message['role'].capitalize() + ': You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\\\boxed{} tag. This is the problem: ' + message['content'] + '\n' }}" # \\\\boxed{} is for jinja template escape
+        "{{ message['role'].capitalize() + ': You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\\\boxed{} tag. This is the problem: ' + message['content'] + '\n' }}"  # \\\\boxed{} is for jinja template escape
         "{% if loop.last and add_generation_prompt %}"
         "{{ 'Assistant: <think>' }}"
         "{% endif %}"
@@ -365,7 +365,7 @@ CHAT_TEMPLATES = {
         "\n\n"
         "{% for message in messages %}"
         "{{ '\n\n' if not loop.first else '' }}"
-        "{{ message['role'].capitalize() + ': You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\\\boxed{} tag. This is the problem: ' + message['content'] + '\n' }}" # \\\\boxed{} is for jinjia template escape
+        "{{ message['role'].capitalize() + ': You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\\\boxed{} tag. This is the problem: ' + message['content'] + '\n' }}"  # \\\\boxed{} is for jinjia template escape
         "{% if loop.last and add_generation_prompt %}"
         "{{ 'Assistant: <think>' }}"
         "{% endif %}"

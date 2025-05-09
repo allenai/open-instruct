@@ -356,7 +356,6 @@ class Args:
         ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
 
 
-
 def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
     if axis is not None:
@@ -1194,7 +1193,12 @@ def vllm_generate_thread(
             tool_outputs = [""] * len(response_ids)
             tool_runtimes = [0] * len(response_ids)
             tool_calleds = [False] * len(response_ids)
-        return response_ids, finish_reasons, masks, (num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds)
+        return (
+            response_ids,
+            finish_reasons,
+            masks,
+            (num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds),
+        )
 
     for training_step in range(resume_training_step, num_training_steps + 1):
         items = param_prompt_Q.get()
@@ -1208,7 +1212,9 @@ def vllm_generate_thread(
 
         # Evaluate the model
         if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-            response_ids, finish_reasons, masks, info = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
+            response_ids, finish_reasons, masks, info = generate_with_engines(
+                eval_prompt_token_ids, eval_generation_config
+            )
             evaluation_inference_results_Q.put((response_ids, finish_reasons, masks, info))
 
 
@@ -1235,21 +1241,28 @@ def data_preparation_thread(
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             responses, finish_reasons, masks, infos = inference_results_Q.get()
             num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
-            good_outputs = [len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i] for i in range(len(tool_outputs))]
+            good_outputs = [
+                len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
+                for i in range(len(tool_outputs))
+            ]
             for i in range(len(finish_reasons)):
                 # edge case: sometimes it outputs eos immediately, and we get an empty response
                 # in that case, we need to add the eos token to the response
                 # note that this also adds eos to the end of reponses that stopped for other reasons.
-                if finish_reasons[i] == "stop" and (len(responses[i]) == 0 or responses[i][-1] != tokenizer.eos_token_id):
+                if finish_reasons[i] == "stop" and (
+                    len(responses[i]) == 0 or responses[i][-1] != tokenizer.eos_token_id
+                ):
                     responses[i].append(tokenizer.eos_token_id)
-                    masks[i].append(1) # never mask the eos token for now?
+                    masks[i].append(1)  # never mask the eos token for now?
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards"):
-            scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons, infos)
+            scores, reward_metrics = reward_fn(
+                responses, decoded_responses, ground_truths, datasets, finish_reasons, infos
+            )
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
             non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
@@ -1510,7 +1523,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
     # ------------------------------------------------------------
     # Create the model and optimizer
-    ray.init(dashboard_host="0.0.0.0") # enable debugging from a different machine (e.g., phobos)
+    ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
     pg = None
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
@@ -1534,6 +1547,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         for tool in args.tools:
             if tool.lower() == "search":
                 from open_instruct.search_utils.search_tool import SearchTool
+
                 tool = SearchTool(
                     start_str="<query>",
                     end_str="</query>",
@@ -1543,6 +1557,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 tool_objects[tool.end_str] = tool
             elif tool.lower() == "code":
                 from open_instruct.tool_utils.tool_vllm import PythonCodeTool
+
                 tool = PythonCodeTool(
                     start_str="<code>",
                     end_str="</code>",
@@ -1584,7 +1599,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         stop_strings += list(tool_objects.keys())
     generation_config = SamplingParams(
         temperature=args.temperature,
-        top_p=.98,  # prevent rare out-of-vocab tokens with qwen
+        top_p=0.98,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
@@ -1593,7 +1608,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     )
     eval_generation_config = SamplingParams(
         temperature=0.0,
-        top_p=.98,   # prevent rare out-of-vocab tokens with qwen
+        top_p=0.98,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
@@ -1772,7 +1787,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 # timeout 0.01 if this is the last training step or we're not evaluating
                 # otherwise, wait to get the last evaluation generations (long timeout just in case)
                 timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else 100
-                eval_responses, eval_finish_reasons, masks, eval_infos = evaluation_inference_results_Q.get(timeout=timeout)
+                eval_responses, eval_finish_reasons, masks, eval_infos = evaluation_inference_results_Q.get(
+                    timeout=timeout
+                )
                 print("[Main Thread] 📊 Evaluation responses received")
 
                 eval_sequence_lengths = np.array([len(response) for response in eval_responses])
@@ -1880,7 +1897,10 @@ if __name__ == "__main__":
         infos: List[List[int]],
     ) -> List[float]:
         num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
-        good_outputs = [len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i] for i in range(len(tool_outputs))]
+        good_outputs = [
+            len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
+            for i in range(len(tool_outputs))
+        ]
         scores = [0] * len(decoded_responses)
         metrics = {}
 
