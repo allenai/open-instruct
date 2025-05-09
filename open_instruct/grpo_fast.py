@@ -97,10 +97,15 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.rl_utils2 import pack_sequences_with_masks
+from open_instruct.rl_utils2 import Timer, pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
+    RayProcess,
+    _z3_params_to_fetch,
+    get_eval_ds_config,
+    get_optimizer_grouped_parameters,
+    get_train_ds_config,
     calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
     download_latest_checkpoint_from_gs,
@@ -113,8 +118,7 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     sync_gs_bucket,
 )
-from open_instruct.vllm_utils3 import LLMRayActor, create_vllm_engines, init_process_group
-from open_instruct.tool_utils.tool_vllm import ToolUseLLM
+from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -324,7 +328,7 @@ class Args:
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
 
-    # tool settings
+    # Tool settings
     tools: Optional[List[str]] = None
     """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
     max_tool_calls: int = 5
@@ -372,106 +376,6 @@ class Args:
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
 
 
-def get_train_ds_config(
-    offload,
-    adam_offload=False,
-    stage=0,
-    bf16=True,
-    max_norm=1.0,
-    zpg=8,
-    grad_accum_dtype=None,
-    disable_trace_cache=True,
-):
-    device = "cpu" if offload else "none"
-    zero_opt_dict = {
-        "stage": stage,
-        "offload_param": {"device": device},
-        "offload_optimizer": {
-            "device": "cpu" if adam_offload else "none",
-            "pin_memory": True,
-        },
-        "sub_group_size": "auto",
-        "stage3_max_live_parameters": "auto",
-        "stage3_max_reuse_distance": "auto",
-        "stage3_param_persistence_threshold": "auto",
-        "stage3_prefetch_bucket_size": "auto",
-        "reduce_bucket_size": "auto",
-        # # ZeRO++
-        # "zero_hpz_partition_size": zpg,
-        # "zero_quantized_weights": False,
-        # "zero_quantized_gradients": False,
-    }
-    if disable_trace_cache:
-        zero_opt_dict["stage3_prefetch_bucket_size"] = 0
-        zero_opt_dict["stage3_max_live_parameters"] = 0
-        zero_opt_dict["stage3_max_reuse_distance"] = 0
-
-    return {
-        "steps_per_print": 100,
-        "zero_optimization": zero_opt_dict,
-        "bf16": {
-            "enabled": bf16,
-        },
-        "gradient_clipping": max_norm,
-        "prescale_gradients": False,
-        "wall_clock_breakdown": False,
-        "data_types": {"grad_accum_dtype": grad_accum_dtype if grad_accum_dtype else "fp32"},
-    }
-
-
-def get_eval_ds_config(
-    offload,
-    stage=0,
-    bf16=True,
-):
-    zero_opt_dict = {
-        "stage": stage,
-        "stage3_param_persistence_threshold": "auto",
-        "offload_param": {
-            "device": "cpu" if offload else "none",
-            "pin_memory": True,
-        },
-    }
-    return {
-        "steps_per_print": 100,
-        "zero_optimization": zero_opt_dict,
-        "bf16": {
-            "enabled": bf16,
-        },
-        "prescale_gradients": False,
-        "wall_clock_breakdown": False,
-    }
-
-
-def get_optimizer_grouped_parameters(
-    model: torch.nn.Module,
-    weight_decay: float,
-    no_decay_name_list=["bias", "layer_norm.weight", "layernorm.weight", "norm.weight", "ln_f.weight"],
-):
-    optimizer_grouped_parameters = [
-        {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if (not any(nd in n for nd in no_decay_name_list) and p.requires_grad)
-            ],
-            "weight_decay": weight_decay,
-        },
-        {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if (any(nd in n for nd in no_decay_name_list) and p.requires_grad)
-            ],
-            "weight_decay": 0.0,
-        },
-    ]
-    return optimizer_grouped_parameters
-
-
-def _z3_params_to_fetch(param_list):
-    return [p for p in param_list if hasattr(p, "ds_id") and p.ds_status == ZeroParamStatus.NOT_AVAILABLE]
-
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
@@ -518,27 +422,6 @@ def to_device_inplace(tensors_list: List[torch.Tensor], device: torch.device):
         tensors_list[i] = tensors_list[i].to(device, non_blocking=True)
 
 
-class Timer:
-    """A context manager for timing code blocks"""
-
-    def __init__(self, description: str, noop: int = 0):
-        self.description = description
-        self.noop = noop
-
-    def __enter__(self):
-        if self.noop:
-            return
-        self.start_time = time.perf_counter()
-        return self
-
-    def __exit__(self, type, value, traceback):
-        if self.noop:
-            return
-        self.end_time = time.perf_counter()
-        self.duration = self.end_time - self.start_time
-        print(f"{self.description}: {self.duration:.2f} seconds")
-
-
 class ShufflingIterator:
     def __init__(self, data: np.ndarray, batch_size: int, seed: Optional[int] = None):
         self.data = data.copy()
@@ -563,49 +446,6 @@ class ShufflingIterator:
         self.index = end_index
 
         return batch
-
-
-class RayProcess:
-    def __init__(self, world_size, rank, local_rank, master_addr, master_port):
-        logging.basicConfig(
-            format="%(asctime)s %(levelname)-8s %(message)s",
-            level=logging.INFO,
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-        self.world_size = world_size
-        self.rank = rank
-        self.local_rank = local_rank
-        self.master_addr = master_addr if master_addr else self.get_current_node_ip()
-        self.master_port = master_port if master_port else self.get_free_port()
-        os.environ["MASTER_ADDR"] = self.master_addr
-        os.environ["MASTER_PORT"] = str(self.master_port)
-        os.environ["WORLD_SIZE"] = str(self.world_size)
-        os.environ["RANK"] = str(self.rank)
-        # NOTE: Ray will automatically set the CUDA_VISIBLE_DEVICES
-        # environment variable for each actor, so always set device to 0
-        # os.environ["LOCAL_RANK"] = str(self._local_rank)
-        os.environ["LOCAL_RANK"] = "0"
-        random.seed(self.rank)
-        np.random.seed(self.rank)
-        torch.manual_seed(self.rank)
-
-    @staticmethod
-    def get_current_node_ip():
-        address = ray._private.services.get_node_ip_address()
-        # strip ipv6 address
-        return address.strip("[]")
-
-    @staticmethod
-    def get_free_port():
-        with socket.socket() as sock:
-            sock.bind(("", 0))
-            return sock.getsockname()[1]
-
-    def get_master_addr_port(self):
-        return self.master_addr, self.master_port
-
-    def empty_cache(self) -> None:
-        torch.cuda.empty_cache()
 
 
 @ray.remote(num_gpus=1)
@@ -1193,7 +1033,7 @@ def vllm_generate_thread(
                 tool_calleds.extend([out.tool_called for output in outputs for out in output.outputs])
         # if not using the tool, mask is all 1s
         if not args.tool_use:
-            masks = [1] * len(response_ids)
+            masks = [[1] * len(response_ids[i]) for i in range(len(response_ids))]
             num_calls = [0] * len(response_ids)
             timeouts = [0] * len(response_ids)
             tool_errors = [""] * len(response_ids)
@@ -1243,7 +1083,7 @@ def data_preparation_thread(
             num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
             good_outputs = [len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i] for i in range(len(tool_outputs))]
             for i in range(len(finish_reasons)):
-                # edge case with RL-rag agent: sometimes it outputs eos immediately, and we get an empty response
+                # edge case: sometimes it outputs eos immediately, and we get an empty response
                 # in that case, we need to add the eos token to the response
                 # note that this also adds eos to the end of reponses that stopped for other reasons.
                 if finish_reasons[i] == "stop" and (len(responses[i]) == 0 or responses[i][-1] != tokenizer.eos_token_id):
@@ -1292,7 +1132,7 @@ def data_preparation_thread(
             datasets = [datasets[i] for i in non_zero_gradient_index]
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
-            packed_sequences = pack_sequences_with_masks(
+            packed_sequences = pack_sequences(
                 queries=queries,
                 responses=responses,
                 masks=masks,
@@ -1551,7 +1391,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
     # ------------------------------------------------------------
     # Create the model and optimizer
-    ray.init(dashboard_host="0.0.0.0")
+    ray.init(dashboard_host="0.0.0.0") # enable debugging from a different machine (e.g., phobos)
     pg = None
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")

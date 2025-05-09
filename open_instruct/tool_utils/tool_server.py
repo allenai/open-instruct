@@ -4,7 +4,6 @@
 This script sets up a FastAPI server that allows users to execute Python code snippets
 
 cd open_instruct/tool_utils
-
 PREIMPORT_PKGS=pandas,numpy,sympy,time,math,networkx uv run uvicorn tool_server:app --host 0.0.0.0 --port 1212
 
 ```bash
