@@ -125,7 +125,9 @@ def _worker_init():  # noqa: D401
 # Create a single, long‑lived pool
 ###############################################################################
 POOL_SIZE = int(os.getenv("POOL_SIZE", os.cpu_count() or 1))
-process_pool: ProcessPoolExecutor | None = ProcessPoolExecutor(max_workers=POOL_SIZE, initializer=_worker_init)
+process_pool: ProcessPoolExecutor | None = ProcessPoolExecutor(
+    max_workers=POOL_SIZE, initializer=_worker_init
+)
 logger.info("Process pool started with %s workers", POOL_SIZE)
 
 app = FastAPI(title="Python Code Executor (Optimised, Logged)")
@@ -180,12 +182,9 @@ def _run_user_code(code: str, timeout: int = 5):
 
     try:
         with redirect_stdout(stdout), redirect_stderr(stderr):
-            compiled = _compile_repl(code)
-            namespace: dict[str, object] = {}
-            if isinstance(compiled, str):
-                exec(compiled, namespace)  # type: ignore[arg-type]
-            else:
-                exec(compiled, namespace)
+            # 👉 compile() directly without REPL transformation
+            compiled = compile(code, "<user-snippet>", "exec")
+            exec(compiled, {})  # noqa: S102
         result = {
             "output": stdout.getvalue(),
             "error": stderr.getvalue() or None,
