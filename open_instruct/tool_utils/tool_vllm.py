@@ -405,7 +405,7 @@ and you will get the output between the <output> and </output> tags.
 
     # Create a tool.
     python_code_tool = PythonCodeTool(
-        api_endpoint="https://open-instruct-tool-server-10554368204.us-central1.run.app/execute",
+        api_endpoint="http://localhost:1212",
         start_str="<code>",
         end_str="</code>",
     )
