@@ -332,6 +332,8 @@ class Args:
     """What tools to use"""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
+    only_reward_good_outputs: bool = False
+    """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
 
     # rl-rag specific settngs
     number_documents_to_search: int = 3
@@ -1959,8 +1961,10 @@ if __name__ == "__main__":
                     reward_mult=args.verification_reward,
                 )
                 for i in range(len(verifiable_rewards)):
-                    if good_outputs[i]:
+                    if good_outputs[i] and args.only_reward_good_outputs:
                         scores[i] = verifiable_rewards[i]
+                    elif not args.only_reward_good_outputs:
+                        scores[i] = verifiable_rewards[i] + scores[i]
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
