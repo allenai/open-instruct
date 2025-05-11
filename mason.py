@@ -21,6 +21,7 @@ OPEN_INSTRUCT_COMMANDS = [
     "open_instruct/finetune.py",
     "open_instruct/dpo_tune_cache.py",
     "open_instruct/grpo_fast.py",
+    "open_instruct/ppo_fast.py",
     "open_instruct/grpo_vllm_thread_ray_gtrl.py",
     "open_instruct/ppo2.py",
     "open_instruct/ppo_vllm_thread_ray_gtrl.py",
@@ -517,6 +518,12 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
         command = [f"WANDB_PROJECT={os.environ['WANDB_PROJECT']}"] + command
     if "WANDB_TAGS" in os.environ:
         command = [f"WANDB_TAGS={os.environ['WANDB_TAGS']}"] + command
+    
+    # escape the command (e.g., --stop_strings "</answer>")
+    for i in range(len(command)):
+        if "</" in command[i]:
+            command[i] = f"'{command[i]}'"
+    # breakpoint()
 
     is_open_instruct_training = any(cmd in command for cmd in OPEN_INSTRUCT_COMMANDS)
     if is_open_instruct_training:
@@ -854,7 +861,6 @@ def main():
         budget=args.budget,
         retry=beaker.RetrySpec(allowed_task_retries=args.max_retries)
     )
-
     exp = beaker_client.experiment.create(spec=experiment_spec)
     console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.id}")
 

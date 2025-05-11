@@ -4,7 +4,6 @@
 This script sets up a FastAPI server that allows users to execute Python code snippets
 
 cd open_instruct/tool_utils
-
 PREIMPORT_PKGS=pandas,numpy,sympy,time,math,networkx uv run uvicorn tool_server:app --host 0.0.0.0 --port 1212
 
 ```bash
@@ -77,9 +76,9 @@ import os
 import signal
 import time
 import traceback
-from contextlib import redirect_stdout, redirect_stderr
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
+from contextlib import redirect_stderr, redirect_stdout
 from typing import Optional
 
 from fastapi import FastAPI
@@ -112,6 +111,7 @@ for _pkg in PREIMPORT_PKGS:
 # Pool initialiser (runs in each worker process)
 ###############################################################################
 
+
 def _worker_init():  # noqa: D401
     """Run in every worker process to ensure packages are imported."""
     for _pkg in PREIMPORT_PKGS:
@@ -119,6 +119,7 @@ def _worker_init():  # noqa: D401
             importlib.import_module(_pkg)
         except ModuleNotFoundError:
             pass  # already warned in parent
+
 
 ###############################################################################
 # Create a single, long‑lived pool
@@ -130,6 +131,7 @@ process_pool: ProcessPoolExecutor | None = ProcessPoolExecutor(
 logger.info("Process pool started with %s workers", POOL_SIZE)
 
 app = FastAPI(title="Python Code Executor (Optimised, Logged)")
+
 
 ###############################################################################
 # REPL‑style transformation
@@ -153,6 +155,7 @@ class _ReplPrinter(ast.NodeTransformer):
             node,
         )
 
+
 def _compile_repl(code: str):
     try:
         tree = ast.parse(code, mode="exec")
@@ -162,9 +165,11 @@ def _compile_repl(code: str):
     except SyntaxError:
         return code
 
+
 ###############################################################################
 # Worker function (executes user code)
 ###############################################################################
+
 
 def _run_user_code(code: str, timeout: int = 5):
     def _timeout_handler(signum, frame):  # noqa: D401, ANN001, ARG001
@@ -177,12 +182,9 @@ def _run_user_code(code: str, timeout: int = 5):
 
     try:
         with redirect_stdout(stdout), redirect_stderr(stderr):
-            compiled = _compile_repl(code)
-            namespace: dict[str, object] = {}
-            if isinstance(compiled, str):
-                exec(compiled, namespace)  # type: ignore[arg-type]
-            else:
-                exec(compiled, namespace)
+            # 👉 compile() directly without REPL transformation
+            compiled = compile(code, "<user-snippet>", "exec")
+            exec(compiled, {})  # noqa: S102
         result = {
             "output": stdout.getvalue(),
             "error": stderr.getvalue() or None,
@@ -199,6 +201,7 @@ def _run_user_code(code: str, timeout: int = 5):
 
     return result
 
+
 ###############################################################################
 # FastAPI schema
 ###############################################################################
@@ -206,10 +209,12 @@ class CodeRequest(BaseModel):
     code: str
     timeout: Optional[int] = 5
 
+
 class CodeResponse(BaseModel):
     output: str
     error: Optional[str] = None
     success: bool
+
 
 ###############################################################################
 # Endpoints
@@ -257,6 +262,7 @@ async def execute_code(req: CodeRequest):  # noqa: D401
         logger.debug("Error: %s", result["error"])
 
     return CodeResponse(**result)
+
 
 @app.get("/")
 async def root():  # noqa: D401

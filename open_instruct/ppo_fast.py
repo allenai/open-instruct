@@ -28,6 +28,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # isort: off
+# ---------------------------------------------------------------------
+# The file referenced a lot of code from the ORZ project:
+# https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero
 import os
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
@@ -53,7 +56,7 @@ from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
-from typing import Callable, Dict, Iterator, List, Literal, Optional
+from typing import Callable, Iterator, List, Literal, Optional
 
 import numpy as np
 import pandas as pd
@@ -66,9 +69,12 @@ from peft import PeftModel, get_peft_model_state_dict
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
+from torch import distributed as dist
 from torch.utils.tensorboard import SummaryWriter
 from transformers import (
+    AutoConfig,
     AutoModelForCausalLM,
+    AutoModelForSequenceClassification,
     PreTrainedModel,
     PreTrainedTokenizer,
     get_scheduler,
@@ -94,16 +100,12 @@ from open_instruct.model_utils import (
     print_rich_table,
     push_folder_to_hub,
 )
-from open_instruct.rl_utils2 import Timer, pack_sequences
+from open_instruct.rl_utils2 import Timer, calculate_advantages_packed, pack_sequences
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
     RayProcess,
     _z3_params_to_fetch,
-    calibrate_checkpoint_state_dir,
-    clean_last_n_checkpoints_deepspeed,
-    download_latest_checkpoint_from_gs,
-    get_beaker_whoami,
     get_eval_ds_config,
     get_optimizer_grouped_parameters,
     get_train_ds_config,
@@ -113,13 +115,13 @@ from open_instruct.utils import (
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
-    create_snippet_mask,
-    sync_gs_bucket,
 )
 from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
+INVALID_VALUE = 0.0  # to play nicely with debugging output
+# torch.set_printoptions(precision=2, sci_mode=False)
 
 
 @dataclass
@@ -163,6 +165,8 @@ class Args:
     # Optimizer
     learning_rate: float = 2e-5
     """The initial learning rate for AdamW optimizer."""
+    value_learning_rate: float = 2e-5
+    """The initial learning rate for AdamW optimizer for the value function"""
     lr_scheduler_type: Literal[
         "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
     ] = "linear"
@@ -214,10 +218,18 @@ class Args:
     """the number of epochs to train"""
     num_mini_batches: int = 1
     """Number of minibatches to split a batch into"""
+    value_num_mini_batches: int = 1
+    """Number of minibatches to split a batch into for the value function"""
     beta: float = 0.05
     """the beta value of the RLHF objective (KL coefficient)"""
     cliprange: float = 0.2
     """the clip range"""
+    cliprange_value: float = 0.2
+    """the clip range for the value function"""
+    gamma: float = 1.0
+    """the discount factor"""
+    lam: float = 1.0
+    """the lambda value for GAE"""
     kl_estimator: Literal["kl1", "kl2", "kl3", "kl4"] = "kl3"
     """the KL estimator to use"""
     pack_length: int = 512
@@ -231,10 +243,10 @@ class Args:
     """
     ref_policy_update_freq: Optional[int] = None
     """How many training steps to take before updating the reference policy."""
-    advantage_normalization_type: Literal["standard", "centered"] = "standard"
-    """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
-    divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
-    DR.GRPO https://arxiv.org/pdf/2503.20783)."""
+    value_model_name_or_path: str = "EleutherAI/pythia-160m"
+    """the name or path to the value model"""
+    value_model_revision: Optional[str] = None
+    """the revision of the value model"""
 
     # Reward
     # -- r1 style format reward
@@ -303,14 +315,6 @@ class Args:
     """Whether to save learning data traces"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
-    keep_last_n_checkpoints: int = 3
-    """How many checkpoints to keep in the output directory. -1 for all."""
-    checkpoint_state_freq: int = -1
-    """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
-    checkpoint_state_dir: Optional[str] = None
-    """Where to save the model checkpoint (if applicable)"""
-    gs_checkpoint_state_dir: Optional[str] = None
-    """The actual `checkpoint_state_dir` to use (handling the case where gs_bucket_path is provided)"""
 
     # Ai2 specific settings
     try_launch_beaker_eval_jobs_on_weka: bool = False
@@ -333,8 +337,6 @@ class Args:
     """What tools to use"""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
-    only_reward_good_outputs: bool = False
-    """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
 
     # rl-rag specific settngs
     number_documents_to_search: int = 3
@@ -345,36 +347,13 @@ class Args:
     # code-tool specific settings
     code_tool_api_endpoint: Optional[str] = None
 
-
     def __post_init__(self):
-        assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
-        if self.num_samples_per_prompt_rollout == 1:
-            print("WARNING: num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE. ")
         assert (
             self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
         ), "At least one reward must be applied!"
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
         ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
-        if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
-            raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
-        if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
-            raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
-        if self.gs_bucket_path is not None and self.gs_checkpoint_state_dir is None:
-            beaker_users = get_beaker_whoami()
-            if beaker_users is not None:
-                self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{beaker_users}/{self.checkpoint_state_dir}"
-            else:
-                self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{self.checkpoint_state_dir}"
-        if self.gs_checkpoint_state_dir is not None:
-            download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
-        if self.checkpoint_state_dir is not None:
-            calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
-        if self.tools is not None and len(self.tools) > 0:
-            for tool in self.tools:
-                if tool not in ["search", "code"]:
-                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
-            assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
 
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
@@ -458,22 +437,6 @@ class PolicyTrainerRayProcess(RayProcess):
         wandb_url: str,
         tokenizer: PreTrainedTokenizer,
     ):
-        # ------------------------------------------------------------
-        # Monkey patch to load checkpoints with `weights_only=False`
-        # otherwise it errors out with:
-        # `_pickle.UnpicklingError: Weights only load failed. ` with pytorch 2.6.0
-        from deepspeed.runtime.checkpoint_engine import torch_checkpoint_engine
-        from deepspeed.utils import logger
-
-        def load(self, path: str, map_location=None):
-            logger.info(f"[Torch] Loading checkpoint from {path}...")
-            partition = torch.load(path, map_location=map_location, weights_only=False)
-            logger.info(f"[Torch] Loaded checkpoint from {path}.")
-            return partition
-
-        torch_checkpoint_engine.TorchCheckpointEngine.load = load
-
-        # ------------------------------------------------------------
         self.args = args
         self.tokenizer = tokenizer
         self.model_config = model_config
@@ -509,14 +472,16 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
-        # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
-        # AdamOptimizer = FusedAdam
+        # Have to use FusedAdam for offloading6 and backloading
+        from deepspeed.ops.adam import FusedAdam  # DeepSpeedCPUAdam
+
         if args.set_weight_decay_on_bias_and_norm:
             optim_params = get_optimizer_grouped_parameters(self.policy, args.weight_decay)
         else:
             optim_params = self.policy.parameters()
-        # self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
-        self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
+        self.optimizer = FusedAdam(
+            optim_params, lr=args.learning_rate, betas=(0.9, 0.95), weight_decay=args.weight_decay
+        )
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
         if args.warmup_ratio > 0.0:
@@ -534,26 +499,62 @@ class PolicyTrainerRayProcess(RayProcess):
             lr_scheduler=scheduler,
             dist_init_required=True,
         )
-        optimization_steps_done = 0
-        if args.checkpoint_state_dir:
-            # check if the dir exists
-            if not os.path.exists(args.checkpoint_state_dir):
-                print(f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!")
-            else:
-                path, states = self.model.load_checkpoint(
-                    args.checkpoint_state_dir,
-                    load_module_strict=True,
-                    load_optimizer_states=True,
-                    load_lr_scheduler_states=True,
-                    load_module_only=False,
-                )
-                if path is None:
-                    raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
-                optimization_steps_done = states["training_step"]
-                print(
-                    f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
-                )
         self.model.train()
+
+        # value model
+        from open_instruct.olmo_adapter import (
+            Olmo2Config,
+            Olmo2ForSequenceClassification,
+            OlmoeConfig,
+            OlmoeForSequenceClassification,
+        )
+
+        AutoModelForSequenceClassification.register(Olmo2Config, Olmo2ForSequenceClassification)
+        AutoModelForSequenceClassification.register(OlmoeConfig, OlmoeForSequenceClassification)
+        self.value_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
+            args.value_model_name_or_path,
+            revision=args.value_model_revision,
+            num_labels=1,
+            torch_dtype=torch.bfloat16,
+            attn_implementation="flash_attention_2",
+            use_cache=False,
+        )
+
+        value_head = self.value_model.score
+        config = AutoConfig.from_pretrained(
+            args.value_model_name_or_path, revision=args.value_model_revision, trust_remote_code=True
+        )
+        print("initialize value_head for ZeRO-3 reward model training.")
+        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
+            with deepspeed.zero.GatheredParameters([value_head.weight], modifier_rank=0):
+                if torch.distributed.get_rank() == 0:
+                    value_head.weight.data.normal_(mean=0.0, std=1 / (config.hidden_size + 1))
+        else:
+            value_head.weight.data.normal_(mean=0.0, std=1 / (config.hidden_size + 1))
+
+        disable_dropout_in_model(self.value_model)
+        self.value_model.gradient_checkpointing_enable()
+        if args.set_weight_decay_on_bias_and_norm:
+            optim_params = get_optimizer_grouped_parameters(self.value_model, args.weight_decay)
+        else:
+            optim_params = self.value_model.parameters()
+        self.value_optimizer = FusedAdam(
+            optim_params, lr=args.value_learning_rate, betas=(0.9, 0.95), weight_decay=args.weight_decay
+        )
+        value_scheduler = get_scheduler(
+            args.lr_scheduler_type,
+            optimizer=self.value_optimizer,
+            num_warmup_steps=warm_up_steps,
+            num_training_steps=num_scheduler_steps,
+        )
+        self.value_model, self.value_optimizer, _, self.value_scheduler = deepspeed.initialize(
+            model=self.value_model,
+            optimizer=self.value_optimizer,
+            config=ds_config,
+            lr_scheduler=value_scheduler,
+            dist_init_required=True,
+        )
+        self.value_model.train()
 
         # reference model
         ds_config = get_eval_ds_config(
@@ -580,6 +581,10 @@ class PolicyTrainerRayProcess(RayProcess):
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
         self.ref_policy.eval()
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
+
+        self.offload_to_cpu(self.model)
+        self.offload_to_cpu(self.value_model)
+        optimization_steps_done = 0
         return optimization_steps_done
 
     def forward(
@@ -606,6 +611,29 @@ class PolicyTrainerRayProcess(RayProcess):
         logits /= temperature + 1e-7
         logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
         return logprob
+
+    def forward_value(
+        self,
+        model: PreTrainedModel,
+        query_response: torch.LongTensor,
+        attention_mask: torch.LongTensor,
+        position_ids: torch.LongTensor,
+        pad_token_id: int,
+    ) -> torch.Tensor:
+        # Replace pad tokens with 0s so that we don't run into index out of bounds errors
+        padding_mask = query_response != pad_token_id
+        input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
+        lm_backbone = getattr(model, model.base_model_prefix)
+        output = lm_backbone(
+            input_ids=input_ids[:, :-1],
+            # @vwxyzjn: without clamp, we get index out of bounds errors; TODO: investigate
+            attention_mask=attention_mask[:, :-1].clamp(0, 1),
+            position_ids=position_ids[:, :-1],
+            return_dict=True,
+            output_hidden_states=True,
+        )
+        reward_logits = model.score(output.hidden_states[-1])  # (batch_size, sequence_length)
+        return reward_logits
 
     def setup_model_update_group(self, vllm_engines):
         self.vllm_engines = vllm_engines
@@ -647,6 +675,10 @@ class PolicyTrainerRayProcess(RayProcess):
         model = self.model.module
         count, num_params = 0, len(list(model.named_parameters()))
         refss = []
+        # @vwxyzjn: magic taken from https://github.com/huggingface/trl/issues/2840#issuecomment-2662747485
+        # to avoid assert not param.ds_active_sub_modules, param.ds_summary()
+        for param in self.model.parameters():
+            param.ds_active_sub_modules.clear()
         if self.args.gather_whole_model:
             with deepspeed.zero.GatheredParameters(model.parameters(), enabled=self.args.deepspeed_stage == 3):
                 for name, param in model.named_parameters():
@@ -695,31 +727,39 @@ class PolicyTrainerRayProcess(RayProcess):
 
     def train(
         self,
-        collated_query_responses,
-        collated_tool_masks,
-        collated_attention_masks,
-        collated_position_ids,
-        collated_advantages,
-        collated_response_masks,
+        collated_query_responses: torch.Tensor,
+        collated_attention_masks: torch.Tensor,
+        collated_position_ids: torch.Tensor,
+        collated_response_masks: torch.Tensor,
+        collated_dones: torch.Tensor,
+        collated_rewards: torch.Tensor,
         pad_token_id: int,
         num_mini_batches: int,
+        value_num_mini_batches: int,
+        gamma: float,
+        lam: float,
     ):
         args = self.args
+        # Flatten tensors to cpu list for adv calculation
+        cpu_collated_dones = sum([item.clamp(0, 1).tolist() for item in collated_dones], [])
+        cpu_collated_rewards = sum([item.tolist() for item in collated_rewards], [])
+        cpu_collated_response_masks = sum([item.clamp(0, 1).tolist() for item in collated_response_masks], [])
+        max_len = max([len(item) for item in cpu_collated_dones])
+
+        # Put to device
         to_device_inplace(collated_query_responses, self.device)
-        to_device_inplace(collated_tool_masks, self.device)
         to_device_inplace(collated_attention_masks, self.device)
         to_device_inplace(collated_position_ids, self.device)
-        to_device_inplace(collated_advantages, self.device)
         to_device_inplace(collated_response_masks, self.device)
-        accumulation_steps = len(collated_query_responses) // (num_mini_batches)
+        accumulation_steps = max(1, len(collated_query_responses) // (num_mini_batches))
+        value_accumulation_steps = max(1, len(collated_query_responses) // (value_num_mini_batches))
 
         # Calculate the logprob of the reference policy
-        collated_ref_logprobs = []
-        with Timer("Inference Calculation", noop=self.rank != 0):
+        with Timer("Ref Logprob Calculation", noop=self.rank != 0):
+            collated_ref_logprobs = []
             with torch.no_grad():
                 for i in range(len(collated_query_responses)):
                     query_response = collated_query_responses[i]
-                    tool_mask = collated_tool_masks[i]
                     attention_mask = collated_attention_masks[i]
                     position_id = collated_position_ids[i]
                     response_mask = collated_response_masks[i]
@@ -731,17 +771,133 @@ class PolicyTrainerRayProcess(RayProcess):
                         pad_token_id,
                         args.temperature,
                     )
-                    if args.mask_tool_use and args.tool_use:
-                        # mask logprobs for tool tokens
-                        response_mask = response_mask.bool() & tool_mask.bool()
-                    else:
-                        response_mask = response_mask.bool()
-                    ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
+                    ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:].bool(), INVALID_LOGPROB)
                     collated_ref_logprobs.append(ref_logprob)
                     torch.cuda.empty_cache()
-        local_step = 0
-        # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
-        with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
+        with Timer("Backload Value Model", noop=self.rank != 0):
+            self.backload_to_gpu(self.value_model)
+        with Timer("Value Calculation", noop=self.rank != 0):
+            collated_values = []
+            with torch.no_grad():
+                for i in range(len(collated_query_responses)):
+                    query_response = collated_query_responses[i]
+                    attention_mask = collated_attention_masks[i]
+                    position_id = collated_position_ids[i]
+                    response_mask = collated_response_masks[i]
+                    value = self.forward_value(
+                        self.value_model,
+                        query_response,
+                        attention_mask,
+                        position_id,
+                        pad_token_id,
+                    ).squeeze(-1)
+                    value = torch.masked_fill(value, ~response_mask[:, 1:].bool(), INVALID_VALUE)
+                    collated_values.append(value)
+
+        with Timer("Advantage Calculation", noop=self.rank != 0):
+            with torch.no_grad():
+                # Pad cpu lists to max_len; then do advantage calculation
+                cpu_collated_values = sum([item.cpu().tolist() for item in collated_values], [])
+                cpu_collated_dones = [item + [0] * (max_len - len(item)) for item in cpu_collated_dones]
+                cpu_collated_rewards = [item + [0] * (max_len - len(item)) for item in cpu_collated_rewards]
+                cpu_collated_response_masks = [
+                    item + [0] * (max_len - len(item)) for item in cpu_collated_response_masks
+                ]
+                # minus 1 in `cpu_collated_values` because we already did the calculation based on [:-1] and masking on [1:]
+                cpu_collated_values = [
+                    item + [INVALID_VALUE] * (max_len - 1 - len(item)) for item in cpu_collated_values
+                ]
+                adv, ret = calculate_advantages_packed(
+                    np.stack(cpu_collated_values),
+                    np.stack(cpu_collated_rewards)[:, 1:],
+                    gamma,
+                    lam,
+                    np.stack(cpu_collated_dones)[:, 1:],
+                    np.stack(cpu_collated_response_masks)[:, 1:],
+                )
+
+                # Calculate the mean and std of the advantages
+                adv_gpu = torch.from_numpy(adv).to(self.device)
+                response_masks_gpu = torch.from_numpy(np.stack(cpu_collated_response_masks)[:, 1:]).to(self.device)
+                adv_sum = (adv_gpu * response_masks_gpu).sum()
+                adv_abs_sum = (torch.abs(adv_gpu) * response_masks_gpu).sum()
+                mask_sum = response_masks_gpu.sum()
+                dist.all_reduce(adv_sum, op=dist.ReduceOp.SUM)
+                dist.all_reduce(adv_abs_sum, op=dist.ReduceOp.SUM)
+                dist.all_reduce(mask_sum, op=dist.ReduceOp.SUM)
+                adv_mean = adv_sum / mask_sum
+                adv_abs_mean = adv_abs_sum / mask_sum
+                adv_variance = (torch.square(adv_gpu - adv_mean) * response_masks_gpu).sum()
+                dist.all_reduce(adv_variance, op=dist.ReduceOp.SUM)
+                adv_variance /= mask_sum
+                adv_std = torch.sqrt(adv_variance)
+
+                # Normalize the advantages
+                adv = (adv_gpu - adv_mean) / (adv_std + 1e-8)
+                collated_advantages = []
+                collated_returns = []
+                offset = 0
+                for i in range(len(collated_query_responses)):
+                    batch_size, seq_len = collated_query_responses[i].shape
+                    collated_advantages.append(adv[offset : offset + batch_size, : seq_len - 1])
+                    collated_returns.append(torch.from_numpy(ret[offset : offset + batch_size, : seq_len - 1]))
+                    offset += batch_size
+                to_device_inplace(collated_advantages, self.device)
+                to_device_inplace(collated_returns, self.device)
+                to_device_inplace(collated_values, self.device)
+
+        with Timer("[Training Processes] Value Loss calculation", noop=self.rank != 0):
+            value_losses = torch.zeros(len(collated_query_responses))
+            local_step = 0
+            value_optimizer_step = 0
+            for epoch_idx in range(args.num_epochs):
+                for i in range(len(collated_query_responses)):
+                    mb_query_responses = collated_query_responses[i]
+                    mb_response_masks = collated_response_masks[i]
+                    mb_response_masks_bool = mb_response_masks[:, 1:].bool()
+                    mb_attention_mask = collated_attention_masks[i]
+                    mb_position_id = collated_position_ids[i]
+                    mb_values = collated_values[i]
+                    mb_return = collated_returns[i]
+                    vpred = self.forward_value(
+                        self.value_model,
+                        mb_query_responses,
+                        mb_attention_mask,
+                        mb_position_id,
+                        pad_token_id,
+                    ).squeeze(-1)
+                    vpred = torch.masked_fill(vpred, ~mb_response_masks_bool, INVALID_VALUE)
+                    vpredclipped = torch.clamp(
+                        vpred,
+                        mb_values - args.cliprange_value,
+                        mb_values + args.cliprange_value,
+                    )
+                    vf_losses1 = torch.square(vpred - mb_return)
+                    vf_losses2 = torch.square(vpredclipped - mb_return)
+                    vf_loss_max = torch.max(vf_losses1, vf_losses2)
+                    loss = 0.5 * masked_mean(vf_loss_max, mb_response_masks_bool)
+                    loss = loss / value_accumulation_steps
+                    self.value_model.backward(loss)
+                    with torch.no_grad():
+                        value_losses[i] = loss
+                    if (local_step + 1) % value_accumulation_steps == 0:
+                        self.value_model.step()
+                        value_optimizer_step += 1
+                    if (local_step + 1) // value_accumulation_steps == value_num_mini_batches:
+                        break
+                    local_step += 1
+
+            with torch.no_grad():
+                self.local_metrics.add("loss/value", value_losses.mean())
+        with Timer("Offload Value Model", noop=self.rank != 0):
+            self.offload_to_cpu(self.value_model)
+
+        with Timer("Backload Model", noop=self.rank != 0):
+            self.backload_to_gpu(self.model)
+
+        with Timer("[Training Processes] Policy Loss calculation", noop=self.rank != 0):
+            local_step = 0
+            policy_optimizer_step = 0
             old_logprobs = [None for _ in range(len(collated_query_responses))]
             kl1_stats = torch.zeros(len(collated_query_responses))
             kl2_stats = torch.zeros(len(collated_query_responses))
@@ -756,13 +912,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 for i in range(len(collated_query_responses)):
                     mb_ref_logprob = collated_ref_logprobs[i]
                     mb_query_responses = collated_query_responses[i]
-                    mb_tool_mask = collated_tool_masks[i]
                     mb_advantages = collated_advantages[i]
                     mb_response_masks = collated_response_masks[i]
                     mb_response_masks_bool = mb_response_masks[:, 1:].bool()
-                    # if masking snippets, do it here.
-                    if args.mask_tool_use and args.tool_use:
-                        mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
                     mb_new_logprobs = self.forward(
@@ -784,8 +936,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Calculate the policy's loss
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
                     ratio = torch.exp(logprobs_diff)
-                    pg_losses = -mb_advantages[:, 1:] * ratio
-                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
+                    pg_losses = -mb_advantages * ratio
+                    pg_losses2 = -mb_advantages * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
                     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
                     # Here we recalculate kl: we want the KL loss to backpropagate through the model
@@ -811,6 +963,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
                         self.model.step()
+                        policy_optimizer_step += 1
                     local_step += 1
                     with torch.no_grad():
                         # NOTE: in packed implementation, kl calculation are averages over response tokens
@@ -845,21 +998,21 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("val/ratio", ratio_stats.mean())
                 self.local_metrics.add("val/ratio_var", ratio_stats.var())
                 self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
-                return self.local_metrics.get_metrics_list()
+                self.local_metrics.add("lr_value", self.value_scheduler.get_last_lr()[0])
+                self.local_metrics.add("policy_optimizer_step", policy_optimizer_step)
+                self.local_metrics.add("value_optimizer_step", value_optimizer_step)
+                self.local_metrics.add("val/adv_mean", adv_mean)
+                self.local_metrics.add("val/adv_abs_mean", adv_abs_mean)
+                self.local_metrics.add("val/adv_std", adv_std)
+                metrics_list = self.local_metrics.get_metrics_list()
+                # metrics_list["val/advantages_mean"] = adv.mean()
+                # metrics_list["val/advantages_min"] = adv.min()
+                # metrics_list["val/advantages_max"] = adv.max()
+                # metrics_list["val/advantages_std"] = adv.std()
 
-    def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: Dict[str, str]) -> None:
-        args = self.args
-        self.model.save_checkpoint(checkpoint_state_dir, client_state=client_state)
-        # `save_checkpoint` needs to be called on all ranks, only rank 0 will have all the states
-        if self.rank == 0:
-            if args.keep_last_n_checkpoints >= 0:
-                clean_last_n_checkpoints_deepspeed(checkpoint_state_dir, args.keep_last_n_checkpoints)
-
-            if args.gs_bucket_path is not None:
-                ray.remote(sync_gs_bucket).options(num_cpus=1).remote(
-                    checkpoint_state_dir,
-                    args.gs_checkpoint_state_dir,
-                )
+        with Timer("Offload Model", noop=self.rank != 0):
+            self.offload_to_cpu(self.model)
+        return metrics_list
 
     def save_model(self, output_dir: str) -> None:
         model_to_save = self.model
@@ -1106,44 +1259,14 @@ def data_preparation_thread(
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
-        with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
+        with Timer("💰 [Data Preparation Thread] Calculating rewards"):
             scores, reward_metrics = reward_fn(
                 responses, decoded_responses, ground_truths, datasets, finish_reasons, infos
             )
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
-            mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-            mean_grouped_rewards = np.repeat(mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
-            std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            std_grouped_rewards = np.repeat(std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
-            if args.advantage_normalization_type == "standard":
-                advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
-            elif args.advantage_normalization_type == "centered":
-                advantages = scores - mean_grouped_rewards
-            else:
-                raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
-
-        with Timer("📦 [Data Preparation Thread] Filtering sequences"):
-            # Here we get the max possible score for each prompt, and see how many prompts are unsolved
-            max_possible_score = 0
-            if args.apply_verifiable_reward:
-                max_possible_score += args.verification_reward
-            if args.apply_r1_style_format_reward and args.additive_format_reward:
-                max_possible_score += args.r1_style_format_reward
-            unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
-            # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
-            # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
             non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
             real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
-            expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
-            non_zero_gradient_index = np.where(expanded_mask)[0]
-            advantages = advantages[non_zero_gradient_index]
-            scores = scores[non_zero_gradient_index]
-            responses = [responses[i] for i in non_zero_gradient_index]
-            masks = [masks[i] for i in non_zero_gradient_index]
-            queries = [queries[i] for i in non_zero_gradient_index]
-            ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
-            datasets = [datasets[i] for i in non_zero_gradient_index]
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
@@ -1154,15 +1277,13 @@ def data_preparation_thread(
                 pad_token_id=tokenizer.pad_token_id,
             )
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
-            # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
-            # and each value is the corresponding advantage score: index 0 is set to 0 since response masks start from 1 (1-indexed)
-            lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
-            lookup_advantages[1:] = advantages
-            packed_advantages = [
-                torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
-                for packed_mask in packed_sequences.response_masks
+            lookup_rewards = np.zeros(len(scores) + 1, dtype=np.float32)
+            lookup_rewards[1:] = scores
+            packed_rewards = [
+                torch.tensor(lookup_rewards[packed_done], dtype=torch.float32)
+                for packed_done in packed_sequences.dones
             ]
-            packed_sequences.advantages = packed_advantages
+            packed_sequences.rewards = packed_rewards
 
         with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
             B = (
@@ -1171,29 +1292,27 @@ def data_preparation_thread(
             collated_data = []
             for i in range(args.world_size):
                 per_device_packed_query_responses = packed_sequences.query_responses[B * i : B * (i + 1)]
-                per_device_packed_tool_masks = packed_sequences.tool_masks[B * i : B * (i + 1)]
                 per_device_packed_attention_masks = packed_sequences.attention_masks[B * i : B * (i + 1)]
                 per_device_packed_position_ids = packed_sequences.position_ids[B * i : B * (i + 1)]
-                per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
                 per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
+                per_device_packed_dones = packed_sequences.dones[B * i : B * (i + 1)]
+                per_device_packed_rewards = packed_sequences.rewards[B * i : B * (i + 1)]
 
                 # Shuffle the batch and collate the data
-                b_inds = np.random.permutation(len(per_device_packed_query_responses))
+                # b_inds = np.random.permutation(len(per_device_packed_query_responses))
+                b_inds = np.arange(len(per_device_packed_query_responses))
                 collated_query_responses = []
-                collated_tool_masks = []
                 collated_attention_masks = []
                 collated_position_ids = []
                 collated_response_masks = []
-                collated_advantages = []
+                collated_dones = []
+                collated_rewards = []
                 for j in range(0, len(per_device_packed_query_responses), args.per_device_train_batch_size):
                     micro_range = b_inds[j : j + args.per_device_train_batch_size]
                     collated_query_responses.append(
                         collate_fn(
                             [per_device_packed_query_responses[idx] for idx in micro_range], tokenizer.pad_token_id
                         )
-                    )
-                    collated_tool_masks.append(
-                        collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0)
                     )
                     collated_attention_masks.append(
                         collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0)
@@ -1204,21 +1323,25 @@ def data_preparation_thread(
                     collated_response_masks.append(
                         collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0)
                     )
-                    collated_advantages.append(
-                        collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0)
-                    )
+                    collated_dones.append(collate_fn([per_device_packed_dones[idx] for idx in micro_range], 0))
+                    collated_rewards.append(collate_fn([per_device_packed_rewards[idx] for idx in micro_range], 0))
                 collated_data.append(
                     {
                         "collated_query_responses": collated_query_responses,
-                        "collated_tool_masks": collated_tool_masks,
                         "collated_attention_masks": collated_attention_masks,
                         "collated_position_ids": collated_position_ids,
-                        "collated_advantages": collated_advantages,
                         "collated_response_masks": collated_response_masks,
+                        "collated_dones": collated_dones,
+                        "collated_rewards": collated_rewards,
                     }
                 )
 
         # Create a result package with metrics and data
+        max_possible_score = 0
+        if args.apply_verifiable_reward:
+            max_possible_score += args.verification_reward
+        if args.apply_r1_style_format_reward and args.additive_format_reward:
+            max_possible_score += args.r1_style_format_reward
         sequence_lengths = np.array([len(response) for response in responses])
         sequence_length_solved = (
             np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == max_possible_score])
@@ -1229,7 +1352,6 @@ def data_preparation_thread(
         metrics = {
             "scores": np.array(scores).mean(),
             "real_batch_size_ratio": real_batch_size_ratio,
-            "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
             "packed_ratio": len(packed_sequences.query_responses) / len(responses),
             "val/sequence_lengths": sequence_lengths.mean(),
             "val/sequence_lengths_min": sequence_lengths.min(),
@@ -1241,10 +1363,6 @@ def data_preparation_thread(
             "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
             "val/sequence_lengths_solved_hist": sequence_length_solved,
             "val/stop_rate": stop_rate,
-            "val/advantages_mean": advantages.mean(),
-            "val/advantages_min": advantages.min(),
-            "val/advantages_max": advantages.max(),
-            "val/advantages_hist": advantages,
             "val/num_calls_rate": np.array(num_calls).mean(),
             "val/timeouts_rate": np.array(timeouts).mean(),
             "val/tool_errors_rate": np.array([len(item) > 0 for item in tool_errors]).mean(),
@@ -1481,7 +1599,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         stop_strings += list(tool_objects.keys())
     generation_config = SamplingParams(
         temperature=args.temperature,
-        top_p=.95,  # prevent rare out-of-vocab tokens with qwen
+        top_p=0.98,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
@@ -1490,7 +1608,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     )
     eval_generation_config = SamplingParams(
         temperature=0.0,
-        top_p=.95,   # prevent rare out-of-vocab tokens with qwen
+        top_p=0.98,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
@@ -1610,6 +1728,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                             **collated_data[i],
                             pad_token_id=tokenizer.pad_token_id,
                             num_mini_batches=args.num_mini_batches,
+                            value_num_mini_batches=args.value_num_mini_batches,
+                            gamma=args.gamma,
+                            lam=args.lam,
                         )
                         for i in range(args.world_size)
                     ]
@@ -1655,22 +1776,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                                 policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
                                     step_dir, leaderboard_name, wandb_url, training_step
                                 )
-                if (
-                    args.checkpoint_state_freq > 0
-                    and training_step % args.checkpoint_state_freq == 0
-                    and args.checkpoint_state_dir is not None
-                ):
-                    with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
-                        client_state = {"training_step": training_step}
-                        ray.get(
-                            [
-                                policy_group.models[i].save_checkpoint_state.remote(
-                                    args.checkpoint_state_dir, client_state
-                                )
-                                for i in range(args.world_size)
-                            ]
-                        )
-                        print(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
             if len(update_ref_policy_future) > 0:
                 with Timer("[Main Thread] 🔃 Updating reference policy"):
@@ -1818,10 +1923,8 @@ if __name__ == "__main__":
                     reward_mult=args.verification_reward,
                 )
                 for i in range(len(verifiable_rewards)):
-                    if good_outputs[i] and args.only_reward_good_outputs:
+                    if good_outputs[i]:
                         scores[i] = verifiable_rewards[i]
-                    elif not args.only_reward_good_outputs:
-                        scores[i] = verifiable_rewards[i] + scores[i]
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
