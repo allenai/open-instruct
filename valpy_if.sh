@@ -7,7 +7,7 @@ python mason.py \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_vllm_thread_ray_gtrl.py \
-    --exp_name valpy_if_preference_data_full_after_sft  \
+    --exp_name valpy_if_preference_data_full_after_dpo  \
     --beta 0.01 \
     --local_mini_batch_size 32 \
     --number_samples_per_prompt 16 \
@@ -21,7 +21,7 @@ python mason.py \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
-    --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-SFT \
+    --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-DPO \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
