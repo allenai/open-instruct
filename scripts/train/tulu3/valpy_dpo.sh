@@ -1,6 +1,6 @@
 python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
-    --workspace ai2/tulu-3-dev \
+    --workspace ai2/scaling-rl \
     --priority normal \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
