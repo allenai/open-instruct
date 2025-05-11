@@ -282,7 +282,7 @@ class ReSearchVerifierF1(VerifierFunction):
             return 0.0
         # if label is list, max over labels
         if isinstance(label, list):
-            f1 = max(f1_score(answer_string, l)["f1"] for l in label)
+            f1 = max(f1_score(answer_string, lab)["f1"] for lab in label)
         else:
             label = str(label)  # safety.
             f1 = f1_score(answer_string, label)["f1"]
