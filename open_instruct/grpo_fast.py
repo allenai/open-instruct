@@ -642,6 +642,12 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
+        # clear vllm cache if we need to
+        cache_reset_refs = []
+        if self.args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
+            for engine in self.vllm_engines:
+                cache_reset_refs.append(engine.reset_prefix_cache.remote())
+
         # avoid OOM
         torch.cuda.empty_cache()
         model = self.model.module
@@ -680,6 +686,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
         if torch.distributed.get_rank() == 0:
             ray.get(refss)
+        if args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
+            ray.get(cache_reset_refs)
 
     def update_ref_policy(self):
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
