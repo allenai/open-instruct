@@ -1,7 +1,7 @@
 python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/scaling-rl \
-    --priority normal \
+    --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
     --num_nodes 4 \
