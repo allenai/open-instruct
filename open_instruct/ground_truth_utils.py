@@ -261,6 +261,7 @@ class ReSearchVerifierF1(VerifierFunction):
     Verifier from ReSearch paper (https://arxiv.org/abs/2503.19470)
     Uses F1 score + format. If format is achieved but f1 is 0, returns 0.1. Otherwise returns F1.
     """
+
     def __init__(self) -> None:
         self.answer_start_tag = "<finish>"
         self.answer_end_tag = "</finish>"
@@ -281,10 +282,10 @@ class ReSearchVerifierF1(VerifierFunction):
             return 0.0
         # if label is list, max over labels
         if isinstance(label, list):
-            f1 = max(f1_score(answer_string, l)['f1'] for l in label)
+            f1 = max(f1_score(answer_string, l)["f1"] for l in label)
         else:
             label = str(label)  # safety.
-            f1 = f1_score(answer_string, label)['f1']
+            f1 = f1_score(answer_string, label)["f1"]
         # if f1 is 0, but format is correct, return 0.1
         if f1 == 0:
             return 0.1
@@ -298,18 +299,14 @@ class R1SearchVerifier(VerifierFunction):
     Uses normalized exact match: returns 1.0 if answer matches any label, else 0.0.
     Answer extraction is done via a case-insensitive regex on <finish>...</finish> tags.
     """
+
     # Precompile a case-insensitive regex to extract answer text
     TAG_PATTERN = re.compile(r"<finish>(.*?)</finish>", re.IGNORECASE | re.DOTALL)
 
     def __init__(self) -> None:
         super().__init__(name="re_search", weight=1.0)
 
-    def __call__(
-        self,
-        tokenized_prediction: List[int],
-        prediction: str,
-        label: Union[str, List[str]]
-    ) -> float:
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, List[str]]) -> float:
         # 1. Parse JSON label safely
         parsed_labels: Union[List, str]
         try:

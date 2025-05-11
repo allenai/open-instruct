@@ -1,6 +1,7 @@
-'''
+"""
 Eval short-form QA using the search actor.
-'''
+"""
+
 import os
 import re
 import argparse
@@ -12,10 +13,13 @@ from transformers import AutoTokenizer
 from open_instruct.ground_truth_utils import f1_score
 from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 from open_instruct.search_utils.search_tool import SearchTool
+
 ray.init()
 
 parser = argparse.ArgumentParser(description="Eval SimpleQA using the search actor.")
-parser.add_argument("--dataset_name", type=str, choices=["hotpotqa", "nq", "tqa", "2wiki", "simpleqa"], help="Dataset name.")
+parser.add_argument(
+    "--dataset_name", type=str, choices=["hotpotqa", "nq", "tqa", "2wiki", "simpleqa"], help="Dataset name."
+)
 parser.add_argument("--no_prompt", action="store_true", help="Whether to use no prompt.")
 parser.add_argument("--model_path", type=str, help="Path to the model.")
 parser.add_argument("--model_revision", type=str, default="main", help="Model revision.")
@@ -24,7 +28,12 @@ parser.add_argument("--model_len", type=int, default=8192, help="Max model lengt
 parser.add_argument("--output_dir", type=str, default="tmp", help="Output directory.")
 parser.add_argument("--max_eval_samples", type=int, default=2000, help="Max eval samples.")
 parser.add_argument("--num_docs", type=int, default=3, help="Number of documents to retrieve.")
-parser.add_argument("--analyse_existing", type=str, default=None, help="Path to existing predictions to analyze. If specified, will not run the model again.")
+parser.add_argument(
+    "--analyse_existing",
+    type=str,
+    default=None,
+    help="Path to existing predictions to analyze. If specified, will not run the model again.",
+)
 parser.add_argument("--search_api_endpoint", type=str, default="http://localhost:8000", help="Search API endpoint.")
 args = parser.parse_args()
 
@@ -41,7 +50,10 @@ if args.dataset_name == "simpleqa":
     else:
         ds = load_dataset("hamishivi/SimpleQA-RLVR", split="test")
 else:
-    ds = load_dataset(f"{'rulins' if args.no_prompt else 'hamishivi'}/{args.dataset_name}_rlvr{'_no_prompt' if args.no_prompt else ''}", split="test")
+    ds = load_dataset(
+        f"{'rulins' if args.no_prompt else 'hamishivi'}/{args.dataset_name}_rlvr{'_no_prompt' if args.no_prompt else ''}",
+        split="test",
+    )
 
 if args.max_eval_samples > -1 and args.max_eval_samples < len(ds):
     ds = ds.shuffle(42).select(range(args.max_eval_samples))
@@ -78,7 +90,6 @@ if not args.analyse_existing:
     result = actor.generate(
         sampling_params=sampling_params,
         prompt_token_ids=prompt_token_ids,
-   
     )
     # grab text answers - for tool vllm, we have to decode the output ids.
     generations = [x.outputs[0].token_ids for x in result]
@@ -108,10 +119,13 @@ except json.JSONDecodeError:
     labels = [[label] for label in labels]
 
 # calculate string f1
-f1_scores = [max([f1_score(predictions[i], label) for label in labels[i]], key=lambda x: x['f1']) for i in range(len(predictions))]
-f1s = [x['f1'] for x in f1_scores]
-recalls = [x['recall'] for x in f1_scores]
-precisions = [x['precision'] for x in f1_scores]
+f1_scores = [
+    max([f1_score(predictions[i], label) for label in labels[i]], key=lambda x: x["f1"])
+    for i in range(len(predictions))
+]
+f1s = [x["f1"] for x in f1_scores]
+recalls = [x["recall"] for x in f1_scores]
+precisions = [x["precision"] for x in f1_scores]
 avg_f1 = sum(f1s) / len(f1s)
 print(f"Average F1: {avg_f1}")
 avg_recall = sum(recalls) / len(recalls)
@@ -125,9 +139,11 @@ finished = [1 if x.lower().endswith("</finish>") else 0 for x in generations]
 print(f"Finished: {sum(finished) / len(finished)}")
 # 2. Of the predictions that finished, what is the f1 score?
 f1_finished = [
-    max([f1_score(predictions[i], label) for label in labels[i]], key=lambda x: x['f1']) for i in range(len(predictions)) if finished[i]
+    max([f1_score(predictions[i], label) for label in labels[i]], key=lambda x: x["f1"])
+    for i in range(len(predictions))
+    if finished[i]
 ]
-f1s_finished = [x['f1'] for x in f1_finished]
+f1s_finished = [x["f1"] for x in f1_finished]
 avg_f1_finished = sum(f1s_finished) / len(f1s_finished)
 print(f"Average F1 (finished only): {avg_f1_finished}")
 # 3. How many predictions searched?
@@ -136,9 +152,11 @@ searched = [1 if re.search(query_regex, x) else 0 for x in generations]
 print(f"Sent a query: {sum(searched) / len(searched)}")
 # 3. Of the predictions that searched, what is the f1 score?
 f1_searched = [
-    max([f1_score(predictions[i], label) for label in labels[i]], key=lambda x: x['f1']) for i in range(len(predictions)) if searched[i]
+    max([f1_score(predictions[i], label) for label in labels[i]], key=lambda x: x["f1"])
+    for i in range(len(predictions))
+    if searched[i]
 ]
-f1s_searched = [x['f1'] for x in f1_searched]
+f1s_searched = [x["f1"] for x in f1_searched]
 avg_f1_searched = sum(f1s_searched) / len(f1s_searched)
 print(f"Average F1 (searched only): {avg_f1_searched}")
 # What is the average number of times we search?

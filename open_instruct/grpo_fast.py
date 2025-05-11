@@ -113,7 +113,6 @@ from open_instruct.utils import (
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
-    create_snippet_mask,
     sync_gs_bucket,
 )
 from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
@@ -344,7 +343,6 @@ class Args:
 
     # code-tool specific settings
     code_tool_api_endpoint: Optional[str] = None
-
 
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
@@ -1489,7 +1487,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         stop_strings += list(tool_objects.keys())
     generation_config = SamplingParams(
         temperature=args.temperature,
-        top_p=.95,  # prevent rare out-of-vocab tokens with qwen
+        top_p=0.95,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
@@ -1498,7 +1496,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     )
     eval_generation_config = SamplingParams(
         temperature=0.0,
-        top_p=.95,   # prevent rare out-of-vocab tokens with qwen
+        top_p=0.95,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         skip_special_tokens=False,

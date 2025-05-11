@@ -766,7 +766,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 else:
                     # Standard forward pass
                     outputs = model(**batch, use_cache=False)
-                        
+
                 if args.reduce_loss == "mean":
                     loss = outputs.loss
                 else:
@@ -782,8 +782,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     # Shift so that tokens < n predict n
                     shift_logits = logits[..., :-1, :].contiguous()
                     shift_labels = labels[..., 1:].contiguous()
-                    
-                    
+
                     # Flatten the tokens
                     loss_fct = torch.nn.CrossEntropyLoss(reduction="sum")
                     shift_logits = shift_logits.view(-1, embedding_size)

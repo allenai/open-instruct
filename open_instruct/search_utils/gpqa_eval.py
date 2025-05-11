@@ -1,6 +1,7 @@
-'''
+"""
 Eval GPQA using the search actor.
-'''
+"""
+
 import os
 import argparse
 import ray
@@ -10,6 +11,7 @@ from datasets import load_dataset
 from transformers import AutoTokenizer
 from open_instruct.search_utils.search_actor import LLMSearchRayActor
 from open_instruct.vllm_utils2 import ray_noset_visible_devices
+
 ray.init()
 
 parser = argparse.ArgumentParser(description="Eval GPQA using the search actor.")

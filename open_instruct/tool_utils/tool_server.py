@@ -125,9 +125,7 @@ def _worker_init():  # noqa: D401
 # Create a single, long‑lived pool
 ###############################################################################
 POOL_SIZE = int(os.getenv("POOL_SIZE", os.cpu_count() or 1))
-process_pool: ProcessPoolExecutor | None = ProcessPoolExecutor(
-    max_workers=POOL_SIZE, initializer=_worker_init
-)
+process_pool: ProcessPoolExecutor | None = ProcessPoolExecutor(max_workers=POOL_SIZE, initializer=_worker_init)
 logger.info("Process pool started with %s workers", POOL_SIZE)
 
 app = FastAPI(title="Python Code Executor (Optimised, Logged)")

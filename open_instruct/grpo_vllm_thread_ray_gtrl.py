@@ -53,7 +53,6 @@ import socket
 import subprocess
 import threading
 import time
-import re
 from argparse import Namespace
 from collections import deque
 from dataclasses import asdict, dataclass, field
@@ -1157,7 +1156,11 @@ class PolicyTrainerRayProcess(RayProcess):
                     query_scores = torch.zeros(queries.shape[0], device=device)
                     for i, resp in enumerate(decoded_response):
                         # check for query tags AND that the query is not empty
-                        if "<query>" in resp and "</query>" in resp and len(resp.split("<query>")[1].split("</query>")[0]) > 0:
+                        if (
+                            "<query>" in resp
+                            and "</query>" in resp
+                            and len(resp.split("<query>")[1].split("</query>")[0]) > 0
+                        ):
                             query_scores[i] = 10.0
                 if args.add_r1_style_format_reward:
                     format_scores = torch.tensor(

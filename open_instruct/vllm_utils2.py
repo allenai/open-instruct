@@ -141,9 +141,11 @@ class LLMRayActor:
         if tool_use:
             # use tool vllm
             from open_instruct.tool_utils.tool_vllm import ToolUseLLM
+
             self.llm = ToolUseLLM(*args, **kwargs)
         else:
             from vllm import LLM
+
             self.llm = LLM(*args, **kwargs)
 
     def generate(self, *args, **kwargs):

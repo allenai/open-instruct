@@ -29,13 +29,13 @@ def process_vllm_output_for_search(text: str, number_documents_to_search: int = 
     query_match = re.search(r"<query>(.*?)</query>", text)
     if not query_match:
         return ""
-    
+
     query = query_match.group(1).strip()
     print(f"Searching: {query}")
     snippets = get_snippets_for_query(query, number_of_results=number_documents_to_search)
     if not snippets:
         return "<document>Query failed.</document>"
-    
+
     return f"<document>{snippets[0]}</document>"
 
 
@@ -45,15 +45,17 @@ class GenerationOutput:
     text: str
     finish_reason: str = "stop"
 
+
 @dataclass
 class CompletionList:
     outputs: List[GenerationOutput]
+
 
 @ray.remote
 class LLMSearchRayActor:
     def __init__(self, *args, bundle_indices: list = None, **kwargs):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
-        self.max_output_length =   kwargs.pop("max_output_len", 8192)
+        self.max_output_length = kwargs.pop("max_output_len", 8192)
         self.max_searches = kwargs.pop("max_searches", 5)
         self.number_documents_to_search = kwargs.pop("number_documents_to_search", 10)
         if kwargs.get("distributed_executor_backend") == "ray":
@@ -99,12 +101,11 @@ class LLMSearchRayActor:
 
         # Initialize queries as a list of tuples: (index, decoded query text)
         queries: List[Tuple[int, str]] = [
-            (i, self.tokenizer.decode(tokens))
-            for i, tokens in enumerate(prompt_token_ids)
+            (i, self.tokenizer.decode(tokens)) for i, tokens in enumerate(prompt_token_ids)
         ]
         original_queries: Dict[int, str] = {i: q for i, q in queries}
         finished_queries: Dict[int, str] = {}
-        
+
         # Track token counts for each query.
         # init with 0, we just want max output length
         query_token_counts: Dict[int, int] = {i: 0 for i, _ in enumerate(prompt_token_ids)}
@@ -115,9 +116,7 @@ class LLMSearchRayActor:
                 break
 
             query_texts = [q for _, q in queries]
-            outputs = self.llm.generate(
-                sampling_params=sampling_params, prompts=query_texts, use_tqdm=use_tqdm
-            )
+            outputs = self.llm.generate(sampling_params=sampling_params, prompts=query_texts, use_tqdm=use_tqdm)
             updated_queries: List[Tuple[int, str]] = []
             # Process each query and update its text.
             for (idx, current_text), output in zip(queries, outputs):
@@ -137,8 +136,7 @@ class LLMSearchRayActor:
 
                 # Process potential snippet.
                 snippet_response = process_vllm_output_for_search(
-                    output_text,
-                    number_documents_to_search=number_documents_to_search
+                    output_text, number_documents_to_search=number_documents_to_search
                 )
 
                 if snippet_response:
@@ -157,7 +155,7 @@ class LLMSearchRayActor:
                         updated_queries.append((idx, current_text + output_text + snippet_response))
                 else:
                     finished_queries[idx] = current_text + output_text
-            
+
             queries = updated_queries
 
         # Finalize any queries that haven't been marked finished ---
@@ -172,12 +170,11 @@ class LLMSearchRayActor:
             original = original_queries.get(i, "")
             # Remove only the first occurrence of the original prompt.
             final_texts.append(full_text.replace(original, "", 1))
-        
+
         # Encode final outputs and wrap in GenerationOutput objects.
         # Truncate to max_context_length.
         encoded_outputs = [
-            self.tokenizer.encode(text, max_length=self.max_output_length, truncation=True)
-            for text in final_texts
+            self.tokenizer.encode(text, max_length=self.max_output_length, truncation=True) for text in final_texts
         ]
         # Re-decode with max length.
         final_texts = [self.tokenizer.decode(tokens) for tokens in encoded_outputs]
@@ -188,19 +185,21 @@ class LLMSearchRayActor:
         for i in range(0, len(encoded_outputs), original_n):
             start, stop = i, i + original_n
             generation_outputs.append(
-                CompletionList([
-                    GenerationOutput(token_ids=tokens, text=text, finish_reason="stop")
-                    for tokens, text in zip(encoded_outputs[start:stop], final_texts[start:stop])
-                ])
+                CompletionList(
+                    [
+                        GenerationOutput(token_ids=tokens, text=text, finish_reason="stop")
+                        for tokens, text in zip(encoded_outputs[start:stop], final_texts[start:stop])
+                    ]
+                )
             )
         # set the sampling params back to original
         sampling_params.n = original_n
 
         return generation_outputs
-    
+
     def init_process_group(
-            self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
-        ):
+        self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
+    ):
         return self.llm.collective_rpc(
             "init_process_group",
             args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
@@ -226,16 +225,14 @@ class LLMSearchRayActor:
 if __name__ == "__main__":
     from vllm import SamplingParams
     from transformers import AutoTokenizer
+
     ray.init()
-    
+
     # Load the tokenizer
     tokenizer = AutoTokenizer.from_pretrained("allenai/Llama-3.1-Tulu-3-8B")
-    
+
     # Instantiate the actor. The scheduling strategy has been removed for clarity.
-    actor = LLMSearchRayActor.options(
-        num_cpus=4,
-        num_gpus=0.48
-    ).remote(
+    actor = LLMSearchRayActor.options(num_cpus=4, num_gpus=0.48).remote(
         "allenai/Llama-3.1-Tulu-3-8B",
         revision="main",
         tokenizer_revision="main",
@@ -249,14 +246,14 @@ if __name__ == "__main__":
         max_context_length=4096,  # Explicitly set a custom max context length
         gpu_memory_utilization=0.95,
     )
-    
+
     # Create a prompt using a chat template.
     prompt = tokenizer.apply_chat_template(
         [
             {
                 "role": "user",
                 "content": (
-                    "How much money, in euros, was the surgeon held responsible for Stella Obasanjo\'s death ordered to pay her son? "
+                    "How much money, in euros, was the surgeon held responsible for Stella Obasanjo's death ordered to pay her son? "
                     "Search the web by wrapping a query in query tags like so: <query>{query}</query> "
                     "Then, based on the document, provide the answer, or another query if you need."
                 ),
@@ -265,7 +262,7 @@ if __name__ == "__main__":
         add_generation_prompt=True,
         tokenize=False,
     )
-    
+
     # Encode the prompt to token ids.
     prompt_token_ids = [tokenizer.encode(prompt, add_special_tokens=False)]
 
@@ -277,7 +274,7 @@ if __name__ == "__main__":
         n=1,
         stop=["</query>"],
     )
-    
+
     # Generate output using the actor.
     result = ray.get(
         actor.generate.remote(

@@ -1,6 +1,7 @@
-'''
+"""
 Eval GPQA using the search actor.
-'''
+"""
+
 import os
 import argparse
 import ray
@@ -11,6 +12,7 @@ from transformers import AutoTokenizer
 from open_instruct.search_utils.search_actor import LLMSearchRayActor
 from open_instruct.ground_truth_utils import f1_score
 from open_instruct.vllm_utils2 import ray_noset_visible_devices
+
 ray.init()
 
 parser = argparse.ArgumentParser(description="Eval SimpleQA using the search actor.")
@@ -78,9 +80,9 @@ predictions = [x.split("<finish>")[-1].split("</finish>")[0].lower() for x in ge
 labels = [data["ground_truth"].lower() for data in ds]
 # calculate string f1
 f1_scores = [f1_score(predictions[i], labels[i]) for i in range(len(predictions))]
-f1s = [x['f1'] for x in f1_scores]
-recalls = [x['recall'] for x in f1_scores]
-precisions = [x['precision'] for x in f1_scores]
+f1s = [x["f1"] for x in f1_scores]
+recalls = [x["recall"] for x in f1_scores]
+precisions = [x["precision"] for x in f1_scores]
 avg_f1 = sum(f1s) / len(f1s)
 print(f"Average F1: {avg_f1}")
 avg_recall = sum(recalls) / len(recalls)

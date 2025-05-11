@@ -1,10 +1,11 @@
-'''
+"""
 Naive simpleQA RAG baseline: query using the question, and then generate the answer.
 python open_instruct/search_utils/naive_rag_baseline_eval.py \
     --dataset_name simpleqa \
     --model_path /path/to/model \
     --output_dir tmp
-'''
+"""
+
 import os
 import argparse
 import ray
@@ -15,6 +16,7 @@ from datasets import load_dataset
 from transformers import AutoTokenizer
 from open_instruct.ground_truth_utils import f1_score
 from open_instruct.search_utils.massive_ds import get_snippets_for_query
+
 ray.init()
 
 PROMPT = "Answer the given question. You must conduct reasoning "
@@ -28,14 +30,18 @@ PROMPT = "Answer the given question. You must conduct reasoning "
 
 
 parser = argparse.ArgumentParser(description="Eval SimpleQA using the search actor.")
-parser.add_argument("--dataset_name", type=str, choices=["hotpotqa", "nq", "tqa", "2wiki", "simpleqa"], help="Dataset name.")
+parser.add_argument(
+    "--dataset_name", type=str, choices=["hotpotqa", "nq", "tqa", "2wiki", "simpleqa"], help="Dataset name."
+)
 parser.add_argument("--model_path", type=str, help="Path to the model.")
 parser.add_argument("--model_revision", type=str, default="main", help="Model revision.")
 parser.add_argument("--tokenizer_revision", type=str, default="main", help="Tokenizer revision.")
 parser.add_argument("--model_len", type=int, default=8192, help="Max model length.")
 parser.add_argument("--output_dir", type=str, default="tmp", help="Output directory.")
 parser.add_argument("--max_eval_samples", type=int, default=2000, help="Max eval samples.")
-parser.add_argument("--add_finish", action="store_true", help="Whether to forcibly add the finish tag to the end of the prompt.")
+parser.add_argument(
+    "--add_finish", action="store_true", help="Whether to forcibly add the finish tag to the end of the prompt."
+)
 args = parser.parse_args()
 
 # Load the tokenizer
@@ -56,14 +62,14 @@ else:
 if args.max_eval_samples > -1 and args.max_eval_samples < len(ds):
     ds = ds.shuffle(42).select(range(args.max_eval_samples))
 
-queries = [x[0]['content'].strip() for x in ds["messages"]]
+queries = [x[0]["content"].strip() for x in ds["messages"]]
 # manually do the search
 query_results = [get_snippets_for_query(query)[0] for query in queries]
 
 prompt_strings = []
 for i, sample in enumerate(ds):
     msgs = sample["messages"]
-    msgs[0]['content'] = PROMPT + msgs[0]['content']
+    msgs[0]["content"] = PROMPT + msgs[0]["content"]
     s = tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
     prompt_strings.append(s)
 
@@ -103,9 +109,9 @@ else:
 labels = [data["ground_truth"].lower() for data in ds]
 # calculate string f1
 f1_scores = [f1_score(predictions[i], labels[i]) for i in range(len(predictions))]
-f1s = [x['f1'] for x in f1_scores]
-recalls = [x['recall'] for x in f1_scores]
-precisions = [x['precision'] for x in f1_scores]
+f1s = [x["f1"] for x in f1_scores]
+recalls = [x["recall"] for x in f1_scores]
+precisions = [x["precision"] for x in f1_scores]
 avg_f1 = sum(f1s) / len(f1s)
 print(f"Average F1: {avg_f1}")
 avg_recall = sum(recalls) / len(recalls)

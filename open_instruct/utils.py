@@ -36,7 +36,6 @@ import shutil
 import socket
 import subprocess
 import sys
-import re
 import time
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from dataclasses import dataclass

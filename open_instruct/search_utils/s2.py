@@ -7,11 +7,9 @@ from urllib3.util.retry import Retry
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger("urllib3").setLevel(logging.DEBUG)
 
+
 def create_session_with_retries(
-    retries=3,
-    backoff_factor=0.3,
-    status_forcelist=(500, 502, 504),
-    allowed_methods=("GET", "POST")
+    retries=3, backoff_factor=0.3, status_forcelist=(500, 502, 504), allowed_methods=("GET", "POST")
 ):
     session = requests.Session()
     retry = Retry(
@@ -27,13 +25,14 @@ def create_session_with_retries(
     session.mount("https://", adapter)
     return session
 
+
 def get_snippets_for_query(query, number_of_results=10):
     api_key = os.environ.get("S2_API_KEY")
     if not api_key:
         raise ValueError("Missing S2_API_KEY environment variable.")
 
     session = create_session_with_retries()
-    
+
     try:
         res = session.get(
             "https://api.semanticscholar.org/graph/v1/snippet/search",
@@ -42,14 +41,15 @@ def get_snippets_for_query(query, number_of_results=10):
             timeout=60,  # extended timeout for long queries
         )
         res.raise_for_status()  # Raises HTTPError for bad responses
-        data = res.json().get('data', [])
-        snippets = [item['snippet']['text'] for item in data if item.get('snippet')]
+        data = res.json().get("data", [])
+        snippets = [item["snippet"]["text"] for item in data if item.get("snippet")]
         return ["\n".join(snippets)]
     except requests.exceptions.RequestException as e:
         print(f"Error: {e}")
 
     print("Failed to retrieve S2 snippets for one query:", query, res)
     return None
+
 
 if __name__ == "__main__":
     print(get_snippets_for_query("colbert model retrieval"))

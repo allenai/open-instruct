@@ -1,7 +1,8 @@
-'''
+"""
 Search using the massive DS API.
 Assumes you are hosting it yourself somewhere.
-'''
+"""
+
 import os
 import requests
 from requests.adapters import HTTPAdapter
@@ -9,10 +10,7 @@ from urllib3.util.retry import Retry
 
 
 def create_session_with_retries(
-    retries=3,
-    backoff_factor=0.3,
-    status_forcelist=(500, 502, 504),
-    allowed_methods=("GET", "POST")
+    retries=3, backoff_factor=0.3, status_forcelist=(500, 502, 504), allowed_methods=("GET", "POST")
 ):
     session = requests.Session()
     retry = Retry(
@@ -28,6 +26,7 @@ def create_session_with_retries(
     session.mount("https://", adapter)
     return session
 
+
 def get_snippets_for_query(query, api_endpoint=None, number_of_results=3):
     if not api_endpoint:
         url = os.environ.get("MASSIVE_DS_URL")
@@ -37,11 +36,15 @@ def get_snippets_for_query(query, api_endpoint=None, number_of_results=3):
         url = api_endpoint
 
     session = create_session_with_retries()
-    
+
     try:
         res = session.post(
             url,
-            json={"query": query, "n_docs": number_of_results, "domains": "dpr_wiki_contriever"},  # domains is meaningless for now
+            json={
+                "query": query,
+                "n_docs": number_of_results,
+                "domains": "dpr_wiki_contriever",
+            },  # domains is meaningless for now
             headers={"Content-Type": "application/json"},
             timeout=(3, 15),
         )
@@ -57,5 +60,10 @@ def get_snippets_for_query(query, api_endpoint=None, number_of_results=3):
     print("Failed to retrieve massive ds passages for one query:", query)
     return None
 
+
 if __name__ == "__main__":
-    print(get_snippets_for_query("Where was Marie Curie born?", api_endpoint="http://root@saturn-cs-aus-231.reviz.ai2.in:45479/search"))
+    print(
+        get_snippets_for_query(
+            "Where was Marie Curie born?", api_endpoint="http://root@saturn-cs-aus-231.reviz.ai2.in:45479/search"
+        )
+    )

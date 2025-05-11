@@ -17,5 +17,10 @@ except json.JSONDecodeError:
     labels = [[label] for label in labels]
 
 predictions = [label[0] for label in labels]
-f1_scores = [max([f1_score(predictions[i], label) for label in labels[i]], key=lambda x: x['f1']) for i in range(len(predictions))]
-import pdb; pdb.set_trace()
+f1_scores = [
+    max([f1_score(predictions[i], label) for label in labels[i]], key=lambda x: x["f1"])
+    for i in range(len(predictions))
+]
+import pdb
+
+pdb.set_trace()

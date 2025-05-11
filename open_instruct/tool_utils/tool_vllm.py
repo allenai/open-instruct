@@ -40,7 +40,6 @@ class ToolOutput:
     runtime: float
     start_str: str = "<output>\n"
     end_str: str = "\n</output>"
-    
 
 
 class Tool:
@@ -326,7 +325,11 @@ class ToolUseLLM(LLM):
                                 self.pending_tool_futures[output.request_id] = (future, o, output)
                                 output_processed = True
                                 break
-                            elif o.text.endswith(stop_str) and stop_str in self.tools and num_calls[output.request_id] > self.max_tool_calls:
+                            elif (
+                                o.text.endswith(stop_str)
+                                and stop_str in self.tools
+                                and num_calls[output.request_id] > self.max_tool_calls
+                            ):
                                 # If the tool has been called too many times, we tell the model it has exceeded the limit.
                                 # use a dummy tool object to keep things simple.
                                 tool = MaxCallsExceededTool(start_str="<tool>", end_str="</tool>")
