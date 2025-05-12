@@ -328,7 +328,7 @@ class Args:
     # Tool settings
     tools: Optional[List[str]] = None
     """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
-    max_tool_calls: List[int] = [5]
+    max_tool_calls: List[int] = field(default_factory=lambda: [5])
     """Maximum number of tool calls allowed. If a list is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
     mask_tool_use: bool = True
     """Whether to mask the tool output. By default on."""
