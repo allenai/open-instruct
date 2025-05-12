@@ -13,10 +13,10 @@ python mason.py \
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/dpo_tune_cache.py \
-    --exp_name tulu3_8b_dpo_if_pref_full \
-    --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-SFT \
+    --exp_name tulu3_8b_after_dpo_if_pref_full \
+    --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-DPO \
     --model_revision main \
-    --tokenizer_name allenai/Llama-3.1-Tulu-3-8B-SFT \
+    --tokenizer_name allenai/Llama-3.1-Tulu-3-8B-DPO \
     --tokenizer_revision main \
     --use_slow_tokenizer \
     --dataset_mixer_list valpy/IF_preference_data_full 1.0 \
