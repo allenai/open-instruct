@@ -387,24 +387,44 @@ def extract_final_answer(prediction: str) -> str:
     Returns:
         str: The extracted substring or the cleaned/original string.
     """
-    # Handle <|assistant|> tag
-    answer = prediction.split("<|assistant|>\n")[-1].strip() if "<|assistant|>" in prediction else prediction.strip()
+    # Faezeh's code
+    # # Handle <|assistant|> tag
+    # answer = prediction.split("<|assistant|>\n")[-1].strip() if "<|assistant|>" in prediction else prediction.strip()
     
-    # Try to extract substring between <answer> and </answer>
-    match = re.search(r"<answer>(.*?)</answer>", answer, re.DOTALL)
+    # # Try to extract substring between <answer> and </answer>
+    # match = re.search(r"<answer>(.*?)</answer>", answer, re.DOTALL)
+    # if match:
+    #     return match.group(1).strip()
+    
+    # # If no <answer>...</answer>, try to extract substring after </think>
+    # think_match = re.search(r"</think>\s*(.*)", answer, re.DOTALL)
+    # if think_match:
+    #     # remove any </answer> or <answer> tags that might be present
+    #     think_match = re.sub(r"<answer>", "", think_match.group(1))
+    #     think_match = re.sub(r"</answer>", "", think_match)
+    #     return think_match #.group(1).strip()
+    
+    # # Fallback to the cleaned or original string
+    # return answer
+
+    prediction = prediction.split("<|assistant|>\n")[-1].strip() if "<|assistant|>" in prediction else prediction.strip()
+    match = re.search(r"<answer>(.*?)</answer>", prediction, re.DOTALL)
     if match:
         return match.group(1).strip()
     
-    # If no <answer>...</answer>, try to extract substring after </think>
-    think_match = re.search(r"</think>\s*(.*)", answer, re.DOTALL)
-    if think_match:
-        # remove any </answer> or <answer> tags that might be present
-        think_match = re.sub(r"<answer>", "", think_match.group(1))
-        think_match = re.sub(r"</answer>", "", think_match)
-        return think_match #.group(1).strip()
+    # oe-eval version
+    reasoning = re.findall("(?ms)^(?:\\s*<think>\\s*)?(.*)\\s*</think>", prediction)
+    if reasoning:
+        reasoning_content = reasoning[0]
+    answer = re.sub("(?ms).*</think>", "", prediction)
+    answer = re.sub("(?ms)^\\s*<answer>\\s*", "", answer)
+    # answer = re.sub("(?ms)</answer>\\s*$", "", answer)
+    # to remove the </answer> tag followed by any punctuation or white spaces
+    answer = re.sub(r"(?ms)</answer>([.,!?;:\\s])?", r"\1", answer)
     
-    # Fallback to the cleaned or original string
-    return answer
+    return answer.strip()
+
+
 
 
 JUDGE_CLASS_MAP = {

@@ -154,6 +154,8 @@ class MathVerifier(VerifierFunction):
         # Fallback to the full output.
         if not all_answers:
             all_answers.append(normalize_final_answer(prediction))
+            # also provide original string in case normalization fails
+            all_answers.append(prediction)
 
         # Compare each candidate answer to the ground truth.
         for answer in all_answers:
@@ -280,7 +282,7 @@ class IFEvalVerifier(VerifierFunction):
         api_cost = 0.0
         reasoning = None
         constraint = label
-        answer = prediction.split("<|assistant|>\n")[-1].strip()
+        answer = extract_final_answer(prediction)
         if isinstance(constraint, str):
             constraint = json.loads(constraint)
         if "func_name" not in constraint:
@@ -288,7 +290,6 @@ class IFEvalVerifier(VerifierFunction):
             return 0.0, api_cost, reasoning
         func_name = constraint.pop("func_name")
         func = IF_FUNCTIONS_MAP[func_name]
-        # breakpoint()
         non_none_args = {k: v for k, v in constraint.items() if v is not None}
         if not constraint:
             return func(prediction), api_cost, reasoning
@@ -391,11 +392,12 @@ class LMJudgeVerifier(VerifierFunction):
             float: Score between 0 and 1
         """
         # Clean prediction if needed
+        breakpoint()
         answer = extract_final_answer(prediction)
         if answer == "":
             logger.warning("Empty answer string, returning 0.0")
             return 0.0, 0.0
-
+        breakpoint()
         # Ensure judge_type is valid
         if self.judge_type not in JUDGE_PROMPT_MAP:
             logger.warning(f"Subtask prompt not found: {self.judge_type}, falling back to general")

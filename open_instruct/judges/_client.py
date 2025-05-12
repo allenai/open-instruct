@@ -31,6 +31,10 @@ PRICING_PER_1M_TOKENS = {
     "gpt-4-1106-preview": {"input": 0.00001, "output": 0.00003},
     "gpt-4o": {"input": 0.0000025, "output": 0.000001},
     "gpt-4o-mini": {"input": 0.00000015, "output": 0.0000006},
+    "gpt-4o-standard": {"input": 0.0000025, "output": 0.000001},
+    "gpt-4.1": {"input": 0.000002, "output": 0.0000008},
+    "gpt-4.1-standard": {"input": 0.000002, "output": 0.0000008},
+    "gpt-4.1-mini-standard": {"input": 0.0000004, "output": 0.0000016},
     "claude-sonnet": {"input": 0.000003, "output": 0.000015}, 
     "deepseek-chat": {"input": 0.00000007, "output": 0.000001}, 
     "deepseek-reasoner": {"input": 0.00000014, "output": 0.000002}, 
@@ -70,7 +74,7 @@ class CompletionWithMetadata:
 def build_fallback_response(reason: str, elapsed_time: float = 0.0):
     """Return a structured fallback response with a reasoning and zero score."""
     logger.warning(f"Returning fallback response: {reason}")
-    return {
+    fallback_response = {
         "choices": [
             {
                 "message": {
@@ -87,6 +91,8 @@ def build_fallback_response(reason: str, elapsed_time: float = 0.0):
         "cost": 0.0,
         "response_time": elapsed_time,
     }
+
+    return CompletionWithMetadata(fallback_response)
 
 async def call_azure_sync(client, **kwargs):
     loop = asyncio.get_running_loop()
@@ -244,10 +250,11 @@ async def async_get_completion(
                     else:
                         raise Exception("unknown client type for standard completion handling.")
 
-                    end_time = time.time()
-                    track_cost_callback({"model": model}, response, start_time, end_time)
+                end_time = time.time()
+                track_cost_callback({"model": model}, response, start_time, end_time)
+                # breakpoint()
 
-                if response_model is None:
+                if response is None:
                     response = CompletionWithMetadata(response)
                     # return build_fallback_response("No response received.", elapsed_time=end_time - start_time)
                     

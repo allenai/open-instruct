@@ -3,11 +3,12 @@
 # mix with rewritten math, shortqa and tuu 3 ifeval rlvr: ai2-adapt-dev/tulu-3-sft-72k-criteria-gpt4o-classified-rewritten-math-shortqa-ifeval
 # rubric+ref+math+shortqa_ifeval: ai2-adapt-dev/tulu-3-sft-92k-criteria-gpt4o-classified-rewritten-math-shortqa-ifeval-v2
 # previous tested dataset: faezeb/tulu-3-sft-t3-70b-thinker-sampled
+# tulu 3 rewritten replace string f1 with lm jduge + ifeval: ai2-adapt-dev/tulu_3_rewritten_100k-v2-ifeval
 
 python open_instruct/grpo_fast_wip.py \
-    --dataset_mixer_list ai2-adapt-dev/tulu-3-sft-72k-criteria-gpt4o-classified-rewritten-math-shortqa-ifeval 512 \
+    --dataset_mixer_list ai2-adapt-dev/tulu_3_rewritten_100k-v2-ifeval 512 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list ai2-adapt-dev/tulu-3-sft-72k-criteria-gpt4o-classified-rewritten-math-shortqa-ifeval 16 \
+    --dataset_mixer_eval_list ai2-adapt-dev/tulu_3_rewritten_100k-v2-ifeval 16 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 512 \
     --max_prompt_token_length 512 \
@@ -27,7 +28,7 @@ python open_instruct/grpo_fast_wip.py \
     --ground_truths_key ground_truth \
     --chat_template_name tulu_thinker_r1_style \
     --learning_rate 3e-7 \
-    --total_episodes 4000 \
+    --total_episodes 5000 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
@@ -42,7 +43,7 @@ python open_instruct/grpo_fast_wip.py \
     --gradient_checkpointing \
     --single_gpu_mode \
     --push_to_hub false \
-    --llm_judge_model "gpt-4o-mini-standard" \
+    --llm_judge_model "gpt-4.1-standard" \
     --llm_judge_type "quality_rubric"
     # --with_tracking
 

@@ -499,27 +499,27 @@ async def _process_single_response(
 
         # Unpack successful result (assuming it returns tuple like (score, cost, reasoning))
         try:
-             # Check the type of verifier that produced the result
-             if issubclass(verifier_type, LMJudgeVerifier):
-                 reward_result, api_cost, judge_reasoning = result_or_exception
-                 reasoning = judge_reasoning # Capture reasoning from the judge
-             else:
-                 # Assume others return (score, cost, reasoning_str) or similar
-                 # Adapt based on the actual return signature of non-LMJudge verifiers
-                 if isinstance(result_or_exception, tuple) and len(result_or_exception) >= 2:
-                      reward_result, api_cost = result_or_exception[:2]
-                      # Optionally capture reasoning if returned as third element
-                      judge_reasoning = result_or_exception[2] if len(result_or_exception) > 2 else f"Verifier {ds.lower().split('-')[0]} score: {reward_result}"
-                 elif isinstance(result_or_exception, (float, int)):
-                      reward_result = result_or_exception
-                      api_cost = 0 # Assume no cost if not returned
-                      judge_reasoning = f"Verifier {ds.lower().split('-')[0]} score: {reward_result}" # Basic reasoning for non-judges
-                 else:
-                      logger.warning(f"Unexpected result format from verifier for {ds}: {result_or_exception}. Assigning score=0, cost=0.")
-                      reward_result = 0
-                      api_cost = 0
-                      judge_reasoning = f"Verifier {ds.lower().split('-')[0]} failed to produce score."
-                 reasoning = judge_reasoning # Update overall reasoning
+            # Check the type of verifier that produced the result
+            if issubclass(verifier_type, LMJudgeVerifier):
+                reward_result, api_cost, judge_reasoning = result_or_exception
+                reasoning = judge_reasoning # Capture reasoning from the judge
+            else:
+                # Assume others return (score, cost, reasoning_str) or similar
+                # Adapt based on the actual return signature of non-LMJudge verifiers
+                if isinstance(result_or_exception, tuple) and len(result_or_exception) >= 2:
+                    reward_result, api_cost = result_or_exception[:2]
+                    # Optionally capture reasoning if returned as third element
+                    judge_reasoning = result_or_exception[2] if len(result_or_exception) > 2 else f"Verifier {ds.lower().split('-')[0]} score: {reward_result}"
+                elif isinstance(result_or_exception, (float, int)):
+                    reward_result = result_or_exception
+                    api_cost = 0 # Assume no cost if not returned
+                    judge_reasoning = f"Verifier {ds.lower().split('-')[0]} score: {reward_result}" # Basic reasoning for non-judges
+                else:
+                    logger.warning(f"Unexpected result format from verifier for {ds}: {result_or_exception}. Assigning score=0, cost=0.")
+                    reward_result = 0
+                    api_cost = 0
+                    judge_reasoning = f"Verifier {ds.lower().split('-')[0]} failed to produce score."
+                reasoning = judge_reasoning # Update overall reasoning
 
         except ValueError as e:
              logger.error(f"Error unpacking result for dataset {ds}: {e}. Result was: {result_or_exception}", exc_info=True)
