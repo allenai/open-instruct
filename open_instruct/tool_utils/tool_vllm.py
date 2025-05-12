@@ -140,9 +140,13 @@ class PythonCodeTool(Tool):
 
 
 class ToolUseLLM(LLM):
-    def __init__(self, tools: dict[str, Tool] = None, max_tool_calls: int = 4, *args, **kwargs):
+    def __init__(self, tools: dict[str, Tool] = None, max_tool_calls: Union[int, dict[str, int]] = 4, *args, **kwargs):
         self.tools = tools
-        self.max_tool_calls = max_tool_calls
+        # Convert max_tool_calls to a dict if it's an int
+        if isinstance(max_tool_calls, int):
+            self.max_tool_calls = {tool.end_str: max_tool_calls for tool in tools.values()} if tools else {}
+        else:
+            self.max_tool_calls = max_tool_calls
         # Initialize executor and store for pending tool calls
         self.executor = ThreadPoolExecutor(max_workers=20)
         self.pending_tool_futures = {}
@@ -316,7 +320,7 @@ class ToolUseLLM(LLM):
                             if (
                                 o.text.endswith(stop_str)
                                 and stop_str in self.tools
-                                and num_calls[output.request_id] <= self.max_tool_calls
+                                and num_calls[output.request_id] <= self.max_tool_calls[stop_str]
                             ):
                                 # Schedule tool call asynchronously
                                 tool = self.tools[stop_str]
@@ -327,7 +331,7 @@ class ToolUseLLM(LLM):
                             elif (
                                 o.text.endswith(stop_str)
                                 and stop_str in self.tools
-                                and num_calls[output.request_id] > self.max_tool_calls
+                                and num_calls[output.request_id] > self.max_tool_calls[stop_str]
                             ):
                                 # If the tool has been called too many times, we tell the model it has exceeded the limit.
                                 # use a dummy tool object to keep things simple.
