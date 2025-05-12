@@ -188,22 +188,19 @@ def create_vllm_engines(
     pg: Optional[ray.util.placement_group] = None,
     vllm_enable_sleep=False,
     tools: Optional[List[Any]] = None,
-    max_tool_calls: Union[int, List[int]] = 4,
+    max_tool_calls: List[int] = [5],
 ):
     import vllm
 
     assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
 
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
-    if isinstance(max_tool_calls, int):
-        max_tool_calls_dict = {tool.end_str: max_tool_calls for tool in tools} if tools else {}
+    assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), \
+        "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
+    if len(max_tool_calls) == 1:
+        max_tool_calls_dict = {tool.end_str: max_tool_calls[0] for tool in tools} if tools else {}
     else:
-        assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), \
-            "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
-        if len(max_tool_calls) == 1:
-            max_tool_calls_dict = {tool.end_str: max_tool_calls[0] for tool in tools} if tools else {}
-        else:
-            max_tool_calls_dict = {tool.end_str: limit for tool, limit in zip(tools, max_tool_calls)} if tools else {}
+        max_tool_calls_dict = {tool.end_str: limit for tool, limit in zip(tools, max_tool_calls)} if tools else {}
 
     vllm_engines = []
     distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "ray"
