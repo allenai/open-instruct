@@ -7,7 +7,7 @@ python mason.py \
     --num_nodes 4 \
     --budget ai2/oe-adapt \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_vllm_thread_ray_gtrl.py \
-    --exp_name valpy_if_multi_tulu3.1_8b_grpo \
+    --exp_name valpy_if_multi_tulu3.1_8b_grpo_with_rm \
     --beta 0.01 \
     --local_mini_batch_size 16 \
     --number_samples_per_prompt 8 \
