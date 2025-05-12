@@ -120,7 +120,7 @@ from open_instruct.utils import (
     upload_metadata_to_hf,
     create_snippet_mask,
 )
-from open_instruct.vllm_utils2 import LLMRayActor, create_vllm_engines, init_process_group
+from open_instruct.vllm_utils3 import LLMRayActor, create_vllm_engines, init_process_group
 from open_instruct.search_utils.search_actor import LLMSearchRayActor
 
 api = HfApi()

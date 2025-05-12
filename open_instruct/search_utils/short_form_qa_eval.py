@@ -12,7 +12,7 @@ from datasets import load_dataset
 from transformers import AutoTokenizer
 from open_instruct.search_utils.search_actor import LLMSearchRayActor
 from open_instruct.ground_truth_utils import f1_score
-from open_instruct.vllm_utils2 import ray_noset_visible_devices
+from open_instruct.vllm_utils3 import ray_noset_visible_devices
 
 ray.init()
 
