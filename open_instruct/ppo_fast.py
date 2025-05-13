@@ -56,7 +56,7 @@ from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
-from typing import Callable, Iterator, List, Literal, Optional
+from typing import Callable, Iterator, List, Literal, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -116,13 +116,12 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
 )
-from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
+from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
 INVALID_VALUE = 0.0  # to play nicely with debugging output
 # torch.set_printoptions(precision=2, sci_mode=False)
-from concurrent.futures import ThreadPoolExecutor
 
 
 @dataclass
@@ -331,8 +330,27 @@ class Args:
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
 
+    # Tool settings
+    tools: Optional[List[str]] = None
+    """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
+    max_tool_calls: List[int] = field(default_factory=lambda: [5])
+    """Maximum number of tool calls allowed. Can be either a single integer (applies to all tools) or a list of integers
+    with length 1 (applies to all tools) or matching the length of the tools list (per-tool limit)."""
+    mask_tool_use: bool = True
+    """Whether to mask the tool output. By default on."""
+    only_reward_good_outputs: bool = False
+    """Whether to only reward good outputs from the tools or not."""
+
+    # rl-rag specific settngs
+    number_documents_to_search: int = 3
+    """The maximum number of documents to retrieve for each query."""
+    search_api_endpoint: Optional[str] = None
+    """The API endpoint for the search engine."""
+
+    # code-tool specific settings
+    code_tool_api_endpoint: Optional[str] = None
+
     def __post_init__(self):
-        assert self.num_samples_per_prompt_rollout > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
         assert (
             self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
         ), "At least one reward must be applied!"
@@ -457,6 +475,7 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
+        # Have to use FusedAdam for offloading6 and backloading
         from deepspeed.ops.adam import FusedAdam  # DeepSpeedCPUAdam
 
         if args.set_weight_decay_on_bias_and_norm:
@@ -568,6 +587,8 @@ class PolicyTrainerRayProcess(RayProcess):
 
         self.offload_to_cpu(self.model)
         self.offload_to_cpu(self.value_model)
+        optimization_steps_done = 0
+        return optimization_steps_done
 
     def forward(
         self,
@@ -967,6 +988,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
                         loss_stats[i] = loss
                         ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
+
             with torch.no_grad():
                 self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
                 self.local_metrics.add("objective/kl2_avg", kl2_stats.mean())
@@ -1147,10 +1169,39 @@ def vllm_generate_thread(
         all_outputs = ray.get(futures)
         response_ids = []
         finish_reasons = []  # either "stop" or "length"
+        masks = []
+        num_calls = []
+        timeouts = []
+        tool_errors = []
+        tool_outputs = []
+        tool_runtimes = []
+        tool_calleds = []
         for outputs in all_outputs:
             response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
             finish_reasons.extend([out.finish_reason for output in outputs for out in output.outputs])
-        return response_ids, finish_reasons
+            if args.tool_use:
+                masks.extend([out.mask for output in outputs for out in output.outputs])
+                num_calls.extend([out.num_calls for output in outputs for out in output.outputs])
+                timeouts.extend([out.timeout for output in outputs for out in output.outputs])
+                tool_errors.extend([out.tool_error for output in outputs for out in output.outputs])
+                tool_outputs.extend([out.tool_output for output in outputs for out in output.outputs])
+                tool_runtimes.extend([out.tool_runtime for output in outputs for out in output.outputs])
+                tool_calleds.extend([out.tool_called for output in outputs for out in output.outputs])
+        # if not using the tool, mask is all 1s
+        if not args.tool_use:
+            masks = [[1] * len(response_ids[i]) for i in range(len(response_ids))]
+            num_calls = [0] * len(response_ids)
+            timeouts = [0] * len(response_ids)
+            tool_errors = [""] * len(response_ids)
+            tool_outputs = [""] * len(response_ids)
+            tool_runtimes = [0] * len(response_ids)
+            tool_calleds = [False] * len(response_ids)
+        return (
+            response_ids,
+            finish_reasons,
+            masks,
+            (num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds),
+        )
 
     for training_step in range(resume_training_step, num_training_steps + 1):
         items = param_prompt_Q.get()
@@ -1159,13 +1210,15 @@ def vllm_generate_thread(
         _, g_queries_list = items
 
         with Timer("🔥 Generation time"):
-            response_ids, finish_reasons = generate_with_engines(g_queries_list, generation_config)
-        inference_results_Q.put((response_ids, finish_reasons))
+            response_ids, finish_reasons, masks, info = generate_with_engines(g_queries_list, generation_config)
+        inference_results_Q.put((response_ids, finish_reasons, masks, info))
 
         # Evaluate the model
         if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-            response_ids, finish_reasons = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
-            evaluation_inference_results_Q.put((response_ids, finish_reasons))
+            response_ids, finish_reasons, masks, info = generate_with_engines(
+                eval_prompt_token_ids, eval_generation_config
+            )
+            evaluation_inference_results_Q.put((response_ids, finish_reasons, masks, info))
 
 
 def data_preparation_thread(
@@ -1176,7 +1229,6 @@ def data_preparation_thread(
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
-    executor: ThreadPoolExecutor,
 ):
     for training_step in range(1, num_training_steps + 1):
         # Get next batch of prompts and responses
@@ -1190,10 +1242,21 @@ def data_preparation_thread(
             ground_truths = [item for item in ground_truths for _ in range(args.num_samples_per_prompt_rollout)]
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            responses, finish_reasons = inference_results_Q.get()
+            responses, finish_reasons, masks, infos = inference_results_Q.get()
+            num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
+            good_outputs = [
+                len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
+                for i in range(len(tool_outputs))
+            ]
             for i in range(len(finish_reasons)):
-                if finish_reasons[i] == "stop" and responses[i][-1] != tokenizer.eos_token_id:
+                # edge case: sometimes it outputs eos immediately, and we get an empty response
+                # in that case, we need to add the eos token to the response
+                # note that this also adds eos to the end of reponses that stopped for other reasons.
+                if finish_reasons[i] == "stop" and (
+                    len(responses[i]) == 0 or responses[i][-1] != tokenizer.eos_token_id
+                ):
                     responses[i].append(tokenizer.eos_token_id)
+                    masks[i].append(1)  # never mask the eos token for now?
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
@@ -1201,7 +1264,7 @@ def data_preparation_thread(
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards"):
             scores, reward_metrics = reward_fn(
-                responses, decoded_responses, ground_truths, datasets, finish_reasons, executor
+                responses, decoded_responses, ground_truths, datasets, finish_reasons, infos
             )
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
@@ -1212,6 +1275,7 @@ def data_preparation_thread(
             packed_sequences = pack_sequences(
                 queries=queries,
                 responses=responses,
+                masks=masks,
                 pack_length=args.pack_length,
                 pad_token_id=tokenizer.pad_token_id,
             )
@@ -1223,23 +1287,6 @@ def data_preparation_thread(
                 for packed_done in packed_sequences.dones
             ]
             packed_sequences.rewards = packed_rewards
-            # index_of_first_reward = scores.tolist().index(10)
-            # print("index of the first reward", index_of_first_reward)
-            # for i in range(len(packed_sequences.response_masks)):
-            #     if index_of_first_reward + 1 in packed_sequences.response_masks[i].tolist():
-            #         print("response_masks index of the first reward", i)
-            #         index_of_packed_first_reward = i
-            #         break
-            # print("-" * 20)
-            # print(tokenizer.decode(queries[index_of_first_reward]))
-            # print("-" * 20)
-            # print(tokenizer.decode(responses[index_of_first_reward]))
-            # print("-" * 20)
-            # print(ground_truths[index_of_first_reward])
-            # print("-" * 20)
-            # print(f"{index_of_packed_first_reward=}")
-            # print(tokenizer.decode(packed_sequences.query_responses[index_of_packed_first_reward]))
-            # breakpoint()
 
         with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
             B = (
@@ -1319,6 +1366,12 @@ def data_preparation_thread(
             "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
             "val/sequence_lengths_solved_hist": sequence_length_solved,
             "val/stop_rate": stop_rate,
+            "val/num_calls_rate": np.array(num_calls).mean(),
+            "val/timeouts_rate": np.array(timeouts).mean(),
+            "val/tool_errors_rate": np.array([len(item) > 0 for item in tool_errors]).mean(),
+            "val/good_outputs_rate": np.array(good_outputs).mean(),
+            "val/tool_runtimes_rate": np.array(tool_runtimes).mean(),
+            "val/tool_calleds_rate": np.array(tool_calleds).mean(),
             **reward_metrics,
         }
 
@@ -1397,6 +1450,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     if args.with_tracking:
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
+    args.tool_use = args.tools is not None and len(args.tools) > 0
 
     # ------------------------------------------------------------
     # Setup experiment tracking and seeds
@@ -1472,6 +1526,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
     # ------------------------------------------------------------
     # Create the model and optimizer
+    ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
     pg = None
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
@@ -1489,6 +1544,32 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         for model in policy_group.models
     )
     max_len = args.max_prompt_token_length + args.response_length
+    # make tool list
+    tool_objects = {}
+    if args.tools:
+        for tool in args.tools:
+            if tool.lower() == "search":
+                from open_instruct.search_utils.search_tool import SearchTool
+
+                tool = SearchTool(
+                    start_str="<query>",
+                    end_str="</query>",
+                    api_endpoint=args.search_api_endpoint,
+                    number_documents_to_search=args.number_documents_to_search,
+                )
+                tool_objects[tool.end_str] = tool
+            elif tool.lower() == "code":
+                from open_instruct.tool_utils.tool_vllm import PythonCodeTool
+
+                tool = PythonCodeTool(
+                    start_str="<code>",
+                    end_str="</code>",
+                    api_endpoint=args.code_tool_api_endpoint,
+                )
+                tool_objects[tool.end_str] = tool
+            else:
+                raise ValueError(f"Unknown tool: {tool}")
+
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
@@ -1501,31 +1582,41 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
+        tools=tool_objects,
+        max_tool_calls=args.max_tool_calls,
     )
-    ray.get(inits)
+    resume_training_step = ray.get(inits)[0] + 1
+    episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     print("======== ✅ all models and vLLM engines initialized =========")
 
     ray.get([m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models])
     print("======== ✅ model update group setup successfully =========")
+    if resume_training_step > 1:
+        print(f"Resuming training from step {resume_training_step}... Broadcasting weights to vLLM engines.")
+        with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
+            ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
     # Setup training
+    stop_strings = [] if args.stop_strings is None else args.stop_strings
+    if args.tool_use:
+        stop_strings += list(tool_objects.keys())
     generation_config = SamplingParams(
         temperature=args.temperature,
-        top_p=1.0,
+        top_p=0.98,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
         n=args.num_samples_per_prompt_rollout,
-        stop=args.stop_strings,
+        stop=stop_strings,
     )
     eval_generation_config = SamplingParams(
         temperature=0.0,
-        top_p=1.0,
+        top_p=0.98,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
         n=1,  # since we are doing greedy sampling, don't need to generate more
-        stop=args.stop_strings,
+        stop=stop_strings,
     )
     train_dataset_idxs = np.arange(len(train_dataset))
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
@@ -1543,7 +1634,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         eval_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
         eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
         eval_dataset_names = eval_dataset[:num_eval_samples][DATASET_SOURCE_KEY]
-    resume_training_step = 1
     thread = threading.Thread(
         target=vllm_generate_thread,
         args=(
@@ -1561,7 +1651,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     )
     thread.start()
     print("======== ✅ vllm generate thread starts =========")
-    executor = ThreadPoolExecutor(max_workers=64)
+
     packing_thread = threading.Thread(
         target=data_preparation_thread,
         args=(
@@ -1572,7 +1662,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             args,
             tokenizer,
             args.num_training_steps,
-            executor,
         ),
     )
     packing_thread.start()
@@ -1586,7 +1675,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
     param_prompt_Q.put((None, queries_next))
 
-    episode = 0
     num_total_tokens = 0
     start_time = time.time()
     try:
@@ -1700,9 +1788,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             # Optionally evaluate the model
             try:
                 # timeout 0.01 if this is the last training step or we're not evaluating
-                # otherwise, wait to get the last evaluation generations
-                timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else None
-                eval_responses, eval_finish_reasons = evaluation_inference_results_Q.get(timeout=timeout)
+                # otherwise, wait to get the last evaluation generations (long timeout just in case)
+                timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else 100
+                eval_responses, eval_finish_reasons, masks, eval_infos = evaluation_inference_results_Q.get(
+                    timeout=timeout
+                )
                 print("[Main Thread] 📊 Evaluation responses received")
 
                 eval_sequence_lengths = np.array([len(response) for response in eval_responses])
@@ -1718,7 +1808,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     eval_ground_truths,
                     eval_dataset_names,
                     eval_finish_reasons,
-                    executor,
+                    eval_infos,
                 )
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
                 eval_metrics = {
@@ -1807,8 +1897,13 @@ if __name__ == "__main__":
         ground_truths: List[str],
         datasets: List[str],
         finish_reasons: List[str],
-        executor: ThreadPoolExecutor,
+        infos: List[List[int]],
     ) -> List[float]:
+        num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
+        good_outputs = [
+            len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
+            for i in range(len(tool_outputs))
+        ]
         scores = [0] * len(decoded_responses)
         metrics = {}
 
@@ -1830,15 +1925,11 @@ if __name__ == "__main__":
                     datasets,
                     reward_mult=args.verification_reward,
                 )
-                if len(verifiable_rewards) != len(scores):
-                    raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
                 for i in range(len(verifiable_rewards)):
-                    if args.apply_r1_style_format_reward and args.additive_format_reward:
-                        scores[i] = verifiable_rewards[i] + scores[i]
-                    elif args.apply_r1_style_format_reward and not args.additive_format_reward:
-                        scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
-                    else:
+                    if good_outputs[i] and args.only_reward_good_outputs:
                         scores[i] = verifiable_rewards[i]
+                    elif not args.only_reward_good_outputs:
+                        scores[i] = verifiable_rewards[i] + scores[i]
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
