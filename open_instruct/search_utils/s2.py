@@ -1,5 +1,6 @@
-import os
 import logging
+import os
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry

@@ -553,7 +553,7 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
             command.append("allenai")
         if not any("wandb_entity" in c for c in command):
             command.append("--wandb_entity")
-            command.append("allenai")
+            command.append("ai2-llm")
         
         dataset_cache_paths = []
         dataset_config_hashes = []
