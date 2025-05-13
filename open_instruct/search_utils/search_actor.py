@@ -12,11 +12,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import re
-import ray
 import os
+import re
 from dataclasses import dataclass
-from typing import List, Dict, Tuple, Any
+from typing import Any, Dict, List, Tuple
+
+import ray
 
 from open_instruct.search_utils.massive_ds import get_snippets_for_query
 
@@ -223,8 +224,8 @@ class LLMSearchRayActor:
 
 # Debugging code
 if __name__ == "__main__":
-    from vllm import SamplingParams
     from transformers import AutoTokenizer
+    from vllm import SamplingParams
 
     ray.init()
 

@@ -4,8 +4,9 @@ example:
 python -m open_instruct.search_utils.calculate_doc_recall --output_file /path/to/output.jsonl
 """
 
-import json
 import argparse
+import json
+
 from open_instruct.ground_truth_utils import f1_score
 
 argparser = argparse.ArgumentParser(description="Calculate recall of documents.")

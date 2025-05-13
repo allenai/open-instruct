@@ -53,7 +53,7 @@ from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
-from typing import Callable, Dict, Iterator, List, Literal, Optional, Union
+from typing import Callable, Dict, Iterator, List, Literal, Optional
 
 import numpy as np
 import pandas as pd
@@ -1825,7 +1825,7 @@ if __name__ == "__main__":
                 )
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
-                # slightly complex combo of good outputs and additive format reward            
+                # slightly complex combo of good outputs and additive format reward
                 for i in range(len(verifiable_rewards)):
                     if not args.only_reward_good_outputs or (good_outputs[i] and args.only_reward_good_outputs):
                         if args.apply_r1_style_format_reward and args.additive_format_reward:

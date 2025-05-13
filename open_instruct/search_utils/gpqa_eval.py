@@ -2,13 +2,15 @@
 Eval GPQA using the search actor.
 """
 
-import os
 import argparse
-import ray
 import json
-from vllm import SamplingParams
+import os
+
+import ray
 from datasets import load_dataset
 from transformers import AutoTokenizer
+from vllm import SamplingParams
+
 from open_instruct.search_utils.search_actor import LLMSearchRayActor
 from open_instruct.vllm_utils3 import ray_noset_visible_devices
 

@@ -2,17 +2,19 @@
 Eval short-form QA using the search actor.
 """
 
+import argparse
+import json
 import os
 import re
-import argparse
+
 import ray
-import json
-from vllm import SamplingParams
 from datasets import load_dataset
 from transformers import AutoTokenizer
+from vllm import SamplingParams
+
 from open_instruct.ground_truth_utils import f1_score
-from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 from open_instruct.search_utils.search_tool import SearchTool
+from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 
 ray.init()
 

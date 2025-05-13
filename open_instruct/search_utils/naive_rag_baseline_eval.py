@@ -6,14 +6,16 @@ python open_instruct/search_utils/naive_rag_baseline_eval.py \
     --output_dir tmp
 """
 
-import os
 import argparse
-import ray
 import json
+import os
+
+import ray
 import vllm
-from vllm import SamplingParams
 from datasets import load_dataset
 from transformers import AutoTokenizer
+from vllm import SamplingParams
+
 from open_instruct.ground_truth_utils import f1_score
 from open_instruct.search_utils.massive_ds import get_snippets_for_query
 
