@@ -1823,11 +1823,17 @@ if __name__ == "__main__":
                     datasets,
                     reward_mult=args.verification_reward,
                 )
+                if len(verifiable_rewards) != len(scores):
+                    raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
+                # slightly complex combo of good outputs and additive format reward            
                 for i in range(len(verifiable_rewards)):
-                    if good_outputs[i] and args.only_reward_good_outputs:
-                        scores[i] = verifiable_rewards[i]
-                    elif not args.only_reward_good_outputs:
-                        scores[i] = verifiable_rewards[i] + scores[i]
+                    if not args.only_reward_good_outputs or (good_outputs[i] and args.only_reward_good_outputs):
+                        if args.apply_r1_style_format_reward and args.additive_format_reward:
+                            scores[i] = verifiable_rewards[i] + scores[i]
+                        elif args.apply_r1_style_format_reward and not args.additive_format_reward:
+                            scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
+                        else:
+                            scores[i] = verifiable_rewards[i]
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
