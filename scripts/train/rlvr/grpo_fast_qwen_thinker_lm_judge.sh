@@ -5,10 +5,9 @@
 # tulu3-rewritten with ref base lm judge + ifeval: ai2-adapt-dev/tulu_3_rewritten_100k-v2-ifeval
 # general-thoughts-100k-rewritten with ref base lm judge + ifeval: ai2-adapt-dev/general-thoughts-100k-rewritten-v2-ifeval
 
-# saurab command:
+
 # exp_name="0504_qwen2.5_7B_thinker_grpo_fast_llm_judge__gpt-4o_quality_ref_${RANDOM}_large"
 exp_name="0508_qwen2.5_7B_thinker_grpo_lm_judge_gpt-41_ref_${RANDOM}_generalthought_rewritten_ifeval"
-# exp_name="0505_qwen2.5_7B_thinker_grpo_fast_llm_judge_gpt-4o_quality_ref_3188_v2/resume_from_step_250/"
 model_weka_path="/weka/oe-adapt-default/faezeb/model_checkpoints/0505_qwen2.5_7B_thinker_grpo_fast_llm_judge_gpt-4o_quality_ref_3188_v2/grpo_fast_wip__1__1746517521_checkpoints/step_250"
 python mason.py \
     --description $exp_name \
