@@ -161,7 +161,7 @@ def main(args: Args, dataset_config: DatasetConfig, gen_args: GenerationArgs):
         )
         messages = dataset["prompt"]
         responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args))
-        outputs = [{"outputs": [{"text": response} for response in responses]}]
+        outputs = [{"outputs": [{"text": r} for r in response]} for response in responses]
 
     else:
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, revision=args.revision)
