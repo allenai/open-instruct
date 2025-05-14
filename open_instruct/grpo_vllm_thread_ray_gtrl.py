@@ -1220,8 +1220,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         )
                         rm_score *= args.reward_model_multiplier
 
-                        score = verifiable_reward.copy()
-
+                        #score = verifiable_reward.copy()
+                        score = verifiable_reward
                         # Process each element based on conditions
                         for i in range(len(rm_score)):
                             # Only modify if reward_scores2[i] > 0
