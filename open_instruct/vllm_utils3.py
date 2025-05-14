@@ -143,9 +143,9 @@ class LLMRayActor:
 
             self.llm = ToolUseLLM(*args, **kwargs)
         else:
-            from vllm.engine import LLMEngine
+            from vllm import LLM
 
-            self.llm = LLMEngine(*args, **kwargs)
+            self.llm = LLM(*args, **kwargs)
 
     def generate(self, *args, **kwargs):
         return self.llm.generate(*args, **kwargs)
