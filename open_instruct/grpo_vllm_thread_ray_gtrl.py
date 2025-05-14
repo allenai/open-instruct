@@ -1219,11 +1219,24 @@ class PolicyTrainerRayProcess(RayProcess):
                             self.reward_model, reward_model_tokens, self.reward_model_tokenizer.pad_token_id, 0
                         )
                         rm_score *= args.reward_model_multiplier
+
+                        score = verifiable_reward.copy()
+
+                        # Process each element based on conditions
+                        for i in range(len(rm_score)):
+                            # Only modify if reward_scores2[i] > 0
+                            if verifiable_reward[i] > 0:
+                                if rm_score[i] > 7.0:
+                                    score[i] += 1
+                                else:
+                                    score[i] -= 0.5
+
                         print("rm_score", rm_score)
+                        print("verifiable_reward", verifiable_reward)
                         rm_rewards_only.append(rm_score)
-                        mask = verifiable_reward > 0.0
-                        print("mask", mask)
-                        score = (verifiable_reward * mask) + (rm_score * mask)
+                        #mask = verifiable_reward > 0.0
+                        #print("mask", mask)
+                        #score = (verifiable_reward * mask) + (rm_score * mask)
                         print("final_score", score)
                     else:
                         print("NO REWARD APPLIED")
