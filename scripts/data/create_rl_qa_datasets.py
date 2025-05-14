@@ -236,8 +236,7 @@ def convert_deepseek_long_form_reasoning_to_rl_format(no_prompt: bool):
         message = [ { "content": f"{question}{prompt}", "role": "user" } ]
         rl_data.append({
             "messages": message,
-            "ground_truth": example["response"],
-            "no_reasoning_ground_truth": example["response"].split("</think>")[-1],
+            "ground_truth": example["response"].split("</think>")[-1],
             "dataset": "long_re_search"})
     
     # upload to huggingface
@@ -251,8 +250,7 @@ def convert_deepseek_long_form_reasoning_to_rl_format(no_prompt: bool):
         message = [ { "content": f"{question}{prompt}", "role": "user" } ]
         rl_data.append({
             "messages": message,
-            "ground_truth": example["response"],
-            "no_reasoning_ground_truth": example["response"].split("</think>")[-1],
+            "ground_truth": example["response"].split("</think>")[-1],
             "dataset": "long_re_search"})
     
     # upload to huggingface
@@ -280,7 +278,6 @@ def convert_os_to_rl_format(no_prompt: bool):
         rl_data.append({
             "messages": message,
             "ground_truth": message[-1]["content"],
-            "no_reasoning_ground_truth": message[-1]["content"],
             "dataset": "long_re_search"})
     
     # upload to huggingface
@@ -294,7 +291,6 @@ def convert_os_to_rl_format(no_prompt: bool):
         rl_data.append({
             "messages": message,
             "ground_truth": message[-1]["content"],
-            "no_reasoning_ground_truth": message[-1]["content"],
             "dataset": "long_re_search"})
     
     # upload to huggingface

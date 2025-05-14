@@ -20,7 +20,7 @@ ray.init()
 
 parser = argparse.ArgumentParser(description="Eval SimpleQA using the search actor.")
 parser.add_argument(
-    "--dataset_name", type=str, choices=["hotpotqa", "nq", "tqa", "2wiki", "simpleqa"], help="Dataset name."
+    "--dataset_name", type=str, choices=["hotpotqa", "nq", "tqa", "2wiki", "simpleqa", "asqa", "glaiveai-reasoning-v1-1m_rl", "open_scholar_rl"], help="Dataset name."
 )
 parser.add_argument("--no_prompt", action="store_true", help="Whether to use no prompt.")
 parser.add_argument("--model_path", type=str, help="Path to the model.")
