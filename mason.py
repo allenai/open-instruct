@@ -766,6 +766,8 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
     join_full_command = " ".join(full_command)
     # override accelerate call
     if args.num_nodes > 1:
+        if "--num_processes" not in join_full_command:
+            raise ValueError("num_processes must be specified in the command for multi-node jobs.")
         join_full_command = re.sub(
             r'--num_processes (\d+)',
             lambda m: (
