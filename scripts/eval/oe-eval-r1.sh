@@ -202,7 +202,9 @@ DEFAULT_TASKS=(
     "mmlu:cot::summarize"
     "alpaca_eval_v2::tulu"
     "truthfulqa::tulu"
+    "codex_humanevalplus:0-shot-chat::tulu-thinker"
 )
+
 
 
 UNSEEN_TASKS=(
