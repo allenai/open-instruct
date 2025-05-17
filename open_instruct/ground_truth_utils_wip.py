@@ -392,12 +392,10 @@ class LMJudgeVerifier(VerifierFunction):
             float: Score between 0 and 1
         """
         # Clean prediction if needed
-        breakpoint()
         answer = extract_final_answer(prediction)
         if answer == "":
             logger.warning("Empty answer string, returning 0.0")
             return 0.0, 0.0
-        breakpoint()
         # Ensure judge_type is valid
         if self.judge_type not in JUDGE_PROMPT_MAP:
             logger.warning(f"Subtask prompt not found: {self.judge_type}, falling back to general")
@@ -446,6 +444,7 @@ class LMJudgeVerifier(VerifierFunction):
         # Clean prediction if needed
         answer = extract_final_answer(prediction)
         if answer == "":
+            # logger.warning(f"Empty answer string, returning 0.0: {prediction}\n")
             logger.warning("Empty answer string, returning 0.0")
             return 0.0, 0.0, "Empty answer string, returning 0.0"
 
