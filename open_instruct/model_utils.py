@@ -421,7 +421,6 @@ async def _process_single_response(
 
     judgment_tasks = []
     for gt, ds in zip(ground_truth_list, dataset_list):
-        # Split dataset name, e.g., "general-quality" -> ["general", "quality"]
         verifier_name_parts = ds.lower().split("-")
         verifier_name = verifier_name_parts[0]
         # Determine the specific judge type for LMJudgeVerifier if provided in ds name
@@ -532,7 +531,7 @@ async def _process_single_response(
         logger.info("Applying reward for dataset %s (verifier: %s, judge_type: %s) 🤗", ds, verifier_name_parts[0], ds_judge_type)
 
         # Determine reward multiplier (e.g., don't multiply reference scores)
-        actual_reward_mult = 1.0 if "ref" in ds_judge_type else reward_mult
+        actual_reward_mult = 1.0 if ds_judge_type in ["quality_ref", "quality"] else reward_mult
         reward_value = actual_reward_mult * reward_result * weight
 
         reward += reward_value
