@@ -183,7 +183,6 @@ class BaseJudge:
             reasoning = ""
             score = 0.0
 
-        # breakpoint()
 
         # check if cost/response_time is available
         try:
