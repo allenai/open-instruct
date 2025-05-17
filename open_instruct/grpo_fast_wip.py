@@ -1688,7 +1688,7 @@ if __name__ == "__main__":
         queries: Optional[List[str]] = None,
     ) -> List[float]:
         scores = [0] * len(decoded_responses)
-        judge_reasonings = [""] * len(decoded_responses)
+        # judge_reasonings = [""] * len(decoded_responses)
         metrics = {}
         # breakpoint()
 
@@ -1752,7 +1752,6 @@ if __name__ == "__main__":
                     raise ValueError(f"{len(llm_judge_rewards)=} != {len(scores)=}")
                 for i in range(len(llm_judge_rewards)):
                     scores[i] = llm_judge_rewards[i] + scores[i]
-                    judge_reasonings[i] = judge_reasoning
 
                 np_llm_judge_rewards = np.array(llm_judge_rewards)
                 np_api_cost = np.array(api_cost)
@@ -1769,7 +1768,7 @@ if __name__ == "__main__":
                 for key, value in per_func_lists.items():
                     np_value = np.array(value)
                     metrics[f"objective/{key}_reward"] = np_value.mean() 
-                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean() if "ref" not in key else (np_value > 5.0).mean()
+                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean() if key not in ["general-quality", "general-quality_ref"] else (np_value > 5.0).mean()
 
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
@@ -1804,6 +1803,7 @@ if __name__ == "__main__":
                 metrics["objective/arithmetic_score"] = np.array(arithmetic_rewards).mean()
                 metrics["objective/arithmetic_correct_rate"] = (np.array(arithmetic_rewards) > 0.0).mean()
 
-        return scores, metrics, judge_reasonings
+
+        return scores, metrics, judge_reasoning
 
     main(args, tokenizer_config, model_config, reward_fn)
