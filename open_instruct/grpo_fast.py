@@ -623,7 +623,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 bf16=True,
             )
             ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-            ds_config["train_batch_size"] = args.mini_batch_size
+            ds_config["train_batch_size"] = args.per_device_train_batch_size / args.num_mini_batches
             self.reward_model, *_ = deepspeed.initialize(model=self.reward_model, config=ds_config)
             self.reward_model.eval()
 
