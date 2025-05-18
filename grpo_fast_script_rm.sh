@@ -12,11 +12,11 @@ reward_model_revision="main"
 exp_name="test_rm_during_grpo"
 python mason.py \
     --description $exp_name \
-    --cluster ai2/jupiter-cirrascale-2 \
+    --cluster ai2/saturn-cirrascale \
     --workspace ai2/tulu-3-results \
     --priority high \
     --preemptible \
-    --num_nodes 4 \
+    --num_nodes 1 \
     --max_retries 0 \
     --budget ai2/oe-adapt \
     --image ai2/cuda11.8-cudnn8-dev-ubuntu20.04 \
