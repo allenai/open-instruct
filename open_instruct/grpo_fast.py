@@ -69,6 +69,8 @@ from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
 from transformers import (
     AutoModelForCausalLM,
+    AutoModelForSequenceClassification,
+    AutoTokenizer,
     PreTrainedModel,
     PreTrainedTokenizer,
     get_scheduler,
@@ -234,6 +236,14 @@ class Args:
     """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
     divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
+    reward_model_path: str = "EleutherAI/pythia-160m"
+    """the path to the reward model"""
+    reward_model_revision: Optional[str] = None
+    """the revision of the reward model"""
+    reward_model_tokenizer_path: str = "EleutherAI/pythia-160m"
+    """the path to the reward model's tokenizer"""
+    reward_model_tokenizer_revision: Optional[str] = None
+    """the revision of the reward model's tokenizer"""
 
     # Reward
     # -- r1 style format reward
@@ -243,6 +253,10 @@ class Args:
     """the reward value for R1 style format reward"""
     additive_format_reward: bool = False
     """whether to add the format reward to the final reward"""
+    reward_model_multiplier: float = 1.0
+    """the reward model multiplier, for down/upscaling the reward model output"""
+    reward_model_batch_size: int = 8
+    """the batch size for the reward model"""
 
     # -- verifiable reward
     apply_verifiable_reward: bool = True
@@ -577,6 +591,42 @@ class PolicyTrainerRayProcess(RayProcess):
         disable_dropout_in_model(self.ref_policy)
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
         self.ref_policy.eval()
+
+        # reward model
+        if args.reward_model_multiplier:
+            self.reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
+                args.reward_model_path,
+                revision=args.reward_model_revision,
+                num_labels=1,
+                torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2",
+                use_cache=False,
+            )
+            self.reward_model_tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(
+                args.reward_model_tokenizer_path,
+                revision=args.reward_model_tokenizer_revision
+            )
+            self.reward_model_vocab_size = self.reward_model.config.vocab_size
+            if self.policy.config.vocab_size != self.reward_model_vocab_size:
+                raise ValueError(
+                    "Policy and reward model must have the same vocab size. "
+                    f"Policy: {self.policy.config.vocab_size}, Reward: {self.reward_model_vocab_size}. "
+                    "If they don't have the same vocab size, the policy could generate tokens which "
+                    "is going to cause index out of bound error in the reward model."
+                )
+            disable_dropout_in_model(self.reward_model)
+            ds_config = get_eval_ds_config(
+                offload=False,
+                # inference model only has stage 3 (sharding) or stage 0 (no sharding)
+                # stage 2 is optimizer sharding which doesn't apply to inference
+                stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
+                bf16=True,
+            )
+            ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
+            ds_config["train_batch_size"] = args.mini_batch_size
+            self.reward_model, *_ = deepspeed.initialize(model=self.reward_model, config=ds_config)
+            self.reward_model.eval()
+
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
         return optimization_steps_done
 
@@ -698,6 +748,43 @@ class PolicyTrainerRayProcess(RayProcess):
                         ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
             else:
                 ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
+
+    def get_rewards_from_model(self, prompt_response_batch: List[List[dict]]) -> np.ndarray:
+        """
+        Calculates rewards for a batch of padded (query + postprocessed_response) sequences
+        using the self.reward_model (a standard sequence classifier).
+        """
+        if not hasattr(self, 'reward_model') or not self.args.reward_model_multiplier:
+            return np.zeros(len(prompt_response_batch), dtype=np.float32)
+        
+        formatted_strings = []
+        for elem in prompt_response_batch:
+            formatted_strings.append(
+                self.reward_model_tokenizer.apply_chat_template(
+                    elem,
+                    tokenize=False,
+                    add_generation_prompt=False
+                )
+            )
+
+        with torch.no_grad():
+            inputs = self.reward_model_tokenizer(
+                formatted_strings,
+                return_tensors="pt",
+                padding=True,
+                # TODO: truncation?
+            ).to(self.device)
+
+            # attention_mask = (input_tensor_device != pad_token_id).long()
+
+            outputs = self.reward_model(
+                input_ids=inputs,
+                return_dict=True
+            )
+            raw_scores = outputs.logits.squeeze(-1) # Shape: (batch_size,)
+            scaled_scores = raw_scores * self.args.reward_model_multiplier
+
+        return scaled_scores.cpu().numpy()
 
     def train(
         self,
@@ -1070,6 +1157,12 @@ def vllm_generate_thread(
             )
             evaluation_inference_results_Q.put((response_ids, finish_reasons, masks, info))
 
+def parse_prediction_for_reward_model(prediction: str):
+    # remove thinking section from the prediction
+    cleaned_prediction = prediction.split("</think>")[-1]
+    # remove answer tags from the prediction
+    cleaned_prediction = cleaned_prediction.replace("<answer>", "").replace("</answer>", "")
+    return cleaned_prediction
 
 def data_preparation_thread(
     reward_fn: Callable,
@@ -1079,6 +1172,7 @@ def data_preparation_thread(
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
+    policy_actors: List[ray.actor.ActorHandle],
 ):
     for training_step in range(1, num_training_steps + 1):
         # Get next batch of prompts and responses
@@ -1113,8 +1207,47 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
+            neural_model_scores_np = np.array([0.0] * len(responses), dtype=np.float32) # Default
+
+            if args.reward_model_multiplier > 0 and policy_actors:
+                decoded_queries = tokenizer.batch_decode(queries, skip_special_tokens=True)
+                all_combined_sequences_for_rm = []
+                for i in range(len(responses)):
+                    query = decoded_queries[i]
+                    response = parse_prediction_for_reward_model(decoded_responses[i]) # Decoded response
+
+                    # Need to format and tokenizer while scoring
+                    all_combined_sequences_for_rm.append(
+                        [
+                            {"role": "user", "content": query},
+                            {"role": "assistant", "content": response},
+                        ]
+                    )
+
+                if all_combined_sequences_for_rm:
+                    temp_neural_scores_collector = []
+
+                    for i in range(0, len(all_combined_sequences_for_rm), args.reward_model_batch_size):
+                        current_rm_batch_sequences = all_combined_sequences_for_rm[i:i + args.reward_model_batch_size]
+                        try:
+                            batch_scores_np = ray.get(
+                                policy_actors[0].get_rewards_from_model.remote(
+                                    current_rm_batch_sequences
+                                )
+                            )
+                            temp_neural_scores_collector.extend(list(batch_scores_np))
+                        except Exception as e:
+                            print(f"Warning: RM scoring error for batch: {e}. Using zeros.")
+                            temp_neural_scores_collector.extend([0.0] * len(current_rm_batch_sequences))
+
+                    if len(temp_neural_scores_collector) == len(responses):
+                        neural_model_scores_np = np.array(temp_neural_scores_collector, dtype=np.float32)
+                    else:
+                        print(f"Critical Warning: Length mismatch in collected neural scores. Expected {len(responses)}, got {len(temp_neural_scores_collector)}.")
+                        # neural_model_scores_np remains zeros or handle error appropriately
+
             scores, reward_metrics = reward_fn(
-                responses, decoded_responses, ground_truths, datasets, finish_reasons, infos
+                responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, neural_model_scores_np,
             )
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
@@ -1132,6 +1265,8 @@ def data_preparation_thread(
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved
             max_possible_score = 0
+            if args.reward_model_multiplier:
+                max_possible_score += 1.0 * args.reward_model_multiplier # TODO: Will we have RMs with a higher max score?
             if args.apply_verifiable_reward:
                 max_possible_score += args.verification_reward
             if args.apply_r1_style_format_reward and args.additive_format_reward:
@@ -1547,6 +1682,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             args,
             tokenizer,
             args.num_training_steps,
+            policy_group.models,
         ),
     )
     packing_thread.start()
@@ -1796,13 +1932,15 @@ if __name__ == "__main__":
         datasets: List[str],
         finish_reasons: List[str],
         infos: List[List[int]],
+        neural_model_scores: np.ndarray,
     ) -> List[float]:
         num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
         good_outputs = [
             len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
             for i in range(len(tool_outputs))
         ]
-        scores = [0] * len(decoded_responses)
+        # scores = [0] * len(decoded_responses)
+        scores = list(neural_model_scores.astype(np.float32)) # Start with neural scores
         metrics = {}
 
         if args.apply_r1_style_format_reward:
