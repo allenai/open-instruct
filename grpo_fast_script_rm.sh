@@ -33,7 +33,6 @@ python mason.py \
     --model_name_or_path Qwen/Qwen2.5-7B \
     --oe_eval_tasks minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,alpaca_eval_v2::tulu,ifeval::tulu,popqa::tulu,drop::llama3,codex_humanevalplus::tulu,mmlu:cot::summarize \
     --output_dir /weka/oe-adapt-default/jacobm/llm-as-a-judge/checkpoints/rm-vs-llm/${exp_name} \
-    --apply_llm_verifier_reward false \
     --apply_verifiable_reward false \
     --apply_r1_style_format_reward true \
     --reward_model_path allenai/open_instruct_dev \
