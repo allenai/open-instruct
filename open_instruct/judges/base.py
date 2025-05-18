@@ -164,25 +164,26 @@ class BaseJudge:
             client=client
         )
         # breakpoint()
-        if completion:
-            try:
-                data = json.loads(completion.choices[0].message.content)
-                reasoning = data.get("REASONING", "")
-                score = data.get("SCORE", 0.0)
-            except json.JSONDecodeError:
-                print(
-                    f"Model did not return a valid JSON response. Response: {completion.choices[0].message.content}")
-                reasoning = ""
-                score = extract_score_from_string(completion.choices[0].message.content) if isinstance(completion.choices[0].message.content, str) else 0.0
-            except AttributeError:
-                print(f"Model returned JSON without REASONING or SCORE. Response: {completion.choices[0].message.content}")
-                reasoning = ""
-                score = extract_score_from_string(completion.choices[0].message.content) if isinstance(completion.choices[0].message.content, str) else 0.0
-        else:
-            print("No completion received from the model.")
-            reasoning = ""
-            score = 0.0
-
+        # if completion:
+        #     try:
+        #         data = json.loads(completion.choices[0].message.content)
+        #         reasoning = data.get("REASONING", "")
+        #         score = data.get("SCORE", 0.0)
+        #     except json.JSONDecodeError:
+        #         print(
+        #             f"Model did not return a valid JSON response. Response: {completion.choices[0].message.content}")
+        #         reasoning = ""
+        #         score = extract_score_from_string(completion.choices[0].message.content) if isinstance(completion.choices[0].message.content, str) else 0.0
+        #     # Attribute or Type error
+        #     except (AttributeError, TypeError):
+        #         print(f"Model returned JSON without REASONING or SCORE. Response: {completion.choices[0].message.content}")
+        #         reasoning = ""
+        #         score = extract_score_from_string(completion.choices[0].message.content) if isinstance(completion.choices[0].message.content, str) else 0.0
+        # else:
+        #     print("No completion received from the model.")
+        #     reasoning = ""
+        #     score = 0.0
+        reasoning, score = extract_completion_data(completion)
 
         # check if cost/response_time is available
         try:
@@ -326,3 +327,53 @@ def extract_score_from_string(score_str: str) -> float:
     else:
         print(f"Could not parse score from: {score_str}, defaulting to 0.0")
         return 0.0
+    
+    
+def extract_completion_data(completion):
+    """
+    Extract reasoning and score from an OpenAI API completion response.
+    
+    Args:
+        completion: The OpenAI API completion response object
+        
+    Returns:
+        tuple: (reasoning, score) extracted from the response
+    """
+    reasoning = ""
+    score = 0.0
+    
+    # Check if completion exists
+    if not completion:
+        print("No completion received from the model.")
+        return reasoning, score
+    
+    try:
+        # Get the response content
+        content = completion.choices[0].message.content
+        
+        # Try to parse as JSON first
+        try:
+            data = json.loads(content)
+            # Check if data is a dictionary and contains the expected fields
+            if isinstance(data, dict):
+                reasoning = data.get("REASONING", "")
+                score = float(data.get("SCORE", 0.0))
+                return reasoning, score
+        except (json.JSONDecodeError, TypeError, ValueError):
+            # Not valid JSON or missing fields, will fall through to string parsing
+            pass
+        
+        # If we get here, JSON parsing failed, so try to extract score from string
+        if isinstance(content, str):
+            reasoning = content
+            # Try to extract score from the string content
+            extracted_score = extract_score_from_string(content)
+            if extracted_score is not None:
+                score = extracted_score
+            
+    except Exception as e:
+        print(f"Error processing model response: {str(e)}")
+        if hasattr(completion, 'choices') and len(completion.choices) > 0:
+            print(f"Response content: {getattr(completion.choices[0].message, 'content', 'No content available')}")
+    
+    return reasoning, score
