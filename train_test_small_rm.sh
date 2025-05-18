@@ -6,7 +6,7 @@ do
   do
     echo "Running with LR=${LR} and NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS} and seed ${seed}"
     python mason.py \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/saturn-cirrascale \
     --workspace ai2/reward-bench-v2 \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
