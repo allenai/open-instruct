@@ -14,8 +14,8 @@ reward_model_revision="rm_qwen2p5_base_0p5b_1e-6_1_skyworkstulufull__1__17476012
 exp_name="test_rm_during_grpo"
 python mason.py \
     --description $exp_name \
-    --cluster ai2/saturn-cirrascale \
-    --workspace ai2/tulu-3-results \
+    --cluster ai2/augusta-google-1 \
+    --workspace ai2/scaling-rl \
     --priority high \
     --preemptible \
     --num_nodes 1 \
