@@ -15,7 +15,7 @@ exp_name="test_rm_during_grpo"
 python mason.py \
     --description $exp_name \
     --cluster ai2/saturn-cirrascale \
-    --workspace ai2/scaling-rl \
+    --workspace ai2/tulu-3-results \
     --priority high \
     --preemptible \
     --num_nodes 1 \
