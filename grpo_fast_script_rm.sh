@@ -21,7 +21,7 @@ python mason.py \
     --num_nodes 1 \
     --max_retries 0 \
     --budget ai2/oe-adapt \
-    --image ai2/cuda11.8-cudnn8-dev-ubuntu20.04 \
+    --image nathanl/open_instruct_auto \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --dataset_mixer_list jacobmorrison/tulu_3_rewritten_53k_no_verifiable 5000 \
     --dataset_mixer_list_splits train \
