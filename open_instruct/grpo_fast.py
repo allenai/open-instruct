@@ -470,6 +470,7 @@ class PolicyTrainerRayProcess(RayProcess):
         wandb_url: str,
         tokenizer: PreTrainedTokenizer,
     ):
+        print("starting policy trainer")
         # ------------------------------------------------------------
         # Monkey patch to load checkpoints with `weights_only=False`
         # otherwise it errors out with:
@@ -495,6 +496,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.device = torch.device(self.local_rank)
         deepspeed.init_distributed()
 
+        print("loading policy model")
         ds_config = get_train_ds_config(
             offload=False,
             adam_offload=False,
@@ -567,6 +569,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 )
         self.model.train()
 
+        print("loading reference model")
         # reference model
         ds_config = get_eval_ds_config(
             offload=False,
@@ -594,6 +597,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # reward model
         if args.reward_model_multiplier:
+            print("loading reward model")
             self.reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
                 args.reward_model_path,
                 revision=args.reward_model_revision,
@@ -628,6 +632,7 @@ class PolicyTrainerRayProcess(RayProcess):
             self.reward_model, *_ = deepspeed.initialize(model=self.reward_model, config=ds_config)
             self.reward_model.eval()
 
+        print("finalizing policy process thing")
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
         return optimization_steps_done
 
@@ -1545,8 +1550,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     # Runtime setups and quick logging
     pprint([args, model_config])
 
+    print("printed configs")
     # ------------------------------------------------------------
     # Create the model and optimizer
+    print("creating model and optimizer")
     ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
     pg = None
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
@@ -1591,6 +1598,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
+    print("creating vllm engines")
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
