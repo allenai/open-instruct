@@ -7,8 +7,8 @@ rm_revision=rm_llama_3e-6_1_skyworkstulufull__2__1744311461
 exp_name="0506_grpo_sftbase_${beta}_rm_llama_3e-6_1_stfull__2__1744311461"
 python mason.py \
     --cluster ai2/augusta-google-1 \
-    --workspace ai2/reward-bench-v2 \
-    --priority high \
+    --workspace ai2/scaling-rl \
+    --priority normal \
     --preemptible \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --budget ai2/oe-adapt \
