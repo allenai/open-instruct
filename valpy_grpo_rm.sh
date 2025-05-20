@@ -1,8 +1,8 @@
 python mason.py \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/scaling-rl \
-    --priority high \
-    --image valpy/open_instruct_dev_multi --pure_docker_mode \
+    --priority normal \
+    --image ai2/cuda11.8-cudnn8-dev-ubuntu20.04 --pure_docker_mode \
     --preemptible \
     --num_nodes 4 \
     --budget ai2/oe-adapt \
@@ -46,3 +46,6 @@ python mason.py \
     --try_launch_beaker_eval_jobs_on_weka \
     --gradient_checkpointing \
     --with_tracking
+
+    # ai2/cuda11.8-cudnn8-dev-ubuntu20.04
+    # valpy/open_instruct_dev_multi
