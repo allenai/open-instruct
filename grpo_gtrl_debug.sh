@@ -13,10 +13,10 @@ python mason.py \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --budget ai2/oe-adapt \
     --num_nodes 2 \
-    --num_processes 16 \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --exp_name $exp_name \
-    --beta $beta \
+    --beta 0.01 \
+    --num_processes 16 \
     --output_dir /output \
     --try_launch_beaker_eval_jobs_on_weka \
     --try_launch_beaker_eval_jobs False \
