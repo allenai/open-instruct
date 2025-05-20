@@ -1777,8 +1777,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
-        ray_actor_class=LLMSearchRayActor if args.use_search_actor else LLMRayActor,
-        additional_ray_actor_kwargs=additional_ray_actor_kwargs,
+        # ray_actor_class=LLMSearchRayActor if args.use_search_actor else LLMRayActor,
+        # additional_ray_actor_kwargs=additional_ray_actor_kwargs,
     )
 
     metrics_queue = RayQueue()
