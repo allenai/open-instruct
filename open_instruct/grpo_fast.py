@@ -253,6 +253,8 @@ class Args:
     """the reward value for R1 style format reward"""
     additive_format_reward: bool = False
     """whether to add the format reward to the final reward"""
+    use_reward_model: bool = False
+    """whether to also use a reward model"""
     reward_model_multiplier: float = 1.0
     """the reward model multiplier, for down/upscaling the reward model output"""
     reward_model_batch_size: int = 8
@@ -596,7 +598,8 @@ class PolicyTrainerRayProcess(RayProcess):
         self.ref_policy.eval()
 
         # reward model
-        if args.reward_model_multiplier:
+        # if args.reward_model_multiplier:
+        if args.use_reward_model:
             print("loading reward model")
             self.reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
                 args.reward_model_path,
@@ -760,7 +763,7 @@ class PolicyTrainerRayProcess(RayProcess):
         Calculates rewards for a batch of padded (query + postprocessed_response) sequences
         using the self.reward_model (a standard sequence classifier).
         """
-        if not hasattr(self, 'reward_model') or not self.args.reward_model_multiplier:
+        if not hasattr(self, 'reward_model') or not args.use_reward_model:
             return np.zeros(len(prompt_response_batch), dtype=np.float32)
         
         formatted_strings = []
@@ -1215,7 +1218,7 @@ def data_preparation_thread(
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
             neural_model_scores_np = np.array([0.0] * len(responses), dtype=np.float32) # Default
 
-            if args.reward_model_multiplier > 0 and policy_actors:
+            if args.use_reward_model and policy_actors:
                 decoded_queries = tokenizer.batch_decode(queries, skip_special_tokens=True)
                 all_combined_sequences_for_rm = []
                 for i in range(len(responses)):
@@ -1271,7 +1274,7 @@ def data_preparation_thread(
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved
             max_possible_score = 0
-            if args.reward_model_multiplier:
+            if args.use_reward_model:
                 max_possible_score += 1.0 * args.reward_model_multiplier # TODO: Will we have RMs with a higher max score?
             if args.apply_verifiable_reward:
                 max_possible_score += args.verification_reward

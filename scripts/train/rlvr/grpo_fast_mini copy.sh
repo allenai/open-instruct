@@ -31,10 +31,10 @@ python open_instruct/grpo_fast.py \
     --beta 0.01 \
     --seed 3 \
     --num_evals 20 \
-    --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.3 \
     --save_traces \
     --vllm_enforce_eager \
     --gradient_checkpointing \
+    --vllm_sync_backend gloo \
+    --vllm_gpu_memory_utilization 0.3 \
     --single_gpu_mode \
     # --with_tracking

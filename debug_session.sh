@@ -12,17 +12,7 @@ reward_model_revision="rm_qwen2p5_base_0p5b_1e-6_1_skyworkstulufull__1__17476012
 # exp_name="0504_qwen2.5_7B_thinker_grpo_fast_llm_judge__gpt-4o_quality_ref_${RANDOM}_large"
 # exp_name="0508_qwen2.5_7B_thinker_grpo_rm_judge_${RANDOM}_tulu_3_rewritten_no_verifiable"
 exp_name="test_rm_during_grpo"
-python mason.py \
-    --description $exp_name \
-    --cluster ai2/saturn-cirrascale \
-    --workspace ai2/scaling-rl \
-    --priority high \
-    --preemptible \
-    --num_nodes 1 \
-    --max_retries 0 \
-    --budget ai2/oe-adapt \
-    --image ai2/cuda11.8-cudnn8-dev-ubuntu20.04 \
-    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+python open_instruct/grpo_fast.py \
     --dataset_mixer_list jacobmorrison/tulu_3_rewritten_53k_no_verifiable 5000 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list jacobmorrison/tulu_3_rewritten_53k_no_verifiable 128 \
@@ -38,7 +28,7 @@ python mason.py \
     --oe_eval_tasks minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,alpaca_eval_v2::tulu,ifeval::tulu,popqa::tulu,drop::llama3,codex_humanevalplus::tulu,mmlu:cot::summarize \
     --output_dir /weka/oe-adapt-default/jacobm/llm-as-a-judge/checkpoints/rm-vs-llm/${exp_name} \
     --apply_verifiable_reward false \
-    --apply_r1_style_format_reward true \
+    --apply_r1_style_format_reward false \
     --reward_model_path allenai/open_instruct_dev \
     --reward_model_revision $reward_model_revision \
     --reward_model_tokenizer_path allenai/open_instruct_dev \
@@ -46,10 +36,8 @@ python mason.py \
     --non_stop_penalty True \
     --non_stop_penalty_value 0.0 \
     --temperature 0.7 \
-    --ground_truths_key ground_truth \
     --oe_eval_max_length 8192 \
     --chat_template_name tulu_thinker_r1_style \
-    --use_reward_model true \
     --kl_estimator kl3 \
     --learning_rate 5e-6 \
     --total_episodes 520000 \
@@ -71,3 +59,20 @@ python mason.py \
     --with_tracking \
     --hf_entity allenai \
     --wandb_entity ai2-llm 
+
+# python open_instruct/grpo_fast.py \
+#     --exp_name $exp_name \
+#     --output_dir output/dummy \
+#     --dataset_mixer_list nouhad/multiplication_test_100_2x2 1.0 \
+#     --dataset_mixer_list_splits train \
+#     --dataset_mixer_eval_list nouhad/multiplication_test_100_2x2 1.0 \
+#     --dataset_mixer_eval_list_splits train \
+#     --max_token_length 512 \
+#     --max_prompt_token_length 256 \
+#     --response_length 256 \
+#     --pack_length 512 \
+#     --stop_strings "</answer>" \
+#     --save_traces \
+#     --vllm_enforce_eager \
+#     --gradient_checkpointing \
+#     --single_gpu_mode \
