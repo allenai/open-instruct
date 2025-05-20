@@ -118,7 +118,7 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     upload_metadata_to_hf,
-    create_snippet_mask,
+    # create_snippet_mask,
 )
 from open_instruct.vllm_utils3 import LLMRayActor, create_vllm_engines, init_process_group
 from open_instruct.search_utils.search_actor import LLMSearchRayActor
