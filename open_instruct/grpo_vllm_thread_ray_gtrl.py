@@ -56,7 +56,6 @@ import time
 from argparse import Namespace
 from collections import deque
 from dataclasses import asdict, dataclass, field
-from itertools import chain
 from queue import Empty, Queue
 from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
 
@@ -76,6 +75,8 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
 from transformers import (
+    AutoConfig,
+    AutoTokenizer,
     AutoModelForCausalLM,
     AutoModelForSequenceClassification,
     PreTrainedModel,
@@ -118,10 +119,8 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     upload_metadata_to_hf,
-    # create_snippet_mask,
 )
-from open_instruct.vllm_utils3 import LLMRayActor, create_vllm_engines, init_process_group
-from open_instruct.search_utils.search_actor import LLMSearchRayActor
+from open_instruct.vllm_utils2 import create_vllm_engines, init_process_group
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -265,8 +264,6 @@ class Args:
     """whether to add the R1 style format reward"""
     r1_style_format_reward: float = 1.0
     """the reward value for R1 style format reward"""
-    add_query_reward: bool = False
-    """whether to add the query reward"""
 
     # async setting
     async_mode: bool = True
@@ -334,21 +331,8 @@ class Args:
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
 
-    # rl-rag settings
-    use_search_actor: bool = False
-    """Whether to use the search actor for RL-RAG"""
-    mask_snippet_loss: bool = False
-    """Whether to mask the loss for tokens within <document>...</document> tags.
-    This is useful for training with search functionality where snippets should not contribute to the loss."""
-    max_searches: int = 5
-    """The maximum number of searches to perform for each query."""
-    number_documents_to_search: int = 10
-    """The maximum number of documents to retrieve for each query."""
-
     def __post_init__(self):
-        assert self.number_samples_per_prompt > 0, "Number of samples per prompt must be greater than 0!"
-        if self.number_samples_per_prompt == 1:
-            print("WARNING: number_samples_per_prompt is 1. This reduces GRPO to REINFORCE. ")
+        assert self.number_samples_per_prompt > 1, "Number of samples per prompt must be greater than 1 for GRPO!"
 
 
 def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
@@ -651,7 +635,7 @@ class RayProcess:
 @ray.remote(num_gpus=1)
 class PolicyTrainerRayProcess(RayProcess):
     def from_pretrained(
-        self, args: Args, model_config: ModelConfig, beaker_config: BeakerRuntimeConfig, wandb_url: str
+        self, args: Args, model_config: ModelConfig, beaker_config: BeakerRuntimeConfig, wandb_url: str, tokenizer: PreTrainedTokenizer
     ):
         self.args = args
         self.model_config = model_config
@@ -757,13 +741,13 @@ class PolicyTrainerRayProcess(RayProcess):
                 use_cache=False,
             )
             self.reward_model_vocab_size = self.reward_model.config.vocab_size
-            if self.policy_vocab_size != self.reward_model_vocab_size:
-                raise ValueError(
-                    "Policy and reward model must have the same vocab size. "
-                    f"Policy: {self.policy_vocab_size}, Reward: {self.reward_model_vocab_size}. "
-                    "If they don't have the same vocab size, the policy could generate tokens which "
-                    "is going to cause index out of bound error in the reward model."
-                )
+            # if self.policy_vocab_size != self.reward_model_vocab_size:
+            #     raise ValueError(
+            #         "Policy and reward model must have the same vocab size. "
+            #         f"Policy: {self.policy_vocab_size}, Reward: {self.reward_model_vocab_size}. "
+            #         "If they don't have the same vocab size, the policy could generate tokens which "
+            #         "is going to cause index out of bound error in the reward model."
+            #     )
             disable_dropout_in_model(self.reward_model)
             ds_config = get_eval_ds_config(
                 offload=False,
@@ -776,6 +760,20 @@ class PolicyTrainerRayProcess(RayProcess):
             ds_config["train_batch_size"] = args.mini_batch_size
             self.reward_model, *_ = deepspeed.initialize(model=self.reward_model, config=ds_config)
             self.reward_model.eval()
+            self.reward_model_tokenizer = AutoTokenizer.from_pretrained(
+                args.reward_model_path, revision=args.reward_model_revision, padding_side="right"
+            )
+            reward_model_config = AutoConfig.from_pretrained(
+                args.reward_model_path, revision=args.reward_model_revision, num_labels=1
+            )
+            if reward_model_config.architectures == "LlamaForCausalLM" and reward_model_config.bos_token_id == 128000:
+                self.reward_model_tokenizer.pad_token_id = 128002
+            else:
+                self.reward_model_tokenizer.add_special_tokens({"pad_token": "[PAD]"})
+
+            # if reward model does not have a chat template, use the same as the policy model
+            if self.reward_model_tokenizer.chat_template is None:
+                self.reward_model_tokenizer.chat_template = tokenizer.chat_template
 
         assert (
             args.reward_model_multiplier or args.apply_verifiable_reward
@@ -817,10 +815,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # get list of all reward types in dataset, used for logging
         # sorted to make sure the order is consistent
-        # have to handle case where dataset is a list of values.
-        dataset_column = train_dataset["dataset"]
-        all_datasets = chain.from_iterable(d if isinstance(d, list) else [d] for d in dataset_column)
-        reward_types = sorted(set(all_datasets))
+        reward_types = sorted(list(set(train_dataset.unique("dataset"))))
 
         args = self.args
         self.tokenizer = tokenizer
@@ -1119,11 +1114,12 @@ class PolicyTrainerRayProcess(RayProcess):
             torch.cuda.empty_cache()
             # if we generate multiple samples per prompt, we need to repeat the queries and ground truths
             # to match the vllm outputs.
+            messages = data["messages"]
             if args.number_samples_per_prompt > 1:
                 queries = queries.repeat_interleave(args.number_samples_per_prompt, dim=0)
                 ground_truths = [gt for gt in ground_truths for _ in range(args.number_samples_per_prompt)]
                 datasets = [ds for ds in datasets for _ in range(args.number_samples_per_prompt)]
-
+                messages = [msg for msg in messages for _ in range(args.number_samples_per_prompt)]
             training_time_start = time.time()
             with torch.no_grad():
                 context_length = queries.shape[1]
@@ -1133,6 +1129,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 scores = []
                 verifiable_counts = []
                 sequence_lengths = []
+                rm_rewards_only = []
                 per_func_rewards = {k: [] for k in reward_types}
                 if self.rank == 0:
                     g_response_token_ids = response_ids_Q.get()
@@ -1150,22 +1147,13 @@ class PolicyTrainerRayProcess(RayProcess):
                     accelerator.process_index * queries.shape[0] : (accelerator.process_index + 1) * queries.shape[0]
                 ]
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
-                decoded_response = tokenizer.batch_decode(local_vllm_responses)
-                # adding a reward for using a query
-                if args.add_query_reward:
-                    query_scores = torch.zeros(queries.shape[0], device=device)
-                    for i, resp in enumerate(decoded_response):
-                        # check for query tags AND that the query is not empty
-                        if (
-                            "<query>" in resp
-                            and "</query>" in resp
-                            and len(resp.split("<query>")[1].split("</query>")[0]) > 0
-                        ):
-                            query_scores[i] = 10.0
+
                 if args.add_r1_style_format_reward:
+                    decoded_response = tokenizer.batch_decode(local_vllm_responses)
                     format_scores = torch.tensor(
                         soft_format_reward_func(decoded_response, args.r1_style_format_reward), device=device
                     )
+
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
                     query = queries[i : i + args.local_rollout_forward_batch_size]
                     query_response = query_responses[i : i + args.local_rollout_forward_batch_size]
@@ -1189,38 +1177,73 @@ class PolicyTrainerRayProcess(RayProcess):
                             args.stop_token_id, tokenizer.pad_token_id, response
                         )
                     # Response Processing 2. run reward model on the truncated responses
-                    postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
+                    #postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
                     score = torch.zeros(query.shape[0], device=query.device)
-                    if args.reward_model_multiplier:
-                        _, score, _ = get_reward(
-                            self.reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
-                        )
-                        score *= args.reward_model_multiplier
                     if args.apply_verifiable_reward:
                         # we need to batch the gt to match query.
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
                         decoded_response = tokenizer.batch_decode(postprocessed_response)
                         verifiable_reward, per_func_reward = apply_verifiable_reward(
-                            responses=[seq[seq != tokenizer.pad_token_id].tolist() for seq in postprocessed_response],
+                            responses=postprocessed_response,
                             decoded_responses=decoded_response,
                             ground_truths=ground_truth,
                             datasets=dataset,
                             reward_mult=args.verification_reward,
                         )
                         verifiable_reward = torch.tensor(verifiable_reward, device=score.device)
+                        #print(f"decoded_response: {verifiable_reward.item()}")
                         verifiable_count = verifiable_reward > 0
                         score += verifiable_reward
                         # For each sample, aggregate each per-function reward into a single dict.
                         for reward_dict in per_func_reward:
                             for key, value in reward_dict.items():
                                 per_func_rewards[key].append(value)
+                    #if args.reward_model_multiplier and verifiable_reward.item() > 0:
+                    if args.reward_model_multiplier:
+                        print("APPLYING REWARD MODEL")
+                        response_txts = tokenizer.batch_decode(postprocessed_response, skip_special_tokens=True)
+                        reward_model_tokens = []
+                        for j in range(i, i + args.local_rollout_forward_batch_size):
+                            messages[j].append({"role": "assistant", "content": response_txts[j - i]})
+                            reward_model_tokens.append(self.reward_model_tokenizer.apply_chat_template(messages[j]))
+                        # right pad the reward model tokens
+                        max_reward_model_len = max(len(item) for item in reward_model_tokens)
+                        reward_model_tokens = [
+                            item + [self.reward_model_tokenizer.pad_token_id] * (max_reward_model_len - len(item))
+                            for item in reward_model_tokens
+                        ]
+                        reward_model_tokens = torch.tensor(reward_model_tokens, device=device)
+                        _, rm_score, _ = get_reward(
+                            self.reward_model, reward_model_tokens, self.reward_model_tokenizer.pad_token_id, 0
+                        )
+                        rm_score *= args.reward_model_multiplier
+
+                        #score = verifiable_reward.copy()
+                        score = verifiable_reward
+                        # Process each element based on conditions
+                        for i in range(len(rm_score)):
+                            # Only modify if reward_scores2[i] > 0
+                            if verifiable_reward[i] > 0:
+                                if rm_score[i] > 7.0:
+                                    score[i] += 1
+                                else:
+                                    score[i] -= 0.5
+
+                        print("rm_score", rm_score)
+                        print("verifiable_reward", verifiable_reward)
+                        rm_rewards_only.append(rm_score)
+                        #mask = verifiable_reward > 0.0
+                        #print("mask", mask)
+                        #score = (verifiable_reward * mask) + (rm_score * mask)
+                        print("final_score", score)
+                    else:
+                        print("NO REWARD APPLIED")
                     if args.add_r1_style_format_reward:
                         score += format_scores[i : i + args.local_rollout_forward_batch_size]
-                    if args.add_query_reward:
-                        score += query_scores[i : i + args.local_rollout_forward_batch_size]
-
+                    # if args.apply_verifiable_reward and args.reward_model_multiplier:
+                    #     score = score / 2.0
                     responses.append(response)
                     postprocessed_responses.append(postprocessed_response)
                     ref_logprobs.append(ref_logprob)
@@ -1234,6 +1257,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
                 verifiable_counts = torch.cat(verifiable_counts, 0)
+                rm_rewards_only = torch.cat(rm_rewards_only, 0) if rm_rewards_only else None
                 verifiable_correct_rate = verifiable_counts.sum() / queries.shape[0]
                 del (ref_logprob, score)
                 gc.collect()
@@ -1325,14 +1349,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         elif args.kl_estimator == "kl4":
                             kl = kl4
                         # grpo change: directly subtract KL in loss (add)
-                        # Apply snippet masking if enabled
-                        if args.mask_snippet_loss:
-                            snippet_mask = create_snippet_mask(mb_responses, tokenizer)
-                            # Combine padding mask with snippet mask (we want ~padding_mask AND snippet_mask)
-                            combined_mask = (~padding_mask[micro_batch_inds]) & snippet_mask
-                            loss = masked_mean(pg_loss_max + (args.beta * kl), combined_mask)
-                        else:
-                            loss = masked_mean(pg_loss_max + (args.beta * kl), ~padding_mask[micro_batch_inds])
+                        loss = masked_mean(pg_loss_max + (args.beta * kl), ~padding_mask[micro_batch_inds])
                         self.model.backward(loss)
                         self.model.step()
                         with torch.no_grad():
@@ -1380,6 +1397,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics.add("objective/scores_mean", reward_mean.mean())
                 local_metrics.add("objective/reward_std", reward_std.mean())
                 local_metrics.add("objective/verifiable_correct_rate", verifiable_correct_rate)
+                local_metrics.add("objective/rm_reward_only", rm_rewards_only.mean() if rm_rewards_only is not None else 0)
                 local_metrics.add("loss/policy_avg", pg_loss_stats.mean())
                 local_metrics.add("loss/policy_avg", loss_stats.mean())
                 local_metrics.add("policy/approxkl_avg", approxkl_stats.mean())
@@ -1401,7 +1419,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     "episode": episode,
                     "training_step": training_step,
                     "lr": self.scheduler.get_last_lr()[0],
-                    "epoch": episode / args.number_samples_per_prompt / len(train_dataset),
+                    "epoch": episode / len(train_dataset),
                     "time/from_scratch": time.time() - start_time,
                     "time/training": time.time() - training_time_start,
                     **local_metrics.get_reduced_metrics_correctness(),
@@ -1755,16 +1773,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     )
     wandb_url = wandb.run.get_url() if args.with_tracking else None
     inits.extend(
-        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url) for model in policy_group.models
+        model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer) for model in policy_group.models
     )
     max_len = args.max_prompt_token_length + args.response_length
-    additional_ray_actor_kwargs = {}
-    if args.use_search_actor:
-        additional_ray_actor_kwargs = {
-            "max_output_len": args.response_length,
-            "max_searches": args.max_searches,
-            "number_documents_to_search": args.number_documents_to_search,
-        }
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
@@ -1777,8 +1788,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
-        # ray_actor_class=LLMSearchRayActor if args.use_search_actor else LLMRayActor,
-        # additional_ray_actor_kwargs=additional_ray_actor_kwargs,
     )
 
     metrics_queue = RayQueue()
