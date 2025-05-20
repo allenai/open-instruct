@@ -1114,6 +1114,8 @@ class PolicyTrainerRayProcess(RayProcess):
             torch.cuda.empty_cache()
             # if we generate multiple samples per prompt, we need to repeat the queries and ground truths
             # to match the vllm outputs.
+            print("printing data, will probably break after:")
+            print(data)
             messages = data["messages"]
             if args.number_samples_per_prompt > 1:
                 queries = queries.repeat_interleave(args.number_samples_per_prompt, dim=0)
