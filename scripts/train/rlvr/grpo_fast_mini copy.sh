@@ -16,8 +16,6 @@ python open_instruct/grpo_fast.py \
     --model_name_or_path HuggingFaceTB/SmolLM2-135M \
     --stop_strings "</answer>" \
     --apply_r1_style_format_reward \
-    --apply_arithmetic_reward \
-    --arithmetic_reward 10.0 \
     --apply_verifiable_reward False \
     --temperature 0.7 \
     --ground_truths_key ground_truth \
