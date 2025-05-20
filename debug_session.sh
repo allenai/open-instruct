@@ -26,13 +26,13 @@ python open_instruct/grpo_fast.py \
     --num_samples_per_prompt_rollout 8 \
     --model_name_or_path Qwen/Qwen2.5-0.5B \
     --oe_eval_tasks minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,alpaca_eval_v2::tulu,ifeval::tulu,popqa::tulu,drop::llama3,codex_humanevalplus::tulu,mmlu:cot::summarize \
-    --output_dir /weka/oe-adapt-default/jacobm/llm-as-a-judge/checkpoints/rm-vs-llm/${exp_name} \
+    --output_dir /weka/oe-adapt-default/jacobm/llm-as-a-judge/checkpoints/rm-vs-llm/test_rm_during_grpo\
     --apply_verifiable_reward false \
     --apply_r1_style_format_reward false \
     --reward_model_path allenai/open_instruct_dev \
-    --reward_model_revision $reward_model_revision \
+    --reward_model_revision rm_qwen2p5_base_0p5b_1e-6_1_skyworkstulufull__1__1747601229 \
     --reward_model_tokenizer_path allenai/open_instruct_dev \
-    --reward_model_tokenizer_revision $reward_model_revision \
+    --reward_model_tokenizer_revision rm_qwen2p5_base_0p5b_1e-6_1_skyworkstulufull__1__1747601229 \
     --non_stop_penalty True \
     --non_stop_penalty_value 0.0 \
     --temperature 0.7 \
