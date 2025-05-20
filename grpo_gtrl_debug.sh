@@ -6,7 +6,7 @@
 rm_revision=rm_llama_3e-6_1_skyworkstulufull__2__1744311461
 exp_name="0506_grpo_sftbase_${beta}_rm_llama_3e-6_1_stfull__2__1744311461"
 python mason.py \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-3-results \
     --priority normal \
     --preemptible \
