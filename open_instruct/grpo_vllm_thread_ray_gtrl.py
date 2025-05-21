@@ -1205,6 +1205,7 @@ class PolicyTrainerRayProcess(RayProcess):
                                 per_func_rewards[key].append(value)
                     else:
                         verifiable_reward = torch.zeros(query.shape[0], device=query.device)
+                        verifiable_count = verifiable_reward > 0
 
                     #if args.reward_model_multiplier and verifiable_reward.item() > 0:
                     # TODO: NEED TO PARSE OUT COTS
