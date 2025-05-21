@@ -1040,9 +1040,13 @@ class PolicyTrainerRayProcess(RayProcess):
         start_time = time.time()
         eval_futures = deque([])
         global_data = next(iter_dataloader)
+        print("global data:")
+        print(global_data)
         data = data_collator(
             global_data[self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size]
         )
+        print("collated data:")
+        print(data)
         global_queries = data_collator(global_data)[
             INPUT_IDS_PROMPT_KEY
         ].tolist()  # can be simplified since we `remove_padding` later anyway
