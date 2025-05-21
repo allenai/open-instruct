@@ -66,7 +66,7 @@ python mason.py \
     --hf_entity allenai \
     --wandb_entity ai2-llm 
     
-    
+    # ai2/cuda11.8-cudnn8-dev-ubuntu20.04
     
     # python open_instruct/grpo_fast.py \
     # --dataset_mixer_list jacobmorrison/tulu_3_rewritten_53k_no_verifiable 5000 \
