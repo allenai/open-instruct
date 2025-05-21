@@ -150,7 +150,8 @@ DEFAULT_TASKS=(
     "popqa::tulu"
     "mmlu:mc::tulu"
     "mmlu:cot::summarize"
-#    "alpaca_eval_v2::tulu" # TEMPORARILY remove alpacaeval from eval suite until we update to cheaper model
+#    "alpaca_eval_v2::tulu" # Removed for high cost of judge
+    "alpaca_eval_v3::tulu" # New version using GPT 4.1 as cheaper judge
     "truthfulqa::tulu"
 )
 UNSEEN_TASKS=(
@@ -205,7 +206,7 @@ for TASK in "${TASKS[@]}"; do
             --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
-            --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1"}' \
+            --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", "env-secret": "AZURE_API_KEY=azure_api_key"}' \
             ${REVISION_ARG} \
             --cluster "$CLUSTER" \
             --beaker-retries 2 \
@@ -225,7 +226,7 @@ for TASK in "${TASKS[@]}"; do
         --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
         ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT" \
-        --gantry-args "{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"}" \
+        --gantry-args "{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env-secret\": \"AZURE_API_KEY=azure_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"}" \
         ${REVISION_ARG} \
         --cluster ai2/augusta-google-1 \
         --beaker-retries 2 \
