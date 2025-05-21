@@ -19,7 +19,7 @@ python mason.py \
     --num_nodes 4 \
     --max_retries 0 \
     --budget ai2/oe-adapt \
-    --image ai2/cuda11.8-cudnn8-dev-ubuntu20.04 \
+    --image nathanl/open_instruct_auto \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --exp_name test_grpo_rm_with_valpy_code \
     --beta 0.01 \
