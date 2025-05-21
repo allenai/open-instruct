@@ -1040,13 +1040,9 @@ class PolicyTrainerRayProcess(RayProcess):
         start_time = time.time()
         eval_futures = deque([])
         global_data = next(iter_dataloader)
-        print("global data:")
-        print(global_data)
         data = data_collator(
             global_data[self.rank * args.local_rollout_batch_size : (self.rank + 1) * args.local_rollout_batch_size]
         )
-        print("collated data:")
-        print(data)
         global_queries = data_collator(global_data)[
             INPUT_IDS_PROMPT_KEY
         ].tolist()  # can be simplified since we `remove_padding` later anyway
@@ -1121,8 +1117,6 @@ class PolicyTrainerRayProcess(RayProcess):
             torch.cuda.empty_cache()
             # if we generate multiple samples per prompt, we need to repeat the queries and ground truths
             # to match the vllm outputs.
-            print("printing data, will probably break after:")
-            print(data)
             messages = data["messages"]
             if args.number_samples_per_prompt > 1:
                 queries = queries.repeat_interleave(args.number_samples_per_prompt, dim=0)
