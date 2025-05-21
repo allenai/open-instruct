@@ -53,6 +53,7 @@ INPUT_IDS_PROMPT_KEY = "input_ids_prompt"
 ATTENTION_MASK_PROMPT_KEY = "attention_mask_prompt"
 GROUND_TRUTHS_KEY = "ground_truth"
 DATASET_SOURCE_KEY = "dataset"
+MESSAGES_KEY = "messages"
 
 # NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
 # also we don't really need `ATTENTION_MASK_CHOSEN_KEY` and `ATTENTION_MASK_REJECTED_KEY`
@@ -243,7 +244,7 @@ class DatasetProcessor:
         self.tokenizer = tokenizer
         self.config = config
         if self.tokenizer.pad_token_id == self.tokenizer.eos_token_id:
-            logging.warning(
+            logging.warn(
                 "Tokenizer's pad token is the same as EOS token, this might cause the model to not learn to generate EOS tokens."
             )
 
@@ -252,7 +253,7 @@ class DatasetProcessor:
 
     def filter(self, dataset: DatasetDict):
         if self.config is None:
-            logging.warning("No config provided, skipping filtering")
+            logging.warn("No config provided, skipping filtering")
             return dataset
         raise NotImplementedError
 
@@ -601,10 +602,14 @@ class SimpleGenerateCollatorWithGroundTruth:
         # datasets
         datasets = [x[DATASET_SOURCE_KEY] for x in batch]
 
+        # messages
+        messages = [x[MESSAGES_KEY] for x in batch]
+
         return {
             INPUT_IDS_PROMPT_KEY: padded_sequences,
             GROUND_TRUTHS_KEY: ground_truths,
             DATASET_SOURCE_KEY: datasets,
+            MESSAGES_KEY: messages,
         }
 
 
