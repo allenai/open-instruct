@@ -206,7 +206,8 @@ for TASK in "${TASKS[@]}"; do
             --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
-            --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", "env-secret": "AZURE_API_KEY=azure_api_key"}' \
+            # NOTE: For gantry args here and below, random numbers like #42 are added to the env variables because they need to be unique names. The numbers are ignored.
+            --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", "env-secret#42": "AZURE_API_KEY=azure_api_key"}' \
             ${REVISION_ARG} \
             --cluster "$CLUSTER" \
             --beaker-retries 2 \
