@@ -1203,6 +1203,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         for reward_dict in per_func_reward:
                             for key, value in reward_dict.items():
                                 per_func_rewards[key].append(value)
+                    else:
+                        verifiable_reward = torch.zeros(query.shape[0], device=query.device)
 
                     #if args.reward_model_multiplier and verifiable_reward.item() > 0:
                     # TODO: NEED TO PARSE OUT COTS
