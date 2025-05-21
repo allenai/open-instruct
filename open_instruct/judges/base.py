@@ -373,7 +373,7 @@ def extract_completion_data(completion):
             
     except Exception as e:
         print(f"Error processing model response: {str(e)}")
-        if hasattr(completion, 'choices') and len(completion.choices) > 0:
+        if hasattr(completion, 'choices') and completion.choices is not None and len(completion.choices) > 0:
             print(f"Response content: {getattr(completion.choices[0].message, 'content', 'No content available')}")
     
     return reasoning, score
