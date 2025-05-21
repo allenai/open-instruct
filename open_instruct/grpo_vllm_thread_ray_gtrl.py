@@ -289,7 +289,7 @@ class Args:
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
-    """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
+    """whether to gather the whole model to broadcast (not doable for 70B but can be faster for 8B)"""
 
     # wandb and HF tracking configs
     with_tracking: bool = False
@@ -816,9 +816,9 @@ class PolicyTrainerRayProcess(RayProcess):
         # get list of all reward types in dataset, used for logging
         # sorted to make sure the order is consistent
         reward_types = sorted(list(set(train_dataset.unique("dataset"))))
-        print(f"reward types: {reward_types}")
-        print("train dataset:")
-        print(train_dataset)
+        # print(f"reward types: {reward_types}")
+        # print("train dataset:")
+        # print(train_dataset)
 
         args = self.args
         self.tokenizer = tokenizer
@@ -1209,7 +1209,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         for reward_dict in per_func_reward:
                             for key, value in reward_dict.items():
                                 per_func_rewards[key].append(value)
+
                     #if args.reward_model_multiplier and verifiable_reward.item() > 0:
+                    # TODO: NEED TO PARSE OUT COTS
                     if args.reward_model_multiplier:
                         print("APPLYING REWARD MODEL")
                         response_txts = tokenizer.batch_decode(postprocessed_response, skip_special_tokens=True)
@@ -1230,7 +1232,10 @@ class PolicyTrainerRayProcess(RayProcess):
                         rm_score *= args.reward_model_multiplier
 
                         #score = verifiable_reward.copy()
-                        score = verifiable_reward
+                        if args.apply_verifiable_reward:
+                            score = verifiable_reward
+                        else:
+                            score = torch.zeros(query.shape[0], device=query.device)
                         # Process each element based on conditions
                         for i in range(len(rm_score)):
                             # Only modify if reward_scores2[i] > 0
