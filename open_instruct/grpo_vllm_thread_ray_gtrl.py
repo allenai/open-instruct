@@ -1229,15 +1229,18 @@ class PolicyTrainerRayProcess(RayProcess):
                         if args.apply_verifiable_reward:
                             score = verifiable_reward
                         else:
-                            score = torch.zeros(query.shape[0], device=query.device)
+                            # score = torch.zeros(query.shape[0], device=query.device)
+                            score = rm_score
+
+                        # TODO: this is valentina's custom scorer, we'll need custom logic for combining verifiable and rm scores
                         # Process each element based on conditions
-                        for i in range(len(rm_score)):
-                            # Only modify if reward_scores2[i] > 0
-                            if verifiable_reward[i] > 0:
-                                if rm_score[i] > 7.0:
-                                    score[i] += 1
-                                else:
-                                    score[i] -= 0.5
+                        # for i in range(len(rm_score)):
+                        #     # Only modify if reward_scores2[i] > 0
+                        #     if verifiable_reward[i] > 0:
+                        #         if rm_score[i] > 7.0:
+                        #             score[i] += 1
+                        #         else:
+                        #             score[i] -= 0.5
 
                         print("rm_score", rm_score)
                         print("verifiable_reward", verifiable_reward)
