@@ -816,6 +816,9 @@ class PolicyTrainerRayProcess(RayProcess):
         # get list of all reward types in dataset, used for logging
         # sorted to make sure the order is consistent
         reward_types = sorted(list(set(train_dataset.unique("dataset"))))
+        print(f"reward types: {reward_types}")
+        print("train dataset:")
+        print(train_dataset)
 
         args = self.args
         self.tokenizer = tokenizer
