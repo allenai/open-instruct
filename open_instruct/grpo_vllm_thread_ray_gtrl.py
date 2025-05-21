@@ -1209,14 +1209,19 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     #if args.reward_model_multiplier and verifiable_reward.item() > 0:
                     # TODO: NEED TO PARSE OUT COTS
+                    def parse_prediction_for_reward_model(prediction: str):
+                        # remove thinking section from the prediction
+                        cleaned_prediction = prediction.split("</think>")[-1]
+                        # remove answer tags from the prediction
+                        cleaned_prediction = cleaned_prediction.replace("<answer>", "").replace("</answer>", "")
+                        return cleaned_prediction
+
                     if args.reward_model_multiplier:
                         print("APPLYING REWARD MODEL")
                         response_txts = tokenizer.batch_decode(postprocessed_response, skip_special_tokens=True)
                         reward_model_tokens = []
                         for j in range(i, i + args.local_rollout_forward_batch_size):
-                            messages[j].append({"role": "assistant", "content": response_txts[j - i]})
-                            print("parsed messages:")
-                            print(messages[j][-1])
+                            messages[j].append({"role": "assistant", "content": parse_prediction_for_reward_model(response_txts[j - i])})
                             reward_model_tokens.append(self.reward_model_tokenizer.apply_chat_template(messages[j]))
                         # right pad the reward model tokens
                         max_reward_model_len = max(len(item) for item in reward_model_tokens)
