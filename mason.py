@@ -713,9 +713,6 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                 "&&", "ls", download_path,
                 "&&",
             ]
-            print()
-            print("google command initial:")
-            print(gs_download_command)
 
             command.append("--gs_bucket_path")
             command.append(f"gs://ai2-llm/post-training/")
@@ -747,24 +744,14 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                         "&&", "ls", dataset_cache_path,
                         "&&",
                     ]
-                    print(f"google command {cidx}:")
-                    print(gs_download_command)
-                    print()
                     if cidx == 0:
                         command.append("--dataset_config_hash")
                         command.append(dataset_config_hash)
                     elif cidx == 1:
                         command.append("--dataset_config_eval_hash")
                         command.append(dataset_config_hash)
-            print()
-            print("google command final:")
-            print(gs_download_command)
-            print()
             command = gs_download_command + command
 
-    print("command after adding google: ")
-    print(command)
-    quit()
     # special logic to deal with escape like
     # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
     # we need to wrap the json string with single quote
