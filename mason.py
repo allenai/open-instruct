@@ -752,6 +752,10 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                         command.append(dataset_config_hash)
             print("command before adding google: ")
             print(command)
+            print()
+            print("google command:")
+            print(gs_download_command)
+            print()
             command = gs_download_command + command
 
     print("command after adding google: ")
