@@ -884,11 +884,11 @@ class PolicyTrainerRayProcess(RayProcess):
             pg_loss_stats = torch.zeros(len(collated_query_responses))
             loss_stats = torch.zeros(len(collated_query_responses))
             ratio_stats = torch.zeros(len(collated_query_responses))
-            logprob_diffs = []
-            single_advantages = []
+            
 
             for epoch_idx in range(args.num_epochs):
                 for i in range(len(collated_query_responses)):
+
                     mb_ref_logprob = collated_ref_logprobs[i]
                     mb_query_responses = collated_query_responses[i]
                     mb_advantages = collated_advantages[i]
@@ -906,6 +906,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     )
                     mb_new_logprobs = torch.masked_fill(mb_new_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
 
+                    accumulated_diffs = torch.tensor(0.0, device=mb_advantages.device)
+                    single_advantages = torch.zeros(args.num_samples_per_prompt_rollout, device=mb_advantages.device)
+
                     # Cache the old logprobs
                     with torch.no_grad():
                         if epoch_idx == 0:
@@ -916,14 +919,18 @@ class PolicyTrainerRayProcess(RayProcess):
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
 
                     if args.aggregate_maj:
-                        logprob_diffs.append(torch.sum(logprobs_diff))
+                        accumulated_diffs += torch.sum(logprobs_diff)
+                        response_index = i % args.num_samples_per_prompt_rollout
+                        
                         # single advantage is sum(nb_advantages[:, 1:]) / length of non zero entries in nb_advantages[:, 1:]
                         # if all advantages are 0, then single advantage is 0
                        
                         if torch.sum(mb_advantages[:, 1:] != 0) == 0:
-                            single_advantages.append(torch.tensor(0.0, device=mb_advantages.device))
+                            single_advantages[response_index] = torch.tensor(0.0, device=mb_advantages.device)
                         else:
-                            single_advantages.append(torch.tensor(torch.sum(mb_advantages[:, 1:]) / torch.sum(mb_advantages[:, 1:] != 0), device=mb_advantages.device))
+                            print(f"before: mb_advantages[:, 1:] {mb_advantages[:, 1:]}")
+                            single_advantages[response_index] = torch.sum(mb_advantages[:, 1:]) / torch.sum(mb_advantages[:, 1:] != 0)
+                            print(f"after: single_advantages {single_advantages}")
 
                     ratio = torch.exp(logprobs_diff)
                     
@@ -962,6 +969,27 @@ class PolicyTrainerRayProcess(RayProcess):
                             if (local_step + 1) % accumulation_steps == 0:
                                 self.model.step()
                         local_step += 1
+                    else:
+                        if (i + 1) % args.num_samples_per_prompt_rollout == 0:
+                            print(f"accumulated_diffs: {accumulated_diffs}")
+                            sum_ratios = torch.exp(accumulated_diffs).unsqueeze(-1)
+                            single_advantages = single_advantages.unsqueeze(-1)
+                            print(f"sum_ratios: {sum_ratios}")
+                            print(f"single_advantages: {single_advantages}")
+
+                            pg_losses = -single_advantages * sum_ratios
+                            pg_losses2 = -single_advantages * torch.clamp(sum_ratios, 1.0 - args.cliprange, 1.0 + args.cliprange)
+                            pg_loss_max = torch.max(pg_losses, pg_losses2)
+                            loss_maj = pg_loss_max.mean() 
+                            accumulated_diffs = 0.0
+
+                            self.model.zero_grad()
+                            # Check if loss is valid before backward pass
+                            if not torch.isnan(loss_maj) and not torch.isinf(loss_maj) and loss_maj != 0:
+                                self.model.backward(loss_maj)
+                                self.model.step()
+                            local_step += args.num_samples_per_prompt_rollout
+
                     with torch.no_grad():
                         # NOTE: in packed implementation, kl calculation are averages over response tokens
                         kl1_stats[i] = masked_mean(kl1, mb_response_masks_bool, args.masked_mean_axis).float()
@@ -982,28 +1010,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         # pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
                         # loss_stats[i] = loss if not args.aggregate_maj else 0.0
                         # ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
-                if args.aggregate_maj:    
-                    logprobs_diffs = torch.stack(logprob_diffs).reshape(-1, args.num_samples_per_prompt_rollout)
-                    
-
-                    sum_ratios = torch.exp(torch.sum(logprobs_diffs, dim=-1)).unsqueeze(-1)
-                    single_advantages = torch.stack(single_advantages).reshape(-1, args.num_samples_per_prompt_rollout)
-
-                    
-                    pg_losses = -single_advantages * sum_ratios
-                    pg_losses2 = -single_advantages * torch.clamp(sum_ratios, 1.0 - args.cliprange, 1.0 + args.cliprange)
-                    pg_loss_max = torch.max(pg_losses, pg_losses2)
-                    loss_maj = pg_loss_max.mean()                    
-                    # Clear any existing gradients before backward pass
-                    self.model.zero_grad()
-                    # Check if loss is valid before backward pass
-                    if not torch.isnan(loss_maj) and not torch.isinf(loss_maj) and loss_maj != 0:
-                        self.model.backward(loss_maj)
-                        self.model.step()
-                    local_step += len(collated_query_responses)
-
-                    # loss = loss / accumulation_steps
-                    # self.model.backward(loss)
+                
 
             with torch.no_grad():
                 self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
