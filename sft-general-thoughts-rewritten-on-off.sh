@@ -2,7 +2,7 @@
 python mason.py \
     --cluster ai2/augusta-google-1 \
     --workspace ai2/tulu-thinker \
-    --priority normal \
+    --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
     --preemptible \
     --num_nodes 4 \
