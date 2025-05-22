@@ -506,7 +506,7 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
         tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
     else:
         try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path).chat_template
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision).chat_template
         except Exception:
             raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
 
