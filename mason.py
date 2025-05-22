@@ -750,8 +750,13 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                     elif cidx == 1:
                         command.append("--dataset_config_eval_hash")
                         command.append(dataset_config_hash)
+            print("command before adding google: ")
+            print(command)
             command = gs_download_command + command
 
+    print("command after adding google: ")
+    print(command)
+    quit()
     # special logic to deal with escape like
     # python mason.py ... -- python x.py --dataset_mixer '{"trl-internal-testing/sentiment-trl-style": 1.0}'
     # we need to wrap the json string with single quote
