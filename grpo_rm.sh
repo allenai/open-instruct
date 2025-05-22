@@ -42,7 +42,6 @@ python mason.py \
     --chat_template_name tulu_thinker_r1_style \
     --total_episodes 2000000 \
     --penalty_reward_value 0.0 \
-    --apply_r1_style_format_reward false \
     --deepspeed_stage 2 \
     --per_device_train_batch_size 1 \
     --local_rollout_forward_batch_size 1 \
