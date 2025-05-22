@@ -45,7 +45,7 @@ python mason.py \
     --deepspeed_stage 2 \
     --per_device_train_batch_size 1 \
     --local_rollout_forward_batch_size 1 \
-    --actor_num_gpus_per_node 4 8 8 8 \
+    --actor_num_gpus_per_node 4 8 \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
     --vllm_num_engines 4 \
