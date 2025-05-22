@@ -35,10 +35,12 @@ PRICING_PER_1M_TOKENS = {
     "gpt-4.1": {"input": 0.000002, "output": 0.000008},
     "gpt-4.1-standard": {"input": 0.000002, "output": 0.000008},
     "gpt-4.1-mini-standard": {"input": 0.0000004, "output": 0.0000016},
+    "o3": {"input": 0.00001, "output": 0.00004},
+    "o3-standard": {"input": 0.00001, "output": 0.00004},
     "claude-sonnet": {"input": 0.000003, "output": 0.000015}, 
     "deepseek-chat": {"input": 0.00000007, "output": 0.000001}, 
     "deepseek-reasoner": {"input": 0.00000014, "output": 0.000002}, 
-    "claude-3-7-sonnet-20250219": {"input": 0.000003, "output": 0.000015}
+    "claude-3-7-sonnet-20250219": {"input": 0.000003, "output": 0.000015},
 }
 
 
