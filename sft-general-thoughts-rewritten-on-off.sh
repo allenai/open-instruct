@@ -1,0 +1,40 @@
+# SFT on general-thoughts rewritten
+python mason.py \
+    --cluster ai2/augusta-google-1 \
+    --workspace ai2/tulu-thinker \
+    --priority normal \
+    --image nathanl/open_instruct_auto --pure_docker_mode \
+    --preemptible \
+    --num_nodes 4 \
+    --budget ai2/oe-adapt \
+    --gpus 8 -- accelerate launch \
+    --mixed_precision bf16 \
+    --num_processes 8 \
+    --use_deepspeed \
+    --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
+    --deepspeed_multinode_launcher standard \
+    open_instruct/finetune.py \
+    --model_name_or_path Qwen/Qwen2.5-7B \
+    --tokenizer_name Qwen/Qwen2.5-7B \
+    --chat_template tulu_thinker_r1_style_reasoning_on_off \
+    --use_flash_attn \
+    --use_liger_kernel False \
+    --max_seq_length 16384 \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 1 \
+    --learning_rate 5e-06 \
+    --lr_scheduler_type linear \
+    --warmup_ratio 0.03 \
+    --weight_decay 0.0 \
+    --gradient_checkpointing \
+    --num_train_epochs 2 \
+    --output_dir /output \
+    --with_tracking \
+    --report_to wandb \
+    --logging_steps 1 \
+    --reduce_loss sum \
+    --model_revision main \
+    --dataset_mixer_list jacobmorrison/tulu_3_rewritten_with_and_without_thoughts_160k 1.0 \
+    --dataset_mix_dir output \
+    --exp_name qwen-2-tulu-general-thinker-rewrite-on-off-test-160k \
+    --seed 123
