@@ -14,7 +14,7 @@ python mason.py \
     --description $exp_name \
     --cluster ai2/augusta-google-1 \
     --workspace ai2/scaling-rl \
-    --priority high \
+    --priority normal \
     --preemptible \
     --num_nodes 4 \
     --max_retries 0 \
