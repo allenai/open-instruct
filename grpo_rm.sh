@@ -18,6 +18,7 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --max_retries 0 \
+    -no_auto_dataset_cache \
     --budget ai2/oe-adapt \
     --image jacobm/grpo-with-rm \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_vllm_thread_ray_gtrl.py \
