@@ -13,7 +13,7 @@ exp_name="test_rm_during_grpo"
 python mason.py \
     --description $exp_name \
     --cluster ai2/augusta-google-1 \
-    --workspace ai2/tulu-thinker \
+    --workspace ai2/tulu-thinker --pure_docker_mode \
     --priority high \
     --preemptible \
     --num_nodes 4 \
