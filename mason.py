@@ -713,6 +713,9 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                 "&&", "ls", download_path,
                 "&&",
             ]
+            print()
+            print("google command initial:")
+            print(gs_download_command)
 
             command.append("--gs_bucket_path")
             command.append(f"gs://ai2-llm/post-training/")
@@ -744,16 +747,17 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                         "&&", "ls", dataset_cache_path,
                         "&&",
                     ]
+                    print(f"google command {cidx}:")
+                    print(gs_download_command)
+                    print()
                     if cidx == 0:
                         command.append("--dataset_config_hash")
                         command.append(dataset_config_hash)
                     elif cidx == 1:
                         command.append("--dataset_config_eval_hash")
                         command.append(dataset_config_hash)
-            print("command before adding google: ")
-            print(command)
             print()
-            print("google command:")
+            print("google command final:")
             print(gs_download_command)
             print()
             command = gs_download_command + command
