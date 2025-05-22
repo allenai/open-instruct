@@ -80,10 +80,33 @@ def pack_sequences(
     pack_length: int,
     pad_token_id: int,
     pad_to_pack_length: bool = False,
+    pack: bool = True,
 ) -> PackedSequences:
     # assert padding token does not exist in queries and responses
     assert not any(pad_token_id in query for query in queries)
     # assert not any(pad_token_id in response for response in responses)
+
+    def process_sequence(query: List[int], response: List[int], i: int, offset: int = 0) -> tuple:
+        # remove padding (but using vllm so this should not be needed, but just in case)
+        query = [t for t in query if t != pad_token_id]
+        response = [t for t in response if t != pad_token_id]
+        query_response = query + response
+        
+        if pad_to_pack_length:
+            query_response = query_response + [pad_token_id] * (pack_length - len(query_response))
+            response_mask = [0 for _ in range(len(query))] + [i + 1 for _ in range(len(response))] + [0] * (pack_length - len(query_response))
+            attention_mask = [1 for _ in range(len(query_response))] + [0] * (pack_length - len(query_response))
+            num_action = [len(response)] + [0] * (pack_length - 1)
+            packed_seq_len = [len(query_response)] + [0] * (pack_length - 1)
+            done = [0 for _ in range(len(query_response) - 1)] + [1] + [0] * (pack_length - len(query_response))
+        else:
+            response_mask = [0 for _ in range(len(query))] + [i + 1 for _ in range(len(response))]
+            attention_mask = [1 for _ in range(len(query_response))]
+            num_action = [len(response)]
+            packed_seq_len = [len(query_response)]
+            done = [0 for _ in range(len(query_response) - 1)] + [1]
+        
+        return query_response, response_mask, attention_mask, num_action, packed_seq_len, done
 
     query_responses = []
     attention_masks = []
@@ -91,21 +114,62 @@ def pack_sequences(
     dones = []
     num_actions = []
     packed_seq_lens = []
-    cur_data = []
-    cur_response_mask = []
-    cur_num_actions = []
-    cur_packed_seq_lens = []
-    cur_attention_mask = []
-    cur_dones = []
-    offset = 0
-    for i in range(len(queries)):
-        query = queries[i]
-        response = responses[i]
-        # remove padding (but using vllm so this should not be needed, but just in case)
-        query = [t for t in query if t != pad_token_id]
-        response = [t for t in response if t != pad_token_id]
-        query_response = query + response
-        if len(query_response) + len(cur_data) > pack_length:
+
+    if not pack:
+        # In unpacked mode, each query_response is its own sequence
+        for i in range(len(queries)):
+            seq_data = process_sequence(queries[i], responses[i], i)
+            query_responses.append(seq_data[0])
+            response_masks.append(seq_data[1])
+            attention_masks.append(seq_data[2])
+            num_actions.append(seq_data[3])
+            packed_seq_lens.append(seq_data[4])
+            dones.append(seq_data[5])
+    else:
+        # Original packing logic
+        cur_data = []
+        cur_response_mask = []
+        cur_num_actions = []
+        cur_packed_seq_lens = []
+        cur_attention_mask = []
+        cur_dones = []
+        offset = 0
+        
+        for i in range(len(queries)):
+            seq_data = process_sequence(queries[i], responses[i], i, offset)
+            query_response, response_mask, attention_mask, num_action, packed_seq_len, done = seq_data
+            
+            if len(query_response) + len(cur_data) > pack_length:
+                if pad_to_pack_length:
+                    cur_data = cur_data + [pad_token_id] * (pack_length - len(cur_data))
+                    cur_response_mask = cur_response_mask + [0] * (pack_length - len(cur_response_mask))
+                    cur_attention_mask = cur_attention_mask + [0] * (pack_length - len(cur_attention_mask))
+                    cur_num_actions = cur_num_actions + [0] * (pack_length - len(cur_num_actions))
+                    cur_packed_seq_lens = cur_packed_seq_lens + [0] * (pack_length - len(cur_packed_seq_lens))
+                    cur_dones = cur_dones + [0] * (pack_length - len(cur_dones))
+                query_responses.append(cur_data)
+                response_masks.append(cur_response_mask)
+                attention_masks.append(cur_attention_mask)
+                num_actions.append(cur_num_actions)
+                packed_seq_lens.append(cur_packed_seq_lens)
+                dones.append(cur_dones)
+                cur_data = []
+                cur_response_mask = []
+                cur_attention_mask = []
+                cur_num_actions = []
+                cur_packed_seq_lens = []
+                cur_dones = []
+                offset = i
+            
+            cur_data.extend(query_response)
+            cur_num_actions.append(len(responses[i]))
+            cur_packed_seq_lens.append(len(query_response))
+            cur_response_mask.extend([0 for _ in range(len(queries[i]))] + [i + 1 for _ in range(len(responses[i]))])
+            cur_attention_mask.extend([i + 1 - offset for _ in range(len(query_response))])
+            cur_dones.extend([0 for _ in range(len(query_response) - 1)] + [i + 1])
+
+        # Handle leftover data
+        if len(cur_data) > 0:
             if pad_to_pack_length:
                 cur_data = cur_data + [pad_token_id] * (pack_length - len(cur_data))
                 cur_response_mask = cur_response_mask + [0] * (pack_length - len(cur_response_mask))
@@ -119,38 +183,7 @@ def pack_sequences(
             num_actions.append(cur_num_actions)
             packed_seq_lens.append(cur_packed_seq_lens)
             dones.append(cur_dones)
-            cur_data = []
-            cur_response_mask = []
-            cur_attention_mask = []
-            cur_num_actions = []
-            cur_packed_seq_lens = []
-            cur_dones = []
-            offset = i
-        cur_data.extend(query_response)
-        cur_num_actions.append(len(response))
-        cur_packed_seq_lens.append(len(query_response))
 
-        # @vwxyzjn: here we use i + 1 to avoid 0 as a response mask token; the actual number should corresponds to
-        # the response's index
-        cur_response_mask.extend([0 for _ in range(len(query))] + [i + 1 for _ in range(len(response))])
-        cur_attention_mask.extend([i + 1 - offset for _ in range(len(query_response))])
-        cur_dones.extend([0 for _ in range(len(query) + len(response) - 1)] + [i + 1])
-
-    # Handle leftover data
-    if len(cur_data) > 0:
-        if pad_to_pack_length:
-            cur_data = cur_data + [pad_token_id] * (pack_length - len(cur_data))
-            cur_response_mask = cur_response_mask + [0] * (pack_length - len(cur_response_mask))
-            cur_attention_mask = cur_attention_mask + [0] * (pack_length - len(cur_attention_mask))
-            cur_num_actions = cur_num_actions + [0] * (pack_length - len(cur_num_actions))
-            cur_packed_seq_lens = cur_packed_seq_lens + [0] * (pack_length - len(cur_packed_seq_lens))
-            cur_dones = cur_dones + [0] * (pack_length - len(cur_dones))
-        query_responses.append(cur_data)
-        response_masks.append(cur_response_mask)
-        attention_masks.append(cur_attention_mask)
-        num_actions.append(cur_num_actions)
-        packed_seq_lens.append(cur_packed_seq_lens)
-        dones.append(cur_dones)
     attention_masks_list = [torch.tensor(t) for t in attention_masks]
     return PackedSequences(
         query_responses=[torch.tensor(t) for t in query_responses],

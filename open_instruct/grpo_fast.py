@@ -228,7 +228,7 @@ class Args:
     """
     ref_policy_update_freq: Optional[int] = None
     """How many training steps to take before updating the reference policy."""
-    advantage_normalization_type: Literal["standard", "centered"] = "standard"
+    advantage_normalization_type: Literal["standard", "centered", "none"] = "standard"
     """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
     divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
@@ -247,6 +247,9 @@ class Args:
     """whether to apply verifiable reward"""
     verification_reward: float = 10.0
     """the reward value for verifiable responses"""
+
+    aggregate_maj: bool = False
+    """whether to aggregate the majority of the verifiable rewards"""
 
     # -- non stop penalty
     non_stop_penalty: bool = False
@@ -881,6 +884,9 @@ class PolicyTrainerRayProcess(RayProcess):
             pg_loss_stats = torch.zeros(len(collated_query_responses))
             loss_stats = torch.zeros(len(collated_query_responses))
             ratio_stats = torch.zeros(len(collated_query_responses))
+            logprob_diffs = []
+            single_advantages = []
+
             for epoch_idx in range(args.num_epochs):
                 for i in range(len(collated_query_responses)):
                     mb_ref_logprob = collated_ref_logprobs[i]
@@ -908,10 +914,19 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # Calculate the policy's loss
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
+
+                    if args.aggregate_maj:
+                        logprob_diffs.append(torch.sum(logprobs_diff))
+                        # single advantage is sum(nb_advantages[:, 1:]) / length of non zero entries in nb_advantages[:, 1:]
+                        # if all advantages are 0, then single advantage is 0
+                       
+                        if torch.sum(mb_advantages[:, 1:] != 0) == 0:
+                            single_advantages.append(torch.tensor(0.0, device=mb_advantages.device))
+                        else:
+                            single_advantages.append(torch.tensor(torch.sum(mb_advantages[:, 1:]) / torch.sum(mb_advantages[:, 1:] != 0), device=mb_advantages.device))
+
                     ratio = torch.exp(logprobs_diff)
-                    pg_losses = -mb_advantages[:, 1:] * ratio
-                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
-                    pg_loss_max = torch.max(pg_losses, pg_losses2)
+                    
 
                     # Here we recalculate kl: we want the KL loss to backpropagate through the model
                     # We also clamp the KL loss to avoid numerical instability
@@ -931,12 +946,22 @@ class PolicyTrainerRayProcess(RayProcess):
                         kl = kl4
 
                     # grpo change: directly subtract KL in loss (add)
-                    loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
-                    loss = loss / accumulation_steps
-                    self.model.backward(loss)
-                    if (local_step + 1) % accumulation_steps == 0:
-                        self.model.step()
-                    local_step += 1
+                    
+                    if not args.aggregate_maj:
+                        pg_losses = -mb_advantages[:, 1:] * ratio
+                        pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
+                        pg_loss_max = torch.max(pg_losses, pg_losses2)
+
+                        loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
+                        loss = loss / accumulation_steps
+                        # Clear any existing gradients before backward pass
+                        self.model.zero_grad()
+                        # Check if loss is valid before backward pass
+                        if not torch.isnan(loss) and not torch.isinf(loss) and loss != 0:
+                            self.model.backward(loss)
+                            if (local_step + 1) % accumulation_steps == 0:
+                                self.model.step()
+                        local_step += 1
                     with torch.no_grad():
                         # NOTE: in packed implementation, kl calculation are averages over response tokens
                         kl1_stats[i] = masked_mean(kl1, mb_response_masks_bool, args.masked_mean_axis).float()
@@ -951,12 +976,34 @@ class PolicyTrainerRayProcess(RayProcess):
                             kl_loss_stats[i] = kl3_stats[i] * args.beta
                         elif args.kl_estimator == "kl4":
                             kl_loss_stats[i] = kl4_stats[i] * args.beta
-                        pg_clipfrac_stats[i] = masked_mean(
-                            (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
-                        )
-                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
-                        loss_stats[i] = loss
-                        ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
+                        # pg_clipfrac_stats[i] = masked_mean(
+                        #     (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
+                        # )
+                        # pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
+                        # loss_stats[i] = loss if not args.aggregate_maj else 0.0
+                        # ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
+                if args.aggregate_maj:    
+                    logprobs_diffs = torch.stack(logprob_diffs).reshape(-1, args.num_samples_per_prompt_rollout)
+                    
+
+                    sum_ratios = torch.exp(torch.sum(logprobs_diffs, dim=-1)).unsqueeze(-1)
+                    single_advantages = torch.stack(single_advantages).reshape(-1, args.num_samples_per_prompt_rollout)
+
+                    
+                    pg_losses = -single_advantages * sum_ratios
+                    pg_losses2 = -single_advantages * torch.clamp(sum_ratios, 1.0 - args.cliprange, 1.0 + args.cliprange)
+                    pg_loss_max = torch.max(pg_losses, pg_losses2)
+                    loss_maj = pg_loss_max.mean()                    
+                    # Clear any existing gradients before backward pass
+                    self.model.zero_grad()
+                    # Check if loss is valid before backward pass
+                    if not torch.isnan(loss_maj) and not torch.isinf(loss_maj) and loss_maj != 0:
+                        self.model.backward(loss_maj)
+                        self.model.step()
+                    local_step += len(collated_query_responses)
+
+                    # loss = loss / accumulation_steps
+                    # self.model.backward(loss)
 
             with torch.no_grad():
                 self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
@@ -1195,7 +1242,7 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-            scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons)
+            scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons, args.aggregate_maj)
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
@@ -1206,12 +1253,15 @@ def data_preparation_thread(
                 advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
             elif args.advantage_normalization_type == "centered":
                 advantages = scores - mean_grouped_rewards
+            elif args.advantage_normalization_type == "none":
+                advantages = scores
             else:
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved
             max_possible_score = 0
+            
             if args.apply_verifiable_reward:
                 max_possible_score += args.verification_reward
             if args.apply_r1_style_format_reward and args.additive_format_reward:
@@ -1219,16 +1269,17 @@ def data_preparation_thread(
             unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
             # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
             # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
-            non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
-            real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
-            expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
-            non_zero_gradient_index = np.where(expanded_mask)[0]
-            advantages = advantages[non_zero_gradient_index]
-            scores = scores[non_zero_gradient_index]
-            responses = [responses[i] for i in non_zero_gradient_index]
-            queries = [queries[i] for i in non_zero_gradient_index]
-            ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
-            datasets = [datasets[i] for i in non_zero_gradient_index]
+            if not args.aggregate_maj:
+                non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
+                real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
+                expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
+                non_zero_gradient_index = np.where(expanded_mask)[0]
+                advantages = advantages[non_zero_gradient_index]
+                scores = scores[non_zero_gradient_index]
+                responses = [responses[i] for i in non_zero_gradient_index]
+                queries = [queries[i] for i in non_zero_gradient_index]
+                ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
+                datasets = [datasets[i] for i in non_zero_gradient_index]
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
@@ -1236,7 +1287,9 @@ def data_preparation_thread(
                 responses=responses,
                 pack_length=args.pack_length,
                 pad_token_id=tokenizer.pad_token_id,
+                pack=not args.aggregate_maj
             )
+            
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
             # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
             # and each value is the corresponding advantage score: index 0 is set to 0 since response masks start from 1 (1-indexed)
@@ -1260,8 +1313,11 @@ def data_preparation_thread(
                 per_device_packed_advantages = packed_sequences.advantages[B * i : B * (i + 1)]
                 per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
 
-                # Shuffle the batch and collate the data
-                b_inds = np.random.permutation(len(per_device_packed_query_responses))
+                # Shuffle the batch and collate the data only if not aggregated with majority voting
+                if not args.aggregate_maj:
+                    b_inds = np.random.permutation(len(per_device_packed_query_responses))
+                else:
+                    b_inds = np.arange(len(per_device_packed_query_responses))
                 collated_query_responses = []
                 collated_attention_masks = []
                 collated_position_ids = []
@@ -1304,14 +1360,30 @@ def data_preparation_thread(
         sequence_length_unsolved = (
             np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
         )
+        if len(responses) == 0:
+            packed_ratio = 0
+            seq_length_mean, seq_length_min, seq_length_max = 0, 0, 0
+            advatages_mean, advatages_min, advatages_max = 0, 0, 0  
+        else:
+            packed_ratio = len(packed_sequences.query_responses) / len(responses)
+            seq_length_mean, seq_length_min, seq_length_max = sequence_lengths.mean(), sequence_lengths.min(), sequence_lengths.max()
+            advatages_mean, advatages_min, advatages_max = advantages.mean(), advantages.min(), advantages.max()
+
+        if args.aggregate_maj:
+            mean_scores = reward_metrics["scores"]
+        else:
+            if len(scores) > 0:
+                mean_scores = np.array(scores).mean()
+            else:
+                mean_scores = 0.0
         metrics = {
-            "scores": np.array(scores).mean(),
-            "real_batch_size_ratio": real_batch_size_ratio,
+            "scores": mean_scores,
+            "real_batch_size_ratio": 0, #real_batch_size_ratio
             "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
-            "packed_ratio": len(packed_sequences.query_responses) / len(responses),
-            "val/sequence_lengths": sequence_lengths.mean(),
-            "val/sequence_lengths_min": sequence_lengths.min(),
-            "val/sequence_lengths_max": sequence_lengths.max(),
+            "packed_ratio": packed_ratio,
+            "val/sequence_lengths": seq_length_mean,
+            "val/sequence_lengths_min": seq_length_min,
+            "val/sequence_lengths_max": seq_length_max,
             "val/sequence_lengths_unsolved": (
                 0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
             ),
@@ -1319,9 +1391,9 @@ def data_preparation_thread(
             "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
             "val/sequence_lengths_solved_hist": sequence_length_solved,
             "val/stop_rate": stop_rate,
-            "val/advantages_mean": advantages.mean(),
-            "val/advantages_min": advantages.min(),
-            "val/advantages_max": advantages.max(),
+            "val/advantages_mean": advatages_mean,
+            "val/advantages_min": advatages_min,
+            "val/advantages_max": advatages_max,
             "val/advantages_hist": advantages,
             **reward_metrics,
         }
@@ -1826,6 +1898,7 @@ if __name__ == "__main__":
         ground_truths: List[str],
         datasets: List[str],
         finish_reasons: List[str],
+        aggregate_maj: bool = False
     ) -> List[float]:
         scores = [0] * len(decoded_responses)
         metrics = {}
@@ -1841,13 +1914,25 @@ if __name__ == "__main__":
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
-                verifiable_rewards, per_func_rewards = apply_verifiable_reward(
+                verifiable_rewards, mean_per_func_rewards = apply_verifiable_reward(
                     responses,
                     decoded_responses,
                     ground_truths,
                     datasets,
                     reward_mult=args.verification_reward,
+                    num_samples_per_prompt_rollout=args.num_samples_per_prompt_rollout,
+                    aggregate_maj=aggregate_maj,
                 )
+                if aggregate_maj:
+                    mean_verifiable_rewards, mean_per_func_rewards = apply_verifiable_reward(
+                    responses,
+                    decoded_responses,
+                    ground_truths,
+                    datasets,
+                    reward_mult=args.verification_reward,
+                    num_samples_per_prompt_rollout=args.num_samples_per_prompt_rollout,
+                    )
+
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
                 for i in range(len(verifiable_rewards)):
@@ -1857,12 +1942,19 @@ if __name__ == "__main__":
                         scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
                     else:
                         scores[i] = verifiable_rewards[i]
-                np_verifiable_rewards = np.array(verifiable_rewards)
-                metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
-                metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
+                
+
+                if aggregate_maj:
+                    np_mean_verifiable_rewards = np.array(mean_verifiable_rewards)
+                else:
+                    np_mean_verifiable_rewards = np.array(verifiable_rewards)
+                metrics["scores"] = np_mean_verifiable_rewards.mean()
+
+                metrics["objective/verifiable_reward"] = np_mean_verifiable_rewards.mean()
+                metrics["objective/verifiable_correct_rate"] = (np_mean_verifiable_rewards > 0.0).mean()
                 # reshuffle around per_func rewards
                 per_func_lists = defaultdict(list)
-                for reward_dict in per_func_rewards:
+                for reward_dict in mean_per_func_rewards:
                     for key, value in reward_dict.items():
                         per_func_lists[key].append(value)
                 # log per function rewards

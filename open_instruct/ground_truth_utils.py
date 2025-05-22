@@ -64,11 +64,15 @@ class GSM8KVerifier(VerifierFunction):
 
     def __init__(self) -> None:
         super().__init__("gsm8k", weight=1.0)
-
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> float:
+    
+    def extract_answer(self, prediction: str) -> str:
         response = re.sub(r"(\d),(\d)", r"\1\2", prediction)
         numbers = re.findall(r"[-+]?\d*\.\d+|\d+", response)
         extracted = numbers[-1] if numbers else response
+        return extracted
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> float:
+        extracted = self.extract_answer(prediction)
         return float(str(extracted).lower() == str(label).lower())
 
 
@@ -82,8 +86,8 @@ class MathVerifier(VerifierFunction):
 
     def __init__(self) -> None:
         super().__init__("math", weight=1.0)
-
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
+    
+    def extract_answer(self, prediction: str) -> str:
         raw_answer = prediction
         all_answers = []
 
@@ -95,30 +99,38 @@ class MathVerifier(VerifierFunction):
             except AssertionError:
                 boxed_answer = None
         if boxed_answer is not None:
-            all_answers.append(boxed_answer)
+            return boxed_answer
+            # all_answers.append(boxed_answer)
 
         # Attempt extraction via Minerva format.
         minerva_answer = normalize_final_answer(get_unnormalized_answer(raw_answer))
         if minerva_answer is not None and minerva_answer != "[invalidanswer]":
-            all_answers.append(minerva_answer)
+            return minerva_answer
+            # all_answers.append(minerva_answer)
 
         # Attempt extraction from the last LaTeX-formatted answer.
         if not all_answers:
             dollars = [m.start() for m in re.finditer(r"\$", raw_answer)]
             if len(dollars) > 1:
                 answer = normalize_final_answer(raw_answer[dollars[-2] + 1 : dollars[-1]])
-                all_answers.append(answer)
+                return answer
+                # all_answers.append(answer)
 
         # Fallback to the full output.
-        if not all_answers:
-            all_answers.append(normalize_final_answer(prediction))
+        # if not all_answers:
+        #     return normalize_final_answer(prediction)
+            # all_answers.append(normalize_final_answer(prediction))
             # also provide original string in case normalization fails
-            all_answers.append(prediction)
+            # all_answers.append(prediction)  
+
+        return "no answer"
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> bool:
+        answer = self.extract_answer(prediction)
 
         # Compare each candidate answer to the ground truth.
-        for answer in all_answers:
-            if is_equiv(answer, label) or hendrycks_is_equiv(answer, label):
-                return 1.0
+        if is_equiv(answer, label) or hendrycks_is_equiv(answer, label):
+            return 1.0
         return 0.0
 
 

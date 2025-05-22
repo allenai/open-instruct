@@ -41,6 +41,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from open_instruct.ground_truth_utils import REWARD_FN_MAPPING
 from open_instruct.utils import retry_on_exception
+from collections import Counter
 
 logger = logging.getLogger(__name__)
 
@@ -208,47 +209,162 @@ def get_reward(
     )
 
 
+def compute_majority_reward_per_prompt(
+    responses: List[torch.Tensor],
+    decoded_responses: List[str],
+    ground_truth: List[str],
+    dataset: List[str],
+    reward_mult: int = 10,
+):
+    # I should check how to pack the responses that are passed to apply_verifiable_reward based on the common prompt
+    # so that the responses all share the same ground truth. then for each prompt, I will pass all the decoded responses
+    # together with the ground truth to this function.
+    """
+    Extract answers from the decoded responses.
+    Compute the most-frequent answer and the second-most-frequent answer.
+    Compute the margin between the counts of the most-frequent answer and the second-most-frequent answer.
+    """
+    if isinstance(dataset, str):
+        ds = dataset
+    if isinstance(dataset, list):
+        if isinstance(dataset[0], str):
+            ds = dataset[0]
+        else:
+            ds = dataset[0][0]
+    reward_func = REWARD_FN_MAPPING.get(ds.lower())
+    
+    # extract answers is only implemented for math verifier, so assert it is math verifier
+    assert reward_func.__class__.__name__ == "MathVerifier" or reward_func.__class__.__name__ == "GSM8KVerifier", "extract answers is only implemented for math verifier"
+
+    # extract answers
+    answers = [reward_func.extract_answer(response) for response in decoded_responses]
+    
+    # compute majority and margin
+    counts = Counter(answers)
+    counts = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+    counts_dict = dict(counts)
+    if len(counts) > 1:
+        diff = counts[0][1] - counts[1][1]
+    else:
+        diff = counts[0][1]
+
+    # initialize rewards and per_func_rewards to zero
+    rewards = [0] * len(decoded_responses)
+    per_func_rewards = [{ds: 0} for _ in range(len(decoded_responses))]
+
+    # if diff is greater than 1, then all rewards are zero
+    if diff > 1:
+        print(f"majority answer {counts[0]} ground truth {ground_truth}")
+        print("="*100)
+        return rewards, per_func_rewards
+    else:
+        # compute the reward for the most frequent answer and the second most frequent answer
+        # the advantage for the most frequent answer is r(most frequent) - r(second most frequent)
+        # the advantage for the second most frequent answer is r(second most frequent) - r(most frequent)
+        # the advantage for the rest of the answers is 0
+        assert len(counts) > 1, "There should be at least two most frequent answers"
+        
+        
+        second_most_frequent_indices = [i for i, answer in enumerate(answers) if answer == counts[1][0]]
+        most_frequent_indices = [i for i, answer in enumerate(answers) if answer == counts[0][0]]
+
+        most_frequent_idx = most_frequent_indices[0]
+        second_most_frequent_idx = second_most_frequent_indices[0]
+        reward_most_frequent, _ = compute_a_single_reward(
+            responses[most_frequent_idx],
+            decoded_responses[most_frequent_idx],
+            ground_truth[most_frequent_idx],
+            ds,
+            reward_mult
+        )
+        second_most_frequent_reward, _ = compute_a_single_reward(
+            responses[second_most_frequent_idx],
+            decoded_responses[second_most_frequent_idx],
+            ground_truth[second_most_frequent_idx],
+            ds,
+            reward_mult
+        )
+
+        
+        
+
+        results = [0] * len(decoded_responses)
+        for i in most_frequent_indices:
+            results[i] = int(reward_most_frequent - second_most_frequent_reward)
+        
+        print(f"counts: {counts}")
+        print(f"ground_truth: {ground_truth}")
+        print(f"reward_most_frequent: {reward_most_frequent}")
+        print(f"second_most_frequent_reward: {second_most_frequent_reward}")
+        print(f"scores: {results}")
+        print("="*100)
+
+        return results, per_func_rewards
+
+    
+
+def compute_a_single_reward(tok_prediction, prediction, ground_truth, dataset, reward_mult=10):
+    if isinstance(ground_truth, str):
+            ground_truth_list = [ground_truth]
+    else:
+        ground_truth_list = ground_truth
+    if isinstance(dataset, str):
+        dataset_list = [dataset]
+    else:
+        dataset_list = dataset
+    assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
+    # for now, we just assume rewards are additive, rather than more complex functions.
+    reward = 0
+    per_func_reward = {}
+    for gt, ds in zip(ground_truth_list, dataset_list):
+        reward_func = REWARD_FN_MAPPING.get(ds.lower())
+        if reward_func is None:
+            logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
+            continue
+        reward_weight = reward_func.weight
+        # compare with ground truth.
+        # sometimes we need the tokenized pred.
+        reward_result = reward_func(
+            tokenized_prediction=tok_prediction,
+            prediction=prediction,
+            label=gt,
+        )
+        reward += reward_mult * reward_result * reward_weight
+        per_func_reward[ds] = per_func_reward.get(ds, 0) + (reward_mult * reward_result * reward_weight)
+    return reward, per_func_reward
+
 def apply_verifiable_reward(
     responses: List[torch.Tensor],
     decoded_responses: List[str],
     ground_truths: List[str],
     datasets: List[Union[str, List[str]]],
     reward_mult: int = 10,
+    num_samples_per_prompt_rollout: int = 1,
+    aggregate_maj: bool = False,
 ):
     rewards = []
     per_func_rewards = []
+    
+    if aggregate_maj:
+        assert num_samples_per_prompt_rollout > 1, "num_samples_per_prompt_rollout must be greater than 1 when aggregate_maj is True"
+        # process responses in batches of num_samples_per_prompt_rollout
+        for i in range(0, len(responses), num_samples_per_prompt_rollout):
+            responses_batch = responses[i:i+num_samples_per_prompt_rollout]
+            decoded_responses_batch = decoded_responses[i:i+num_samples_per_prompt_rollout]
+            ground_truths_batch = ground_truths[i:i+num_samples_per_prompt_rollout]
+            datasets_batch = datasets[i:i+num_samples_per_prompt_rollout]
+            majority_rewards, per_func_rewards = compute_majority_reward_per_prompt(
+                responses_batch, decoded_responses_batch, ground_truths_batch, datasets_batch, reward_mult
+            )
+            rewards.extend(majority_rewards)
+            per_func_rewards.extend(per_func_rewards)
+        return rewards, per_func_rewards
+
+    
     for tok_prediction, prediction, ground_truth, dataset in zip(
         responses, decoded_responses, ground_truths, datasets
     ):
-        # allow multiple ground truths and datasets for a single response
-        if isinstance(ground_truth, str):
-            ground_truth_list = [ground_truth]
-        else:
-            ground_truth_list = ground_truth
-        if isinstance(dataset, str):
-            dataset_list = [dataset]
-        else:
-            dataset_list = dataset
-        assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
-        # for now, we just assume rewards are additive, rather than more complex functions.
-        reward = 0
-        per_func_reward = {}
-        for gt, ds in zip(ground_truth_list, dataset_list):
-            reward_func = REWARD_FN_MAPPING.get(ds.lower())
-            if reward_func is None:
-                logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
-                continue
-            reward_weight = reward_func.weight
-            # compare with ground truth.
-            # sometimes we need the tokenized pred.
-            reward_result = reward_func(
-                tokenized_prediction=tok_prediction,
-                prediction=prediction,
-                label=gt,
-            )
-            logger.info("Applying ground truth reward 🤗")
-            reward += reward_mult * reward_result * reward_weight
-            per_func_reward[ds] = per_func_reward.get(ds, 0) + (reward_mult * reward_result * reward_weight)
+        reward, per_func_reward = compute_a_single_reward(tok_prediction, prediction, ground_truth, dataset, reward_mult)
         rewards.append(reward)
         per_func_rewards.append(per_func_reward)
     return rewards, per_func_rewards
