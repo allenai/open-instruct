@@ -118,10 +118,8 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     upload_metadata_to_hf,
-    create_snippet_mask,
 )
-from open_instruct.vllm_utils3 import LLMRayActor, create_vllm_engines, init_process_group
-from open_instruct.search_utils.search_actor import LLMSearchRayActor
+from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -265,8 +263,6 @@ class Args:
     """whether to add the R1 style format reward"""
     r1_style_format_reward: float = 1.0
     """the reward value for R1 style format reward"""
-    add_query_reward: bool = False
-    """whether to add the query reward"""
 
     # async setting
     async_mode: bool = True
@@ -333,17 +329,6 @@ class Args:
     """the max generation length for evaluation for oe-eval"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
-
-    # rl-rag settings
-    use_search_actor: bool = False
-    """Whether to use the search actor for RL-RAG"""
-    mask_snippet_loss: bool = False
-    """Whether to mask the loss for tokens within <document>...</document> tags.
-    This is useful for training with search functionality where snippets should not contribute to the loss."""
-    max_searches: int = 5
-    """The maximum number of searches to perform for each query."""
-    number_documents_to_search: int = 10
-    """The maximum number of documents to retrieve for each query."""
 
     def __post_init__(self):
         assert self.number_samples_per_prompt > 0, "Number of samples per prompt must be greater than 0!"
@@ -1150,19 +1135,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     accelerator.process_index * queries.shape[0] : (accelerator.process_index + 1) * queries.shape[0]
                 ]
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
-                decoded_response = tokenizer.batch_decode(local_vllm_responses)
-                # adding a reward for using a query
-                if args.add_query_reward:
-                    query_scores = torch.zeros(queries.shape[0], device=device)
-                    for i, resp in enumerate(decoded_response):
-                        # check for query tags AND that the query is not empty
-                        if (
-                            "<query>" in resp
-                            and "</query>" in resp
-                            and len(resp.split("<query>")[1].split("</query>")[0]) > 0
-                        ):
-                            query_scores[i] = 10.0
+
                 if args.add_r1_style_format_reward:
+                    decoded_response = tokenizer.batch_decode(local_vllm_responses)
                     format_scores = torch.tensor(
                         soft_format_reward_func(decoded_response, args.r1_style_format_reward), device=device
                     )
@@ -1218,8 +1193,6 @@ class PolicyTrainerRayProcess(RayProcess):
                                 per_func_rewards[key].append(value)
                     if args.add_r1_style_format_reward:
                         score += format_scores[i : i + args.local_rollout_forward_batch_size]
-                    if args.add_query_reward:
-                        score += query_scores[i : i + args.local_rollout_forward_batch_size]
 
                     responses.append(response)
                     postprocessed_responses.append(postprocessed_response)
@@ -1325,14 +1298,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         elif args.kl_estimator == "kl4":
                             kl = kl4
                         # grpo change: directly subtract KL in loss (add)
-                        # Apply snippet masking if enabled
-                        if args.mask_snippet_loss:
-                            snippet_mask = create_snippet_mask(mb_responses, tokenizer)
-                            # Combine padding mask with snippet mask (we want ~padding_mask AND snippet_mask)
-                            combined_mask = (~padding_mask[micro_batch_inds]) & snippet_mask
-                            loss = masked_mean(pg_loss_max + (args.beta * kl), combined_mask)
-                        else:
-                            loss = masked_mean(pg_loss_max + (args.beta * kl), ~padding_mask[micro_batch_inds])
+                        loss = masked_mean(pg_loss_max + (args.beta * kl), ~padding_mask[micro_batch_inds])
                         self.model.backward(loss)
                         self.model.step()
                         with torch.no_grad():
@@ -1758,13 +1724,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url) for model in policy_group.models
     )
     max_len = args.max_prompt_token_length + args.response_length
-    additional_ray_actor_kwargs = {}
-    if args.use_search_actor:
-        additional_ray_actor_kwargs = {
-            "max_output_len": args.response_length,
-            "max_searches": args.max_searches,
-            "number_documents_to_search": args.number_documents_to_search,
-        }
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
@@ -1777,8 +1736,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
-        ray_actor_class=LLMSearchRayActor if args.use_search_actor else LLMRayActor,
-        additional_ray_actor_kwargs=additional_ray_actor_kwargs,
     )
 
     metrics_queue = RayQueue()
