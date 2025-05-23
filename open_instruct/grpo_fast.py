@@ -1973,7 +1973,7 @@ if __name__ == "__main__":
         metrics = {}
 
         if args.use_reward_model:
-            metrics["val/reward_model_scores"] = neural_model_scores.mean()
+            metrics["val/reward_model_scores"] = float(neural_model_scores.mean())
 
         if args.apply_r1_style_format_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
