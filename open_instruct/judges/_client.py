@@ -216,7 +216,7 @@ async def async_get_completion(
                         # Use the potentially provided or newly created client
                         response = await client_or_module.chat.completions.create(
                             model=model,
-                            max_tokens=max_tokens,
+                            max_completion_tokens=max_tokens,
                             temperature=temperature,
                             messages=messages,
                             seed=seed,
