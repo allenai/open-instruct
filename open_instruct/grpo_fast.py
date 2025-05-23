@@ -635,6 +635,20 @@ class PolicyTrainerRayProcess(RayProcess):
             self.reward_model, *_ = deepspeed.initialize(model=self.reward_model, config=ds_config)
             self.reward_model.eval()
 
+            if self.reward_model_tokenizer.pad_token_id is None:
+                # This would be very unexpected given your config, but a safety check.
+                raise ValueError("Tokenizer's pad_token_id is None even though '<pad>' is in config. Check tokenizer loading.")
+
+            # 2. Ensure the model's configuration uses this pad_token_id.
+            # This is the crucial step to fix the ValueError.
+            if self.reward_model.config.pad_token_id != self.reward_model_tokenizer.pad_token_id:
+                print(f"Warning: Model's config pad_token_id ({self.reward_model.config.pad_token_id}) "
+                    f"does not match tokenizer's pad_token_id ({self.reward_model_tokenizer.pad_token_id}). Updating.")
+                self.reward_model.config.pad_token_id = self.reward_model_tokenizer.pad_token_id
+            elif self.reward_model.config.pad_token_id is None: # Explicitly check if it was None
+                print(f"Model's config pad_token_id was None. Setting to tokenizer's pad_token_id: {self.reward_model_tokenizer.pad_token_id}")
+                self.reward_model.config.pad_token_id = self.reward_model_tokenizer.pad_token_id
+
         print("finalizing policy process thing")
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
         return optimization_steps_done
