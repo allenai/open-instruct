@@ -1234,41 +1234,42 @@ def data_preparation_thread(
             neural_model_scores_np = np.array([0.0] * len(responses), dtype=np.float32) # Default
 
             if args.use_reward_model and policy_actors:
-                decoded_queries = tokenizer.batch_decode(queries, skip_special_tokens=True)
-                all_combined_sequences_for_rm = []
-                for i in range(len(responses)):
-                    query = decoded_queries[i]
-                    response = parse_prediction_for_reward_model(decoded_responses[i]) # Decoded response
+                with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating neural reward"):
+                    decoded_queries = tokenizer.batch_decode(queries, skip_special_tokens=True)
+                    all_combined_sequences_for_rm = []
+                    for i in range(len(responses)):
+                        query = decoded_queries[i]
+                        response = parse_prediction_for_reward_model(decoded_responses[i]) # Decoded response
 
-                    # Need to format and tokenizer while scoring
-                    all_combined_sequences_for_rm.append(
-                        [
-                            {"role": "user", "content": query},
-                            {"role": "assistant", "content": response},
-                        ]
-                    )
+                        # Need to format and tokenizer while scoring
+                        all_combined_sequences_for_rm.append(
+                            [
+                                {"role": "user", "content": query},
+                                {"role": "assistant", "content": response},
+                            ]
+                        )
 
-                if all_combined_sequences_for_rm:
-                    temp_neural_scores_collector = []
+                    if all_combined_sequences_for_rm:
+                        temp_neural_scores_collector = []
 
-                    for i in range(0, len(all_combined_sequences_for_rm), args.reward_model_batch_size):
-                        current_rm_batch_sequences = all_combined_sequences_for_rm[i:i + args.reward_model_batch_size]
-                        try:
-                            batch_scores_np = ray.get(
-                                policy_actors[0].get_rewards_from_model.remote(
-                                    current_rm_batch_sequences
+                        for i in range(0, len(all_combined_sequences_for_rm), args.reward_model_batch_size):
+                            current_rm_batch_sequences = all_combined_sequences_for_rm[i:i + args.reward_model_batch_size]
+                            try:
+                                batch_scores_np = ray.get(
+                                    policy_actors[0].get_rewards_from_model.remote(
+                                        current_rm_batch_sequences
+                                    )
                                 )
-                            )
-                            temp_neural_scores_collector.extend(list(batch_scores_np))
-                        except Exception as e:
-                            print(f"Warning: RM scoring error for batch: {e}. Using zeros.")
-                            temp_neural_scores_collector.extend([0.0] * len(current_rm_batch_sequences))
+                                temp_neural_scores_collector.extend(list(batch_scores_np))
+                            except Exception as e:
+                                print(f"Warning: RM scoring error for batch: {e}. Using zeros.")
+                                temp_neural_scores_collector.extend([0.0] * len(current_rm_batch_sequences))
 
-                    if len(temp_neural_scores_collector) == len(responses):
-                        neural_model_scores_np = np.array(temp_neural_scores_collector, dtype=np.float32)
-                    else:
-                        print(f"Critical Warning: Length mismatch in collected neural scores. Expected {len(responses)}, got {len(temp_neural_scores_collector)}.")
-                        # neural_model_scores_np remains zeros or handle error appropriately
+                        if len(temp_neural_scores_collector) == len(responses):
+                            neural_model_scores_np = np.array(temp_neural_scores_collector, dtype=np.float32)
+                        else:
+                            print(f"Critical Warning: Length mismatch in collected neural scores. Expected {len(responses)}, got {len(temp_neural_scores_collector)}.")
+                            # neural_model_scores_np remains zeros or handle error appropriately
 
             scores, reward_metrics = reward_fn(
                 responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, neural_model_scores_np,
@@ -1970,6 +1971,9 @@ if __name__ == "__main__":
         # scores = [0] * len(decoded_responses)
         scores = list(neural_model_scores.astype(np.float32)) # Start with neural scores
         metrics = {}
+
+        if args.use_reward_model:
+            metrics["val/reward_model_scores"] = np.array(neural_model_scores).mean()
 
         if args.apply_r1_style_format_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
