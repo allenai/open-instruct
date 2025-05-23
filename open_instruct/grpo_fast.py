@@ -621,20 +621,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     "If they don't have the same vocab size, the policy could generate tokens which "
                     "is going to cause index out of bound error in the reward model."
                 )
-            disable_dropout_in_model(self.reward_model)
-            ds_config = get_eval_ds_config(
-                offload=False,
-                # inference model only has stage 3 (sharding) or stage 0 (no sharding)
-                # stage 2 is optimizer sharding which doesn't apply to inference
-                stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
-                bf16=True,
-            )
-            ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
-            # ds_config["train_batch_size"] = args.per_device_train_batch_size / args.num_mini_batches
-            ds_config["gradient_accumulation_steps"] = 1
-            self.reward_model, *_ = deepspeed.initialize(model=self.reward_model, config=ds_config)
-            self.reward_model.eval()
-
+            
             if self.reward_model_tokenizer.pad_token_id is None:
                 # This would be very unexpected given your config, but a safety check.
                 raise ValueError("Tokenizer's pad_token_id is None even though '<pad>' is in config. Check tokenizer loading.")
@@ -648,6 +635,20 @@ class PolicyTrainerRayProcess(RayProcess):
                 print(f"Warning: Model's config pad_token_id ({self.reward_model.config.pad_token_id}) "
                     f"does not match tokenizer's pad_token_id ({self.reward_model_tokenizer.pad_token_id}). Updating.")
                 self.reward_model.config.pad_token_id = self.reward_model_tokenizer.pad_token_id
+
+            disable_dropout_in_model(self.reward_model)
+            ds_config = get_eval_ds_config(
+                offload=False,
+                # inference model only has stage 3 (sharding) or stage 0 (no sharding)
+                # stage 2 is optimizer sharding which doesn't apply to inference
+                stage=args.deepspeed_stage if args.deepspeed_stage == 3 else 0,
+                bf16=True,
+            )
+            ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
+            # ds_config["train_batch_size"] = args.per_device_train_batch_size / args.num_mini_batches
+            ds_config["gradient_accumulation_steps"] = 1
+            self.reward_model, *_ = deepspeed.initialize(model=self.reward_model, config=ds_config)
+            self.reward_model.eval()
 
         print("finalizing policy process thing")
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
