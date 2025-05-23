@@ -9,7 +9,7 @@ reward_model_revision="rm_qwen_2p5_7b_base_2e-5_1_skyworkstulufull__1__174762468
 # reward_model_revision="main"
 # exp_name="0504_qwen2.5_7B_thinker_grpo_fast_llm_judge__gpt-4o_quality_ref_${RANDOM}_large"
 # exp_name="0508_qwen2.5_7B_thinker_grpo_rm_judge_${RANDOM}_tulu_3_rewritten_no_verifiable"
-exp_name="test_rm_during_grpo"
+exp_name="test_rm_during_grpo_match_faeze_hparams_mostly"
 python mason.py \
     --description $exp_name \
     --cluster ai2/augusta-google-1 \
@@ -39,13 +39,15 @@ python mason.py \
     --model_name_or_path Qwen/Qwen2.5-7B \
     --non_stop_penalty \
     --stop_token eos \
-    --temperature 1.0 \
+    --non_stop_penalty_value 0.0 \
+    --temperature 0.7 \
     --chat_template_name tulu_thinker_r1_style \
     --total_episodes 2000000 \
     --penalty_reward_value 0.0 \
     --deepspeed_stage 2 \
     --per_device_train_batch_size 1 \
     --local_rollout_forward_batch_size 1 \
+    --num_mini_batches 2 \
     --actor_num_gpus_per_node 4 8 8 8 \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
@@ -54,8 +56,8 @@ python mason.py \
     --lr_scheduler_type constant \
     --apply_verifiable_reward false \
     --seed 1 \
-    --num_evals 100 \
-    --save_freq 40 \
+    --num_evals 50 \
+    --save_freq 50 \
     --reward_model_multiplier 1.0 \
     --reward_model_path allenai/open_instruct_dev \
     --reward_model_revision $reward_model_revision \
