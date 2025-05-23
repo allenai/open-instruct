@@ -808,7 +808,7 @@ class PolicyTrainerRayProcess(RayProcess):
             raw_scores = outputs.logits.squeeze(-1) # Shape: (batch_size,)
             scaled_scores = raw_scores * self.args.reward_model_multiplier
 
-        return scaled_scores.cpu().numpy()
+        return scaled_scores.cpu().float().numpy()
 
     def train(
         self,
