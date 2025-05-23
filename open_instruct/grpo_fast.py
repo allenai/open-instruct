@@ -924,7 +924,11 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # grpo change: directly subtract KL in loss (add)
                     loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
+                    print("debugging: ")
+                    print(f"loss: {loss}")
+                    print(f"accumulation steps: {accumulation_steps}")
                     loss = loss / accumulation_steps
+                    print(f"loss again: {loss}")
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
                         self.model.step()
