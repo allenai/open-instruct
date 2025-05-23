@@ -929,6 +929,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     print(f"accumulation steps: {accumulation_steps}")
                     loss = loss / accumulation_steps
                     print(f"loss again: {loss}")
+                    print(f"local_step: {local_step}")
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
                         self.model.step()
