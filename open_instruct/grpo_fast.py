@@ -787,7 +787,7 @@ class PolicyTrainerRayProcess(RayProcess):
             # attention_mask = (input_tensor_device != pad_token_id).long()
 
             outputs = self.reward_model(
-                input_ids=inputs,
+                **inputs,
                 return_dict=True
             )
             raw_scores = outputs.logits.squeeze(-1) # Shape: (batch_size,)
