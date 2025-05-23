@@ -960,34 +960,28 @@ class PolicyTrainerRayProcess(RayProcess):
 
                         loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
                         loss = loss / accumulation_steps
-                        # Clear any existing gradients before backward pass
-                        self.model.zero_grad()
                         # Check if loss is valid before backward pass
-                        if not torch.isnan(loss) and not torch.isinf(loss) and loss != 0:
-                            self.model.backward(loss)
-                            if (local_step + 1) % accumulation_steps == 0:
-                                self.model.step()
+                        self.model.backward(loss)
+                        if (local_step + 1) % accumulation_steps == 0:
+                            self.model.step()
                         local_step += 1
                     else:
                         if (i + 1) % args.num_samples_per_prompt_rollout == 0:
-                            print(f"accumulated_diffs: {accumulated_diffs}")
                             sum_ratios = torch.exp(accumulated_diffs).unsqueeze(-1)
                             single_advantages = single_advantages.unsqueeze(-1)
-                            print(f"sum_ratios: {sum_ratios}")
-                            print(f"single_advantages: {single_advantages}")
 
                             pg_losses = -single_advantages * sum_ratios
                             pg_losses2 = -single_advantages * torch.clamp(sum_ratios, 1.0 - args.cliprange, 1.0 + args.cliprange)
                             pg_loss_max = torch.max(pg_losses, pg_losses2)
-                            loss_maj = pg_loss_max.mean() 
                             
-
-                            self.model.zero_grad()
-                            # Check if loss is valid before backward pass
-                            if not torch.isnan(loss_maj) and not torch.isinf(loss_maj) and loss_maj != 0:
-                                self.model.backward(loss_maj)
-                                self.model.step()
+                            loss_maj = pg_loss_max.sum() / accumulation_steps
+                            self.model.backward(loss_maj)
                             local_step += args.num_samples_per_prompt_rollout
+                            
+                            if local_step % accumulation_steps == 0:
+                                self.model.step()
+                                
+                            
                             single_advantages = torch.zeros(args.num_samples_per_prompt_rollout, device=collated_advantages[0].device)
                             accumulated_diffs = 0.0
 
