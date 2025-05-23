@@ -628,10 +628,10 @@ class PolicyTrainerRayProcess(RayProcess):
 
             # 2. Ensure the model's configuration uses this pad_token_id.
             # This is the crucial step to fix the ValueError.
-            if self.reward_model.config.get('pad_token_id') is None: # Explicitly check if it was None
+            if self.reward_model.config.pad_token_id is None: # Explicitly check if it was None
                 print(f"Model's config pad_token_id was None. Setting to tokenizer's pad_token_id: {self.reward_model_tokenizer.pad_token_id}")
-                self.reward_model.config["pad_token_id"] = self.reward_model_tokenizer.pad_token_id
-            elif self.reward_model.config["pad_token_id"] != self.reward_model_tokenizer.pad_token_id:
+                self.reward_model.config.pad_token_id = self.reward_model_tokenizer.pad_token_id
+            elif self.reward_model.config.pad_token_id != self.reward_model_tokenizer.pad_token_id:
                 print(f"Warning: Model's config pad_token_id ({self.reward_model.config.pad_token_id}) "
                     f"does not match tokenizer's pad_token_id ({self.reward_model_tokenizer.pad_token_id}). Updating.")
                 self.reward_model.config.pad_token_id = self.reward_model_tokenizer.pad_token_id
