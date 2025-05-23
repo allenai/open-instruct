@@ -51,6 +51,7 @@ python mason.py \
     --actor_num_gpus_per_node 4 8 8 8 \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
+    --add_r1_style_format_reward true \
     --vllm_num_engines 4 \
     --vllm_gpu_memory_utilization 0.9 \
     --lr_scheduler_type constant \

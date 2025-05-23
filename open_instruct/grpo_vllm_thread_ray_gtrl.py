@@ -1218,7 +1218,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     if args.reward_model_multiplier:
                         print("APPLYING REWARD MODEL")
-                        response_txts = tokenizer.batch_decode(postprocessed_response, skip_special_tokens=True)
+                        response_txts = tokenizer.batch_decode(postprocessed_response)
                         reward_model_tokens = []
                         for j in range(i, i + args.local_rollout_forward_batch_size):
                             messages[j].append({"role": "assistant", "content": parse_prediction_for_reward_model(response_txts[j - i])})
