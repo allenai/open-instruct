@@ -39,7 +39,7 @@ python mason.py \
     --model_name_or_path Qwen/Qwen2.5-7B \
     --non_stop_penalty \
     --stop_token eos \
-    --non_stop_penalty_value 0.0 \
+    --penalty_reward_value 0.0 \
     --temperature 0.7 \
     --chat_template_name tulu_thinker_r1_style \
     --total_episodes 2000000 \
