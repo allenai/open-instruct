@@ -1855,6 +1855,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     eval_dataset_names,
                     eval_finish_reasons,
                     eval_infos,
+                    [0] * len(eval_decoded_responses),
                 )
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
                 eval_metrics = {
