@@ -209,6 +209,8 @@ class Args:
     # Algorithm
     async_mode: bool = True
     """Whether to run the generation in async mode which learns from the second latest policy like Cleanba (https://arxiv.org/abs/2310.00036)"""
+    async_steps: int = 1
+    """Number of steps ahead to generate responses. Only used when async_mode is True."""
     num_epochs: int = 1
     """the number of epochs to train"""
     num_mini_batches: int = 1
@@ -1506,11 +1508,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     train_dataset_idxs = np.arange(len(train_dataset))
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
 
-    inference_results_Q = Queue(maxsize=1)
-    param_prompt_Q = Queue(maxsize=1)
+    inference_results_Q = Queue(maxsize=args.async_steps)
+    param_prompt_Q = Queue(maxsize=args.async_steps)
     evaluation_inference_results_Q = Queue(maxsize=1)
-    packed_sequences_Q = Queue(maxsize=1)
-    queries_prompt_Q = Queue(maxsize=1)
+    packed_sequences_Q = Queue(maxsize=args.async_steps)
+    queries_prompt_Q = Queue(maxsize=args.async_steps)
     num_eval_samples = 32
 
     eval_prompt_token_ids = None
