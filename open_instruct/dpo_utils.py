@@ -25,6 +25,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import DataCollatorForSeq2Seq
 
+from open_instruct.model_utils import log_softmax_and_gather
+
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
@@ -162,12 +164,33 @@ def _get_batch_logps(
     # dummy token; we'll ignore the losses on these tokens later
     labels[labels == -100] = 0
 
-    per_token_logps = torch.gather(logits.log_softmax(-1), dim=2, index=labels.unsqueeze(2)).squeeze(2)
+    per_token_logps = log_softmax_and_gather(logits, labels)
 
     if average_log_prob:
         return (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1)
     else:
         return (per_token_logps * loss_mask).sum(-1)
+
+
+def process_batch(
+    batch: Dict[str, Union[List, torch.LongTensor]], prefix: str, pad_value: int = 0
+) -> Dict[str, torch.LongTensor]:
+    """Process either chosen or rejected inputs separately.
+
+    Args:
+        batch: Input batch dictionary
+        prefix: Either 'chosen' or 'rejected'
+        pad_value: Value to use for padding (0 for input_ids, -100 for labels)
+
+    Returns:
+        Processed batch dictionary for the specified prefix
+    """
+    processed = {}
+    for k in batch:
+        if k.startswith(prefix) and isinstance(batch[k], torch.Tensor):
+            new_key = k.replace(prefix + "_", "")
+            processed[new_key] = batch[k]
+    return processed
 
 
 def concatenated_inputs(batch: Dict[str, Union[List, torch.LongTensor]]) -> Dict[str, torch.LongTensor]:
@@ -229,6 +252,74 @@ def concatenated_forward(
     all_logps = _get_batch_logps(logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob)
     chosen_logps = all_logps[: batch["chosen_input_ids"].shape[0]]
     rejected_logps = all_logps[batch["chosen_input_ids"].shape[0] :]
+    return chosen_logps, rejected_logps, aux_loss
+
+
+def separate_forward(
+    model: nn.Module,
+    batch: Dict[str, Union[List, torch.LongTensor]],
+    average_log_prob: bool = False,
+    output_router_logits: bool = False,
+) -> Tuple[torch.FloatTensor, torch.FloatTensor, Union[torch.FloatTensor, None]]:
+    """Run the model on chosen and rejected inputs separately.
+
+    Args:
+        model: The model to run
+        batch: Dictionary containing chosen and rejected inputs
+        average_log_prob: Whether to average the log probabilities
+        output_router_logits: Whether to output router logits for MoE models
+
+    Returns:
+        Tuple of (chosen_logps, rejected_logps, aux_loss)
+    """
+    # Process chosen inputs
+    chosen_batch = process_batch(batch, "chosen")
+
+    if output_router_logits:
+        chosen_outputs = model(
+            input_ids=chosen_batch["input_ids"],
+            attention_mask=chosen_batch["attention_mask"],
+            output_router_logits=True,
+        )
+        chosen_logits = chosen_outputs.logits.to(torch.float32)
+        aux_loss = chosen_outputs.aux_loss
+    else:
+        chosen_logits = model(
+            input_ids=chosen_batch["input_ids"], attention_mask=chosen_batch["attention_mask"]
+        ).logits.to(torch.float32)
+        aux_loss = None
+
+    chosen_logps = _get_batch_logps(chosen_logits, chosen_batch["labels"], average_log_prob=average_log_prob)
+    del chosen_batch, chosen_logits
+    if output_router_logits:
+        del chosen_outputs
+    torch.cuda.empty_cache()
+
+    # Process rejected inputs
+    rejected_batch = process_batch(batch, "rejected")
+
+    if output_router_logits:
+        rejected_outputs = model(
+            input_ids=rejected_batch["input_ids"],
+            attention_mask=rejected_batch["attention_mask"],
+            output_router_logits=True,
+        )
+        rejected_logits = rejected_outputs.logits.to(torch.float32)
+        aux_loss = rejected_outputs.aux_loss
+    else:
+        rejected_logits = model(
+            input_ids=rejected_batch["input_ids"], attention_mask=rejected_batch["attention_mask"]
+        ).logits.to(torch.float32)
+        aux_loss = None
+
+    rejected_logps = _get_batch_logps(rejected_logits, rejected_batch["labels"], average_log_prob=average_log_prob)
+    del rejected_batch, rejected_logits
+    if output_router_logits:
+        del rejected_outputs
+    torch.cuda.empty_cache()
+    if output_router_logits:
+        aux_loss = torch.cat([chosen_outputs.aux_loss, rejected_outputs.aux_loss], dim=0)
+
     return chosen_logps, rejected_logps, aux_loss
 
 

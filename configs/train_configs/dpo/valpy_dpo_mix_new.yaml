@@ -1,0 +1,77 @@
+model_name_or_path: /model
+model_revision: main
+use_flash_attn: true
+gradient_checkpointing: true
+dataset_mixer:
+  #ai2-adapt-dev/hs2_nvidia_new: 1.0
+  #valpy/dpo_rewritten_prompts: 1.0
+  #valpy/taxonomy_tulu: 1.0
+  #allenai/ultrafeedback_binarized_cleaned_train: 1.0
+  #ai2-adapt-dev/DaringAnteater-prefs-RM-filter: 1.0
+  #ai2-adapt-dev/only_wildchat_aug28_regenerated_llama: 1.0
+ # ai2-adapt-dev/ultrafeedback-replication-p0: 1.0
+  #ai2-adapt-dev/ultrafeedback-replication-p1: 1.0
+  #ai2-adapt-dev/ultrafeedback-replication-p2: 1.0
+  #ai2-adapt-dev/ultrafeedback-replication-p3: 1.0
+  #ai2-adapt-dev/ultrafeedback-replication-p4: 1.0
+  #ai2-adapt-dev/ultrafeedback-replication-p5: 1.0
+  #ai2-adapt-dev/ultrafeedback-replication-p6: 1.0
+#  ai2-adapt-dev/hh-rlhf-helpful: 20000
+  #ai2-adapt-dev/webgpt-binarized: 1.0
+  #ai2-adapt-dev/WildChat-prefs-280824: 1.0
+  #ai2-adapt-dev/helpsteer2-binarized-mean-aspects: 1.0
+  #ai2-adapt-dev/tulu-2/5-prefs-helpsteer: 1.0
+  #ai2-adapt-dev/helpsteer2-binarized-nvidia-spec: 1.0
+  #ai2-adapt-dev/helpsteer-2-binarized-above-2.0-margin-0.5-ignore-verbosity: 1.0
+  #ai2-adapt-dev/helpsteer-2-binarized-above-2.5-ignore-verbosity: 1.0
+  #  ai2-adapt-dev/UltraInteract_pair_randomlen_Logic: 1.0
+#  ai2-adapt-dev/UltraInteract_pair_randomlen_Math_PoT: 1.0
+#  ai2-adapt-dev/UltraInteract_pair_randomlen_Math_CoT: 1.0
+#  ai2-adapt-dev/UltraInteract_pair_randomlen_Coding: 1.0
+#  ai2-adapt-dev/UltraInteract_pair_maxlen_Logic: 1.0
+  #ai2-adapt-dev/UltraInteract_pair_maxlen_Math_PoT: 1.0
+#  ai2-adapt-dev/UltraInteract_pair_maxlen_Math_CoT: 1.0
+#  ai2-adapt-dev/UltraInteract_pair_maxlen_Coding: 1.0
+ # ai2-adapt-dev/Skywork-Magpie: 1.0
+  #ai2-adapt-dev/nectar_binarized-dedup-ultrafeedback: 1.0
+  #ai2-adapt-dev/nectar_binarized-lmsys-chat-1m: 1.0
+  #ai2-adapt-dev/nectar_binarized-anthropic-hh: 1.0
+
+  #LJ's helpsteer regenerations
+  # orig Helpsteer2
+  ai2-adapt-dev/helpsteer2-uf-pipeline-regen: 1.0
+
+  #the newer Helpsteer2-Preferences dataset.
+  #ai2-adapt-dev/helpsteer2-prefs-uf-pipeline-regen: 1.0
+
+  #LJ's UF regenerations
+  ai2-adapt-dev/tulu3.4-sft-replica-50k-gpt4-prefs-on-policy: 1.0
+  #ai2-adapt-dev/tulu3.4-sft-replica-50k: 1.0
+
+  #LJ's regenerations of my datasets
+  #ai2-adapt-dev/DaringAnteater-prefs-RM-filter-uf-pipeline-regen: 1.0
+  #ai2-adapt-dev/WildChat-prefs-280824-uf-pipeline-regen: 1.0
+  #ai2-adapt-dev/Llama-3.1-if_taxonomy_tulu-uf-regen: 1.0
+  
+  #Faeze's persona IF preference dataset
+  ai2-adapt-dev/personahub_if_pref_data_manualseed_v2_19890: 1.0
+tokenizer_name: /model
+use_slow_tokenizer: true
+max_seq_length: 2048
+preprocessing_num_workers: 16
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 16 # designed for 8 GPUs, so batch size 128
+learning_rate: 5.0e-7
+lr_scheduler_type: linear
+warmup_ratio: 0.1
+weight_decay: 0.0
+num_train_epochs: 1
+output_dir: /output
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+use_lora: false
+dpo_loss_type: dpo_norm
+dpo_beta: 5
+checkpointing_steps: 1000

@@ -1,0 +1,29 @@
+model_name_or_path: allenai/OLMo-2-1124-13B-SFT
+use_flash_attn: true
+gradient_checkpointing: true
+dataset_mixer:
+    allenai/olmo-2-1124-13b-preference-mix: 1.0
+tokenizer_name: allenai/OLMo-2-1124-13B-SFT
+use_slow_tokenizer: false
+max_seq_length: 2048
+preprocessing_num_workers: 16
+per_device_train_batch_size: 1
+# gradient_accumulation_steps: 16 # designed for 8 GPUs, so batch size 128
+gradient_accumulation_steps: 4 # designed for 32 GPUs, so batch size 128
+learning_rate: 5.0e-7
+lr_scheduler_type: linear
+warmup_ratio: 0.1
+weight_decay: 0.0
+num_train_epochs: 1
+output_dir: output/dpo_7b
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+use_lora: false
+dpo_loss_type: dpo_norm
+dpo_beta: 5
+checkpointing_steps: 1000
+hf_metadata_dataset: allenai/olmo-instruct-evals
+add_bos: true
+seed: 1234

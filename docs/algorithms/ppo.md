@@ -1,246 +1,40 @@
-# Reward model training
-
-`open_instruct/ppo_vllm_thread.py` contains the script for training PPO models.
+# Proximal Policy Optimization (PPO)
 
 
-## Get started
 
-In the sections below, we will include some examples on how to train models and demonstrating different features. A couple of notes:
+## Implemented Variants
 
-* You should adjust your `per_device_train_batch_size` and `gradient_accumulation_steps` accordingly to maximize throughput on a particular GPU type.
-* For the examples below, we use `mason.py` to invoke experiment orchastration on Ai2's cluster. For external users, you can copy the command after the `--` and run it on your system or debug locally. For example: the documentation will have commands like the following, but you can just run `$YOUR_COMMAND` on your system and make sure it matches `$NUM_GPUS`.
-    * You can you `--image costah/open_instruct_onlinedpo2` to specify a custom image or if you don't specify any it's going to use the default image.
-    * If you installed your python on NFS you can run a debug mode by **not toggling** `--pure_docker_mode` and it will mount your python environment on the docker container.
-
-```bash
-python mason.py \
-    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale \
-    --image costah/open_instruct_onlinedpo2 --pure_docker_mode \
-    --priority preemptible \
-    --budget ai2/allennlp \
-    --gpus $NUM_GPUS -- $YOUR_COMMAND
-```
+- `open_instruct/grpo_vllm_thread_ray_gtrl.py` contains the script for training PPO models.
 
 
-### Level 0: single GPU; quick debug. Should take less than 10 minutes to finish
+
+## `ppo_vllm_thread_ray_gtrl.py`
+
+
+This implementation has the following features:
+
+- Uses a thread-based approach to parallelize the training and inference processes, based on [Asynchronous RLHF](https://arxiv.org/abs/2410.18252).
+- Uses vLLM and Ray to parallelize the training process, based on how [OpenRLHF](https://github.com/OpenRLHF/OpenRLHF) does it
+
+
+
+### Debug (Single GPU)
+
+You can run the script in a single GPU mode to debug the training process.
 
 ```bash
-python open_instruct/ppo_vllm_thread.py \
-    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
-    --dataset_eval_splits validation \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
-    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr \
-    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
-    --non_stop_penalty \
-    --stop_token eos \
-    --chat_template simple_concat_with_space \
-    --learning_rate 3e-6 \
-    --total_episodes 4000 \
-    --per_device_train_batch_size 2 \
-    --per_device_eval_batch_size 2 \
-    --gradient_accumulation_steps 64 \
-    --max_token_length 2048 \
-    --max_prompt_token_lenth 512 \
-    --num_train_epochs 1 \
-    --beta 0.1 \
-    --output_dir models/rm/rm_sentiment_1b \
-    --vllm_device cuda:0 \
-    --vllm_gpu_memory_utilization 0.1 \
-    --sanity_check \
-    --sanity_check_max_samples 2048 \
-    --hf_metadata_dataset "" \
-    --no_try_launch_beaker_eval_jobs \
-    --gradient_checkpointing \
-    --with_tracking \
-    --push_to_hub
-
-# LEVEL 0.1: two GPU; quick debug; using 1 GPU for training and 1 GPU for vllm generation via --vllm_device cuda:1
-python open_instruct/ppo_vllm_thread.py \
-    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
-    --dataset_eval_splits validation \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
-    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr \
-    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
-    --non_stop_penalty \
-    --stop_token eos \
-    --chat_template simple_concat_with_space \
-    --learning_rate 3e-6 \
-    --total_episodes 3000 \
-    --per_device_train_batch_size 2 \
-    --per_device_eval_batch_size 2 \
-    --gradient_accumulation_steps 64 \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
-    --num_train_epochs 1 \
-    --beta 0.1 \
-    --output_dir models/rm/rm_sentiment_1b \
-    --vllm_device cuda:1 \
-    --sanity_check \
-    --sanity_check_max_samples 2048 \
-    --hf_metadata_dataset "" \
-    --no_try_launch_beaker_eval_jobs \
-    --gradient_checkpointing \
-    --with_tracking \
-    --push_to_hub
+bash scripts/train/debug/ppo.sh
 ```
 
 
 
+### Reproduce `allenai/Llama-3.1-Tulu-3.1-8B` (2 Nodes)
 
-### LEVEL 1: 8 GPU; TL;DR summarization
-
-Here we are using --vllm_device cuda:7 to say we want to launch the vllm generation engine on the 8th GPU (or GPU_7 using 0 index)
-```bash
-# for running TL;DR you can likely use GPUs with less memory
-python mason.py \
-    --image nathanl/open_instruct_auto --pure_docker_mode \
-    --cluster ai2/pluto-cirrascale ai2/prior-cirrascale ai2/s2-cirrascale ai2/general-cirrascale \
-    --priority normal \
-    --resumable \
-    --preemptible \
-    --budget ai2/allennlp \
-    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
-     open_instruct/ppo_vllm_thread.py \
-    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
-    --dataset_eval_splits validation \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
-    --learning_rate 3e-6 \
-    --output_dir models/minimal/ppo_vllm_thread_tldr \
-    --per_device_train_batch_size 16 \
-    --local_rollout_forward_batch_size 32 \
-    --gradient_accumulation_steps 4 \
-    --num_epochs 1 \
-    --num_mini_batches 1 \
-    --total_episodes 1000000 \
-    --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr  \
-    --reward_model_path cleanrl/EleutherAI_pythia-1b-deduped__reward__tldr \
-    --non_stop_penalty \
-    --stop_token eos \
-    --beta 0.1 \
-    --response_length 53 \
-    --with_tracking \
-    --push_to_hub \
-    --hf_metadata_dataset '""' \
-    --no_try_launch_beaker_eval_jobs \
-    --vllm_device cuda:7
-```
-
-* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/by8j2ejp
-* Trained model: https://huggingface.co/vwxyzjn/ppo_vllm_thread__cleanrl_EleutherAI_pythia-1b-deduped__sft__tldr/tree/ppo_vllm_thread__1__1726110645
-
-
-### LEVEL 2: 8 GPU; Huggingface no robot
+You can reproduce our `allenai/Llama-3.1-Tulu-3-8B` model by running the following command:
 
 ```bash
-# for running chat based models you should use an 8xH100 node.
-# use ai2/jupiter-cirrascale-2 or ai2/pluto-cirrascale
-python mason.py \
-    --cluster ai2/jupiter-cirrascale-2 \
-    --image nathanl/open_instruct_auto --pure_docker_mode \
-    --workspace ai2/tulu-3-dev \
-    --priority high \
-    --preemptible \
-    --budget ai2/allennlp \
-    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
-    open_instruct/ppo_vllm_thread.py \
-    --exp_name "ppo_vllm_thread_beta_0.03" \
-    --dataset_mixer '{"HuggingFaceH4/no_robots": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"HuggingFaceH4/no_robots": 1.0}' \
-    --dataset_eval_splits test \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
-    --learning_rate 8e-7 \
-    --output_dir /output/ \
-    --chat_template tulu \
-    --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 32 \
-    --local_rollout_forward_batch_size 1 \
-    --vllm_device cuda:7 \
-    --num_epochs 1 \
-    --num_mini_batches 1 \
-    --total_episodes 100000 \
-    --model_name_or_path allenai/open_instruct_dev  \
-    --model_revision costa_finetune_tulu3_8b_norobot__meta-llama_Meta-Llama-3.1-8B__42__1725559869 \
-    --reward_model_path vwxyzjn/reward_modeling__allenai_open_instruct_dev \
-    --reward_model_revision reward_modeling__1__1725760619 \
-    --non_stop_penalty \
-    --stop_token eos \
-    --penalty_reward_value -10.0 \
-    --beta 0.03 \
-    --num_evals 3 \
-    --seed 3 \
-    --response_length 1024 \
-    --gradient_checkpointing \
-    --with_tracking \
-    --push_to_hub
+bash scripts/train/tulu3/ppo_8b.sh
 ```
-
-* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/jvjegpcq
-* Trained model: https://huggingface.co/vwxyzjn/ppo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/ppo_vllm_thread_beta_0.03__3__1726244716
-
-
-### LEVEL 3: 8 GPU; Training on ultrafeedback RM
-
-```bash
-# for running chat based models you should use an 8xH100 node.
-# use ai2/jupiter-cirrascale-2 or ai2/pluto-cirrascale
-python mason.py \
-    --cluster ai2/pluto-cirrascale \
-    --image nathanl/open_instruct_auto --pure_docker_mode \
-    --workspace ai2/tulu-3-dev \
-    --priority high \
-    --preemptible \
-    --budget ai2/allennlp \
-    --gpus 8 -- accelerate launch --num_processes 7 --config_file configs/ds_configs/deepspeed_zero3.yaml \
-    open_instruct/ppo_vllm_thread.py \
-    --exp_name "ppo_vllm_thread_beta_0.03" \
-    --dataset_mixer '{"allenai/ultrafeedback_binarized_cleaned": 1.0}' \
-    --sft_messages_key chosen \
-    --dataset_train_splits train_prefs \
-    --dataset_eval_mixer '{"allenai/ultrafeedback_binarized_cleaned": 1.0}' \
-    --dataset_eval_splits test_prefs \
-    --max_token_length 1024 \
-    --max_prompt_token_lenth 512 \
-    --learning_rate 8e-7 \
-    --output_dir /output/ \
-    --chat_template tulu \
-    --per_device_train_batch_size 1 \
-    --per_device_eval_batch_size 1 \
-    --gradient_accumulation_steps 64 \
-    --local_rollout_forward_batch_size 1 \
-    --vllm_device cuda:7 \
-    --num_epochs 1 \
-    --num_mini_batches 1 \
-    --total_episodes 300000 \
-    --model_name_or_path allenai/open_instruct_dev  \
-    --model_revision finetune__meta-llama_Meta-Llama-3.1-8B__42__1725751338 \
-    --reward_model_path vwxyzjn/reward_modeling__allenai_llama-3-tulu-2-8b \
-    --reward_model_revision reward_modeling__1__1726175049 \
-    --non_stop_penalty \
-    --stop_token eos \
-    --penalty_reward_value -10.0 \
-    --beta 0.02 \
-    --num_evals 3 \
-    --response_length 1024 \
-    --gradient_checkpointing \
-    --with_tracking \
-    --push_to_hub
-```
-
-* Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/z9035fv5/overview
-* Trained model: https://huggingface.co/vwxyzjn/ppo_vllm_thread_beta_0.03__allenai_open_instruct_dev/tree/ppo_vllm_thread_beta_0.03__1__1726282755
-
 
 ### Quality of life tools
 
@@ -261,24 +55,25 @@ Finally, we also include samples
 ![reward modeling preference sample texts](reward_modeling_preference_sample_texts.png)
 
 
-## Explanation of the logged metrics
+### Training Metrics
+
+During training, the following metrics are logged:
 
 
-* `episode`: the global episode number training has gone through (e.g., `3000` means we have trained on 3000 data points already)
+* `episode`: the global episode number training has gone through (e.g., `3000` means we have trained on 3000 data points already -- in the case of RLVR that is prompts, which can repeat)
 * `lr`: the current learning rate
 * `epoch`: the fraction or multiple of the epoch (e.g., `2.7` means we have trained on the dataset for 2 epochs and 70% of the third epoch)
 * `objective/kl`: the KL divergence between the current policy and the reference policy (sum of the KL divergence of each response token)
-* `objective/scores`: the scores of the current response, rated by a reward model
+* `objective/scores`: the scores of the current response, rated by a combination of reward model and other rewards (e.g., R1 style format reward, verifiable reward, etc.)
 * `objective/rlhf_reward`: the RLHF reward, which is `objective/scores` - `beta` * `objective/kl`
 * `objective/non_score_reward`: `beta` * `objective/kl`
 * `objective/entropy`: the entropy of the current policy
-* `objective/scores_margin`: the difference between the chosen response scores and the rejected response scores. We pick the chosen response to be the response with higher scores, and the rejected response to be the response with lower scores
-* `objective/loss`: the DPO loss
-* `logps/chosen`: the log probability of the chosen response
-* `logps/rejected`: the log probability of the rejected response
-* `reward/chosen`: the implicit DPO reward of the chosen response
-* `reward/rejected`: the implicit DPO reward of the rejected response
-* `reward_margin`: the difference between the implicit PDO chosen reward and the implicit rejected reward
+* `objective/loss`: the PPO loss
+* `objective/verifiable_correct_rate`: the rate at which responses are verifiably correct, providing a measure of response accuracy
+* `loss/policy_avg`: the average policy loss, indicating the mean loss incurred during policy updates
+* `policy/approxkl_avg`: the average approximate KL divergence, used to monitor policy stability
+* `policy/clipfrac_avg`: the average fraction of updates where the policy was clipped, indicating how often clipping occurs
+* `policy/entropy_avg`: the average entropy of the policy, providing a measure of policy randomness
 * `time/from_scratch`: the time taken to train the model from scratch
 * `time/training`: the time taken to do one training step
 * `val/sequence_lengths`: the length of the sequences in the generated responses
@@ -346,11 +141,12 @@ for g in range(1, ITER + 1):
     if async_mode:
         if g != 1:
             next_queries = next(generator)
-        param_and_query_Q.put((agent.param, queries))
+        param_and_query_Q.put((agent.param, next_queries))
     else:
         if g != 1:
             next_queries = next(generator)
             param_and_query_Q.put((agent.param, next_queries)) # note the indent here is different
+            queries = next_queries
     _, data = data_Q.get()
     old_param = agent.param
     agent.learn(data)
@@ -359,20 +155,57 @@ for g in range(1, ITER + 1):
 actor_thread.join()
 ```
 ```
+# async_mode = True
 [actor] generating data π_1 -> p_1 D_π_1
 [actor] generating data π_1 -> p_1 D_π_1
---[leaner] get π_1 ->  p_1 D_π_1 -> π_2, time: 2.0022709369659424
-[actor] generating data π_2 -> p_1 D_π_2
---[leaner] get π_2 ->  p_1 D_π_1 -> π_3, time: 3.003502607345581
-[actor] generating data π_3 -> p_2 D_π_3
---[leaner] get π_3 ->  p_2 D_π_2 -> π_4, time: 4.004725933074951
-[actor] generating data π_4 -> p_3 D_π_4
---[leaner] get π_4 ->  p_3 D_π_3 -> π_5, time: 5.005916118621826
-[actor] generating data π_5 -> p_4 D_π_5
---[leaner] get π_5 ->  p_4 D_π_4 -> π_6, time: 6.007085800170898
-[actor] generating data π_6 -> p_5 D_π_6
---[leaner] get π_6 ->  p_5 D_π_5 -> π_7, time: 7.007669448852539
---[leaner] get π_7 ->  p_6 D_π_6 -> π_8, time: 8.009439706802368
+--[leaner] get π_1 ->  p_1 D_π_1 -> π_2, time: 2.0003671646118164
+[actor] generating data π_2 -> p_2 D_π_2
+--[leaner] get π_2 ->  p_1 D_π_1 -> π_3, time: 3.0012056827545166
+[actor] generating data π_3 -> p_3 D_π_3
+--[leaner] get π_3 ->  p_2 D_π_2 -> π_4, time: 4.001934766769409
+[actor] generating data π_4 -> p_4 D_π_4
+--[leaner] get π_4 ->  p_3 D_π_3 -> π_5, time: 5.002779722213745
+[actor] generating data π_5 -> p_5 D_π_5
+--[leaner] get π_5 ->  p_4 D_π_4 -> π_6, time: 6.003664970397949
+[actor] generating data π_6 -> p_6 D_π_6
+--[leaner] get π_6 ->  p_5 D_π_5 -> π_7, time: 7.004390716552734
+--[leaner] get π_7 ->  p_6 D_π_6 -> π_8, time: 8.00534439086914
+
+# async_mode = False
+[actor] generating data π_1 -> p_1 D_π_1
+--[leaner] get π_1 ->  p_1 D_π_1 -> π_2, time: 2.000866174697876
+[actor] generating data π_2 -> p_2 D_π_2
+--[leaner] get π_2 ->  p_2 D_π_2 -> π_3, time: 4.002583980560303
+[actor] generating data π_3 -> p_3 D_π_3
+--[leaner] get π_3 ->  p_3 D_π_3 -> π_4, time: 6.003793239593506
+[actor] generating data π_4 -> p_4 D_π_4
+--[leaner] get π_4 ->  p_4 D_π_4 -> π_5, time: 8.005346775054932
+[actor] generating data π_5 -> p_5 D_π_5
+--[leaner] get π_5 ->  p_5 D_π_5 -> π_6, time: 10.00696587562561
+[actor] generating data π_6 -> p_6 D_π_6
+--[leaner] get π_6 ->  p_6 D_π_6 -> π_7, time: 12.00776195526123
+[actor] generating data π_7 -> p_7 D_π_7
+--[leaner] get π_7 ->  p_7 D_π_7 -> π_8, time: 14.009297132492065
 ```
 
 
+
+## Acknowledgements
+
+We would like to thank the following resources for PPO theory:
+
+- [Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347)
+- [The N+ Implementation Details of RLHF with PPO: A Case Study on TL;DR Summarization](https://arxiv.org/abs/2403.17031)
+- [Asynchronous RLHF](https://arxiv.org/abs/2410.18252)
+
+We would like to thank the following resources for distributed Ray usage:
+
+- [OpenRLHF/OpenRLHF](https://github.com/OpenRLHF/OpenRLHF)
+
+
+We would like to thank the following projects for general infrastructure:
+
+- [vLLM](https://github.com/vllm-project/vllm)
+- [Ray](https://github.com/ray-project/ray)
+- [DeepSpeedAI/DeepSpeed](https://github.com/deepspeedai/DeepSpeed)
+- [HuggingFace/Transformers](https://github.com/huggingface/transformers)

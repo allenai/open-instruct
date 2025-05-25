@@ -15,7 +15,6 @@ def load_yaml(file_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Run experiment with Beaker config")
-    parser.add_argument("--experiment_name", required=False, help="Name of the experiment")
     parser.add_argument("--default_beaker_config", default="configs/beaker_configs/default_dpo.yaml", 
                         help="Path to the default Beaker config file")
     parser.add_argument("--config", default=None, 
@@ -74,6 +73,158 @@ def main():
     d1['tasks'][0]['context']['preemptible'] = args.preemptible # True requried for Jupiter/Pluto
     d1['tasks'][0]['resources']['gpuCount'] = args.num_gpus
 
+    # add cluster-specific env vars
+    if args.num_nodes > 1:
+        if args.cluster == "ai2/jupiter-cirrascale-2":
+            d1['tasks'][0]['envVars'] += [
+                {
+                    "name": "NCCL_SOCKET_IFNAME",
+                    "value": "ib",
+                },
+                {
+                    "name": "NCCL_IB_HCA",
+                    "value": "^=mlx5_bond_0",
+                },
+                {
+                    "name": "NCCL_DEBUG",
+                    "value": "INFO",
+                },
+                # {
+                #     "name": "HF_HOME",
+                #     "value": "/weka/oe-adapt-default/allennlp/.cache/huggingface",
+                # },
+                # {
+                #     "name": "HF_DATASETS_CACHE",
+                #     "value": "/weka/oe-adapt-default/allennlp/.cache/huggingface",
+                # },
+                # {
+                #     "name": "HF_HUB_CACHE",
+                #     "value": "/weka/oe-adapt-default/allennlp/.cache/hub",
+                # },
+            ]
+        elif args.cluster == "ai2/pluto-cirrascale":
+            d1['tasks'][0]['envVars'] += [
+                {
+                    "name": "NCCL_IB_HCA",
+                    "value": "^=mlx5_1,mlx5_2",
+                },
+                {
+                    "name": "NCCL_DEBUG",
+                    "value": "INFO",
+                },
+            ]
+        elif args.cluster == "ai2/augusta-google-1":
+            d1['tasks'][0]['envVars'] += [
+                {
+                    "name":"LD_LIBRARY_PATH",
+                    "value": r"/var/lib/tcpxo/lib64:${LD_LIBRARY_PATH}",
+                },
+                {
+                    "name":"NCCL_CROSS_NIC",
+                    "value": "0",
+                },
+                {
+                    "name":"NCCL_ALGO",
+                    "value": "Ring,Tree",
+                },
+                {
+                    "name":"NCCL_PROTO",
+                    "value": "Simple",
+                },
+                {
+                    "name":"NCCL_MIN_NCHANNELS",
+                    "value": "4",
+                },
+                {
+                    "name":"NCCL_P2P_NET_CHUNKSIZE",
+                    "value": "524288",
+                },
+                {
+                    "name":"NCCL_P2P_PCI_CHUNKSIZE",
+                    "value": "524288",
+                },
+                {
+                    "name":"NCCL_P2P_NVL_CHUNKSIZE",
+                    "value": "1048576",
+                },
+                {
+                    "name":"NCCL_FASTRAK_NUM_FLOWS",
+                    "value": "2",
+                },
+                {
+                    "name":"NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL",
+                    "value": "0",
+                },
+                {
+                    "name":"NCCL_BUFFSIZE",
+                    "value": "8388608",
+                },
+                {
+                    "name":"NCCL_FASTRAK_USE_SNAP",
+                    "value": "1",
+                },
+                {
+                    "name":"CUDA_VISIBLE_DEVICES",
+                    "value": "0,1,2,3,4,5,6,7",
+                },
+                {
+                    "name":"NCCL_NET_GDR_LEVEL",
+                    "value": "PIX",
+                },
+                {
+                    "name":"NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING",
+                    "value": "0",
+                },
+                {
+                    "name":"NCCL_TUNER_PLUGIN",
+                    "value": "libnccl-tuner.so",
+                },
+                {
+                    "name":"NCCL_TUNER_CONFIG_PATH",
+                    "value": "/var/lib/tcpxo/lib64/a3plus_tuner_config.textproto",
+                },
+                {
+                    "name":"NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE",
+                    "value": "/var/lib/tcpxo/lib64/a3plus_guest_config.textproto",
+                },
+                {
+                    "name":"NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS",
+                    "value": "600000",
+                },
+                {
+                    "name":"NCCL_NVLS_ENABLE",
+                    "value": "0",
+                },
+                {
+                    "name":"NCCL_DEBUG",
+                    "value": "WARN",
+                },
+                {
+                    "name":"NCCL_FASTRAK_CTRL_DEV",
+                    "value": "enp0s12",
+                },
+                {
+                    "name":"NCCL_FASTRAK_IFNAME",
+                    "value": "enp6s0,enp7s0,enp13s0,enp14s0,enp134s0,enp135s0,enp141s0,enp142s0",
+                },
+                {
+                    "name":"NCCL_SOCKET_IFNAME",
+                    "value": "enp0s12",
+                },
+                {
+                    "name":"NCCL_USE_SNAP",
+                    "value": "1",
+                },
+                {
+                    "name":"NCCL_FASTRAK_USE_LLCM",
+                    "value": "1",
+                },
+                {
+                    "name":"NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY",
+                    "value": "/dev/aperture_devices",
+                },
+            ]
+
     # modify here for different set of experiments
     experiment_group = "dataset_comparison"
     wandb_project = "open_instruct"
@@ -103,7 +254,7 @@ def main():
         cmd_parts = shlex.split(original_command)
 
         # Find the index of open_instruct/dpo_tune.py
-        script_index = cmd_parts.index('open_instruct/dpo_tune.py')
+        script_index = cmd_parts.index('open_instruct/dpo_tune_cache.py')
 
         # Find the index of 'accelerate launch'
         pre_index = cmd_parts.index('launch')
@@ -130,7 +281,7 @@ def main():
             if value is not True:
                 new_cmd_parts.append(str(value))
         # add python job + post args
-        new_cmd_parts.append('open_instruct/dpo_tune.py')
+        new_cmd_parts.append('open_instruct/dpo_tune_cache.py')
         for key, value in cmd_dict.items():
             if key == "dataset_mixer":
                 key = "dataset_mixer_list"
@@ -156,14 +307,10 @@ def main():
     new_arguments = re.sub(r'--num_machines \d+', f'--num_machines {args.num_nodes}', new_arguments)
 
     # if given, use the provided name. Otherwise try to guess from the config
-    if args.experiment_name:
-        model_name  = args.experiment_name
-    else:
-        model_name = get_model_name(new_arguments)
-        if model_name.lower() == "/model":
-            raise ValueError("Warning - model name found was just /model. Please provide a more descriptive name via the `--experiment_name` flag.")
-    # if model name has /, replace with _
-    model_name = model_name.replace("/", "_")
+    exp_name = get_exp_name(new_arguments)
+    if exp_name is None:
+        exp_name = ""
+    exp_name = exp_name.replace("/", "_")
     # try given config only has one
     dataset_name, dataset_mixer, train_file = check_dataset_selection(new_arguments)
     print(f"Dataset selection is valid.")
@@ -175,7 +322,7 @@ def main():
     d['tasks'][0]['arguments'][0] = new_arguments
 
     # name and description
-    exp_name = f"open_instruct_dpo_tune_{model_name}_{now}"
+    exp_name = f"dpo_tune_{exp_name}_{now}"
     d['description'] = exp_name
     d['tasks'][0]['name'] = exp_name
 
@@ -258,10 +405,10 @@ def parse_dataset_mixer(mixer_dict):
         elems.append(str(v))
     return ' '.join(elems)
 
-def get_model_name(command_string):
+def get_exp_name(command_string):
     parts = shlex.split(command_string)
     for i, part in enumerate(parts):
-        if part == '--model_name_or_path':
+        if part == '--exp_name':
             if i + 1 < len(parts):
                 return parts[i + 1]
     return None  # Return None if model name is not found

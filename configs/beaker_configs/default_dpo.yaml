@@ -14,7 +14,7 @@ tasks:
       --num_processes 4
       --use_deepspeed
       --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf
-      open_instruct/dpo_tune.py
+      open_instruct/dpo_tune_cache.py
       --model_name_or_path /hf_llama_models
       --use_flash_attn
       --max_seq_length 4096
@@ -48,16 +48,10 @@ tasks:
         value: true
       - name: HF_TOKEN
         secret: HF_TOKEN
-    # datasets: # example for how to include datasets in mounting
-    #   - mountPath: /data
-    #     source:
-    #       beaker: Yizhongw03/processed_open_instruct_data
-    #   - mountPath: /mmlu
-    #     source:
-    #       beaker: Yizhongw03/mmlu
-    #   - mountPath: /hf_llama_models
-    #     source:
-    #       beaker: Yizhongw03/hf_llama_model_7B
+    datasets:
+      - mountPath: /oe-adapt-default
+        source:
+          weka: oe-adapt-default
     result:
       path: /output
     resources:

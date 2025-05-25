@@ -4,6 +4,11 @@ rejection_sampling/shards1
 token_length.png
 *.tfevents.*
 
+# for on policy preferences 
+birr/
+
+oe-eval-internal/
+
 results
 models
 wandb
@@ -143,3 +148,5 @@ dmypy.json
 .pyre/
 
 .idea/
+.vscode
+.DS_Store

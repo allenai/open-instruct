@@ -1,0 +1,31 @@
+model_name_or_path: /model
+model_revision: main
+use_flash_attn: true
+gradient_checkpointing: true
+dataset_mixer:
+  ai2-adapt-dev/sft_v3.9_used_off_policy: 1.0
+  ai2-adapt-dev/sft_v3.9_used_on_policy_small_8b_ckpt: 1.0
+  ai2-adapt-dev/WildChat-prefs-280824-uf-pipeline-regen-v3.9: 1.0
+  ai2-adapt-dev/Llama-3.1-if_taxonomy_tulu-uf-pipeline-regen-v3.9: 1.0
+  ai2-adapt-dev/wildchat_v3.9_used_on_policy_small_8b_ckpt: 1.0
+  ai2-adapt-dev/ultrafeedback-cleaned-regen-v3.9-8b-sft: 1.0
+tokenizer_name: /model
+use_slow_tokenizer: true
+max_seq_length: 2048
+preprocessing_num_workers: 16
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 16 # designed for 8 GPUs, so batch size 128
+learning_rate: 5.0e-7
+lr_scheduler_type: linear
+warmup_ratio: 0.1
+weight_decay: 0.0
+num_train_epochs: 1
+output_dir: /output
+with_tracking: true
+report_to:
+  - wandb
+logging_steps: 1
+use_lora: false
+dpo_loss_type: dpo_norm
+dpo_beta: 5
+checkpointing_steps: 1000

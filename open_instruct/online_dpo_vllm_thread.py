@@ -50,6 +50,7 @@ from open_instruct.model_utils import (
     first_true_indices,
     forward,
     get_reward,
+    log_softmax_and_gather,
     prepare_deepspeed,
     print_rich_single_line_metrics,
     print_rich_table,
@@ -396,11 +397,22 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         tokenizer.pad_token_id = 128002  # <|reserved_special_token_0|>
     else:
         tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
-    tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
+    if dataset_config.chat_template is not None:
+        tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
 
     # create the dataset
     dataset_dict = DatasetDict()
     dataset_processor = SFTDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
+    if len(args.dataset_train_splits) != len(args.dataset_mixer_dict) and len(args.dataset_train_splits) == 1:
+        args.dataset_train_splits = [args.dataset_train_splits[0]] * len(args.dataset_mixer_dict)
+        print(
+            f"Dataset splits not provided for all datasets. Using the same {args.dataset_train_splits[0]} split for all datasets."
+        )
+    if len(args.dataset_eval_splits) != len(args.dataset_eval_mixer_dict) and len(args.dataset_eval_splits) == 1:
+        args.dataset_eval_splits = [args.dataset_eval_splits[0]] * len(args.dataset_eval_mixer_dict)
+        print(
+            f"Dataset splits not provided for all datasets. Using the same {args.dataset_eval_splits[0]} split for all datasets."
+        )
     train_dataset = combine_dataset(
         args.dataset_mixer_dict,
         splits=args.dataset_train_splits,
@@ -519,7 +531,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
     # handle preemption
     class PreemptionHandler:
-        preemptied = False
+        preempted = False
 
         def __init__(self):
             signal.signal(signal.SIGTERM, self.exit_gracefully)
@@ -538,7 +550,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     print("vllm thread terminated")
                 except Exception as e:
                     print(e)
-            self.preemptied = True
+            self.preempted = True
 
     ph = PreemptionHandler()
 
@@ -581,7 +593,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             args=(
                 model_config.model_name_or_path,
                 model_config.model_revision,
-                dataset_config.max_prompt_token_lenth + args.response_length,
+                dataset_config.max_prompt_token_length + args.response_length,
                 args.vllm_device,
                 args.vllm_gpu_memory_utilization,
                 generation_config,
@@ -624,7 +636,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         episode += args.batch_size
         scheduler.step()
         queries = queries_next
-        if ph.preemptied:
+        if ph.preempted:
             break
 
         if accelerator.is_main_process:
@@ -686,9 +698,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     g_vllm_responses[:] = g_padded_response_ids
                 broadcast(g_vllm_responses, 0)
                 local_vllm_responses = g_vllm_responses[
-                    accelerator.local_process_index
-                    * queries.shape[0] : (accelerator.local_process_index + 1)
-                    * queries.shape[0]
+                    accelerator.process_index * queries.shape[0] : (accelerator.process_index + 1) * queries.shape[0]
                 ]
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
                 for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
@@ -828,10 +838,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         # chosen
                         chosen_logits = chosen_logits[:, context_length - 1 : -1]
                         chosen_logits /= args.temperature + 1e-7
-                        chosen_all_logprobs = F.log_softmax(chosen_logits, dim=-1)
-                        chosen_logprobs = torch.gather(chosen_all_logprobs, 2, chosen_responses.unsqueeze(-1)).squeeze(
-                            -1
-                        )
+                        chosen_logprobs = log_softmax_and_gather(chosen_logits, chosen_responses)
                         chosen_logprobs = torch.masked_fill(
                             chosen_logprobs, padding_mask[chosen_mb_inds], INVALID_LOGPROB
                         )
@@ -842,10 +849,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         # rejected
                         rejected_logits = rejected_logits[:, context_length - 1 : -1]
                         rejected_logits /= args.temperature + 1e-7
-                        rejected_all_logprobs = F.log_softmax(rejected_logits, dim=-1)
-                        rejected_logprobs = torch.gather(
-                            rejected_all_logprobs, 2, rejected_responses.unsqueeze(-1)
-                        ).squeeze(-1)
+                        rejected_logprobs = log_softmax_and_gather(rejected_logits, rejected_responses)
                         rejected_logprobs = torch.masked_fill(
                             rejected_logprobs, padding_mask[rejected_mb_inds], INVALID_LOGPROB
                         )
@@ -875,11 +879,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                                 response = concat_query_responses[:, context_length:]
                                 logits = concat_output.logits[:, context_length - 1 : -1]
                                 logits /= args.temperature + 1e-7
-                                all_logprob = F.log_softmax(logits, dim=-1)
-                                logprob = torch.gather(all_logprob, 2, response.unsqueeze(-1)).squeeze(-1)
+                                logprob = log_softmax_and_gather(logits, response)
                                 logprob = torch.masked_fill(logprob, padding_mask[concat_mb_inds], INVALID_LOGPROB)
                                 logprobs.append(logprob)
-                                del all_logprob
                             chosen_rewards = args.beta * (chosen_logprobs_sum - chosen_ref_logprobs_sum)
                             rejected_rewards = args.beta * (rejected_logprobs_sum - rejected_ref_logprobs_sum)
                             loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = loss
@@ -944,7 +946,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 "val/num_stop_token_ids": global_metrics[1],
                 "objective/kl": global_metrics[2],
                 "objective/kl2": global_metrics[15],
-                "ojbective/kl3": global_metrics[16],
+                "objective/kl3": global_metrics[16],
                 "objective/entropy": global_metrics[3],
                 "objective/non_score_reward": global_metrics[4],
                 "objective/rlhf_reward": global_metrics[5],
@@ -967,7 +969,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
         gc.collect()
         torch.cuda.empty_cache()
 
-    if not ph.preemptied:
+    if not ph.preempted:
         # save model
         os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
         original_tokenizer = AutoTokenizer.from_pretrained(
@@ -1014,6 +1016,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     --pure_docker_mode \
                     --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
                     --beaker_workload_id {beaker_config.beaker_workload_id} \
+                --upload_to_hf {args.hf_metadata_dataset} \
                     --model_name {args.hf_repo_revision}
                 """
                 process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)

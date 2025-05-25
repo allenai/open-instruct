@@ -1,6 +1,8 @@
 version: v2
 description: open-instruct-eval-default
 budget: ai2/oe-adapt
+retry:
+  allowedTaskRetries: 2
 tasks:
   - name: open-instruct-eval-default
     image:
@@ -36,6 +38,8 @@ tasks:
         secret: openai_api_key
       - name: HF_TOKEN
         secret: HF_TOKEN
+      - name: VLLM_ALLOW_LONG_MAX_MODEL_LEN
+        value: 1
     datasets:
       - mountPath: /data/
         source:
@@ -43,9 +47,9 @@ tasks:
       - mountPath: /model
         source:
           beaker: 01GVYXDGJC6DV0JW9JZ16YM07G
-      - mountPath: /net/nfs.cirrascale
-        source:
-          hostPath: /net/nfs.cirrascale
+      # - mountPath: /net/nfs.cirrascale
+      #   source:
+      #     hostPath: /net/nfs.cirrascale
     result:
       # Beaker will capture anything that's written to this location and store it in the results
       # dataset.

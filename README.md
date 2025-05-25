@@ -1,27 +1,42 @@
 # Training Open Instruction-Following Language Models
 
-This repo serves as an open effort on instruction-tuning popular pretrained language models on publicly available datasets. We release this repo and will keep updating it with:
+This repo serves as an open effort on instruction-tuning and post-training popular pretrained language models on publicly available datasets. We release this repo and will keep updating it with:
 
 1. Code for finetuning language models with latest techniques and instruction datasets in a unified format.
-2. Code for running standard evaluation on a range of benchmarks, targeting for differnt capabilities of these language models.
+2. Code for DPO, preference finetuning and reinforcement learning with verifiable rewards (RLVR).
 3. Checkpoints or other useful artifacts that we build in our exploration.
 
-Please see our first paper [How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources](https://arxiv.org/abs/2306.04751) for more thoughts behind this project and our initial findings. Please see our second paper [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702) for results using Llama-2 models and direct preference optimization. We are still working on more models. For more recent results involving PPO and DPO please see our third paper [Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback](https://arxiv.org/abs/2406.09279).
+We also support some evaluations natively in the codebase, but these are now unmaintained and instead we suggest using [OLMES](https://github.com/allenai/olmes), which we used for TÜLU 3.
+
+The lastest details on open post-training are found in [TÜLU 3: Pushing Frontiers in Open Language Model Post-Training](https://arxiv.org/abs/2411.15124).
+
+Please see our first paper [How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources](https://arxiv.org/abs/2306.04751) for more thoughts behind this project and our initial findings. 
+Please see our second paper [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702) for results using Llama-2 models and direct preference optimization. We are still working on more models. 
+For more recent results involving PPO and DPO please see our third paper [Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback](https://arxiv.org/abs/2406.09279).
 
 <p align="center" width="100%">
       <img src="assets/images/tulu_logo.png" alt="Tülu (a hybrid camel) represents a suite of LLaMa models that we built by fully-finetuning them on a strong mix of datasets." style="width: 20%; min-width: 200px; display: block; margin: auto;">
 </p>
 
-*Note:* Previous versions of Open Instruct used a pinned version of Transformers for replicating Tulu 1/2 results. If this is your goal, refer to [this commit or older](https://github.com/allenai/open-instruct/commit/f3424591638ed63b31d5869abd867932c359c1ed).
+Try some of the models we train with Open Instruct. There is a [free demo](https://playground.allenai.org/) or download them from HuggingFace:
+
+| **Stage**           | **Llama 3.1 8B**                                                                                          | **Llama 3.1 70B**                                                                                         | **OLMo-2 7B**                                                                                          | **OLMo-2 13B**                                                                                         |
+|----------------------|----------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|
+| **Base Model**       | [meta-llama/Llama-3.1-8B](https://huggingface.co/meta-llama/Llama-3.1-8B)                                | [meta-llama/Llama-3.1-70B](https://huggingface.co/meta-llama/Llama-3.1-70B)                              | [allenai/OLMo2-7B-1124](https://huggingface.co/allenai/OLMo2-7B-1124)                                | [allenai/OLMo-2-13B-1124](https://huggingface.co/allenai/OLMo-2-13B-1124)                             |
+| **SFT**              | [allenai/Llama-3.1-Tulu-3-8B-SFT](https://huggingface.co/allenai/Llama-3.1-Tulu-3-8B-SFT)                | [allenai/Llama-3.1-Tulu-3-70B-SFT](https://huggingface.co/allenai/Llama-3.1-Tulu-3-70B-SFT)              | [allenai/OLMo-2-1124-7B-SFT](https://huggingface.co/allenai/OLMo-2-1124-7B-SFT)                | [allenai/OLMo-2-1124-13B-SFT](https://huggingface.co/allenai/OLMo-2-1124-13B-SFT)              |
+| **DPO**              | [allenai/Llama-3.1-Tulu-3-8B-DPO](https://huggingface.co/allenai/Llama-3.1-Tulu-3-8B-DPO)                | [allenai/Llama-3.1-Tulu-3-70B-DPO](https://huggingface.co/allenai/Llama-3.1-Tulu-3-70B-DPO)              | [allenai/OLMo-2-1124-7B-DPO](https://huggingface.co/allenai/OLMo-2-1124-7B-DPO)                | [allenai/OLMo-2-1124-13B-DPO](https://huggingface.co/allenai/OLMo-2-1124-13B-DPO)              |
+| **Final Models (RLVR)** | [allenai/Llama-3.1-Tulu-3-8B](https://huggingface.co/allenai/Llama-3.1-Tulu-3-8B)                        | [allenai/Llama-3.1-Tulu-3-70B](https://huggingface.co/allenai/Llama-3.1-Tulu-3-70B)                      | [allenai/OLMo-2-1124-7B-Instruct](https://huggingface.co/allenai/OLMo-2-1124-7B-Instruct)                        | [allenai/OLMo-2-1124-13B-Instruct](https://huggingface.co/allenai/OLMo-2-1124-13B-Instruct)                      |
+| **Reward Model (RM)**| [allenai/Llama-3.1-Tulu-3-8B-RM](https://huggingface.co/allenai/Llama-3.1-Tulu-3-8B-RM)                                                     | (Same as 8B)                                                     | [allenai/OLMo-2-1124-7B-RM](https://huggingface.co/allenai/OLMo-2-1124-7B-RM)                                                     | (Same as 7B)                                                     |
 
 ## News
 
+- [2024-11-22] We released [TÜLU 3: Pushing Frontiers in Open Language Model Post-Training](https://arxiv.org/abs/2411.15124) and updated our entire stack of open post-training recipes with both Llama 3.1 and OLMo 2.
 - [2024-07-01] We released [Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback](https://arxiv.org/abs/2406.09279) and have majorly updated our codebase to support new models and package versions.
 - [2023-11-27] We released [Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2](https://arxiv.org/abs/2311.10702). Check out our models [here](https://huggingface.co/collections/allenai/tulu-v2-suite-6551b56e743e6349aab45101). We have added a DPO finetuning script for replicating our results.
 - [2023-09-26] We switched to use the official [alpaca-eval](https://github.com/tatsu-lab/alpaca_eval) library to run AlpacaFarm evaluation but use regenerated longer reference outputs. This will change our numbers reported in the paper. We will update the paper soon.
 - [2023-09-25] Supported using [vLLM](https://github.com/vllm-project/vllm/) for our evaluations, which speeds up the evaluation by 10x.
 - [2023-09-17] Supported [LoRA](https://arxiv.org/abs/2106.09685) and [QLoRA](https://arxiv.org/abs/2305.14314) finetuning. See [here](#parameter-efficient-finetuning) for more details.
-- [2023-08-18] Added support for [ToxiGen](https://github.com/microsoft/TOXIGEN)/[TrutufulQA](https://github.com/sylinrl/TruthfulQA) evaluation. Check our `scripts/eval/` for examples of running them.
+- [2023-08-18] Added support for [ToxiGen](https://github.com/microsoft/TOXIGEN)/[TruthfulQA](https://github.com/sylinrl/TruthfulQA) evaluation. Check our `scripts/eval/` for examples of running them.
 - [2023-08-08] Supported several new instruction dataset, including [LIMA](https://huggingface.co/datasets/GAIR/lima) / [WizardLM](https://github.com/nlpxucan/WizardLM) / [Open-Orca](https://huggingface.co/datasets/Open-Orca/OpenOrca). See the [preparation script](./scripts/data/prepare_train_data.sh) for details. Performance hasn't been evaluated yet.
 - [2023-08-06] Supported LLaMa 2 finetuning and FlashAttention-2 by bumping the version of transformers and many other dependencies.
 - [2023-06-29] Added [licensing info](#licensing) for our released models.
@@ -30,40 +45,99 @@ Please see our first paper [How Far Can Camels Go? Exploring the State of Instru
 
 ## Setup
 
-Installation is lightweight and assumes **one of two installation strategies**. 
-First, installing in a *bare environment* (no Cuda image).
+Our setup mostly follows our [Dockerfile](./Dockerfile), which uses Python 3.10. *Note that Open Instruct is a research codebase and does not guarantee backward compatibility.* We offer two installation strategies:
 
-Before installing, if not in a Docker container with NVCC installed, you should run:
-```
-conda install cuda-nvcc=<ver> -c nvidia
-```
-Then, install `torch==2.3.0` from source.
-
-To run training, evaluation, or inference for our finetuned models, you need to install the required packages by running the following command (after installing pytorch):
-
+* **Local installation**: This is the recommended way to install Open Instruct. You can install the dependencies by running the following commands:
 ```bash
+pip install --upgrade pip "setuptools<70.0.0" wheel 
+# TODO, unpin setuptools when this issue in flash attention is resolved
+pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
+pip install packaging
+pip install flash-attn==2.7.2.post1 --no-build-isolation
 pip install -r requirements.txt
-```
-*Note:* Previous versions of Open Instruct used a pinned version of Transformers for replicating Tulu 2 results. If this is your goal, refer to [this commit or older](https://github.com/allenai/open-instruct/commit/f3424591638ed63b31d5869abd867932c359c1ed).
-
-If you just want the dependencies for the weight diff script, use:
-```bash
-pip install -r weight-diff-requirements.txt
+pip install -e .
+python -m nltk.downloader punkt
 ```
 
-For a second installation strategy, if you'd like to *run experiments within a Docker environment*, you can create one using:
+* **Local installation with uv (preview)**: We are experimenting with using [uv](https://docs.astral.sh/uv/). You can install via
+```bash
+uv sync
+uv sync --extra compile --extra liger # to install flash attention and liger-kernel
+```
+
+
+* **Docker installation**: You can also use the Dockerfile to build a Docker image. You can build the image with the following command:
 
 ```bash
-docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 --build-arg REQUIRE=requirements.txt . -t open_instruct
-
+docker build . -t open_instruct_dev
 # if you are interally at AI2, you can create an image like this:
-beaker image create open_instruct -n open_instruct -w ai2/$(whoami)
+beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
+beaker image delete $beaker_user/open_instruct_dev 
+beaker image create open_instruct_dev -n open_instruct_dev -w ai2/$beaker_user
 ```
 
-If you are internally at AI2, you can use this pre-built beaker image `hamishivi/open-instruct-eval` (most recent version [here](https://beaker.org/im/01J2CKY81A6N1WG5QS08Y3WNM5/details)). For finetuning, you can use `hamishivi/open-instruct-public` (most recent version [here](https://beaker.org/im/01J2CQFX7076PDHZJR2GB0C3A9/details)). I will try to update these periodically.
+Optionally you can build the base image with the following command:
+
+```bash
+docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 -f  Dockerfile.base . -t cuda-no-conda:12.1-cudnn8-dev-ubuntu20.04
+```
+
+* **Docker with uv**: You can also use the Dockerfile to build a Docker image with uv. You can build the image with the following command:
+
+```bash
+docker build -f Dockerfile.uv --build-arg UV_CACHE_DIR=$UV_CACHE_DIR -t open_instruct_dev_uv .
+# if you are interally at AI2, you can create an image like this:
+beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
+beaker image delete $beaker_user/open_instruct_dev_uv 
+beaker image create open_instruct_dev_uv -n open_instruct_dev_uv -w ai2/$beaker_user
+```
+
+If you are internally at AI2, you may launch experiments using our always-up-to-date auto-built image `nathanl/open_instruct_auto`.
 
 
-For training, you can use the previous image.
+## Training
+
+After having setup the environment, you are ready to launch some experiments. We provide a few examples below. To learn more about how to reproduce the Tulu 3 models, please refer to the [Tulu 3 README](./docs/tulu3.md). The instructions and documentations for Tulu 1 and Tulu 2 are in [Tulu 1 and 2 README](./docs/tulu1_tulu2.md).
+
+### Finetuning
+
+You can run the following commands for getting started:
+
+```bash
+# quick debugging run using 1 GPU
+bash scripts/train/finetune/mini.sh
+# train an 8B tulu3 model using 8 GPU
+bash scripts/train/finetune/tulu_finetune_mix.sh
+```
+
+
+### Preference Tuning
+
+```bash
+# quick debugging run using 1 GPU
+bash scripts/train/dpo/mini.sh
+# train an 8B tulu3 model using 8 GPU
+bash scripts/train/dpo/tulu_preference_mix.sh
+```
+
+
+### Reinforcement Learning with Verifiable Rewards (RLVR)
+
+```bash
+# quick debugging run using 1 GPU (0.5 for inference, 0.5 for training)
+# here we are using a small model, so it's prob not gonna train good models, but it's easy to test run and print stuff.
+bash scripts/train/rlvr/ppo_mini.sh
+bash scripts/train/rlvr/ppo2_mini.sh # experimental support (ppo2 adds kl to loss directly instead of using KL penalty in rewards)
+bash scripts/train/rlvr/grpo_mini.sh
+
+# train an 8B tulu3 model using 8 GPU (1 for inference, 7 for training)
+bash scripts/train/rlvr/tulu_rlvr.sh
+```
+
+
+## Contamination checks
+
+We release our scripts for measuring the overlap between instruction tuning datasets and evaluation datasets in `./decontamination`. See the [README](./decontamination/README.md) for more details.
 
 ### Developing
 When submitting a PR to this repo, we check the core code in `open_instruct/` for style with the following:
@@ -79,6 +153,7 @@ make quality
 |     ├── beaker_configs/       <- AI2 Beaker configs
 |     ├── ds_configs/           <- DeepSpeed configs
 |     └── train_configs/        <- Training configs
+├── decontamination/            <- Scripts for measuring train-eval overlap
 ├── eval/                       <- Evaluation suite for fine-tuned models
 ├── human_eval/                 <- Human evaluation interface (not maintained)
 ├── open_instruct/              <- Source code (flat)
@@ -87,142 +162,6 @@ make quality
 └── Dockerfile                  <- Dockerfile
 ```
 
-## Training
-
-### Dataset preparation
-
-We include a collection of representative instruction datasets in our exploration and are adding new ones to our list. We unify them into the same chatting format. To download and prepare these datasets, simply run the following command:
-
-```bash
-./scripts/data/prepare_train_data.sh
-```
-
-Please check these datasets for licenses and restrictions around their use!
-
-You can also find the processed [Tulu v1](https://huggingface.co/datasets/allenai/tulu-v1-sft-mixture) and [Tulu v2](https://huggingface.co/datasets/allenai/tulu-v2-sft-mixture) SFT datasets on HuggingFace. Note that the train data preparation script will not precisely recreate the Tulu v2 mixture due to randomness in the generation and shifts in data availability - see [this PR](https://github.com/allenai/open-instruct/pull/156) for some details. If you need exactly yhe training data used, the HuggingFace mixture is exactly this - the exact same data used during model training.
-
-### Model preparation
-
-Generally, most huggingface-compatible causal language models should work fine with our codebase, potentially with some adjusting for different tokenizers etc. Some models may require addtional requests to download. E.g., for LLaMa 1 and 2, please consult [the Hugging Face documentation](https://huggingface.co/docs/transformers/model_doc/llama) for requesting access and converting them to a huggingface-compatible format.
-
-### Finetuning
-
-You can use the following command to run instruction tuning (finetuning a pretrained model to follow instructions):
-
-```bash
-./scripts/finetune_with_accelerate.sh
-```
-
-Make sure to adjust `model_name_or_path`, `tokenizer_name`, `train_file`, and `output_dir` to your models / data / setting. By default, this uses `deepspeed` with `accelerate`.
-
-**Note:** If you are looking to replicate the released Tulu 2 models, it may be useful to swap the loss calculation to `--reduce_loss sum`. This uses a sum reduction instead of a mean reduction for loss calculations, and means we weight all tokens evenly when training, better mimicking the larger batch sizes used to train Tulu 2 models. See https://github.com/huggingface/transformers/issues/24725 for more discussion and details. Generally, *you may get better results using the sum reduction if you need to use a lot of gradient accumulation* (including for training Llama 3 models).
-
-### Parameter-Efficient Finetuning
-
-We support [LoRA](https://arxiv.org/abs/2106.09685) finetuning, wherein only a small number of parameters are updated, resulting in faster and cheaper training. For even more efficiency, we also support [QLoRA](https://arxiv.org/abs/2305.14314) finetuning, wherein the non-trained (underlying) model parameters are quantised during 4-bit training. This means you can train a 70b Llama model on a single 80GB A100! Please refer to the respective papers for more details.
-
-Please also note you cannot currently run QLoRA with model parallelism - only data-parallel training is supported, so you cannot train a model that does not fit on one GPU. For LoRA, you can use deepspeed + zero-3 to achieve model parallelism (and FSDP is not currently supported).
-
-Please see `./scripts/finetune_lora_with_accelerate.sh` and `./scripts/finetune_qlora_with_accelerate.sh` for example hyperparameters. We found a larger rank (e.g. 256) and higher learning rate (e.g. 2e-4) worked best. Additionally, we found that QLoRA tended to always achieve similar results to LoRA, while LoRA itself sometimes fell behind full-finetuning, especially in long, complex generation tasks. However, for most purposes, LoRA training essentially matches full-finetuning performance. We recommend merging modules learnt with QLoRA into a dequantised model (run our merge script with the `--qlora` flag).
-
-## DPO Finetuning
-
-For an example of how to fully finetune a model with DPO, see `scripts/dpo_train_with_accelerate.sh`. Note you will require at least 8 80GB A100s to be able to train a 7b size model, and will require more compute for anything larger. We have not tested multi-node training with this script, but it should work.
-
-Our script also supports PEFT training with QLoRA. See `scripts/dpo_train_with_qlora.sh` for an example. We have not trained models with this, so it may require additional hyperparameter tuning to achieve reasonable results.
-
-## Released Checkpoints
-
-Our checkpoints can be found:
-
-- [Here](https://huggingface.co/collections/hamishivi/tulu-v1-suite-655138c3743e6349aaa07d7d) for all Tulu v1 models.
-- [Here](https://huggingface.co/collections/allenai/tulu-v2-suite-6551b56e743e6349aab45101) for all Tulu v2 models.
-- [OLMo 7B SFT](https://huggingface.co/allenai/OLMo-7B-SFT) and [Instruct](https://huggingface.co/allenai/OLMo-7B-Instruct), along with a [2048 sequence length version of Tulu 2](https://huggingface.co/datasets/allenai/tulu-v2-sft-mixture-olmo-2048).
-
-
-### Weight diff script
-
-Our Tulu V1 models were released as weight diffs (due to LLaMa 1 license). We use a slightly modified form of the [Alpaca weight diff script](https://github.com/tatsu-lab/stanford_alpaca/blob/main/weight_diff.py), which runs the same.
-
-To merge a model:
-1. Download the relevant LLaMa model and convert it to Hugging Face format (see above).
-2. Download our repository and install the right dependencies (see above).
-3. Download the model diff you want.
-4. Run the command below:
-
-```bash
-python scripts/weights/weight_diff.py recover --path_raw ${hf_llama_path} --path_tuned ${output_path} --path_diff ${diff_location}
-```
-
-## Evaluation
-
-### Benchmark-based eval
-
-We provide the scripts for running evaluation of Huggingface/OpenAI models on a list of standard benchmarks targeting for the core capabilities of large language models. These benchmakrs include:
-
-- [MMLU](https://github.com/hendrycks/test)
-- [Grade School Math (GSM)](https://github.com/openai/grade-school-math)
-- [MATH](https://github.com/hendrycks/math)
-- [Big-Bench Hard (BBH)](https://github.com/suzgunmirac/BIG-Bench-Hard/tree/main)
-- [TydiQA](https://github.com/google-research-datasets/tydiqa)
-- [Codex HumanEval](https://github.com/openai/human-eval/tree/master)
-- [HumanEval+ and MBPP+](https://github.com/evalplus/evalplus)
-- [IFEval](https://github.com/google-research/google-research/tree/master/instruction_following_eval)
-- [ToxiGen](https://github.com/microsoft/TOXIGEN)
-- [XSTest](https://github.com/paul-rottger/exaggerated-safety/)
-- [TruthfulQA](https://github.com/sylinrl/TruthfulQA)
-- [AlpacaEval 1 and 2](https://github.com/tatsu-lab/alpaca_eval)
-
-We are working on including more promising benchmarks into this list. Please stay tuned!
-
-You can use the following script to download all the evaluation data:
-
-```bash
-./scripts/data/prepare_eval_data.sh
-```
-
-Evaluation scripts for different datasets are put under `./scripts`. For example, you can use the following command to run the MMLU evaluation script:
-
-```bash
-./scripts/eval/mmlu.sh
-```
-
-### Ai2 Internal Evaluation
-
-We provide a script integrated with beaker for use internally at Ai2. For example, to run all the tulu 3 evals with easy uploading:
-```bash
-python scripts/submit_eval_jobs.py \
-      --model_name <model name> \
-      --location <beaker id> \
-      --is_tuned --workspace tulu-3-results \
-      --preemptible \
-      --use_hf_tokenizer_template \
-      --beaker_image nathanl/open_instruct_auto \
-      --upload_to_hf allenai/tulu-3-evals \
-      --run_oe_eval_experiments \
-      --run_safety_evaluations \
-      --skip_oi_evals
-```
-Replace location with your beaker ID, and model name with your model name (note this will affect experiment naming, so make it unique and memorable!). For HF models, use a name with `hf-<model-name>` for the model_name argument, and for location give the HF path (e.g. `meta-llama/Meta-Llama-3-8B-Instruct`). Note this assumes your model has a valid HF tokenizer chat template.
-
-To make this script work you have to clone the [following repository](https://github.com/allenai/oe-eval-internal/tree/main) to the top level directory of the open-instruct repository.
-
-You can additionally run other evaluations in this repository through varied arguments to the script.
-
-You can also upload metadata via the `scripts/add_metadata.py` script. Just run `python scripts/add_metadata.py` and follow the prompts.
-
-If you have used automatic evaluation, you cacn also upload metadata via `python add_metadata_from_wandb.py`. Example usage:
-
-```bash
-# from a wandb url
-python scripts/add_metadata_from_wandb.py --wandb_run_id ai2-llm/open_instruct_internal/runs/fjclmg47
-# or from a hf_revision (the name of the autoeval)
-python scripts/add_metadata_from_wandb.py --hf_repo_revision valpy_dpo_mix_uf_wc_regen_da_sftmix_v4.23___model__42__1725581304
-```
-
-### Human evaluation
-
-We release our human evaluation interface and collected annotations in the `./human_eval` folder. Please see the corresponding [README](./human_eval/README.md) for more details.
 
 ## Licensing
 
@@ -232,10 +171,21 @@ The license we use for V1 models released (along with the base model licenses) c
 
 V2 models are licensed under the [low-risk AI2 ImpACT license](https://allenai.org/licenses/impact-lr). See [here](https://allenai.org/impact-license) for more details.
 
+
+## Acknowledgements
+
+Open Instruct is a project that benefitd from many open-source projects and libraries. We would like to particularly thank the folloiwng projects:
+
+* [HuggingFace Transformers](https://github.com/huggingface/transformers): We adapted Hugging Face's Trainer for our finetuning scripts.
+* [HuggingFace TRL](https://github.com/huggingface/trl) and [eric-mitchell/direct-preference-optimization](https://github.com/eric-mitchell/direct-preference-optimization): our preference tuning code is adapted from TRL and from Eric Mitchell's DPO code.
+* OpenAI's [lm-human-preferences](https://github.com/openai/lm-human-preferences), [summarize-from-feedback](https://github.com/openai/summarize-from-feedback), and [vwxyzjn/summarize_from_feedback_details](https://github.com/vwxyzjn/summarize_from_feedback_details): Our core PPO code is adapted from OpenAI's original RLHF code and [Huang et al (2024)'s reproduction work](https://openreview.net/forum?id=kHO2ZTa8e3) of OpenAI's summarize from feedback work.
+* [OpenRLHF](https://github.com/OpenRLHF/OpenRLHF): We adapted OpenRLHF's Ray + vLLM distributed code for scaling up PPO RLVR training into the 70B scale.
+
 ## Citation
 
 If you used this repository or our models, please cite our work:
 
+Tulu 1:
 ```bibtex
 @misc{wang2023far,
    title={How Far Can Camels Go? Exploring the State of Instruction Tuning on Open Resources}, 
@@ -247,6 +197,7 @@ If you used this repository or our models, please cite our work:
 }
 ```
 
+Tulu 2:
 ```bibtex
 @misc{ivison2023camels,
       title={Camels in a Changing Climate: Enhancing LM Adaptation with Tulu 2}, 
@@ -258,6 +209,7 @@ If you used this repository or our models, please cite our work:
 }
 ```
 
+Tulu 2.5:
 ```bibtex
 @misc{ivison2024unpacking,
       title={Unpacking DPO and PPO: Disentangling Best Practices for Learning from Preference Feedback}, 
@@ -266,5 +218,17 @@ If you used this repository or our models, please cite our work:
       eprint={2406.09279},
       archivePrefix={arXiv},
       primaryClass={cs.CL},
+}
+```
+
+Tulu 3:
+```bibtex
+@article{lambert2024tulu3,
+  title = {Tülu 3: Pushing Frontiers in Open Language Model Post-Training},
+  author = {
+    Nathan Lambert and Jacob Morrison and Valentina Pyatkin and Shengyi Huang and Hamish Ivison and Faeze Brahman and Lester James V. Miranda and Alisa Liu and Nouha Dziri and Shane Lyu and Yuling Gu and Saumya Malik and Victoria Graf and Jena D. Hwang and Jiangjiang Yang and Ronan Le Bras and Oyvind Tafjord and Chris Wilhelm and Luca Soldaini and Noah A. Smith and Yizhong Wang and Pradeep Dasigi and Hannaneh Hajishirzi
+  },
+  year = {2024},
+  email = {tulu@allenai.org}
 }
 ```
