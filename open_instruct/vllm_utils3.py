@@ -116,7 +116,7 @@ def init_process_group(
 
 @ray.remote
 class LLMRayActor:
-    def __init__(self, *args, bundle_indices: list = None, **kwargs):
+    def __init__(self, *args, bundle_indices: list = None, tool_use: bool = False, **kwargs):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
@@ -136,9 +136,14 @@ class LLMRayActor:
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             print(f"creating LLM with bundle_indices={bundle_indices}")
 
-        from vllm import LLM
+        if tool_use:
+            from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 
-        self.llm = LLM(*args, **kwargs)
+            self.llm = ToolUseLLM(*args, **kwargs)
+        else:
+            from vllm import LLM
+
+            self.llm = LLM(*args, **kwargs)
 
     def generate(self, *args, **kwargs):
         return self.llm.generate(*args, **kwargs)
@@ -198,10 +203,22 @@ def create_vllm_engines(
     single_gpu_mode: bool = False,
     pg: Optional[ray.util.placement_group] = None,
     vllm_enable_sleep=False,
+    tools: Optional[List[Any]] = None,
+    max_tool_calls: List[int] = [5],
 ):
     import vllm
 
     assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
+
+    # Convert max_tool_calls to a dict mapping tool end strings to their limits
+    assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(
+        tools
+    ), "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
+    # tool key is the end_str
+    if len(max_tool_calls) == 1:
+        max_tool_calls_dict = {tool: max_tool_calls[0] for tool in tools.keys()} if tools else {}
+    else:
+        max_tool_calls_dict = {tool: limit for tool, limit in zip(tools.keys(), max_tool_calls)} if tools else {}
 
     vllm_engines = []
     distributed_executor_backend = "uni" if tensor_parallel_size == 1 else "ray"
@@ -231,6 +248,13 @@ def create_vllm_engines(
             placement_group_bundle_index=i * tensor_parallel_size,
         )
 
+        additional_kwargs = {}
+        tool_use = False
+        if tools is not None and len(tools) > 0:
+            tool_use = True
+            additional_kwargs["tools"] = tools
+            additional_kwargs["max_tool_calls"] = max_tool_calls_dict
+
         vllm_engines.append(
             LLMRayActor.options(
                 num_cpus=num_gpus,
@@ -256,6 +280,8 @@ def create_vllm_engines(
                 num_gpus=num_gpus if use_hybrid_engine else 1,
                 enable_sleep_mode=vllm_enable_sleep,
                 noset_visible_devices=ray_noset_visible_devices(),
+                tool_use=tool_use,
+                **additional_kwargs,
             )
         )
 

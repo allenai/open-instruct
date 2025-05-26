@@ -86,9 +86,13 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str = N
         else:
             return None
     else:
-        return try_to_load_from_cache(
+        resolved_file = try_to_load_from_cache(
             model_name_or_path, filename, cache_dir=TRANSFORMERS_CACHE, revision=revision, repo_type=repo_type
         )
+        # special return value from try_to_load_from_cache
+        if resolved_file == _CACHED_NO_EXIST:
+            return None
+        return resolved_file
 
 
 def get_commit_hash(
@@ -139,6 +143,19 @@ def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
     rich_text = Text()
     for i, token in enumerate(tokens):
         color = COLORS[i % len(COLORS)]
+        decoded_token = tokenizer.decode(token)
+        rich_text.append(f"{decoded_token}", style=color)
+    console.print(rich_text)
+
+
+def visualize_token_role(tokens: list[int], masks: list[int], tokenizer: PreTrainedTokenizer):
+    i = 0
+    console = Console()
+    rich_text = Text()
+    # for i, token in enumerate():
+    for i in range(min(len(tokens), len(masks))):
+        token = tokens[i]
+        color = COLORS[masks[i] % len(COLORS)]
         decoded_token = tokenizer.decode(token)
         rich_text.append(f"{decoded_token}", style=color)
     console.print(rich_text)
@@ -211,6 +228,56 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    "tulu_thinker": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|system|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'user' %}"
+        "{{ '<|user|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{% set content = message['content'] %}"
+        "{% if not loop.last %}"
+        "{{ '<|assistant|>\n' + content + eos_token + '\n' }}"
+        "{% else %}"
+        "{{ '<|assistant|>\n' + content + eos_token }}"
+        "{% endif %}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|assistant|>\n<think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "tulu_thinker_r1_style": (
+        "A conversation between User and Assistant. "
+        "The user asks a question, and the Assistant solves it. "
+        "The assistant first thinks about the reasoning process in "
+        "the mind and then provides the user with the answer. "
+        "The reasoning process and answer are enclosed within <think> </think> "
+        "and <answer> </answer> tags, respectively, "
+        "i.e., <think> reasoning process here </think> "
+        "<answer> answer here </answer>."
+        "\n\n"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|system|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'user' %}"
+        "{{ '<|user|>\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{% set content = message['content'] %}"
+        "{% if '</think>' in content %}"
+        "{% set content = content.split('</think>')[-1] %}"
+        "{% endif %}"
+        "{% if not loop.last %}"
+        "{{ '<|assistant|>\n' + content + eos_token + '\n' }}"
+        "{% else %}"
+        "{{ '<|assistant|>\n' + content + eos_token }}"
+        "{% endif %}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|assistant|>\n<think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
     # template is taken from https://arxiv.org/abs/2501.12948.
     "r1_simple_chat": (
         "A conversation between User and Assistant. "
@@ -243,6 +310,62 @@ CHAT_TEMPLATES = {
         "{% for message in messages %}"
         "{{ '\n\n' if not loop.first else '' }}"
         "{{ message['role'].capitalize() + ': ' + message['content'] + '\n' }}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ 'Assistant: <think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "r1_simple_chat_postpend_think_orz_style": (
+        "A conversation between User and Assistant. "
+        "The user asks a question, and the Assistant solves it. "
+        "The assistant first thinks about the reasoning process in "
+        "the mind and then provides the user with the answer. "
+        "The reasoning process and answer are enclosed within <think> </think> "
+        "and <answer> </answer> tags, respectively, "
+        "i.e., <think> reasoning process here </think> "
+        "<answer> answer here </answer>."
+        "\n\n"
+        "{% for message in messages %}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['role'].capitalize() + ': You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\\\boxed{} tag. This is the problem: ' + message['content'] + '\n' }}"  # \\\\boxed{} is for jinja template escape
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ 'Assistant: <think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "r1_simple_chat_postpend_think_tool_vllm": (
+        "A conversation between User and Assistant. "
+        "The User asks a question, and the Assistant solves it. "
+        "The Assistant first thinks about the reasoning process in "
+        "the mind and then provides the User with the answer. "
+        "\n\n"
+        "When given a question, the Assistant must conduct reasoning inside the <think> "
+        "and </think> tags. During reasoning, the Assistant may write and execute python "
+        "code using the <code> </code> tag, in order to solve the problem or verify the answer. "
+        "Then the Assistant will get the stdout and stderr in the <output> and </output> tags. "
+        "For example, the code could be\n"
+        "<code>\n"
+        "x, y = 1, 2\n"
+        "result = x + y\n"
+        "print(result)\n"
+        "</code>\n"
+        "or\n"
+        "<code>\n"
+        "import sympy as sp\n"
+        "from sympy import Symbol\n"
+        "x = Symbol('x')\n"
+        "y = Symbol('y')\n"
+        "solution = sp.solve(x**2 + y**2 - 1, (x, y))\n"
+        "print(solution)\n"
+        "</code>\n"
+        "The Assistant will always `print` the result of the code execution in order to see it in the <output> tag. "
+        "The Assistant may use the <code> </code> tag multiple times. "
+        "When the Assistant is done reasoning, it should provide the answer inside the <answer> "
+        "and </answer> tag."
+        "\n\n"
+        "{% for message in messages %}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['role'].capitalize() + ': You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\\\boxed{} tag. This is the problem: ' + message['content'] + '\n' }}"  # \\\\boxed{} is for jinjia template escape
         "{% if loop.last and add_generation_prompt %}"
         "{{ 'Assistant: <think>' }}"
         "{% endif %}"
@@ -314,7 +437,7 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
         tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
     else:
         try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path).chat_template
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision).chat_template
         except Exception:
             raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
 
@@ -383,7 +506,7 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
         tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
     else:
         try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path).chat_template
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision).chat_template
         except Exception:
             raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
 
@@ -458,7 +581,7 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
         tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
     else:
         try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path).chat_template
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision).chat_template
         except Exception:
             raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
 
@@ -1088,7 +1211,7 @@ class LocalDatasetTransformationCache:
         # Check if the cache exists
         if os.path.exists(cache_path) and not dataset_skip_cache:
             print(f"✅ Found cached dataset at {cache_path}")
-            return Dataset.load_from_disk(cache_path)
+            return Dataset.load_from_disk(cache_path, keep_in_memory=True)
 
         print(f"Cache not found or invalid, transforming datasets...")
 
@@ -1108,7 +1231,7 @@ class LocalDatasetTransformationCache:
         self.save_config(self.config_hash, dcs, tc)
         print(f"🚀 Saved transformed dataset to {cache_path}")
         print(f"✅ Found cached dataset at {cache_path}")
-        return combined_dataset
+        return Dataset.load_from_disk(cache_path, keep_in_memory=True)
 
 
 def get_cached_dataset(

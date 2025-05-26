@@ -25,7 +25,7 @@ python mason.py \
     --max_prompt_token_length 2048 \
     --response_length 4096 \
     --model_name_or_path Qwen/Qwen2.5-7B \
-    --stop_strings '"</answer>"' \
+    --stop_strings "</answer>" \
     --add_r1_style_format_reward True \
     --apply_verifiable_reward True \
     --chat_template_name r1_simple_chat_postpend_think \

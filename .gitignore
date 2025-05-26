@@ -4,6 +4,9 @@ rejection_sampling/shards1
 token_length.png
 *.tfevents.*
 
+# for on policy preferences 
+birr/
+
 oe-eval-internal/
 
 results

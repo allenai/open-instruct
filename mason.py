@@ -9,6 +9,8 @@ import string
 from rich.console import Console
 from rich.text import Text
 import select
+import time
+import random
 
 console = Console()
 
@@ -19,12 +21,19 @@ OPEN_INSTRUCT_COMMANDS = [
     "open_instruct/finetune.py",
     "open_instruct/dpo_tune_cache.py",
     "open_instruct/grpo_fast.py",
+    "open_instruct/ppo_fast.py",
     "open_instruct/grpo_vllm_thread_ray_gtrl.py",
     "open_instruct/ppo2.py",
     "open_instruct/ppo_vllm_thread_ray_gtrl.py",
     "open_instruct/reward_modeling.py",
 ]
 
+OPEN_INSTRUCT_RESUMABLES = [
+    "open_instruct/grpo_fast.py",
+]
+
+# ----------------------------------------------------------------------
+# Mason logic
 def parse_beaker_dataset(dataset_str):
     splt = dataset_str.split(":")
     if len(splt) != 2:
@@ -66,6 +75,7 @@ WEKA_CLUSTERS = [
     "ai2/allennlp-elara-cirrascale",
     "ai2/ceres-cirrascale",
     "ai2/ganymede-cirrascale",
+    "ai2/test-h100",
 ]
 GCP_CLUSTERS = [
     "ai2/augusta-google-1"
@@ -156,6 +166,10 @@ def get_args():
     parser.add_argument(
         "--auto_output_dir_path", type=str, default="/weka/oe-adapt-default/allennlp/deletable_checkpoint",
         help="If given, automatically replace the `--output_dir` argument with this path, essentially using it as a prefix"
+    )
+    parser.add_argument(
+        "--auto_checkpoint_state_dir", type=str, default="/weka/oe-adapt-default/allennlp/deletable_checkpoint_states",
+        help="If given, automatically replace the `--checkpoint_state_dir` argument with this path, essentially using it as a prefix"
     )
     parser.add_argument(
         "--env",
@@ -504,6 +518,12 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
         command = [f"WANDB_PROJECT={os.environ['WANDB_PROJECT']}"] + command
     if "WANDB_TAGS" in os.environ:
         command = [f"WANDB_TAGS={os.environ['WANDB_TAGS']}"] + command
+    
+    # escape the command (e.g., --stop_strings "</answer>")
+    for i in range(len(command)):
+        if "</" in command[i]:
+            command[i] = f"'{command[i]}'"
+    # breakpoint()
 
     is_open_instruct_training = any(cmd in command for cmd in OPEN_INSTRUCT_COMMANDS)
     if is_open_instruct_training:
@@ -520,11 +540,20 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                     return i
             return -1
 
-        # Save the runtime `whoami` calls
-        command.append("--hf_entity")
-        command.append("allenai")
-        command.append("--wandb_entity")
-        command.append("ai2-llm")
+        def remove_arg_from_list(lst: List[str], item: str, remove_value: bool = False):
+            idx = find_list_idx(lst, item)
+            if idx != -1 and idx + 1 < len(lst):
+                if remove_value:
+                    lst.pop(idx + 1)
+                lst.pop(idx)
+
+        # Add the whoami parts if not already present
+        if not any("hf_entity" in c for c in command):
+            command.append("--hf_entity")
+            command.append("allenai")
+        if not any("wandb_entity" in c for c in command):
+            command.append("--wandb_entity")
+            command.append("ai2-llm")
         
         dataset_cache_paths = []
         dataset_config_hashes = []
@@ -535,8 +564,10 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                 if idx != -1:
                     # then try executing the same command with 
                     caching_command = command.copy()
-                    if "--with_tracking" in caching_command:
-                        caching_command.remove("--with_tracking")
+                    remove_arg_from_list(caching_command, "--with_tracking", False)
+                    remove_arg_from_list(caching_command, "--checkpoint_state_freq", True)
+                    remove_arg_from_list(caching_command, "--checkpoint_state_dir", True)
+                    remove_arg_from_list(caching_command, "--gs_checkpoint_state_dir", True)
                     caching_command = "python " + " ".join(caching_command[idx:]) + " --cache_dataset_only"
                     console.log(f"📦📦📦 Running the caching command with `--cache_dataset_only`")
                     import subprocess
@@ -592,6 +623,25 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                     return_code = result.returncode
                     console.log("✅✅✅ Finished running the caching command")
 
+                if file in OPEN_INSTRUCT_RESUMABLES and idx != -1 and len(args.auto_checkpoint_state_dir) > 0:
+                    need_to_override_checkpoint_state_dir = True
+                    default_checkpoint_state_freq = 200
+                    for idx, cmd in enumerate(command):
+                        if cmd == "--checkpoint_state_dir":
+                            if idx + 1 < len(command):
+                                if "/weka/" in command[idx + 1]:
+                                    need_to_override_checkpoint_state_dir = False
+                        if cmd == "--checkpoint_state_freq":
+                            if idx + 1 < len(command):
+                                default_checkpoint_state_freq = command[idx + 1]
+                                        
+                    if need_to_override_checkpoint_state_dir and is_open_instruct_training and not is_external_user:
+                        new_checkpoint_state_dir = f"{args.auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
+                        console.log(f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`")
+                        command.append("--checkpoint_state_dir")
+                        command.append(new_checkpoint_state_dir)
+                        command.append("--checkpoint_state_freq")
+                        command.append(str(default_checkpoint_state_freq))
 
         # For Weka clusters, we need to override the output_dir parameter to make auto-evaluation work
         # If the output_dir is already set to a path in /weka/, we'll keep that path
@@ -716,6 +766,8 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
     join_full_command = " ".join(full_command)
     # override accelerate call
     if args.num_nodes > 1:
+        if "--num_processes" not in join_full_command and "accelerate" in join_full_command:
+            raise ValueError("num_processes must be specified in the command for accelerate-based multi-node jobs.")
         join_full_command = re.sub(
             r'--num_processes (\d+)',
             lambda m: (
@@ -815,7 +867,6 @@ def main():
         budget=args.budget,
         retry=beaker.RetrySpec(allowed_task_retries=args.max_retries)
     )
-
     exp = beaker_client.experiment.create(spec=experiment_spec)
     console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.id}")
 

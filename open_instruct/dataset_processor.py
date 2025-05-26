@@ -243,7 +243,7 @@ class DatasetProcessor:
         self.tokenizer = tokenizer
         self.config = config
         if self.tokenizer.pad_token_id == self.tokenizer.eos_token_id:
-            logging.warn(
+            logging.warning(
                 "Tokenizer's pad token is the same as EOS token, this might cause the model to not learn to generate EOS tokens."
             )
 
@@ -252,7 +252,7 @@ class DatasetProcessor:
 
     def filter(self, dataset: DatasetDict):
         if self.config is None:
-            logging.warn("No config provided, skipping filtering")
+            logging.warning("No config provided, skipping filtering")
             return dataset
         raise NotImplementedError
 
