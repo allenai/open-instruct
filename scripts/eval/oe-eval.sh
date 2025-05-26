@@ -139,6 +139,7 @@ else
 fi
 
 # Define default tasks if no custom tasks provided
+#    "alpaca_eval_v2::tulu" # Removed for high cost of judge
 DEFAULT_TASKS=(
     "gsm8k::tulu"
     "bbh:cot-v1::tulu"
@@ -150,8 +151,8 @@ DEFAULT_TASKS=(
     "popqa::tulu"
     "mmlu:mc::tulu"
     "mmlu:cot::summarize"
-#    "alpaca_eval_v2::tulu" # Removed for high cost of judge
-    "alpaca_eval_v3::tulu" # New version using GPT 4.1 as cheaper judge
+    # "alpaca_eval_v3::tulu" # GPT 4.1 judge on OpenAI
+    "alpaca_eval_v4::tulu" # GPT 4.1, judge on Azure 
     "truthfulqa::tulu"
 )
 UNSEEN_TASKS=(
