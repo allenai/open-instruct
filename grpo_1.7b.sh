@@ -6,7 +6,7 @@
 #SBATCH -p main
 
 source mila.sh
-exp_name="grpo_qwen1.5b_base"
+exp_name="grpo_qwen3_1.7b_base"
 
 uv run open_instruct/grpo_tinyzero.py \
     --exp_name $exp_name \
@@ -47,6 +47,7 @@ uv run open_instruct/grpo_tinyzero.py \
     --deepspeed_stage 2 \
     --async_mode False \
     --vllm_sync_backend gloo \
+    --fused_optimizer \
     --with_tracking $@
 
     # --liger_kernel \

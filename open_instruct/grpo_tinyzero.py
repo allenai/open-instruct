@@ -295,6 +295,7 @@ class Args:
     """the priority of auto-launched evaluation jobs"""
 
     base_prompt: bool = False
+    enable_thinking: bool = False
 
     def __post_init__(self):
         if self.single_gpu_mode:
@@ -312,6 +313,12 @@ class Args:
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
         ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+
+
+def safe_mean(arr):
+    if len(arr) == 0:
+        return np.nan  # or any default value you prefer
+    return arr.mean()
 
 
 @contextmanager
@@ -340,6 +347,7 @@ def preprocess_example(
     system_message: str,
     prompt_template: str,
     chat_template: bool = True,
+    enable_thinking: bool = False,
 ):
     numbers: List[int] = example["nums"]
     target: int = example["target"]
@@ -351,8 +359,11 @@ def preprocess_example(
                 "role": "user",
                 "content": prompt_template.format(numbers=numbers, target=target),
             },
-            {"role": "assistant", "content": "Let me solve this step by step.\n<think>"},
         ]
+        if not enable_thinking:
+            messages.append(
+                {"role": "assistant", "content": "Let me solve this step by step.\n<think>"},
+            )
         input_ids = tokenizer.apply_chat_template(messages, tokenize=True, continue_final_message=True)
         prompt = tokenizer.decode(input_ids, skip_special_tokens=False, clean_up_tokenization_spaces=False)
     else:
@@ -381,6 +392,11 @@ def create_datasets(args: Args, tokenizer):
     #     "<answer> answer here </answer>."
     # )
     if args.base_prompt:
+        #         PROMPT_TEMPLATE = """A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant first thinks about the reasoning process in the mind and then provides the user with the answer.
+        # User: Using the numbers {numbers}, create an equation that equals {target}. You can use basic arithmetic operations (+, -, *, /) and each number can only be used once. Show your work in <think> </think> tags. And return the final answer in <answer> </answer> tags, for example <answer> (1 + 2) / 3 </answer>.
+        # Assistant:
+        # <think>"""
+        #         SYSTEM_MESSAGE = ""
         PROMPT_TEMPLATE = """A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant first thinks about the reasoning process in the mind and then provides the user with the answer.
 User: Using the numbers {numbers}, create an equation that equals {target}. You can use basic arithmetic operations (+, -, *, /) and each number can only be used once. Show your work in <think> </think> tags. And return the final answer in <answer> </answer> tags, for example <answer> (1 + 2) / 3 </answer>.
 Assistant: Let me solve this step by step.
@@ -405,9 +421,9 @@ Assistant: Let me solve this step by step.
             "system_message": SYSTEM_MESSAGE,
             "prompt_template": PROMPT_TEMPLATE,
             "chat_template": not args.base_prompt,
+            "enable_thinking": args.enable_thinking,
         },
     )
-
     eval_dataset = load_dataset(args.dataset_name, split=args.dataset_eval_split)
     eval_dataset = eval_dataset.add_column(DATASET_SOURCE_KEY, ["countdown"] * len(eval_dataset))
     eval_dataset = eval_dataset.map(
@@ -418,6 +434,7 @@ Assistant: Let me solve this step by step.
             "system_message": SYSTEM_MESSAGE,
             "prompt_template": PROMPT_TEMPLATE,
             "chat_template": not args.base_prompt,
+            "enable_thinking": args.enable_thinking,
         },
     )
     return train_dataset, eval_dataset
