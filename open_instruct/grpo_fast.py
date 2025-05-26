@@ -276,6 +276,8 @@ class Args:
     """vLLM GPU memory utilization"""
     vllm_enable_prefix_caching: bool = False
     """whether to enable prefix caching"""
+    vllm_top_p: float = 1.0
+    """vLLM top p for nucleus sampling"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
@@ -1501,7 +1503,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         stop_strings += list(tool_objects.keys())
     generation_config = SamplingParams(
         temperature=args.temperature,
-        top_p=0.95,  # prevent rare out-of-vocab tokens with qwen
+        top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
@@ -1510,7 +1512,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     )
     eval_generation_config = SamplingParams(
         temperature=0.0,
-        top_p=0.95,  # prevent rare out-of-vocab tokens with qwen
+        top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
