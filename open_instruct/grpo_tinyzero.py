@@ -30,6 +30,7 @@
 # isort: off
 from collections import defaultdict
 import os
+import re
 import shutil
 
 os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
@@ -397,10 +398,16 @@ def create_datasets(args: Args, tokenizer):
         # Assistant:
         # <think>"""
         #         SYSTEM_MESSAGE = ""
-        PROMPT_TEMPLATE = """A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant first thinks about the reasoning process in the mind and then provides the user with the answer.
-User: Using the numbers {numbers}, create an equation that equals {target}. You can use basic arithmetic operations (+, -, *, /) and each number can only be used once. Show your work in <think> </think> tags. And return the final answer in <answer> </answer> tags, for example <answer> (1 + 2) / 3 </answer>.
-Assistant: Let me solve this step by step.
-<think>"""
+        #         PROMPT_TEMPLATE = """A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant first thinks about the reasoning process in the mind and then provides the user with the answer.
+        # User: Using the numbers {numbers}, create an equation that equals {target}. You can use basic arithmetic operations (+, -, *, /) and each number can only be used once. Show your work in <think> </think> tags. And return the final answer in <answer> </answer> tags, for example <answer> (1 + 2) / 3 </answer>.
+        # Assistant: Let me solve this step by step.
+        # <think>"""
+        PROMPT_TEMPLATE = (
+            "Using the numbers {numbers}, create an equation that equals {target}. "
+            "You can use basic arithmetic operations (+, -, *, /) and each number can only be used once, though not all numbers need to be used. "
+            "First reason about the problem. After reasoning, return the equation as a final answer in <answer> </answer> tags. For example <answer> (1 + 2) / 3 </answer>. "
+            "Let's solve this step by step."
+        )
         SYSTEM_MESSAGE = ""
     else:
         SYSTEM_MESSAGE = (
@@ -774,10 +781,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     "eval/sequence_lengths_min": eval_sequence_lengths.min(),
                     "eval/sequence_lengths_max": eval_sequence_lengths.max(),
                     "eval/stop_rate": eval_stop_rate,
-                    "val/correct_lengths": eval_sequence_lengths[eval_np_scores == 1].mean(),
-                    "val/incorrect_lengths": eval_sequence_lengths[eval_np_scores == 0.1].mean(),
-                    "val/long_answer_correct": eval_np_scores[eval_sequence_lengths > 100].mean(),
-                    "val/short_answer_correct": eval_np_scores[eval_sequence_lengths <= 100].mean(),
+                    "val/correct_lengths": safe_mean(eval_sequence_lengths[eval_np_scores == 1]),
+                    "val/incorrect_lengths": safe_mean([eval_np_scores == 0.1]),
+                    "val/long_answer_correct": safe_mean(eval_np_scores[eval_sequence_lengths > 100]),
+                    "val/short_answer_correct": safe_mean(eval_np_scores[eval_sequence_lengths <= 100]),
                     **eval_reward_metrics,
                 }
                 table = {}
@@ -853,6 +860,18 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         )
 
 
+# special case, we use this outside our general verifier loop.
+def simple_format_reward_func(responses: List[str], reward_scale: float = 1.0) -> List[float]:
+    """
+    Check if the completion has a specific format defined by a pattern.
+
+    Returns a list of rewards scaled by reward_scale.
+    """
+    pattern = r".*<answer>.*?</answer>"
+    matches = [re.match(pattern, r, re.DOTALL) for r in responses]
+    return [reward_scale if match else 0.0 for match in matches]
+
+
 if __name__ == "__main__":
     parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
     args, tokenizer_config, model_config = parser.parse()
@@ -874,7 +893,8 @@ if __name__ == "__main__":
         metrics = {}
         if args.apply_r1_style_format_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
-                format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
+                format_reward_func = simple_format_reward_func if args.base_prompt else soft_format_reward_func
+                format_scores = format_reward_func(decoded_responses, args.r1_style_format_reward)
                 if len(format_scores) != len(scores):
                     raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
                 for i in range(len(format_scores)):

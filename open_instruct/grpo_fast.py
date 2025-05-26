@@ -313,6 +313,12 @@ class Args:
         ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
 
 
+def safe_mean(arr):
+    if len(arr) == 0:
+        return np.nan
+    return arr.mean()
+
+
 def get_train_ds_config(
     offload,
     adam_offload=False,
@@ -1251,10 +1257,10 @@ def data_preparation_thread(
             "val/sequence_lengths_min": sequence_lengths.min(),
             "val/sequence_lengths_max": sequence_lengths.max(),
             "val/stop_rate": stop_rate,
-            "val/correct_lengths": sequence_lengths[np_scores == 1].mean(),
-            "val/incorrect_lengths": sequence_lengths[np_scores == 0.1].mean(),
-            "val/long_answer_correct": np_scores[sequence_lengths > 100].mean(),
-            "val/short_answer_correct": np_scores[sequence_lengths <= 100].mean(),
+            "val/correct_lengths": safe_mean(sequence_lengths[np_scores == 1]),
+            "val/incorrect_lengths": safe_mean(sequence_lengths[np_scores == 0.1]),
+            "val/long_answer_correct": safe_mean(np_scores[sequence_lengths > 100]),
+            "val/short_answer_correct": safe_mean(np_scores[sequence_lengths <= 100]),
             **reward_metrics,
         }
 

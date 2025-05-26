@@ -24,14 +24,14 @@ uv run open_instruct/grpo_tinyzero.py \
     --total_episodes 64000 \
     --model_name_or_path Qwen/Qwen3-1.7B-Base \
     --base_prompt \
-    --stop_strings "<|endoftext|>" "User:" "</answer>" "Assistant:" \
+    --stop_strings "<|endoftext|>" "</answer>" \
     --apply_r1_style_format_reward \
     --r1_style_format_reward 0.1 \
     --apply_verifiable_reward \
     --verification_reward 0.9 \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --eval_temperature 0.6 \
+    --eval_temperature 0.7 \
     --top_p 0.95 \
     --learning_rate 1e-6 \
     --num_epochs 1 \
@@ -42,13 +42,16 @@ uv run open_instruct/grpo_tinyzero.py \
     --seed 3 \
     --num_evals 4 \
     --save_freq 1000 \
-    --vllm_gpu_memory_utilization 0.35 \
+    --vllm_gpu_memory_utilization 0.55 \
     --single_gpu_mode \
     --deepspeed_stage 2 \
     --async_mode False \
     --vllm_sync_backend gloo \
+    --offload_ref \
+    --vllm_sleep_level 1 \
     --fused_optimizer \
     --with_tracking $@
+    #
 
     # --liger_kernel \
     # --vllm_enforce_eager \

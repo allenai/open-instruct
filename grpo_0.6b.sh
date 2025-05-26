@@ -2,11 +2,11 @@
 #SBATCH --gres=gpu:l40s:1
 #SBATCH --mem=24G
 #SBATCH -c 4
-#SBATCH --time=2:00:00
+#SBATCH --time=4:00:00
 #SBATCH -p long
 
 source mila.sh
-exp_name="grpo_orz0.5b_base"
+exp_name="grpo_0.6b_base"
 
 uv run open_instruct/grpo_tinyzero.py \
     --exp_name $exp_name \
@@ -20,11 +20,11 @@ uv run open_instruct/grpo_tinyzero.py \
     --pack_length 4096 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 4 \
-    --num_samples_per_prompt_rollout 16 \
+    --num_samples_per_prompt_rollout 8 \
     --total_episodes 64000 \
-    --model_name_or_path Open-Reasoner-Zero/Open-Reasoner-Zero-0.5B \
+    --stop_strings "<|endoftext|>" "</answer>" \
+    --model_name_or_path Qwen/Qwen3-0.6B-Base \
     --base_prompt \
-    --stop_strings "<|endoftext|>" "User:" "</answer>" "Assistant:" \
     --apply_r1_style_format_reward \
     --r1_style_format_reward 0.1 \
     --apply_verifiable_reward \
@@ -46,7 +46,9 @@ uv run open_instruct/grpo_tinyzero.py \
     --async_mode False \
     --vllm_sync_backend gloo \
     --fused_optimizer \
-    --with_tracking $@
+    --with_tracking $@  
+
+# --total_episodes 512 --save_freq -1
 
     # --liger_kernel \
     # --vllm_enforce_eager \
