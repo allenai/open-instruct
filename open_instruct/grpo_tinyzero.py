@@ -89,13 +89,15 @@ from open_instruct.model_utils import (
 )
 from open_instruct.utils import (
     ArgumentParserPlus,
+    calibrate_checkpoint_state_dir,
+    download_latest_checkpoint_from_gs,
+    get_beaker_whoami,
     get_wandb_tags,
     is_beaker_job,
     maybe_get_beaker_config,
     maybe_use_ai2_hf_entity,
-    maybe_use_ai2_wandb_entity,
 )
-from open_instruct.vllm_utils2 import create_vllm_engines
+from open_instruct.vllm_utils3 import create_vllm_engines
 
 
 api = HfApi()
@@ -200,6 +202,17 @@ class Args:
     """the length of the pack (you should prob set to the max length of the model)"""
     masked_mean_axis: Optional[int] = None
     """the axis to compute the mean of the masked values"""
+    alpha: float = 0.6
+    """The alpha value for doing polyak updates (ref_param = alpha * param + (1 - alpha) * ref_param)
+    reference: [TR-DPO](https://huggingface.co/papers/2404.09656), but it's actually pretty commonly
+    used. E.g., [TD3](https://arxiv.org/abs/1802.09477) uses https://github.com/vwxyzjn/cleanrl/blob/dcc289fc6f0bda492fa7360a155262cf826b12a5/cleanrl/td3_continuous_action.py#L269
+    """
+    ref_policy_update_freq: Optional[int] = None
+    """How many training steps to take before updating the reference policy."""
+    advantage_normalization_type: Literal["standard", "centered"] = "standard"
+    """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
+    divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
+    DR.GRPO https://arxiv.org/pdf/2503.20783)."""
 
     # Reward
     # -- r1 style format reward
@@ -207,6 +220,8 @@ class Args:
     """whether to add the R1 style format reward"""
     r1_style_format_reward: float = 0.1
     """the reward value for R1 style format reward"""
+    additive_format_reward: bool = True
+    """whether to add the format reward to the final reward"""
 
     # -- verifiable reward
     apply_verifiable_reward: bool = True
@@ -278,6 +293,33 @@ class Args:
     """Whether to save learning data traces"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
+    keep_last_n_checkpoints: int = 3
+    """How many checkpoints to keep in the output directory. -1 for all."""
+    checkpoint_state_freq: int = -1
+    """How often to save the model checkpoint, optimizer states, and lr scheduler states (in steps)"""
+    checkpoint_state_dir: Optional[str] = None
+    """Where to save the model checkpoint (if applicable)"""
+    gs_checkpoint_state_dir: Optional[str] = None
+    """The actual `checkpoint_state_dir` to use (handling the case where gs_bucket_path is provided)"""
+
+    # Tool settings
+    tools: Optional[List[str]] = None
+    """If set, use the tool mapped to the string. Currently only supports `search` and `code`"""
+    max_tool_calls: List[int] = field(default_factory=lambda: [5])
+    """Maximum number of tool calls allowed. If a list is provided, it must have length 1 (applies to all tools) or same length as tools (per-tool limit)."""
+    mask_tool_use: bool = True
+    """Whether to mask the tool output. By default on."""
+    only_reward_good_outputs: bool = False
+    """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
+
+    # rl-rag specific settngs
+    number_documents_to_search: int = 3
+    """The maximum number of documents to retrieve for each query."""
+    search_api_endpoint: Optional[str] = None
+    """The API endpoint for the search engine."""
+
+    # code-tool specific settings
+    code_tool_api_endpoint: Optional[str] = None
 
     # Ai2 specific settings
     is_ai2: bool = False
@@ -314,6 +356,27 @@ class Args:
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
         ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+
+        if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
+            raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
+        if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
+            raise ValueError("`checkpoint_state_freq` must be greater than 0 if `checkpoint_state_dir` is provided!")
+        if self.gs_bucket_path is not None and self.gs_checkpoint_state_dir is None:
+            beaker_users = get_beaker_whoami()
+            if beaker_users is not None:
+                self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{beaker_users}/{self.checkpoint_state_dir}"
+            else:
+                self.gs_checkpoint_state_dir = f"{self.gs_bucket_path}/{self.checkpoint_state_dir}"
+        if self.gs_checkpoint_state_dir is not None:
+            download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
+        if self.checkpoint_state_dir is not None:
+            calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
+        if self.tools is not None and len(self.tools) > 0:
+            for tool in self.tools:
+                if tool not in ["search", "code"]:
+                    raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
+            assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
+        self.tool_use = self.tools is not None and len(self.tools) > 0
 
 
 def safe_mean(arr):
@@ -624,6 +687,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             args.eval_freq,
             resume_training_step,
             args.vllm_sleep_level,
+            args.tool_use,
         ),
     )
     thread.start()
@@ -888,7 +952,9 @@ if __name__ == "__main__":
         ground_truths: List[Any],
         datasets: List[str],
         finish_reasons: List[str],
+        infos: List[List[int]],
     ) -> List[float]:
+        num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
         scores = [0] * len(decoded_responses)
         metrics = {}
         if args.apply_r1_style_format_reward:
@@ -915,7 +981,12 @@ if __name__ == "__main__":
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
                 for i in range(len(verifiable_rewards)):
-                    scores[i] = verifiable_rewards[i] + scores[i]
+                    if args.apply_r1_style_format_reward and args.additive_format_reward:
+                        scores[i] = verifiable_rewards[i] + scores[i]
+                    elif args.apply_r1_style_format_reward and not args.additive_format_reward:
+                        scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
+                    else:
+                        scores[i] = verifiable_rewards[i]
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()

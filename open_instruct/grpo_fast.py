@@ -116,7 +116,8 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     sync_gs_bucket,
 )
-from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group, batch_vllm_engine_call
+from open_instruct.vllm_utils3 import batch_vllm_engine_call, create_vllm_engines, init_process_group
+
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -711,7 +712,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
         if torch.distributed.get_rank() == 0:
             ray.get(refss)
-        if args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
+        if self.args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
             ray.get(cache_reset_refs)
 
     def update_ref_policy(self):
@@ -1040,6 +1041,7 @@ def vllm_generate_thread(
     eval_freq: int,
     resume_training_step: int = 1,
     vllm_sleep_level: int = 0,
+    tool_use: bool = False,
 ):
     def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
         # Split queries between engines
@@ -1064,7 +1066,7 @@ def vllm_generate_thread(
         for outputs in all_outputs:
             response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
             finish_reasons.extend([out.finish_reason for output in outputs for out in output.outputs])
-            if args.tool_use:
+            if tool_use:
                 masks.extend([out.mask for output in outputs for out in output.outputs])
                 num_calls.extend([out.num_calls for output in outputs for out in output.outputs])
                 timeouts.extend([out.timeout for output in outputs for out in output.outputs])
@@ -1073,7 +1075,7 @@ def vllm_generate_thread(
                 tool_runtimes.extend([out.tool_runtime for output in outputs for out in output.outputs])
                 tool_calleds.extend([out.tool_called for output in outputs for out in output.outputs])
         # if not using the tool, mask is all 1s
-        if not args.tool_use:
+        if not tool_use:
             masks = [[1] * len(response_ids[i]) for i in range(len(response_ids))]
             num_calls = [0] * len(response_ids)
             timeouts = [0] * len(response_ids)
@@ -1297,8 +1299,8 @@ def data_preparation_thread(
                 0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
             ),
             "val/sequence_lengths_solved": 0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean(),
-            "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
-            "val/sequence_lengths_solved_hist": sequence_length_solved,
+            # "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
+            # "val/sequence_lengths_solved_hist": sequence_length_solved,
             "val/stop_rate": stop_rate,
             # "val/correct_lengths": safe_mean(sequence_lengths[np_scores == 1]),
             # "val/incorrect_lengths": safe_mean(sequence_lengths[np_scores == 0.1]),
@@ -1307,7 +1309,7 @@ def data_preparation_thread(
             "val/advantages_mean": advantages.mean(),
             "val/advantages_min": advantages.min(),
             "val/advantages_max": advantages.max(),
-            "val/advantages_hist": advantages,
+            # "val/advantages_hist": advantages,
             "val/num_calls_rate": np.array(num_calls).mean(),
             "val/timeouts_rate": np.array(timeouts).mean(),
             "val/tool_errors_rate": np.array([len(item) > 0 for item in tool_errors]).mean(),
@@ -1524,7 +1526,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
-        enable_sleep_mode=args.sleep_mode,
+        vllm_enable_sleep=False,
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,
     )
@@ -1590,6 +1592,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             evaluation_inference_results_Q,
             args.eval_freq,
             resume_training_step,
+            None,
+            args.tool_use,
         ),
     )
     thread.start()

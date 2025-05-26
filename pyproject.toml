@@ -23,7 +23,7 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch>=2.6.0",
     "transformers>=4.51.0",
-    "vllm>=0.8.2",
+    "vllm>=0.8.4",
     "wandb==0.18.1",
     "liger-kernel",
 ]
