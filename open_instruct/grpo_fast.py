@@ -234,6 +234,8 @@ class Args:
     """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
     divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
+    mask_truncated_completions: bool = False
+    """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
 
     # Reward
     # -- r1 style format reward
@@ -765,7 +767,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     mb_tool_mask = collated_tool_masks[i]
                     mb_advantages = collated_advantages[i]
                     mb_response_masks = collated_response_masks[i]
-                    mb_response_masks_bool = mb_response_masks[:, 1:].bool()
+                    mb_response_masks_bool = mb_response_masks[:, 1:].bool()                    
                     # if masking snippets, do it here.
                     if args.mask_tool_use and args.tool_use:
                         mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
@@ -1107,6 +1109,11 @@ def data_preparation_thread(
                 ):
                     responses[i].append(tokenizer.eos_token_id)
                     masks[i].append(1)  # never mask the eos token for now?
+                # overlong filtering: mask out completions that do not stop.
+                # we keep them in the advantage / score calculations
+                if args.mask_truncated_completions and finish_reasons[i] != "stop":
+                    masks[i] = [0] * len(masks[i])
+                    
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
