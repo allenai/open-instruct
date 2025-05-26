@@ -1109,19 +1109,6 @@ def data_preparation_thread(
                 ):
                     responses[i].append(tokenizer.eos_token_id)
                     masks[i].append(1)  # never mask the eos token for now?
-            # if we have overlong filtering, remove samples that didn't stop.
-            if args.mask_truncated_completions:
-                stop_idxes = [i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"]
-                # readjust the indices
-                responses = [responses[i] for i in stop_idxes]
-                masks = [masks[i] for i in stop_idxes]
-                finish_reasons = [finish_reasons[i] for i in stop_idxes]
-                num_calls = [num_calls[i] for i in stop_idxes]
-                timeouts = [timeouts[i] for i in stop_idxes]
-                tool_errors = [tool_errors[i] for i in stop_idxes]
-                tool_outputs = [tool_outputs[i] for i in stop_idxes]
-                tool_runtimes = [tool_runtimes[i] for i in stop_idxes]
-                tool_calleds = [tool_calleds[i] for i in stop_idxes]
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
@@ -1165,6 +1152,17 @@ def data_preparation_thread(
             queries = [queries[i] for i in non_zero_gradient_index]
             ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
             datasets = [datasets[i] for i in non_zero_gradient_index]
+            finish_reasons = [finish_reasons[i] for i in non_zero_gradient_index]
+            if args.mask_truncated_completions:
+                stop_idxes = [i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"]
+                scores = [scores[i] for i in stop_idxes]
+                advantages = [advantages[i] for i in stop_idxes]
+                responses = [responses[i] for i in stop_idxes]
+                masks = [masks[i] for i in stop_idxes]
+                queries = [queries[i] for i in stop_idxes]
+                ground_truths = [ground_truths[i] for i in stop_idxes]
+                datasets = [datasets[i] for i in stop_idxes]
+                finish_reasons = [finish_reasons[i] for i in stop_idxes]
 
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
