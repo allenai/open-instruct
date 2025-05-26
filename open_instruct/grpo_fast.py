@@ -767,7 +767,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     mb_tool_mask = collated_tool_masks[i]
                     mb_advantages = collated_advantages[i]
                     mb_response_masks = collated_response_masks[i]
-                    mb_response_masks_bool = mb_response_masks[:, 1:].bool()                    
+                    mb_response_masks_bool = mb_response_masks[:, 1:].bool()
                     # if masking snippets, do it here.
                     if args.mask_tool_use and args.tool_use:
                         mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
@@ -1109,11 +1109,19 @@ def data_preparation_thread(
                 ):
                     responses[i].append(tokenizer.eos_token_id)
                     masks[i].append(1)  # never mask the eos token for now?
-                # overlong filtering: mask out completions that do not stop.
-                # we keep them in the advantage / score calculations
-                if args.mask_truncated_completions and finish_reasons[i] != "stop":
-                    masks[i] = [0] * len(masks[i])
-                    
+            # if we have overlong filtering, remove samples that didn't stop.
+            if args.mask_truncated_completions:
+                stop_idxes = [i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"]
+                # readjust the indices
+                responses = [responses[i] for i in stop_idxes]
+                masks = [masks[i] for i in stop_idxes]
+                finish_reasons = [finish_reasons[i] for i in stop_idxes]
+                num_calls = [num_calls[i] for i in stop_idxes]
+                timeouts = [timeouts[i] for i in stop_idxes]
+                tool_errors = [tool_errors[i] for i in stop_idxes]
+                tool_outputs = [tool_outputs[i] for i in stop_idxes]
+                tool_runtimes = [tool_runtimes[i] for i in stop_idxes]
+                tool_calleds = [tool_calleds[i] for i in stop_idxes]
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
@@ -1157,6 +1165,7 @@ def data_preparation_thread(
             queries = [queries[i] for i in non_zero_gradient_index]
             ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
             datasets = [datasets[i] for i in non_zero_gradient_index]
+
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
