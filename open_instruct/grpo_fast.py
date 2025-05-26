@@ -1154,9 +1154,9 @@ def data_preparation_thread(
             datasets = [datasets[i] for i in non_zero_gradient_index]
             finish_reasons = [finish_reasons[i] for i in non_zero_gradient_index]
             if args.mask_truncated_completions:
-                stop_idxes = [i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"]
-                scores = [scores[i] for i in stop_idxes]
-                advantages = [advantages[i] for i in stop_idxes]
+                stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
+                scores = scores[stop_idxes]
+                advantages = advantages[stop_idxes]
                 responses = [responses[i] for i in stop_idxes]
                 masks = [masks[i] for i in stop_idxes]
                 queries = [queries[i] for i in stop_idxes]
