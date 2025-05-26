@@ -32,7 +32,6 @@ uv run open_instruct/grpo_tinyzero.py \
     --non_stop_penalty False \
     --temperature 1.0 \
     --eval_temperature 0.7 \
-    --top_p 0.95 \
     --learning_rate 1e-6 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
@@ -46,6 +45,7 @@ uv run open_instruct/grpo_tinyzero.py \
     --single_gpu_mode \
     --deepspeed_stage 2 \
     --async_mode False \
+    --gradient_checkpointing \
     --vllm_sync_backend gloo \
     --offload_ref \
     --vllm_sleep_level 1 \
@@ -55,7 +55,6 @@ uv run open_instruct/grpo_tinyzero.py \
 
     # --liger_kernel \
     # --vllm_enforce_eager \
-    # --gradient_checkpointing \
     # --dataset_mixer_list_splits train \
     # --dataset_mixer_eval_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \
     # --dataset_mixer_eval_list_splits train \
