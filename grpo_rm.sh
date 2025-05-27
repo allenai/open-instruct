@@ -37,6 +37,7 @@ python mason.py \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
     --model_name_or_path Qwen/Qwen2.5-7B \
+    --oe_eval_tasks minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,alpaca_eval_v2::tulu,ifeval::tulu,popqa::tulu,drop::llama3,codex_humanevalplus::tulu,mmlu:cot::summarize \
     --non_stop_penalty \
     --stop_token eos \
     --penalty_reward_value 0.0 \
