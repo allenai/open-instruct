@@ -5,21 +5,26 @@ Add new verifiers by subclassing VerifierFunction and implementing the __call__ 
 They are then automatically added to the REWARD_FN_MAPPING.
 """
 
+import asyncio
 import json
 import logging
 import os
 import re
 import string
+import weakref
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Dict, List, Union, Tuple, Optional
+from typing import Any, Dict, List, Optional, Union
 
-from open_instruct.if_functions import IF_FUNCTIONS_MAP
-from open_instruct.judge_utils import JUDGE_PROMPT_MAP, PRICE_PER_TOKEN, extract_score_from_string
-import asyncio
 from openai import AsyncAzureOpenAI
 
+from open_instruct.if_functions import IF_FUNCTIONS_MAP
+from open_instruct.judge_utils import (
+    JUDGE_PROMPT_MAP,
+    PRICE_PER_TOKEN,
+    extract_score_from_string,
+)
 from open_instruct.math_utils import (
     get_unnormalized_answer,
     hendrycks_is_equiv,
@@ -31,14 +36,16 @@ from open_instruct.math_utils import (
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class VerifierConfig:
     """For now this config exists to support LMJudgeVerifer, can be expanded to support other verifers"""
+
     # judge args
     llm_judge_model: str
     llm_judge_max_tokens: int = 2048
     llm_judge_temperature: float = 1.0
-    seed: int = 1 # will be overwritten by seed from args
+    seed: int = 1  # will be overwritten by seed from args
 
     @classmethod
     def from_args(cls, args) -> "VerifierConfig":
@@ -47,17 +54,18 @@ class VerifierConfig:
         Only fields that exist in both Args and VerifierConfig will be passed through.
         """
         import dataclasses
-        
+
         # Get all field names from VerifierConfig
         verifier_fields = {field.name for field in dataclasses.fields(cls)}
-        
+
         # Get all attributes from args that match VerifierConfig field names
         matching_kwargs = {}
         for field_name in verifier_fields:
             if hasattr(args, field_name):
                 matching_kwargs[field_name] = getattr(args, field_name)
-        
+
         return cls(**matching_kwargs)
+
 
 @dataclass
 class VerificationResult:
@@ -80,7 +88,9 @@ class VerifierFunction(ABC):
         self.verifier_config = verifier_config
 
     @abstractmethod
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None) -> VerificationResult:
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
+    ) -> VerificationResult:
         """
         Evaluate the given prediction against the ground truth (or constraint).
 
@@ -88,13 +98,15 @@ class VerifierFunction(ABC):
             tokenized_prediction (List[int]): Tokenized representation (unused by most verifiers).
             prediction (str): The model output.
             label (Any): The ground truth answer or evaluation constraint.
-            query (Optional[str]): The original query 
+            query (Optional[str]): The original query
 
         Returns:
             VerificationResult
         """
-    
-    async def async_call(self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None) -> VerificationResult:
+
+    async def async_call(
+        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
+    ) -> VerificationResult:
         """
         Asynchronous version of __call__. By default, it runs the synchronous __call__ in a thread pool.
         Subclasses can override this method for truly asynchronous implementation.
@@ -110,11 +122,7 @@ class VerifierFunction(ABC):
         """
         # Run the synchronous __call__ in a thread pool to avoid blocking
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, 
-            lambda: self.__call__(tokenized_prediction, prediction, label, query)
-        )
-
+        return await loop.run_in_executor(None, lambda: self.__call__(tokenized_prediction, prediction, label, query))
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(name={self.name}, weight={self.weight})"
@@ -129,7 +137,9 @@ class GSM8KVerifier(VerifierFunction):
     def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
         super().__init__("gsm8k", verifier_config=verifier_config, weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> VerificationResult:
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
         response = re.sub(r"(\d),(\d)", r"\1\2", prediction)
         numbers = re.findall(r"[-+]?\d*\.\d+|\d+", response)
         extracted = numbers[-1] if numbers else response
@@ -148,7 +158,9 @@ class MathVerifier(VerifierFunction):
     def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
         super().__init__("math", verifier_config=verifier_config, weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> VerificationResult:
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
         raw_answer = prediction
         all_answers = []
 
@@ -195,7 +207,9 @@ class StrictMathVerifier(VerifierFunction):
     def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
         super().__init__("strict_math", verifier_config=verifier_config, weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> VerificationResult:
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
         raw_answer = prediction
         all_answers = []
         minerva_answer = normalize_final_answer(get_unnormalized_answer(raw_answer))
@@ -221,7 +235,9 @@ class IFEvalVerifier(VerifierFunction):
     def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
         super().__init__("ifeval", verifier_config=verifier_config, weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], query: Optional[str] = None) -> VerificationResult:
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], query: Optional[str] = None
+    ) -> VerificationResult:
         constraint = label
         answer = prediction.split("<|assistant|>\n")[-1].strip()
         if isinstance(constraint, str):
@@ -280,7 +296,9 @@ class FlanVerifier(VerifierFunction):
     def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
         super().__init__("flan", verifier_config=verifier_config, weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> VerificationResult:
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
         answer_string = prediction.split("The answer is: ")[-1].strip()
         score = float(normalize_answer(answer_string) == normalize_answer(label))
         return VerificationResult(score=score)
@@ -296,7 +314,9 @@ class StringMatcherVerifier(VerifierFunction):
     def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
         super().__init__("string_matcher", verifier_config=verifier_config, weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> VerificationResult:
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
         if "<answer>" not in prediction or "</answer>" not in prediction:
             return VerificationResult(score=0.0)
         # extract out of answer tag
@@ -314,7 +334,9 @@ class F1Verifier(VerifierFunction):
     def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
         super().__init__("string_f1", verifier_config=verifier_config, weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> VerificationResult:
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
         # remove thinking section from the prediction
         prediction = prediction.split("</think>")[-1]
         # remove answer tags from the prediction
@@ -335,7 +357,9 @@ class ReSearchVerifierF1(VerifierFunction):
         self.answer_end_tag = "</finish>"
         super().__init__("re_search_f1", verifier_config=verifier_config, weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> VerificationResult:
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
         try:
             label = json.loads(label)
         except json.JSONDecodeError:
@@ -374,7 +398,13 @@ class R1SearchVerifier(VerifierFunction):
     def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
         super().__init__(name="re_search", verifier_config=verifier_config, weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, List[str]], query: Optional[str] = None) -> VerificationResult:
+    def __call__(
+        self,
+        tokenized_prediction: List[int],
+        prediction: str,
+        label: Union[str, List[str]],
+        query: Optional[str] = None,
+    ) -> VerificationResult:
         # 1. Parse JSON label safely
         parsed_labels: Union[List, str]
         try:
@@ -424,7 +454,9 @@ class MaxLenVerifier(VerifierFunction):
     def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
         super().__init__("max_length", verifier_config=verifier_config, weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> VerificationResult:
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
         desired_length = float(label)
         # return absolute difference between the length of the prediction and the max length
         # make sure to disallow negative rewards
@@ -443,7 +475,9 @@ class UpToMaxLenVerifier(VerifierFunction):
     def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
         super().__init__("up_to_max_length", verifier_config=verifier_config, weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None) -> VerificationResult:
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
         desired_length = float(label)
         length_diff = len(tokenized_prediction) - desired_length
         # if we were too short, its fine! return 1.0
@@ -459,68 +493,60 @@ class LMJudgeVerifier(VerifierFunction):
     """
     Verifier that uses a language model's judgement to score a response.
     """
-    _client_cache = {}
+
+    # Use WeakKeyDictionary to automatically clean up clients when event loops are garbage collected
+    _client_cache = weakref.WeakKeyDictionary()
 
     def __init__(self, judge_type: str, verifier_config: VerifierConfig) -> None:
         super().__init__(f"general-{judge_type}", verifier_config=verifier_config, weight=1.0)
         self.prompt_template = JUDGE_PROMPT_MAP[judge_type]
-    
+
     def _get_client(self):
         """
         Get or create an AsyncAzureOpenAI client for the current event loop.
-        This avoids both event loop conflicts and unnecessary client creation overhead.
+        Uses WeakKeyDictionary to avoid cleanup issues when event loops close.
         """
         try:
             loop = asyncio.get_running_loop()
-            loop_id = id(loop)
-            
-            if loop_id not in self._client_cache:
-                self._client_cache[loop_id] = AsyncAzureOpenAI(
+
+            # Use the loop object itself as the key (WeakKeyDictionary will clean up automatically)
+            if loop not in self._client_cache:
+                self._client_cache[loop] = AsyncAzureOpenAI(
                     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
                     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
                     api_version="2024-12-01-preview",
                 )
-                
-                def cleanup_client():
-                    if loop_id in self._client_cache:
-                        del self._client_cache[loop_id]
-                
-                loop.add_signal_handler = getattr(loop, 'add_signal_handler', lambda *args: None)
-                try:
-                    import signal
-                    loop.add_signal_handler(signal.SIGTERM, cleanup_client)
-                except (AttributeError, NotImplementedError):
-                    pass
-            
-            return self._client_cache[loop_id]
-            
+
+            return self._client_cache[loop]
+
         except RuntimeError:
+            # No event loop running, create a fresh client (this should be rare)
             return AsyncAzureOpenAI(
                 api_key=os.getenv("AZURE_OPENAI_API_KEY"),
                 azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
                 api_version="2024-12-01-preview",
             )
-    
+
     def parse_completion(self, completion):
         """
         Extract reasoning and score from an OpenAI API completion response.
-        
+
         Args:
             completion: The OpenAI API completion response object
-            
+
         Returns:
             tuple: (reasoning, score) extracted from the response
         """
         reasoning = ""
         score = 0.0
-        
+
         if not completion:
             print("No completion received from the model.")
             return reasoning, score
-        
+
         try:
             content = completion.choices[0].message.content
-            
+
             try:
                 data = json.loads(content)
                 if isinstance(data, dict):
@@ -529,38 +555,43 @@ class LMJudgeVerifier(VerifierFunction):
                     return reasoning, score
             except (json.JSONDecodeError, TypeError, ValueError):
                 pass
-            
+
             if isinstance(content, str):
                 reasoning = content
                 extracted_score = extract_score_from_string(content)
                 if extracted_score is not None:
                     score = extracted_score
-                
+
         except Exception as e:
             print(f"Error processing model response: {str(e)}")
-            if hasattr(completion, 'choices') and completion.choices is not None and len(completion.choices) > 0:
+            if hasattr(completion, "choices") and completion.choices is not None and len(completion.choices) > 0:
                 print(f"Response content: {getattr(completion.choices[0].message, 'content', 'No content available')}")
-        
+
         return reasoning, score
-    
+
     def get_cost(self, response, model: str):
         """
         Get the cost of the response.
         """
-        model_name = model.replace("-standard", "") #azure OAI models have -standard in the name
-        return PRICE_PER_TOKEN[model_name]["input"] * response.usage.prompt_tokens + PRICE_PER_TOKEN[model_name]["output"] * response.usage.completion_tokens
+        model_name = model.replace("-standard", "")  # azure OAI models have -standard in the name
+        return (
+            PRICE_PER_TOKEN[model_name]["input"] * response.usage.prompt_tokens
+            + PRICE_PER_TOKEN[model_name]["output"] * response.usage.completion_tokens
+        )
 
-    async def async_call(self, tokenized_prediction: List[int], prediction: str, label: str, query: str) -> VerificationResult:
+    async def async_call(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: str
+    ) -> VerificationResult:
         """
         Asynchronous version of __call__ that properly handles the async OpenAI client.
         """
         client = self._get_client()
-        
+
         prompt = self.prompt_template.format(input=query, output=prediction, label=label)
-        
+
         max_retries = 3
         retry_delay = 1.0
-        
+
         for attempt in range(max_retries):
             try:
                 response = await client.chat.completions.create(
@@ -570,15 +601,15 @@ class LMJudgeVerifier(VerifierFunction):
                 reasoning, score = self.parse_completion(response)
                 cost = self.get_cost(response, self.verifier_config.llm_judge_model)
                 return VerificationResult(score=score, cost=cost, reasoning=reasoning)
-                
+
             except Exception as e:
                 logger.warning(f"LLM judge attempt {attempt + 1}/{max_retries} failed: {str(e)}")
                 if attempt == max_retries - 1:
                     logger.error(f"LLM judge failed after {max_retries} attempts. Returning default score of 0.0")
                     return VerificationResult(score=0.0, cost=0.0, reasoning=f"Error: {str(e)}")
                 else:
-                    await asyncio.sleep(retry_delay * (2 ** attempt))  # Exponential backoff
-    
+                    await asyncio.sleep(retry_delay * (2**attempt))  # Exponential backoff
+
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: str) -> VerificationResult:
         """
         Evaluates the prediction based on an LLM's judgement.
@@ -593,11 +624,28 @@ class LMJudgeVerifier(VerifierFunction):
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                raise RuntimeError("Cannot call synchronous __call__ method from within an async context. Use async_call instead.")
+                raise RuntimeError(
+                    "Cannot call synchronous __call__ method from within an async context. Use async_call instead."
+                )
             else:
                 return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
         except RuntimeError:
             return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+
+    @classmethod
+    async def cleanup_all_clients(cls):
+        """
+        Manually close all cached clients. Call this before shutting down to avoid cleanup warnings.
+        """
+        clients_to_close = list(cls._client_cache.values())
+        cls._client_cache.clear()
+
+        for client in clients_to_close:
+            try:
+                await client.aclose()
+            except Exception as e:
+                logger.warning(f"Error closing OpenAI client: {e}")
+                # Suppress the error to avoid breaking shutdown
 
 
 def build_all_verifiers(verifier_config: Optional[VerifierConfig] = None) -> Dict[str, VerifierFunction]:
@@ -614,7 +662,7 @@ def build_all_verifiers(verifier_config: Optional[VerifierConfig] = None) -> Dic
     for judge_type in JUDGE_PROMPT_MAP.keys():
         instance = LMJudgeVerifier(judge_type, verifier_config)
         verifiers[instance.name.lower()] = instance
-    
+
     return verifiers
 
 
@@ -628,3 +676,10 @@ def soft_format_reward_func(responses: List[str], reward_scale: float = 1.0) -> 
     pattern = r".*?</think>\s*<answer>.*?</answer>"
     matches = [re.match(pattern, r, re.DOTALL) for r in responses]
     return [reward_scale if match else 0.0 for match in matches]
+
+
+async def cleanup_all_llm_judge_clients():
+    """
+    Cleanup function to properly close all LLM judge clients before shutdown.
+    """
+    await LMJudgeVerifier.cleanup_all_clients()
