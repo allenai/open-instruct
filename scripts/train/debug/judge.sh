@@ -20,7 +20,7 @@ python open_instruct/grpo_fast.py \
     --ground_truths_key ground_truth \
     --chat_template_name tulu_thinker_r1_style \
     --learning_rate 3e-7 \
-    --total_episodes 10 \
+    --total_episodes 256 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
