@@ -77,11 +77,8 @@ def load_and_sample(dataset_name: str, column: str, num_rows: int) -> datasets.D
 def hf_messages_to_chat(messages: List[Dict[str, Any]]) -> List[ChatMessage]:
     """Convert HF message dicts (role/content) → vLLM ChatMessage list."""
     chat: List[ChatMessage] = []
-    for msg in messages:
-        role = msg["role"]
-        # Map HF 'system'/'assistant'/'user' to openai spec 1-to-1
-        assert role in {"system", "assistant", "user", "tool"}, f"Unexpected role: {role}"
-        chat.append(ChatMessage(role=role, content=msg["content"]))
+    assert messages[0]["role"] == "user"
+    chat.append(ChatMessage(role="user", content=messages[0]["content"]))
     return chat
 
 
