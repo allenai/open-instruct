@@ -11,7 +11,7 @@ python oe_eval/launch.py \
   --task-args '{ "generation_kwargs": { "max_gen_toks": 32768, "truncate_context": false, "stop_sequences": ["</answer>"] } }' \
   --gpus 1 \
   --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "env":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", "env-secret#2":"HF_TOKEN=HF_TOKEN", "mount": "/mnt/filestore_1:/filestore", "env#111": "HF_HOME=/filestore/.cache/huggingface", "env#112": "HF_DATASETS_CACHE=/filestore/.cache/huggingface", "env#113": "HF_HUB_CACHE=/filestore/.cache/hub"}' \
-  --cluster ai2/augusta-google-1 \
+  --cluster ai2/jupiter-cirrascale-2 \
   --beaker-retries 2 \
   --beaker-image oe-eval-beaker/oe_eval_auto \
   --beaker-priority high \
