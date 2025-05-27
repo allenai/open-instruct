@@ -99,6 +99,7 @@ def build_chat_request(system_prompt: str,
     else:
         raise ValueError(f"Unknown body_type: {body_type}")
 
+    print(messages)
     return ChatCompletionRequest(
         model=MODEL_NAME,
         messages=messages,
