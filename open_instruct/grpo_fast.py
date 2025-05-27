@@ -42,6 +42,7 @@ except Exception:
     pass
 # isort: on
 
+import asyncio
 import json
 import os
 import shutil
@@ -49,7 +50,6 @@ import socket
 import threading
 import time
 import traceback
-import asyncio
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
@@ -85,7 +85,11 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
-from open_instruct.ground_truth_utils import soft_format_reward_func, build_all_verifiers, VerifierConfig
+from open_instruct.ground_truth_utils import (
+    VerifierConfig,
+    build_all_verifiers,
+    soft_format_reward_func,
+)
 from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
@@ -1118,9 +1122,9 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-            scores, reward_metrics = asyncio.run(reward_fn(
-                responses, decoded_responses, ground_truths, datasets, finish_reasons, infos
-            ))
+            scores, reward_metrics = asyncio.run(
+                reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons, infos)
+            )
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
@@ -1705,14 +1709,16 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 )
 
                 # get and log evaluation metrics
-                eval_scores, eval_reward_metrics = asyncio.run(reward_fn(
-                    eval_responses,
-                    eval_decoded_responses,
-                    eval_ground_truths,
-                    eval_dataset_names,
-                    eval_finish_reasons,
-                    eval_infos,
-                ))
+                eval_scores, eval_reward_metrics = asyncio.run(
+                    reward_fn(
+                        eval_responses,
+                        eval_decoded_responses,
+                        eval_ground_truths,
+                        eval_dataset_names,
+                        eval_finish_reasons,
+                        eval_infos,
+                    )
+                )
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
                 eval_metrics = {
                     "eval/scores": np.array(eval_scores).mean(),
