@@ -642,7 +642,7 @@ class LMJudgeVerifier(VerifierFunction):
 
         for client in clients_to_close:
             try:
-                await client.aclose()
+                await client.close()
             except Exception as e:
                 logger.warning(f"Error closing OpenAI client: {e}")
                 # Suppress the error to avoid breaking shutdown
