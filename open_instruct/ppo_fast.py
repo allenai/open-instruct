@@ -1273,9 +1273,9 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards"):
-            scores, reward_metrics = asyncio.run(reward_fn(
-                responses, decoded_responses, ground_truths, datasets, finish_reasons, infos
-            ))
+            scores, reward_metrics = asyncio.run(
+                reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons, infos)
+            )
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
             non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
@@ -1812,14 +1812,16 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 )
 
                 # get and log evaluation metrics
-                eval_scores, eval_reward_metrics = asyncio.run(reward_fn(
-                    eval_responses,
-                    eval_decoded_responses,
-                    eval_ground_truths,
-                    eval_dataset_names,
-                    eval_finish_reasons,
-                    eval_infos,
-                ))
+                eval_scores, eval_reward_metrics = asyncio.run(
+                    reward_fn(
+                        eval_responses,
+                        eval_decoded_responses,
+                        eval_ground_truths,
+                        eval_dataset_names,
+                        eval_finish_reasons,
+                        eval_infos,
+                    )
+                )
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
                 eval_metrics = {
                     "eval/scores": np.array(eval_scores).mean(),

@@ -41,12 +41,6 @@ logger = logging.getLogger(__name__)
 class VerifierConfig:
     """For now this config exists to support LMJudgeVerifer, can be expanded to support other verifers"""
 
-    # judge args
-    llm_judge_model: str
-    llm_judge_max_tokens: int = 2048
-    llm_judge_temperature: float = 1.0
-    seed: int = 1  # will be overwritten by seed from args
-
     @classmethod
     def from_args(cls, args) -> "VerifierConfig":
         """
@@ -65,6 +59,15 @@ class VerifierConfig:
                 matching_kwargs[field_name] = getattr(args, field_name)
 
         return cls(**matching_kwargs)
+
+
+@dataclass
+class LMJudgeVerifierConfig(VerifierConfig):
+    # judge args
+    llm_judge_model: str
+    llm_judge_max_tokens: int = 2048
+    llm_judge_temperature: float = 1.0
+    seed: int = 1  # will be overwritten by seed from args
 
 
 @dataclass
@@ -497,7 +500,7 @@ class LMJudgeVerifier(VerifierFunction):
     # Use WeakKeyDictionary to automatically clean up clients when event loops are garbage collected
     _client_cache = weakref.WeakKeyDictionary()
 
-    def __init__(self, judge_type: str, verifier_config: VerifierConfig) -> None:
+    def __init__(self, judge_type: str, verifier_config: LMJudgeVerifierConfig) -> None:
         super().__init__(f"general-{judge_type}", verifier_config=verifier_config, weight=1.0)
         self.prompt_template = JUDGE_PROMPT_MAP[judge_type]
 
@@ -597,6 +600,9 @@ class LMJudgeVerifier(VerifierFunction):
                 response = await client.chat.completions.create(
                     model=self.verifier_config.llm_judge_model,
                     messages=[{"role": "user", "content": prompt}],
+                    temperature=self.verifier_config.llm_judge_temperature,
+                    max_tokens=self.verifier_config.llm_judge_max_tokens,
+                    seed=self.verifier_config.seed,
                 )
                 reasoning, score = self.parse_completion(response)
                 cost = self.get_cost(response, self.verifier_config.llm_judge_model)
@@ -648,7 +654,7 @@ class LMJudgeVerifier(VerifierFunction):
                 # Suppress the error to avoid breaking shutdown
 
 
-def build_all_verifiers(verifier_config: Optional[VerifierConfig] = None) -> Dict[str, VerifierFunction]:
+def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     """
     Build all verifiers with the given judge config.
     """
@@ -656,11 +662,11 @@ def build_all_verifiers(verifier_config: Optional[VerifierConfig] = None) -> Dic
     for subclass in VerifierFunction.__subclasses__():
         if subclass == LMJudgeVerifier:
             continue
-        instance = subclass(verifier_config)
+        instance = subclass(VerifierConfig.from_args(args))
         verifiers[instance.name.lower()] = instance
 
     for judge_type in JUDGE_PROMPT_MAP.keys():
-        instance = LMJudgeVerifier(judge_type, verifier_config)
+        instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args))
         verifiers[instance.name.lower()] = instance
 
     return verifiers

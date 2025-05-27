@@ -86,7 +86,6 @@ from open_instruct.dataset_transformation import (
     visualize_token,
 )
 from open_instruct.ground_truth_utils import (
-    VerifierConfig,
     build_all_verifiers,
     cleanup_all_llm_judge_clients,
     soft_format_reward_func,
@@ -1810,13 +1809,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 if __name__ == "__main__":
     parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
-    verifier_config = VerifierConfig.from_args(args)
     assert isinstance(args, Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
-    assert isinstance(verifier_config, VerifierConfig)
 
-    reward_fn_mapping = build_all_verifiers(verifier_config)
+    reward_fn_mapping = build_all_verifiers(args)
 
     async def reward_fn(
         responses: List[torch.Tensor],
