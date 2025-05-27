@@ -49,6 +49,7 @@ import socket
 import threading
 import time
 import traceback
+import asyncio
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
@@ -84,7 +85,7 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
-from open_instruct.ground_truth_utils import soft_format_reward_func
+from open_instruct.ground_truth_utils import soft_format_reward_func, build_all_verifiers, VerifierConfig
 from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
@@ -249,6 +250,10 @@ class Args:
     """whether to apply verifiable reward"""
     verification_reward: float = 10.0
     """the reward value for verifiable responses"""
+
+    # -- llm verifiers reward
+    llm_judge_model: str = "gpt-4o-mini-standard"
+    """the model to use for the llm judge"""
 
     # -- non stop penalty
     non_stop_penalty: bool = False
@@ -1113,9 +1118,9 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-            scores, reward_metrics = reward_fn(
+            scores, reward_metrics = asyncio.run(reward_fn(
                 responses, decoded_responses, ground_truths, datasets, finish_reasons, infos
-            )
+            ))
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
@@ -1700,14 +1705,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 )
 
                 # get and log evaluation metrics
-                eval_scores, eval_reward_metrics = reward_fn(
+                eval_scores, eval_reward_metrics = asyncio.run(reward_fn(
                     eval_responses,
                     eval_decoded_responses,
                     eval_ground_truths,
                     eval_dataset_names,
                     eval_finish_reasons,
                     eval_infos,
-                )
+                ))
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
                 eval_metrics = {
                     "eval/scores": np.array(eval_scores).mean(),
@@ -1785,11 +1790,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 if __name__ == "__main__":
     parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
+    verifier_config = VerifierConfig.from_args(args)
     assert isinstance(args, Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
+    assert isinstance(verifier_config, VerifierConfig)
 
-    def reward_fn(
+    reward_fn_mapping = build_all_verifiers(verifier_config)
+
+    async def reward_fn(
         responses: List[torch.Tensor],
         decoded_responses: List[str],
         ground_truths: List[str],
@@ -1816,7 +1825,8 @@ if __name__ == "__main__":
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
-                verifiable_rewards, per_func_rewards = apply_verifiable_reward(
+                verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
+                    reward_fn_mapping,
                     responses,
                     decoded_responses,
                     ground_truths,
