@@ -22,7 +22,7 @@ from datasets import load_dataset
 from tqdm import tqdm
 from vllm import LLM, SamplingParams
 from vllm.utils import random_uuid
-from vllm.entrypoints.openai.protocol import ChatCompletionRequest, ChatMessage
+from vllm.entrypoints.openai.protocol import ChatCompletionRequest
 
 
 # --------------------------------------------------------------------------- #
@@ -82,24 +82,26 @@ def hf_messages_to_chat(messages: List[Dict[str, Any]]) -> List[ChatMessage]:
     return chat
 
 
+def make_msg(role: str, content: str) -> dict:
+    """Return an OpenAI-compatible chat message dict."""
+    return {"role": role, "content": content}
+
 def build_chat_request(system_prompt: str,
                        body: Any,
                        body_type: str) -> ChatCompletionRequest:
     """
-    Construct ChatCompletionRequest expected by vLLM from either
-    1) a list of HF messages ('messages' column) or
-    2) a raw prompt string ('prompt' column).
+    Construct ChatCompletionRequest expected by vLLM >= 0.4,
+    where messages must be a list[dict] / typed-dicts.
     """
-    messages: List[ChatMessage] = [ChatMessage(role="system", content=system_prompt)]
+    messages: List[dict] = [make_msg("system", system_prompt)]
 
-    if body_type == "messages":
-        messages.extend(hf_messages_to_chat(body))
+    if body_type == "messages":          # already list[dict] from the dataset
+        messages.extend(body)
     elif body_type == "prompt":
-        messages.append(ChatMessage(role="user", content=body))
+        messages.append(make_msg("user", body))
     else:
         raise ValueError(f"Unknown body_type: {body_type}")
 
-    print(messages)
     return ChatCompletionRequest(
         model=MODEL_NAME,
         messages=messages,
@@ -108,8 +110,6 @@ def build_chat_request(system_prompt: str,
         top_p=SAMPLING_PARAMS.top_p,
         stop=SAMPLING_PARAMS.stop,
         stream=False,
-        # vLLM uses a request_id to match outputs; UUID is fine.
-        request_id=random_uuid()
     )
 
 
