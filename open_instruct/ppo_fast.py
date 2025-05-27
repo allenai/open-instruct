@@ -273,6 +273,10 @@ class Args:
     # -- llm verifiers reward
     llm_judge_model: str = "gpt-4o-mini-standard"
     """the model to use for the llm judge"""
+    llm_judge_max_tokens: int = 2048
+    """the max tokens to use for the llm judge"""
+    llm_judge_temperature: float = 1.0
+    """the temperature to use for the llm judge"""
 
     # -- non stop penalty
     non_stop_penalty: bool = False
@@ -1277,7 +1281,9 @@ def data_preparation_thread(
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards"):
             scores, reward_metrics = asyncio.run(
-                reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries)
+                reward_fn(
+                    responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries
+                )
             )
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)

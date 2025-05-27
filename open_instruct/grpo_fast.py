@@ -259,6 +259,10 @@ class Args:
     # -- llm verifiers reward
     llm_judge_model: str = "gpt-4o-mini-standard"
     """the model to use for the llm judge"""
+    llm_judge_max_tokens: int = 2048
+    """the max tokens to use for the llm judge"""
+    llm_judge_temperature: float = 1.0
+    """the temperature to use for the llm judge"""
 
     # -- non stop penalty
     non_stop_penalty: bool = False

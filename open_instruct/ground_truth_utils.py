@@ -65,9 +65,9 @@ class VerifierConfig:
 class LMJudgeVerifierConfig(VerifierConfig):
     # judge args
     llm_judge_model: str
-    llm_judge_max_tokens: int = 2048
-    llm_judge_temperature: float = 1.0
-    seed: int = 1  # will be overwritten by seed from args
+    llm_judge_max_tokens: int
+    llm_judge_temperature: float
+    seed: int
 
 
 @dataclass
@@ -121,7 +121,7 @@ class VerifierFunction(ABC):
             query (Optional[str]): The original query.
 
         Returns:
-            Tuple[float, float]: A tuple containing (score, cost)
+            VerificationResult
         """
         # Run the synchronous __call__ in a thread pool to avoid blocking
         loop = asyncio.get_event_loop()
@@ -601,7 +601,7 @@ class LMJudgeVerifier(VerifierFunction):
                     model=self.verifier_config.llm_judge_model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=self.verifier_config.llm_judge_temperature,
-                    max_tokens=self.verifier_config.llm_judge_max_tokens,
+                    max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                     seed=self.verifier_config.seed,
                 )
                 reasoning, score = self.parse_completion(response)
