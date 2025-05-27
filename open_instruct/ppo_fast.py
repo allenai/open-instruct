@@ -112,6 +112,7 @@ from open_instruct.utils import (
     BeakerRuntimeConfig,
     RayProcess,
     _z3_params_to_fetch,
+    extract_user_query,
     get_eval_ds_config,
     get_optimizer_grouped_parameters,
     get_train_ds_config,
@@ -1270,11 +1271,13 @@ def data_preparation_thread(
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
+            decoded_queries = tokenizer.batch_decode(queries, skip_special_tokens=True)
+            decoded_queries = [extract_user_query(query) for query in decoded_queries]
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards"):
             scores, reward_metrics = asyncio.run(
-                reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons, infos)
+                reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries)
             )
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
@@ -1926,6 +1929,7 @@ if __name__ == "__main__":
         datasets: List[str],
         finish_reasons: List[str],
         infos: List[List[int]],
+        queries: Optional[List[str]] = None,
     ) -> List[float]:
         num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
         good_outputs = [
@@ -1953,6 +1957,7 @@ if __name__ == "__main__":
                     ground_truths,
                     datasets,
                     reward_mult=args.verification_reward,
+                    queries=queries,
                 )
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
