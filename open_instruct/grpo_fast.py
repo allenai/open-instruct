@@ -117,6 +117,7 @@ from open_instruct.utils import (
 )
 from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
 
+
 api = HfApi()
 INVALID_LOGPROB = 1.0
 
@@ -1005,6 +1006,7 @@ def vllm_generate_thread(
     evaluation_inference_results_Q: Queue,
     eval_freq: int,
     resume_training_step: int = 1,
+    tool_use: bool = False,
 ):
     def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
         # Split queries between engines
@@ -1029,7 +1031,7 @@ def vllm_generate_thread(
         for outputs in all_outputs:
             response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
             finish_reasons.extend([out.finish_reason for output in outputs for out in output.outputs])
-            if args.tool_use:
+            if tool_use:
                 masks.extend([out.mask for output in outputs for out in output.outputs])
                 num_calls.extend([out.num_calls for output in outputs for out in output.outputs])
                 timeouts.extend([out.timeout for output in outputs for out in output.outputs])
@@ -1038,7 +1040,7 @@ def vllm_generate_thread(
                 tool_runtimes.extend([out.tool_runtime for output in outputs for out in output.outputs])
                 tool_calleds.extend([out.tool_called for output in outputs for out in output.outputs])
         # if not using the tool, mask is all 1s
-        if not args.tool_use:
+        if not tool_use:
             masks = [[1] * len(response_ids[i]) for i in range(len(response_ids))]
             num_calls = [0] * len(response_ids)
             timeouts = [0] * len(response_ids)
@@ -1532,6 +1534,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             evaluation_inference_results_Q,
             args.eval_freq,
             resume_training_step,
+            args.tool_use,
         ),
     )
     thread.start()
