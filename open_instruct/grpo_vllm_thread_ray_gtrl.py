@@ -1267,7 +1267,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         while j < i + args.local_rollout_forward_batch_size:
                             format_score = format_scores[j]
                             if format_score == 0.0:
-                                print("Format was bad")
+                                # print("Format was bad")
                                 score[j - i] = 0.0
                             j += 1
                     # if args.apply_verifiable_reward and args.reward_model_multiplier:

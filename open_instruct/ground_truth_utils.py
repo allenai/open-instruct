@@ -407,6 +407,14 @@ def soft_format_reward_func(responses: List[str], reward_scale: float = 1.0) -> 
 
     Returns a list of rewards scaled by reward_scale.
     """
-    pattern = r".*?</think>\s*<answer>.*?</answer>"
-    matches = [re.match(pattern, r, re.DOTALL) for r in responses]
-    return [reward_scale if match else 0.0 for match in matches]
+    # pattern = r".*?</think>\s*<answer>.*?</answer>"
+    # matches = [re.match(pattern, r, re.DOTALL) for r in responses]
+    # return [reward_scale if match else 0.0 for match in matches]
+
+    pattern = re.compile(
+        r".*?</think>\s*<answer>.*?</answer>\s*\Z",  # \Z = real end-of-string
+        re.S                                         # DOTALL so '.' spans lines
+    )
+
+    # Use the compiled pattern’s .match() (or .fullmatch()) — no extra flags needed
+    return [reward_scale if pattern.match(r) else 0.0 for r in responses]
