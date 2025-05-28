@@ -44,7 +44,7 @@ RUN python -m nltk.downloader punkt
 RUN python -m nltk.downloader punkt_tab
 
 COPY open_instruct open_instruct
-COPY oe-eval-internal oe-eval-internal
+#COPY oe-eval-internal oe-eval-internal
 
 # install the package in editable mode
 COPY pyproject.toml .

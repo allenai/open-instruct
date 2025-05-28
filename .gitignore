@@ -28,6 +28,9 @@ __pycache__/
 # C extensions
 *.so
 
+# VSCode/Cursor
+.devcontainer/
+
 # Distribution / packaging
 .Python
 build/
