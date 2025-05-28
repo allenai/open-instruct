@@ -152,14 +152,13 @@ def main(args: argparse.Namespace) -> None:
     generations: List[str] = [None] * len(prompts)
 
     for start in tqdm(range(0, len(prompts), BATCH_SIZE),
-                      desc="vLLM inference"):
-        batch_prompts = prompts[start:start+BATCH_SIZE]
+                    desc="vLLM inference"):
+        batch_prompts = prompts[start:start + BATCH_SIZE]
         outs = llm.generate(batch_prompts, SAMPLING_PARAMS)
 
-        for out in outs:  # out.index is position inside *this* batch
-            generations[start + out.index] = out.outputs[0].text
-
-    assert None not in generations, "Some generations missing—indexing bug?"
+        # outs[i] corresponds to batch_prompts[i]
+        for i, out in enumerate(outs):
+            generations[start + i] = out.outputs[0].text
 
     # 6. Parse & aggregate ----------------------------------------------------
     aggregates: Dict[str, Dict[str, float]] = {}
