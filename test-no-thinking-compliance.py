@@ -36,7 +36,7 @@ SYSTEM_PROMPTS: List[str] = [
 MODEL_NAME   = "allenai/open_instruct_dev"  # repository / path
 MODEL_REV    = "qwen-2-tulu-general-thinker-rewrite-on-off-test-160k__123__1747894780"
 
-NUM_SAMPLES  = 10_000
+NUM_SAMPLES  = 1000
 DATASETS = {
     "tulu3_rewritten":
         ("hamishivi/tulu_3_rewritten_100k",  "messages"),  # column name
@@ -44,7 +44,7 @@ DATASETS = {
         ("allenai/tulu-3-wildchat-unused",   "prompt"),
 }
 
-BATCH_SIZE = 10000
+BATCH_SIZE = 512
 
 SAMPLING_PARAMS = SamplingParams(
     temperature=0.7,
