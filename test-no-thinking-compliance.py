@@ -44,7 +44,7 @@ DATASETS = {
         ("allenai/tulu-3-wildchat-unused",   "prompt"),
 }
 
-BATCH_SIZE = 128
+BATCH_SIZE = 32
 
 SAMPLING_PARAMS = SamplingParams(
     temperature=0.7,
