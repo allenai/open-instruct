@@ -235,6 +235,8 @@ class Args:
     """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
     divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
+    mask_truncated_completions: bool = False
+    """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
 
     # Reward
     # -- r1 style format reward
@@ -275,6 +277,8 @@ class Args:
     """vLLM GPU memory utilization"""
     vllm_enable_prefix_caching: bool = False
     """whether to enable prefix caching"""
+    vllm_top_p: float = 1.0
+    """vLLM top p for nucleus sampling"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
@@ -1152,6 +1156,17 @@ def data_preparation_thread(
             queries = [queries[i] for i in non_zero_gradient_index]
             ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
             datasets = [datasets[i] for i in non_zero_gradient_index]
+            finish_reasons = [finish_reasons[i] for i in non_zero_gradient_index]
+            if args.mask_truncated_completions:
+                stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
+                scores = scores[stop_idxes]
+                advantages = advantages[stop_idxes]
+                responses = [responses[i] for i in stop_idxes]
+                masks = [masks[i] for i in stop_idxes]
+                queries = [queries[i] for i in stop_idxes]
+                ground_truths = [ground_truths[i] for i in stop_idxes]
+                datasets = [datasets[i] for i in stop_idxes]
+                finish_reasons = [finish_reasons[i] for i in stop_idxes]
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
@@ -1489,7 +1504,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         stop_strings += list(tool_objects.keys())
     generation_config = SamplingParams(
         temperature=args.temperature,
-        top_p=0.95,  # prevent rare out-of-vocab tokens with qwen
+        top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
@@ -1498,7 +1513,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     )
     eval_generation_config = SamplingParams(
         temperature=0.0,
-        top_p=0.95,  # prevent rare out-of-vocab tokens with qwen
+        top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
