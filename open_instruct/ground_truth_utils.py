@@ -593,7 +593,7 @@ class LMJudgeVerifier(VerifierFunction):
 
         prompt = self.prompt_template.format(input=query, output=prediction, label=label)
 
-        max_retries = 3 # for rate limits
+        max_retries = 3  # for rate limits
         retry_delay = 1.0
 
         for attempt in range(max_retries):

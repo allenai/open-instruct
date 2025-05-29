@@ -108,11 +108,9 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
     truncate_response,
 )
-from open_instruct.search_utils.search_actor import LLMSearchRayActor
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
-    create_snippet_mask,
     get_wandb_tags,
     is_beaker_job,
     launch_ai2_evals_on_weka,
