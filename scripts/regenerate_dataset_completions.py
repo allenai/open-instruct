@@ -26,27 +26,12 @@ import tiktoken
 
 # Model costs are in USD per million tokens.
 MODEL_COSTS = {
-    "o3": {
+    "o3-batch": {
         "input": 10,
         "output": 40,
     },
 }
 
-
-def get_input(row: dict[str, str]) -> str:
-    return row['input']
-
-def get_solution(row: dict[str, str]) -> str:
-    """
-    for message in row['messages']:
-        if message['role'] == 'assistant':
-            return message['content']
-    return None
-    """
-    return row['solution']
-
-def get_id(row: dict[str, str]) -> str:
-    return row['id']
 
 class OpenAIStructuredOutput(pydantic.BaseModel):
     rewritten_input: str
@@ -133,14 +118,14 @@ def parse_args():
     dataset_group.add_argument(
         '--input-dataset',
         type=str,
-        default="nvidia/OpenCodeReasoning",
-        help='Name of the input dataset (default: nvidia/OpenCodeReasoning)'
+        default="allenai/tulu-3-sft-personas-code",
+        help='Name of the input dataset (default: allenai/tulu-3-sft-personas-code)'
     )
     dataset_group.add_argument(
         '--split',
         type=str,
-        default="split_0",
-        help='Dataset split to use (default: split_0)'
+        default="train",
+        help='Dataset split to use (default: "train")'
     )
     dataset_group.add_argument(
         '--sample-limit',
@@ -153,7 +138,7 @@ def parse_args():
     model_group.add_argument(
         '--model',
         type=str,
-        default="o3",
+        default="o3-batch",
         choices=list(MODEL_COSTS.keys()),
         help=f'Model to use for completions. Available models: {", ".join(MODEL_COSTS.keys())}'
     )
@@ -177,7 +162,7 @@ def parse_args():
 def main(sample_limit: int | None = None,
          input_dataset_name: str = "allenai/tulu-3-sft-personas-code",
          split: str = "split_0",
-         model: str = "o3",
+         model: str = "o3-batch",
          current_dir: str | None = None,
          dry_run: bool = False) -> None:
     
@@ -189,10 +174,12 @@ def main(sample_limit: int | None = None,
     os.makedirs(f"{current_dir}/batch_files", exist_ok=True)
 
     print(f"Loading dataset {input_dataset_name} with split {split}")
-    input_dataset = datasets.load_dataset(input_dataset_name, split)[split]
+    input_dataset = datasets.load_dataset(input_dataset_name, split=split)
     
     # First get all unique IDs    
     print(f'Processing dataset with {len(input_dataset)} rows')    
+    print(f'{input_dataset=}')
+    print(f'{next(iter(input_dataset))=}')
     unique_rows = list({row['id']: row for row in input_dataset}.values())
     print(f"Found {len(unique_rows)} unique rows out of {len(input_dataset)} total rows.")
 
@@ -210,13 +197,14 @@ def main(sample_limit: int | None = None,
     for row in sampled_rows:
         # Create prompt
         prompts.append(PromptData(
-            id=get_id(row), 
-            prompt=get_input(row)
+            id=row['id'],
+            prompt=row['prompt']
         ))
         
         # Count tokens
         prompt_tokens = len(tokenizer.encode(prompts[-1].prompt))
-        output_tokens = len(tokenizer.encode(get_solution(row)))
+        output = ''.join([message['content'] for message in row['messages'] if message['role'] == 'assistant'])
+        output_tokens = len(tokenizer.encode(output))
         input_tokens += prompt_tokens
         output_tokens += output_tokens
     
@@ -239,7 +227,7 @@ def main(sample_limit: int | None = None,
     client = openai.AzureOpenAI(
       azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT"), 
       api_key=os.getenv("AZURE_OPENAI_API_KEY"),  
-      api_version="2024-02-01"
+      api_version="2025-04-01-preview"
     )
 
     # Submit the batch job
