@@ -23,8 +23,8 @@ from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.judge_utils import (
     JUDGE_PROMPT_MAP,
     PRICE_PER_TOKEN,
+    build_messages,
     extract_score_from_string,
-    build_messages
 )
 from open_instruct.math_utils import (
     get_unnormalized_answer,
@@ -593,7 +593,7 @@ class LMJudgeVerifier(VerifierFunction):
 
         prompt = self.prompt_template.format(input=query, output=prediction, label=label)
 
-        max_retries = 1 # turn off retries for now
+        max_retries = 1  # turn off retries for now
         retry_delay = 1.0
 
         for attempt in range(max_retries):

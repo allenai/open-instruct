@@ -108,9 +108,11 @@ from open_instruct.model_utils import (
     push_folder_to_hub,
     truncate_response,
 )
+from open_instruct.search_utils.search_actor import LLMSearchRayActor
 from open_instruct.utils import (
     ArgumentParserPlus,
     BeakerRuntimeConfig,
+    create_snippet_mask,
     get_wandb_tags,
     is_beaker_job,
     launch_ai2_evals_on_weka,
@@ -118,10 +120,12 @@ from open_instruct.utils import (
     maybe_use_ai2_hf_entity,
     maybe_use_ai2_wandb_entity,
     upload_metadata_to_hf,
-    create_snippet_mask,
 )
-from open_instruct.vllm_utils3 import LLMRayActor, create_vllm_engines, init_process_group
-from open_instruct.search_utils.search_actor import LLMSearchRayActor
+from open_instruct.vllm_utils3 import (
+    LLMRayActor,
+    create_vllm_engines,
+    init_process_group,
+)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0

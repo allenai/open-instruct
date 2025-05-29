@@ -158,6 +158,7 @@ Reference Answer:{{label}}
 Correct:
 """
 
+
 def build_messages(user_prompt: str, system_prompt: Optional[str] = None):
     """
     Build the message payload for the model evaluation.
@@ -167,9 +168,7 @@ def build_messages(user_prompt: str, system_prompt: Optional[str] = None):
         messages.append({"role": "system", "content": system_prompt})
 
     # add json format expectation to the user prompt:
-    user_prompt += (
-        '\nRespond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}'
-    )
+    user_prompt += '\nRespond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}'
 
     messages.append({"role": "user", "content": user_prompt})
     return messages
