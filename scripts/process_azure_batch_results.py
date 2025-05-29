@@ -17,8 +17,6 @@ import os
 import datasets
 import openai
 
-# ------------- CLI -----------------------------------------------------------
-
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -48,8 +46,6 @@ def parse_args() -> argparse.Namespace:
     )
     return p.parse_args()
 
-
-# ------------- Helpers -------------------------------------------------------
 
 client = openai.AzureOpenAI(
     azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
@@ -156,9 +152,6 @@ def process_batch_results(
         print(f"Pushed to {output_dataset} ({split})")
     else:
         print("--no-upload specified; dataset not pushed.")
-
-
-# ------------- Entry point ---------------------------------------------------
 
 
 def main():
