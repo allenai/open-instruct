@@ -4,20 +4,33 @@ Usage:
 
 Cd into the directory of this file and run:
 ```
-python regenerate_dataset_completions.py
+python regenerate_dataset_completions.py [--sample-limit SAMPLE_LIMIT] \
+    [--input-dataset INPUT_DATASET] [--split SPLIT] [--model MODEL] \
+    [--dry-run]
 ```
 
 """
+import argparse
 import json
 import os
 import random
+import sys
 import time
 from dataclasses import dataclass
 from typing import List
 
-from datasets import load_dataset
-from openai import OpenAI
-from pydantic import BaseModel
+import datasets
+import openai
+import pydantic
+import tiktoken
+
+# Model costs are in USD per million tokens.
+MODEL_COSTS = {
+    "o3": {
+        "input": 10,
+        "output": 40,
+    },
+}
 
 
 def get_input(row: dict[str, str]) -> str:
@@ -35,7 +48,7 @@ def get_solution(row: dict[str, str]) -> str:
 def get_id(row: dict[str, str]) -> str:
     return row['id']
 
-class OpenAIStructuredOutput(BaseModel):
+class OpenAIStructuredOutput(pydantic.BaseModel):
     rewritten_input: str
     rewritten_solution: str
     test_cases: List[str]
@@ -109,33 +122,80 @@ def find_cached_results(id: str, response_dir: str) -> dict | None:
         except Exception:
             return None
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description='Regenerate completions for a dataset using a specific OpenAI model.',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    # Dataset configuration group
+    dataset_group = parser.add_argument_group('Dataset Configuration')
+    dataset_group.add_argument(
+        '--input-dataset',
+        type=str,
+        default="nvidia/OpenCodeReasoning",
+        help='Name of the input dataset (default: nvidia/OpenCodeReasoning)'
+    )
+    dataset_group.add_argument(
+        '--split',
+        type=str,
+        default="split_0",
+        help='Dataset split to use (default: split_0)'
+    )
+    dataset_group.add_argument(
+        '--sample-limit',
+        type=int,
+        help='Limit the number of samples to process. If not specified, processes all samples.'
+    )
+
+    # Model configuration group
+    model_group = parser.add_argument_group('Model Configuration')
+    model_group.add_argument(
+        '--model',
+        type=str,
+        default="o3",
+        choices=list(MODEL_COSTS.keys()),
+        help=f'Model to use for completions. Available models: {", ".join(MODEL_COSTS.keys())}'
+    )
+
+    # Runtime options group
+    runtime_group = parser.add_argument_group('Runtime Options')
+    runtime_group.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Preview what would happen without making any API calls'
+    )
+
+    args = parser.parse_args()
+
+    # Validate arguments
+    if args.sample_limit is not None and args.sample_limit <= 0:
+        parser.error("--sample-limit must be a positive integer")
+
+    return args
+
 def main(sample_limit: int | None = None,
-         input_dataset_name: str = "nvidia/OpenCodeReasoning",
+         input_dataset_name: str = "allenai/tulu-3-sft-personas-code",
          split: str = "split_0",
-         model: str = "gpt-4.1",
-         current_dir: str | None = None) -> None:
+         model: str = "o3",
+         current_dir: str | None = None,
+         dry_run: bool = False) -> None:
     
-    if current_dir is None:
-        current_dir = os.getcwd()
-    
+    current_dir = current_dir or os.getcwd()    
     timestamp = int(time.time())
     batch_file_name = f"{current_dir}/batch_files/{timestamp}.jsonl"
     
     # Make sure that the batch files directory exists.
     os.makedirs(f"{current_dir}/batch_files", exist_ok=True)
 
-    input_dataset = load_dataset(input_dataset_name, split)
+    print(f"Loading dataset {input_dataset_name} with split {split}")
+    input_dataset = datasets.load_dataset(input_dataset_name, split)[split]
     
-    # First get all unique IDs
-    unique_ids = set()
-    unique_rows = []
-    for row in input_dataset:
-        if row['id'] not in unique_ids:
-            unique_ids.add(row['id'])
-            unique_rows.append(row)
-    
-    print(f"Found {len(unique_rows)} unique rows out of {len(input_dataset)} total rows")
-    
+    # First get all unique IDs    
+    print(f'Processing dataset with {len(input_dataset)} rows')    
+    unique_rows = list({row['id']: row for row in input_dataset}.values())
+    print(f"Found {len(unique_rows)} unique rows out of {len(input_dataset)} total rows.")
+
     # Now sample from unique rows
     random.seed(42)
     sample_limit = len(unique_rows) if sample_limit is None else sample_limit
@@ -143,64 +203,44 @@ def main(sample_limit: int | None = None,
     
     print(f"Processing {len(sampled_rows)} unique rows")
 
-    master_prompt = r"""
-# Instructions
-Your task is to transform coding problems into a structured dataset format with function-based solutions and test cases.
-
-## Response Rules
-- Return only a JSON object with no additional text
-- The JSON must include: rewritten_input, rewritten_solution, test_cases, and good_program
-- Set good_program to False if the solution is incorrect or the problem is unsuitable
-
-## Transformation Process
-1. Convert the input problem to specify a function signature
-2. Rewrite the solution to use function parameters instead of input()
-3. Create test cases as executable assert statements
-4. Package everything in the required JSON format
-
-## Input Requirements
-- Keep the rewritten_input similar in length to the original
-- Clearly specify the function name and parameters
-- Update any examples to use the new function signature
-
-## Test Case Requirements
-- Extract test cases from the input when available
-- Add new test cases to cover edge cases
-- Format as executable Python assert statements
-- Do not include comments in test cases
-
-Here is the file input:
-<INPUT>
-{input}
-</INPUT>
-
-Here is a reference solution:
-```python
-{solution}
-```
-
-Output should be a JSON object with this structure:
-{
-    "rewritten_input": "...",
-    "rewritten_solution": "...",
-    "test_cases": ["...", "..."],
-    "good_program": true/false
-}
-"""
-
     prompts: List[PromptData] = []
+    tokenizer = tiktoken.encoding_for_model(model)
+    input_tokens, output_tokens = 0, 0
+
     for row in sampled_rows:
-        prompts.append(PromptData(id=get_id(row), prompt=master_prompt.replace("{input}", get_input(row)).replace("{solution}", get_solution(row))))
+        # Create prompt
+        prompts.append(PromptData(
+            id=get_id(row), 
+            prompt=get_input(row)
+        ))
+        
+        # Count tokens
+        prompt_tokens = len(tokenizer.encode(prompts[-1].prompt))
+        output_tokens = len(tokenizer.encode(get_solution(row)))
+        input_tokens += prompt_tokens
+        output_tokens += output_tokens
+    
+    estimated_cost = (input_tokens * MODEL_COSTS[model]["input"] + 
+                      output_tokens * MODEL_COSTS[model]["output"]) / 1_000_000
+    print(f"Input tokens: {input_tokens}, output tokens: {output_tokens}. Estimated cost: ${estimated_cost:.2f} (assuming # of output tokens is the same with the new model).")
+    
+    if dry_run:
+        print("Dry run mode - exiting without making API calls")
+        sys.exit(0)
+        
+    time.sleep(10)
+    print("Waiting 10 seconds to allow you to cancel the script if you don't want to proceed...")
 
     print(f"Creating batch file with {len(prompts)} prompts...")
     create_batch_file(prompts, batch_file_name, model, timestamp)
     print(f"Created batch file at {batch_file_name}")
 
-    quit()
-
-
     # Initialize the client with your API key
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    client = openai.AzureOpenAI(
+      azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT"), 
+      api_key=os.getenv("AZURE_OPENAI_API_KEY"),  
+      api_version="2024-02-01"
+    )
 
     # Submit the batch job
     print("Submitting batch job to Azure OpenAI...")
@@ -219,4 +259,11 @@ Output should be a JSON object with this structure:
     print("You can check the status of your batch job using the ID above.")
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    main(
+        sample_limit=args.sample_limit,
+        input_dataset_name=args.input_dataset,
+        split=args.split,
+        model=args.model,
+        dry_run=args.dry_run
+    )
