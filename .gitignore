@@ -153,3 +153,4 @@ dmypy.json
 
 **/open_ai_responses/**
 **/batch_files/**
+cache/

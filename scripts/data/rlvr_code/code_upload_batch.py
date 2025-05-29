@@ -23,8 +23,15 @@ from typing import List
 
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-INPUT_HF_DATASET = "allenai/tulu-3-sft-personas-code"
-OUTPUT_HF_DATASET = "saurabh5/tulu-3-personas-code-rlvr"
+INPUT_HF_DATASET = "nvidia/OpenCodeReasoning"
+OUTPUT_HF_DATASET = "saurabh5/open-code-reasoning-rlvr"
+SPLIT = "split_0"
+
+def extract_id_from_custom_id(custom_id: str) -> str:
+    # get rid of the timestamp
+    if '_' in custom_id:
+        return '_'.join(custom_id.split('_')[1:])
+    return custom_id
 
 class OpenAIStructuredOutput(BaseModel):
     rewritten_input: str
@@ -36,7 +43,6 @@ def check_batch_status(batch_id: str) -> bool:
     """Check if the batch job is complete."""
     try:
         batch = client.batches.retrieve(batch_id)
-        print(batch)
         print(f"Batch status: {batch.status}")
         return batch.status == "completed"
     except Exception as e:
@@ -69,9 +75,7 @@ def get_batch_results(batch_id: str) -> list:
                         processed_result = json.loads(content)
                         # Extract the original ID from custom_id (format: TIMESTAMP_ID)
                         custom_id = result.get('custom_id', '')
-                        if '_' in custom_id:
-                            original_id = custom_id.split('_')[1]
-                            processed_result['id'] = original_id
+                        processed_result['id'] = extract_id_from_custom_id(custom_id)
                         results.append(processed_result)
                 except Exception as e:
                     print(f"Error processing result line: {e}")
@@ -97,7 +101,7 @@ def process_batch_results(batch_id: str):
     # Filter and validate results
     url = "http://localhost:1234/test_program"
     new_results = []
-    original_dataset = load_dataset(INPUT_HF_DATASET, 'train', split="train")
+    original_dataset = load_dataset(INPUT_HF_DATASET, SPLIT, split=SPLIT)
     
     # Create a lookup dictionary for O(1) access
     id_to_row = {row['id']: row for row in original_dataset}

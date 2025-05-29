@@ -24,7 +24,11 @@ curl -X POST http://localhost:1234/test_program -H "Content-Type: application/js
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
-from code_utils import get_successful_tests_fast
+import subprocess
+import tempfile
+import os
+import signal
+from .code_utils import get_successful_tests_fast
 import logging
 
 app = FastAPI()

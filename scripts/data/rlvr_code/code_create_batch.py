@@ -8,35 +8,41 @@ python open_code_reasoning_create_batch.py
 import json
 import os
 import time
-from openai import OpenAI
+from openai import AzureOpenAI
 from datasets import load_dataset
 from pydantic import BaseModel
 from typing import List
 from collections import Counter
 import random
 from open_instruct.ground_truth_utils import extract_python_code
-# Initialize the client with your API key
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-MODEL = "gpt-4.1"
-SAMPLE_LIMIT = None 
+client = AzureOpenAI(
+    api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
+    azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
+    api_version="2024-12-01-preview"
+)
+
+MODEL = "gpt-4o-mini-batch"
+SAMPLE_LIMIT = None
 WD = os.getcwd()
 TIMESTAMP = int(time.time())
 BATCH_FILE_NAME = f"{WD}/batch_files/{TIMESTAMP}.jsonl"
 os.makedirs(f"{WD}/batch_files", exist_ok=True)
 
-
-INPUT_HF_DATASET = "allenai/tulu-3-sft-personas-code"
-OUTPUT_HF_DATASET = "saurabh5/tulu-3-personas-code-rlvr"
+INPUT_HF_DATASET = "nvidia/OpenCodeReasoning"
+SPLIT = "split_0"
 
 def get_input(row):
-    return row['prompt']
+    return row['input']
 
 def get_solution(row):
+    """
     for message in row['messages']:
         if message['role'] == 'assistant':
             return message['content']
     return None
+    """
+    return row['solution']
 
 def get_id(row):
     return row['id']
@@ -115,17 +121,17 @@ def find_cached_results(id: str):
 
 def main():
     global SAMPLE_LIMIT
-    ocr_ds_split_0 = load_dataset(INPUT_HF_DATASET, split="train")
+    input_dataset = load_dataset(INPUT_HF_DATASET, SPLIT, split=SPLIT)
     
     # First get all unique IDs
     unique_ids = set()
     unique_rows = []
-    for row in ocr_ds_split_0:
+    for row in input_dataset:
         if row['id'] not in unique_ids:
             unique_ids.add(row['id'])
             unique_rows.append(row)
     
-    print(f"Found {len(unique_rows)} unique rows out of {len(ocr_ds_split_0)} total rows")
+    print(f"Found {len(unique_rows)} unique rows out of {len(input_dataset)} total rows")
     
     # Now sample from unique rows
     random.seed(42)

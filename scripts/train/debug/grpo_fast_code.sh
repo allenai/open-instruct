@@ -1,36 +1,37 @@
 python open_instruct/grpo_fast.py \
-    --dataset_mixer_list vwxyzjn/rlvr_acecoder 64 \
-    --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list vwxyzjn/rlvr_acecoder 16 \
-    --dataset_mixer_eval_list_splits train \
-    --max_token_length 512 \
-    --max_prompt_token_length 512 \
-    --response_length 512 \
-    --pack_length 1024 \
-    --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 16 \
-    --num_samples_per_prompt_rollout 4 \
-    --model_name_or_path HuggingFaceTB/SmolLM2-135M \
-    --stop_strings "</answer>" \
-    --apply_r1_style_format_reward \
-    --apply_verifiable_reward false \
-    --apply_code_reward true \
-    --code_api_url http://0.0.0.0:1234/test_program \
-    --temperature 0.7 \
-    --ground_truths_key ground_truth \
-    --chat_template_name r1_simple_chat_postpend_think \
-    --learning_rate 3e-7 \
-    --total_episodes 200 \
-    --deepspeed_stage 2 \
-    --num_epochs 1 \
-    --num_learners_per_node 1 \
-    --vllm_tensor_parallel_size 1 \
+    --exp_name "test" \
     --beta 0.01 \
-    --seed 3 \
-    --num_evals 20 \
-    --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.5 \
-    --save_traces \
-    --vllm_enforce_eager \
+    --num_unique_prompts_rollout 48 \
+    --num_samples_per_prompt_rollout 16 \
+    --try_launch_beaker_eval_jobs_on_weka \
+    --kl_estimator kl3 \
+    --learning_rate 5e-7 \
+    --dataset_mixer_list saurabh5/open-code-reasoning-rlvr 1.0 saurabh5/tulu-3-personas-code-rlvr 10000 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list saurabh5/open-code-reasoning-rlvr 16 saurabh5/tulu-3-personas-code-rlvr 16 \
+    --dataset_mixer_eval_list_splits train \
+    --max_token_length 4096 \
+    --max_prompt_token_length 2048 \
+    --response_length 2048 \
+    --pack_length 4096 \
+    --model_name_or_path Qwen/Qwen2.5-0.5B-Instruct \
+    --apply_verifiable_reward true \
+    --non_stop_penalty True \
+    --oe_eval_tasks gsm8k::tulu,bbh:cot-v1::tulu,codex_humaneval::tulu,codex_humanevalplus::tulu,mbppplus::openinstruct,drop::llama3,minerva_math::tulu,ifeval::tulu,popqa::tulu,mmlu:mc::tulu,mmlu:cot::summarize,alpaca_eval_v2::tulu,truthfulqa::tulu,cruxeval_input:pass@5,cruxeval_output:pass@5 \
+    --non_stop_penalty_value 0.0 \
+    --temperature 1.0 \
+    --chat_template_name tulu \
+    --total_episodes 20000 \
+    --num_training_steps 20000 \
+    --deepspeed_stage 2 \
+    --per_device_train_batch_size 1 \
+    --num_mini_batches 2 \
+    --num_epochs 1 \
+    --vllm_tensor_parallel_size 1 \
+    --vllm_num_engines 1 \
+    --lr_scheduler_type constant \
+    --seed 1 \
+    --num_evals 100 \
+    --save_freq 40 \
     --gradient_checkpointing \
-    --single_gpu_mode
+    --single_gpu_mode 
