@@ -1,5 +1,6 @@
 import logging
 import re
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +157,22 @@ Provided Answer: {{output}}
 Reference Answer:{{label}}
 Correct:
 """
+
+def build_messages(user_prompt: str, system_prompt: Optional[str] = None):
+    """
+    Build the message payload for the model evaluation.
+    """
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+
+    # add json format expectation to the user prompt:
+    user_prompt += (
+        '\nRespond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}'
+    )
+
+    messages.append({"role": "user", "content": user_prompt})
+    return messages
 
 
 JUDGE_PROMPT_MAP = {

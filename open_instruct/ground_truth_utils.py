@@ -24,6 +24,7 @@ from open_instruct.judge_utils import (
     JUDGE_PROMPT_MAP,
     PRICE_PER_TOKEN,
     extract_score_from_string,
+    build_messages
 )
 from open_instruct.math_utils import (
     get_unnormalized_answer,
@@ -592,14 +593,15 @@ class LMJudgeVerifier(VerifierFunction):
 
         prompt = self.prompt_template.format(input=query, output=prediction, label=label)
 
-        max_retries = 3
+        max_retries = 1 # turn off retries for now
         retry_delay = 1.0
 
         for attempt in range(max_retries):
             try:
+                messages = build_messages(prompt)
                 response = await client.chat.completions.create(
                     model=self.verifier_config.llm_judge_model,
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=messages,
                     temperature=self.verifier_config.llm_judge_temperature,
                     max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                     seed=self.verifier_config.seed,
