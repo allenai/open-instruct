@@ -44,7 +44,8 @@ class PromptData:
     id: str
     prompt: str
 
-def create_batch_file(prompts: List[PromptData], batch_file_name: str, model: str, timestamp: int) -> None:
+def create_batch_file(prompts: List[PromptData], batch_file_name: str, model: str, timestamp: int,
+                      max_completion_tokens: int) -> None:
     """Create a batch file in the format required by Azure OpenAI Batch API."""
     with open(batch_file_name, "w") as f:
         for prompt in prompts:
@@ -58,7 +59,7 @@ def create_batch_file(prompts: List[PromptData], batch_file_name: str, model: st
                     "messages": [
                         {"role": "user", "content": prompt.prompt}
                     ],
-                    "max_tokens": 8192,
+                    "max_completion_tokens": max_completion_tokens,
                 }
             }
             f.write(json.dumps(batch_request) + "\n")
@@ -110,6 +111,12 @@ def parse_args():
         type=int,
         help='Limit the number of samples to process. If not specified, processes all samples.'
     )
+    dataset_group.add_argument(
+        '--max-completion-tokens',
+        type=int,
+        default=8192,
+        help='Maximum number of completion tokens to use (default: 8192)'
+    )
 
     # Model configuration group
     model_group = parser.add_argument_group('Model Configuration')
@@ -142,7 +149,8 @@ def main(sample_limit: int | None = None,
          split: str = "split_0",
          model: str = "o3-batch",
          current_dir: str | None = None,
-         dry_run: bool = False) -> None:
+         dry_run: bool = False,
+         max_completion_tokens: int = 8192) -> None:
     
     current_dir = current_dir or os.getcwd()    
     timestamp = int(time.time())
@@ -198,7 +206,7 @@ def main(sample_limit: int | None = None,
     print("Waiting 10 seconds to allow you to cancel the script if you don't want to proceed...")
 
     print(f"Creating batch file with {len(prompts)} prompts...")
-    create_batch_file(prompts, batch_file_name, model, timestamp)
+    create_batch_file(prompts, batch_file_name, model, timestamp, max_completion_tokens)
     print(f"Created batch file at {batch_file_name}")
 
     # Initialize the client with your API key
