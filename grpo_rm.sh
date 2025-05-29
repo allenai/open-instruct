@@ -38,13 +38,11 @@ python mason.py \
     --response_length 8192 \
     --model_name_or_path Qwen/Qwen2.5-7B \
     --oe_eval_tasks minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,alpaca_eval_v2::tulu,ifeval::tulu,popqa::tulu,drop::llama3,codex_humanevalplus::tulu,mmlu:cot::summarize \
-    --non_stop_penalty \
-    --stop_token eos \
-    --penalty_reward_value 0.0 \
+    --non_stop_penalty False \
+    --stop_strings '</answer>' \
     --temperature 0.7 \
     --chat_template_name tulu_thinker_r1_style \
     --total_episodes 2000000 \
-    --penalty_reward_value 0.0 \
     --deepspeed_stage 2 \
     --per_device_train_batch_size 1 \
     --local_rollout_forward_batch_size 1 \
