@@ -16,12 +16,10 @@ import os
 import random
 import sys
 import time
-from dataclasses import dataclass
 from typing import List
 
 import datasets
 import openai
-import pydantic
 import tiktoken
 
 # Model costs are in USD per million tokens.
@@ -33,16 +31,11 @@ MODEL_COSTS = {
 }
 
 
-class OpenAIStructuredOutput(pydantic.BaseModel):
-    rewritten_input: str
-    rewritten_solution: str
-    test_cases: List[str]
-    good_program: bool
-
-@dataclass
+@dataclasses.dataclass
 class PromptData:
     id: str
     prompt: str
+
 
 def create_batch_file(prompts: List[PromptData], batch_file_name: str, model: str, timestamp: int,
                       max_completion_tokens: int) -> None:
@@ -196,7 +189,9 @@ def main(sample_limit: int | None = None,
     
     estimated_cost = (input_tokens * MODEL_COSTS[model]["input"] + 
                       output_tokens * MODEL_COSTS[model]["output"]) / 1_000_000
-    print(f"Input tokens: {input_tokens}, output tokens: {output_tokens}. Estimated cost: ${estimated_cost:.2f} (assuming # of output tokens is the same with the new model).")
+    print(f"Input tokens: {input_tokens}, output tokens: {output_tokens}. "
+          f"Estimated cost: ${estimated_cost:.2f} (assuming # of output "
+          "tokens is the same with the new model).")
     
     if dry_run:
         print("Dry run mode - exiting without making API calls")
