@@ -36,7 +36,7 @@ RUN pip install -r requirements.txt
 RUN python -m nltk.downloader punkt
 
 COPY open_instruct open_instruct
-#COPY oe-eval-internal oe-eval-internal
+COPY oe-eval-internal oe-eval-internal
 
 # install the package in editable mode
 COPY pyproject.toml .
