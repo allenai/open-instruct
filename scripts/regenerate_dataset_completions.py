@@ -56,31 +56,9 @@ def create_batch_file(prompts: List[PromptData], batch_file_name: str, model: st
                 "body": {
                     "model": model,
                     "messages": [
-                        {"role": "system", "content": "You are a helpful assistant that can write code in Python."},
                         {"role": "user", "content": prompt.prompt}
                     ],
                     "max_tokens": 8192,
-                    "response_format": {
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": "OpenAIStructuredOutput",
-                            "strict": True,
-                            "schema": {
-                                "type": "object",
-                                "properties": {
-                                    "rewritten_input": {"type": "string"},
-                                    "rewritten_solution": {"type": "string"},
-                                    "test_cases": {
-                                        "type": "array",
-                                        "items": {"type": "string"}
-                                    },
-                                    "good_program": {"type": "boolean"}
-                                },
-                                "required": ["rewritten_input", "rewritten_solution", "test_cases", "good_program"],
-                                "additionalProperties": False
-                            }
-                        }
-                    }
                 }
             }
             f.write(json.dumps(batch_request) + "\n")
