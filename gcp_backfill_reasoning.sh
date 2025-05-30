@@ -1,5 +1,5 @@
 for eval in minerva_math::hamish_zs_reasoning bbh:cot::hamish_zs_reasoning gsm8k::hamish_zs_reasoning minerva_math_500::hamish_zs_reasoning zebralogic::hamish_zs_reasoning aime::hamish_zs_reasoning agi_eval_english:0shot_cot::hamish_zs_reasoning gpqa:0shot_cot::hamish_zs_reasoning alpaca_eval_v2::tulu ifeval::tulu popqa::tulu drop::llama3 codex_humanevalplus::tulu mmlu:cot::summarize; do
-for step in 400 450 500 550 600 650 700 750 800 850 900; do
+for step in 950 1000 1050; do
 python oe_eval/launch.py \
   --model test_grpo_rm_with_valpy_code__1__1748573647_step_${step} \
   --beaker-workspace ai2/tulu-3-results \
