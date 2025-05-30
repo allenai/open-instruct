@@ -31,6 +31,9 @@ MODEL_COSTS_PER_1M_TOKENS = {
     },
 }
 
+# Maximum number of prompts per batch file
+MAX_PROMPTS_PER_BATCH = 95_000
+
 
 @dataclasses.dataclass
 class PromptData:
@@ -38,25 +41,37 @@ class PromptData:
     prompt: str
 
 
-def create_batch_file(prompts: List[PromptData], batch_file_name: str, model: str, timestamp: int,
-                      max_completion_tokens: int, add_reasoning_summary: bool, tool_choice: str) -> None:
-    """Create a batch file in the format required by Azure OpenAI Batch API."""
-    with open(batch_file_name, "w") as f:
-        for prompt in prompts:
-            # Format each request according to batch API requirements
-            batch_request = {
-                "custom_id": f"{timestamp}_{prompt.id}",
-                "method": "POST",
-                "url": "/v1/chat/completions",
-                "body": {
-                    "model": model,
-                    "messages": [
-                        {"role": "user", "content": prompt.prompt}
-                    ],
-                    "max_completion_tokens": max_completion_tokens,
+def create_batch_files(prompts: List[PromptData], base_batch_file_name: str, model: str, timestamp: int,
+                      max_completion_tokens: int, add_reasoning_summary: bool, tool_choice: str) -> List[str]:
+    """Create multiple batch files in the format required by Azure OpenAI Batch API.
+    Returns a list of created batch file paths."""
+    batch_file_paths = []
+    
+    # Split prompts into chunks of MAX_PROMPTS_PER_BATCH
+    for i in range(0, len(prompts), MAX_PROMPTS_PER_BATCH):
+        chunk = prompts[i:i + MAX_PROMPTS_PER_BATCH]
+        batch_file_name = f"{base_batch_file_name}_{i//MAX_PROMPTS_PER_BATCH}.jsonl"
+        
+        with open(batch_file_name, "w") as f:
+            for prompt in chunk:
+                # Format each request according to batch API requirements
+                batch_request = {
+                    "custom_id": f"{timestamp}_{prompt.id}",
+                    "method": "POST",
+                    "url": "/v1/chat/completions",
+                    "body": {
+                        "model": model,
+                        "messages": [
+                            {"role": "user", "content": prompt.prompt}
+                        ],
+                        "max_completion_tokens": max_completion_tokens,
+                    }
                 }
-            }
-            f.write(json.dumps(batch_request) + "\n")
+                f.write(json.dumps(batch_request) + "\n")
+        
+        batch_file_paths.append(batch_file_name)
+    
+    return batch_file_paths
 
 def find_cached_results(id: str, response_dir: str) -> dict | None:
     all_files = []
@@ -162,7 +177,7 @@ def main(sample_limit: int | None = None,
     
     current_dir = current_dir or os.getcwd()    
     timestamp = int(time.time())
-    batch_file_name = f"{current_dir}/batch_files/{timestamp}.jsonl"
+    base_batch_file_name = f"{current_dir}/batch_files/{timestamp}"
     
     # Make sure that the batch files directory exists.
     os.makedirs(f"{current_dir}/batch_files", exist_ok=True)
@@ -172,8 +187,6 @@ def main(sample_limit: int | None = None,
     
     # First get all unique IDs    
     print(f'Processing dataset with {len(input_dataset)} rows')    
-    print(f'{input_dataset=}')
-    print(f'{next(iter(input_dataset))=}')
     unique_rows = list({row['id']: row for row in input_dataset}.values())
     print(f"Found {len(unique_rows)} unique rows out of {len(input_dataset)} total rows.")
 
@@ -215,9 +228,9 @@ def main(sample_limit: int | None = None,
     time.sleep(10)
     print("Waiting 10 seconds to allow you to cancel the script if you don't want to proceed...")
 
-    print(f"Creating batch file with {len(prompts)} prompts...")
-    create_batch_file(prompts, batch_file_name, model, timestamp, max_completion_tokens, add_reasoning_summary, tool_choice)
-    print(f"Created batch file at {batch_file_name}")
+    print(f"Creating batch files for {len(prompts)} prompts...")
+    batch_file_paths = create_batch_files(prompts, base_batch_file_name, model, timestamp, max_completion_tokens, add_reasoning_summary, tool_choice)
+    print(f"Created {len(batch_file_paths)} batch files")
 
     # Initialize the client with your API key
     client = openai.AzureOpenAI(
@@ -226,21 +239,28 @@ def main(sample_limit: int | None = None,
       api_version="2025-04-01-preview"
     )
 
-    # Submit the batch job
-    print("Submitting batch job to Azure OpenAI...")
-    batch_file = client.files.create(
-        file=open(batch_file_name, "rb"),
-        purpose="batch"
-    )
+    # Submit the batch jobs
+    print("Submitting batch jobs to Azure OpenAI...")
+    batch_ids = []
+    
+    for batch_file_path in batch_file_paths:
+        batch_file = client.files.create(
+            file=open(batch_file_path, "rb"),
+            purpose="batch"
+        )
 
-    batch_job = client.batches.create(
-        input_file_id=batch_file.id,
-        endpoint="/v1/chat/completions",
-        completion_window="24h"
-    )
+        batch_job = client.batches.create(
+            input_file_id=batch_file.id,
+            endpoint="/v1/chat/completions",
+            completion_window="24h"
+        )
+        
+        batch_ids.append(batch_job.id)
+        print(f"Submitted batch job with ID: {batch_job.id}")
 
-    print(f"Batch job submitted with ID: {batch_job.id}")
-    print("You can check the status of your batch job using the ID above.")
+    # Print all batch IDs in the requested format
+    print(f"\n{input_dataset_name}: {', '.join(batch_ids)}")
+    print("\nYou can check the status of your batch jobs using the IDs above.")
 
 if __name__ == "__main__":
     args = parse_args()
