@@ -1,4 +1,4 @@
-for eval in minerva_math::hamish_zs_reasoning bbh:cot::hamish_zs_reasoning gsm8k::hamish_zs_reasoning minerva_math_500::hamish_zs_reasoning zebralogic::hamish_zs_reasoning aime::hamish_zs_reasoning agi_eval_english:0shot_cot::hamish_zs_reasoning gpqa:0shot_cot::hamish_zs_reasoning codex_humanevalplus:0-shot-chat::tulu-thinker ifeval::tulu popqa::tulu mmlu:mc::tulu bbh:cot-v1::tulu; do
+for eval in minerva_math::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,alpaca_eval_v2::tulu,ifeval::tulu,popqa::tulu,drop::llama3,codex_humanevalplus::tulu,mmlu:cot::summarize; do
 for step in 280 320 360 400 440 480 520 560 600; do
 python oe_eval/launch.py \
   --model lmeval-test_grpo_rm_with_valpy_code__1__1748026885_step_${step} \
