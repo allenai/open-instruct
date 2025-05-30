@@ -724,7 +724,15 @@ class PolicyTrainerRayProcess(RayProcess):
         to_device_inplace(collated_position_ids, self.device)
         to_device_inplace(collated_advantages, self.device)
         to_device_inplace(collated_response_masks, self.device)
-        accumulation_steps = len(collated_query_responses) // (num_mini_batches)
+        accumulation_steps = (len(collated_query_responses) + num_mini_batches - 1) // num_mini_batches
+        leftover = len(collated_query_responses) % accumulation_steps
+        if leftover > 0:
+            collated_query_responses = collated_query_responses[0:-leftover]
+            collated_tool_masks = collated_tool_masks[0:-leftover]
+            collated_attention_masks = collated_attention_masks[0:-leftover]
+            collated_position_ids = collated_position_ids[0:-leftover]
+            collated_advantages = collated_advantages[0:-leftover]
+            collated_response_masks = collated_response_masks[0:-leftover]
 
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
