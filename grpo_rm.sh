@@ -44,6 +44,7 @@ python mason.py \
     --stop_token eos \
     --temperature 0.7 \
     --chat_template_name tulu_thinker_r1_style \
+    --oe_eval_max_length 8192 \
     --total_episodes 2000000 \
     --deepspeed_stage 2 \
     --per_device_train_batch_size 1 \

@@ -45,6 +45,35 @@ set -ex
 # bigcodebench::tulu
 
 
+# # Function to print usage
+# usage() {
+#     echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--unseen-evals] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>]"
+#     echo "TASKS should be a comma-separated list of task specifications (e.g., 'gsm8k::tulu,bbh:cot::tulu')"
+#     echo "STOP_SEQUENCES should be a comma-separated list of strings to stop generation at (e.g., '</answer>,\\n\\n')"
+#     exit 1
+# }
+
+# # Parse named arguments
+# while [[ "$#" -gt 0 ]]; do
+#     case $1 in
+#         --model-name) MODEL_NAME="$2"; shift ;;
+#         --model-location) MODEL_LOCATION="$2"; shift ;;
+#         --num_gpus) NUM_GPUS="$2"; shift ;;
+#         --upload_to_hf) UPLOAD_TO_HF="$2"; shift ;;
+#         --revision) REVISION="$2"; shift ;;
+#         --max-length) MAX_LENGTH="$2"; shift ;;
+#         --unseen-evals) UNSEEN_EVALS="true" ;;
+#         --priority) PRIORITY="$2"; shift ;;
+#         --tasks) CUSTOM_TASKS="$2"; shift ;;
+#         --evaluate_on_weka) EVALUATE_ON_WEKA="true" ;;
+#         --step) STEP="$2"; shift ;;
+#         --run-id) RUN_ID="$2"; shift ;;
+#         --stop-sequences) STOP_SEQUENCES="$2"; shift ;;
+#         *) echo "Unknown parameter passed: $1"; usage ;;
+#     esac
+#     shift
+# done
+
 # Function to print usage
 usage() {
     echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--unseen-evals] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>]"
@@ -75,7 +104,6 @@ while [[ "$#" -gt 0 ]]; do
     esac
     shift
 done
-
 
 # Optional: Default number of GPUs if not specified
 NUM_GPUS="${NUM_GPUS:-1}"
@@ -139,20 +167,47 @@ else
 fi
 
 # Define default tasks if no custom tasks provided
+# DEFAULT_TASKS=(
+#     "gsm8k::tulu"
+#     "bbh:cot-v1::tulu"
+#     "drop::llama3"
+#     "minerva_math::tulu"
+#     "codex_humaneval::tulu"
+#     "codex_humanevalplus::tulu"
+#     "ifeval::tulu"
+#     "popqa::tulu"
+#     "mmlu:mc::tulu"
+#     "mmlu:cot::summarize"
+#     "alpaca_eval_v2::tulu"
+#     "truthfulqa::tulu"
+# )
+
+# Hamish list of reasoning tasks:
 DEFAULT_TASKS=(
-    "gsm8k::tulu"
+    "gsm8k::hamish_zs_reasoning"
+    "bbh:cot::hamish_zs_reasoning"
+    "minerva_math::hamish_zs_reasoning"
+    "minerva_math_500::hamish_zs_reasoning"
+    "aime::hamish_zs_reasoning"
+    "zebralogic::hamish_zs_reasoning"
+    "agi_eval_english:0shot_cot::hamish_zs_reasoning"
+    "gpqa:0shot_cot::hamish_zs_reasoning"
+    # "gsm8k::tulu"
     "bbh:cot-v1::tulu"
     "drop::llama3"
-    "minerva_math::tulu"
     "codex_humaneval::tulu"
     "codex_humanevalplus::tulu"
     "ifeval::tulu"
     "popqa::tulu"
-    "mmlu:mc::tulu"
     "mmlu:cot::summarize"
-#    "alpaca_eval_v2::tulu" # TEMPORARILY remove alpacaeval from eval suite until we update to cheaper model
+    "alpaca_eval_v2::tulu"
+    # "alpaca_eval_v2.5"
     "truthfulqa::tulu"
+    "codex_humanevalplus:0-shot-chat::tulu-thinker"
 )
+
+
+
 UNSEEN_TASKS=(
     "agi_eval_english:0shot_cot::tulu3"
     "gpqa:0shot_cot::tulu3"
@@ -201,15 +256,15 @@ for TASK in "${TASKS[@]}"; do
             --task "$TASK" \
             $MODEL_TYPE \
             --batch-size "$BATCH_SIZE" \
-            --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
-            --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
+            --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"process_output\": \"r1_style\"}" \
+            --task-args "{ \"generation_kwargs\": { \"do_sample\": true, \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
+            --beaker-imag "$BEAKER_IMAGE" \
             --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1"}' \
             ${REVISION_ARG} \
-            --cluster "$CLUSTER" \
+            --cluster ai2/neptune-cirrascale,ai2/saturn-cirrascale,ai2/jupiter-cirrascale-2 \
             --beaker-retries 2 \
-            --beaker-image "$BEAKER_IMAGE" \
             --beaker-priority "$PRIORITY" \
             --push-datalake \
             --datalake-tags "$DATALAKE_ARGS"
@@ -221,17 +276,19 @@ for TASK in "${TASKS[@]}"; do
         --task "$TASK" \
         $MODEL_TYPE \
         --batch-size "$BATCH_SIZE" \
-        --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
-        --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
+        --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"process_output\": \"r1_style\"}" \
+        --task-args "{ \"generation_kwargs\": { \"do_sample\": true, \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
         ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT" \
+        --beaker-image "$BEAKER_IMAGE" \
         --gantry-args "{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"}" \
         ${REVISION_ARG} \
         --cluster ai2/augusta-google-1 \
         --beaker-retries 2 \
-        --beaker-image "$BEAKER_IMAGE" \
-        --beaker-priority  "$PRIORITY" \
+        --beaker-priority high \
         --push-datalake \
         --datalake-tags "$DATALAKE_ARGS"
     fi
 done
+
+# \"do_sample\": true,

@@ -7,7 +7,7 @@ python oe_eval/launch.py \
   --task $eval \
   --model-type vllm \
   --batch-size 10000 \
-  --model-args "{\"model_path\":\"/weka-mount/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/test_grpo_rm_with_valpy_code__1__1748026885_checkpoints/step_${step}\", \"max_length\": 32768}" \
+  --model-args "{\"model_path\":\"/weka-mount/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/test_grpo_rm_with_valpy_code__1__1748026885_checkpoints/step_${step}\", \"max_length\": 32768, \"process_output\": \"r1_style\"}" \
   --task-args '{ "generation_kwargs": { "max_gen_toks": 32768, "truncate_context": false, "stop_sequences": ["</answer>"] } }' \
   --gpus 1 \
   --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "env":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", "env-secret#2":"HF_TOKEN=HF_TOKEN", "mount": "/mnt/filestore_1:/filestore", "env#111": "HF_HOME=/filestore/.cache/huggingface", "env#112": "HF_DATASETS_CACHE=/filestore/.cache/huggingface", "env#113": "HF_HUB_CACHE=/filestore/.cache/hub", "weka": "oe-adapt-default:/weka-mount/oe-adapt-default"}' \
