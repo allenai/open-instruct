@@ -11,6 +11,7 @@ python regenerate_dataset_completions.py [--sample-limit SAMPLE_LIMIT] \
 
 """
 import argparse
+import dataclasses
 import json
 import os
 import random
@@ -23,10 +24,10 @@ import openai
 import tiktoken
 
 # Model costs are in USD per million tokens.
-MODEL_COSTS = {
+MODEL_COSTS_PER_1M_TOKENS = {
     "o3-batch": {
-        "input": 10,
-        "output": 40,
+        "input": 10 * 0.5,
+        "output": 40 * 0.5,
     },
 }
 
@@ -38,7 +39,7 @@ class PromptData:
 
 
 def create_batch_file(prompts: List[PromptData], batch_file_name: str, model: str, timestamp: int,
-                      max_completion_tokens: int) -> None:
+                      max_completion_tokens: int, add_reasoning_summary: bool, tool_choice: str) -> None:
     """Create a batch file in the format required by Azure OpenAI Batch API."""
     with open(batch_file_name, "w") as f:
         for prompt in prompts:
@@ -105,6 +106,18 @@ def parse_args():
         help='Limit the number of samples to process. If not specified, processes all samples.'
     )
     dataset_group.add_argument(
+        '--add-reasoning-summary',
+        action='store_true',
+        help='Add reasoning summary to the completions'
+    )
+    dataset_group.add_argument(
+        '--tool-choice',
+        type=str,
+        default="auto",
+        choices=["auto", "none", "required"],
+        help='Tool choice to use for the completions (default: "auto")'
+    )
+    dataset_group.add_argument(
         '--max-completion-tokens',
         type=int,
         default=8192,
@@ -117,8 +130,8 @@ def parse_args():
         '--model',
         type=str,
         default="o3-batch",
-        choices=list(MODEL_COSTS.keys()),
-        help=f'Model to use for completions. Available models: {", ".join(MODEL_COSTS.keys())}'
+        choices=list(MODEL_COSTS_PER_1M_TOKENS.keys()),
+        help=f'Model to use for completions. Available models: {", ".join(MODEL_COSTS_PER_1M_TOKENS.keys())}'
     )
 
     # Runtime options group
@@ -143,7 +156,9 @@ def main(sample_limit: int | None = None,
          model: str = "o3-batch",
          current_dir: str | None = None,
          dry_run: bool = False,
-         max_completion_tokens: int = 8192) -> None:
+         max_completion_tokens: int = 8192,
+         add_reasoning_summary: bool = False,
+         tool_choice: str = "auto") -> None:
     
     current_dir = current_dir or os.getcwd()    
     timestamp = int(time.time())
@@ -187,8 +202,8 @@ def main(sample_limit: int | None = None,
         input_tokens += prompt_tokens
         output_tokens += output_tokens
     
-    estimated_cost = (input_tokens * MODEL_COSTS[model]["input"] + 
-                      output_tokens * MODEL_COSTS[model]["output"]) / 1_000_000
+    estimated_cost = (input_tokens * MODEL_COSTS_PER_1M_TOKENS[model]["input"] + 
+                      output_tokens * MODEL_COSTS_PER_1M_TOKENS[model]["output"]) / 1_000_000
     print(f"Input tokens: {input_tokens}, output tokens: {output_tokens}. "
           f"Estimated cost: ${estimated_cost:.2f} (assuming # of output "
           "tokens is the same with the new model).")
@@ -201,7 +216,7 @@ def main(sample_limit: int | None = None,
     print("Waiting 10 seconds to allow you to cancel the script if you don't want to proceed...")
 
     print(f"Creating batch file with {len(prompts)} prompts...")
-    create_batch_file(prompts, batch_file_name, model, timestamp, max_completion_tokens)
+    create_batch_file(prompts, batch_file_name, model, timestamp, max_completion_tokens, add_reasoning_summary, tool_choice)
     print(f"Created batch file at {batch_file_name}")
 
     # Initialize the client with your API key

@@ -13,9 +13,33 @@ import argparse
 import copy
 import json
 import os
+from dataclasses import dataclass
+from typing import Tuple
 
 import datasets
 import openai
+from regenerate_dataset_completions import MODEL_COSTS_PER_1M_TOKENS
+
+
+@dataclass
+class TokenUsage:
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+    @property
+    def cost(self) -> float:
+        
+        cost = (self.prompt_tokens * MODEL_COSTS_PER_1M_TOKENS["o3-batch"]["input"] +
+                self.completion_tokens  * MODEL_COSTS_PER_1M_TOKENS["o3-batch"]["output"]) / 1_000_000
+        return cost
+
+
+@dataclass
+class BatchResult:
+    result_id: str
+    content: str
+    reasoning_summary: str
 
 
 def parse_args() -> argparse.Namespace:
@@ -66,8 +90,8 @@ def check_batch_status(batch_id: str) -> bool:
         return False
 
 
-def get_batch_results(batch_id: str) -> dict[str, str]:
-    """Returns a dictionary of result_id -> content.
+def get_batch_results(batch_id: str) -> Tuple[dict[str, str], TokenUsage]:
+    """Returns a dictionary of result_id -> content and token usage statistics.
 
     Args:
         batch_id: The ID of the batch job to process.
@@ -76,7 +100,9 @@ def get_batch_results(batch_id: str) -> dict[str, str]:
         ValueError: If the batch job is not complete.
 
     Returns:
-        A dictionary of result_id -> content.
+        A tuple containing:
+        - A dictionary of result_id -> content
+        - TokenUsage object with token counts and cost
     """
     batch = client.batches.retrieve(batch_id)
     if batch.status != "completed":
@@ -86,16 +112,44 @@ def get_batch_results(batch_id: str) -> dict[str, str]:
     content_str = client.files.content(output_file.id).text
 
     results = {}
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+    total_tokens = 0
+
     for line in content_str.splitlines():
-        print(f'{line=}')
         if not line.strip():
             continue
-        result = json.loads(line)
+        try:
+            result = json.loads(line)
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON from line: {e}")
+            continue
         result_id = extract_id_from_custom_id(result["custom_id"])
         content = result["response"]["body"]["choices"][0]["message"]["content"]
-        print(f'{content=}')
-        results[result_id] = content
-    return results
+
+        # Extract token usage from the response
+        usage = result["response"]["body"]["usage"]
+        total_prompt_tokens += usage["prompt_tokens"]
+        total_completion_tokens += usage["completion_tokens"]
+        total_tokens += usage["total_tokens"]
+        
+        if "reasoning" in result["response"]["body"]:
+            reasoning_summary = result["response"]["body"]["reasoning"]["summary"]
+        else:
+            reasoning_summary = ""
+        results[result_id] = BatchResult(
+            result_id=result_id,
+            content=content,
+            reasoning_summary=reasoning_summary
+        )
+
+    token_usage = TokenUsage(
+        prompt_tokens=total_prompt_tokens,
+        completion_tokens=total_completion_tokens,
+        total_tokens=total_tokens
+    )
+    
+    return results, token_usage
 
 
 # ------------- Main processing ----------------------------------------------
@@ -113,10 +167,16 @@ def process_batch_results(
         print("Batch not complete; aborting.")
         return
 
-    batch_results = get_batch_results(batch_id)
+    batch_results, token_usage = get_batch_results(batch_id)
     if not batch_results:
         print("No results found.")
         return
+
+    print("\nToken Usage Statistics:")
+    print(f"Prompt tokens: {token_usage.prompt_tokens:,}")
+    print(f"Completion tokens: {token_usage.completion_tokens:,}")
+    print(f"Total tokens: {token_usage.total_tokens:,}")
+    print(f"Estimated cost: ${token_usage.cost:.4f}\n")
 
     original_ds = datasets.load_dataset(input_dataset, split=split)
     id_lookup = {row["id"]: row for row in original_ds}
@@ -124,7 +184,6 @@ def process_batch_results(
     new_rows = []
 
     for result_id, content in batch_results.items():
-        print(f'{result_id=}')
         row = id_lookup[result_id]
         if row is None:
             print(f"[skip] id {result_id=} not in source dataset")
@@ -135,7 +194,8 @@ def process_batch_results(
 
         # We should always have two messages: user and assistant.
         assert len(updated["messages"]) == 2
-        updated["messages"][1]["content"] = batch_results[result_id]
+        updated["messages"][1]["content"] = batch_results[result_id].content
+        updated["reasoning_summary"] = batch_results[result_id].reasoning_summary
         updated["dataset"] = output_dataset
 
         new_rows.append(updated)
