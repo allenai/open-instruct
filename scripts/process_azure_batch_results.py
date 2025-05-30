@@ -13,11 +13,13 @@ import argparse
 import copy
 import json
 import os
+import pathlib
 from dataclasses import dataclass
 from typing import Tuple
 
 import datasets
 import openai
+import requests
 from regenerate_dataset_completions import MODEL_COSTS_PER_1M_TOKENS
 
 
@@ -152,7 +154,26 @@ def get_batch_results(batch_id: str) -> Tuple[dict[str, str], TokenUsage]:
     return results, token_usage
 
 
-# ------------- Main processing ----------------------------------------------
+def download_file(file_id: str, dest: pathlib.Path) -> None:
+    """Download a file from Azure OpenAI API to the specified destination."""
+    endpoint = os.environ["AZURE_OPENAI_ENDPOINT"].rstrip("/")
+    url = f"{endpoint}/openai/files/{file_id}/content?api-version=2024-07-01-preview"
+    
+    response = requests.get(
+        url,
+        headers={"api-key": os.environ["AZURE_OPENAI_API_KEY"]},
+        timeout=120
+    )
+    response.raise_for_status()
+    
+    with dest.open("wb") as f:
+        f.write(response.content)
+
+
+def load_jsonl(file_path: pathlib.Path) -> list[dict]:
+    """Load a JSONL file into a list of dictionaries."""
+    with file_path.open() as f:
+        return [json.loads(line) for line in f]
 
 
 def process_batch_results(
@@ -167,6 +188,51 @@ def process_batch_results(
         print("Batch not complete; aborting.")
         return
 
+    # Load the original dataset first so we can look up failed prompts
+    original_ds = datasets.load_dataset(input_dataset, split=split)
+    id_lookup = {row["id"]: row for row in original_ds}
+
+    # Get batch details to check for errors
+    endpoint = os.environ["AZURE_OPENAI_ENDPOINT"].rstrip("/")
+    url = f"{endpoint}/openai/batches/{batch_id}?api-version=2024-07-01-preview"
+    r = requests.get(
+        url,
+        headers={"api-key": os.environ["AZURE_OPENAI_API_KEY"]},
+        timeout=30,
+    )
+    r.raise_for_status()
+    job = r.json()
+
+    # Show errors if they exist
+    if job.get("error_file_id"):
+        error_file = pathlib.Path(".errors.jsonl")
+        
+        try:
+            # Download error file
+            download_file(job["error_file_id"], error_file)
+            errors = load_jsonl(error_file)
+
+            print("\nBatch Errors:")
+            print("-" * 80)
+            
+            for error in errors:
+                request_id = error['custom_id']
+                error_id = extract_id_from_custom_id(request_id)
+                original_row = id_lookup.get(error_id)
+                
+                print(f"\nError ID: {request_id}")
+                print(f"Error: {error.get('error', {}).get('message', 'Unknown error')}")
+                
+                if original_row:
+                    print(f"\nOriginal Prompt: {original_row['prompt']}")
+                else:
+                    print("\nOriginal prompt not found in dataset")
+                print("-" * 80)
+
+        finally:
+            # Clean up temporary files
+            error_file.unlink(missing_ok=True)
+
     batch_results, token_usage = get_batch_results(batch_id)
     if not batch_results:
         print("No results found.")
@@ -178,13 +244,10 @@ def process_batch_results(
     print(f"Total tokens: {token_usage.total_tokens:,}")
     print(f"Estimated cost: ${token_usage.cost:.4f}\n")
 
-    original_ds = datasets.load_dataset(input_dataset, split=split)
-    id_lookup = {row["id"]: row for row in original_ds}
-
     new_rows = []
 
-    for result_id, content in batch_results.items():
-        row = id_lookup[result_id]
+    for result_id, batch_result in batch_results.items():
+        row = id_lookup.get(result_id)
         if row is None:
             print(f"[skip] id {result_id=} not in source dataset")
             continue
@@ -194,8 +257,8 @@ def process_batch_results(
 
         # We should always have two messages: user and assistant.
         assert len(updated["messages"]) == 2
-        updated["messages"][1]["content"] = batch_results[result_id].content
-        updated["reasoning_summary"] = batch_results[result_id].reasoning_summary
+        updated["messages"][1]["content"] = batch_result.content
+        updated["reasoning_summary"] = batch_result.reasoning_summary
         updated["dataset"] = output_dataset
 
         new_rows.append(updated)
