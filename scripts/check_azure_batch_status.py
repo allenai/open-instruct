@@ -6,8 +6,8 @@ Usage:
 # just once:
 ./check_batch.py batch_abc
 
-# watch until done, print two error rows, save full error file:
-./check_batch.py batch_abc --watch --peek-errors 2 --save-errors bad.jsonl
+# watch until done:
+./check_batch.py batch_abc --watch
 """
 from __future__ import annotations
 
@@ -17,8 +17,12 @@ import pathlib
 import sys
 import time
 from argparse import ArgumentParser, Namespace
+from typing import List
 
 import requests
+
+# Constants
+POLL_INTERVAL = 15  # seconds between status checks
 
 
 def download_file(file_id: str, dest: pathlib.Path) -> None:
@@ -53,13 +57,62 @@ def print_status(job: dict) -> None:
     print(line, flush=True)
 
 
+def load_jsonl(file_path: pathlib.Path) -> List[dict]:
+    """Load a JSONL file into a list of dictionaries."""
+    with file_path.open() as f:
+        return [json.loads(line) for line in f]
+
+
+def show_errors_with_requests(job: dict) -> None:
+    """Download and display errors alongside their corresponding requests."""
+    if not job.get("error_file_id"):
+        print("No error file available")
+        return
+
+    # Create temporary files for downloads
+    error_file = pathlib.Path(".errors.jsonl")
+    result_file = pathlib.Path(".results.jsonl")
+
+    try:
+        # Download error file
+        download_file(job["error_file_id"], error_file)
+        errors = load_jsonl(error_file)
+
+        # If we have a result file, download it too
+        results_by_id = {}
+        if job.get("result_file_id"):
+            download_file(job["result_file_id"], result_file)
+            results = load_jsonl(result_file)
+            results_by_id = {r.get("id"): r for r in results}
+
+        print("\nErrors with corresponding requests:")
+        print("-" * 80)
+        
+        for error in errors:
+            request_id = error.get("id")
+            result = results_by_id.get(request_id, {})
+            
+            print(f"\nError ID: {request_id}")
+            print(f"Error: {error.get('error', {}).get('message', 'Unknown error')}")
+            
+            # Show the original request data from the error file
+            if "request" in error:
+                print(f"Original Request: {json.dumps(error['request'], indent=2)}")
+            # Fall back to result file data if available
+            elif result:
+                print(f"Request: {json.dumps(result.get('request', {}), indent=2)}")
+            print("-" * 80)
+
+    finally:
+        # Clean up temporary files
+        error_file.unlink(missing_ok=True)
+        result_file.unlink(missing_ok=True)
+
+
 def cli() -> Namespace:
     p = ArgumentParser(description="Check Azure OpenAI batch job status")
     p.add_argument("batch_id")
     p.add_argument("--watch", action="store_true", help="poll until terminal state")
-    p.add_argument("--interval", type=int, default=15, help="seconds between polls")
-    p.add_argument("--peek-errors", type=int, metavar="N", help="print first N rows from error_file_id")
-    p.add_argument("--save-errors", metavar="PATH", help="download full error_file_id to PATH")
     return p.parse_args()
 
 
@@ -80,23 +133,14 @@ def main() -> None:
         print_status(job)
 
         if job["status"] in {"completed", "failed", "cancelled", "expired"}:
-            if (args.peek_errors or args.save_errors) and job.get("error_file_id"):
-                dest = pathlib.Path(args.save_errors or ".errors.jsonl")
-                download_file(job["error_file_id"], dest)
-
-                if args.peek_errors:
-                    with dest.open() as f:
-                        for _ in range(args.peek_errors):
-                            try:
-                                print(json.loads(next(f)))
-                            except StopIteration:
-                                break
+            if job.get("error_file_id"):
+                show_errors_with_requests(job)
             sys.exit(0 if job["status"] == "completed" else 1)
 
         if not args.watch:
             sys.exit(1)
 
-        time.sleep(args.interval)
+        time.sleep(POLL_INTERVAL)
 
 
 if __name__ == "__main__":
