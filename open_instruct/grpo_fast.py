@@ -263,6 +263,8 @@ class Args:
     """the max tokens to use for the llm judge"""
     llm_judge_temperature: float = 1.0
     """the temperature to use for the llm judge"""
+    llm_judge_timeout: int = 60
+    """the timeout to use for the llm judge"""
 
     # -- non stop penalty
     non_stop_penalty: bool = False

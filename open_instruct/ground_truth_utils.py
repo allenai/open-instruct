@@ -68,6 +68,7 @@ class LMJudgeVerifierConfig(VerifierConfig):
     llm_judge_model: str
     llm_judge_max_tokens: int
     llm_judge_temperature: float
+    llm_judge_timeout: int
     seed: int
 
 
@@ -519,6 +520,7 @@ class LMJudgeVerifier(VerifierFunction):
                     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
                     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
                     api_version="2024-12-01-preview",
+                    timeout=self.verifier_config.llm_judge_timeout,
                 )
 
             return self._client_cache[loop]
@@ -529,6 +531,7 @@ class LMJudgeVerifier(VerifierFunction):
                 api_key=os.getenv("AZURE_OPENAI_API_KEY"),
                 azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
                 api_version="2024-12-01-preview",
+                timeout=self.verifier_config.llm_judge_timeout,
             )
 
     def parse_completion(self, completion):
