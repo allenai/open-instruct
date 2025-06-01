@@ -183,3 +183,13 @@ JUDGE_PROMPT_MAP = {
     "creative_writing": creative_writing_template,
     "refusal": refusal_template,
 }
+
+MAX_VALUE_MAP = {
+    "quality": 10,
+    "quality_rubric": 1,
+    "quality_ref": 10,
+    "safety": 1,
+    "factuality": 1,
+    "creative_writing": 1,
+    "refusal": 1,
+}

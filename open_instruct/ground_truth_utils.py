@@ -22,6 +22,7 @@ from openai import AsyncAzureOpenAI
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.judge_utils import (
     JUDGE_PROMPT_MAP,
+    MAX_VALUE_MAP,
     PRICE_PER_TOKEN,
     build_messages,
     extract_score_from_string,
@@ -505,6 +506,7 @@ class LMJudgeVerifier(VerifierFunction):
     def __init__(self, judge_type: str, verifier_config: LMJudgeVerifierConfig) -> None:
         super().__init__(f"general-{judge_type}", verifier_config=verifier_config, weight=1.0)
         self.prompt_template = JUDGE_PROMPT_MAP[judge_type]
+        self.max_value = MAX_VALUE_MAP[judge_type]
 
     def _get_client(self):
         """
@@ -611,7 +613,8 @@ class LMJudgeVerifier(VerifierFunction):
                 )
                 reasoning, score = self.parse_completion(response)
                 cost = self.get_cost(response, self.verifier_config.llm_judge_model)
-                return VerificationResult(score=score, cost=cost, reasoning=reasoning)
+                # normalize score to be between 0 and 1
+                return VerificationResult(score=score / self.max_value, cost=cost, reasoning=reasoning)
 
             except Exception as e:
                 logger.warning(f"LLM judge attempt {attempt + 1}/{max_retries} failed: {str(e)}")
