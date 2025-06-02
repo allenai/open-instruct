@@ -151,8 +151,6 @@ python scripts/weights/weight_diff.py recover --path_raw ${hf_llama_path} --path
 ```
 3. `weights/convert_llama_weights_to_hf.sh`: Use `transformers` to convert weights.
 4. `data/*`: scripts for inpecting statistics of and rebuilding Tulu 1/2/N datasets from scratch (where possible).
-5. `regenerate_dataset_completions.py`: to regenerate the completions for a dataset using the OpenAI Azure batch API.
-6. `check_azure_batch_status.py`: Checks the status of a batch API submission.
 
 ## Notes on data mixing
 Most of the scripts with `_config` take in configs that look like the following (just the data part):
