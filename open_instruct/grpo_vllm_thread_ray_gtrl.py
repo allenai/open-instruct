@@ -258,12 +258,16 @@ class Args:
     """whether to apply verifiable reward"""
     reward_model_multiplier: float = 1.0
     """the reward model multiplier, for down/upscaling the reward model output"""
+    apply_reward_model: bool = False
+    """whether to add the reward model reward"""
     verification_reward: float = 10.0
     """the reward value for verifiable responses"""
     add_r1_style_format_reward: bool = False
     """whether to add the R1 style format reward"""
     r1_style_format_reward: float = 1.0
     """the reward value for R1 style format reward"""
+    add_random_rewards: bool = False
+    """whether to use random values for the rewards"""
 
     # async setting
     async_mode: bool = True
@@ -731,7 +735,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.ref_policy.eval()
 
         # reward model
-        if args.reward_model_multiplier:
+        if args.apply_reward_model:
             self.reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
                 args.reward_model_path,
                 revision=args.reward_model_revision,
@@ -776,7 +780,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.reward_model_tokenizer.chat_template = tokenizer.chat_template
 
         assert (
-            args.reward_model_multiplier or args.apply_verifiable_reward
+            args.reward_model_multiplier or args.apply_verifiable_reward or args.add_random_rewards
         ), "Either `reward_model_multiplier` must be non-zero or `apply_verifiable_reward` must be True."
 
     def forward(
@@ -1216,7 +1220,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         cleaned_prediction = cleaned_prediction.replace("<answer>", "").replace("</answer>", "")
                         return cleaned_prediction
 
-                    if args.reward_model_multiplier:
+                    if args.apply_reward_model:
                         print("APPLYING REWARD MODEL")
                         response_txts = tokenizer.batch_decode(postprocessed_response)
                         reward_model_tokens = []
@@ -1263,6 +1267,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         print("NO REWARD APPLIED")
                     if args.add_r1_style_format_reward:
                         score += format_scores[i : i + args.local_rollout_forward_batch_size]
+                    if args.add_random_rewards:
+                        score += torch.rand_like(score)
                         # j = i
                         # while j < i + args.local_rollout_forward_batch_size:
                         #     format_score = format_scores[j]

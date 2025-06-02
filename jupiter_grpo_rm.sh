@@ -62,6 +62,7 @@ python mason.py \
     --num_evals 50 \
     --save_freq 50 \
     --reward_model_multiplier 1.0 \
+    --apply_reward_model true \
     --reward_model_path allenai/open_instruct_dev \
     --reward_model_revision $reward_model_revision \
     --no_try_launch_beaker_eval_jobs \
