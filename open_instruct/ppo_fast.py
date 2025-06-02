@@ -359,6 +359,9 @@ class Args:
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
         ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+        assert (
+            self.num_unique_prompts_rollout * self.num_samples_per_prompt_rollout % self.num_mini_batches == 0
+        ), "The number of unique prompts rollout times the number of samples per prompt rollout must be divisible by the number of minibatches!"
 
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
