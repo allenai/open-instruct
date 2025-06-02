@@ -4,7 +4,7 @@ exp_name="grpo_random_rewards_non_verifiable"
 python mason.py \
     --description $exp_name \
     --cluster ai2/jupiter-cirrascale-2 \
-    --workspace ai2/tulu-thinker \
+    --workspace ai2/tulu-3-results \
     --priority high \
     --preemptible \
     --num_nodes 4 \
