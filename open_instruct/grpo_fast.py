@@ -218,8 +218,10 @@ class Args:
     """Number of minibatches to split a batch into"""
     beta: float = 0.05
     """the beta value of the RLHF objective (KL coefficient)"""
-    cliprange: float = 0.2
-    """the clip range"""
+    clip_lower: float = 0.2
+    """the lower clip range"""
+    clip_higher: float = 0.2
+    """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
     kl_estimator: Literal["kl1", "kl2", "kl3", "kl4"] = "kl3"
     """the KL estimator to use"""
     pack_length: int = 512
@@ -798,7 +800,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
                     ratio = torch.exp(logprobs_diff)
                     pg_losses = -mb_advantages[:, 1:] * ratio
-                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
+                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(ratio, 1.0 - args.clip_lower, 1.0 + args.clip_higher)
                     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
                     # Here we recalculate kl: we want the KL loss to backpropagate through the model
