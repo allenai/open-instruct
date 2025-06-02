@@ -35,6 +35,7 @@ from open_instruct.math_utils import (
     normalize_final_answer,
     remove_boxed,
 )
+from open_instruct.utils import extract_final_answer
 
 logger = logging.getLogger(__name__)
 
@@ -595,8 +596,8 @@ class LMJudgeVerifier(VerifierFunction):
         Asynchronous version of __call__ that properly handles the async OpenAI client.
         """
         client = self._get_client()
-
-        prompt = self.prompt_template.format(input=query, output=prediction, label=label)
+        final_answer = extract_final_answer(prediction)
+        prompt = self.prompt_template.format(input=query, output=final_answer, label=label)
 
         max_retries = 3  # for rate limits
         retry_delay = 1.0
