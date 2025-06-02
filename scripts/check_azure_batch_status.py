@@ -85,10 +85,10 @@ def show_errors_with_requests(job: dict) -> None:
             results = load_jsonl(result_file)
             results_by_id = {r.get("id"): r for r in results}
 
-        print("\nErrors with corresponding requests:")
+        print("\nErrors with corresponding requests (showing first 10):")
         print("-" * 80)
         
-        for error in errors:
+        for error in errors[:10]:  # Only show first 10 errors
             request_id = error.get("id")
             result = results_by_id.get(request_id, {})
             
@@ -102,6 +102,9 @@ def show_errors_with_requests(job: dict) -> None:
             elif result:
                 print(f"Request: {json.dumps(result.get('request', {}), indent=2)}")
             print("-" * 80)
+
+        if len(errors) > 10:
+            print(f"\n... and {len(errors) - 10} more errors not shown")
 
     finally:
         # Clean up temporary files
