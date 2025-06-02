@@ -84,7 +84,7 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
-from open_instruct.ground_truth_utils import soft_format_reward_func
+from open_instruct.ground_truth_utils import soft_format_reward_func, verify_code_sample
 from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
@@ -255,6 +255,14 @@ class Args:
     verification_reward: float = 10.0
     """the reward value for verifiable responses"""
 
+    # -- ace coder reward
+    apply_code_reward: bool = False
+    """whether to apply code reward"""
+    code_reward: float = 10.0
+    """the reward value for code responses"""
+    code_api_url: Optional[str] = None
+    """the URL of the code API"""
+
     # -- non stop penalty
     non_stop_penalty: bool = False
     """whether to penalize responses which did not finish generation"""
@@ -375,6 +383,8 @@ class Args:
             download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
         if self.checkpoint_state_dir is not None:
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
+        if self.apply_code_reward:
+            assert self.code_api_url is not None, "The code API URL must be provided!"
         if self.tools is not None and len(self.tools) > 0:
             for tool in self.tools:
                 if tool not in ["search", "code"]:
@@ -1867,6 +1877,20 @@ if __name__ == "__main__":
                     np_value = np.array(value)
                     metrics[f"objective/{key}_reward"] = np_value.mean()
                     metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
+
+
+        if args.apply_code_reward:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying code reward"):
+                code_rewards = verify_code_sample(
+                    decoded_responses,
+                    ground_truths,
+                    args.code_api_url,
+                )
+                code_rewards = [item * args.code_reward for item in code_rewards]
+                for i in range(len(code_rewards)):
+                    scores[i] = code_rewards[i] + scores[i]
+                metrics["objective/code_reward"] = np.array(code_rewards).mean()
+                metrics["objective/code_correct_rate"] = (np.array(code_rewards) > 0.0).mean()
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:

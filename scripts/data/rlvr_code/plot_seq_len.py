@@ -1,0 +1,195 @@
+import datasets
+from transformers import AutoTokenizer
+import matplotlib.pyplot as plt
+import numpy as np
+import argparse
+from tqdm import tqdm
+import logging
+import sys
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+MODEL_NAME = "allenai/Llama-3.1-Tulu-3-8B-SFT"
+
+# --- Helper Function ---
+def get_sequence_lengths(batch, tokenizer, column_name):
+    """Tokenizes the specified column and returns sequence lengths."""
+    if column_name not in batch:
+        if not hasattr(get_sequence_lengths, "warned"):
+             logging.warning(f"Column '{column_name}' not found in at least one batch. Skipping.")
+             get_sequence_lengths.warned = True
+        return {"seq_len": []}
+
+    outputs = [str(item) if item is not None else "" for item in batch[column_name]]
+    try:
+        tokenized_outputs = tokenizer(outputs, truncation=False, padding=False)
+        return {"seq_len": [len(ids) for ids in tokenized_outputs["input_ids"]]}
+    except Exception as e:
+        logging.error(f"Error during tokenization: {e}")
+        return {"seq_len": [0] * len(outputs)}
+
+# --- Main Function ---
+def main(args):
+    """Loads dataset, calculates lengths, and plots distribution."""
+    logging.info(f"Loading tokenizer: {MODEL_NAME}")
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, use_fast=True)
+    except Exception as e:
+        logging.error(f"Failed to load tokenizer {MODEL_NAME}: {e}")
+        sys.exit(1)
+
+    logging.info(f"Loading dataset: {args.dataset_name}, split: {args.split}")
+    dataset = None
+    try:
+        dataset = datasets.load_dataset(args.dataset_name, split=args.split, streaming=args.streaming)
+        if args.streaming:
+            logging.info("Processing in streaming mode.")
+            if args.max_samples_streaming > 0:
+                logging.info(f"Taking first {args.max_samples_streaming} samples.")
+                dataset = dataset.take(args.max_samples_streaming)
+
+    except FileNotFoundError:
+        logging.error(f"Dataset '{args.dataset_name}' not found.")
+        sys.exit(1)
+    except ValueError as e:
+         logging.error(f"Invalid split '{args.split}' or dataset config error for '{args.dataset_name}': {e}")
+         sys.exit(1)
+    except Exception as e:
+        logging.error(f"Failed to load dataset '{args.dataset_name}' split '{args.split}': {e}")
+        sys.exit(1)
+
+    if not args.streaming and dataset:
+         if args.column_name not in dataset.column_names:
+             logging.error(f"Column '{args.column_name}' not found in dataset '{args.dataset_name}' split '{args.split}'.")
+             logging.info(f"Available columns: {dataset.column_names}")
+             sys.exit(1)
+
+    logging.info(f"Calculating sequence lengths for column '{args.column_name}'...")
+    sequence_lengths = []
+    try:
+        if hasattr(get_sequence_lengths, "warned"):
+            delattr(get_sequence_lengths, "warned")
+
+        mapped_dataset = dataset.map(
+            get_sequence_lengths,
+            fn_kwargs={"tokenizer": tokenizer, "column_name": args.column_name},
+            batched=True,
+            batch_size=args.batch_size
+        )
+
+        logging.info("Collecting sequence lengths...")
+        if args.streaming:
+             temp_lengths = []
+             # Correctly iterate over batches in streaming mode
+             for batch in tqdm(mapped_dataset, desc="Processing batches"):
+                 if 'seq_len' in batch:
+                     # Extend with lengths from the current batch
+                     batch_lengths = batch['seq_len']
+                     # Ensure batch_lengths is a list, even if map returns single value for single input
+                     if isinstance(batch_lengths, list):
+                          temp_lengths.extend(batch_lengths)
+                     else: # Handle case where maybe it's not a list (less common for batched=True)
+                          temp_lengths.append(batch_lengths)
+                 else:
+                      # This might happen if get_sequence_lengths returned empty due to missing column
+                      logging.debug(f"'seq_len' key missing in a batch.")
+
+             sequence_lengths = temp_lengths
+        else:
+            sequence_lengths = mapped_dataset["seq_len"]
+
+    except KeyError:
+        logging.error(f"Column '{args.column_name}' caused a KeyError during processing.")
+        try:
+            if not args.streaming and dataset:
+                 logging.info(f"Available columns: {dataset.column_names}")
+            else:
+                 logging.info("Cannot list columns for streaming dataset easily after error.")
+        except Exception as e_inner:
+            logging.warning(f"Could not retrieve column names: {e_inner}")
+        sys.exit(1)
+    except Exception as e:
+        logging.error(f"Error calculating sequence lengths: {e}")
+        import traceback
+        traceback.print_exc() # Print stack trace for debugging
+        sys.exit(1)
+
+    if not sequence_lengths:
+        logging.warning("No sequence lengths were calculated. Check dataset, column name, and potential errors.")
+        sys.exit(1)
+
+    logging.info(f"Successfully calculated {len(sequence_lengths)} sequence lengths.")
+    min_len = np.min(sequence_lengths)
+    max_len = np.max(sequence_lengths)
+    avg_len = np.mean(sequence_lengths)
+    median_len = np.median(sequence_lengths)
+    logging.info(f"Min length: {min_len}, Max length: {max_len}, Avg length: {avg_len:.2f}, Median length: {median_len}")
+
+    logging.info("Plotting histogram...")
+    plt.figure(figsize=(12, 7))
+    num_bins = min(args.num_bins, int(max_len / 10) if max_len > 10 else args.num_bins) # Adjust bin calculation
+    if num_bins <= 0: num_bins = 10
+    plt.hist(sequence_lengths, bins=num_bins, color='skyblue', edgecolor='black')
+
+    # --- Add Percentile Lines ---
+    percentiles = np.arange(10, 100, 10) # 10, 20, ..., 90
+    percentile_values = np.percentile(sequence_lengths, percentiles)
+    logging.info(f"Percentile values (10th-90th): {dict(zip(percentiles, np.round(percentile_values, 2)))}")
+
+    # Determine a good y-position for labels (e.g., 95% of max y-axis height)
+    y_max = plt.gca().get_ylim()[1]
+    label_y_pos = y_max * 0.95
+
+    for p, val in zip(percentiles, percentile_values):
+        plt.axvline(val, color='red', linestyle='dashed', linewidth=1)
+        # Add text label slightly above the line, adjusting x position slightly
+        plt.text(val * 1.01, label_y_pos, f'{p}%', color='red', verticalalignment='top', fontsize=8)
+    # ---------------------------
+
+    plt.title(f'Distribution of Sequence Lengths for "{args.column_name}" column\nDataset: {args.dataset_name} ({args.split} split) - {len(sequence_lengths)} samples')
+    plt.xlabel("Sequence Length (Tokens)")
+    plt.ylabel("Frequency")
+    plt.grid(axis='y', alpha=0.75)
+
+    stats_text = f'Min: {min_len}\nMax: {max_len}\nAvg: {avg_len:.2f}\nMedian: {median_len}'
+    plt.text(0.95, 0.95, stats_text, transform=plt.gca().transAxes, fontsize=9,
+             verticalalignment='top', horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+    plot_filename = args.plot_filename or f"{args.dataset_name.replace('/', '_')}_{args.split}_{args.column_name}_seq_len_dist.png"
+    try:
+        plt.savefig(plot_filename)
+        logging.info(f"Histogram saved to {plot_filename}")
+    except Exception as e:
+        logging.error(f"Failed to save plot to {plot_filename}: {e}")
+
+    if args.show_plot:
+        logging.info("Displaying plot...")
+        plt.show()
+
+# --- Argument Parsing and Execution ---
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Plot sequence length distribution for a Hugging Face dataset column.')
+    parser.add_argument('--dataset_name', type=str, required=True, help='Name of the Hugging Face dataset (e.g., "allenai/c4").')
+    parser.add_argument('--split', type=str, default='train', help='Dataset split to use (e.g., "train", "validation").')
+    parser.add_argument('--column_name', type=str, default='output', help='Name of the column containing text data (default: "output").')
+    parser.add_argument('--batch_size', type=int, default=1000, help='Batch size for mapping function (default: 1000).')
+    parser.add_argument('--num_bins', type=int, default=50, help='Number of bins for the histogram (default: 50).')
+    parser.add_argument('--plot_filename', type=str, default=None, help='Filename to save the plot. Defaults to DATANAME_SPLIT_COL_seq_len_dist.png')
+    parser.add_argument('--streaming', action='store_true', help='Load dataset in streaming mode (useful for large datasets).')
+    parser.add_argument('--max_samples_streaming', type=int, default=0, help='Max samples to process in streaming mode (0 for all, default: 0). Use with caution for very large datasets.')
+    parser.add_argument('--show_plot', action='store_true', help='Display the plot after saving.')
+
+    args = parser.parse_args()
+
+    if args.streaming and args.max_samples_streaming < 0:
+        logging.error("--max_samples_streaming cannot be negative.")
+        sys.exit(1)
+    elif not args.streaming and args.max_samples_streaming != 0:
+        logging.warning("--max_samples_streaming is ignored when --streaming is not used.")
+
+    main(args)
+
+
+
+
+
