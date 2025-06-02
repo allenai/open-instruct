@@ -21,6 +21,7 @@ OPEN_INSTRUCT_COMMANDS = [
     "open_instruct/finetune.py",
     "open_instruct/dpo_tune_cache.py",
     "open_instruct/grpo_fast.py",
+    "open_instruct/ppo_fast.py",
     "open_instruct/grpo_vllm_thread_ray_gtrl.py",
     "open_instruct/ppo2.py",
     "open_instruct/ppo_vllm_thread_ray_gtrl.py",
@@ -517,6 +518,12 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
         command = [f"WANDB_PROJECT={os.environ['WANDB_PROJECT']}"] + command
     if "WANDB_TAGS" in os.environ:
         command = [f"WANDB_TAGS={os.environ['WANDB_TAGS']}"] + command
+    
+    # escape the command (e.g., --stop_strings "</answer>")
+    for i in range(len(command)):
+        if "</" in command[i]:
+            command[i] = f"'{command[i]}'"
+    # breakpoint()
 
     is_open_instruct_training = any(cmd in command for cmd in OPEN_INSTRUCT_COMMANDS)
     if is_open_instruct_training:
@@ -540,11 +547,13 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                     lst.pop(idx + 1)
                 lst.pop(idx)
 
-        # Save the runtime `whoami` calls
-        command.append("--hf_entity")
-        command.append("allenai")
-        command.append("--wandb_entity")
-        command.append("ai2-llm")
+        # Add the whoami parts if not already present
+        if not any("hf_entity" in c for c in command):
+            command.append("--hf_entity")
+            command.append("allenai")
+        if not any("wandb_entity" in c for c in command):
+            command.append("--wandb_entity")
+            command.append("ai2-llm")
         
         dataset_cache_paths = []
         dataset_config_hashes = []
@@ -757,6 +766,8 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
     join_full_command = " ".join(full_command)
     # override accelerate call
     if args.num_nodes > 1:
+        if "--num_processes" not in join_full_command and "accelerate" in join_full_command:
+            raise ValueError("num_processes must be specified in the command for accelerate-based multi-node jobs.")
         join_full_command = re.sub(
             r'--num_processes (\d+)',
             lambda m: (
@@ -856,7 +867,6 @@ def main():
         budget=args.budget,
         retry=beaker.RetrySpec(allowed_task_retries=args.max_retries)
     )
-
     exp = beaker_client.experiment.create(spec=experiment_spec)
     console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.id}")
 

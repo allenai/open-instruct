@@ -75,7 +75,12 @@ from open_instruct.utils import hf_whoami
 
 # ----------------------------------------------------------------------------
 # Utilities
-def custom_cached_file(model_name_or_path: str, filename: str, revision: str = None, repo_type: str = "model"):
+def custom_cached_file(
+    model_name_or_path: str,
+    filename: str,
+    revision: str = None,
+    repo_type: str = "model",
+):
     """@vwxyzjn: HF's `cached_file` no longer works for `repo_type="dataset"`."""
     # local_file = os.path.join(model_name_or_path, filename)
 
@@ -87,7 +92,11 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str = N
             return None
     else:
         resolved_file = try_to_load_from_cache(
-            model_name_or_path, filename, cache_dir=TRANSFORMERS_CACHE, revision=revision, repo_type=repo_type
+            model_name_or_path,
+            filename,
+            cache_dir=TRANSFORMERS_CACHE,
+            revision=revision,
+            repo_type=repo_type,
         )
         # special return value from try_to_load_from_cache
         if resolved_file == _CACHED_NO_EXIST:
@@ -96,17 +105,27 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str = N
 
 
 def get_commit_hash(
-    model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
+    model_name_or_path: str,
+    revision: str,
+    filename: str = "config.json",
+    repo_type: str = "model",
 ) -> str:
-    file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
+    file = custom_cached_file(
+        model_name_or_path, filename, revision=revision, repo_type=repo_type
+    )
     commit_hash = extract_commit_hash(file, None)
     return commit_hash
 
 
 def get_file_hash(
-    model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
+    model_name_or_path: str,
+    revision: str,
+    filename: str = "config.json",
+    repo_type: str = "model",
 ) -> str:
-    file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
+    file = custom_cached_file(
+        model_name_or_path, filename, revision=revision, repo_type=repo_type
+    )
     if isinstance(file, str):
         with open(file, "rb") as f:
             return hashlib.sha256(f.read()).hexdigest()
@@ -119,9 +138,15 @@ def get_file_hash(
 
 
 def get_files_hash_if_exists(
-    model_name_or_path: str, revision: str, filenames: List[str], repo_type: str = "model"
+    model_name_or_path: str,
+    revision: str,
+    filenames: List[str],
+    repo_type: str = "model",
 ) -> List[str]:
-    return [get_file_hash(model_name_or_path, revision, filename, repo_type) for filename in filenames]
+    return [
+        get_file_hash(model_name_or_path, revision, filename, repo_type)
+        for filename in filenames
+    ]
 
 
 # Performance tuning. Some rough numbers:
@@ -129,7 +154,9 @@ APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU = 400
 FILTER_EXAMPLE_PER_SECOND_PER_CPU = 1130
 
 
-def get_num_proc(dataset_len: int, num_available_cpus: int, example_per_second_per_cpu) -> int:
+def get_num_proc(
+    dataset_len: int, num_available_cpus: int, example_per_second_per_cpu
+) -> int:
     num_required_cpus = max(1, dataset_len // example_per_second_per_cpu)
     return min(num_required_cpus, num_available_cpus)
 
@@ -143,6 +170,21 @@ def visualize_token(tokens: list[int], tokenizer: PreTrainedTokenizer):
     rich_text = Text()
     for i, token in enumerate(tokens):
         color = COLORS[i % len(COLORS)]
+        decoded_token = tokenizer.decode(token)
+        rich_text.append(f"{decoded_token}", style=color)
+    console.print(rich_text)
+
+
+def visualize_token_role(
+    tokens: list[int], masks: list[int], tokenizer: PreTrainedTokenizer
+):
+    i = 0
+    console = Console()
+    rich_text = Text()
+    # for i, token in enumerate():
+    for i in range(min(len(tokens), len(masks))):
+        token = tokens[i]
+        color = COLORS[masks[i] % len(COLORS)]
         decoded_token = tokenizer.decode(token)
         rich_text.append(f"{decoded_token}", style=color)
     console.print(rich_text)
@@ -337,6 +379,62 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    "r1_simple_chat_postpend_think_orz_style": (
+        "A conversation between User and Assistant. "
+        "The user asks a question, and the Assistant solves it. "
+        "The assistant first thinks about the reasoning process in "
+        "the mind and then provides the user with the answer. "
+        "The reasoning process and answer are enclosed within <think> </think> "
+        "and <answer> </answer> tags, respectively, "
+        "i.e., <think> reasoning process here </think> "
+        "<answer> answer here </answer>."
+        "\n\n"
+        "{% for message in messages %}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['role'].capitalize() + ': You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\\\boxed{} tag. This is the problem: ' + message['content'] + '\n' }}"  # \\\\boxed{} is for jinja template escape
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ 'Assistant: <think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "r1_simple_chat_postpend_think_tool_vllm": (
+        "A conversation between User and Assistant. "
+        "The User asks a question, and the Assistant solves it. "
+        "The Assistant first thinks about the reasoning process in "
+        "the mind and then provides the User with the answer. "
+        "\n\n"
+        "When given a question, the Assistant must conduct reasoning inside the <think> "
+        "and </think> tags. During reasoning, the Assistant may write and execute python "
+        "code using the <code> </code> tag, in order to solve the problem or verify the answer. "
+        "Then the Assistant will get the stdout and stderr in the <output> and </output> tags. "
+        "For example, the code could be\n"
+        "<code>\n"
+        "x, y = 1, 2\n"
+        "result = x + y\n"
+        "print(result)\n"
+        "</code>\n"
+        "or\n"
+        "<code>\n"
+        "import sympy as sp\n"
+        "from sympy import Symbol\n"
+        "x = Symbol('x')\n"
+        "y = Symbol('y')\n"
+        "solution = sp.solve(x**2 + y**2 - 1, (x, y))\n"
+        "print(solution)\n"
+        "</code>\n"
+        "The Assistant will always `print` the result of the code execution in order to see it in the <output> tag. "
+        "The Assistant may use the <code> </code> tag multiple times. "
+        "When the Assistant is done reasoning, it should provide the answer inside the <answer> "
+        "and </answer> tag."
+        "\n\n"
+        "{% for message in messages %}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['role'].capitalize() + ': You must put your answer inside <answer> </answer> tags, i.e., <answer> answer here </answer>. And your final answer will be extracted automatically by the \\\\boxed{} tag. This is the problem: ' + message['content'] + '\n' }}"  # \\\\boxed{} is for jinjia template escape
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ 'Assistant: <think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
 }
 # flake8: noqa
 
@@ -361,7 +459,9 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
     # only add if the pad token is not present already.
-    if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
+    if isinstance(tokenizer, LlamaTokenizer) or isinstance(
+        tokenizer, LlamaTokenizerFast
+    ):
         num_added_tokens = tokenizer.add_special_tokens(
             {
                 "bos_token": "<s>",
@@ -378,7 +478,9 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
         # OLMo newer models use this tokenizer
         if tokenizer.bos_token is None:
             tokenizer.bos_token = tokenizer.eos_token
-            assert tc.add_bos, "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
+            assert (
+                tc.add_bos
+            ), "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
         # else, pythia / other models
         else:
             num_added_tokens = tokenizer.add_special_tokens(
@@ -392,9 +494,14 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
     # NOTE: (Costa) I just commented the `OPTForCausalLM` because we are not likely to use it.
     # elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
     #     num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
-    elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast) and tokenizer.pad_token is None:
+    elif (
+        isinstance(tokenizer, transformers.PreTrainedTokenizerFast)
+        and tokenizer.pad_token is None
+    ):
         num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
-        assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
+        assert (
+            num_added_tokens == 1
+        ), "We detected no padding token but add_special_tokens did not add one."
 
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
@@ -403,13 +510,18 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
         tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
     else:
         try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path).chat_template
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(
+                tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
+            ).chat_template
         except Exception:
-            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
+            raise ValueError(
+                f"Could not find chat template for {tc.tokenizer_name_or_path}."
+            )
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
-            tokenizer.bos_token is not None and tokenizer.chat_template.startswith(tokenizer.bos_token)
+            tokenizer.bos_token is not None
+            and tokenizer.chat_template.startswith(tokenizer.bos_token)
         ):
             raise ValueError(
                 "You specified add_bos=True, but the chat template already has a bos_token at the beginning."
@@ -430,8 +542,13 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
     # only add if the pad token is not present already, or if the current one is set to eos_token_id.
-    if tokenizer.pad_token_id is None or tokenizer.pad_token_id == tokenizer.eos_token_id:
-        if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
+    if (
+        tokenizer.pad_token_id is None
+        or tokenizer.pad_token_id == tokenizer.eos_token_id
+    ):
+        if isinstance(tokenizer, LlamaTokenizer) or isinstance(
+            tokenizer, LlamaTokenizerFast
+        ):
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
             assert num_added_tokens in [
                 0,
@@ -459,7 +576,9 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
         #     num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
         elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast):
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
-            assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
+            assert (
+                num_added_tokens == 1
+            ), "We detected no padding token but add_special_tokens did not add one."
 
     assert (
         tokenizer.pad_token_id != tokenizer.eos_token_id
@@ -472,13 +591,18 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
         tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
     else:
         try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path).chat_template
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(
+                tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
+            ).chat_template
         except Exception:
-            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
+            raise ValueError(
+                f"Could not find chat template for {tc.tokenizer_name_or_path}."
+            )
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
-            tokenizer.bos_token is not None and tokenizer.chat_template.startswith(tokenizer.bos_token)
+            tokenizer.bos_token is not None
+            and tokenizer.chat_template.startswith(tokenizer.bos_token)
         ):
             raise ValueError(
                 "You specified add_bos=True, but the chat template already has a bos_token at the beginning."
@@ -490,7 +614,9 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
 
 
 def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
-    config = AutoConfig.from_pretrained(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision)
+    config = AutoConfig.from_pretrained(
+        tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
+    )
     # @vwxyzjn: "olmo" handles both `olmo2` and `olmoe`.
     if "olmo" in config.model_type:
         assert tc.add_bos, "For OLMo, you must run with `--add_bos`."
@@ -505,8 +631,13 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     # no default pad token for llama!
     # here we add all special tokens again, because the default ones are not in the special_tokens_map
     # only add if the pad token is not present already, or if the current one is set to eos_token_id.
-    if tokenizer.pad_token_id is None or tokenizer.pad_token_id == tokenizer.eos_token_id:
-        if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
+    if (
+        tokenizer.pad_token_id is None
+        or tokenizer.pad_token_id == tokenizer.eos_token_id
+    ):
+        if isinstance(tokenizer, LlamaTokenizer) or isinstance(
+            tokenizer, LlamaTokenizerFast
+        ):
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
             assert num_added_tokens in [
                 0,
@@ -534,7 +665,9 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
         #     num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
         elif isinstance(tokenizer, transformers.PreTrainedTokenizerFast):
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
-            assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
+            assert (
+                num_added_tokens == 1
+            ), "We detected no padding token but add_special_tokens did not add one."
 
     assert (
         tokenizer.pad_token_id != tokenizer.eos_token_id
@@ -547,13 +680,18 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
         tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
     else:
         try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path).chat_template
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(
+                tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
+            ).chat_template
         except Exception:
-            raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
+            raise ValueError(
+                f"Could not find chat template for {tc.tokenizer_name_or_path}."
+            )
 
     if tc.add_bos:
         if tokenizer.chat_template.startswith("{{ bos_token }}") or (
-            tokenizer.bos_token is not None and tokenizer.chat_template.startswith(tokenizer.bos_token)
+            tokenizer.bos_token is not None
+            and tokenizer.chat_template.startswith(tokenizer.bos_token)
         ):
             raise ValueError(
                 "You specified add_bos=True, but the chat template already has a bos_token at the beginning."
@@ -602,7 +740,12 @@ class TokenizerConfig:
         files_hash = get_files_hash_if_exists(
             self.tokenizer_name_or_path,
             self.tokenizer_revision,
-            filenames=["tokenizer_config.json", "tokenizer.json", "special_tokens_map.json", "vocab.json"],
+            filenames=[
+                "tokenizer_config.json",
+                "tokenizer.json",
+                "special_tokens_map.json",
+                "vocab.json",
+            ],
         )
         self.tokenizer_files_hash = ",".join(files_hash)
         if self.tokenizer_name is not None and self.tokenizer_name_or_path is None:
@@ -660,7 +803,9 @@ TOKENIZED_PREFERENCE_DATASET_KEYS = [
 
 # TODO: allow passing in sft_message key, so we can train on "chosen" of pref dataset.
 def sft_tokenize_v1(
-    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
+    row: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
 ):
     if len(row[sft_messages_key]) == 1:
         prompt = row[sft_messages_key]
@@ -679,7 +824,9 @@ def sft_tokenize_v1(
 
 
 def sft_tokenize_mask_out_prompt_v1(
-    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
+    row: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
 ):
     """mask out the prompt tokens by manipulating labels"""
     if len(row[sft_messages_key]) == 1:
@@ -708,17 +855,25 @@ def sft_filter_v1(
 ):
     max_prompt_token_length_ok = True
     if max_prompt_token_length is not None:
-        max_prompt_token_length_ok = len(row[INPUT_IDS_PROMPT_KEY]) <= max_prompt_token_length
+        max_prompt_token_length_ok = (
+            len(row[INPUT_IDS_PROMPT_KEY]) <= max_prompt_token_length
+        )
 
     max_token_length_ok = True
     if max_token_length is not None:
         max_token_length_ok = len(row[INPUT_IDS_KEY]) <= max_token_length
 
     contain_some_labels = any(x != -100 for x in row[LABELS_KEY])
-    return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
+    return (
+        max_prompt_token_length_ok
+        and max_token_length_ok
+        and (contain_some_labels or not need_contain_labels)
+    )
 
 
-def sft_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
+def sft_tulu_tokenize_and_truncate_v1(
+    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int
+):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
     messages = row["messages"]
     if len(messages) == 0:
@@ -741,7 +896,9 @@ def sft_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrained
                 message_start_idx = 0
             else:
                 message_start_idx = tokenizer.apply_chat_template(
-                    conversation=messages[:message_idx],  # here marks the end of the previous messages
+                    conversation=messages[
+                        :message_idx
+                    ],  # here marks the end of the previous messages
                     tokenize=True,
                     return_tensors="pt",
                     padding=False,
@@ -750,7 +907,10 @@ def sft_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrained
                     add_generation_prompt=False,
                 ).shape[1]
             # next, we calculate the end index of this non-assistant message
-            if message_idx < len(messages) - 1 and messages[message_idx + 1]["role"] == "assistant":
+            if (
+                message_idx < len(messages) - 1
+                and messages[message_idx + 1]["role"] == "assistant"
+            ):
                 # for intermediate messages that follow with an assistant message, we need to
                 # set `add_generation_prompt=True` to avoid the assistant generation prefix being included in the loss
                 # (e.g., `<|assistant|>`)
@@ -870,7 +1030,9 @@ def preference_tulu_tokenize_and_truncate_v1(
 
 
 def preference_tulu_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
-    return any(x != -100 for x in row[CHOSEN_LABELS_KEY]) and any(x != -100 for x in row[REJECTED_LABELS_KEY])
+    return any(x != -100 for x in row[CHOSEN_LABELS_KEY]) and any(
+        x != -100 for x in row[REJECTED_LABELS_KEY]
+    )
 
 
 def rlvr_tokenize_v1(
@@ -906,14 +1068,20 @@ def rlvr_filter_v1(
 ):
     max_prompt_token_length_ok = True
     if max_prompt_token_length is not None:
-        max_prompt_token_length_ok = len(row[INPUT_IDS_PROMPT_KEY]) <= max_prompt_token_length
+        max_prompt_token_length_ok = (
+            len(row[INPUT_IDS_PROMPT_KEY]) <= max_prompt_token_length
+        )
 
     max_token_length_ok = True
     if max_token_length is not None:
         max_token_length_ok = len(row[INPUT_IDS_KEY]) <= max_token_length
 
     contain_some_labels = any(x != -100 for x in row[LABELS_KEY])
-    return max_prompt_token_length_ok and max_token_length_ok and (contain_some_labels or not need_contain_labels)
+    return (
+        max_prompt_token_length_ok
+        and max_token_length_ok
+        and (contain_some_labels or not need_contain_labels)
+    )
 
 
 TRANSFORM_FNS = {
@@ -924,7 +1092,10 @@ TRANSFORM_FNS = {
     "sft_tulu_filter_v1": (sft_tulu_filter_v1, "filter"),
     "preference_tokenize_v1": (preference_tokenize_v1, "map"),
     "preference_filter_v1": (preference_filter_v1, "filter"),
-    "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1, "map"),
+    "preference_tulu_tokenize_and_truncate_v1": (
+        preference_tulu_tokenize_and_truncate_v1,
+        "map",
+    ),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
     "rlvr_tokenize_v1": (rlvr_tokenize_v1, "map"),
     "rlvr_filter_v1": (rlvr_filter_v1, "filter"),
@@ -942,8 +1113,12 @@ class SimplePreferenceCollator:
         max_length_chosen = -1
         max_length_rejected = -1
         for i in range(len(batch)):
-            max_length_chosen = max(max_length_chosen, len(batch[i][CHOSEN_INPUT_IDS_KEY]))
-            max_length_rejected = max(max_length_rejected, len(batch[i][REJECTED_INPUT_IDS_KEY]))
+            max_length_chosen = max(
+                max_length_chosen, len(batch[i][CHOSEN_INPUT_IDS_KEY])
+            )
+            max_length_rejected = max(
+                max_length_rejected, len(batch[i][REJECTED_INPUT_IDS_KEY])
+            )
         max_length = max(max_length_chosen, max_length_rejected)
         assert max_length > 0, "the dataset is empty"
 
@@ -960,7 +1135,9 @@ class SimplePreferenceCollator:
             padding_chosen = [self.pad_token_id] * pad_length_chosen
             padding_rejected = [self.pad_token_id] * pad_length_rejected
             padded_sequence_chosen = batch[i][CHOSEN_INPUT_IDS_KEY] + padding_chosen
-            padded_sequence_rejected = batch[i][REJECTED_INPUT_IDS_KEY] + padding_rejected
+            padded_sequence_rejected = (
+                batch[i][REJECTED_INPUT_IDS_KEY] + padding_rejected
+            )
             padded_sequences_chosen.append(padded_sequence_chosen)
             padded_sequences_rejected.append(padded_sequence_rejected)
 
@@ -992,7 +1169,9 @@ class DatasetConfig:
     def __post_init__(self):
         # if the file exists locally, use the local file
         if os.path.exists(self.dataset_name) and self.dataset_name.endswith(".jsonl"):
-            assert self.dataset_split == "train", "Only train split is supported for local jsonl files."
+            assert (
+                self.dataset_split == "train"
+            ), "Only train split is supported for local jsonl files."
             self.dataset = load_dataset(
                 "json",
                 data_files=self.dataset_name,
@@ -1024,7 +1203,9 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         dc.transform_fn_args
     ), f"transform_fn and transform_fn_args must have the same length: {dc.transform_fn=} != {dc.transform_fn_args=}"
     # beaker specific logic; we may get assigned 15.5 CPU, so we convert it to float then int
-    num_proc = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count())))
+    num_proc = int(
+        float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count()))
+    )
 
     tokenizer = tc.tokenizer
     dataset = dc.dataset
@@ -1035,19 +1216,29 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
         fn_kwargs.update(fn_args)
 
         # perform the transformation
-        target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
+        target_columns = (
+            dataset.column_names if dc.target_columns is None else dc.target_columns
+        )
         if fn_type == "map":
             dataset = dataset.map(
                 fn,
                 fn_kwargs=fn_kwargs,
-                remove_columns=[col for col in dataset.column_names if col not in target_columns],
-                num_proc=get_num_proc(len(dataset), num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
+                remove_columns=[
+                    col for col in dataset.column_names if col not in target_columns
+                ],
+                num_proc=get_num_proc(
+                    len(dataset),
+                    num_proc,
+                    APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU,
+                ),
             )
         elif fn_type == "filter":
             dataset = dataset.filter(
                 fn,
                 fn_kwargs=fn_kwargs,
-                num_proc=get_num_proc(len(dataset), num_proc, FILTER_EXAMPLE_PER_SECOND_PER_CPU),
+                num_proc=get_num_proc(
+                    len(dataset), num_proc, FILTER_EXAMPLE_PER_SECOND_PER_CPU
+                ),
             )
         # NOTE: elif we can implement packing here to create a packed SFT dataset. Low priority for now.
         else:
@@ -1073,7 +1264,10 @@ class DatasetTransformationCache:
         self.hf_entity = hf_entity or hf_whoami()["name"]
 
     def load_or_transform_dataset(
-        self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
+        self,
+        dcs: List[DatasetConfig],
+        tc: TokenizerConfig,
+        dataset_skip_cache: bool = False,
     ) -> Dataset:
         """Load dataset from cache if it exists, otherwise transform and cache it."""
         repo_name = f"{self.hf_entity}/dataset-mix-cached"
@@ -1083,12 +1277,20 @@ class DatasetTransformationCache:
 
         # Check if the revision exists
         if revision_exists(repo_name, self.config_hash, repo_type="dataset"):
-            print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{self.config_hash}")
+            print(
+                f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{self.config_hash}"
+            )
             if dataset_skip_cache:
-                print("dataset_skip_cache is True, so we will not load the dataset from cache")
+                print(
+                    "dataset_skip_cache is True, so we will not load the dataset from cache"
+                )
             else:
                 # Use the split from the first dataset config as default
-                return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash)
+                return load_dataset(
+                    repo_name,
+                    split=DEFAULT_SPLIT_FOR_CACHED_DATASET,
+                    revision=self.config_hash,
+                )
 
         print(f"Cache not found, transforming datasets...")
 
@@ -1110,7 +1312,9 @@ class DatasetTransformationCache:
             revision=self.config_hash,
             commit_message=f"Cache combined dataset with configs hash: {self.config_hash}",
         )
-        print(f"🚀 Pushed transformed dataset to https://huggingface.co/datasets/{repo_name}/tree/{self.config_hash}")
+        print(
+            f"🚀 Pushed transformed dataset to https://huggingface.co/datasets/{repo_name}/tree/{self.config_hash}"
+        )
 
         model_card = ModelCard(
             f"""\
@@ -1137,11 +1341,17 @@ This is a cached dataset produced by https://github.com/allenai/open-instruct
 ```
 """
         )
-        model_card.push_to_hub(repo_name, repo_type="dataset", revision=self.config_hash)
+        model_card.push_to_hub(
+            repo_name, repo_type="dataset", revision=self.config_hash
+        )
 
         # NOTE: Load the dataset again to make sure it's downloaded to the HF cache
-        print(f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{self.config_hash}")
-        return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash)
+        print(
+            f"✅ Found cached dataset at https://huggingface.co/datasets/{repo_name}/tree/{self.config_hash}"
+        )
+        return load_dataset(
+            repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash
+        )
 
 
 class LocalDatasetTransformationCache:
@@ -1155,7 +1365,9 @@ class LocalDatasetTransformationCache:
         """Get the path to the cached dataset."""
         return os.path.join(self.dataset_local_cache_dir, self.config_hash)
 
-    def save_config(self, config_hash: str, dcs: List[DatasetConfig], tc: TokenizerConfig):
+    def save_config(
+        self, config_hash: str, dcs: List[DatasetConfig], tc: TokenizerConfig
+    ):
         """Save the configuration to a JSON file."""
         config_path = os.path.join(self.get_cache_path(), "config.json")
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
@@ -1169,7 +1381,10 @@ class LocalDatasetTransformationCache:
             json.dump(config_dict, f, indent=2)
 
     def load_or_transform_dataset(
-        self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
+        self,
+        dcs: List[DatasetConfig],
+        tc: TokenizerConfig,
+        dataset_skip_cache: bool = False,
     ) -> Dataset:
         """Load dataset from local cache if it exists, otherwise transform and cache it locally."""
         cache_path = self.get_cache_path()
@@ -1208,10 +1423,14 @@ def get_cached_dataset(
     dataset_skip_cache: bool = False,
 ) -> Dataset:
     if dataset_local_cache_dir is not None:
-        cache = LocalDatasetTransformationCache(dataset_local_cache_dir=dataset_local_cache_dir)
+        cache = LocalDatasetTransformationCache(
+            dataset_local_cache_dir=dataset_local_cache_dir
+        )
     else:
         cache = DatasetTransformationCache(hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
+    return cache.load_or_transform_dataset(
+        dcs, tc, dataset_skip_cache=dataset_skip_cache
+    )
 
 
 def get_cached_dataset_tulu(
@@ -1231,13 +1450,17 @@ def get_cached_dataset_tulu(
     if dataset_config_hash is None:
         if len(dataset_mixer_list_splits) == 1:
             print("by default, we will use the same split for all datasets")
-            dataset_mixer_list_splits = [dataset_mixer_list_splits[0]] * len(dataset_mixer_list)
+            dataset_mixer_list_splits = [dataset_mixer_list_splits[0]] * len(
+                dataset_mixer_list
+            )
         else:
             if len(dataset_mixer_list_splits) != len(dataset_mixer_list):
                 raise ValueError(
                     f"dataset_mixer_list_splits length must be the same as dataset_mixer_list: {len(dataset_mixer_list_splits)=} != {len(dataset_mixer_list)=}"
                 )
-        assert len(dataset_mixer_list) % 2 == 0, f"Data mixer list length is not even: {dataset_mixer_list}"
+        assert (
+            len(dataset_mixer_list) % 2 == 0
+        ), f"Data mixer list length is not even: {dataset_mixer_list}"
         for i in range(0, len(dataset_mixer_list), 2):
             dataset_name = dataset_mixer_list[i]
             frac_or_num_samples = dataset_mixer_list[i + 1]
@@ -1263,36 +1486,53 @@ def get_cached_dataset_tulu(
         dataset_config_hash = compute_config_hash(dcs, tc)
     if dataset_cache_mode == "local":
         cache = LocalDatasetTransformationCache(
-            config_hash=dataset_config_hash, dataset_local_cache_dir=dataset_local_cache_dir
+            config_hash=dataset_config_hash,
+            dataset_local_cache_dir=dataset_local_cache_dir,
         )
     elif dataset_cache_mode == "hf":
-        cache = DatasetTransformationCache(config_hash=dataset_config_hash, hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
+        cache = DatasetTransformationCache(
+            config_hash=dataset_config_hash, hf_entity=hf_entity
+        )
+    return cache.load_or_transform_dataset(
+        dcs, tc, dataset_skip_cache=dataset_skip_cache
+    )
 
 
 def test_sft_dpo_same_tokenizer():
     base_to_sft_tc = TokenizerConfig(
-        tokenizer_name_or_path="meta-llama/Llama-3.1-8B", tokenizer_revision="main", chat_template_name="tulu"
+        tokenizer_name_or_path="meta-llama/Llama-3.1-8B",
+        tokenizer_revision="main",
+        chat_template_name="tulu",
     )
     sft_to_dpo_tc = TokenizerConfig(
-        tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-SFT", tokenizer_revision="main", chat_template_name="tulu"
+        tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-SFT",
+        tokenizer_revision="main",
+        chat_template_name="tulu",
     )
     dpo_to_rl_tc = TokenizerConfig(
-        tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-DPO", tokenizer_revision="main", chat_template_name="tulu"
+        tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-DPO",
+        tokenizer_revision="main",
+        chat_template_name="tulu",
     )
 
     def equal_tokenizer(tc1, tc2):
         tok1 = tc1.tokenizer
         tok2 = tc2.tokenizer
         assert tok1.vocab_size == tok2.vocab_size, "Vocab size should be the same"
-        assert tok1.model_max_length == tok2.model_max_length, "Model max length should be the same"
+        assert (
+            tok1.model_max_length == tok2.model_max_length
+        ), "Model max length should be the same"
         assert tok1.is_fast == tok2.is_fast, "is_fast should be the same"
         assert tok1.padding_side == tok2.padding_side, "padding_side should be the same"
-        assert tok1.truncation_side == tok2.truncation_side, "truncation_side should be the same"
+        assert (
+            tok1.truncation_side == tok2.truncation_side
+        ), "truncation_side should be the same"
         assert (
             tok1.clean_up_tokenization_spaces == tok2.clean_up_tokenization_spaces
         ), "clean_up_tokenization_spaces should be the same"
-        assert tok1.added_tokens_decoder == tok2.added_tokens_decoder, "added_tokens_decoder should be the same"
+        assert (
+            tok1.added_tokens_decoder == tok2.added_tokens_decoder
+        ), "added_tokens_decoder should be the same"
 
     equal_tokenizer(base_to_sft_tc, sft_to_dpo_tc)
     equal_tokenizer(sft_to_dpo_tc, dpo_to_rl_tc)
@@ -1318,20 +1558,30 @@ def test_sft_dpo_same_tokenizer_olmo():
         chat_template_name="tulu",
         add_bos=True,
     )
-    print("vocab size", base_to_sft_tc.tokenizer.vocab_size, len(base_to_sft_tc.tokenizer.vocab))
+    print(
+        "vocab size",
+        base_to_sft_tc.tokenizer.vocab_size,
+        len(base_to_sft_tc.tokenizer.vocab),
+    )
 
     def equal_tokenizer(tc1, tc2):
         tok1 = tc1.tokenizer
         tok2 = tc2.tokenizer
         assert tok1.vocab_size == tok2.vocab_size, "Vocab size should be the same"
-        assert tok1.model_max_length == tok2.model_max_length, "Model max length should be the same"
+        assert (
+            tok1.model_max_length == tok2.model_max_length
+        ), "Model max length should be the same"
         assert tok1.is_fast == tok2.is_fast, "is_fast should be the same"
         assert tok1.padding_side == tok2.padding_side, "padding_side should be the same"
-        assert tok1.truncation_side == tok2.truncation_side, "truncation_side should be the same"
+        assert (
+            tok1.truncation_side == tok2.truncation_side
+        ), "truncation_side should be the same"
         assert (
             tok1.clean_up_tokenization_spaces == tok2.clean_up_tokenization_spaces
         ), "clean_up_tokenization_spaces should be the same"
-        assert tok1.added_tokens_decoder == tok2.added_tokens_decoder, "added_tokens_decoder should be the same"
+        assert (
+            tok1.added_tokens_decoder == tok2.added_tokens_decoder
+        ), "added_tokens_decoder should be the same"
 
     equal_tokenizer(base_to_sft_tc, sft_to_dpo_tc)
     equal_tokenizer(sft_to_dpo_tc, dpo_to_rl_tc)
@@ -1341,7 +1591,9 @@ def test_sft_dpo_same_tokenizer_olmo():
 def test_config_hash_different():
     """Test that different configurations produce different hashes."""
     tc = TokenizerConfig(
-        tokenizer_name_or_path="meta-llama/Llama-3.1-8B", tokenizer_revision="main", chat_template_name="tulu"
+        tokenizer_name_or_path="meta-llama/Llama-3.1-8B",
+        tokenizer_revision="main",
+        chat_template_name="tulu",
     )
 
     dcs1 = [
@@ -1395,7 +1647,9 @@ def test_get_cached_dataset_tulu_sft():
         dataset_skip_cache=True,
     )
 
-    gold_tokenized_dataset = load_dataset("allenai/dataset-mix-cached", split="train", revision="61ac38e052")
+    gold_tokenized_dataset = load_dataset(
+        "allenai/dataset-mix-cached", split="train", revision="61ac38e052"
+    )
     assert len(dataset) == len(gold_tokenized_dataset)
     for i in range(len(dataset)):
         assert dataset[i]["input_ids"] == gold_tokenized_dataset[i]["input_ids"]
@@ -1412,7 +1666,10 @@ def test_get_cached_dataset_tulu_preference():
     )
     dataset_mixer_list = ["allenai/llama-3.1-tulu-3-8b-preference-mixture", "1.0"]
     dataset_mixer_list_splits = ["train"]
-    dataset_transform_fn = ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
+    dataset_transform_fn = [
+        "preference_tulu_tokenize_and_truncate_v1",
+        "preference_tulu_filter_v1",
+    ]
     transform_fn_args = [
         {"max_seq_length": 2048},
         {},
@@ -1426,10 +1683,15 @@ def test_get_cached_dataset_tulu_preference():
         TOKENIZED_PREFERENCE_DATASET_KEYS,
         dataset_skip_cache=True,
     )
-    gold_tokenized_dataset = load_dataset("allenai/dataset-mix-cached", split="train", revision="9415479293")
+    gold_tokenized_dataset = load_dataset(
+        "allenai/dataset-mix-cached", split="train", revision="9415479293"
+    )
     assert len(dataset) == len(gold_tokenized_dataset)
     for i in range(len(dataset)):
-        assert dataset[i]["chosen_input_ids"] == gold_tokenized_dataset[i]["chosen_input_ids"]
+        assert (
+            dataset[i]["chosen_input_ids"]
+            == gold_tokenized_dataset[i]["chosen_input_ids"]
+        )
     return True
 
 
@@ -1460,10 +1722,15 @@ def test_get_cached_dataset_tulu_rlvr():
         transform_fn_args,
         dataset_skip_cache=True,
     )
-    gold_tokenized_dataset = load_dataset("allenai/dataset-mix-cached", split="train", revision="0ff0043e56")
+    gold_tokenized_dataset = load_dataset(
+        "allenai/dataset-mix-cached", split="train", revision="0ff0043e56"
+    )
     assert len(dataset) == len(gold_tokenized_dataset)
     for i in range(len(dataset)):
-        assert dataset[i][INPUT_IDS_PROMPT_KEY] == gold_tokenized_dataset[i][INPUT_IDS_PROMPT_KEY]
+        assert (
+            dataset[i][INPUT_IDS_PROMPT_KEY]
+            == gold_tokenized_dataset[i][INPUT_IDS_PROMPT_KEY]
+        )
     return True
 
 
