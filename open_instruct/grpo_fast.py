@@ -725,7 +725,7 @@ class PolicyTrainerRayProcess(RayProcess):
         to_device_inplace(collated_position_ids, self.device)
         to_device_inplace(collated_advantages, self.device)
         to_device_inplace(collated_response_masks, self.device)
-        accumulation_steps = math.ceil(len(collated_query_responses)/num_mini_batches - 0.5)
+        accumulation_steps = math.ceil(len(collated_query_responses) / num_mini_batches - 0.5)
         leftover = len(collated_query_responses) % accumulation_steps
         if leftover > 0:
             collated_query_responses = collated_query_responses[0:-leftover]
