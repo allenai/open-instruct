@@ -64,10 +64,8 @@ from transformers import (
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
-from open_instruct.dataset_processor import SimpleGenerateCollatorWithGroundTruth
+from open_instruct.dataset_processor import SimpleGenerateCollator
 from open_instruct.dataset_transformation import (
-    DATASET_SOURCE_KEY,
-    GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
@@ -114,7 +112,7 @@ class Args:
     """The dataset splits to use for training"""
     dataset_mixer_eval_list_splits: Optional[List[str]] = None
     """The dataset splits to use for evaluation"""
-    dataset_transform_fn: list[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_filter_v1"])
+    dataset_transform_fn: list[str] = field(default_factory=lambda: ["sft_tokenize_v1", "sft_filter_v1"])
     """The list of transform functions to apply to the dataset."""
     dataset_cache_mode: Literal["hf", "local"] = "local"
     """The mode to use for caching the dataset."""
@@ -1458,7 +1456,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     if args.cache_dataset_only:
         return
 
-    data_collator = SimpleGenerateCollatorWithGroundTruth(pad_token_id=tokenizer.pad_token_id)
+    data_collator = SimpleGenerateCollator(pad_token_id=tokenizer.pad_token_id)
 
     # some more runtime logging
     pprint([args, tc, model_config])
