@@ -303,6 +303,7 @@ def vllm_generate(
     vllm_enforce_eager: bool = False,
     enable_prefix_caching: bool = False,
     single_gpu_mode: bool = False,
+    accelerator: Optional[Accelerator] = None,
 ):
     # Initialize Ray if not already initialized
     if not ray.is_initialized():
@@ -347,9 +348,24 @@ def vllm_generate(
         unwrapped_model, g_queries_list = items
         if unwrapped_model is not None:
             start_time = time.time()
-            # Update weights for all engines using remote calls
-            futures = [engine.load_weights.remote(unwrapped_model.named_parameters()) for engine in vllm_engines]
-            ray.get(futures)  # Wait for all weight updates to complete
+            # Update weights for all engines using broadcast
+            count, num_params = 0, len(list(unwrapped_model.named_parameters()))
+            refss = []
+            for name, param in unwrapped_model.named_parameters():
+                count += 1  # empty_cache at last param
+                # Fire all vllm engines for broadcast
+                if accelerator.is_main_process:
+                    refs = [
+                        engine.update_weight.remote(
+                            name, dtype=param.dtype, shape=param.shape, empty_cache=count == num_params
+                        )
+                        for engine in vllm_engines
+                    ]
+                    refss.extend(refs)
+                if accelerator.is_main_process:
+                    accelerator.broadcast(param.data, 0)
+            if accelerator.is_main_process:
+                ray.get(refss)
             print(f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds")
         
         generation_start_time = time.time()
@@ -625,6 +641,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 args.vllm_enforce_eager,
                 args.vllm_enable_prefix_caching,
                 args.single_gpu_mode,
+                accelerator,
             ),
         )
         thread.start()
