@@ -151,8 +151,8 @@ DEFAULT_TASKS=(
     "popqa::tulu"
     "mmlu:mc::tulu"
     "mmlu:cot::summarize"
-    # "alpaca_eval_v3::tulu" # GPT 4.1 judge on OpenAI
-    "alpaca_eval_v4::tulu" # GPT 4.1, judge on Azure 
+    "alpaca_eval_v3::tulu" # GPT 4.1 judge on OpenAI
+    # "alpaca_eval_v4::tulu" # GPT 4.1, judge on Azure 
     "truthfulqa::tulu"
 )
 UNSEEN_TASKS=(
