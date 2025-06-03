@@ -17,7 +17,6 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
-from openai import AsyncAzureOpenAI
 from litellm import acompletion
 
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
@@ -509,34 +508,7 @@ class LMJudgeVerifier(VerifierFunction):
         super().__init__(f"general-{judge_type}", verifier_config=verifier_config, weight=1.0)
         self.prompt_template = JUDGE_PROMPT_MAP[judge_type]
         self.max_value = MAX_VALUE_MAP[judge_type]
-
-    def _get_client(self):
-        """
-        Get or create an AsyncAzureOpenAI client for the current event loop.
-        Uses WeakKeyDictionary to avoid cleanup issues when event loops close.
-        """
-        try:
-            loop = asyncio.get_running_loop()
-
-            # Use the loop object itself as the key (WeakKeyDictionary will clean up automatically)
-            if loop not in self._client_cache:
-                self._client_cache[loop] = AsyncAzureOpenAI(
-                    api_key=os.getenv("AZURE_API_KEY"),
-                    azure_endpoint=os.getenv("AZURE_API_BASE"),
-                    api_version=os.getenv("AZURE_API_VERSION") if os.getenv("AZURE_API_VERSION") else "2024-12-01-preview",
-                    timeout=self.verifier_config.llm_judge_timeout,
-                )
-
-            return self._client_cache[loop]
-
-        except RuntimeError:
-            # No event loop running, create a fresh client (this should be rare)
-            return AsyncAzureOpenAI(
-                api_key=os.getenv("AZURE_API_KEY"),
-                azure_endpoint=os.getenv("AZURE_API_BASE"),
-                api_version=os.getenv("AZURE_API_VERSION") if os.getenv("AZURE_API_VERSION") else "2024-12-01-preview",
-                timeout=self.verifier_config.llm_judge_timeout,
-            )
+        os.environ["AZURE_API_VERSION"] = "2024-12-01-preview"
 
     def parse_completion(self, completion):
         """
