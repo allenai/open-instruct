@@ -347,9 +347,9 @@ def vllm_generate(
         unwrapped_model, g_queries_list = items
         if unwrapped_model is not None:
             start_time = time.time()
-            # Update weights for all engines
-            for engine in vllm_engines:
-                engine.load_weights.remote(unwrapped_model.named_parameters())
+            # Update weights for all engines using remote calls
+            futures = [engine.load_weights.remote(unwrapped_model.named_parameters()) for engine in vllm_engines]
+            ray.get(futures)  # Wait for all weight updates to complete
             print(f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds")
         
         generation_start_time = time.time()
