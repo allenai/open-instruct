@@ -123,6 +123,7 @@ from open_instruct.utils import (
 )
 from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
 
+
 api = HfApi()
 INVALID_LOGPROB = 1.0
 
@@ -215,14 +216,18 @@ class Args:
     # Algorithm
     async_mode: bool = True
     """Whether to run the generation in async mode which learns from the second latest policy like Cleanba (https://arxiv.org/abs/2310.00036)"""
+    async_steps: int = 1
+    """Number of steps ahead to generate responses. Only used when async_mode is True."""
     num_epochs: int = 1
     """the number of epochs to train"""
     num_mini_batches: int = 1
     """Number of minibatches to split a batch into"""
     beta: float = 0.05
     """the beta value of the RLHF objective (KL coefficient)"""
-    cliprange: float = 0.2
-    """the clip range"""
+    clip_lower: float = 0.2
+    """the lower clip range"""
+    clip_higher: float = 0.2
+    """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
     kl_estimator: Literal["kl1", "kl2", "kl3", "kl4"] = "kl3"
     """the KL estimator to use"""
     pack_length: int = 512
@@ -240,6 +245,8 @@ class Args:
     """The type of advantage normalization to use. Standard normalization is the default: it subtracts the mean and
     divides by the standard deviation. Centered normalization is the same but subtracts the mean only (e.g., used in
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
+    mask_truncated_completions: bool = False
+    """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
 
     # Reward
     # -- r1 style format reward
@@ -290,6 +297,8 @@ class Args:
     """vLLM GPU memory utilization"""
     vllm_enable_prefix_caching: bool = False
     """whether to enable prefix caching"""
+    vllm_top_p: float = 1.0
+    """vLLM top p for nucleus sampling"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
@@ -807,7 +816,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
                     ratio = torch.exp(logprobs_diff)
                     pg_losses = -mb_advantages[:, 1:] * ratio
-                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
+                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(ratio, 1.0 - args.clip_lower, 1.0 + args.clip_higher)
                     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
                     # Here we recalculate kl: we want the KL loss to backpropagate through the model
@@ -1021,6 +1030,7 @@ def vllm_generate_thread(
     evaluation_inference_results_Q: Queue,
     eval_freq: int,
     resume_training_step: int = 1,
+    tool_use: bool = False,
 ):
     def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
         # Split queries between engines
@@ -1045,7 +1055,7 @@ def vllm_generate_thread(
         for outputs in all_outputs:
             response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
             finish_reasons.extend([out.finish_reason for output in outputs for out in output.outputs])
-            if args.tool_use:
+            if tool_use:
                 masks.extend([out.mask for output in outputs for out in output.outputs])
                 num_calls.extend([out.num_calls for output in outputs for out in output.outputs])
                 timeouts.extend([out.timeout for output in outputs for out in output.outputs])
@@ -1054,7 +1064,7 @@ def vllm_generate_thread(
                 tool_runtimes.extend([out.tool_runtime for output in outputs for out in output.outputs])
                 tool_calleds.extend([out.tool_called for output in outputs for out in output.outputs])
         # if not using the tool, mask is all 1s
-        if not args.tool_use:
+        if not tool_use:
             masks = [[1] * len(response_ids[i]) for i in range(len(response_ids))]
             num_calls = [0] * len(response_ids)
             timeouts = [0] * len(response_ids)
@@ -1170,6 +1180,17 @@ def data_preparation_thread(
             queries = [queries[i] for i in non_zero_gradient_index]
             ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
             datasets = [datasets[i] for i in non_zero_gradient_index]
+            finish_reasons = [finish_reasons[i] for i in non_zero_gradient_index]
+            if args.mask_truncated_completions:
+                stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
+                scores = scores[stop_idxes]
+                advantages = advantages[stop_idxes]
+                responses = [responses[i] for i in stop_idxes]
+                masks = [masks[i] for i in stop_idxes]
+                queries = [queries[i] for i in stop_idxes]
+                ground_truths = [ground_truths[i] for i in stop_idxes]
+                datasets = [datasets[i] for i in stop_idxes]
+                finish_reasons = [finish_reasons[i] for i in stop_idxes]
 
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
@@ -1507,7 +1528,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         stop_strings += list(tool_objects.keys())
     generation_config = SamplingParams(
         temperature=args.temperature,
-        top_p=0.95,  # prevent rare out-of-vocab tokens with qwen
+        top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
@@ -1516,7 +1537,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     )
     eval_generation_config = SamplingParams(
         temperature=0.0,
-        top_p=0.95,  # prevent rare out-of-vocab tokens with qwen
+        top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
         max_tokens=args.response_length,
         include_stop_str_in_output=True,
         skip_special_tokens=False,
@@ -1526,11 +1547,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     train_dataset_idxs = np.arange(len(train_dataset))
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
 
-    inference_results_Q = Queue(maxsize=1)
-    param_prompt_Q = Queue(maxsize=1)
+    inference_results_Q = Queue(maxsize=args.async_steps)
+    param_prompt_Q = Queue(maxsize=args.async_steps)
     evaluation_inference_results_Q = Queue(maxsize=1)
-    packed_sequences_Q = Queue(maxsize=1)
-    queries_prompt_Q = Queue(maxsize=1)
+    packed_sequences_Q = Queue(maxsize=args.async_steps)
+    queries_prompt_Q = Queue(maxsize=args.async_steps)
     num_eval_samples = 32
 
     eval_prompt_token_ids = None
@@ -1552,6 +1573,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             evaluation_inference_results_Q,
             args.eval_freq,
             resume_training_step,
+            args.tool_use,
         ),
     )
     thread.start()
