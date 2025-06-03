@@ -461,12 +461,6 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     if accelerator.is_main_process:
         pprint([args, dataset_config, model_config])
         visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
-        if args.with_tracking:
-            # upload the visualized token length
-            dataset_processor.get_token_length_visualization(
-                dataset_dict, save_path=f"runs/{args.run_name}/token_length.png"
-            )
-            wandb.log({"token_length": wandb.Image(f"runs/{args.run_name}/token_length.png")})
 
     # create the model and optimizer
     policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
