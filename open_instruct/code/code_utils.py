@@ -19,6 +19,40 @@ tmp_print = print
 tmp_rm_tree = shutil.rmtree
 tmp_unlink = os.unlink
 
+# Save all the functions that reliability_guard disables
+tmp_getcwd = os.getcwd
+tmp_system = getattr(os, 'system', None)
+tmp_putenv = getattr(os, 'putenv', None)
+tmp_remove = getattr(os, 'remove', None)
+tmp_removedirs = getattr(os, 'removedirs', None)
+tmp_fchdir = getattr(os, 'fchdir', None)
+tmp_setuid = getattr(os, 'setuid', None)
+tmp_forkpty = getattr(os, 'forkpty', None)
+tmp_killpg = getattr(os, 'killpg', None)
+tmp_rename = getattr(os, 'rename', None)
+tmp_renames = getattr(os, 'renames', None)
+tmp_truncate = getattr(os, 'truncate', None)
+tmp_replace = getattr(os, 'replace', None)
+tmp_fchown = getattr(os, 'fchown', None)
+tmp_chown = getattr(os, 'chown', None)
+tmp_chroot = getattr(os, 'chroot', None)
+tmp_lchflags = getattr(os, 'lchflags', None)
+tmp_lchmod = getattr(os, 'lchmod', None)
+tmp_lchown = getattr(os, 'lchown', None)
+
+# Save shutil functions
+tmp_shutil_move = shutil.move
+tmp_shutil_chown = shutil.chown
+
+# Save subprocess
+import subprocess
+tmp_subprocess_popen = subprocess.Popen
+
+# Save builtins
+import builtins
+tmp_exit = builtins.exit
+tmp_quit = builtins.quit
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -181,7 +215,7 @@ def partial_undo_reliability_guard():
     os.chdir = tmp_chdir
     os.unlink = tmp_unlink
     os.rmdir = tmp_rmdir
-    # shutil.rmtree = tmp_rmtree
+    # shutil.rmtree = tmp_rm_tree
     # builtins.open = tmp_open
     builtins.print = tmp_print
 
@@ -189,6 +223,83 @@ def partial_undo_reliability_guard():
     os.chdir(cwd)
     # shutil.rmtree(cache_wd)
     shutil.rmtree = tmp_rm_tree
+
+
+def full_undo_reliability_guard():
+    """Fully undo all reliability guard changes, restoring all disabled functions"""
+    import builtins
+    import subprocess
+    import shutil
+    
+    print("🔧 Restoring all OS functions disabled by reliability guard...")
+    
+    # Restore os functions (only if they exist on this platform)
+    os.chmod = tmp_chmod
+    os.fchmod = tmp_fchmod
+    os.chdir = tmp_chdir
+    os.unlink = tmp_unlink
+    os.rmdir = tmp_rmdir
+    os.getcwd = tmp_getcwd  # This was missing from partial_undo!
+    
+    # Platform-specific functions - only restore if they were available
+    if tmp_system is not None:
+        os.system = tmp_system
+    if tmp_putenv is not None:
+        os.putenv = tmp_putenv
+    if tmp_remove is not None:
+        os.remove = tmp_remove
+    if tmp_removedirs is not None:
+        os.removedirs = tmp_removedirs
+    if tmp_fchdir is not None:
+        os.fchdir = tmp_fchdir
+    if tmp_setuid is not None:
+        os.setuid = tmp_setuid
+    if tmp_forkpty is not None:
+        os.forkpty = tmp_forkpty
+    if tmp_killpg is not None:
+        os.killpg = tmp_killpg
+    if tmp_rename is not None:
+        os.rename = tmp_rename
+    if tmp_renames is not None:
+        os.renames = tmp_renames
+    if tmp_truncate is not None:
+        os.truncate = tmp_truncate
+    if tmp_replace is not None:
+        os.replace = tmp_replace
+    if tmp_fchown is not None:
+        os.fchown = tmp_fchown
+    if tmp_chown is not None:
+        os.chown = tmp_chown
+    if tmp_chroot is not None:
+        os.chroot = tmp_chroot
+    if tmp_lchflags is not None:
+        os.lchflags = tmp_lchflags
+    if tmp_lchmod is not None:
+        os.lchmod = tmp_lchmod
+    if tmp_lchown is not None:
+        os.lchown = tmp_lchown
+    
+    # Restore shutil functions
+    shutil.rmtree = tmp_rm_tree
+    shutil.move = tmp_shutil_move
+    shutil.chown = tmp_shutil_chown
+    
+    # Restore subprocess
+    subprocess.Popen = tmp_subprocess_popen
+    
+    # Restore builtins
+    builtins.exit = tmp_exit
+    builtins.quit = tmp_quit
+    builtins.print = tmp_print
+    
+    # Restore working directory
+    try:
+        os.chdir(cwd)
+        print(f"Working directory restored to: {cwd}")
+    except Exception as e:
+        print(f"Warning: Could not restore working directory: {e}")
+    
+    print("All OS functions restored successfully")
 
 
 def reliability_guard(maximum_memory_bytes: Optional[int] = None):
