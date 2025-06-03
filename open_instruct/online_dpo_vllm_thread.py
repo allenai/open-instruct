@@ -192,6 +192,8 @@ class Args:
     """whether to enable prefix caching"""
     single_gpu_mode: bool = False
     """whether to use single GPU mode where each engine uses 0.5 GPU memory"""
+    async_mode: bool = False
+    """whether to use async mode for inference"""
 
     # wandb and HF tracking configs
     with_tracking: bool = False
