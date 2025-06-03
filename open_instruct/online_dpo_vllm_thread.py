@@ -285,52 +285,140 @@ def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig
     return accelerator
 
 
-def vllm_generate(
-    model_name_or_path: str,
-    model_revision: Optional[str],
-    max_model_len: int,
-    vllm_gpu_memory_utilization: float,
-    generation_config: SamplingParams,
-    response_ids_Q: Queue,
-    param_prompt_Q: Queue,
-    num_training_steps: int,
-    sample_evaluation_prompt_token_ids: Optional[List[int]],
-    evaluation_Q: Queue,
-    eval_freq: int,
-    resume_training_step: int,
-    num_engines: int = 1,
-    tensor_parallel_size: int = 1,
-    vllm_enforce_eager: bool = False,
-    enable_prefix_caching: bool = False,
-    single_gpu_mode: bool = False,
-    accelerator: Optional[Accelerator] = None,
-):
-    # Initialize Ray if not already initialized
-    if not ray.is_initialized():
-        ray.init()
+@ray.remote(num_gpus=1)
+class PolicyTrainerRayProcess:
+    def __init__(
+        self,
+        rank: int,
+        world_size: int,
+        model_name_or_path: str,
+        model_revision: Optional[str],
+        max_model_len: int,
+        vllm_gpu_memory_utilization: float,
+        generation_config: SamplingParams,
+        response_ids_Q: Queue,
+        param_prompt_Q: Queue,
+        num_training_steps: int,
+        sample_evaluation_prompt_token_ids: Optional[List[int]],
+        evaluation_Q: Queue,
+        eval_freq: int,
+        resume_training_step: int,
+        num_engines: int = 1,
+        tensor_parallel_size: int = 1,
+        vllm_enforce_eager: bool = False,
+        enable_prefix_caching: bool = False,
+        single_gpu_mode: bool = False,
+        args: Optional[Args] = None,
+        dataset_config: Optional[DatasetConfig] = None,
+        model_config: Optional[ModelConfig] = None,
+    ):
+        self.rank = rank
+        self.world_size = world_size
+        self.model_name_or_path = model_name_or_path
+        self.model_revision = model_revision
+        self.max_model_len = max_model_len
+        self.vllm_gpu_memory_utilization = vllm_gpu_memory_utilization
+        self.generation_config = generation_config
+        self.response_ids_Q = response_ids_Q
+        self.param_prompt_Q = param_prompt_Q
+        self.num_training_steps = num_training_steps
+        self.sample_evaluation_prompt_token_ids = sample_evaluation_prompt_token_ids
+        self.evaluation_Q = evaluation_Q
+        self.eval_freq = eval_freq
+        self.resume_training_step = resume_training_step
+        self.num_engines = num_engines
+        self.tensor_parallel_size = tensor_parallel_size
+        self.vllm_enforce_eager = vllm_enforce_eager
+        self.enable_prefix_caching = enable_prefix_caching
+        self.single_gpu_mode = single_gpu_mode
+        self.args = args
+        self.dataset_config = dataset_config
+        self.model_config = model_config
 
-    # Create vLLM engines using Ray
-    vllm_engines = create_vllm_engines(
-        num_engines=num_engines,
-        tensor_parallel_size=tensor_parallel_size,
-        enforce_eager=vllm_enforce_eager,
-        pretrain=model_name_or_path,
-        revision=model_revision,
-        seed=42,
-        enable_prefix_caching=enable_prefix_caching,
-        max_model_len=max_model_len,
-        vllm_gpu_memory_utilization=vllm_gpu_memory_utilization,
-        single_gpu_mode=single_gpu_mode,
-    )
+        # Initialize distributed training
+        init_process_group(backend="nccl")
+        self.device = torch.device(f"cuda:{self.rank}")
+        torch.cuda.set_device(self.device)
 
-    def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
+        # Create vLLM engines
+        self.vllm_engines = create_vllm_engines(
+            num_engines=num_engines,
+            tensor_parallel_size=tensor_parallel_size,
+            enforce_eager=vllm_enforce_eager,
+            pretrain=model_name_or_path,
+            revision=model_revision,
+            seed=42,
+            enable_prefix_caching=enable_prefix_caching,
+            max_model_len=max_model_len,
+            vllm_gpu_memory_utilization=vllm_gpu_memory_utilization,
+            single_gpu_mode=single_gpu_mode,
+        )
+
+        # Create model update group for broadcasting weights
+        self.model_update_group = torch.distributed.new_group()
+
+        # Initialize models and tokenizer
+        self.setup_models_and_tokenizer()
+
+    def setup_models_and_tokenizer(self):
+        # Create tokenizer
+        config = AutoConfig.from_pretrained(self.model_name_or_path, revision=self.model_revision)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name_or_path, revision=self.model_revision, padding_side="right"
+        )
+        if config.architectures == "LlamaForCausalLM" and config.bos_token_id == 128000:
+            self.tokenizer.pad_token_id = 128002  # <|reserved_special_token_0|>
+        else:
+            self.tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
+        if self.dataset_config.chat_template is not None:
+            self.tokenizer.chat_template = CHAT_TEMPLATES[self.dataset_config.chat_template]
+
+        # Create models
+        self.policy = AutoModelForCausalLM.from_pretrained(
+            self.model_name_or_path,
+            revision=self.model_revision,
+            torch_dtype=torch.bfloat16,
+            attn_implementation="flash_attention_2",
+            use_cache=False,
+        )
+        self.ref_model = AutoModelForCausalLM.from_pretrained(
+            self.model_name_or_path,
+            revision=self.model_revision,
+            torch_dtype=torch.bfloat16,
+            attn_implementation="flash_attention_2",
+            use_cache=False,
+        )
+        self.reward_model = AutoModelForSequenceClassification.from_pretrained(
+            self.args.reward_model_path,
+            revision=self.args.reward_model_revision,
+            num_labels=1,
+            torch_dtype=torch.bfloat16,
+            attn_implementation="flash_attention_2",
+            use_cache=False,
+        )
+
+        # Move models to device
+        self.policy = self.policy.to(self.device)
+        self.ref_model = self.ref_model.to(self.device)
+        self.reward_model = self.reward_model.to(self.device)
+
+        # Setup optimizer and scheduler
+        self.optimizer = optim.AdamW(self.policy.parameters(), lr=self.args.learning_rate, eps=self.args.eps)
+        self.scheduler = get_scheduler(
+            self.args.lr_scheduler_type,
+            optimizer=self.optimizer,
+            num_warmup_steps=self.args.warm_up_steps,
+            num_training_steps=self.args.num_training_steps * self.args.num_train_epochs,
+        )
+
+    def generate_with_engines(self, prompts: List[List[int]], sampling_params: SamplingParams):
         # Split queries between engines
-        queries_per_engine = (len(prompts) + len(vllm_engines) - 1) // len(vllm_engines)
+        queries_per_engine = (len(prompts) + len(self.vllm_engines) - 1) // len(self.vllm_engines)
         split_queries = [prompts[i : i + queries_per_engine] for i in range(0, len(prompts), queries_per_engine)]
         # Generate responses in parallel across engines
         futures = [
             vllm_engine.generate.remote(sampling_params=sampling_params, prompt_token_ids=queries, use_tqdm=False)
-            for vllm_engine, queries in zip(vllm_engines, split_queries)
+            for vllm_engine, queries in zip(self.vllm_engines, split_queries)
         ]
         # Gather all responses
         all_outputs = ray.get(futures)
@@ -339,382 +427,95 @@ def vllm_generate(
             response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
         return response_ids
 
-    print("🔥🔥🔥 vLLM engines loaded")
-    
-    for training_step in range(resume_training_step, num_training_steps + 1):
-        items = param_prompt_Q.get()
-        if items is None:
-            break
-        unwrapped_model, g_queries_list = items
-        if unwrapped_model is not None:
-            start_time = time.time()
-            # Update weights for all engines using broadcast
-            count, num_params = 0, len(list(unwrapped_model.named_parameters()))
-            refss = []
-            for name, param in unwrapped_model.named_parameters():
-                count += 1  # empty_cache at last param
-                # Fire all vllm engines for broadcast
-                if accelerator.is_main_process:
-                    refs = [
-                        engine.update_weight.remote(
-                            name, dtype=param.dtype, shape=param.shape, empty_cache=count == num_params
-                        )
-                        for engine in vllm_engines
-                    ]
-                    refss.extend(refs)
-                if accelerator.is_main_process:
-                    accelerator.broadcast(param.data, 0)
-            if accelerator.is_main_process:
-                ray.get(refss)
-            print(f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds")
+    def broadcast_to_vllm(self, model):
+        # avoid OOM
+        torch.cuda.empty_cache()
+        count, num_params = 0, len(list(model.named_parameters()))
+        refss = []
+        for name, param in model.named_parameters():
+            count += 1  # empty_cache at last param
+            # Fire all vllm engines for broadcast
+            if torch.distributed.get_rank() == 0:
+                refs = [
+                    engine.update_weight.remote(
+                        name, dtype=param.dtype, shape=param.shape, empty_cache=count == num_params
+                    )
+                    for engine in self.vllm_engines
+                ]
+                refss.extend(refs)
+            if torch.distributed.get_rank() == 0:
+                torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+        if torch.distributed.get_rank() == 0:
+            ray.get(refss)
+
+    def train(self):
+        print("🔥🔥🔥 vLLM engines loaded")
         
-        generation_start_time = time.time()
-        response_ids = generate_with_engines(g_queries_list, generation_config)
-        print(f"🔥🔥🔥 Generation time: {time.time() - generation_start_time:.2f} seconds")
-        response_ids_Q.put(response_ids)
+        # Initialize metrics
+        stats_shape = (self.args.num_epochs, self.args.num_mini_batches, self.args.gradient_accumulation_steps)
+        loss_stats = torch.zeros(stats_shape, device=self.device)
+        chosen_rewards_stats = torch.zeros(stats_shape, device=self.device)
+        rejected_rewards_stats = torch.zeros(stats_shape, device=self.device)
+        chosen_logprobs_stats = torch.zeros(stats_shape, device=self.device)
+        rejected_logprobs_stats = torch.zeros(stats_shape, device=self.device)
+        local_metrics = torch.zeros((20,), device=self.device)
+        episode = self.args.batch_size * (self.resume_training_step - 1)
+        self.policy.train()
 
-        if sample_evaluation_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-            response_ids = generate_with_engines(sample_evaluation_prompt_token_ids, generation_config)
-            evaluation_Q.put(response_ids)
-
-
-def send_queries(accelerator, unwrapped_model, tokenizer, param_prompt_Q, queries):
-    g_queries_list = gather_object(queries.tolist())
-    if accelerator.is_main_process:
-        g_queries_list = [
-            [inneritem for inneritem in item if inneritem != tokenizer.pad_token_id] for item in g_queries_list
-        ]  # remove padding
-        param_prompt_Q.put((unwrapped_model, g_queries_list))
-
-
-def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
-    accelerator = calculate_runtime_args_and_accelerator(args, model_config)
-    local_seed = args.seed + accelerator.process_index
-
-    # set up experiment tracking and seeds
-    all_configs = {}
-    if is_beaker_job():
-        args.checkpoint_output_dir = os.environ.get("CHECKPOINT_OUTPUT_DIR", args.output_dir)
-        beaker_config = maybe_get_beaker_config()
-        # try saving to the beaker `/output`, which will be uploaded to the beaker dataset
-        if len(beaker_config.beaker_dataset_id_urls) > 0:
-            args.output_dir = "/output"
-        all_configs.update(vars(beaker_config))
-    all_configs.update(**asdict(args), **asdict(dataset_config), **asdict(model_config))
-    
-    # Initialize wandb
-    if accelerator.is_main_process and args.with_tracking:
-        import wandb
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            config=all_configs,
-            name=args.run_name,
-            save_code=True,
-            tags=[args.exp_name] + get_wandb_tags(),
+        # Create dataset and dataloader
+        dataset_dict = DatasetDict()
+        dataset_processor = SFTDatasetProcessor(tokenizer=self.tokenizer, config=self.dataset_config)
+        train_dataset = combine_dataset(
+            self.args.dataset_mixer_dict,
+            splits=self.args.dataset_train_splits,
+            columns_to_keep=[self.dataset_config.sft_messages_key],
         )
-        # Log hyperparameters as a table
-        wandb.log({
-            "hyperparameters": wandb.Table(
-                data=[[k, str(v)] for k, v in vars(args).items()],
-                columns=["param", "value"]
+        if self.dataset_config.sanity_check:
+            train_dataset = train_dataset.select(
+                range(0, min(len(train_dataset), self.dataset_config.sanity_check_max_samples))
             )
-        })
-
-    device = torch.device(f"cuda:{accelerator.local_process_index}")
-    random.seed(local_seed)
-    np.random.seed(local_seed)
-    torch.manual_seed(local_seed)
-    torch.backends.cudnn.deterministic = True
-
-    # create a tokenizer (pad from right)
-    config = AutoConfig.from_pretrained(model_config.model_name_or_path, revision=model_config.model_revision)
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_config.model_name_or_path, revision=model_config.model_revision, padding_side="right"
-    )
-    if config.architectures == "LlamaForCausalLM" and config.bos_token_id == 128000:
-        tokenizer.pad_token_id = 128002  # <|reserved_special_token_0|>
-    else:
-        tokenizer.add_special_tokens({"pad_token": "[PAD]"})  # NOTE: we do not resize the embedding
-    if dataset_config.chat_template is not None:
-        tokenizer.chat_template = CHAT_TEMPLATES[dataset_config.chat_template]
-
-    # create the dataset
-    dataset_dict = DatasetDict()
-    dataset_processor = SFTDatasetProcessor(tokenizer=tokenizer, config=dataset_config)
-    if len(args.dataset_train_splits) != len(args.dataset_mixer_dict) and len(args.dataset_train_splits) == 1:
-        args.dataset_train_splits = [args.dataset_train_splits[0]] * len(args.dataset_mixer_dict)
-        print(
-            f"Dataset splits not provided for all datasets. Using the same {args.dataset_train_splits[0]} split for all datasets."
-        )
-    if len(args.dataset_eval_splits) != len(args.dataset_eval_mixer_dict) and len(args.dataset_eval_splits) == 1:
-        args.dataset_eval_splits = [args.dataset_eval_splits[0]] * len(args.dataset_eval_mixer_dict)
-        print(
-            f"Dataset splits not provided for all datasets. Using the same {args.dataset_eval_splits[0]} split for all datasets."
-        )
-    train_dataset = combine_dataset(
-        args.dataset_mixer_dict,
-        splits=args.dataset_train_splits,
-        columns_to_keep=[dataset_config.sft_messages_key],
-    )
-    if dataset_config.sanity_check:
-        train_dataset = train_dataset.select(
-            range(0, min(len(train_dataset), dataset_config.sanity_check_max_samples))
-        )
-    with accelerator.main_process_first():
         train_dataset = dataset_processor.tokenize(train_dataset)
         train_dataset = dataset_processor.filter(train_dataset)
-    dataset_dict["train"] = train_dataset
-    eval_dataset = None
-    if args.dataset_eval_mixer is not None:
-        eval_dataset = combine_dataset(
-            args.dataset_eval_mixer_dict,
-            splits=args.dataset_eval_splits,
-            columns_to_keep=[dataset_config.sft_messages_key],
+        dataset_dict["train"] = train_dataset
+
+        data_collator = SimpleGenerateCollator(pad_token_id=self.tokenizer.pad_token_id)
+        dataloader = DataLoader(
+            train_dataset,
+            batch_size=self.args.local_dataloader_batch_size,
+            shuffle=True,
+            collate_fn=data_collator,
+            drop_last=True,
         )
-        eval_dataset = eval_dataset.select(range(0, min(len(eval_dataset), dataset_config.sanity_check_max_samples)))
-        with accelerator.main_process_first():
-            eval_dataset = dataset_processor.tokenize(eval_dataset)
-            eval_dataset = dataset_processor.filter(eval_dataset)
-        dataset_dict["eval"] = eval_dataset
 
-    # some more runtime logging
-    if accelerator.is_main_process:
-        pprint([args, dataset_config, model_config])
-        visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
+        # Training loop
+        start_time = time.time()
+        iter_dataloader = iter(dataloader)
+        data = next(iter_dataloader)
+        queries_next = data[INPUT_IDS_PROMPT_KEY].to(self.device)
+        queries_next = queries_next.repeat(self.args.num_generation_per_prompt, 1)
+        self.send_queries(None, queries_next)
 
-    # create the model and optimizer
-    policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-        model_config.model_name_or_path,
-        revision=model_config.model_revision,
-        torch_dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
-        use_cache=False,
-    )
-    ref_model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-        model_config.model_name_or_path,
-        revision=model_config.model_revision,
-        torch_dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
-        use_cache=False,
-    )
-    reward_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(
-        args.reward_model_path,
-        revision=args.reward_model_revision,
-        num_labels=1,
-        torch_dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
-        use_cache=False,
-    )
-    if policy.config.vocab_size != reward_model.config.vocab_size:
-        raise ValueError(
-            "Policy and reward model must have the same vocab size. "
-            f"Policy: {policy.config.vocab_size}, Reward: {reward_model.config.vocab_size}. "
-            "If they don't have the same vocab size, the policy could generate tokens which "
-            "is going to cause index out of bound error in the reward model."
-        )
-    model = policy
-    if model_config.gradient_checkpointing:
-        model.gradient_checkpointing_enable()
-    for module in [model, ref_model, reward_model]:
-        disable_dropout_in_model(module)
-    if args.stop_token:
-        if args.stop_token == "eos":
-            args.stop_token_id = tokenizer.eos_token_id
-        if args.stop_token == "period":
-            args.stop_token_id = tokenizer.encode(".")[0]
-    optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, eps=args.eps)
-    scheduler = get_scheduler(
-        args.lr_scheduler_type,
-        optimizer=optimizer,
-        num_warmup_steps=args.warm_up_steps,
-        num_training_steps=args.num_training_steps * args.num_train_epochs,
-    )
-    data_collator = SimpleGenerateCollator(pad_token_id=tokenizer.pad_token_id)
-    dataloader = DataLoader(
-        train_dataset,
-        batch_size=args.local_dataloader_batch_size,
-        shuffle=True,
-        collate_fn=data_collator,
-        drop_last=True,  # needed; otherwise the last batch will be of ragged shape
-    )
-    # sync random states for DataLoader(shuffle=True) before `accelerator.prepare`
-    # see https://gist.github.com/vwxyzjn/2581bff1e48e185e0b85b6dfe1def79c
-    torch.manual_seed(args.seed)
-    model, optimizer, dataloader = accelerator.prepare(model, optimizer, dataloader)
-    torch.manual_seed(local_seed)
+        for training_step in range(self.resume_training_step, self.num_training_steps + 1):
+            episode += self.args.batch_size
+            self.scheduler.step()
+            queries = queries_next
 
-    # resume from preemption
-    resume_training_step = 1
-    if os.path.exists(args.checkpoint_output_dir):
-        for item in os.listdir(args.checkpoint_output_dir):
-            print(item)
-            if "step_" in item:
-                old_checkpoint_path = os.path.join(args.checkpoint_output_dir, item)
-                # check if the directory is empty
-                if len(os.listdir(old_checkpoint_path)) == 0:
-                    continue
-                accelerator.load_state(old_checkpoint_path)
-                resume_training_step = int(item.split("_")[-1])
-                print("Resuming training from step", resume_training_step)
-                if accelerator.is_main_process:
-                    shutil.rmtree(old_checkpoint_path)
+            # Get responses from vLLM
+            items = self.param_prompt_Q.get()
+            if items is None:
                 break
-    resume_training_step > 1
+            unwrapped_model, g_queries_list = items
+            if unwrapped_model is not None:
+                start_time = time.time()
+                self.broadcast_to_vllm(unwrapped_model)
+                print(f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds")
+            
+            generation_start_time = time.time()
+            response_ids = self.generate_with_engines(g_queries_list, self.generation_config)
+            print(f"🔥🔥🔥 Generation time: {time.time() - generation_start_time:.2f} seconds")
+            self.response_ids_Q.put(response_ids)
 
-    # handle preemption
-    class PreemptionHandler:
-        preempted = False
-
-        def __init__(self):
-            signal.signal(signal.SIGTERM, self.exit_gracefully)
-
-        def exit_gracefully(self, signum, frame):
-            output_dir = os.path.join(args.checkpoint_output_dir, f"step_{training_step - 1}")
-            print(f"SIGTERM received, saving to {output_dir} from {accelerator.local_process_index}")
-            accelerator.save_state(output_dir)
-            if accelerator.is_main_process and args.with_tracking:
-                wandb.log({"preempted": True}, commit=True)
-                wandb.mark_preempting()
-            if accelerator.is_main_process:
-                try:
-                    param_prompt_Q.put(None, timeout=20)
-                    response_ids_Q.get(timeout=20)
-                    print("vllm thread terminated")
-                except Exception as e:
-                    print(e)
-            self.preempted = True
-
-    ph = PreemptionHandler()
-
-    # deepspeed setup
-    is_deepspeed_enabled = getattr(accelerator.state, "deepspeed_plugin", None) is not None
-    mixed_precision = accelerator.state.mixed_precision
-    if is_deepspeed_enabled:
-        reward_model = prepare_deepspeed(reward_model, args.per_device_train_batch_size, mixed_precision)
-        ref_model = prepare_deepspeed(ref_model, args.per_device_train_batch_size, mixed_precision)
-    else:
-        reward_model = reward_model.to(device)
-        ref_model = ref_model.to(device)
-
-    # online generation config
-    def repeat_generator():
-        while True:
-            yield from dataloader
-
-    iter_dataloader = iter(repeat_generator())
-    generation_config = SamplingParams(
-        temperature=args.temperature,
-        top_p=1.0,
-        max_tokens=args.response_length,
-        include_stop_str_in_output=True,
-    )
-    param_prompt_Q = None
-    response_ids_Q = None
-    evaluation_Q = None
-    if accelerator.is_main_process:
-        response_ids_Q = Queue(maxsize=1)
-        param_prompt_Q = Queue(maxsize=1)
-        evaluation_Q = Queue(maxsize=1)
-        LOCAL_NUM_EVAL_SAMPLES = 4
-        num_eval_samples = LOCAL_NUM_EVAL_SAMPLES * accelerator.num_processes
-        sample_evaluation_prompt_token_ids = None
-        if eval_dataset is not None:
-            sample_evaluation_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
-        thread = threading.Thread(
-            target=vllm_generate,
-            args=(
-                model_config.model_name_or_path,
-                model_config.model_revision,
-                dataset_config.max_prompt_token_length + args.response_length,
-                args.vllm_gpu_memory_utilization,
-                generation_config,
-                response_ids_Q,
-                param_prompt_Q,
-                args.num_training_steps,
-                sample_evaluation_prompt_token_ids,
-                evaluation_Q,
-                args.eval_freq,
-                resume_training_step,
-                args.vllm_num_engines,
-                args.vllm_tensor_parallel_size,
-                args.vllm_enforce_eager,
-                args.vllm_enable_prefix_caching,
-                args.single_gpu_mode,
-                accelerator,
-            ),
-        )
-        thread.start()
-    torch.cuda.set_device(device)
-
-    g_vllm_responses = torch.zeros((args.batch_size, args.response_length), device=device, dtype=torch.long)
-
-    # set up the metrics and initial states
-    stats_shape = (args.num_epochs, args.num_mini_batches, args.gradient_accumulation_steps)
-    loss_stats = torch.zeros(stats_shape, device=device)
-    chosen_rewards_stats = torch.zeros(stats_shape, device=device)
-    rejected_rewards_stats = torch.zeros(stats_shape, device=device)
-    chosen_logprobs_stats = torch.zeros(stats_shape, device=device)
-    rejected_logprobs_stats = torch.zeros(stats_shape, device=device)
-    local_metrics = torch.zeros((20,), device=device)
-    episode = args.batch_size * (resume_training_step - 1)
-    model.train()
-
-    # training loop
-    start_time = time.time()
-    data = next(iter_dataloader)
-    queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
-    queries_next = queries_next.repeat(args.num_generation_per_prompt, 1)
-    send_queries(accelerator, None, tokenizer, param_prompt_Q, queries_next)
-
-    for _ in range(1, resume_training_step):  # we didn't store scheduler state
-        scheduler.step()
-
-    for training_step in range(resume_training_step, args.num_training_steps + 1):
-        episode += args.batch_size
-        scheduler.step()
-        queries = queries_next
-        if ph.preempted:
-            break
-
-        if accelerator.is_main_process:
-            try:
-                evaluation_responses = evaluation_Q.get(timeout=0.01)
-                print("🔥🔥🔥 Evaluation responses received")
-                table = {}
-                table["prompt"] = tokenizer.batch_decode(sample_evaluation_prompt_token_ids)
-                table["response"] = tokenizer.batch_decode(evaluation_responses)
-                table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
-                df = pd.DataFrame(table)
-                print_rich_table(df)
-                if args.with_tracking:
-                    wandb.log({"sample_completions": wandb.Table(dataframe=df)})
-                else:
-                    print_rich_table(df)
-                del table
-            except Empty:
-                print("🙈 Evaluation responses not received")
-
-        with unwrap_model_for_generation(model, accelerator) as unwrapped_model:
-            # (optionally) evaluate the model
-            generation_model = unwrapped_model
-            if args.async_mode:
-                if training_step != 1:
-                    data = next(iter_dataloader)
-                    queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
-                    queries_next = queries_next.repeat(args.num_generation_per_prompt, 1)
-                send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
-            else:
-                if training_step != 1:
-                    # NOTE: important: the indent here is different for sync mode
-                    # we also set to use `queries = queries_next` immediately
-                    data = next(iter_dataloader)
-                    queries_next = data[INPUT_IDS_PROMPT_KEY].to(device)
-                    queries_next = queries_next.repeat(args.num_generation_per_prompt, 1)
-                    send_queries(accelerator, generation_model, tokenizer, param_prompt_Q, queries_next)
-                    queries = queries_next
-
-            training_time_start = time.time()
+            # Process responses and compute rewards
             with torch.no_grad():
                 context_length = queries.shape[1]
                 responses = []
@@ -722,49 +523,44 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 ref_logprobs = []
                 scores = []
                 sequence_lengths = []
-                if accelerator.is_main_process:
-                    g_response_token_ids = response_ids_Q.get()
-                    DUMMY_PAD_TOKEN = 0  # we can't use tokenizer.pad_token_id because it's outside vocab and `torch.gather(all_logprob, 2, response.unsqueeze(-1))` will error out
-                    g_padded_response_ids = [
-                        response + [DUMMY_PAD_TOKEN] * (args.response_length - len(response))
-                        for response in g_response_token_ids
-                    ]
-                    for item in g_padded_response_ids:
-                        assert len(item) == args.response_length
-                        for inner_item in item:
-                            if not inner_item < config.vocab_size:
-                                assert inner_item < config.vocab_size, f"{inner_item=}, {tokenizer.vocab_size=}"
-                    g_padded_response_ids = torch.tensor(g_padded_response_ids, device=device)
-                    g_vllm_responses[:] = g_padded_response_ids
-                broadcast(g_vllm_responses, 0)
-                local_vllm_responses = g_vllm_responses[
-                    accelerator.process_index * queries.shape[0] : (accelerator.process_index + 1) * queries.shape[0]
+
+                g_response_token_ids = response_ids
+                DUMMY_PAD_TOKEN = 0
+                g_padded_response_ids = [
+                    response + [DUMMY_PAD_TOKEN] * (self.args.response_length - len(response))
+                    for response in g_response_token_ids
+                ]
+                g_padded_response_ids = torch.tensor(g_padded_response_ids, device=self.device)
+                local_vllm_responses = g_padded_response_ids[
+                    self.rank * queries.shape[0] : (self.rank + 1) * queries.shape[0]
                 ]
                 query_responses = torch.cat((queries, local_vllm_responses), 1)
-                for i in range(0, queries.shape[0], args.local_rollout_forward_batch_size):
-                    query = queries[i : i + args.local_rollout_forward_batch_size]
-                    query_response = query_responses[i : i + args.local_rollout_forward_batch_size]
+
+                for i in range(0, queries.shape[0], self.args.local_rollout_forward_batch_size):
+                    query = queries[i : i + self.args.local_rollout_forward_batch_size]
+                    query_response = query_responses[i : i + self.args.local_rollout_forward_batch_size]
                     response = query_response[:, context_length:]
 
-                    ref_output = forward(ref_model, query_response, tokenizer.pad_token_id)
+                    # Get reference model logprobs
+                    ref_output = forward(self.ref_model, query_response, self.tokenizer.pad_token_id)
                     ref_logits = ref_output.logits[:, context_length - 1 : -1]
-                    ref_logits /= args.temperature + 1e-7
+                    ref_logits = ref_logits / (self.args.temperature + 1e-7)
                     ref_logprob = log_softmax_and_gather(ref_logits, response)
                     del ref_output, ref_logits
                     torch.cuda.empty_cache()
 
-                    # Response Processing 1. truncate response after the first occurrence of `stop_token_id`
+                    # Process responses
                     postprocessed_response = response
-                    if args.stop_token_id is not None:  # handle the edge case when stop_token_id exists but is 0
+                    if self.args.stop_token_id is not None:
                         postprocessed_response = truncate_response(
-                            args.stop_token_id, tokenizer.pad_token_id, response
+                            self.args.stop_token_id, self.tokenizer.pad_token_id, response
                         )
 
-                    # Response Processing 2. run reward model on the truncated responses
+                    # Get rewards
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
-                    sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
+                    sequence_length = first_true_indices(postprocessed_response == self.tokenizer.pad_token_id) - 1
                     _, score, _ = get_reward(
-                        reward_model, postprocessed_query_response, tokenizer.pad_token_id, context_length
+                        self.reward_model, postprocessed_query_response, self.tokenizer.pad_token_id, context_length
                     )
 
                     responses.append(response)
@@ -772,34 +568,25 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                     ref_logprobs.append(ref_logprob)
                     sequence_lengths.append(sequence_length)
                     scores.append(score)
+
                 responses = torch.cat(responses, 0)
                 postprocessed_responses = torch.cat(postprocessed_responses, 0)
                 ref_logprobs = torch.cat(ref_logprobs, 0)
                 sequence_lengths = torch.cat(sequence_lengths, 0)
                 scores = torch.cat(scores, 0)
-                accelerator.gather(scores)
-                del (ref_logprob, score)
-                gc.collect()
-                torch.cuda.empty_cache()
 
-                # Response Processing 3. filter response. Ensure that the sample contains stop_token_id
-                # responses not passing that filter will receive a low (fixed) score
-                # only query humans on responses that pass that filter
-                contain_stop_token = torch.any(postprocessed_responses == args.stop_token_id, dim=-1)
-                # NOTE: only apply the stop token filter if the response is long enough
-                # otherwise the model could learn to generate the first token as the stop token
-                contain_stop_token = contain_stop_token & (sequence_lengths >= args.min_response_length)
-                if args.non_stop_penalty:
+                # Process scores and compute chosen/rejected indices
+                contain_stop_token = torch.any(postprocessed_responses == self.args.stop_token_id, dim=-1)
+                contain_stop_token = contain_stop_token & (sequence_lengths >= self.args.min_response_length)
+                if self.args.non_stop_penalty:
                     scores = torch.where(
-                        contain_stop_token, scores, torch.full_like(scores, args.penalty_reward_value)
+                        contain_stop_token, scores, torch.full_like(scores, self.args.penalty_reward_value)
                     )
 
-                # be very careful with `padding_mask_p1`; see https://excalidraw.com/#json=LWnzG4w2k5DjF_EOL_xPt,e2w3a-hFJ_gX5vOfeyXGTw
                 response_idxs = torch.arange(responses.shape[1], device=responses.device).repeat(responses.shape[0], 1)
                 padding_mask = response_idxs > sequence_lengths.unsqueeze(1)
                 ref_logprobs = torch.masked_fill(ref_logprobs, padding_mask, INVALID_LOGPROB)
 
-                # num_examples should be same as args.local_batch_size divided by 2
                 num_examples = scores.size(0) // 2
                 first_half = scores[:num_examples]
                 second_half = scores[num_examples:]
@@ -813,27 +600,26 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 )
                 scores_margin = scores[chosen_indices] - scores[rejected_indices]
 
-        logprobs = []
-        concat_indices = []
-        # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
-        for epoch_idx in range(args.num_epochs):
-            b_inds = np.random.permutation(args.local_batch_size // args.num_generation_per_prompt)
-            minibatch_idx = 0
-            for mini_batch_start in range(
-                0,
-                args.local_batch_size // args.num_generation_per_prompt,
-                args.local_mini_batch_size // args.num_generation_per_prompt,
-            ):
-                mini_batch_end = mini_batch_start + args.local_mini_batch_size // args.num_generation_per_prompt
-                mini_batch_inds = b_inds[mini_batch_start:mini_batch_end]
-                gradient_accumulation_idx = 0
-                for micro_batch_start in range(
+            # Training loop
+            logprobs = []
+            concat_indices = []
+            for epoch_idx in range(self.args.num_epochs):
+                b_inds = np.random.permutation(self.args.local_batch_size // self.args.num_generation_per_prompt)
+                minibatch_idx = 0
+                for mini_batch_start in range(
                     0,
-                    args.local_mini_batch_size // args.num_generation_per_prompt,
-                    args.per_device_train_batch_size,
+                    self.args.local_batch_size // self.args.num_generation_per_prompt,
+                    self.args.local_mini_batch_size // self.args.num_generation_per_prompt,
                 ):
-                    with accelerator.accumulate(model):
-                        micro_batch_end = micro_batch_start + args.per_device_train_batch_size
+                    mini_batch_end = mini_batch_start + self.args.local_mini_batch_size // self.args.num_generation_per_prompt
+                    mini_batch_inds = b_inds[mini_batch_start:mini_batch_end]
+                    gradient_accumulation_idx = 0
+                    for micro_batch_start in range(
+                        0,
+                        self.args.local_mini_batch_size // self.args.num_generation_per_prompt,
+                        self.args.per_device_train_batch_size,
+                    ):
+                        micro_batch_end = micro_batch_start + self.args.per_device_train_batch_size
                         micro_batch_inds = mini_batch_inds[micro_batch_start:micro_batch_end]
                         chosen_mb_inds = chosen_indices[micro_batch_inds]
                         chosen_responses = responses[chosen_mb_inds]
@@ -842,14 +628,14 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
                         concat_mb_inds = torch.cat((chosen_mb_inds, rejected_mb_inds), dim=0)
                         concat_query_responses = query_responses[concat_mb_inds]
-                        concat_output = forward(model, concat_query_responses, tokenizer.pad_token_id)
+                        concat_output = forward(self.policy, concat_query_responses, self.tokenizer.pad_token_id)
                         num_examples = chosen_mb_inds.shape[0]
                         chosen_logits = concat_output.logits[:num_examples]
                         rejected_logits = concat_output.logits[num_examples:]
 
-                        # chosen
+                        # Compute chosen logprobs
                         chosen_logits = chosen_logits[:, context_length - 1 : -1]
-                        chosen_logits = chosen_logits / (args.temperature + 1e-7)  # Out-of-place division
+                        chosen_logits = chosen_logits / (self.args.temperature + 1e-7)
                         chosen_logprobs = log_softmax_and_gather(chosen_logits, chosen_responses)
                         chosen_logprobs = torch.masked_fill(
                             chosen_logprobs, padding_mask[chosen_mb_inds], INVALID_LOGPROB
@@ -858,9 +644,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         chosen_logprobs_sum = (chosen_logprobs * ~padding_mask[chosen_mb_inds]).sum(1)
                         chosen_ref_logprobs_sum = (chosen_ref_logprobs * ~padding_mask[chosen_mb_inds]).sum(1)
 
-                        # rejected
+                        # Compute rejected logprobs
                         rejected_logits = rejected_logits[:, context_length - 1 : -1]
-                        rejected_logits = rejected_logits / (args.temperature + 1e-7)  # Out-of-place division
+                        rejected_logits = rejected_logits / (self.args.temperature + 1e-7)
                         rejected_logprobs = log_softmax_and_gather(rejected_logits, rejected_responses)
                         rejected_logprobs = torch.masked_fill(
                             rejected_logprobs, padding_mask[rejected_mb_inds], INVALID_LOGPROB
@@ -869,33 +655,35 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                         rejected_logprobs_sum = (rejected_logprobs * ~padding_mask[rejected_mb_inds]).sum(1)
                         rejected_ref_logprobs_sum = (rejected_ref_logprobs * ~padding_mask[rejected_mb_inds]).sum(1)
 
+                        # Compute DPO loss
                         pi_logratios = chosen_logprobs_sum - rejected_logprobs_sum
                         ref_logratios = chosen_ref_logprobs_sum - rejected_ref_logprobs_sum
-
                         logits = pi_logratios - ref_logratios
 
-                        if args.loss_type == "sigmoid":
-                            losses = -F.logsigmoid(args.beta * logits)
-                        elif args.loss_type == "ipo":
-                            losses = (logits - 1 / (2 * args.beta)) ** 2
+                        if self.args.loss_type == "sigmoid":
+                            losses = -F.logsigmoid(self.args.beta * logits)
+                        elif self.args.loss_type == "ipo":
+                            losses = (logits - 1 / (2 * self.args.beta)) ** 2
                         else:
-                            raise NotImplementedError(f"invalid loss type {args.loss_type}")
+                            raise NotImplementedError(f"invalid loss type {self.args.loss_type}")
 
                         loss = losses.mean()
-                        accelerator.backward(loss)
-                        optimizer.step()
-                        optimizer.zero_grad()
+                        loss.backward()
+                        self.optimizer.step()
+                        self.optimizer.zero_grad()
+
+                        # Update metrics
                         with torch.no_grad():
                             if epoch_idx == 0:
                                 concat_indices.append(concat_mb_inds)
                                 response = concat_query_responses[:, context_length:]
                                 logits = concat_output.logits[:, context_length - 1 : -1]
-                                logits /= args.temperature + 1e-7
+                                logits /= self.args.temperature + 1e-7
                                 logprob = log_softmax_and_gather(logits, response)
                                 logprob = torch.masked_fill(logprob, padding_mask[concat_mb_inds], INVALID_LOGPROB)
                                 logprobs.append(logprob)
-                            chosen_rewards = args.beta * (chosen_logprobs_sum - chosen_ref_logprobs_sum)
-                            rejected_rewards = args.beta * (rejected_logprobs_sum - rejected_ref_logprobs_sum)
+                            chosen_rewards = self.args.beta * (chosen_logprobs_sum - chosen_ref_logprobs_sum)
+                            rejected_rewards = self.args.beta * (rejected_logprobs_sum - rejected_ref_logprobs_sum)
                             loss_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = loss
                             chosen_rewards_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = (
                                 chosen_rewards.mean()
@@ -909,149 +697,150 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                             rejected_logprobs_stats[epoch_idx, minibatch_idx, gradient_accumulation_idx] = (
                                 rejected_logprobs_sum.mean()
                             )
-                    gradient_accumulation_idx += 1
-                minibatch_idx += 1
-                # fmt: off
-                del (
-                    loss, logits, concat_output, concat_query_responses,
-                    chosen_logits, rejected_logits, chosen_logprobs, rejected_logprobs,
-                    chosen_responses, rejected_responses,
-                )
-                # fmt: on
-                # del everything and empty cache
-                torch.cuda.empty_cache()
-        with torch.no_grad():
-            logprobs = torch.cat(logprobs, 0)
-            concat_indices = torch.cat(concat_indices, 0)
-            restore_logprobs = torch.zeros_like(logprobs)
-            restore_logprobs[concat_indices] = logprobs
-            kl = restore_logprobs - ref_logprobs
-            non_score_reward = -args.beta * kl
-            non_score_reward_sum = non_score_reward.sum(1)
-            rlhf_reward = scores + non_score_reward_sum
-            local_metrics[0] = sequence_lengths.float().mean()
-            local_metrics[1] = (responses == args.stop_token_id).sum().float().mean()
-            local_metrics[2] = kl.sum(1).mean()
-            local_metrics[3] = (-logprobs).sum(1).mean()
-            local_metrics[4] = non_score_reward_sum.mean()
-            local_metrics[5] = rlhf_reward.mean()
-            local_metrics[6] = scores.mean()
-            local_metrics[7] = scores_margin.mean()
-            local_metrics[8] = loss_stats.mean()
-            local_metrics[9] = chosen_rewards_stats.mean()
-            local_metrics[10] = rejected_rewards_stats.mean()
-            local_metrics[11] = (chosen_rewards_stats > rejected_rewards_stats).float().mean()
-            local_metrics[12] = (chosen_rewards_stats - rejected_rewards_stats).mean()
-            local_metrics[13] = chosen_logprobs_stats.mean()
-            local_metrics[14] = rejected_logprobs_stats.mean()
-            local_metrics[15] = ((kl) ** 2 / 2).sum(1).mean()
-            local_metrics[16] = ((-kl).exp() - 1 + kl).sum(1).mean()
-            global_metrics = accelerator.reduce(local_metrics, reduction="mean").tolist()
-            metrics = {
-                "episode": episode,
-                "training_step": training_step,
-                "lr": scheduler.get_last_lr()[0],
-                "epoch": episode / len(train_dataset),
-                "time/from_scratch": time.time() - start_time,
-                "time/training": time.time() - training_time_start,
-                "val/sequence_lengths": global_metrics[0],
-                "val/num_stop_token_ids": global_metrics[1],
-                "objective/kl": global_metrics[2],
-                "objective/kl2": global_metrics[15],
-                "objective/kl3": global_metrics[16],
-                "objective/entropy": global_metrics[3],
-                "objective/non_score_reward": global_metrics[4],
-                "objective/rlhf_reward": global_metrics[5],
-                "objective/scores": global_metrics[6],
-                "objective/scores_margin": global_metrics[7],
-                "objective/loss": global_metrics[8],
-                "rewards/chosen": global_metrics[9],
-                "rewards/rejected": global_metrics[10],
-                "rewards/accuracies": global_metrics[11],
-                "rewards/margins": global_metrics[12],
-                "logps/chosen": global_metrics[13],
-                "logps/rejected": global_metrics[14],
-            }
-            if accelerator.is_main_process:
-                print_rich_single_line_metrics(metrics)
-                if args.with_tracking:
-                    wandb.log(metrics, step=episode)
-        del (queries, responses, postprocessed_responses, logprobs, ref_logprobs, sequence_lengths, scores)
-        del (metrics, kl, non_score_reward, rlhf_reward)
-        gc.collect()
-        torch.cuda.empty_cache()
+                        gradient_accumulation_idx += 1
+                    minibatch_idx += 1
+                    del (
+                        loss, logits, concat_output, concat_query_responses,
+                        chosen_logits, rejected_logits, chosen_logprobs, rejected_logprobs,
+                        chosen_responses, rejected_responses,
+                    )
+                    torch.cuda.empty_cache()
 
-    if not ph.preempted:
-        # save model
-        os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
-        original_tokenizer = AutoTokenizer.from_pretrained(
-            model_config.model_name_or_path, revision=model_config.model_revision
+            # Compute final metrics
+            with torch.no_grad():
+                logprobs = torch.cat(logprobs, 0)
+                concat_indices = torch.cat(concat_indices, 0)
+                restore_logprobs = torch.zeros_like(logprobs)
+                restore_logprobs[concat_indices] = logprobs
+                kl = restore_logprobs - ref_logprobs
+                non_score_reward = -self.args.beta * kl
+                non_score_reward_sum = non_score_reward.sum(1)
+                rlhf_reward = scores + non_score_reward_sum
+                local_metrics[0] = sequence_lengths.float().mean()
+                local_metrics[1] = (responses == self.args.stop_token_id).sum().float().mean()
+                local_metrics[2] = kl.sum(1).mean()
+                local_metrics[3] = (-logprobs).sum(1).mean()
+                local_metrics[4] = non_score_reward_sum.mean()
+                local_metrics[5] = rlhf_reward.mean()
+                local_metrics[6] = scores.mean()
+                local_metrics[7] = scores_margin.mean()
+                local_metrics[8] = loss_stats.mean()
+                local_metrics[9] = chosen_rewards_stats.mean()
+                local_metrics[10] = rejected_rewards_stats.mean()
+                local_metrics[11] = (chosen_rewards_stats > rejected_rewards_stats).float().mean()
+                local_metrics[12] = (chosen_rewards_stats - rejected_rewards_stats).mean()
+                local_metrics[13] = chosen_logprobs_stats.mean()
+                local_metrics[14] = rejected_logprobs_stats.mean()
+                local_metrics[15] = ((kl) ** 2 / 2).sum(1).mean()
+                local_metrics[16] = ((-kl).exp() - 1 + kl).sum(1).mean()
+
+                # Gather metrics across processes
+                global_metrics = torch.zeros_like(local_metrics)
+                torch.distributed.all_reduce(local_metrics, op=torch.distributed.ReduceOp.SUM)
+                global_metrics = local_metrics / self.world_size
+
+                if self.rank == 0:
+                    metrics = {
+                        "episode": episode,
+                        "training_step": training_step,
+                        "lr": self.scheduler.get_last_lr()[0],
+                        "epoch": episode / len(train_dataset),
+                        "time/from_scratch": time.time() - start_time,
+                        "time/training": time.time() - generation_start_time,
+                        "val/sequence_lengths": global_metrics[0].item(),
+                        "val/num_stop_token_ids": global_metrics[1].item(),
+                        "objective/kl": global_metrics[2].item(),
+                        "objective/kl2": global_metrics[15].item(),
+                        "objective/kl3": global_metrics[16].item(),
+                        "objective/entropy": global_metrics[3].item(),
+                        "objective/non_score_reward": global_metrics[4].item(),
+                        "objective/rlhf_reward": global_metrics[5].item(),
+                        "objective/scores": global_metrics[6].item(),
+                        "objective/scores_margin": global_metrics[7].item(),
+                        "objective/loss": global_metrics[8].item(),
+                        "rewards/chosen": global_metrics[9].item(),
+                        "rewards/rejected": global_metrics[10].item(),
+                        "rewards/accuracies": global_metrics[11].item(),
+                        "rewards/margins": global_metrics[12].item(),
+                        "logps/chosen": global_metrics[13].item(),
+                        "logps/rejected": global_metrics[14].item(),
+                    }
+                    print_rich_single_line_metrics(metrics)
+                    if self.args.with_tracking:
+                        import wandb
+                        wandb.log(metrics, step=episode)
+
+            # Prepare next batch
+            data = next(iter_dataloader)
+            queries_next = data[INPUT_IDS_PROMPT_KEY].to(self.device)
+            queries_next = queries_next.repeat(self.args.num_generation_per_prompt, 1)
+            self.send_queries(self.policy, queries_next)
+
+            # Clean up
+            del (queries, responses, postprocessed_responses, logprobs, ref_logprobs, sequence_lengths, scores)
+            del (metrics, kl, non_score_reward, rlhf_reward)
+            gc.collect()
+            torch.cuda.empty_cache()
+
+    def send_queries(self, model, queries):
+        g_queries_list = gather_object(queries.tolist())
+        if torch.distributed.get_rank() == 0:
+            g_queries_list = [
+                [inneritem for inneritem in item if inneritem != self.tokenizer.pad_token_id] for item in g_queries_list
+            ]  # remove padding
+            self.param_prompt_Q.put((model, g_queries_list))
+
+
+def send_queries(accelerator, unwrapped_model, tokenizer, param_prompt_Q, queries):
+    g_queries_list = gather_object(queries.tolist())
+    if accelerator.is_main_process:
+        g_queries_list = [
+            [inneritem for inneritem in item if inneritem != tokenizer.pad_token_id] for item in g_queries_list
+        ]  # remove padding
+        param_prompt_Q.put((unwrapped_model, g_queries_list))
+
+
+def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
+    # Initialize Ray
+    if not ray.is_initialized():
+        ray.init()
+
+    # Create policy trainer processes
+    policy_trainers = []
+    for rank in range(args.world_size):
+        trainer = PolicyTrainerRayProcess.remote(
+            rank=rank,
+            world_size=args.world_size,
+            model_name_or_path=model_config.model_name_or_path,
+            model_revision=model_config.model_revision,
+            max_model_len=dataset_config.max_prompt_token_length + args.response_length,
+            vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+            generation_config=SamplingParams(
+                temperature=args.temperature,
+                top_p=1.0,
+                max_tokens=args.response_length,
+                include_stop_str_in_output=True,
+            ),
+            response_ids_Q=Queue(maxsize=1),
+            param_prompt_Q=Queue(maxsize=1),
+            num_training_steps=args.num_training_steps,
+            sample_evaluation_prompt_token_ids=None,  # TODO: Add evaluation support
+            evaluation_Q=Queue(maxsize=1),
+            eval_freq=args.eval_freq,
+            resume_training_step=1,
+            num_engines=args.vllm_num_engines,
+            tensor_parallel_size=args.vllm_tensor_parallel_size,
+            vllm_enforce_eager=args.vllm_enforce_eager,
+            enable_prefix_caching=args.vllm_enable_prefix_caching,
+            single_gpu_mode=args.single_gpu_mode,
+            args=args,
+            dataset_config=dataset_config,
+            model_config=model_config,
         )
-        save_with_accelerate(
-            accelerator,
-            model,
-            original_tokenizer,
-            args.output_dir,
-        )
+        policy_trainers.append(trainer)
 
-        # Ai2 specific logic
-        if is_beaker_job() and accelerator.is_main_process:
-            if args.hf_metadata_dataset:
-                dataset_list = list(args.dataset_mixer_dict.keys())
-                # mainly just focussing here on what would be useful for the leaderboard.
-                # wandb will have even more useful information.
-                metadata_blob = {
-                    "model_name": args.exp_name,
-                    "model_type": "sft",
-                    "datasets": dataset_list,
-                    "base_model": model_config.model_name_or_path,
-                    "wandb_path": wandb.run.get_url(),
-                    "beaker_experiment": beaker_config.beaker_experiment_url,
-                    "beaker_datasets": beaker_config.beaker_dataset_id_urls,
-                }
-                upload_metadata_to_hf(
-                    metadata_blob,
-                    "metadata.json",
-                    args.hf_metadata_dataset,
-                    "results/" + args.hf_repo_revision,  # to match what the auto-evals name as.
-                )
-
-            if args.try_launch_beaker_eval_jobs and len(beaker_config.beaker_dataset_id_urls) > 0:
-                command = f"""\
-                python mason.py  \
-                    --cluster ai2/allennlp-cirrascale ai2/general-cirrascale-a5000 ai2/general-cirrascale-a5000 ai2/s2-cirrascale ai2/general-cirrascale \
-                    --priority low \
-                    --preemptible \
-                    --budget ai2/allennlp \
-                    --workspace ai2/tulu-2-improvements \
-                    --image nathanl/open_instruct_auto \
-                    --pure_docker_mode \
-                    --gpus 0 -- python scripts/wait_beaker_dataset_model_upload_then_evaluate_model.py \
-                    --beaker_workload_id {beaker_config.beaker_workload_id} \
-                --upload_to_hf {args.hf_metadata_dataset} \
-                    --model_name {args.hf_repo_revision}
-                """
-                process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                stdout, stderr = process.communicate()
-                print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
-                print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
-                print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
-
-        if args.push_to_hub:
-            push_folder_to_hub(
-                accelerator,
-                args.output_dir,
-                args.hf_repo_id,
-                args.hf_repo_revision,
-            )
-
-        if accelerator.is_main_process:
-            # remove args.checkpoint_output_dir
-            if os.path.exists(args.checkpoint_output_dir):
-                shutil.rmtree(args.checkpoint_output_dir, ignore_errors=True)
-
-        if args.with_tracking:
-            wandb.finish()
+    # Start training
+    ray.get([trainer.train.remote() for trainer in policy_trainers])
 
 
 if __name__ == "__main__":
