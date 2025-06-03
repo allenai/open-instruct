@@ -22,6 +22,8 @@ python mason.py \
     --gpus $NUM_GPUS -- $YOUR_COMMAND
 ```
 
+**WARNING: This script is not battle-tested. There may be bugs and issues -- please report them! Use at your own risk.**
+
 
 ### Level 0: single GPU; quick debug. Should take less than 10 minutes to finish
 
