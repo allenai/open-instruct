@@ -1031,6 +1031,23 @@ class PolicyTrainerRayProcess(RayProcess):
                     chosen_indices = prompt_offsets + top_indices_within_group
                     rejected_indices = prompt_offsets + bottom_indices_within_group
                     
+                    # Create selection indices for filtering all tensors consistently
+                    selection_indices = torch.cat([chosen_indices, rejected_indices])
+                    
+                    # Filter all relevant tensors to only include chosen and rejected samples
+                    responses = responses[selection_indices]
+                    postprocessed_responses = postprocessed_responses[selection_indices]
+                    ref_logprobs = ref_logprobs[selection_indices]
+                    sequence_lengths = sequence_lengths[selection_indices]
+                    scores = scores[selection_indices]
+                    padding_mask = padding_mask[selection_indices]
+                    query_responses = query_responses[selection_indices]
+                    
+                    # Update indices to point to the filtered tensors
+                    num_pairs = len(chosen_indices)
+                    chosen_indices = torch.arange(num_pairs, device=scores.device)
+                    rejected_indices = torch.arange(num_pairs, num_pairs * 2, device=scores.device)
+                    
                     scores_margin = scores[chosen_indices] - scores[rejected_indices]
                 else:
                     # Original DPO logic: split responses into chosen and rejected pairs
@@ -1046,6 +1063,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         first_half < second_half, num_examples_range.clone(), num_examples_range.clone() + num_examples
                     )
                     scores_margin = scores[chosen_indices] - scores[rejected_indices]
+            
             logprobs = []
             concat_indices = []
             # Do multiple epochs of training on on-policy data (PPO-style)
