@@ -271,7 +271,7 @@ class Args:
     """the reward value for verifiable responses"""
 
     # -- llm verifiers reward
-    llm_judge_model: str = "gpt-4o-mini-standard"
+    llm_judge_model: str = "azure/gpt-4o-mini-standard"
     """the model to use for the llm judge"""
     llm_judge_max_tokens: int = 2048
     """the max tokens to use for the llm judge"""

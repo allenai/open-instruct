@@ -3,13 +3,13 @@ python open_instruct/grpo_fast.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list ai2-adapt-dev/general-thoughts-100k-rewritten-v2-ifeval 16 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 512 \
-    --max_prompt_token_length 512 \
+    --max_token_length 4096 \
+    --max_prompt_token_length 2048 \
     --response_length 512 \
-    --pack_length 1024 \
+    --pack_length 4096 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 32 \
-    --num_samples_per_prompt_rollout 4 \
+    --num_unique_prompts_rollout 64 \
+    --num_samples_per_prompt_rollout 16 \
     --model_name_or_path Qwen/Qwen2.5-0.5B \
     --stop_strings "</answer>" \
     --apply_verifiable_reward true \
@@ -20,7 +20,7 @@ python open_instruct/grpo_fast.py \
     --ground_truths_key ground_truth \
     --chat_template_name tulu_thinker_r1_style \
     --learning_rate 3e-7 \
-    --total_episodes 512 \
+    --total_episodes 2048 \
     --deepspeed_stage 2 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
@@ -35,4 +35,4 @@ python open_instruct/grpo_fast.py \
     --gradient_checkpointing \
     --single_gpu_mode \
     --push_to_hub false \
-    --llm_judge_model "gpt-4o-mini-standard"
+    --llm_judge_model "azure/gpt-4.1-standard"

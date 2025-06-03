@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
 from openai import AsyncAzureOpenAI
+from litellm import acompletion
 
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.judge_utils import (
@@ -520,9 +521,9 @@ class LMJudgeVerifier(VerifierFunction):
             # Use the loop object itself as the key (WeakKeyDictionary will clean up automatically)
             if loop not in self._client_cache:
                 self._client_cache[loop] = AsyncAzureOpenAI(
-                    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-                    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-                    api_version="2024-12-01-preview",
+                    api_key=os.getenv("AZURE_API_KEY"),
+                    azure_endpoint=os.getenv("AZURE_API_BASE"),
+                    api_version=os.getenv("AZURE_API_VERSION") if os.getenv("AZURE_API_VERSION") else "2024-12-01-preview",
                     timeout=self.verifier_config.llm_judge_timeout,
                 )
 
@@ -531,9 +532,9 @@ class LMJudgeVerifier(VerifierFunction):
         except RuntimeError:
             # No event loop running, create a fresh client (this should be rare)
             return AsyncAzureOpenAI(
-                api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-                azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-                api_version="2024-12-01-preview",
+                api_key=os.getenv("AZURE_API_KEY"),
+                azure_endpoint=os.getenv("AZURE_API_BASE"),
+                api_version=os.getenv("AZURE_API_VERSION") if os.getenv("AZURE_API_VERSION") else "2024-12-01-preview",
                 timeout=self.verifier_config.llm_judge_timeout,
             )
 
@@ -583,10 +584,11 @@ class LMJudgeVerifier(VerifierFunction):
         """
         Get the cost of the response.
         """
-        model_name = model.replace("-standard", "")  # azure OAI models have -standard in the name
+        model_name = model.split('/')[-1] # for litellm, discard the namespace
+        model_name = model_name.replace("-standard", "")  # azure OAI models have -standard in the name
         return (
-            PRICE_PER_TOKEN[model_name]["input"] * response.usage.prompt_tokens
-            + PRICE_PER_TOKEN[model_name]["output"] * response.usage.completion_tokens
+            PRICE_PER_TOKEN.get(model_name, {}).get("input", 0) * response.usage.prompt_tokens
+            + PRICE_PER_TOKEN.get(model_name, {}).get("output", 0) * response.usage.completion_tokens
         )
 
     async def async_call(
@@ -595,7 +597,7 @@ class LMJudgeVerifier(VerifierFunction):
         """
         Asynchronous version of __call__ that properly handles the async OpenAI client.
         """
-        client = self._get_client()
+        #client = self._get_client()
         final_answer = extract_final_answer(prediction)
         prompt = self.prompt_template.format(input=query, output=final_answer, label=label)
 
@@ -605,7 +607,7 @@ class LMJudgeVerifier(VerifierFunction):
         for attempt in range(max_retries):
             try:
                 messages = build_messages(prompt)
-                response = await client.chat.completions.create(
+                response = await acompletion(
                     model=self.verifier_config.llm_judge_model,
                     messages=messages,
                     temperature=self.verifier_config.llm_judge_temperature,
