@@ -23,7 +23,6 @@ except Exception:
 # isort: on
 
 import gc
-import json
 import math
 import random
 import shutil
@@ -34,9 +33,8 @@ import time
 from argparse import Namespace
 from collections import deque
 from dataclasses import asdict, dataclass, field
-from itertools import chain
 from queue import Empty, Queue
-from typing import Any, Callable, Iterator, List, Literal, Optional, Tuple
+from typing import Any, Callable, Iterator, List, Literal, Optional
 
 import numpy as np
 import pandas as pd
@@ -73,7 +71,6 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.model_utils import (
     ModelConfig,
-    apply_verifiable_reward,
     disable_dropout_in_model,
     exact_div,
     first_true_indices,
@@ -223,7 +220,7 @@ class Args:
     take_top_bottom_generation: bool = False
     """learn on only one pair from each num_generation_per_prompt sample
     the top and bottom scoring completions are chosen"""
-    
+
     # async setting
     async_mode: bool = True
     """Whether to run the generation in async mode which learns from the second latest policy like Cleanba"""
@@ -534,11 +531,11 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["train_batch_size"] = args.mini_batch_size
-        
+
         if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            dschf = HfDeepSpeedConfig(ds_config)
+            HfDeepSpeedConfig(ds_config)
         else:
-            dschf = None
+            pass
 
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
@@ -550,7 +547,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.policy_vocab_size = self.policy.config.vocab_size
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
-        
+
         self.optimizer = torch.optim.AdamW(self.policy.parameters(), lr=args.learning_rate, eps=args.eps)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
@@ -580,11 +577,11 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["train_batch_size"] = args.mini_batch_size
-        
+
         if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            dschf = HfDeepSpeedConfig(ds_config)
+            HfDeepSpeedConfig(ds_config)
         else:
-            dschf = None
+            pass
 
         self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
@@ -665,7 +662,7 @@ class PolicyTrainerRayProcess(RayProcess):
         accelerator.num_processes = self.world_size
         accelerator.is_main_process = self.rank == 0
         torch.distributed.barrier()
-        
+
         if self.rank == 0:
             master_address = ray._private.services.get_node_ip_address()
             with socket.socket() as sock:
@@ -741,22 +738,18 @@ class PolicyTrainerRayProcess(RayProcess):
                 args.stop_token_id = tokenizer.eos_token_id
             if args.stop_token == "period":
                 args.stop_token_id = tokenizer.encode(".")[0]
-        
+
         train_dataset_idxs = np.arange(len(train_dataset))
         if args.take_top_bottom_generation:
             # For top-bottom mode, we need full rollout_batch_size divided by num_generation_per_prompt
             # since we'll generate multiple completions per prompt but only train on top/bottom pairs
             shuffling_iter = ShufflingIterator(
-                train_dataset_idxs, 
-                args.rollout_batch_size // args.num_generation_per_prompt, 
-                seed=args.seed
+                train_dataset_idxs, args.rollout_batch_size // args.num_generation_per_prompt, seed=args.seed
             )
         else:
             # Original DPO: we divide by num_generation_per_prompt because we'll repeat each prompt
             shuffling_iter = ShufflingIterator(
-                train_dataset_idxs, 
-                args.rollout_batch_size // args.num_generation_per_prompt, 
-                seed=args.seed
+                train_dataset_idxs, args.rollout_batch_size // args.num_generation_per_prompt, seed=args.seed
             )
 
         def repeat_generator():
@@ -781,7 +774,7 @@ class PolicyTrainerRayProcess(RayProcess):
             n=1,
             stop=args.stop_strings,
         )
-        
+
         response_ids_Q = Queue(maxsize=1)
         param_prompt_Q = Queue(maxsize=1)
         evaluation_Q = Queue(maxsize=1)
@@ -865,7 +858,7 @@ class PolicyTrainerRayProcess(RayProcess):
         rejected_logprobs_stats = torch.zeros(stats_shape, device=device)
         local_metrics = MetricsTracker(max_metrics=32, device=device)
         episode = args.rollout_batch_size * (resume_training_step - 1)
-        
+
         # training loop
         start_time = time.time()
         eval_futures = deque([])
@@ -873,8 +866,11 @@ class PolicyTrainerRayProcess(RayProcess):
         # For DPO, we only need half the rollout_batch_size from the dataset
         data = data_collator(
             global_data[
-                self.rank * args.local_rollout_batch_size // args.num_generation_per_prompt : 
-                (self.rank + 1) * args.local_rollout_batch_size // args.num_generation_per_prompt
+                self.rank
+                * args.local_rollout_batch_size
+                // args.num_generation_per_prompt : (self.rank + 1)
+                * args.local_rollout_batch_size
+                // args.num_generation_per_prompt
             ]
         )
         global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
@@ -908,8 +904,11 @@ class PolicyTrainerRayProcess(RayProcess):
                     global_data = next(iter_dataloader)
                     data = data_collator(
                         global_data[
-                            self.rank * args.local_rollout_batch_size // args.num_generation_per_prompt : 
-                            (self.rank + 1) * args.local_rollout_batch_size // args.num_generation_per_prompt
+                            self.rank
+                            * args.local_rollout_batch_size
+                            // args.num_generation_per_prompt : (self.rank + 1)
+                            * args.local_rollout_batch_size
+                            // args.num_generation_per_prompt
                         ]
                     )
                     global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
@@ -924,8 +923,11 @@ class PolicyTrainerRayProcess(RayProcess):
                     global_data = next(iter_dataloader)
                     data = data_collator(
                         global_data[
-                            self.rank * args.local_rollout_batch_size // args.num_generation_per_prompt : 
-                            (self.rank + 1) * args.local_rollout_batch_size // args.num_generation_per_prompt
+                            self.rank
+                            * args.local_rollout_batch_size
+                            // args.num_generation_per_prompt : (self.rank + 1)
+                            * args.local_rollout_batch_size
+                            // args.num_generation_per_prompt
                         ]
                     )
                     global_queries = data_collator(global_data)[INPUT_IDS_PROMPT_KEY].tolist()
@@ -982,7 +984,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         postprocessed_response = truncate_response(
                             args.stop_token_id, tokenizer.pad_token_id, response
                         )
-                    
+
                     # Response Processing 2. run reward model on the truncated responses
                     postprocessed_query_response = torch.cat((query, postprocessed_response), 1)
                     sequence_length = first_true_indices(postprocessed_response == tokenizer.pad_token_id) - 1
@@ -1021,19 +1023,19 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Take top and bottom scoring completions from each group
                     num_prompts = scores.size(0) // args.num_generation_per_prompt
                     scores_reshaped = scores.view(num_prompts, args.num_generation_per_prompt)
-                    
+
                     # Get indices of top and bottom scoring completions for each prompt
                     top_indices_within_group = torch.argmax(scores_reshaped, dim=1)  # Shape: [num_prompts]
                     bottom_indices_within_group = torch.argmin(scores_reshaped, dim=1)  # Shape: [num_prompts]
-                    
+
                     # Convert to global indices
                     prompt_offsets = torch.arange(num_prompts, device=scores.device) * args.num_generation_per_prompt
                     chosen_indices = prompt_offsets + top_indices_within_group
                     rejected_indices = prompt_offsets + bottom_indices_within_group
-                    
+
                     # Create selection indices for filtering all tensors consistently
                     selection_indices = torch.cat([chosen_indices, rejected_indices])
-                    
+
                     # Filter all relevant tensors to only include chosen and rejected samples
                     responses = responses[selection_indices]
                     postprocessed_responses = postprocessed_responses[selection_indices]
@@ -1042,12 +1044,12 @@ class PolicyTrainerRayProcess(RayProcess):
                     scores = scores[selection_indices]
                     padding_mask = padding_mask[selection_indices]
                     query_responses = query_responses[selection_indices]
-                    
+
                     # Update indices to point to the filtered tensors
                     num_pairs = len(chosen_indices)
                     chosen_indices = torch.arange(num_pairs, device=scores.device)
                     rejected_indices = torch.arange(num_pairs, num_pairs * 2, device=scores.device)
-                    
+
                     scores_margin = scores[chosen_indices] - scores[rejected_indices]
                 else:
                     # Original DPO logic: split responses into chosen and rejected pairs
@@ -1057,13 +1059,15 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     num_examples_range = torch.arange(num_examples).to(scores.device)
                     chosen_indices = torch.where(
-                        first_half >= second_half, num_examples_range.clone(), num_examples_range.clone() + num_examples
+                        first_half >= second_half,
+                        num_examples_range.clone(),
+                        num_examples_range.clone() + num_examples,
                     )
                     rejected_indices = torch.where(
                         first_half < second_half, num_examples_range.clone(), num_examples_range.clone() + num_examples
                     )
                     scores_margin = scores[chosen_indices] - scores[rejected_indices]
-            
+
             logprobs = []
             concat_indices = []
             # Do multiple epochs of training on on-policy data (PPO-style)
@@ -1093,7 +1097,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         concat_mb_inds = torch.cat((chosen_mb_inds, rejected_mb_inds), dim=0)
                         concat_query_responses = query_responses[concat_mb_inds]
                         concat_responses = torch.cat((chosen_responses, rejected_responses), dim=0)
-                        
+
                         concat_logprobs = self.forward(
                             self.model,
                             concat_query_responses,
@@ -1102,7 +1106,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             context_length,
                             args.temperature,
                         )
-                        
+
                         num_examples = chosen_mb_inds.shape[0]
                         chosen_logprobs = concat_logprobs[:num_examples]
                         rejected_logprobs = concat_logprobs[num_examples:]
@@ -1114,10 +1118,10 @@ class PolicyTrainerRayProcess(RayProcess):
                         rejected_logprobs = torch.masked_fill(
                             rejected_logprobs, padding_mask[rejected_mb_inds], INVALID_LOGPROB
                         )
-                        
+
                         chosen_ref_logprobs = ref_logprobs[chosen_mb_inds]
                         rejected_ref_logprobs = ref_logprobs[rejected_mb_inds]
-                        
+
                         chosen_logprobs_sum = (chosen_logprobs * ~padding_mask[chosen_mb_inds]).sum(1)
                         chosen_ref_logprobs_sum = (chosen_ref_logprobs * ~padding_mask[chosen_mb_inds]).sum(1)
                         rejected_logprobs_sum = (rejected_logprobs * ~padding_mask[rejected_mb_inds]).sum(1)
@@ -1137,7 +1141,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         loss = losses.mean()
                         self.model.backward(loss)
                         self.model.step()
-                        
+
                         with torch.no_grad():
                             if epoch_idx == 0:
                                 concat_indices.append(concat_mb_inds)
@@ -1160,11 +1164,17 @@ class PolicyTrainerRayProcess(RayProcess):
                         gradient_accumulation_idx += 1
                     minibatch_idx += 1
                     del (
-                        loss, logits, concat_logprobs, concat_query_responses,
-                        chosen_logprobs, rejected_logprobs, chosen_responses, rejected_responses,
+                        loss,
+                        logits,
+                        concat_logprobs,
+                        concat_query_responses,
+                        chosen_logprobs,
+                        rejected_logprobs,
+                        chosen_responses,
+                        rejected_responses,
                     )
                     torch.cuda.empty_cache()
-                    
+
             with torch.no_grad():
                 logprobs = torch.cat(logprobs, 0)
                 concat_indices = torch.cat(concat_indices, 0)
@@ -1174,7 +1184,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 non_score_reward = -args.beta * kl
                 non_score_reward_sum = non_score_reward.sum(1)
                 rlhf_reward = scores + non_score_reward_sum
-                
+
                 local_metrics.add("val/sequence_lengths", sequence_lengths.float().mean())
                 local_metrics.add("val/num_stop_token_ids", (responses == args.stop_token_id).sum().float().mean())
                 local_metrics.add("objective/kl", kl.sum(1).mean())
@@ -1190,7 +1200,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 local_metrics.add("rewards/margins", (chosen_rewards_stats - rejected_rewards_stats).mean())
                 local_metrics.add("logps/chosen", chosen_logprobs_stats.mean())
                 local_metrics.add("logps/rejected", rejected_logprobs_stats.mean())
-                
+
                 metrics = {
                     "episode": episode,
                     "training_step": training_step,
@@ -1237,7 +1247,7 @@ class PolicyTrainerRayProcess(RayProcess):
                             if is_ready:
                                 print(f"Eval future {eval_futures[0]} is done")
                                 eval_futures.popleft()
-                                
+
         print(f"Saving final model at step {training_step} to {args.output_dir}")
         self.save_model(self.model, args.output_dir)
         if args.try_launch_beaker_eval_jobs_on_weka:
@@ -1404,7 +1414,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
     if is_beaker_job():
         args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
-    
+
     # DPO specific batch size calculations
     args.gradient_accumulation_steps = exact_div(
         args.local_mini_batch_size,
@@ -1431,7 +1441,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
             args.num_generation_per_prompt,
             "`local_rollout_batch_size` must be a multiple of `num_generation_per_prompt`",
         )
-    
+
     if args.push_to_hub:
         if args.hf_repo_id is None:
             args.hf_repo_id = "open_instruct_dev"
