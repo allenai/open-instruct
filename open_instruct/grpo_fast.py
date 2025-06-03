@@ -123,7 +123,6 @@ from open_instruct.utils import (
 )
 from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
 
-
 api = HfApi()
 INVALID_LOGPROB = 1.0
 
@@ -816,7 +815,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
                     ratio = torch.exp(logprobs_diff)
                     pg_losses = -mb_advantages[:, 1:] * ratio
-                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(ratio, 1.0 - args.clip_lower, 1.0 + args.clip_higher)
+                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(
+                        ratio, 1.0 - args.clip_lower, 1.0 + args.clip_higher
+                    )
                     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
                     # Here we recalculate kl: we want the KL loss to backpropagate through the model

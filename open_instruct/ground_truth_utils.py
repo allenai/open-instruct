@@ -556,7 +556,7 @@ class LMJudgeVerifier(VerifierFunction):
         """
         Get the cost of the response.
         """
-        model_name = model.split('/')[-1] # for litellm, discard the namespace
+        model_name = model.split("/")[-1]  # for litellm, discard the namespace
         model_name = model_name.replace("-standard", "")  # azure OAI models have -standard in the name
         return (
             PRICE_PER_TOKEN.get(model_name, {}).get("input", 0) * response.usage.prompt_tokens
@@ -569,7 +569,7 @@ class LMJudgeVerifier(VerifierFunction):
         """
         Asynchronous version of __call__ that properly handles the async OpenAI client.
         """
-        #client = self._get_client()
+        # client = self._get_client()
         final_answer = extract_final_answer(prediction)
         prompt = self.prompt_template.format(input=query, output=final_answer, label=label)
 
