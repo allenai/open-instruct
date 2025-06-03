@@ -191,6 +191,8 @@ class Args:
     """vLLM GPU memory utilization"""
     enable_prefix_caching: bool = False
     """whether to enable prefix caching"""
+    single_gpu_mode: bool = False
+    """whether to use single GPU mode where each engine uses 0.5 GPU memory"""
 
     # wandb and HF tracking configs
     with_tracking: bool = False
@@ -296,6 +298,7 @@ def vllm_generate(
     resume_training_step: int,
     num_engines: int = 1,
     tensor_parallel_size: int = 1,
+    single_gpu_mode: bool = False,
 ):
     # Initialize Ray if not already initialized
     if not ray.is_initialized():
@@ -312,6 +315,7 @@ def vllm_generate(
         enable_prefix_caching=enable_prefix_caching,
         max_model_len=max_model_len,
         vllm_gpu_memory_utilization=vllm_gpu_memory_utilization,
+        single_gpu_mode=single_gpu_mode,
     )
 
     def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
@@ -619,6 +623,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 resume_training_step,
                 args.vllm_num_engines,
                 args.vllm_tensor_parallel_size,
+                args.single_gpu_mode,
             ),
         )
         thread.start()
