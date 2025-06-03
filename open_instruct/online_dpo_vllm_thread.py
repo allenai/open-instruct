@@ -246,68 +246,6 @@ def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
         raise ValueError("Input must be either a string or a dictionary")
 
 
-def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig) -> Accelerator:
-    """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
-    # Initialize accelerator with distributed training enabled
-    accelerator = Accelerator(
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        mixed_precision="bf16",
-        distributed_type="nccl"
-    )
-    
-    # Set world size based on available GPUs
-    args.world_size = sum(args.actor_num_gpus_per_node)
-    
-    # Calculate batch sizes
-    args.local_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps * args.num_mini_batches
-    args.micro_batch_size = int(args.per_device_train_batch_size * args.world_size)
-    args.batch_size = int(args.local_batch_size * args.world_size)
-    
-    # Set run name with timestamp
-    time_tensor = torch.tensor(int(time.time()), device=accelerator.device)
-    time_int = broadcast(time_tensor, 0).item()
-    args.run_name = f"{args.exp_name}__{args.seed}__{time_int}"
-    
-    # Calculate mini batch sizes
-    args.mini_batch_size = exact_div(
-        args.batch_size, args.num_mini_batches, "`batch_size` must be a multiple of `num_mini_batches`"
-    )
-    args.local_mini_batch_size = exact_div(
-        args.local_batch_size, args.num_mini_batches, "`local_batch_size` must be a multiple of `num_mini_batches`"
-    )
-    
-    # Calculate training steps
-    args.num_training_steps = args.total_episodes // args.batch_size
-    args.eval_freq = max(1, args.num_training_steps // args.num_evals)
-    
-    # Calculate dataloader batch size for DPO
-    args.local_dataloader_batch_size = exact_div(
-        args.local_batch_size,
-        args.num_generation_per_prompt,
-        "`local_batch_size` must be a multiple of `num_generation_per_prompt`",
-    )
-    
-    # Setup HuggingFace repository info
-    if args.push_to_hub:
-        if args.hf_repo_id is None:  # auto-generate one
-            args.hf_repo_id = "open_instruct_dev"
-        if args.hf_entity is None:  # first try to use AI2 entity
-            args.hf_entity = maybe_use_ai2_hf_entity()
-        if args.hf_entity is None:  # then try to use the user's entity
-            args.hf_entity = HfApi().whoami()["name"]
-        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
-        if args.hf_repo_revision is None:  # auto-generate one
-            args.hf_repo_revision = args.run_name
-        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
-
-    # Setup wandb
-    if args.with_tracking and accelerator.is_main_process:
-        if args.wandb_entity is None:
-            args.wandb_entity = maybe_use_ai2_wandb_entity()
-            
-    return accelerator
-
-
 @ray.remote(num_gpus=1)
 class PolicyTrainerRayProcess:
     def __init__(
@@ -827,6 +765,56 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
     # Initialize Ray
     if not ray.is_initialized():
         ray.init()
+
+    # Calculate runtime args
+    args.world_size = sum(args.actor_num_gpus_per_node)
+    
+    # Calculate batch sizes
+    args.local_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps * args.num_mini_batches
+    args.micro_batch_size = int(args.per_device_train_batch_size * args.world_size)
+    args.batch_size = int(args.local_batch_size * args.world_size)
+    
+    # Set run name with timestamp
+    time_tensor = torch.tensor(int(time.time()), device="cuda:0" if torch.cuda.is_available() else "cpu")
+    time_int = time_tensor.item()
+    args.run_name = f"{args.exp_name}__{args.seed}__{time_int}"
+    
+    # Calculate mini batch sizes
+    args.mini_batch_size = exact_div(
+        args.batch_size, args.num_mini_batches, "`batch_size` must be a multiple of `num_mini_batches`"
+    )
+    args.local_mini_batch_size = exact_div(
+        args.local_batch_size, args.num_mini_batches, "`local_batch_size` must be a multiple of `num_mini_batches`"
+    )
+    
+    # Calculate training steps
+    args.num_training_steps = args.total_episodes // args.batch_size
+    args.eval_freq = max(1, args.num_training_steps // args.num_evals)
+    
+    # Calculate dataloader batch size for DPO
+    args.local_dataloader_batch_size = exact_div(
+        args.local_batch_size,
+        args.num_generation_per_prompt,
+        "`local_batch_size` must be a multiple of `num_generation_per_prompt`",
+    )
+    
+    # Setup HuggingFace repository info
+    if args.push_to_hub:
+        if args.hf_repo_id is None:  # auto-generate one
+            args.hf_repo_id = "open_instruct_dev"
+        if args.hf_entity is None:  # first try to use AI2 entity
+            args.hf_entity = maybe_use_ai2_hf_entity()
+        if args.hf_entity is None:  # then try to use the user's entity
+            args.hf_entity = HfApi().whoami()["name"]
+        args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
+        if args.hf_repo_revision is None:  # auto-generate one
+            args.hf_repo_revision = args.run_name
+        args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
+
+    # Setup wandb
+    if args.with_tracking:
+        if args.wandb_entity is None:
+            args.wandb_entity = maybe_use_ai2_wandb_entity()
 
     # Create policy trainer processes
     policy_trainers = []
