@@ -42,6 +42,7 @@ except Exception:
     pass
 # isort: on
 
+import asyncio
 import json
 import os
 import shutil
@@ -84,7 +85,11 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
-from open_instruct.ground_truth_utils import soft_format_reward_func
+from open_instruct.ground_truth_utils import (
+    build_all_verifiers,
+    cleanup_all_llm_judge_clients,
+    soft_format_reward_func,
+)
 from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
@@ -103,6 +108,7 @@ from open_instruct.utils import (
     calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
     download_latest_checkpoint_from_gs,
+    extract_user_query,
     get_beaker_whoami,
     get_eval_ds_config,
     get_optimizer_grouped_parameters,
@@ -116,7 +122,6 @@ from open_instruct.utils import (
     sync_gs_bucket,
 )
 from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
-
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -256,6 +261,16 @@ class Args:
     """whether to apply verifiable reward"""
     verification_reward: float = 10.0
     """the reward value for verifiable responses"""
+
+    # -- llm verifiers reward
+    llm_judge_model: str = "azure/gpt-4o-mini-standard"
+    """the model to use for the llm judge"""
+    llm_judge_max_tokens: int = 2048
+    """the max tokens to use for the llm judge"""
+    llm_judge_temperature: float = 1.0
+    """the temperature to use for the llm judge"""
+    llm_judge_timeout: int = 60
+    """the timeout to use for the llm judge"""
 
     # -- non stop penalty
     non_stop_penalty: bool = False
@@ -800,7 +815,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
                     ratio = torch.exp(logprobs_diff)
                     pg_losses = -mb_advantages[:, 1:] * ratio
-                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(ratio, 1.0 - args.clip_lower, 1.0 + args.clip_higher)
+                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(
+                        ratio, 1.0 - args.clip_lower, 1.0 + args.clip_higher
+                    )
                     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
                     # Here we recalculate kl: we want the KL loss to backpropagate through the model
@@ -1120,11 +1137,15 @@ def data_preparation_thread(
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
+            decoded_queries = tokenizer.batch_decode(queries, skip_special_tokens=True)
+            decoded_queries = [extract_user_query(query) for query in decoded_queries]
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-            scores, reward_metrics = reward_fn(
-                responses, decoded_responses, ground_truths, datasets, finish_reasons, infos
+            scores, reward_metrics = asyncio.run(
+                reward_fn(
+                    responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries
+                )
             )
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
@@ -1722,13 +1743,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 )
 
                 # get and log evaluation metrics
-                eval_scores, eval_reward_metrics = reward_fn(
-                    eval_responses,
-                    eval_decoded_responses,
-                    eval_ground_truths,
-                    eval_dataset_names,
-                    eval_finish_reasons,
-                    eval_infos,
+                eval_scores, eval_reward_metrics = asyncio.run(
+                    reward_fn(
+                        eval_responses,
+                        eval_decoded_responses,
+                        eval_ground_truths,
+                        eval_dataset_names,
+                        eval_finish_reasons,
+                        eval_infos,
+                    )
                 )
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
                 eval_metrics = {
@@ -1770,6 +1793,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     except Exception as e:
         print(f"Training error occurred: {str(e)}")
         print(traceback.format_exc())
+        try:
+            asyncio.run(cleanup_all_llm_judge_clients())
+            print("✅ LLM judge clients cleaned up")
+        except Exception as cleanup_error:
+            print(f"Warning: Error during LLM judge cleanup: {cleanup_error}")
+
         ray.shutdown()
         os._exit(1)
         raise  # Re-raise the exception after shutdown
@@ -1779,6 +1808,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     print("======== ✅ vllm generate thread ends =========")
     packing_thread.join()
     print("======== ✅ data preparation thread ends =========")
+
+    try:
+        asyncio.run(cleanup_all_llm_judge_clients())
+        print("✅ LLM judge clients cleaned up")
+    except Exception as cleanup_error:
+        print(f"Warning: Error during LLM judge cleanup: {cleanup_error}")
+
     ray.shutdown()
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
@@ -1811,13 +1847,16 @@ if __name__ == "__main__":
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
 
-    def reward_fn(
+    reward_fn_mapping = build_all_verifiers(args)
+
+    async def reward_fn(
         responses: List[torch.Tensor],
         decoded_responses: List[str],
         ground_truths: List[str],
         datasets: List[str],
         finish_reasons: List[str],
         infos: List[List[int]],
+        queries: Optional[List[str]] = None,
     ) -> List[float]:
         num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
         good_outputs = [
@@ -1838,12 +1877,14 @@ if __name__ == "__main__":
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
-                verifiable_rewards, per_func_rewards = apply_verifiable_reward(
+                verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
+                    reward_fn_mapping,
                     responses,
                     decoded_responses,
                     ground_truths,
                     datasets,
                     reward_mult=args.verification_reward,
+                    queries=queries,
                 )
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")

@@ -45,6 +45,7 @@ except Exception:
     pass
 # isort: on
 
+import asyncio
 import json
 import os
 import shutil
@@ -90,7 +91,12 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
-from open_instruct.ground_truth_utils import soft_format_reward_func
+from open_instruct.ground_truth_utils import (
+    VerifierConfig,
+    build_all_verifiers,
+    cleanup_all_llm_judge_clients,
+    soft_format_reward_func,
+)
 from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
@@ -106,6 +112,7 @@ from open_instruct.utils import (
     BeakerRuntimeConfig,
     RayProcess,
     _z3_params_to_fetch,
+    extract_user_query,
     get_eval_ds_config,
     get_optimizer_grouped_parameters,
     get_train_ds_config,
@@ -264,6 +271,16 @@ class Args:
     """whether to apply verifiable reward"""
     verification_reward: float = 10.0
     """the reward value for verifiable responses"""
+
+    # -- llm verifiers reward
+    llm_judge_model: str = "azure/gpt-4o-mini-standard"
+    """the model to use for the llm judge"""
+    llm_judge_max_tokens: int = 2048
+    """the max tokens to use for the llm judge"""
+    llm_judge_temperature: float = 1.0
+    """the temperature to use for the llm judge"""
+    llm_judge_timeout: int = 60
+    """the timeout to use for the llm judge"""
 
     # -- non stop penalty
     non_stop_penalty: bool = False
@@ -1262,11 +1279,15 @@ def data_preparation_thread(
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
+            decoded_queries = tokenizer.batch_decode(queries, skip_special_tokens=True)
+            decoded_queries = [extract_user_query(query) for query in decoded_queries]
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards"):
-            scores, reward_metrics = reward_fn(
-                responses, decoded_responses, ground_truths, datasets, finish_reasons, infos
+            scores, reward_metrics = asyncio.run(
+                reward_fn(
+                    responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries
+                )
             )
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
@@ -1804,13 +1825,16 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 )
 
                 # get and log evaluation metrics
-                eval_scores, eval_reward_metrics = reward_fn(
-                    eval_responses,
-                    eval_decoded_responses,
-                    eval_ground_truths,
-                    eval_dataset_names,
-                    eval_finish_reasons,
-                    eval_infos,
+                eval_scores, eval_reward_metrics = asyncio.run(
+                    reward_fn(
+                        eval_responses,
+                        eval_decoded_responses,
+                        eval_ground_truths,
+                        eval_dataset_names,
+                        eval_finish_reasons,
+                        eval_infos,
+                        None,  # queries not available for evaluation
+                    )
                 )
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
                 eval_metrics = {
@@ -1852,6 +1876,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     except Exception as e:
         print(f"Training error occurred: {str(e)}")
         print(traceback.format_exc())
+        try:
+            asyncio.run(cleanup_all_llm_judge_clients())
+            print("✅ LLM judge clients cleaned up")
+        except Exception as cleanup_error:
+            print(f"Warning: Error during LLM judge cleanup: {cleanup_error}")
+
         ray.shutdown()
         os._exit(1)
         raise  # Re-raise the exception after shutdown
@@ -1861,6 +1891,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     print("======== ✅ vllm generate thread ends =========")
     packing_thread.join()
     print("======== ✅ data preparation thread ends =========")
+    try:
+        asyncio.run(cleanup_all_llm_judge_clients())
+        print("✅ LLM judge clients cleaned up")
+    except Exception as cleanup_error:
+        print(f"Warning: Error during LLM judge cleanup: {cleanup_error}")
+
     ray.shutdown()
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
@@ -1889,17 +1925,22 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 if __name__ == "__main__":
     parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
+    verifier_config = VerifierConfig.from_args(args)
     assert isinstance(args, Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
+    assert isinstance(verifier_config, VerifierConfig)
 
-    def reward_fn(
+    reward_fn_mapping = build_all_verifiers(verifier_config)
+
+    async def reward_fn(
         responses: List[torch.Tensor],
         decoded_responses: List[str],
         ground_truths: List[str],
         datasets: List[str],
         finish_reasons: List[str],
         infos: List[List[int]],
+        queries: Optional[List[str]] = None,
     ) -> List[float]:
         num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
         good_outputs = [
@@ -1920,12 +1961,14 @@ if __name__ == "__main__":
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
-                verifiable_rewards, per_func_rewards = apply_verifiable_reward(
+                verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
+                    reward_fn_mapping,
                     responses,
                     decoded_responses,
                     ground_truths,
                     datasets,
                     reward_mult=args.verification_reward,
+                    queries=queries,
                 )
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
