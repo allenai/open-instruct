@@ -1014,6 +1014,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 rejected_indices = torch.where(
                     first_half < second_half, num_examples_range.clone(), num_examples_range.clone() + num_examples
                 )
+                scores_margin = scores[chosen_indices] - scores[rejected_indices]
             logprobs = []
             concat_indices = []
             # Do multiple epochs of training on on-policy data (PPO-style)
