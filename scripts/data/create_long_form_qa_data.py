@@ -7,7 +7,7 @@ no_prompt = True
 if no_prompt:
     prompt = ""
 else:   
-    prompt = " Answer the given question. You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, if you find you lack some knowledge, you can call a search engine by <query> query </query>, and it will return the top searched results between <document> and </document>. You can search as many times as you want. If you find no further external knowledge needed, you can directly provide the answer inside <finish> and </finish>. For example, <finish> xxx </finish>. Question: <question>"
+    prompt = "Answer the given question. You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, if you find you lack some knowledge, you can call a search engine by <query> query </query>, and it will return the top searched results between <document> and </document>. You can search as many times as you want. If you find no further external knowledge needed, you can directly provide the answer inside <finish> and </finish>. For example, <finish> xxx </finish>. Question: <question>"
 
 example_data = [
     {
@@ -70,31 +70,33 @@ def convert_os_to_rl_format():
     
     rl_data = []
     for example in train_data:
-        message = example["messages"]
+        question = example["messages"][0]["content"]
+        message = [ { "content": f"{prompt}{question}", "role": "user" } ]
         rl_data.append({
             "messages": message,
-            "ground_truth": message[-1]["content"],
-            "no_reasoning_ground_truth": message[-1]["content"],
+            "ground_truth": example["messages"][-1]["content"],
+            "no_reasoning_ground_truth": example["messages"][-1]["content"],
             "dataset": "long_re_search"})
     
     # upload to huggingface
     dataset = datasets.Dataset.from_list(rl_data)
-    dataset.push_to_hub("rulins/open_scholar_rl" + ("_no_prompt" if no_prompt else ""), split="train")
+    dataset.push_to_hub("hamishivi/open_scholar_rl" + ("_no_prompt" if no_prompt else ""), split="train")
     
     # Prepare test set
     rl_data = []
     for example in test_data:
-        message = example["messages"]
+        question = example["messages"][0]["content"] 
+        message = [ { "content": f"{prompt}{question}", "role": "user" } ]
         rl_data.append({
             "messages": message,
-            "ground_truth": message[-1]["content"],
-            "no_reasoning_ground_truth": message[-1]["content"],
+            "ground_truth": example["messages"][-1]["content"],
+            "no_reasoning_ground_truth": example["messages"][-1]["content"],
             "dataset": "long_re_search"})
     
     # upload to huggingface
     dataset = datasets.Dataset.from_list(rl_data)
-    dataset.push_to_hub("rulins/open_scholar_rl" + ("_no_prompt" if no_prompt else ""), split="test")
+    dataset.push_to_hub("hamishivi/open_scholar_rl" + ("_no_prompt" if no_prompt else ""), split="test")
     
     
 if __name__ == "__main__":
-    convert_deepseek_long_form_reasoning_to_rl_format()
+    convert_os_to_rl_format()
