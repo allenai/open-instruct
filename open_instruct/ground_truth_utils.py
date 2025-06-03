@@ -358,44 +358,30 @@ class LongR1SearchVerifier(VerifierFunction):
     def __init__(self) -> None:
         super().__init__(name="long_re_search", weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, List[str]]) -> float:
-        # 1. Parse JSON label safely
-        parsed_labels: Union[List, str]
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> float:
         try:
-            parsed = json.loads(label)
-            parsed_labels = parsed if isinstance(parsed, list) else [parsed]
-        except (json.JSONDecodeError, TypeError):
-            # Fallback: treat label as raw string or list-of-strings
-            if isinstance(label, list):
-                parsed_labels = label
-            else:
-                parsed_labels = [str(label).strip()]
-
-        # 2. Extract answer between tags
-        match = self.TAG_PATTERN.search(prediction)
-        if not match:
-            logging.debug("No <finish> tags found in prediction")
+            label = json.loads(label)
+        except json.JSONDecodeError:
+            label = label.strip()
+        print(f"label: {label}")
+        # extract answer
+        if self.answer_start_tag not in prediction and self.answer_end_tag not in prediction:
             return 0.0
-
-        answer_text = match.group(len(match.groups())).strip()
-        if not answer_text:
-            logging.debug("Extracted answer is empty after stripping whitespace")
+        answer_string = prediction.split(self.answer_start_tag)[-1].split(self.answer_end_tag)[0]
+        # check answer non-empty
+        if not answer_string:
             return 0.0
-
-        # 3. Normalize once
-        norm_answer = normalize_answer(answer_text)
-
-        # 4. Compare against each label
-        for lbl in parsed_labels:
-            try:
-                lbl_str = normalize_answer(str(lbl))
-                if norm_answer == lbl_str:
-                    return 1.0
-            except Exception as e:
-                logging.warning(f"Error normalizing label '{lbl}': {e}")
-
-        # 5. No match found
-        return 0.0
+        # if label is list, max over labels
+        if isinstance(label, list):
+            f1 = max(f1_score(answer_string, lab)["f1"] for lab in label)
+        else:
+            label = str(label)  # safety.
+            f1 = f1_score(answer_string, label)["f1"]
+        # if f1 is 0, but format is correct, return 0.1
+        if f1 == 0:
+            return 0.1
+        # otherwise return f1
+        return f1
 
 
 class MaxLenVerifier(VerifierFunction):
