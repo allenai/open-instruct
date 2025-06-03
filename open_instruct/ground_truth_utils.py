@@ -345,6 +345,58 @@ class R1SearchVerifier(VerifierFunction):
         # 5. No match found
         return 0.0
 
+class LongR1SearchVerifier(VerifierFunction):
+    """
+    Verifier based on the Search-R1 paper (https://github.com/PeterGriffinJin/Search-R1).
+    Uses normalized exact match: returns 1.0 if answer matches any label, else 0.0.
+    Answer extraction is done via a case-insensitive regex on <finish>...</finish> tags.
+    """
+
+    # Precompile a case-insensitive regex to extract answer text
+    TAG_PATTERN = re.compile(r"<finish>(.*?)</finish>", re.IGNORECASE | re.DOTALL)
+
+    def __init__(self) -> None:
+        super().__init__(name="long_re_search", weight=1.0)
+
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, List[str]]) -> float:
+        # 1. Parse JSON label safely
+        parsed_labels: Union[List, str]
+        try:
+            parsed = json.loads(label)
+            parsed_labels = parsed if isinstance(parsed, list) else [parsed]
+        except (json.JSONDecodeError, TypeError):
+            # Fallback: treat label as raw string or list-of-strings
+            if isinstance(label, list):
+                parsed_labels = label
+            else:
+                parsed_labels = [str(label).strip()]
+
+        # 2. Extract answer between tags
+        match = self.TAG_PATTERN.search(prediction)
+        if not match:
+            logging.debug("No <finish> tags found in prediction")
+            return 0.0
+
+        answer_text = match.group(len(match.groups())).strip()
+        if not answer_text:
+            logging.debug("Extracted answer is empty after stripping whitespace")
+            return 0.0
+
+        # 3. Normalize once
+        norm_answer = normalize_answer(answer_text)
+
+        # 4. Compare against each label
+        for lbl in parsed_labels:
+            try:
+                lbl_str = normalize_answer(str(lbl))
+                if norm_answer == lbl_str:
+                    return 1.0
+            except Exception as e:
+                logging.warning(f"Error normalizing label '{lbl}': {e}")
+
+        # 5. No match found
+        return 0.0
+
 
 class MaxLenVerifier(VerifierFunction):
     """
