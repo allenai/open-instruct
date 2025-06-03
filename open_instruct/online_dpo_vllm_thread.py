@@ -13,6 +13,7 @@ from typing import List, Literal, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+import ray
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
@@ -69,7 +70,7 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     upload_metadata_to_hf,
 )
-from open_instruct.vllm_utils import vllm_single_gpu_patch
+from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -179,17 +180,17 @@ class Args:
     loss_type: Literal["sigmoid", "ipo"] = "sigmoid"
     """the loss type for the DPO algorithm"""
 
-    # vLLM settings. NOTE: currently we need to place the vLLM model on a separate GPU
-    # for generation to work properly because vLLM would pre-alocate the memory.
-    # To do so, we would need to do a moneky patch `vllm_single_gpu_patch` to make sure
-    # the vLLM model is placed on the correct GPU.
-    vllm_device: str = "cuda:1"
-    """the device placement of the vllm model; typically we place the vllm model on a decicated GPU"""
-    vllm_gpu_memory_utilization: float = 0.8
-    """the GPU memory utilization of the vllm model; passed to `gpu_memory_utilization` to the `vLLM` instance"""
-    # async setting
-    async_mode: bool = True
-    """Whether to run the generation in async mode which learns from the second latest policy like Cleanba (https://arxiv.org/abs/2310.00036)"""
+    # vLLM settings
+    vllm_num_engines: int = 1
+    """number of vLLM Engines"""
+    vllm_tensor_parallel_size: int = 1
+    """tensor parallel size of vLLM Engine for multi-GPU inference"""
+    vllm_enforce_eager: bool = False
+    """whether to enforce eager mode for vLLM -- slow inference but needed for multi-node"""
+    vllm_gpu_memory_utilization: float = 0.9
+    """vLLM GPU memory utilization"""
+    enable_prefix_caching: bool = False
+    """whether to enable prefix caching"""
 
     # wandb and HF tracking configs
     with_tracking: bool = False
@@ -293,19 +294,44 @@ def vllm_generate(
     evaluation_Q: Queue,
     eval_freq: int,
     resume_training_step: int,
+    num_engines: int = 1,
+    tensor_parallel_size: int = 1,
 ):
-    vllm_single_gpu_patch()
-    llm = LLM(
-        model=model_name_or_path,
+    # Initialize Ray if not already initialized
+    if not ray.is_initialized():
+        ray.init()
+
+    # Create vLLM engines using Ray
+    vllm_engines = create_vllm_engines(
+        num_engines=num_engines,
+        tensor_parallel_size=tensor_parallel_size,
+        enforce_eager=vllm_enforce_eager,
+        pretrain=model_name_or_path,
         revision=model_revision,
-        tokenizer_revision=model_revision,
-        tensor_parallel_size=1,
-        device=vllm_device,
-        gpu_memory_utilization=vllm_gpu_memory_utilization,
+        seed=42,
+        enable_prefix_caching=enable_prefix_caching,
         max_model_len=max_model_len,
+        vllm_gpu_memory_utilization=vllm_gpu_memory_utilization,
     )
-    print("🔥🔥🔥 vllm loaded")
-    llmp = llm.llm_engine.model_executor.driver_worker.model_runner.model
+
+    def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
+        # Split queries between engines
+        queries_per_engine = (len(prompts) + len(vllm_engines) - 1) // len(vllm_engines)
+        split_queries = [prompts[i : i + queries_per_engine] for i in range(0, len(prompts), queries_per_engine)]
+        # Generate responses in parallel across engines
+        futures = [
+            vllm_engine.generate.remote(sampling_params=sampling_params, prompt_token_ids=queries, use_tqdm=False)
+            for vllm_engine, queries in zip(vllm_engines, split_queries)
+        ]
+        # Gather all responses
+        all_outputs = ray.get(futures)
+        response_ids = []
+        for outputs in all_outputs:
+            response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
+        return response_ids
+
+    print("🔥🔥🔥 vLLM engines loaded")
+    
     for training_step in range(resume_training_step, num_training_steps + 1):
         items = param_prompt_Q.get()
         if items is None:
@@ -313,21 +339,18 @@ def vllm_generate(
         unwrapped_model, g_queries_list = items
         if unwrapped_model is not None:
             start_time = time.time()
-            llmp.load_weights(unwrapped_model.named_parameters())
-            print(
-                f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds"
-            )
+            # Update weights for all engines
+            for engine in vllm_engines:
+                engine.load_weights.remote(unwrapped_model.named_parameters())
+            print(f"🔥🔥🔥 Loading weights using shared memory; Time to load weights: {time.time() - start_time:.2f} seconds")
+        
         generation_start_time = time.time()
-        outputs = llm.generate(prompt_token_ids=g_queries_list, sampling_params=generation_config)
-        response_ids = [list(output.outputs[0].token_ids) for output in outputs]
+        response_ids = generate_with_engines(g_queries_list, generation_config)
         print(f"🔥🔥🔥 Generation time: {time.time() - generation_start_time:.2f} seconds")
         response_ids_Q.put(response_ids)
 
         if sample_evaluation_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-            outputs = llm.generate(
-                prompt_token_ids=sample_evaluation_prompt_token_ids, sampling_params=generation_config
-            )
-            response_ids = [list(output.outputs[0].token_ids) for output in outputs]
+            response_ids = generate_with_engines(sample_evaluation_prompt_token_ids, generation_config)
             evaluation_Q.put(response_ids)
 
 
@@ -594,6 +617,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 evaluation_Q,
                 args.eval_freq,
                 resume_training_step,
+                args.vllm_num_engines,
+                args.vllm_tensor_parallel_size,
             ),
         )
         thread.start()
