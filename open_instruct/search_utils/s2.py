@@ -10,7 +10,7 @@ logging.getLogger("urllib3").setLevel(logging.DEBUG)
 
 
 def create_session_with_retries(
-    retries=3, backoff_factor=0.3, status_forcelist=(500, 502, 504), allowed_methods=("GET", "POST")
+    retries=3, backoff_factor=0.3, status_forcelist=(500, 502, 504, 429), allowed_methods=("GET", "POST")
 ):
     session = requests.Session()
     retry = Retry(
@@ -48,7 +48,7 @@ def get_snippets_for_query(query, api_endpoint="https://api.semanticscholar.org/
     except requests.exceptions.RequestException as e:
         print(f"Error: {e}")
 
-    print("Failed to retrieve S2 snippets for one query:", query, res)
+    print("Failed to retrieve S2 snippets for one query:", query)
     return None
 
 
