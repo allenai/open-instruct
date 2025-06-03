@@ -186,6 +186,8 @@ class Args:
     """tensor parallel size of vLLM Engine for multi-GPU inference"""
     vllm_enforce_eager: bool = False
     """whether to enforce eager mode for vLLM -- slow inference but needed for multi-node"""
+    vllm_enable_prefix_caching: bool = False
+    """whether to enable prefix caching for vLLM"""
     vllm_gpu_memory_utilization: float = 0.9
     """vLLM GPU memory utilization"""
     enable_prefix_caching: bool = False
@@ -298,6 +300,8 @@ def vllm_generate(
     resume_training_step: int,
     num_engines: int = 1,
     tensor_parallel_size: int = 1,
+    vllm_enforce_eager: bool = False,
+    enable_prefix_caching: bool = False,
     single_gpu_mode: bool = False,
 ):
     # Initialize Ray if not already initialized
@@ -618,6 +622,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
                 resume_training_step,
                 args.vllm_num_engines,
                 args.vllm_tensor_parallel_size,
+                args.vllm_enforce_eager,
+                args.vllm_enable_prefix_caching,
                 args.single_gpu_mode,
             ),
         )
