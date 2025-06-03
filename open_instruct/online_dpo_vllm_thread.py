@@ -114,7 +114,7 @@ class Args:
     """DeepSpeed -> vLLM weight sync backend"""
     vllm_gpu_memory_utilization: float = 0.9
     """vLLM GPU memory utilization"""
-    enable_prefix_caching: bool = False
+    vllm_enable_prefix_caching: bool = False
     """whether to enable prefix caching"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
