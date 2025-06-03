@@ -25,7 +25,6 @@ from datasets import DatasetDict
 from huggingface_hub import HfApi
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -381,24 +380,26 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             args.output_dir = "/output"
         all_configs.update(vars(beaker_config))
     all_configs.update(**asdict(args), **asdict(dataset_config), **asdict(model_config))
-    if accelerator.is_main_process:
-        if args.with_tracking:
-            import wandb
-
-            wandb.init(
-                project=args.wandb_project_name,
-                entity=args.wandb_entity,
-                sync_tensorboard=True,
-                config=all_configs,
-                name=args.run_name,
-                save_code=True,
-                tags=[args.exp_name] + get_wandb_tags(),
-            )
-        writer = SummaryWriter(f"runs/{args.run_name}")
-        writer.add_text(
-            "hyperparameters",
-            "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+    
+    # Initialize wandb
+    if accelerator.is_main_process and args.with_tracking:
+        import wandb
+        wandb.init(
+            project=args.wandb_project_name,
+            entity=args.wandb_entity,
+            config=all_configs,
+            name=args.run_name,
+            save_code=True,
+            tags=[args.exp_name] + get_wandb_tags(),
         )
+        # Log hyperparameters as a table
+        wandb.log({
+            "hyperparameters": wandb.Table(
+                data=[[k, str(v)] for k, v in vars(args).items()],
+                columns=["param", "value"]
+            )
+        })
+
     device = torch.device(f"cuda:{accelerator.local_process_index}")
     random.seed(local_seed)
     np.random.seed(local_seed)
@@ -956,8 +957,8 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             }
             if accelerator.is_main_process:
                 print_rich_single_line_metrics(metrics)
-                for key, value in metrics.items():
-                    writer.add_scalar(key, value, episode)
+                if args.with_tracking:
+                    wandb.log(metrics, step=episode)
         del (queries, responses, postprocessed_responses, logprobs, ref_logprobs, sequence_lengths, scores)
         del (metrics, kl, non_score_reward, rlhf_reward)
         gc.collect()
@@ -1031,6 +1032,9 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
             # remove args.checkpoint_output_dir
             if os.path.exists(args.checkpoint_output_dir):
                 shutil.rmtree(args.checkpoint_output_dir, ignore_errors=True)
+
+        if args.with_tracking:
+            wandb.finish()
 
 
 if __name__ == "__main__":
