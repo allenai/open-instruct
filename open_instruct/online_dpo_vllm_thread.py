@@ -220,6 +220,9 @@ class Args:
     """the number of generations per prompt (currently only support 2)"""
     loss_type: Literal["sigmoid", "ipo"] = "sigmoid"
     """the loss type for the DPO algorithm"""
+    take_top_bottom_generation: bool = False
+    """learn on only one pair from each num_generation_per_prompt sample
+    the top and bottom scoring completions are chosen"""
     
     # async setting
     async_mode: bool = True
@@ -288,7 +291,10 @@ class Args:
     """the priority of auto-launched evaluation jobs"""
 
     def __post_init__(self):
-        assert self.num_generation_per_prompt == 2, "Currently only support 2 generations per prompt for DPO"
+        if not self.take_top_bottom_generation:
+            assert self.num_generation_per_prompt == 2, "Currently only support 2 generations per prompt for DPO"
+        else:
+            assert self.num_generation_per_prompt > 1, "Must have at least 2 generations per prompt for DPO"
 
 
 def get_train_ds_config(
@@ -737,12 +743,21 @@ class PolicyTrainerRayProcess(RayProcess):
                 args.stop_token_id = tokenizer.encode(".")[0]
         
         train_dataset_idxs = np.arange(len(train_dataset))
-        # DPO: we divide by num_generation_per_prompt because we'll repeat each prompt
-        shuffling_iter = ShufflingIterator(
-            train_dataset_idxs, 
-            args.rollout_batch_size // args.num_generation_per_prompt, 
-            seed=args.seed
-        )
+        if args.take_top_bottom_generation:
+            # For top-bottom mode, we need full rollout_batch_size divided by num_generation_per_prompt
+            # since we'll generate multiple completions per prompt but only train on top/bottom pairs
+            shuffling_iter = ShufflingIterator(
+                train_dataset_idxs, 
+                args.rollout_batch_size // args.num_generation_per_prompt, 
+                seed=args.seed
+            )
+        else:
+            # Original DPO: we divide by num_generation_per_prompt because we'll repeat each prompt
+            shuffling_iter = ShufflingIterator(
+                train_dataset_idxs, 
+                args.rollout_batch_size // args.num_generation_per_prompt, 
+                seed=args.seed
+            )
 
         def repeat_generator():
             while True:
@@ -1002,19 +1017,35 @@ class PolicyTrainerRayProcess(RayProcess):
                 padding_mask = response_idxs > sequence_lengths.unsqueeze(1)
                 ref_logprobs = torch.masked_fill(ref_logprobs, padding_mask, INVALID_LOGPROB)
 
-                # DPO logic: split responses into chosen and rejected pairs
-                num_examples = scores.size(0) // 2
-                first_half = scores[:num_examples]
-                second_half = scores[num_examples:]
+                if args.take_top_bottom_generation:
+                    # Take top and bottom scoring completions from each group
+                    num_prompts = scores.size(0) // args.num_generation_per_prompt
+                    scores_reshaped = scores.view(num_prompts, args.num_generation_per_prompt)
+                    
+                    # Get indices of top and bottom scoring completions for each prompt
+                    top_indices_within_group = torch.argmax(scores_reshaped, dim=1)  # Shape: [num_prompts]
+                    bottom_indices_within_group = torch.argmin(scores_reshaped, dim=1)  # Shape: [num_prompts]
+                    
+                    # Convert to global indices
+                    prompt_offsets = torch.arange(num_prompts, device=scores.device) * args.num_generation_per_prompt
+                    chosen_indices = prompt_offsets + top_indices_within_group
+                    rejected_indices = prompt_offsets + bottom_indices_within_group
+                    
+                    scores_margin = scores[chosen_indices] - scores[rejected_indices]
+                else:
+                    # Original DPO logic: split responses into chosen and rejected pairs
+                    num_examples = scores.size(0) // 2
+                    first_half = scores[:num_examples]
+                    second_half = scores[num_examples:]
 
-                num_examples_range = torch.arange(num_examples).to(scores.device)
-                chosen_indices = torch.where(
-                    first_half >= second_half, num_examples_range.clone(), num_examples_range.clone() + num_examples
-                )
-                rejected_indices = torch.where(
-                    first_half < second_half, num_examples_range.clone(), num_examples_range.clone() + num_examples
-                )
-                scores_margin = scores[chosen_indices] - scores[rejected_indices]
+                    num_examples_range = torch.arange(num_examples).to(scores.device)
+                    chosen_indices = torch.where(
+                        first_half >= second_half, num_examples_range.clone(), num_examples_range.clone() + num_examples
+                    )
+                    rejected_indices = torch.where(
+                        first_half < second_half, num_examples_range.clone(), num_examples_range.clone() + num_examples
+                    )
+                    scores_margin = scores[chosen_indices] - scores[rejected_indices]
             logprobs = []
             concat_indices = []
             # Do multiple epochs of training on on-policy data (PPO-style)
@@ -1372,11 +1403,16 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     )
     args.num_training_steps = args.total_episodes // args.rollout_batch_size
     args.eval_freq = max(1, args.num_training_steps // args.num_evals)
-    args.local_dataloader_batch_size = exact_div(
-        args.local_rollout_batch_size,
-        args.num_generation_per_prompt,
-        "`local_rollout_batch_size` must be a multiple of `num_generation_per_prompt`",
-    )
+    if args.take_top_bottom_generation:
+        # Ensure we can form proper training pairs
+        effective_batch_size = args.rollout_batch_size // args.num_generation_per_prompt
+        args.local_dataloader_batch_size = effective_batch_size // args.world_size
+    else:
+        args.local_dataloader_batch_size = exact_div(
+            args.local_rollout_batch_size,
+            args.num_generation_per_prompt,
+            "`local_rollout_batch_size` must be a multiple of `num_generation_per_prompt`",
+        )
     
     if args.push_to_hub:
         if args.hf_repo_id is None:
