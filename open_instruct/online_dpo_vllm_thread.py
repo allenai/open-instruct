@@ -832,7 +832,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
                         # chosen
                         chosen_logits = chosen_logits[:, context_length - 1 : -1]
-                        chosen_logits /= args.temperature + 1e-7
+                        chosen_logits = chosen_logits / (args.temperature + 1e-7)  # Out-of-place division
                         chosen_logprobs = log_softmax_and_gather(chosen_logits, chosen_responses)
                         chosen_logprobs = torch.masked_fill(
                             chosen_logprobs, padding_mask[chosen_mb_inds], INVALID_LOGPROB
@@ -843,7 +843,7 @@ def main(args: Args, dataset_config: DatasetConfig, model_config: ModelConfig):
 
                         # rejected
                         rejected_logits = rejected_logits[:, context_length - 1 : -1]
-                        rejected_logits /= args.temperature + 1e-7
+                        rejected_logits = rejected_logits / (args.temperature + 1e-7)  # Out-of-place division
                         rejected_logprobs = log_softmax_and_gather(rejected_logits, rejected_responses)
                         rejected_logprobs = torch.masked_fill(
                             rejected_logprobs, padding_mask[rejected_mb_inds], INVALID_LOGPROB
