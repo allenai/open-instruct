@@ -7,7 +7,7 @@ import signal
 import subprocess
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import List, Literal, Optional, Tuple
 
@@ -99,6 +99,28 @@ class Args:
     run_name: Optional[str] = None
     """A unique name of this run"""
 
+    # ray
+    actor_num_gpus_per_node: List[int] = field(default_factory=lambda: [1])
+    """number of gpus per node for actor"""
+    single_gpu_mode: bool = False
+    """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
+    vllm_num_engines: int = 1
+    """number of vLLM Engines, set to 0 to disable vLLM"""
+    vllm_tensor_parallel_size: int = 1
+    """tensor parallel size of vLLM Engine for multi-GPU inference"""
+    vllm_enforce_eager: bool = False
+    """whether to enforce eager mode for vLLM -- slow inference but needed for multi-node"""
+    vllm_sync_backend: str = "nccl"
+    """DeepSpeed -> vLLM weight sync backend"""
+    vllm_gpu_memory_utilization: float = 0.9
+    """vLLM GPU memory utilization"""
+    enable_prefix_caching: bool = False
+    """whether to enable prefix caching"""
+    deepspeed_stage: int = 0
+    """the deepspeed stage"""
+    gather_whole_model: bool = True
+    """whether to gather the whole model to boardcast (not doable for 70B but can be faster for 8B)"""
+
     # optimizer args
     eps: float = 1e-5
     """The epsilon value for the optimizer"""
@@ -179,24 +201,6 @@ class Args:
     loss_type: Literal["sigmoid", "ipo"] = "sigmoid"
     """the loss type for the DPO algorithm"""
 
-    # vLLM settings
-    vllm_num_engines: int = 1
-    """number of vLLM Engines"""
-    vllm_tensor_parallel_size: int = 1
-    """tensor parallel size of vLLM Engine for multi-GPU inference"""
-    vllm_enforce_eager: bool = False
-    """whether to enforce eager mode for vLLM -- slow inference but needed for multi-node"""
-    vllm_enable_prefix_caching: bool = False
-    """whether to enable prefix caching for vLLM"""
-    vllm_gpu_memory_utilization: float = 0.9
-    """vLLM GPU memory utilization"""
-    enable_prefix_caching: bool = False
-    """whether to enable prefix caching"""
-    single_gpu_mode: bool = False
-    """whether to use single GPU mode where each engine uses 0.5 GPU memory"""
-    async_mode: bool = False
-    """whether to use async mode for inference"""
-
     # wandb and HF tracking configs
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
@@ -244,29 +248,46 @@ def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
 
 def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig) -> Accelerator:
     """calculate (in-place) runtime args such as the effective batch size, word size, etc."""
-    accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
-    args.world_size = accelerator.num_processes
+    # Initialize accelerator with distributed training enabled
+    accelerator = Accelerator(
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        mixed_precision="bf16",
+        distributed_type="nccl"
+    )
+    
+    # Set world size based on available GPUs
+    args.world_size = sum(args.actor_num_gpus_per_node)
+    
+    # Calculate batch sizes
     args.local_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps * args.num_mini_batches
     args.micro_batch_size = int(args.per_device_train_batch_size * args.world_size)
     args.batch_size = int(args.local_batch_size * args.world_size)
+    
+    # Set run name with timestamp
     time_tensor = torch.tensor(int(time.time()), device=accelerator.device)
-    # set a unique run name with the current timestamp
     time_int = broadcast(time_tensor, 0).item()
     args.run_name = f"{args.exp_name}__{args.seed}__{time_int}"
+    
+    # Calculate mini batch sizes
     args.mini_batch_size = exact_div(
         args.batch_size, args.num_mini_batches, "`batch_size` must be a multiple of `num_mini_batches`"
     )
     args.local_mini_batch_size = exact_div(
         args.local_batch_size, args.num_mini_batches, "`local_batch_size` must be a multiple of `num_mini_batches`"
     )
+    
+    # Calculate training steps
     args.num_training_steps = args.total_episodes // args.batch_size
     args.eval_freq = max(1, args.num_training_steps // args.num_evals)
-    # DPO logic: repeats the same prompt `num_generation_per_prompt` times
+    
+    # Calculate dataloader batch size for DPO
     args.local_dataloader_batch_size = exact_div(
         args.local_batch_size,
         args.num_generation_per_prompt,
         "`local_batch_size` must be a multiple of `num_generation_per_prompt`",
     )
+    
+    # Setup HuggingFace repository info
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -279,9 +300,11 @@ def calculate_runtime_args_and_accelerator(args: Args, model_config: ModelConfig
             args.hf_repo_revision = args.run_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
 
+    # Setup wandb
     if args.with_tracking and accelerator.is_main_process:
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
+            
     return accelerator
 
 
