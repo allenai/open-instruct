@@ -356,6 +356,8 @@ class LongR1SearchVerifier(VerifierFunction):
     TAG_PATTERN = re.compile(r"<finish>(.*?)</finish>", re.IGNORECASE | re.DOTALL)
 
     def __init__(self) -> None:
+        self.answer_start_tag = "<finish>"
+        self.answer_end_tag = "</finish>"
         super().__init__(name="long_re_search", weight=1.0)
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> float:
