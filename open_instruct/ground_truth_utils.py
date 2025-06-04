@@ -15,6 +15,8 @@ import weakref
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass
+from IFEvalG import instructions_registry
+from IFEvalG import instructions
 from typing import Any, Dict, List, Optional, Union
 
 from litellm import acompletion
@@ -235,31 +237,36 @@ class IFEvalVerifier(VerifierFunction):
     Verifier for ifeval tasks that delegates evaluation to a function
     specified in the constraint.
 
-    The constraint may be a JSON string or a dictionary containing a key
-    'func_name' used to lookup the evaluation function.
+    The constraint(s) are a list of constraint ids.
+    This list is found under the key "instruction_id" in the ground_truth dict.
+
     """
 
-    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
-        super().__init__("ifeval", verifier_config=verifier_config, weight=1.0)
+    def __init__(self) -> None:
+        super().__init__("ifeval", weight=1.0)
 
-    def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], query: Optional[str] = None
-    ) -> VerificationResult:
-        constraint = label
+    def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict]) -> bool:
+        instruction_dict = instructions_registry.INSTRUCTION_DICT
+        constraint_dict = ast.literal_eval(label)
+        constraint_dict = constraint_dict[0]
+        if isinstance(constraint_dict, str):
+            constraint_dict = json.loads(constraint_dict)
         answer = prediction.split("<|assistant|>\n")[-1].strip()
-        if isinstance(constraint, str):
-            constraint = json.loads(constraint)
-        if "func_name" not in constraint:
-            logger.warning("Constraint missing 'func_name': %s", constraint)
-            return VerificationResult(score=0.0)
-        func_name = constraint.pop("func_name")
-        func = IF_FUNCTIONS_MAP[func_name]
-        non_none_args = {k: v for k, v in constraint.items() if v is not None}
-        if not constraint:
-            return VerificationResult(score=float(func(prediction)))
-        return VerificationResult(score=float(func(answer, **non_none_args)))
-
-
+        instruction_keys = constraint_dict["instruction_id"]
+        args_list = constraint_dict["kwargs"]
+        rewards = []
+        for instruction_key, args in zip(instruction_keys, args_list):
+            if args is None:
+                args = {}
+            args = {k: v for k, v in args.items() if v is not None}
+            instruction_cls = instruction_dict[instruction_key]
+            instruction_instance = instruction_cls(instruction_key)
+            instruction_instance.build_description(**args)
+            if prediction.strip() and instruction_instance.check_following(answer):
+                rewards.append(1.0)
+            else:
+                rewards.append(0.0)
+        return VerificationResult(score=sum(rewards) / len(rewards))
 def normalize_answer(s: str) -> str:
     """
     Normalize the answer by lowercasing, removing punctuation, articles,
