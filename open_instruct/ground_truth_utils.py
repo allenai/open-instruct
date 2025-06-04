@@ -361,10 +361,7 @@ class LongR1SearchVerifier(VerifierFunction):
         super().__init__(name="long_re_search", weight=1.0)
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str) -> float:
-        try:
-            label = json.loads(label)
-        except json.JSONDecodeError:
-            label = label.strip()
+        label = label.strip()
         print(f"label: {label}")
         # extract answer
         if self.answer_start_tag not in prediction and self.answer_end_tag not in prediction:
