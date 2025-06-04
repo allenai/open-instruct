@@ -74,8 +74,8 @@ def convert_os_to_rl_format():
         message = [ { "content": f"{prompt}{question}", "role": "user" } ]
         rl_data.append({
             "messages": message,
-            "ground_truth": example["messages"][-1]["content"],
-            "no_reasoning_ground_truth": example["messages"][-1]["content"],
+            "ground_truth": str(example["messages"][-1]["content"]),
+            "no_reasoning_ground_truth": str(example["messages"][-1]["content"]),
             "dataset": "long_re_search"})
     
     # upload to huggingface
@@ -89,8 +89,8 @@ def convert_os_to_rl_format():
         message = [ { "content": f"{prompt}{question}", "role": "user" } ]
         rl_data.append({
             "messages": message,
-            "ground_truth": example["messages"][-1]["content"],
-            "no_reasoning_ground_truth": example["messages"][-1]["content"],
+            "ground_truth": str(example["messages"][-1]["content"]),
+            "no_reasoning_ground_truth": str(example["messages"][-1]["content"]),
             "dataset": "long_re_search"})
     
     # upload to huggingface
