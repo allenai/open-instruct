@@ -267,7 +267,7 @@ class IFEvalVerifier(VerifierFunction):
                 rewards.append(0.0)
         return VerificationResult(score=sum(rewards) / len(rewards))
 
-class IFEvalVerifier(VerifierFunction):
+class IFEvalVerifierOld(VerifierFunction):
     """
     Verifier for ifeval tasks that delegates evaluation to a function
     specified in the constraint.
