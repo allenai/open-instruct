@@ -7,11 +7,11 @@ OLMoCore accepts data in numpy mmap format. One file is for the input tokens, on
 
 Usage:
     python scripts/data/convert_sft_data_for_olmocore.py \
-        --tokenizer_name_or_path meta-llama/Llama-3.1-8B \
+        --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
         --chat_template_name tulu \
-        --dataset_mixer_list allenai/tulu-3-sft-personas-algebra 1.0 \
-        --max_seq_length 1024 \
-        --output_prefix oi
+        --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture-0225 1.0 \
+        --max_seq_length 4096 \
+        --output_dir oi
 """
 
 import argparse
@@ -36,7 +36,7 @@ def main():
     parser.add_argument(
         "--tokenizer_name_or_path",
         type=str,
-        default="meta-llama/Llama-3.1-8B",
+        default="allenai/OLMo-2-1124-7B",
         help="Tokenizer name or path",
     )
     parser.add_argument(
@@ -49,14 +49,14 @@ def main():
         "--dataset_mixer_list",
         type=str,
         nargs=2,
-        default=["allenai/tulu-3-sft-personas-algebra", "1.0"],
+        default=["allenai/tulu-3-sft-olmo-2-mixture-0225", "1.0"],
         help="Dataset mixer list [dataset_name, weight]",
     )
     parser.add_argument(
         "--dataset_split", type=str, default="train", help="Dataset split to use"
     )
     parser.add_argument(
-        "--max_seq_length", type=int, default=1024, help="Maximum sequence length"
+        "--max_seq_length", type=int, default=4096, help="Maximum sequence length"
     )
     parser.add_argument(
         "--num_examples",
@@ -65,7 +65,7 @@ def main():
         help="Number of examples to process for debugging. 0 means process all examples.",
     )
     parser.add_argument(
-        "--output_prefix", type=str, default="oi", help="Output file prefix"
+        "--output_dir", type=str, required=True, help="Output directory"
     )
     parser.add_argument(
         "--visualize", action="store_true", help="Visualize first token sequence"
@@ -79,6 +79,7 @@ def main():
         add_bos=args.add_bos,
     )
 
+    # TODO: improve configurability of transform factory
     transform_functions_and_args = [
         ("sft_tulu_tokenize_and_truncate_v1", {"max_seq_length": args.max_seq_length}),
         ("sft_tulu_filter_v1", {}),
@@ -125,9 +126,9 @@ def main():
         mmap.flush()
         return mmap
 
-    write_memmap(f"{args.output_prefix}_token_ids.npy", token_ids, np.uint32)
-    write_memmap(f"{args.output_prefix}_labels.npy", labels, np.int32)
-    write_memmap(f"{args.output_prefix}_attention_mask.npy", attention_mask, np.int32)
+    write_memmap(f"{args.output_dir}/token_ids.npy", token_ids, np.uint32)
+    write_memmap(f"{args.output_dir}/labels.npy", labels, np.int32)
+    write_memmap(f"{args.output_dir}/attention_mask.npy", attention_mask, np.int32)
     print("Data conversion completed successfully")
 
 
