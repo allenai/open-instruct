@@ -1,4 +1,4 @@
-for model in Qwen/Qwen2.5-0.5B; do
+for model in /weka/oe-training-default/ai2-llm/checkpoints/dustins/lc_7b_cont_pretrain_final_anneal/step11921-hf; do
 for LR in 1e-6 # 2e-5 3e-6
 do
   for seed in 1; do
@@ -20,7 +20,7 @@ do
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/reward_modeling.py \
-    --exp_name rm_qwen2p5_base_0p5b_${LR}_${NUM_TRAIN_EPOCHS}_skyworkstulufull \
+    --exp_name rm_olmo_2_7b_lc_base_${LR}_${NUM_TRAIN_EPOCHS}_skyworkstulufull \
     --model_name_or_path $model\
     --model_revision main \
     --tokenizer_name $model \
