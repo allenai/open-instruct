@@ -54,7 +54,7 @@ from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
-from typing import Callable, Dict, Iterator, List, Literal, Optional
+from typing import Callable, Dict, Iterator, List, Literal, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -89,7 +89,6 @@ from open_instruct.ground_truth_utils import (
     build_all_verifiers,
     cleanup_all_llm_judge_clients,
     soft_format_reward_func,
-    verify_code_sample
 )
 from open_instruct.model_utils import (
     ModelConfig,
@@ -263,7 +262,7 @@ class Args:
     verification_reward: float = 10.0
     """the reward value for verifiable responses"""
 
-    # -- llm verifiers reward
+    # -- llm verifiers
     llm_judge_model: str = "azure/gpt-4o-mini-standard"
     """the model to use for the llm judge"""
     llm_judge_max_tokens: int = 2048
@@ -273,13 +272,11 @@ class Args:
     llm_judge_timeout: int = 60
     """the timeout to use for the llm judge"""
 
-    # -- ace coder reward
-    apply_code_reward: bool = False
-    """whether to apply code reward"""
-    code_reward: float = 10.0
-    """the reward value for code responses"""
-    code_api_url: Optional[str] = None
-    """the URL of the code API"""
+    # -- code verifier
+    code_api_url: str = "http://localhost:1234/test_program"
+    """the api url to use for the code verifier"""
+    code_max_execution_time: float = 1.0
+    """the max execution time to use for the code verifier"""
 
     # -- non stop penalty
     non_stop_penalty: bool = False
@@ -401,8 +398,6 @@ class Args:
             download_latest_checkpoint_from_gs(self.gs_checkpoint_state_dir, self.checkpoint_state_dir)
         if self.checkpoint_state_dir is not None:
             calibrate_checkpoint_state_dir(self.checkpoint_state_dir)
-        if self.apply_code_reward:
-            assert self.code_api_url is not None, "The code API URL must be provided!"
         if self.tools is not None and len(self.tools) > 0:
             for tool in self.tools:
                 if tool not in ["search", "code"]:
@@ -1863,7 +1858,7 @@ if __name__ == "__main__":
     async def reward_fn(
         responses: List[torch.Tensor],
         decoded_responses: List[str],
-        ground_truths: List[str],
+        ground_truths: List[Union[str, List[str]]],
         datasets: List[str],
         finish_reasons: List[str],
         infos: List[List[int]],
@@ -1921,20 +1916,6 @@ if __name__ == "__main__":
                     np_value = np.array(value)
                     metrics[f"objective/{key}_reward"] = np_value.mean()
                     metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
-
-
-        if args.apply_code_reward:
-            with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying code reward"):
-                code_rewards = verify_code_sample(
-                    decoded_responses,
-                    ground_truths,
-                    args.code_api_url,
-                )
-                code_rewards = [item * args.code_reward for item in code_rewards]
-                for i in range(len(code_rewards)):
-                    scores[i] = code_rewards[i] + scores[i]
-                metrics["objective/code_reward"] = np.array(code_rewards).mean()
-                metrics["objective/code_correct_rate"] = (np.array(code_rewards) > 0.0).mean()
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:

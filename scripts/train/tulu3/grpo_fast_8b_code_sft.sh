@@ -11,7 +11,7 @@ python mason.py \
     --num_nodes 4 \
     --description "${description}" \
     --budget ai2/oe-adapt \
-    --gpus 8 -- source configs/beaker_configs/ray_node_setup_code.sh \&\& python open_instruct/grpo_fast.py \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name $exp_name \
     --beta 0.01 \
     --num_unique_prompts_rollout 48 \

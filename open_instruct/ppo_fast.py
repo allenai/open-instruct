@@ -57,7 +57,7 @@ from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
-from typing import Callable, Iterator, List, Literal, Optional
+from typing import Callable, Iterator, List, Literal, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -1936,7 +1936,7 @@ if __name__ == "__main__":
     async def reward_fn(
         responses: List[torch.Tensor],
         decoded_responses: List[str],
-        ground_truths: List[str],
+        ground_truths: List[Union[str, List[str]]],
         datasets: List[str],
         finish_reasons: List[str],
         infos: List[List[int]],

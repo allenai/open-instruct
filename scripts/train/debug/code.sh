@@ -16,6 +16,8 @@ python open_instruct/grpo_fast.py \
     --pack_length 4096 \
     --model_name_or_path Qwen/Qwen2.5-0.5B-Instruct \
     --apply_verifiable_reward true \
+    --code_api_url http://localhost:1234/test_program \
+    --code_max_execution_time 1.0 \
     --non_stop_penalty True \
     --oe_eval_tasks gsm8k::tulu,bbh:cot-v1::tulu,codex_humaneval::tulu,codex_humanevalplus::tulu,mbppplus::openinstruct,drop::llama3,minerva_math::tulu,ifeval::tulu,popqa::tulu,mmlu:mc::tulu,mmlu:cot::summarize,alpaca_eval_v2::tulu,truthfulqa::tulu,cruxeval_input:pass@5,cruxeval_output:pass@5 \
     --non_stop_penalty_value 0.0 \

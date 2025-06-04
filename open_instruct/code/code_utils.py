@@ -1,9 +1,9 @@
+import logging
 import multiprocessing
 import os
 import shutil
 from ctypes import c_int
 from typing import Any, Dict, List, Optional
-import logging
 
 # taken from https://github.com/TIGER-AI-Lab/AceCoder/blob/62bb7fc25d694fed04a5270c89bf2cdc282804f7/data/inference/EvaluateInferencedCode.py#L372
 # we save the current working directory and restore them later
@@ -287,7 +287,7 @@ if __name__ == "__main__":
     program = "a = 1"
     bad_test = "assert False"
     good_test = "assert True"
-    time_out_test = f"""
+    time_out_test = """
 for i in range(9999999999999999999):
     for k in range(99999999999999999999):
         print("hello world")
@@ -334,7 +334,7 @@ for i in range(9999999999999999999):
     print(test_case_status)
 
     test_case_status = get_successful_tests_fast(
-        program='\ndef add(a, b):\n    return a + b\n',
-        tests=['assert add(1, 2) == 3', 'assert add(-1, 1) == 0', 'assert add(0, 0) == 1'],
+        program="\ndef add(a, b):\n    return a + b\n",
+        tests=["assert add(1, 2) == 3", "assert add(-1, 1) == 0", "assert add(0, 0) == 1"],
     )
     print(test_case_status)
