@@ -22,7 +22,7 @@ client = AzureOpenAI(
     api_version="2024-12-01-preview"
 )
 
-MODEL = "gpt-4o-mini-batch"
+MODEL = "gpt4.1"
 SAMPLE_LIMIT = None
 WD = os.getcwd()
 TIMESTAMP = int(time.time())
