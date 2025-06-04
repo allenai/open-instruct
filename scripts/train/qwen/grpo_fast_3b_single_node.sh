@@ -22,7 +22,7 @@ python mason.py \
     --response_length 4096 \
     --pack_length 6144 \
     --model_name_or_path Qwen/Qwen2.5-3B \
-    --stop_strings '"</answer>"' \
+    --stop_strings "</answer>" \
     --apply_r1_style_format_reward True \
     --apply_verifiable_reward True \
     --non_stop_penalty True \

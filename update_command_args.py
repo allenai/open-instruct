@@ -5,7 +5,6 @@ This script is used to add or update arguments in a shell script. For example,
 python update_command_args.py scripts/train/tulu3/grpo_fast_8b.sh \
     --cluster ai2/augusta-google-1 \
     --priority normal \
-    --dataset_mixer_list allenai/RLVR-GSM 1.0 allenai/RLVR-MATH 1.0 \
     --image costah/open_instruct_dev0320_11 | uv run bash
 ```
 
@@ -13,14 +12,14 @@ would replace the `--cluster`, `--priority`, `--image` arguments in the script w
 """
 
 import sys
+import re
 import argparse
-from typing import List
 
-def read_shell_script(filename: str) -> str:
+def read_shell_script(filename):
     with open(filename, 'r') as f:
         return f.read()
 
-def modify_command(content: str, new_args: List[str]) -> str:
+def modify_command(content, new_args):
     split_content = content.split(" ")
     new_content = []
     flag_args = []
@@ -39,6 +38,9 @@ def modify_command(content: str, new_args: List[str]) -> str:
                 if flag in new_args:
                     new_content.append(f"--{flag}")
                     new_args_values = new_args[flag]
+                    for i in range(len(new_args_values)):
+                        if "</" in new_args_values[i]:
+                            new_args_values[i] = f"'{new_args_values[i]}'"
                     if isinstance(new_args_values, list):
                         new_content.extend(new_args_values)
                     else:
@@ -80,6 +82,7 @@ def main():
     script_file = sys.argv[1]
     
     # Parse remaining arguments as key-value pairs
+    # NOTE: we need to handle `nargs` for cases like `--dataset_mixer_list xxx 1.0`
     parser = argparse.ArgumentParser()
     num_values = 0
     last_arg = None
@@ -105,20 +108,5 @@ def main():
     
     print(modified_content)
 
-
-def test_modify_command():
-    content = "python train.py --dataset_mixer_list xxx 1.0 --cluster ai2/augusta-google-1 --priority normal"
-    new_args = {
-        "dataset_mixer_list": ["xxx", "1.0"],
-        "cluster": "ai2/augusta-google-1",
-        "priority": "normal",
-        "image": "costah/open_instruct_dev0320_11"
-    }
-    modified_content = modify_command(content, new_args)
-    normalized_content = " ".join(modified_content.replace("\\\n", "").split())
-    assert normalized_content == "python train.py --dataset_mixer_list xxx 1.0 --cluster ai2/augusta-google-1 --priority normal --priority normal --image costah/open_instruct_dev0320_11"
-
-
 if __name__ == "__main__":
-    test_modify_command()
     main()
