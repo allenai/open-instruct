@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from IFEvalG import instructions_registry
 from litellm import acompletion
+
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.judge_utils import (
     JUDGE_PROMPT_MAP,
@@ -267,6 +268,7 @@ class IFEvalVerifier(VerifierFunction):
                 rewards.append(0.0)
         return VerificationResult(score=sum(rewards) / len(rewards))
 
+
 class IFEvalVerifierOld(VerifierFunction):
     """
     Verifier for ifeval tasks that delegates evaluation to a function
@@ -295,6 +297,7 @@ class IFEvalVerifierOld(VerifierFunction):
         if not constraint:
             return VerificationResult(score=float(func(prediction)))
         return VerificationResult(score=float(func(answer, **non_none_args)))
+
 
 def normalize_answer(s: str) -> str:
     """
