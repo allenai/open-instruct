@@ -11,10 +11,11 @@ Usage:
         --chat_template_name tulu \
         --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture-0225 1.0 \
         --max_seq_length 4096 \
-        --output_dir oi
+        --output_dir /weka/oe-adapt-default/tylerr/tulu-3-sft-olmo-2-mixture-0225-olmocore
 """
 
 import argparse
+import os
 from collections.abc import Mapping
 from typing import Any
 
@@ -119,6 +120,9 @@ def main():
     print(f"Maximum token ID: {max(token_ids)}")
 
     print("Writing data to numpy files...")
+
+    # Create output directory if it doesn't exist
+    os.makedirs(args.output_dir, exist_ok=True)
 
     def write_memmap(filename, data, dtype):
         mmap = np.memmap(filename, mode="w+", dtype=dtype, shape=(len(data),))
