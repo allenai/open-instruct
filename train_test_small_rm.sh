@@ -1,12 +1,12 @@
 for model in /weka/oe-training-default/ai2-llm/checkpoints/dustins/lc_7b_cont_pretrain_final_anneal/step11921-hf; do
-for LR in 1e-6 # 2e-5 3e-6
+for LR in 1e-6 2e-5 3e-6
 do
   for seed in 1; do
-  for NUM_TRAIN_EPOCHS in 1 # 2 3
+  for NUM_TRAIN_EPOCHS in 1 2 3
   do
     echo "Running with LR=${LR} and NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS} and seed ${seed}"
     python mason.py \
-    --cluster ai2/saturn-cirrascale \
+    --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/reward-bench-v2 \
     --priority high \
     --image nathanl/open_instruct_auto --pure_docker_mode \
