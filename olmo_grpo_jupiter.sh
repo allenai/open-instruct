@@ -70,7 +70,8 @@ python mason.py \
     --gradient_checkpointing \
     --with_tracking \
     --hf_entity allenai \
-    --wandb_entity ai2-llm 
+    --wandb_entity ai2-llm \
+    --add_bos
     
     # ai2/cuda11.8-cudnn8-dev-ubuntu20.04
     # nathanl/open_instruct_auto
