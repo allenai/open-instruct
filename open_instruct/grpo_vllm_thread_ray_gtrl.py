@@ -43,6 +43,7 @@ except Exception:
     pass
 # isort: on
 
+import asyncio
 import gc
 import json
 import logging
