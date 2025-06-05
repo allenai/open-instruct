@@ -124,7 +124,7 @@ def main():
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
 
-    def write_memmap_chunked(base_filename, data, dtype, max_size_gb=5):
+    def write_memmap_chunked(base_filename, data, dtype, max_size_gb=2):
         """Write data to multiple memmap files if size exceeds max_size_gb."""
         # Calculate size in bytes
         item_size = np.dtype(dtype).itemsize
