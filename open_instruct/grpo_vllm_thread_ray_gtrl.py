@@ -809,7 +809,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         args = self.args
         self.tokenizer = tokenizer
-
+        reward_fn_mapping = build_all_verifiers(args)
         accelerator = Namespace()
         accelerator.process_index = self.rank
         accelerator.num_processes = self.world_size
@@ -1178,6 +1178,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
                         decoded_response = tokenizer.batch_decode(postprocessed_response)
                         verifiable_reward, per_func_reward = apply_verifiable_reward(
+                            reward_fn_mapping=reward_fn_mapping,
                             responses=[seq[seq != tokenizer.pad_token_id].tolist() for seq in postprocessed_response],
                             decoded_responses=decoded_response,
                             ground_truths=ground_truth,
