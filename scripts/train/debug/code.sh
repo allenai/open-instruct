@@ -6,9 +6,9 @@ python open_instruct/grpo_fast.py \
     --try_launch_beaker_eval_jobs_on_weka \
     --kl_estimator kl3 \
     --learning_rate 5e-7 \
-    --dataset_mixer_list saurabh5/open-code-reasoning-rlvr 1.0 saurabh5/tulu-3-personas-code-rlvr 10000 \
+    --dataset_mixer_list saurabh5/the-algorithm-python 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list saurabh5/open-code-reasoning-rlvr 16 saurabh5/tulu-3-personas-code-rlvr 16 \
+    --dataset_mixer_eval_list saurabh5/the-algorithm-python 16 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 4096 \
     --max_prompt_token_length 2048 \

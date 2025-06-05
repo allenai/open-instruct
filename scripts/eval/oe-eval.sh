@@ -71,7 +71,6 @@ while [[ "$#" -gt 0 ]]; do
         --stop-sequences) STOP_SEQUENCES="$2"; shift ;;
         --beaker-image) BEAKER_IMAGE="$2"; shift ;;
         --cluster) CLUSTER="$2"; shift ;;
-        --chat_template) CHAT_TEMPLATE="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -184,16 +183,7 @@ GPU_COUNT="$NUM_GPUS"
 GPU_COUNT_OTHER=$((NUM_GPUS * 2))
 MODEL_TYPE_OTHER=""
 
-MODEL_ARGS_BASE="{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}"
-    FINAL_MODEL_ARGS=""
-    if [ -n "$CHAT_TEMPLATE" ]; then
-      # Ensure CHAT_TEMPLATE is properly escaped if it can contain special JSON characters.
-      # For simple string values, direct embedding like below is often okay.
-      # If CHAT_TEMPLATE can contain quotes, newlines, etc., more robust escaping is needed.
-      FINAL_MODEL_ARGS="${MODEL_ARGS_BASE}, \"chat_template\": \"${CHAT_TEMPLATE}\"}"
-    else
-      FINAL_MODEL_ARGS="${MODEL_ARGS_BASE}}"
-    fi
+MODEL_ARGS="{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}"
 
 for TASK in "${TASKS[@]}"; do
     # mmlu and truthfulqa need different batch sizes and gpu counts because they are multiple choice and we cannot use vllm.
@@ -215,7 +205,7 @@ for TASK in "${TASKS[@]}"; do
             --task "$TASK" \
             $MODEL_TYPE \
             --batch-size "$BATCH_SIZE" \
-            --model-args "$FINAL_MODEL_ARGS" \
+            --model-args "$MODEL_ARGS" \
             --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
@@ -236,7 +226,7 @@ for TASK in "${TASKS[@]}"; do
         --task "$TASK" \
         $MODEL_TYPE \
         --batch-size "$BATCH_SIZE" \
-        --model-args "$FINAL_MODEL_ARGS" \
+        --model-args "$MODEL_ARGS" \
         --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
         ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT" \
