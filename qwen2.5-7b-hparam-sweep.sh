@@ -1,8 +1,8 @@
-for model in Qwen/Qwen2.5-7B; do
-for LR in 1e-6 2e-5 3e-6
+for model in google/gemma-3-4b-pt; do
+for LR in 1e-6 # 2e-5 3e-6
 do
   for seed in 1; do
-  for NUM_TRAIN_EPOCHS in 1 2 3
+  for NUM_TRAIN_EPOCHS in 1 # 2 3
   do
     echo "Running with LR=${LR} and NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS} and seed ${seed}"
     python mason.py \
