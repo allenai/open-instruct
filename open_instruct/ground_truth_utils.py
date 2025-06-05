@@ -297,7 +297,7 @@ class IFEvalVerifierOld(VerifierFunction):
     """
 
     def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
-        super().__init__("ifeval", verifier_config=verifier_config, weight=1.0)
+        super().__init__("ifeval_old", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
         self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], query: Optional[str] = None
