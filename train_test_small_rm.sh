@@ -1,15 +1,15 @@
-for model in /weka/oe-training-default/ai2-llm/checkpoints/dustins/lc_7b_cont_pretrain_final_anneal/step11921-hf; do
-for LR in 1e-6 2e-5 3e-6
+for model in google/gemma-3-4b-pt; do
+for LR in 1e-6 # 2e-5 3e-6
 do
   for seed in 1; do
-  for NUM_TRAIN_EPOCHS in 1 2 3
+  for NUM_TRAIN_EPOCHS in 1 # 2 3
   do
     echo "Running with LR=${LR} and NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS} and seed ${seed}"
     python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/reward-bench-v2 \
     --priority high \
-    --image nathanl/open_instruct_auto --pure_docker_mode \
+    --image ai2/cuda11.8-cudnn8-dev-ubuntu20.04 \
     --preemptible \
     --num_nodes 1 \
     --budget ai2/oe-adapt \
@@ -20,7 +20,7 @@ do
     --deepspeed_config_file configs/ds_configs/stage3_no_offloading_accelerate.conf \
     --deepspeed_multinode_launcher standard \
     open_instruct/reward_modeling.py \
-    --exp_name rm_olmo_2_7b_lc_base_${LR}_${NUM_TRAIN_EPOCHS}_skyworkstulufull \
+    --exp_name rm_gemma_3_4b_pt_${LR}_${NUM_TRAIN_EPOCHS}_skyworkstulufull \
     --model_name_or_path $model\
     --model_revision main \
     --tokenizer_name $model \
