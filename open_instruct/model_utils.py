@@ -214,8 +214,8 @@ async def apply_verifiable_reward(
     reward_fn_mapping: Dict[str, VerifierFunction],
     responses: List[torch.Tensor],
     decoded_responses: List[str],
-    ground_truths: List[Union[str, List[str]]],
-    datasets: List[str],
+    ground_truths: List[str],
+    datasets: List[Union[str, List[str]]],
     reward_mult: int = 10,
     queries: Optional[List[str]] = None,
 ):
@@ -229,23 +229,37 @@ async def apply_verifiable_reward(
     for i, (tok_prediction, prediction, ground_truth, dataset, query) in enumerate(
         zip(responses, decoded_responses, ground_truths, datasets, queries)
     ):
-        # Create async tasks for each ground truth/dataset pair
-        reward_func = reward_fn_mapping.get(dataset.lower())
-        if reward_func is None:
-            logger.warning("No reward function found for dataset %s. Skipping reward.", dataset)
-            continue
+        # allow multiple ground truths and datasets for a single response
 
-        # Create async task
-        task = reward_func.async_call(
-            tokenized_prediction=tok_prediction,
-            prediction=prediction,
-            label=ground_truth,
-            query=query,
-        )
-        async_tasks.append(task)
-        task_metadata.append(
-            {"response_idx": i, "dataset": dataset, "reward_weight": reward_func.weight, "reward_mult": reward_mult}
-        )
+        # TODO: both code and lm_judge might have list of ground_truth *per instance*
+        if isinstance(ground_truth, str):
+            ground_truth_list = [ground_truth]
+        else:
+            ground_truth_list = ground_truth
+        if isinstance(dataset, str):
+            dataset_list = [dataset]
+        else:
+            dataset_list = dataset
+        assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
+
+        # Create async tasks for each ground truth/dataset pair
+        for gt, ds in zip(ground_truth_list, dataset_list):
+            reward_func = reward_fn_mapping.get(ds.lower())
+            if reward_func is None:
+                logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
+                continue
+
+            # Create async task
+            task = reward_func.async_call(
+                tokenized_prediction=tok_prediction,
+                prediction=prediction,
+                label=gt,
+                query=query,
+            )
+            async_tasks.append(task)
+            task_metadata.append(
+                {"response_idx": i, "dataset": ds, "reward_weight": reward_func.weight, "reward_mult": reward_mult}
+            )
 
     # Execute all tasks in parallel
     if async_tasks:

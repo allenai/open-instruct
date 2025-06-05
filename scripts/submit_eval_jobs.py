@@ -114,7 +114,6 @@ parser.add_argument("--oe_eval_max_length", type=int, default=4096, help="Max le
 parser.add_argument("--oe_eval_unseen_evals", action="store_true", help="Run unseen task evals instead of dev task evals on OE Eval.")
 parser.add_argument("--use_alternate_safety_image", type=str, default=None, help="Use a different image for safety eval.")
 parser.add_argument("--evaluate_on_weka", action="store_true", help="Evaluate OE eval on Beaker.")
-parser.add_argument("--chat_template", type=str, default=None, help="Which chat template to use, or 'none' to use the default chat template.")
 # NOTE: evaluate on weka is expected to be on by default. If not, the evals will run on the google augusta cluster.
 # TODO: fix this logic at a future date
 
@@ -649,9 +648,6 @@ if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
     if args.beaker_image:
         oe_eval_cmd += f" --beaker-image {args.beaker_image}"
     
-    if args.chat_template:
-        oe_eval_cmd += f" --chat_template {args.chat_template}"
-        
     # Add cluster parameter - use the existing cluster argument
     # Join the list with commas since oe-eval.sh expects a comma-separated string
     if args.cluster and len(args.cluster) > 0:
