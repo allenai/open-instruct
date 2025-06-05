@@ -641,6 +641,15 @@ class PolicyTrainerRayProcess(RayProcess):
     def from_pretrained(
         self, args: Args, model_config: ModelConfig, beaker_config: BeakerRuntimeConfig, wandb_url: str, tokenizer: PreTrainedTokenizer
     ):
+        from open_instruct.olmo_adapter import (
+            Olmo2Config,
+            Olmo2ForSequenceClassification,
+            OlmoeConfig,
+            OlmoeForSequenceClassification,
+        )
+        AutoModelForSequenceClassification.register(Olmo2Config, Olmo2ForSequenceClassification)
+        AutoModelForSequenceClassification.register(OlmoeConfig, OlmoeForSequenceClassification)
+
         self.args = args
         self.model_config = model_config
         self.beaker_config = beaker_config
