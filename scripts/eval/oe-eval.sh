@@ -183,6 +183,8 @@ GPU_COUNT="$NUM_GPUS"
 GPU_COUNT_OTHER=$((NUM_GPUS * 2))
 MODEL_TYPE_OTHER=""
 
+MODEL_ARGS="{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}"
+
 for TASK in "${TASKS[@]}"; do
     # mmlu and truthfulqa need different batch sizes and gpu counts because they are multiple choice and we cannot use vllm.
     if [[ "$TASK" == "mmlu:mc::tulu" || "$TASK" == "truthfulqa::tulu" ]]; then
@@ -203,7 +205,7 @@ for TASK in "${TASKS[@]}"; do
             --task "$TASK" \
             $MODEL_TYPE \
             --batch-size "$BATCH_SIZE" \
-            --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
+            --model-args "$MODEL_ARGS" \
             --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
@@ -224,7 +226,7 @@ for TASK in "${TASKS[@]}"; do
         --task "$TASK" \
         $MODEL_TYPE \
         --batch-size "$BATCH_SIZE" \
-        --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
+        --model-args "$MODEL_ARGS" \
         --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
         ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT" \
