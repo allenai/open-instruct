@@ -86,21 +86,20 @@ def main():
         ("sft_tulu_filter_v1", {}),
     ]
 
-    transform_functions = [func for func, _ in transform_functions_and_args]
-    transform_function_args = [args for _, args in transform_functions_and_args]
-
     train_dataset = get_cached_dataset_tulu(
         dataset_mixer_list=args.dataset_mixer_list,
         dataset_mixer_list_splits=[args.dataset_split],
         tc=tc,
-        dataset_transform_fn=transform_functions,
-        transform_fn_args=transform_function_args,
+        dataset_transform_fn=[func for func, _ in transform_functions_and_args],
+        transform_fn_args=[args for _, args in transform_functions_and_args],
         target_columns=TOKENIZED_SFT_DATASET_KEYS,
     )
 
     if args.visualize:
+        print("Visualizing first example...")
         visualize_token(train_dataset[0][INPUT_IDS_KEY], tc.tokenizer)
         print("Labels:", train_dataset[0][LABELS_KEY])
+        print("Attention mask:", train_dataset[0][ATTENTION_MASK_KEY])
 
     if args.num_examples > 0:
         print(f"Selecting {args.num_examples} examples for debugging")
@@ -111,28 +110,55 @@ def main():
     labels = []
     attention_mask = []
     sample: Mapping[str, Any]
-    for sample in train_dataset:
+    for i, sample in enumerate(train_dataset):
+        if i % 5000 == 0:
+            print(f"Processing sample {i}/{len(train_dataset)}")
         token_ids.extend(sample[INPUT_IDS_KEY])
         labels.extend(sample[LABELS_KEY])
         attention_mask.extend(sample[ATTENTION_MASK_KEY])
 
     print(f"Total tokens: {len(token_ids)}")
     print(f"Maximum token ID: {max(token_ids)}")
-
     print("Writing data to numpy files...")
 
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
 
-    def write_memmap(filename, data, dtype):
-        mmap = np.memmap(filename, mode="w+", dtype=dtype, shape=(len(data),))
-        mmap[:] = data
-        mmap.flush()
-        return mmap
+    def write_memmap_chunked(base_filename, data, dtype, max_size_gb=5):
+        """Write data to multiple memmap files if size exceeds max_size_gb."""
+        # Calculate size in bytes
+        item_size = np.dtype(dtype).itemsize
+        total_size_bytes = len(data) * item_size
+        max_size_bytes = max_size_gb * 1024**3
 
-    write_memmap(f"{args.output_dir}/token_ids.npy", token_ids, np.uint32)
-    write_memmap(f"{args.output_dir}/labels.npy", labels, np.int32)
-    write_memmap(f"{args.output_dir}/attention_mask.npy", attention_mask, np.int32)
+        if total_size_bytes <= max_size_bytes:  # record in single file
+            mmap = np.memmap(
+                f"{base_filename}.npy", mode="w+", dtype=dtype, shape=(len(data),)
+            )
+            mmap[:] = data
+            mmap.flush()
+            print(f"Written {base_filename}.npy ({total_size_bytes / 1024**3:.2f} GB)")
+            return [mmap]
+        else:  # record in multiple files (if too large)
+            chunk_size = max_size_bytes // item_size
+            chunks = []
+            for i in range(0, len(data), chunk_size):
+                chunk_data = data[i : i + chunk_size]
+                filename = f"{base_filename}_part_{i // chunk_size:04d}.npy"
+                mmap = np.memmap(
+                    filename, mode="w+", dtype=dtype, shape=(len(chunk_data),)
+                )
+                mmap[:] = chunk_data
+                mmap.flush()
+                chunks.append(mmap)
+                print(
+                    f"Written {filename} ({len(chunk_data) * item_size / 1024**3:.2f} GB)"
+                )
+            return chunks
+
+    write_memmap_chunked(f"{args.output_dir}/token_ids", token_ids, np.uint32)
+    write_memmap_chunked(f"{args.output_dir}/labels", labels, np.int32)
+    write_memmap_chunked(f"{args.output_dir}/attention_mask", attention_mask, np.int32)
     print("Data conversion completed successfully")
 
 
