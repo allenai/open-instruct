@@ -1,9 +1,94 @@
 """
+OpenAI Batch Job Creator for Code Dataset Processing
+
+This script creates OpenAI batch jobs to process coding datasets at scale. It transforms
+coding problems into structured formats with function signatures, test cases, and solutions
+using Azure OpenAI's batch API. This is the first step in a two-part process, followed by
+code_upload_batch.py to process the results.
+
+Features:
+- Creates OpenAI batch jobs for large-scale code processing
+- Uses structured output with JSON schema validation
+- Deduplicates input data by unique IDs
+- Supports local caching to avoid reprocessing
+- Configurable sampling and processing limits
+- Generates properly formatted batch request files
+
+Prerequisites:
+1. Set up Azure OpenAI API credentials:
+   - AZURE_OPENAI_API_KEY: Your Azure OpenAI API key
+   - AZURE_OPENAI_ENDPOINT: Your Azure OpenAI endpoint URL
+
+2. Install required packages:
+   ```bash
+   pip install openai datasets pydantic
+   ```
+
 Usage:
-Cd into the directory of this file and run:
-```
-python open_code_reasoning_create_batch.py
-```
+    python code_create_batch.py
+
+Configuration:
+    Modify these variables in the script as needed:
+    - INPUT_HF_DATASET: Source HuggingFace dataset to process
+    - SPLIT: Dataset split to use (e.g., "split_0")
+    - MODEL: Azure OpenAI model name (e.g., "gpt4.1")
+    - SAMPLE_LIMIT: Number of samples to process (None for all)
+
+Output:
+    - Creates a batch file in ./batch_files/ directory
+    - Submits the batch job to Azure OpenAI
+    - Returns a batch job ID for use with code_upload_batch.py
+
+Examples:
+    ```bash
+    # Set environment variables
+    export AZURE_OPENAI_API_KEY="your-api-key"
+    export AZURE_OPENAI_ENDPOINT="https://your-endpoint.openai.azure.com/"
+    
+    # Run the script
+    python code_create_batch.py
+    
+    # The script will output a batch job ID like:
+    # "Batch job submitted with ID: batch_abc123def456"
+    
+    # Use this ID later with code_upload_batch.py:
+    # python code_upload_batch.py batch_abc123def456
+    ```
+
+Process:
+1. Loads and deduplicates the input dataset
+2. Samples data according to SAMPLE_LIMIT configuration
+3. Generates prompts for code transformation
+4. Creates a batch file with structured output schema
+5. Submits the batch job to Azure OpenAI
+6. Returns batch job ID for result processing
+
+Batch Request Format:
+    Each request transforms a coding problem by:
+    - Converting input to specify function signatures
+    - Rewriting solutions to use function parameters
+    - Generating executable test cases
+    - Validating program quality
+
+Structured Output Schema:
+    - rewritten_input: Function-based problem description
+    - rewritten_solution: Function-based solution code
+    - test_cases: List of executable assert statements
+    - good_program: Boolean quality indicator
+
+Workflow:
+    This is typically the first step in a two-part process:
+    1. Run this script to create and submit batch job
+    2. Wait for batch completion (can take hours for large jobs)
+    3. Run code_upload_batch.py with the batch ID to process results
+
+Cost Considerations:
+    Batch processing is more cost-effective than individual API calls, but can still
+    be expensive for large datasets. Monitor your Azure OpenAI usage and costs.
+
+Note:
+    The script includes caching logic to avoid reprocessing previously handled data.
+    Cached results are stored locally and checked before creating new batch requests.
 """
 import json
 import os

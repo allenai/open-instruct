@@ -1,3 +1,45 @@
+"""
+Sequence Length Distribution Plotter for HuggingFace Datasets
+
+This script analyzes the sequence length distribution of text data in HuggingFace datasets.
+It tokenizes a specified column using a pre-trained tokenizer and generates a histogram
+showing the distribution of sequence lengths, along with percentile markers and statistics.
+
+Features:
+- Supports both streaming and non-streaming dataset loading
+- Configurable tokenizer, column selection, and plotting parameters
+- Adds percentile lines (10%, 20%, ..., 90%) to the histogram
+- Displays min/max/average/median statistics
+- Saves plots to file and optionally displays them
+- Handles large datasets efficiently with batched processing
+
+Usage:
+    python plot_seq_len.py --dataset_name <dataset> --split <split> --column_name <column>
+
+Required Arguments:
+    --dataset_name: HuggingFace dataset name (e.g., "allenai/c4")
+    --split: Dataset split to analyze (e.g., "train", "validation")
+    --column_name: Column containing text data to analyze (default: "output")
+
+Optional Arguments:
+    --batch_size: Batch size for processing (default: 1000)
+    --num_bins: Number of histogram bins (default: 50)
+    --plot_filename: Output filename for the plot
+    --streaming: Enable streaming mode for large datasets
+    --max_samples_streaming: Limit samples in streaming mode (0 for all)
+    --show_plot: Display the plot after saving
+
+Examples:
+    # Basic usage
+    python plot_seq_len.py --dataset_name "allenai/c4" --split "train" --column_name "text"
+    
+    # Streaming mode for large datasets
+    python plot_seq_len.py --dataset_name "allenai/c4" --split "train" --column_name "text" --streaming --max_samples_streaming 10000
+    
+    # Custom plot settings
+    python plot_seq_len.py --dataset_name "my/dataset" --split "validation" --column_name "output" --num_bins 100 --show_plot
+"""
+
 import datasets
 from transformers import AutoTokenizer
 import matplotlib.pyplot as plt

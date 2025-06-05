@@ -1,16 +1,75 @@
 """
+SFT to RLVR Dataset Converter using Azure OpenAI
+
+This script converts Supervised Fine-Tuning (SFT) datasets into RLVR (Reinforcement Learning 
+from Verification and Reasoning) format. It processes coding problems by:
+1. Transforming them into structured format with function signatures
+2. Generating test cases using Azure OpenAI GPT-4.1
+3. Validating solutions against test cases using a local code execution API
+4. Uploading successful transformations to HuggingFace Hub
+
+Features:
+- Uses Azure OpenAI API with retry logic and rate limit handling
+- S3 caching system to avoid reprocessing identical prompts
+- Concurrent processing with configurable semaphore limits
+- Code validation using local Docker-based execution environment
+- Automatic cost tracking for API usage
+- Robust error handling and logging
+
+Prerequisites:
+1. Set up Azure OpenAI API credentials:
+   - AZURE_OPENAI_API_KEY: Your Azure OpenAI API key
+   - AZURE_OPENAI_ENDPOINT: Your Azure OpenAI endpoint URL
+
+2. Set up AWS S3 for caching (optional but recommended):
+   - Configure AWS credentials for S3 access
+   - Update S3_BUCKET variable with your bucket name
+
+3. Start the code execution API:
+   ```bash
+   # In the repository root directory
+   docker build -t code-api -f open_instruct/code/Dockerfile .
+   docker run -p 1234:1234 code-api
+   ```
+
 Usage:
+    python sft_to_rlvr_azure.py
 
-In the root directory, run:
-```
-docker build -t code-api -f open_instruct/code/Dockerfile .
-docker run -p 1234:1234 code-api
-```
+Configuration:
+    Modify these variables in the script as needed:
+    - INPUT_DATASET_NAME: Source HuggingFace dataset
+    - OUTPUT_DATASET_NAME: Target HuggingFace dataset
+    - NUM_SAMPLES: Number of samples to process
+    - S3_BUCKET: S3 bucket for caching
+    - READ_FROM_CACHE/WRITE_TO_CACHE: Enable/disable caching
 
-Cd into the directory of this file and run:
-```
-python open_code_reasoning.py
-```
+Output:
+    Creates a dataset with the following structure:
+    - messages: User prompt in chat format
+    - ground_truth: Test cases that pass validation
+    - dataset: Dataset identifier
+    - good_program: Quality flag from GPT-4.1
+    - original_solution/input: Original data
+    - rewritten_solution/input: Transformed data
+    - reasoning-output: Original reasoning output
+
+Example:
+    ```bash
+    # Set environment variables
+    export AZURE_OPENAI_API_KEY="your-api-key"
+    export AZURE_OPENAI_ENDPOINT="https://your-endpoint.openai.azure.com/"
+    
+    # Start code API
+    docker build -t code-api -f open_instruct/code/Dockerfile .
+    docker run -p 1234:1234 code-api
+    
+    # Run the script
+    python sft_to_rlvr_azure.py
+    ```
+
+Note:
+    This script can be expensive to run due to GPT-4.1 API costs. Monitor the cost tracking
+    output and consider using a smaller NUM_SAMPLES for testing.
 """
 import asyncio
 import json
