@@ -210,7 +210,7 @@ for TASK in "${TASKS[@]}"; do
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
         python oe-eval-internal/oe_eval/launch.py \
             --model "$MODEL_NAME" \
-            --beaker-workspace "ai2/oe-adapt-code" \
+            --beaker-workspace "ai2/tulu-3-results" \
             --beaker-budget ai2/oe-adapt \
             --task "$TASK" \
             $MODEL_TYPE \
@@ -231,7 +231,7 @@ for TASK in "${TASKS[@]}"; do
     else
         python oe-eval-internal/oe_eval/launch.py \
         --model "$MODEL_NAME" \
-        --beaker-workspace "ai2/oe-adapt-code" \
+        --beaker-workspace "ai2/tulu-3-results" \
         --beaker-budget ai2/oe-adapt \
         --task "$TASK" \
         $MODEL_TYPE \
