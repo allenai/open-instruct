@@ -647,7 +647,7 @@ if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
     # Add beaker image from existing argument
     if args.beaker_image:
         oe_eval_cmd += f" --beaker-image {args.beaker_image}"
-        
+    
     # Add cluster parameter - use the existing cluster argument
     # Join the list with commas since oe-eval.sh expects a comma-separated string
     if args.cluster and len(args.cluster) > 0:

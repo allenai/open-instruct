@@ -54,7 +54,7 @@ from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
-from typing import Callable, Dict, Iterator, List, Literal, Optional
+from typing import Callable, Dict, Iterator, List, Literal, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -262,7 +262,7 @@ class Args:
     verification_reward: float = 10.0
     """the reward value for verifiable responses"""
 
-    # -- llm verifiers reward
+    # -- llm verifiers
     llm_judge_model: str = "azure/gpt-4o-mini-standard"
     """the model to use for the llm judge"""
     llm_judge_max_tokens: int = 2048
@@ -271,6 +271,12 @@ class Args:
     """the temperature to use for the llm judge"""
     llm_judge_timeout: int = 60
     """the timeout to use for the llm judge"""
+
+    # -- code verifier
+    code_api_url: str = os.environ.get("CODE_API_URL", "http://localhost:1234") + "/test_program"
+    """the api url to use for the code verifier"""
+    code_max_execution_time: float = 1.0
+    """the max execution time to use for the code verifier"""
 
     # -- non stop penalty
     non_stop_penalty: bool = False
@@ -1852,7 +1858,7 @@ if __name__ == "__main__":
     async def reward_fn(
         responses: List[torch.Tensor],
         decoded_responses: List[str],
-        ground_truths: List[str],
+        ground_truths: List[Union[str, List[str]]],
         datasets: List[str],
         finish_reasons: List[str],
         infos: List[List[int]],

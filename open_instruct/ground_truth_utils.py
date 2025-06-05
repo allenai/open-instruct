@@ -18,9 +18,11 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
-from IFEvalG import instructions_registry
+
+import requests
 from litellm import acompletion
 
+from IFEvalG import instructions_registry
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.judge_utils import (
     JUDGE_PROMPT_MAP,
@@ -77,6 +79,12 @@ class LMJudgeVerifierConfig(VerifierConfig):
 
 
 @dataclass
+class CodeVerifierConfig(VerifierConfig):
+    code_api_url: str
+    code_max_execution_time: float
+
+
+@dataclass
 class VerificationResult:
     score: float
     cost: float = 0.0
@@ -85,16 +93,26 @@ class VerificationResult:
 
 class VerifierFunction(ABC):
     """
-    Abstract base class for verifier functions.
+    Base class for all verifier functions that evaluate model predictions against ground truth.
 
-    Each verifier is initialized with a name and a weight (default 1.0).
-    The __call__ method must be implemented by subclasses.
+    Each verifier function takes a prediction and compares it to a ground truth label,
+    returning a VerificationResult with a score between 0.0 and 1.0.
     """
 
     def __init__(self, name: str, weight: float = 1.0, verifier_config: Optional[VerifierConfig] = None) -> None:
         self.name = name
         self.weight = weight
         self.verifier_config = verifier_config
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        """
+        Return the configuration class for this verifier.
+
+        Returns:
+            type: The VerifierConfig class or its subclass
+        """
+        return VerifierConfig
 
     @abstractmethod
     def __call__(
@@ -675,6 +693,127 @@ class LMJudgeVerifier(VerifierFunction):
                 logger.warning(f"Error closing OpenAI client: {e}")
                 # Suppress the error to avoid breaking shutdown
 
+    @classmethod
+    def get_config_class(cls) -> type:
+        """
+        Return the configuration class for this verifier.
+
+        Returns:
+            type: The VerifierConfig class or its subclass
+        """
+        return LMJudgeVerifierConfig
+
+
+class CodeVerifier(VerifierFunction):
+    """
+    Verifier that executes Python code against test cases using an external API.
+
+    The label should be a list of test cases or a JSON string representation of a list.
+    The API URL should be provided during initialization.
+    """
+
+    def __init__(self, verifier_config: CodeVerifierConfig) -> None:
+        super().__init__("code", verifier_config=verifier_config, weight=1.0)
+
+    def extract_python_code(self, model_output: str) -> str:
+        """Extract the last code block between ``` markers from the model output."""
+        # Find content between ``` markers
+        pattern = r"```(?:python)?(.*?)```"
+        matches = re.findall(pattern, model_output, re.DOTALL)
+
+        if not matches:
+            return model_output
+
+        # Return the last match, stripped of whitespace
+        return matches[-1].strip()
+
+    async def async_call(
+        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
+    ) -> VerificationResult:
+        """
+        Asynchronously verify code execution against test cases.
+
+        Args:
+            tokenized_prediction: Unused tokenized representation
+            prediction: The model output containing Python code
+            label: List of test cases or JSON string representation of a list
+            query: Unused original query
+
+        Returns:
+            VerificationResult with score as the pass rate of test cases
+        """
+        # Parse label to get test cases
+        if isinstance(label, str):
+            try:
+                tests = json.loads(label)
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse label as JSON: {label}")
+                return VerificationResult(score=0.0)
+        else:
+            tests = label
+
+        if not isinstance(tests, list):
+            logger.warning(f"Label must be a list of test cases, got: {type(tests)}")
+            return VerificationResult(score=0.0)
+
+        if not tests:
+            logger.warning("No test cases provided")
+            return VerificationResult(score=0.0)
+
+        # Extract Python code from the model output
+        python_code = self.extract_python_code(prediction)
+
+        # Test data
+        payload = {
+            "program": python_code,
+            "tests": tests,
+            "max_execution_time": self.verifier_config.code_max_execution_time,
+        }
+
+        try:
+            # Make the request in a thread pool to keep it async
+            def make_request():
+                response = requests.post(
+                    self.verifier_config.code_api_url, json=payload, headers={"Content-Type": "application/json"}
+                )
+                response.raise_for_status()
+                return response.json()
+
+            result = await asyncio.to_thread(make_request)
+            passes = result["results"]
+            pass_rate = sum(passes) / len(passes) if passes else 0.0
+            return VerificationResult(score=pass_rate)
+        except Exception as e:
+            logger.warning(f"Error verifying code sample: {e}")
+            return VerificationResult(score=0.0)
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
+    ) -> VerificationResult:
+        """
+        Synchronously verify code execution against test cases.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                raise RuntimeError(
+                    "Cannot call synchronous __call__ method from within an async context. Use async_call instead."
+                )
+            else:
+                return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+        except RuntimeError:
+            return asyncio.run(self.async_call(tokenized_prediction, prediction, label, query))
+
+    @classmethod
+    def get_config_class(cls) -> type:
+        """
+        Return the configuration class for this verifier.
+
+        Returns:
+            type: The VerifierConfig class or its subclass
+        """
+        return CodeVerifierConfig
+
 
 def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     """
@@ -684,7 +823,8 @@ def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     for subclass in VerifierFunction.__subclasses__():
         if subclass == LMJudgeVerifier:
             continue
-        instance = subclass(VerifierConfig.from_args(args))
+
+        instance = subclass(subclass.get_config_class().from_args(args))
         verifiers[instance.name.lower()] = instance
 
     for judge_type in JUDGE_PROMPT_MAP.keys():
