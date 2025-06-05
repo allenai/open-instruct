@@ -1,9 +1,9 @@
 base=SFT
-description="5 dataset code mix (ocr personas, acecoder, the-algorithm, llama-nemotron) no limit on top of Tulu ${base}"
+description="test of https://github.com/allenai/open-instruct/pull/631"
 exp_name=rlvr_tulu3.1_8b_${base}_grpo_fast_code
 python mason.py \
     --cluster ai2/augusta-google-1 \
-    --image saurabhs/code \
+    --image saurabhs/code_dev \
     --pure_docker_mode \
     --workspace ai2/oe-adapt-code \
     --priority high \
@@ -11,7 +11,7 @@ python mason.py \
     --num_nodes 4 \
     --description "${description}" \
     --budget ai2/oe-adapt \
-    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name $exp_name \
     --beta 0.01 \
     --num_unique_prompts_rollout 48 \
@@ -29,8 +29,7 @@ python mason.py \
     --pack_length 10240 \
     --model_name_or_path allenai/open_instruct_dev \
     --model_revision code_sft_allenai_Llama-3.1-Tulu-3-8B-SFT_n_1__8__1746057575 \
-    --apply_verifiable_reward false \
-    --apply_code_reward true \
+    --apply_verifiable_reward true \
     --code_api_url \$CODE_API_URL/test_program \
     --non_stop_penalty True \
     --oe_eval_tasks codex_humanevalplus:0-shot-chat-n5,mbppplus::openinstruct,cruxeval_input:pass@5,cruxeval_output:pass@5 \

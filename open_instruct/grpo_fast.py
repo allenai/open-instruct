@@ -273,7 +273,7 @@ class Args:
     """the timeout to use for the llm judge"""
 
     # -- code verifier
-    code_api_url: str = "http://localhost:1234/test_program"
+    code_api_url: str = os.environ.get("CODE_API_URL", "http://localhost:1234") + "/test_program"
     """the api url to use for the code verifier"""
     code_max_execution_time: float = 1.0
     """the max execution time to use for the code verifier"""
