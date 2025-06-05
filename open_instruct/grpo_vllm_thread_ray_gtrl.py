@@ -334,6 +334,16 @@ class Args:
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
 
+    # -- llm verifiers reward
+    llm_judge_model: str = "azure/gpt-4o-mini-standard"
+    """the model to use for the llm judge"""
+    llm_judge_max_tokens: int = 2048
+    """the max tokens to use for the llm judge"""
+    llm_judge_temperature: float = 1.0
+    """the temperature to use for the llm judge"""
+    llm_judge_timeout: int = 60
+    """the timeout to use for the llm judge"""
+
     def __post_init__(self):
         assert self.number_samples_per_prompt > 0, "Number of samples per prompt must be greater than 0!"
         if self.number_samples_per_prompt == 1:
