@@ -9,9 +9,13 @@ Usage:
     python scripts/data/convert_sft_data_for_olmocore.py \
         --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
         --chat_template_name tulu \
+        --add_bos \
         --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture-0225 1.0 \
         --max_seq_length 4096 \
         --output_dir /weka/oe-adapt-default/tylerr/tulu-3-sft-olmo-2-mixture-0225-olmocore
+
+NOTE: allenai/OLMo-2-1124-7B tokenizer is the same as allenai/dolma2-tokenizer, but allenai/OLMo-2-1124-7B
+has additional metadata required for this script.
 """
 
 import argparse
@@ -49,9 +53,9 @@ def main():
     parser.add_argument(
         "--dataset_mixer_list",
         type=str,
-        nargs=2,
+        nargs="+",
         default=["allenai/tulu-3-sft-olmo-2-mixture-0225", "1.0"],
-        help="Dataset mixer list [dataset_name, weight]",
+        help="Dataset mixer list [dataset_name, weight, dataset_name, weight, ...]",
     )
     parser.add_argument(
         "--dataset_split", type=str, default="train", help="Dataset split to use"
@@ -83,7 +87,7 @@ def main():
     # TODO: improve configurability of transform factory
     transform_functions_and_args = [
         ("sft_tulu_tokenize_and_truncate_v1", {"max_seq_length": args.max_seq_length}),
-        ("sft_tulu_filter_v1", {}),
+        ("sft_tulu_filter_v1", {}),  # remove examples that don't have any labels
     ]
 
     train_dataset = get_cached_dataset_tulu(
@@ -121,8 +125,10 @@ def main():
     print(f"Maximum token ID: {max(token_ids)}")
     print("Writing data to numpy files...")
 
-    # Create output directory if it doesn't exist
-    os.makedirs(args.output_dir, exist_ok=True)
+    # Create output directory with tokenizer name
+    tokenizer_name = args.tokenizer_name_or_path.split("/")[-1]  # Drop org name
+    output_dir = os.path.join(args.output_dir, tokenizer_name)
+    os.makedirs(output_dir, exist_ok=True)
 
     def write_memmap_chunked(base_filename, data, dtype, max_size_gb=2):
         """Write data to multiple memmap files if size exceeds max_size_gb."""
@@ -156,9 +162,9 @@ def main():
                 )
             return chunks
 
-    write_memmap_chunked(f"{args.output_dir}/token_ids", token_ids, np.uint32)
-    write_memmap_chunked(f"{args.output_dir}/labels", labels, np.int32)
-    write_memmap_chunked(f"{args.output_dir}/attention_mask", attention_mask, np.int32)
+    write_memmap_chunked(f"{output_dir}/token_ids", token_ids, np.uint32)
+    write_memmap_chunked(f"{output_dir}/labels", labels, np.int32)
+    write_memmap_chunked(f"{output_dir}/attention_mask", attention_mask, np.int32)
     print("Data conversion completed successfully")
 
 
