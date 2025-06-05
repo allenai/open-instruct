@@ -2,7 +2,6 @@ python mason.py \
     --cluster ai2/augusta-google-1 \
     --workspace ai2/tulu-thinker \
     --priority high \
-    #CAREFUL: change the image!!!
     --image valpy/open_instruct_dev_multi --pure_docker_mode \
     --preemptible \
     --num_nodes 2 \
