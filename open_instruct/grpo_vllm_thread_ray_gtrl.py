@@ -1661,6 +1661,16 @@ class ModelGroup:
 
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
+    from open_instruct.olmo_adapter import (
+        Olmo2Config,
+        Olmo2ForSequenceClassification,
+        OlmoeConfig,
+        OlmoeForSequenceClassification,
+    )
+
+    AutoModelForSequenceClassification.register(Olmo2Config, Olmo2ForSequenceClassification)
+    AutoModelForSequenceClassification.register(OlmoeConfig, OlmoeForSequenceClassification)
+
     # ------------------------------------------------------------
     # Setup tokenizer
     tc.tokenizer_revision = model_config.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
