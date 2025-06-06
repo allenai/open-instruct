@@ -261,7 +261,8 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
         # litellm expects these env vars
         "AZURE_API_KEY",
         "AZURE_API_BASE",
-        "ANTHROPIC_API_KEY"
+        "ANTHROPIC_API_KEY",
+        "HOSTED_VLLM_API_BASE",
     ]
     for useful_secret in useful_secrets:
         if f"{whoami}_{useful_secret}" in beaker_secrets:
