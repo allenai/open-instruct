@@ -197,6 +197,7 @@ for TASK in "${TASKS[@]}"; do
         GPU_COUNT="$NUM_GPUS"
     fi
 
+    # NOTE: For gantry args here and below, random numbers like #42 are added to the env variables because they need to be unique names. The numbers are ignored.
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
         python oe-eval-internal/oe_eval/launch.py \
             --model "$MODEL_NAME" \
