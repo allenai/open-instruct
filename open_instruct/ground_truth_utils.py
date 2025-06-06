@@ -303,6 +303,7 @@ class IFEvalVerifierOld(VerifierFunction):
         self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], query: Optional[str] = None
     ) -> VerificationResult:
         constraint = label
+        print("constraint!!!! "+ str(constraint))
         answer = prediction.split("<|assistant|>\n")[-1].strip()
         if isinstance(constraint, str):
             constraint = json.loads(constraint)

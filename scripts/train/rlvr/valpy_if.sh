@@ -14,9 +14,9 @@ python mason.py \
     --local_rollout_batch_size 4 \
     --kl_estimator kl3 \
     --learning_rate 5e-7 \
-    --dataset_mixer_list valpy/multi_old_and_new_5  1.0 \
+    --dataset_mixer_list allenai/IF_multi_constraints_upto5  1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list valpy/multi_old_and_new_5  16 \
+    --dataset_mixer_eval_list allenai/IF_multi_constraints_upto5  16 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
