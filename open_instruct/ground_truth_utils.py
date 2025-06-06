@@ -263,7 +263,9 @@ class IFEvalVerifier(VerifierFunction):
     def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
         super().__init__("ifeval", weight=1.0)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict]) -> bool:
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], query: Optional[str] = None
+    ) -> VerificationResult:
         instruction_dict = instructions_registry.INSTRUCTION_DICT
         constraint_dict = ast.literal_eval(label)
         constraint_dict = constraint_dict[0]
