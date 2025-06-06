@@ -97,7 +97,6 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.ground_truth_utils import (
     build_all_verifiers,
-    cleanup_all_llm_judge_clients,
     soft_format_reward_func,
 )
 from open_instruct.model_utils import (
@@ -1198,14 +1197,18 @@ class PolicyTrainerRayProcess(RayProcess):
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
                         decoded_response = tokenizer.batch_decode(postprocessed_response)
-                        verifiable_reward, per_func_reward = asyncio.run(apply_verifiable_reward(
-                            reward_fn_mapping=reward_fn_mapping,
-                            responses=[seq[seq != tokenizer.pad_token_id].tolist() for seq in postprocessed_response],
-                            decoded_responses=decoded_response,
-                            ground_truths=ground_truth,
-                            datasets=dataset,
-                            reward_mult=args.verification_reward,
-                        ))
+                        verifiable_reward, per_func_reward = asyncio.run(
+                            apply_verifiable_reward(
+                                reward_fn_mapping=reward_fn_mapping,
+                                responses=[
+                                    seq[seq != tokenizer.pad_token_id].tolist() for seq in postprocessed_response
+                                ],
+                                decoded_responses=decoded_response,
+                                ground_truths=ground_truth,
+                                datasets=dataset,
+                                reward_mult=args.verification_reward,
+                            )
+                        )
                         verifiable_reward = torch.tensor(verifiable_reward, device=score.device)
                         verifiable_count = verifiable_reward > 0
                         score += verifiable_reward
