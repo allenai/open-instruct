@@ -138,6 +138,20 @@ Reference Answer:{{label}}
 Correct:
 """
 
+web_instruct_general_verifier_template = """
+User: ### Question: {input}
+
+
+### Ground Truth Answer: {label}
+
+
+### Student Answer: {output}
+
+
+For the above question, please verify if the student's answer is equivalent to the ground truth answer.
+Do not solve the question by yourself; just check if the student's answer is equivalent to the ground truth answer.
+If the student's answer is correct, output \"Final Decision: Yes\". If the student's answer is incorrect, output Final Decision: No. Assistant:"""
+
 # TODO: just a copy (need to be updated)
 creative_writing_template = """
 ### Task Description
@@ -182,6 +196,7 @@ JUDGE_PROMPT_MAP = {
     "factuality": factuality_template,
     "creative_writing": creative_writing_template,
     "refusal": refusal_template,
+    "web_instruct_general_verifier": web_instruct_general_verifier_template,
 }
 
 MAX_VALUE_MAP = {
@@ -192,4 +207,5 @@ MAX_VALUE_MAP = {
     "factuality": 1,
     "creative_writing": 1,
     "refusal": 1,
+    "web_instruct_general_verifier": 1,
 }
