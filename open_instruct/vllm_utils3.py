@@ -146,7 +146,7 @@ class LLMRayActor:
             from vllm import LLM
 
             self.llm = LLM(*args, **kwargs)
-        
+
         # hack to avoid issues with qwen, see https://github.com/vllm-project/vllm/issues/13175
         tokenizer = self.llm.get_tokenizer()
         self.allowed_token_ids = list(tokenizer.get_vocab().values())
