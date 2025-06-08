@@ -1533,6 +1533,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     stop_strings = [] if args.stop_strings is None else args.stop_strings
     if args.tool_use:
         stop_strings += list(tool_objects.keys())
+    # hack to avoid issues with qwen, see https://github.com/vllm-project/vllm/issues/13175
+    allowed_token_ids = list(tokenizer.get_vocab().values())
+    
     generation_config = SamplingParams(
         temperature=args.temperature,
         top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
@@ -1541,6 +1544,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         skip_special_tokens=False,
         n=args.num_samples_per_prompt_rollout,
         stop=stop_strings,
+        allowed_token_ids=allowed_token_ids,
     )
     eval_generation_config = SamplingParams(
         temperature=0.0,
@@ -1550,6 +1554,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         skip_special_tokens=False,
         n=1,  # since we are doing greedy sampling, don't need to generate more
         stop=stop_strings,
+        allowed_token_ids=allowed_token_ids,
     )
     train_dataset_idxs = np.arange(len(train_dataset))
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)

@@ -147,13 +147,7 @@ class LLMRayActor:
 
             self.llm = LLM(*args, **kwargs)
 
-        # hack to avoid issues with qwen, see https://github.com/vllm-project/vllm/issues/13175
-        tokenizer = self.llm.get_tokenizer()
-        self.allowed_token_ids = list(tokenizer.get_vocab().values())
-
     def generate(self, *args, **kwargs):
-        if "allowed_token_ids" not in kwargs:
-            kwargs["allowed_token_ids"] = self.allowed_token_ids
         return self.llm.generate(*args, **kwargs)
 
     def init_process_group(
