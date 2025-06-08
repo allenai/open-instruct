@@ -1,10 +1,10 @@
- """ 
- This script converts the General Thought dataset to a format compatible with Tulu (SFT and RL).
- For now, its fairly hardcoded and in a beta form, use at your own risk.
+"""
+This script converts the General Thought dataset to a format compatible with Tulu (SFT and RL).
+For now, its fairly hardcoded and in a beta form, use at your own risk.
 
- use:  
- python scripts/data/convert_general_thought_to_tulu_thinker.py
- """ 
+use:
+python scripts/data/convert_general_thought_to_tulu_thinker.py
+"""
 
 from datasets import load_dataset, Dataset
 import random
