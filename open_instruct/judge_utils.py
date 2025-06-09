@@ -194,9 +194,9 @@ def extract_score_from_string(score_str: str) -> float:
 def extract_score_web_instruct(score_str: str) -> float:
     """Extractor based on web instruct format"""
     if "Final Decision: Yes" in score_str:
-        return 1.0
+        return score_str, 1.0
     elif "Final Decision: No" in score_str:
-        return 0.0
+        return score_str, 0.0
     logger.warning(f"Could not parse score from: {score_str}, defaulting to 0.0")
     return score_str, 0.0
     
