@@ -430,7 +430,6 @@ class ReSearchVerifierF1(VerifierFunction):
             label = json.loads(label)
         except json.JSONDecodeError:
             label = label.strip()
-        print(f"label: {label}")
         # extract answer
         if self.answer_start_tag not in prediction and self.answer_end_tag not in prediction:
             return VerificationResult(score=0.0)
@@ -592,7 +591,6 @@ class LMJudgeVerifier(VerifierFunction):
 
         try:
             content = completion.choices[0].message.content
-            print(f"Judge response: {content}")
             reasoning, score = self.extractor(content)
 
 
@@ -630,7 +628,6 @@ class LMJudgeVerifier(VerifierFunction):
         for attempt in range(max_retries):
             try:
                 messages = build_messages(prompt)
-                print(f"Sending prompt: {messages}")
                 response = await acompletion(
                     model=self.verifier_config.llm_judge_model,
                     messages=messages,
@@ -640,7 +637,6 @@ class LMJudgeVerifier(VerifierFunction):
                 )
                 reasoning, score = self.parse_completion(response)
                 cost = self.get_cost(response, self.verifier_config.llm_judge_model)
-                print(f"Judge score: {score}, max value: {self.max_value}")
                 # normalize score to be between 0 and 1
                 return VerificationResult(score=score / self.max_value, cost=cost, reasoning=reasoning)
 
