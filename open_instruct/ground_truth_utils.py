@@ -27,6 +27,7 @@ from open_instruct.judge_utils import (
     JUDGE_PROMPT_MAP,
     MAX_VALUE_MAP,
     PRICE_PER_TOKEN,
+    EXTRACTOR_MAP,
     build_messages,
     extract_score_from_string,
 )
@@ -566,6 +567,10 @@ class LMJudgeVerifier(VerifierFunction):
         super().__init__(f"general-{judge_type}", verifier_config=verifier_config, weight=1.0)
         self.prompt_template = JUDGE_PROMPT_MAP[judge_type]
         self.max_value = MAX_VALUE_MAP[judge_type]
+        if judge_type in EXTRACTOR_MAP:
+            self.extractor = EXTRACTOR_MAP[judge_type]
+        else:
+            self.extractor = EXTRACTOR_MAP["default"]
         os.environ["AZURE_API_VERSION"] = "2024-12-01-preview"
 
     def parse_completion(self, completion):
@@ -588,21 +593,8 @@ class LMJudgeVerifier(VerifierFunction):
         try:
             content = completion.choices[0].message.content
             print(f"Judge response: {content}")
+            reasoning, extracted_score = self.extractor(content)
 
-            try:
-                data = json.loads(content)
-                if isinstance(data, dict):
-                    reasoning = data.get("REASONING", "")
-                    score = float(data.get("SCORE", 0.0))
-                    return reasoning, score
-            except (json.JSONDecodeError, TypeError, ValueError):
-                pass
-
-            if isinstance(content, str):
-                reasoning = content
-                extracted_score = extract_score_from_string(content)
-                if extracted_score is not None:
-                    score = extracted_score
 
         except Exception as e:
             print(f"Error processing model response: {str(e)}")

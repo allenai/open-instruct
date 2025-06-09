@@ -22,35 +22,6 @@ PRICE_PER_TOKEN = {
     "claude-3-7-sonnet-20250219": {"input": 0.000003, "output": 0.000015},
 }
 
-
-def extract_score_from_string(score_str: str) -> float:
-    """Extract numerical score from string response."""
-    # Handle rating formats like "4/5"
-    ratio_matches = re.findall(r"(\d+)\/(\d+)", score_str)
-    if ratio_matches:
-        numerator, denominator = ratio_matches[0]
-        return float(numerator) / float(denominator)
-
-    # Try to handle percentage expressions
-    percent_matches = re.findall(r"(\d+\.?\d*|\.\d+)%", score_str)
-    if percent_matches:
-        return float(percent_matches[0]) / 100.0
-
-    # Try to find numerical values in the string
-    matches = re.findall(r"(\d+\.?\d*|\.\d+)", score_str)
-    if matches:
-        return float(matches[0])
-
-    # If parsing fails, check for binary indicators
-    if any(word in score_str.lower() for word in ["yes", "correct", "good", "true", "pass"]):
-        return 1.0
-    elif any(word in score_str.lower() for word in ["no", "incorrect", "bad", "false", "fail"]):
-        return 0.0
-    else:
-        logger.warning(f"Could not parse score from: {score_str}, defaulting to 0.0")
-        return 0.0
-
-
 # Define the templates for different judge types
 general_quality_template = """
 ### Task Description
@@ -192,6 +163,54 @@ def build_messages(user_prompt: str, system_prompt: Optional[str] = None):
     return messages
 
 
+def extract_score_from_string(score_str: str) -> float:
+    """Extract numerical score from string response."""
+    # Handle rating formats like "4/5"
+    ratio_matches = re.findall(r"(\d+)\/(\d+)", score_str)
+    if ratio_matches:
+        numerator, denominator = ratio_matches[0]
+        return float(numerator) / float(denominator)
+
+    # Try to handle percentage expressions
+    percent_matches = re.findall(r"(\d+\.?\d*|\.\d+)%", score_str)
+    if percent_matches:
+        return float(percent_matches[0]) / 100.0
+
+    # Try to find numerical values in the string
+    matches = re.findall(r"(\d+\.?\d*|\.\d+)", score_str)
+    if matches:
+        return float(matches[0])
+
+    # If parsing fails, check for binary indicators
+    if any(word in score_str.lower() for word in ["yes", "correct", "good", "true", "pass"]):
+        return 1.0
+    elif any(word in score_str.lower() for word in ["no", "incorrect", "bad", "false", "fail"]):
+        return 0.0
+    else:
+        logger.warning(f"Could not parse score from: {score_str}, defaulting to 0.0")
+        return 0.0
+
+
+def extract_score_web_instruct(score_str: str) -> float:
+    """Extractor based on web instruct format"""
+    if "Final Decision: Yes" in score_str:
+        return 1.0
+    elif "Final Decision: No" in score_str:
+        return 0.0
+    logger.warning(f"Could not parse score from: {score_str}, defaulting to 0.0")
+    return score_str, 0.0
+    
+
+def extract_json_score_with_fallback(score_str: str) -> float:
+    """Extractor based on json score with fallback"""
+    try:
+        reasoning = data.get("REASONING", "")
+        data = json.loads(score_str)
+        return reasoning, float(data.get("SCORE", 0.0))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return score_str, extract_score_from_string(score_str)
+
+
 JUDGE_PROMPT_MAP = {
     "quality": general_quality_template,
     "quality_rubric": general_quality_rubric_template,
@@ -212,4 +231,9 @@ MAX_VALUE_MAP = {
     "creative_writing": 1,
     "refusal": 1,
     "web_instruct_general_verifier": 1,
+}
+
+EXTRACTOR_MAP = {
+    "web_instruct_general_verifier": extract_score_web_instruct,
+    "default": extract_json_score_with_fallback,
 }
