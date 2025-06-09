@@ -1,6 +1,6 @@
+import json
 import logging
 import re
-import json
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -211,6 +211,12 @@ def extract_json_score_with_fallback(score_str: str) -> float:
         return score_str, extract_score_from_string(score_str)
 
 
+def extract_score_with_fallback_max_10(score_str: str) -> float:
+    """Extractor based on score with fallback"""
+    reasoning, score = extract_json_score_with_fallback(score_str)
+    return reasoning, score / 10.0
+
+
 JUDGE_PROMPT_MAP = {
     "quality": general_quality_template,
     "quality_rubric": general_quality_rubric_template,
@@ -222,18 +228,13 @@ JUDGE_PROMPT_MAP = {
     "web_instruct_general_verifier": web_instruct_general_verifier_template,
 }
 
-MAX_VALUE_MAP = {
-    "quality": 10,
-    "quality_rubric": 1,
-    "quality_ref": 10,
-    "safety": 1,
-    "factuality": 1,
-    "creative_writing": 1,
-    "refusal": 1,
-    "web_instruct_general_verifier": 1,
-}
-
 EXTRACTOR_MAP = {
+    "quality": extract_score_with_fallback_max_10,
+    "quality_rubric": extract_json_score_with_fallback,
+    "quality_ref": extract_score_with_fallback_max_10,
+    "safety": extract_json_score_with_fallback,
+    "factuality": extract_json_score_with_fallback,
+    "creative_writing": extract_json_score_with_fallback,
+    "refusal": extract_json_score_with_fallback,
     "web_instruct_general_verifier": extract_score_web_instruct,
-    "default": extract_json_score_with_fallback,
 }
