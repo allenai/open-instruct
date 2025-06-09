@@ -1533,7 +1533,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     stop_strings = [] if args.stop_strings is None else args.stop_strings
     if args.tool_use:
         stop_strings += list(tool_objects.keys())
-    
     generation_config = SamplingParams(
         temperature=args.temperature,
         top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
