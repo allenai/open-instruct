@@ -24,12 +24,11 @@ from litellm import acompletion
 
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.judge_utils import (
+    EXTRACTOR_MAP,
     JUDGE_PROMPT_MAP,
     MAX_VALUE_MAP,
     PRICE_PER_TOKEN,
-    EXTRACTOR_MAP,
     build_messages,
-    extract_score_from_string,
 )
 from open_instruct.math_utils import (
     get_unnormalized_answer,
@@ -592,7 +591,6 @@ class LMJudgeVerifier(VerifierFunction):
         try:
             content = completion.choices[0].message.content
             reasoning, score = self.extractor(content)
-
 
         except Exception as e:
             print(f"Error processing model response: {str(e)}")

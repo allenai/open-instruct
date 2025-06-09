@@ -198,7 +198,7 @@ def extract_score_web_instruct(score_str: str) -> float:
         return score_str, 0.0
     logger.warning(f"Could not parse score from: {score_str}, defaulting to 0.0")
     return score_str, 0.0
-    
+
 
 def extract_json_score_with_fallback(score_str: str) -> float:
     """Extractor based on json score with fallback"""
