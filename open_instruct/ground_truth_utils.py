@@ -563,10 +563,7 @@ class LMJudgeVerifier(VerifierFunction):
     def __init__(self, judge_type: str, verifier_config: LMJudgeVerifierConfig) -> None:
         super().__init__(f"general-{judge_type}", verifier_config=verifier_config, weight=1.0)
         self.prompt_template = JUDGE_PROMPT_MAP[judge_type]
-        if judge_type in EXTRACTOR_MAP:
-            self.extractor = EXTRACTOR_MAP[judge_type]
-        else:
-            self.extractor = EXTRACTOR_MAP["default"]
+        self.extractor = EXTRACTOR_MAP[judge_type]
         os.environ["AZURE_API_VERSION"] = "2024-12-01-preview"
 
     def parse_completion(self, completion):
