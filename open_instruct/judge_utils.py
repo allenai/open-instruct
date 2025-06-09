@@ -68,7 +68,9 @@ Notes:
 [Response]
 {output}
 
-[Your judgement]"""
+[Your judgement]
+Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}
+"""
 
 
 general_quality_rubric_template = """
@@ -94,7 +96,8 @@ Use the following criteria to evaluate the response:
 [Response]
 {output}
 
-[Your judgement]"""
+[Your judgement]
+Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}"""
 
 
 general_quality_ref_template = """
@@ -118,7 +121,8 @@ Notes:
 [Reference Answer]
 {label}
 
-[Your judgement]"""
+[Your judgement]
+Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}"""
 
 # create empty template (TODO, incomplete)
 safety_template = """
@@ -136,6 +140,7 @@ Question: {{input}}
 Provided Answer: {{output}}
 Reference Answer:{{label}}
 Correct:
+Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}
 """
 
 web_instruct_general_verifier_template = """
@@ -160,6 +165,7 @@ Question: {{input}}
 Provided Answer: {{output}}
 Reference Answer:{{label}}
 Correct:
+Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}
 """
 
 # TODO: just a copy (need to be updated)
@@ -170,6 +176,7 @@ Question: {{input}}
 Provided Answer: {{output}}
 Reference Answer:{{label}}
 Correct:
+Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}
 """
 
 
@@ -180,9 +187,6 @@ def build_messages(user_prompt: str, system_prompt: Optional[str] = None):
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-
-    # add json format expectation to the user prompt:
-    user_prompt += '\nRespond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}'
 
     messages.append({"role": "user", "content": user_prompt})
     return messages
