@@ -114,8 +114,7 @@ Correct:
 Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}
 """
 
-web_instruct_general_verifier_template = """
-User: ### Question: {input}
+web_instruct_general_verifier_template = """User: ### Question: {input}
 
 
 ### Ground Truth Answer: {label}
@@ -193,8 +192,9 @@ def extract_score_from_string(score_str: str) -> float:
 
 def extract_score_web_instruct(score_str: str) -> float:
     """Extractor based on web instruct format"""
-    print(f"Score str: {score_str}")
+    print(f"Score str: {score_str.lower()}", "final decision: yes" in score_str.lower())
     if "final decision: yes" in score_str.lower():
+        print("I SAW YES")
         return score_str, 1.0
     elif "final decision: no" in score_str.lower():
         return score_str, 0.0
