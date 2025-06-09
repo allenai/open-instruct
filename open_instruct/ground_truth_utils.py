@@ -637,6 +637,7 @@ class LMJudgeVerifier(VerifierFunction):
         for attempt in range(max_retries):
             try:
                 messages = build_messages(prompt)
+                print(f"Sending prompt: {messages}")
                 response = await acompletion(
                     model=self.verifier_config.llm_judge_model,
                     messages=messages,
