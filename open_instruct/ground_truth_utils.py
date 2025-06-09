@@ -5,6 +5,7 @@ Add new verifiers by subclassing VerifierFunction and implementing the __call__ 
 They are then automatically added to the REWARD_FN_MAPPING.
 """
 
+import ast
 import asyncio
 import json
 import logging
@@ -18,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
 import requests
+from IFEvalG import instructions_registry
 from litellm import acompletion
 
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
@@ -252,12 +254,51 @@ class IFEvalVerifier(VerifierFunction):
     Verifier for ifeval tasks that delegates evaluation to a function
     specified in the constraint.
 
+    The constraint(s) are a list of constraint ids.
+    This list is found under the key "instruction_id" in the ground_truth dict.
+
+    """
+
+    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+        super().__init__("ifeval", weight=1.0)
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], query: Optional[str] = None
+    ) -> VerificationResult:
+        instruction_dict = instructions_registry.INSTRUCTION_DICT
+        constraint_dict = ast.literal_eval(label)
+        constraint_dict = constraint_dict[0]
+        if isinstance(constraint_dict, str):
+            constraint_dict = json.loads(constraint_dict)
+        answer = prediction.split("<|assistant|>\n")[-1].strip()
+        instruction_keys = constraint_dict["instruction_id"]
+        args_list = constraint_dict["kwargs"]
+        rewards = []
+        for instruction_key, args in zip(instruction_keys, args_list):
+            if args is None:
+                args = {}
+            args = {k: v for k, v in args.items() if v is not None}
+            instruction_cls = instruction_dict[instruction_key]
+            instruction_instance = instruction_cls(instruction_key)
+            instruction_instance.build_description(**args)
+            if prediction.strip() and instruction_instance.check_following(answer):
+                rewards.append(1.0)
+            else:
+                rewards.append(0.0)
+        return VerificationResult(score=sum(rewards) / len(rewards))
+
+
+class IFEvalVerifierOld(VerifierFunction):
+    """
+    Verifier for ifeval tasks that delegates evaluation to a function
+    specified in the constraint.
+
     The constraint may be a JSON string or a dictionary containing a key
     'func_name' used to lookup the evaluation function.
     """
 
     def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
-        super().__init__("ifeval", verifier_config=verifier_config, weight=1.0)
+        super().__init__("ifeval_old", verifier_config=verifier_config, weight=1.0)
 
     def __call__(
         self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], query: Optional[str] = None
