@@ -1,5 +1,6 @@
 import logging
 import re
+import json
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -203,8 +204,8 @@ def extract_score_web_instruct(score_str: str) -> float:
 def extract_json_score_with_fallback(score_str: str) -> float:
     """Extractor based on json score with fallback"""
     try:
-        reasoning = data.get("REASONING", "")
         data = json.loads(score_str)
+        reasoning = data.get("REASONING", "")
         return reasoning, float(data.get("SCORE", 0.0))
     except (json.JSONDecodeError, TypeError, ValueError):
         return score_str, extract_score_from_string(score_str)
