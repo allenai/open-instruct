@@ -646,6 +646,7 @@ class LMJudgeVerifier(VerifierFunction):
                 )
                 reasoning, score = self.parse_completion(response)
                 cost = self.get_cost(response, self.verifier_config.llm_judge_model)
+                print(f"Judge score: {score}, max value: {self.max_value}")
                 # normalize score to be between 0 and 1
                 return VerificationResult(score=score / self.max_value, cost=cost, reasoning=reasoning)
 
