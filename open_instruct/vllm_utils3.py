@@ -178,6 +178,7 @@ def create_vllm_engines(
     num_engines: int,
     tensor_parallel_size: int,
     enforce_eager: bool,
+    tokenizer_name_or_path: str,
     pretrain: str,
     revision: str,
     seed: int,
@@ -249,6 +250,7 @@ def create_vllm_engines(
             ).remote(
                 model=pretrain,
                 revision=revision,
+                tokenizer=tokenizer_name_or_path,
                 tokenizer_revision=revision,
                 trust_remote_code=True,
                 worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",

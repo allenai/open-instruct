@@ -604,6 +604,17 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     return tokenizer
 
 
+# same as above, but we explicitly *dont* add any new tokens.
+# this is because in RL jobs, vllm doesnt see our new tokens, and we can get errors.
+def get_tokenizer_tulu_v2_3(tc: "TokenizerConfig"):
+    tokenizer = AutoTokenizer.from_pretrained(
+        tc.tokenizer_name_or_path,
+        revision=tc.tokenizer_revision,
+        trust_remote_code=tc.trust_remote_code,
+        use_fast=tc.use_fast,
+    )
+
+
 GET_TOKENIZER_FN = {
     "get_tokenizer_simple_v1": get_tokenizer_simple_v1,
     "get_tokenizer_tulu_v1": get_tokenizer_tulu_v1,  # old version, see https://github.com/allenai/open-instruct/pull/570
