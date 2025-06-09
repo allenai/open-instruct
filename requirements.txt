@@ -228,6 +228,7 @@ idna==3.10
     #   httpx
     #   requests
     #   yarl
+immutabledict==1.2.0
 importlib-metadata==8.0.0
     # via
     #   litellm
@@ -264,6 +265,7 @@ jsonschema-specifications==2025.4.1
     # via jsonschema
 kiwisolver==1.4.8
     # via matplotlib
+langdetect==1.0.9
 lark==1.2.2
     # via
     #   outlines
