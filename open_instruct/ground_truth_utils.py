@@ -593,7 +593,7 @@ class LMJudgeVerifier(VerifierFunction):
         try:
             content = completion.choices[0].message.content
             print(f"Judge response: {content}")
-            reasoning, extracted_score = self.extractor(content)
+            reasoning, score = self.extractor(content)
 
 
         except Exception as e:
