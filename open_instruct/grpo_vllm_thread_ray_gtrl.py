@@ -43,6 +43,7 @@ except Exception:
     pass
 # isort: on
 
+import asyncio
 import gc
 import json
 import logging
@@ -94,7 +95,10 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
-from open_instruct.ground_truth_utils import soft_format_reward_func
+from open_instruct.ground_truth_utils import (
+    build_all_verifiers,
+    soft_format_reward_func,
+)
 from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
@@ -329,6 +333,22 @@ class Args:
     """the max generation length for evaluation for oe-eval"""
     eval_priority: Literal["low", "normal", "high", "urgent"] = "normal"
     """the priority of auto-launched evaluation jobs"""
+
+    # -- llm verifiers reward
+    llm_judge_model: str = "azure/gpt-4o-mini-standard"
+    """the model to use for the llm judge"""
+    llm_judge_max_tokens: int = 2048
+    """the max tokens to use for the llm judge"""
+    llm_judge_temperature: float = 1.0
+    """the temperature to use for the llm judge"""
+    llm_judge_timeout: int = 60
+    """the timeout to use for the llm judge"""
+
+    # -- code verifier
+    code_api_url: str = os.environ.get("CODE_API_URL", "http://localhost:1234") + "/test_program"
+    """the api url to use for the code verifier"""
+    code_max_execution_time: float = 1.0
+    """the max execution time to use for the code verifier"""
 
     def __post_init__(self):
         assert self.number_samples_per_prompt > 0, "Number of samples per prompt must be greater than 0!"
@@ -809,7 +829,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         args = self.args
         self.tokenizer = tokenizer
-
+        reward_fn_mapping = build_all_verifiers(args)
         accelerator = Namespace()
         accelerator.process_index = self.rank
         accelerator.num_processes = self.world_size
@@ -1177,12 +1197,17 @@ class PolicyTrainerRayProcess(RayProcess):
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
                         decoded_response = tokenizer.batch_decode(postprocessed_response)
-                        verifiable_reward, per_func_reward = apply_verifiable_reward(
-                            responses=[seq[seq != tokenizer.pad_token_id].tolist() for seq in postprocessed_response],
-                            decoded_responses=decoded_response,
-                            ground_truths=ground_truth,
-                            datasets=dataset,
-                            reward_mult=args.verification_reward,
+                        verifiable_reward, per_func_reward = asyncio.run(
+                            apply_verifiable_reward(
+                                reward_fn_mapping=reward_fn_mapping,
+                                responses=[
+                                    seq[seq != tokenizer.pad_token_id].tolist() for seq in postprocessed_response
+                                ],
+                                decoded_responses=decoded_response,
+                                ground_truths=ground_truth,
+                                datasets=dataset,
+                                reward_mult=args.verification_reward,
+                            )
                         )
                         verifiable_reward = torch.tensor(verifiable_reward, device=score.device)
                         verifiable_count = verifiable_reward > 0
