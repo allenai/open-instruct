@@ -1,0 +1,30 @@
+version: v2
+budget: ai2/oe-adapt
+description: "VLLM Server for general verifier"
+tasks:
+  - name: "vllm-job"
+    image:
+      beaker: ai2/pytorch2.0.0-cuda11.8-python3.10
+    hostNetworking: true
+    command: ["/bin/sh", "-c"]
+    arguments:
+      [
+        "pip install vllm && \
+          VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 vllm serve hamishivi/general-verifier \
+            --tensor-parallel-size 1 \
+            --max-model-len 4096 \
+            --trust-remote-code \
+            --enforce-eager"
+      ]
+    datasets:
+      - mountPath: /weka/oe-adapt-default
+        source:
+          weka: oe-adapt-default
+    constraints:
+      cluster:
+        - ai2/saturn-cirrascale
+    resources:
+      gpuCount: 1
+    context:
+      priority: high
+      preemptible: False
