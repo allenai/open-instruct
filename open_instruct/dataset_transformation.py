@@ -953,6 +953,12 @@ def rlvr_tokenize_v2(
         add_generation_prompt=True,
     )
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
+    # weird issue with qwen: sometimes the padding token ends up in the input ids?
+    # ill look into this more later, for now this guard should be enough
+    if tokenizer.pad_token_id in row[INPUT_IDS_KEY]:
+        row[INPUT_IDS_KEY] = [x for x in row[INPUT_IDS_KEY] if x != tokenizer.pad_token_id]
+    if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
+        row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
     row[LABELS_KEY] = labels
