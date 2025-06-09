@@ -587,6 +587,7 @@ class LMJudgeVerifier(VerifierFunction):
 
         try:
             content = completion.choices[0].message.content
+            print(f"Judge response: {content}")
 
             try:
                 data = json.loads(content)
