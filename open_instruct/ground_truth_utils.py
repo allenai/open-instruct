@@ -24,11 +24,10 @@ from litellm import acompletion
 
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.judge_utils import (
+    EXTRACTOR_MAP,
     JUDGE_PROMPT_MAP,
-    MAX_VALUE_MAP,
     PRICE_PER_TOKEN,
     build_messages,
-    extract_score_from_string,
 )
 from open_instruct.math_utils import (
     get_unnormalized_answer,
@@ -429,7 +428,6 @@ class ReSearchVerifierF1(VerifierFunction):
             label = json.loads(label)
         except json.JSONDecodeError:
             label = label.strip()
-        print(f"label: {label}")
         # extract answer
         if self.answer_start_tag not in prediction and self.answer_end_tag not in prediction:
             return VerificationResult(score=0.0)
@@ -565,7 +563,7 @@ class LMJudgeVerifier(VerifierFunction):
     def __init__(self, judge_type: str, verifier_config: LMJudgeVerifierConfig) -> None:
         super().__init__(f"general-{judge_type}", verifier_config=verifier_config, weight=1.0)
         self.prompt_template = JUDGE_PROMPT_MAP[judge_type]
-        self.max_value = MAX_VALUE_MAP[judge_type]
+        self.extractor = EXTRACTOR_MAP[judge_type]
         os.environ["AZURE_API_VERSION"] = "2024-12-01-preview"
 
     def parse_completion(self, completion):
@@ -587,21 +585,7 @@ class LMJudgeVerifier(VerifierFunction):
 
         try:
             content = completion.choices[0].message.content
-
-            try:
-                data = json.loads(content)
-                if isinstance(data, dict):
-                    reasoning = data.get("REASONING", "")
-                    score = float(data.get("SCORE", 0.0))
-                    return reasoning, score
-            except (json.JSONDecodeError, TypeError, ValueError):
-                pass
-
-            if isinstance(content, str):
-                reasoning = content
-                extracted_score = extract_score_from_string(content)
-                if extracted_score is not None:
-                    score = extracted_score
+            reasoning, score = self.extractor(content)
 
         except Exception as e:
             print(f"Error processing model response: {str(e)}")
@@ -647,7 +631,7 @@ class LMJudgeVerifier(VerifierFunction):
                 reasoning, score = self.parse_completion(response)
                 cost = self.get_cost(response, self.verifier_config.llm_judge_model)
                 # normalize score to be between 0 and 1
-                return VerificationResult(score=score / self.max_value, cost=cost, reasoning=reasoning)
+                return VerificationResult(score=score, cost=cost, reasoning=reasoning)
 
             except Exception as e:
                 logger.warning(f"LLM judge attempt {attempt + 1}/{max_retries} failed: {str(e)}")

@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 from typing import Optional
@@ -21,6 +22,145 @@ PRICE_PER_TOKEN = {
     "deepseek-reasoner": {"input": 0.00000014, "output": 0.000002},
     "claude-3-7-sonnet-20250219": {"input": 0.000003, "output": 0.000015},
 }
+
+# Define the templates for different judge types
+general_quality_template = """
+### Task Description
+Please act as an impartial judge and evaluate the quality of the response provided by an
+AI assistant to the user query displayed below.
+
+Notes:
+1- Your evaluation should consider factors such as the helpfulness, relevance, accuracy, depth, creativity, and level of detail of the response.
+2- Begin your evaluation by providing a short explanation.
+3- Be as objective as possible. After providing your explanation, please rate the response on a scale of 1 to 10.
+
+[Query]
+{input}
+
+[Response]
+{output}
+
+[Your judgement]
+Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}
+"""
+
+
+general_quality_rubric_template = """
+### Task Description
+Please act as an impartial judge and evaluate the quality of the response provided by an
+AI assistant to the user query displayed below. You are shown the user query, assistant response, and an evaluation criteria.
+
+Notes:
+- Each response must be evaluated against these criteria independently.
+- An overall score of 1 requires meeting all criteria.
+- An overall score of 0 in any single category results in the output being classified as bad (0).
+- Begin your evaluation by providing a short explanation.
+- Be as objective as possible. After providing your explanation, please output the overall score of 0 or 1.
+
+
+### Evaluation Criteria
+Use the following criteria to evaluate the response:
+{label}
+
+[Query]
+{input}
+
+[Response]
+{output}
+
+[Your judgement]
+Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}"""
+
+
+general_quality_ref_template = """
+### Task Description
+Please act as an impartial judge and evaluate the quality of the answer provided by an
+AI assistant to the user query displayed below. Judge whether the provided answer is good by comparing it to the reference answer.
+
+Notes:
+- Besides comparing to the referennce answer, your evaluation should consider factors such as the helpfulness, relevance, accuracy, depth, creativity, and appropriate level of detail of the response.
+- Note that sometimes the reference answer is not the only answer. So any valid variation of the reference answer is also acceptable and can get a full score.
+- Begin your evaluation by providing a short explanation.
+- Be as objective as possible. After providing your explanation, please output a score on a scale of 1 to 10.
+- Please adhere to the following format.
+
+[Query]
+{input}
+
+[Answer]
+{output}
+
+[Reference Answer]
+{label}
+
+[Your judgement]
+Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}"""
+
+# create empty template (TODO, incomplete)
+safety_template = """
+### Task Description \
+"""
+
+factuality_template = """
+### Task Description
+You will be given a Question, a Provided Answer and a Reference Answer. Judge whether the Provided Answer is correct by comparing it to the Reference Answer. Differently formatted dates, people with missing middle names, and alternative spellings should all be considered the same. If the Provided Answer is correct say exactly "True", otherwise say "False".
+
+NOTES:
+1- Differently formatted dates, people with missing middle names, and alternative spellings should all be considered the same. If the Provided Answer is correct say exactly "True", otherwise say "False".
+
+Question: {{input}}
+Provided Answer: {{output}}
+Reference Answer:{{label}}
+Correct:
+Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}
+"""
+
+web_instruct_general_verifier_template = """User: ### Question: {input}
+
+
+### Ground Truth Answer: {label}
+
+
+### Student Answer: {output}
+
+
+For the above question, please verify if the student's answer is equivalent to the ground truth answer.
+Do not solve the question by yourself; just check if the student's answer is equivalent to the ground truth answer.
+If the student's answer is correct, output \"Final Decision: Yes\". If the student's answer is incorrect, output Final Decision: No. Assistant:"""
+
+# TODO: just a copy (need to be updated)
+creative_writing_template = """
+### Task Description
+You will be given a Question, a Provided Answer and a Reference Answer. Judge whether the Provided Answer is correct by comparing it to the Reference Answer. Differently formatted dates, people with missing middle names, and alternative spellings should all be considered the same. If the Provided Answer is correct say exactly "True", otherwise say "False".
+Question: {{input}}
+Provided Answer: {{output}}
+Reference Answer:{{label}}
+Correct:
+Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}
+"""
+
+# TODO: just a copy (need to be updated)
+refusal_template = """
+### Task Description
+You will be given a Question, a Provided Answer and a Reference Answer. Judge whether the Provided Answer is correct by comparing it to the Reference Answer. Differently formatted dates, people with missing middle names, and alternative spellings should all be considered the same. If the Provided Answer is correct say exactly "True", otherwise say "False".
+Question: {{input}}
+Provided Answer: {{output}}
+Reference Answer:{{label}}
+Correct:
+Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}
+"""
+
+
+def build_messages(user_prompt: str, system_prompt: Optional[str] = None):
+    """
+    Build the message payload for the model evaluation.
+    """
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+
+    messages.append({"role": "user", "content": user_prompt})
+    return messages
 
 
 def extract_score_from_string(score_str: str) -> float:
@@ -51,127 +191,30 @@ def extract_score_from_string(score_str: str) -> float:
         return 0.0
 
 
-# Define the templates for different judge types
-general_quality_template = """
-### Task Description
-Please act as an impartial judge and evaluate the quality of the response provided by an
-AI assistant to the user query displayed below.
-
-Notes:
-1- Your evaluation should consider factors such as the helpfulness, relevance, accuracy, depth, creativity, and level of detail of the response.
-2- Begin your evaluation by providing a short explanation.
-3- Be as objective as possible. After providing your explanation, please rate the response on a scale of 1 to 10.
-
-[Query]
-{input}
-
-[Response]
-{output}
-
-[Your judgement]"""
+def extract_score_web_instruct(score_str: str) -> float:
+    """Extractor based on web instruct format"""
+    if "final decision: yes" in score_str.lower():
+        return score_str, 1.0
+    elif "final decision: no" in score_str.lower():
+        return score_str, 0.0
+    logger.warning(f"Could not parse score from: {score_str}, defaulting to 0.0")
+    return score_str, 0.0
 
 
-general_quality_rubric_template = """
-### Task Description
-Please act as an impartial judge and evaluate the quality of the response provided by an
-AI assistant to the user query displayed below. You are shown the user query, assistant response, and an evaluation criteria.
-
-Notes:
-- Each response must be evaluated against these criteria independently.
-- An overall score of 1 requires meeting all criteria.
-- An overall score of 0 in any single category results in the output being classified as bad (0).
-- Begin your evaluation by providing a short explanation.
-- Be as objective as possible. After providing your explanation, please output the overall score of 0 or 1.
+def extract_json_score_with_fallback(score_str: str) -> float:
+    """Extractor based on json score with fallback"""
+    try:
+        data = json.loads(score_str)
+        reasoning = data.get("REASONING", "")
+        return reasoning, float(data.get("SCORE", 0.0))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return score_str, extract_score_from_string(score_str)
 
 
-### Evaluation Criteria
-Use the following criteria to evaluate the response:
-{label}
-
-[Query]
-{input}
-
-[Response]
-{output}
-
-[Your judgement]"""
-
-
-general_quality_ref_template = """
-### Task Description
-Please act as an impartial judge and evaluate the quality of the answer provided by an
-AI assistant to the user query displayed below. Judge whether the provided answer is good by comparing it to the reference answer.
-
-Notes:
-- Besides comparing to the referennce answer, your evaluation should consider factors such as the helpfulness, relevance, accuracy, depth, creativity, and appropriate level of detail of the response.
-- Note that sometimes the reference answer is not the only answer. So any valid variation of the reference answer is also acceptable and can get a full score.
-- Begin your evaluation by providing a short explanation.
-- Be as objective as possible. After providing your explanation, please output a score on a scale of 1 to 10.
-- Please adhere to the following format.
-
-[Query]
-{input}
-
-[Answer]
-{output}
-
-[Reference Answer]
-{label}
-
-[Your judgement]"""
-
-# create empty template (TODO, incomplete)
-safety_template = """
-### Task Description \
-"""
-
-factuality_template = """
-### Task Description
-You will be given a Question, a Provided Answer and a Reference Answer. Judge whether the Provided Answer is correct by comparing it to the Reference Answer. Differently formatted dates, people with missing middle names, and alternative spellings should all be considered the same. If the Provided Answer is correct say exactly "True", otherwise say "False".
-
-NOTES:
-1- Differently formatted dates, people with missing middle names, and alternative spellings should all be considered the same. If the Provided Answer is correct say exactly "True", otherwise say "False".
-
-Question: {{input}}
-Provided Answer: {{output}}
-Reference Answer:{{label}}
-Correct:
-"""
-
-# TODO: just a copy (need to be updated)
-creative_writing_template = """
-### Task Description
-You will be given a Question, a Provided Answer and a Reference Answer. Judge whether the Provided Answer is correct by comparing it to the Reference Answer. Differently formatted dates, people with missing middle names, and alternative spellings should all be considered the same. If the Provided Answer is correct say exactly "True", otherwise say "False".
-Question: {{input}}
-Provided Answer: {{output}}
-Reference Answer:{{label}}
-Correct:
-"""
-
-# TODO: just a copy (need to be updated)
-refusal_template = """
-### Task Description
-You will be given a Question, a Provided Answer and a Reference Answer. Judge whether the Provided Answer is correct by comparing it to the Reference Answer. Differently formatted dates, people with missing middle names, and alternative spellings should all be considered the same. If the Provided Answer is correct say exactly "True", otherwise say "False".
-Question: {{input}}
-Provided Answer: {{output}}
-Reference Answer:{{label}}
-Correct:
-"""
-
-
-def build_messages(user_prompt: str, system_prompt: Optional[str] = None):
-    """
-    Build the message payload for the model evaluation.
-    """
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-
-    # add json format expectation to the user prompt:
-    user_prompt += '\nRespond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}'
-
-    messages.append({"role": "user", "content": user_prompt})
-    return messages
+def extract_score_with_fallback_max_10(score_str: str) -> float:
+    """Extractor based on score with fallback"""
+    reasoning, score = extract_json_score_with_fallback(score_str)
+    return reasoning, score / 10.0
 
 
 JUDGE_PROMPT_MAP = {
@@ -182,14 +225,16 @@ JUDGE_PROMPT_MAP = {
     "factuality": factuality_template,
     "creative_writing": creative_writing_template,
     "refusal": refusal_template,
+    "web_instruct_general_verifier": web_instruct_general_verifier_template,
 }
 
-MAX_VALUE_MAP = {
-    "quality": 10,
-    "quality_rubric": 1,
-    "quality_ref": 10,
-    "safety": 1,
-    "factuality": 1,
-    "creative_writing": 1,
-    "refusal": 1,
+EXTRACTOR_MAP = {
+    "quality": extract_score_with_fallback_max_10,
+    "quality_rubric": extract_json_score_with_fallback,
+    "quality_ref": extract_score_with_fallback_max_10,
+    "safety": extract_json_score_with_fallback,
+    "factuality": extract_json_score_with_fallback,
+    "creative_writing": extract_json_score_with_fallback,
+    "refusal": extract_json_score_with_fallback,
+    "web_instruct_general_verifier": extract_score_web_instruct,
 }
