@@ -90,7 +90,6 @@ from open_instruct.ground_truth_utils import (
     build_all_verifiers,
     cleanup_all_llm_judge_clients,
     soft_format_reward_func,
-    verify_code_sample,
 )
 from open_instruct.model_utils import (
     ModelConfig,
