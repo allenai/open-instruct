@@ -1,16 +1,85 @@
 """
+OpenAI Batch Job Results Processor and Dataset Uploader
+
+This script processes completed OpenAI batch job results for code generation tasks.
+It retrieves batch outputs, validates the generated code solutions against test cases,
+and uploads successful results to HuggingFace Hub. This is part of a two-step process
+where batch jobs are first created with code_create_batch.py, then processed with this script.
+
+Features:
+- Retrieves and processes OpenAI batch job results
+- Validates generated code solutions using local execution API
+- Filters results based on test case pass rates (≥80% required)
+- Uploads successful transformations to HuggingFace Hub
+- Handles custom ID extraction from batch job responses
+- Provides detailed logging and error handling
+
+Prerequisites:
+1. Set up OpenAI API credentials:
+   - OPENAI_API_KEY: Your OpenAI API key
+
+2. Complete batch job created by code_create_batch.py:
+   - The batch job must be in "completed" status
+   - You need the batch job ID from the creation step
+
+3. Start the code execution API:
+   ```bash
+   # In the repository root directory
+   docker build -t code-api -f open_instruct/code/Dockerfile .
+   docker run -p 1234:1234 code-api
+   ```
+
 Usage:
+    python code_upload_batch.py <batch_id>
 
-In the root directory, run:
-```
-docker build -t code-api -f open_instruct/code/Dockerfile .
-docker run -p 1234:1234 code-api
-```
+Arguments:
+    batch_id: The OpenAI batch job ID (obtained from code_create_batch.py)
 
-Cd into the directory of this file and run:
-```
-python open_code_reasoning_upload_batch.py <batch_id>
-```
+Configuration:
+    Modify these variables in the script as needed:
+    - INPUT_HF_DATASET: Source HuggingFace dataset
+    - OUTPUT_HF_DATASET: Target HuggingFace dataset
+    - SPLIT: Dataset split to process
+
+Examples:
+    ```bash
+    # Set your OpenAI API key
+    export OPENAI_API_KEY="your-openai-api-key"
+    
+    # Start the code execution API
+    docker build -t code-api -f open_instruct/code/Dockerfile .
+    docker run -p 1234:1234 code-api
+    
+    # Process batch results (replace with your actual batch ID)
+    python code_upload_batch.py batch_abc123def456
+    ```
+
+Process:
+1. Checks if the specified batch job is completed
+2. Downloads and parses batch job results
+3. Validates each generated solution against its test cases
+4. Keeps only solutions that pass ≥80% of test cases
+5. Uploads filtered results to HuggingFace Hub
+6. Provides statistics on success rates
+
+Output:
+    Updates the target HuggingFace dataset with validated code solutions:
+    - messages: User prompts in chat format
+    - ground_truth: Test cases that passed validation
+    - dataset: Dataset identifier
+    - good_program: Quality flag from the generation process
+    - original_solution/input: Original data from source dataset
+    - rewritten_solution/input: Transformed data from batch job
+
+Workflow:
+    This script is typically used after code_create_batch.py:
+    1. Run code_create_batch.py to create batch job
+    2. Wait for batch job to complete (check status periodically)
+    3. Run this script with the batch ID to process results
+
+Note:
+    The script includes a breakpoint before uploading results, allowing you to
+    review the processed data before pushing to HuggingFace Hub.
 """
 import json
 import os

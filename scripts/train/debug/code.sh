@@ -1,0 +1,39 @@
+python open_instruct/grpo_fast.py \
+    --exp_name "test" \
+    --beta 0.01 \
+    --num_unique_prompts_rollout 48 \
+    --num_samples_per_prompt_rollout 16 \
+    --try_launch_beaker_eval_jobs_on_weka \
+    --kl_estimator kl3 \
+    --learning_rate 5e-7 \
+    --dataset_mixer_list saurabh5/the-algorithm-python 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list saurabh5/the-algorithm-python 16 \
+    --dataset_mixer_eval_list_splits train \
+    --max_token_length 4096 \
+    --max_prompt_token_length 2048 \
+    --response_length 2048 \
+    --pack_length 4096 \
+    --model_name_or_path Qwen/Qwen2.5-0.5B-Instruct \
+    --apply_verifiable_reward true \
+    --code_api_url http://localhost:1234/test_program \
+    --code_max_execution_time 1.0 \
+    --non_stop_penalty True \
+    --oe_eval_tasks gsm8k::tulu,bbh:cot-v1::tulu,codex_humaneval::tulu,codex_humanevalplus::tulu,mbppplus::openinstruct,drop::llama3,minerva_math::tulu,ifeval::tulu,popqa::tulu,mmlu:mc::tulu,mmlu:cot::summarize,alpaca_eval_v2::tulu,truthfulqa::tulu,cruxeval_input:pass@5,cruxeval_output:pass@5 \
+    --non_stop_penalty_value 0.0 \
+    --temperature 1.0 \
+    --chat_template_name tulu \
+    --total_episodes 20000 \
+    --num_training_steps 20000 \
+    --deepspeed_stage 2 \
+    --per_device_train_batch_size 1 \
+    --num_mini_batches 2 \
+    --num_epochs 1 \
+    --vllm_tensor_parallel_size 1 \
+    --vllm_num_engines 1 \
+    --lr_scheduler_type constant \
+    --seed 1 \
+    --num_evals 100 \
+    --save_freq 40 \
+    --gradient_checkpointing \
+    --single_gpu_mode 

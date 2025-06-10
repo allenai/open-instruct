@@ -1,18 +1,73 @@
 """
+TheAlgorithms Python Dataset Generator
+
+This script processes Python algorithm implementations from TheAlgorithms/Python repository
+and converts them into a structured dataset format suitable for code generation training.
+It extracts algorithms, creates human-like prompts, generates test cases, and validates
+the reference solutions.
+
+Features:
+- Recursively processes all Python files in TheAlgorithms repository
+- Uses OpenAI GPT-4o to generate human-like prompts and test cases
+- Validates solutions using local code execution API
+- Filters out low-quality or unsuitable programs
+- Uploads results to HuggingFace Hub as a dataset
+
+Prerequisites:
+1. Set up OpenAI API credentials:
+   - OPENAI_API_KEY: Your OpenAI API key
+
+2. Clone TheAlgorithms repository:
+   ```bash
+   git clone https://github.com/TheAlgorithms/Python.git
+   ```
+
+3. Start the code execution API:
+   ```bash
+   # In the repository root directory
+   docker build -t code-api -f open_instruct/code/Dockerfile .
+   docker run -p 1234:1234 code-api
+   ```
+
 Usage:
+    ```bash
+    # Clone the algorithms repository
+    git clone https://github.com/TheAlgorithms/Python.git
+    
+    # Set your OpenAI API key
+    export OPENAI_API_KEY="your-openai-api-key"
+    
+    # Start the code execution API
+    docker build -t code-api -f open_instruct/code/Dockerfile .
+    docker run -p 1234:1234 code-api
+    
+    # Run the script
+    python the_algorithms.py
+    ```
 
-In the root directory, run:
-```
-docker build -t code-api -f open_instruct/code/Dockerfile .
-docker run -p 1234:1234 code-api
-```
+Output:
+    Creates a dataset with the following structure:
+    - messages: User prompt asking to implement the algorithm
+    - ground_truth: Test cases as executable assert statements
+    - dataset: Dataset identifier ("vwxyzjn/the-algorithm-python")
+    - reference_solution: The original algorithm implementation
+    - good_program: Quality flag indicating if the program is suitable
 
-Cd into the directory of this file and run:
-```
-git clone https://github.com/TheAlgorithms/Python.git
-python main.py
-```
+Process:
+1. Scans all .py files in the Python directory (excluding __init__.py)
+2. Sends each file to OpenAI to generate:
+   - A human-like prompt asking for the algorithm implementation
+   - Test cases extracted from the original code
+   - A reference solution
+3. Validates the reference solution against test cases
+4. Keeps only programs where all test cases pass
+5. Uploads the filtered dataset to HuggingFace Hub
+
+Note:
+    This script processes a large number of files and makes many API calls to OpenAI.
+    Consider the API costs and rate limits when running on the full repository.
 """
+
 import asyncio
 import json
 import os

@@ -6,7 +6,7 @@ python mason.py \
     --preemptible \
     --num_nodes 4 \
     --budget ai2/oe-adapt \
-    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name qwen2.5_7b_grpo_fast_zero_orz \
     --beta 0.0 \
     --num_unique_prompts_rollout 128 \
@@ -24,8 +24,7 @@ python mason.py \
     --model_name_or_path Qwen/Qwen2.5-7B \
     --stop_strings '"</answer>"' \
     --apply_r1_style_format_reward True \
-    --apply_verifiable_reward false \
-    --apply_code_reward true \
+    --apply_verifiable_reward true \
     --code_api_url \$CODE_API_URL/test_program \
     --non_stop_penalty True \
     --non_stop_penalty_value 0.0 \

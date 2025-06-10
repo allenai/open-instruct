@@ -140,6 +140,7 @@ else
 fi
 
 # Define default tasks if no custom tasks provided
+#    "alpaca_eval_v2::tulu" # Removed for high cost of judge
 DEFAULT_TASKS=(
     "gsm8k::tulu"
     "bbh:cot-v1::tulu"
@@ -151,7 +152,8 @@ DEFAULT_TASKS=(
     "popqa::tulu"
     "mmlu:mc::tulu"
     "mmlu:cot::summarize"
-#    "alpaca_eval_v2::tulu" # TEMPORARILY remove alpacaeval from eval suite until we update to cheaper model
+    "alpaca_eval_v3::tulu" # GPT 4.1 judge on OpenAI
+    # "alpaca_eval_v4::tulu" # GPT 4.1, judge on Azure 
     "truthfulqa::tulu"
 )
 UNSEEN_TASKS=(
@@ -182,16 +184,7 @@ GPU_COUNT="$NUM_GPUS"
 GPU_COUNT_OTHER=$((NUM_GPUS * 2))
 MODEL_TYPE_OTHER=""
 
-MODEL_ARGS_BASE="{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}"
-    FINAL_MODEL_ARGS=""
-    if [ -n "$CHAT_TEMPLATE" ]; then
-      # Ensure CHAT_TEMPLATE is properly escaped if it can contain special JSON characters.
-      # For simple string values, direct embedding like below is often okay.
-      # If CHAT_TEMPLATE can contain quotes, newlines, etc., more robust escaping is needed.
-      FINAL_MODEL_ARGS="${MODEL_ARGS_BASE}, \"chat_template\": \"${CHAT_TEMPLATE}\"}"
-    else
-      FINAL_MODEL_ARGS="${MODEL_ARGS_BASE}}"
-    fi
+MODEL_ARGS="{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}"
 
 for TASK in "${TASKS[@]}"; do
     # mmlu and truthfulqa need different batch sizes and gpu counts because they are multiple choice and we cannot use vllm.
@@ -205,6 +198,7 @@ for TASK in "${TASKS[@]}"; do
         GPU_COUNT="$NUM_GPUS"
     fi
 
+    # NOTE: For gantry args here and below, random numbers like #42 are added to the env variables because they need to be unique names. The numbers are ignored.
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
         python oe-eval-internal/oe_eval/launch.py \
             --model "$MODEL_NAME" \
@@ -213,11 +207,11 @@ for TASK in "${TASKS[@]}"; do
             --task "$TASK" \
             $MODEL_TYPE \
             --batch-size "$BATCH_SIZE" \
-            --model-args "$FINAL_MODEL_ARGS" \
+            --model-args "$MODEL_ARGS" \
             --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
-            --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", "env-secret#42": "AZURE_API_KEY=azure_api_key"}' \
+            --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", "env-secret#42": "AZURE_EVAL_API_KEY=azure_eval_api_key"}' \
             ${REVISION_ARG} \
             --cluster "$CLUSTER" \
             --beaker-retries 2 \
@@ -233,11 +227,11 @@ for TASK in "${TASKS[@]}"; do
         --task "$TASK" \
         $MODEL_TYPE \
         --batch-size "$BATCH_SIZE" \
-        --model-args "$FINAL_MODEL_ARGS" \
+        --model-args "$MODEL_ARGS" \
         --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
         ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT" \
-        --gantry-args "{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env-secret#43\": \"AZURE_API_KEY=azure_api_key\", \"env\": \"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\": \"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"}" \
+        --gantry-args "{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env-secret#43\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"}" \
         ${REVISION_ARG} \
         --cluster ai2/augusta-google-1 \
         --beaker-retries 2 \

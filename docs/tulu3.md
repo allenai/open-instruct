@@ -276,6 +276,11 @@ accelerate launch --mixed_precision bf16 \
 
 ## RLVR
 
+### RLVR for IF Note:
+We have since updated the RLVR verifier functions and judge for precise IF. If you want to reproduce Tulu3 results,
+please use the IFEvalVerifierOld class in ground_truth_utils.py. The new IFEvalVerifier class is not compatible with
+the old data format, so please use the new IF data format for the new verifier. The new verifier and the new data will
+give better results.
 
 ### Llama-3.1-Tulu-3-8B-RM Reproduction
 

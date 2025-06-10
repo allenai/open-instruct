@@ -4,6 +4,9 @@ rejection_sampling/shards1
 token_length.png
 *.tfevents.*
 
+# For generating datasets.
+*.jsonl
+
 # for on policy preferences 
 birr/
 

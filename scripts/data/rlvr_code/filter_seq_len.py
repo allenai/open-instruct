@@ -1,3 +1,81 @@
+"""
+HuggingFace Dataset Sequence Length Filter
+
+This script filters HuggingFace datasets based on sequence length limits and uploads
+the filtered results to a new branch on HuggingFace Hub. It's designed to create
+subsets of datasets that fit within specific token length constraints for model training.
+
+Features:
+- Filters datasets by maximum sequence length using configurable tokenizers
+- Supports both streaming and non-streaming dataset processing
+- Uploads filtered datasets to new branches on HuggingFace Hub
+- Handles large datasets efficiently with batched processing
+- Comprehensive logging and error handling
+- Automatic repository and branch creation
+
+Prerequisites:
+1. Install required packages:
+   ```bash
+   pip install datasets transformers huggingface_hub
+   ```
+
+2. Login to HuggingFace Hub:
+   ```bash
+   huggingface-cli login
+   ```
+
+Usage:
+    python filter_seq_len.py --dataset_name <dataset> --split <split> --column_name <column> --max_seq_len <length> --hub_repo_id <repo> --new_branch_name <branch>
+
+Required Arguments:
+    --dataset_name: Source HuggingFace dataset name (e.g., "allenai/c4")
+    --split: Dataset split to filter (e.g., "train", "validation")
+    --column_name: Column containing text data to check length
+    --max_seq_len: Maximum sequence length allowed (inclusive)
+    --hub_repo_id: Target HuggingFace repository (e.g., "username/filtered-dataset")
+    --new_branch_name: Name of the new branch to create (e.g., "filtered-v1")
+
+Optional Arguments:
+    --batch_size: Batch size for processing (default: 1000)
+    --streaming: Enable streaming mode for large datasets
+
+Examples:
+    # Filter a dataset to maximum 512 tokens
+    python filter_seq_len.py \
+        --dataset_name "allenai/c4" \
+        --split "train" \
+        --column_name "text" \
+        --max_seq_len 512 \
+        --hub_repo_id "myuser/c4-filtered" \
+        --new_branch_name "max-512-tokens"
+    
+    # Use streaming mode for very large datasets
+    python filter_seq_len.py \
+        --dataset_name "allenai/c4" \
+        --split "train" \
+        --column_name "text" \
+        --max_seq_len 1024 \
+        --hub_repo_id "myuser/c4-filtered" \
+        --new_branch_name "max-1024-tokens" \
+        --streaming
+
+Process:
+1. Loads the specified dataset and tokenizer
+2. Applies length filtering in batches
+3. Creates target repository and branch if they don't exist
+4. Uploads filtered data to the new branch
+5. Provides logging throughout the process
+
+Output:
+    - Filtered dataset uploaded to specified HuggingFace Hub repository and branch
+    - Log messages showing original vs filtered dataset sizes
+    - Error messages if any issues occur during processing
+
+Note:
+    Ensure you have sufficient permissions to create repositories and branches
+    on HuggingFace Hub. The script will create private repositories by default.
+"""
+
 import datasets
 from transformers import AutoTokenizer
 import argparse

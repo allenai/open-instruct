@@ -11,7 +11,7 @@ python mason.py \
     --num_nodes 2 \
     --description "${description}" \
     --budget ai2/oe-adapt \
-    --gpus 8 -- source configs/beaker_configs/ray_node_setup_code.sh \&\& python open_instruct/grpo_fast.py \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& source configs/beaker_configs/code_api_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name $exp_name \
     --beta 0.01 \
     --num_unique_prompts_rollout 48 \
@@ -19,17 +19,16 @@ python mason.py \
     --try_launch_beaker_eval_jobs_on_weka \
     --kl_estimator kl3 \
     --learning_rate 5e-7 \
-    --dataset_mixer_list saurabh5/open-code-reasoning-rlvr 1.0 saurabh5/tulu-3-personas-code-rlvr 10000 vwxyzjn/rlvr_acecoder 10000 vwxyzjn/the-algorithm-python 1.0\
+    --dataset_mixer_list saurabh5/open-code-reasoning-rlvr 1.0 saurabh5/tulu-3-personas-code-rlvr 1.0 saurabh5/rlvr_acecoder 1.0 saurabh5/the-algorithm-python 1.0\
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list saurabh5/open-code-reasoning-rlvr 16 saurabh5/tulu-3-personas-code-rlvr 16 vwxyzjn/rlvr_acecoder 16 vwxyzjn/the-algorithm-python 16 \
+    --dataset_mixer_eval_list saurabh5/open-code-reasoning-rlvr 16 saurabh5/tulu-3-personas-code-rlvr 16 saurabh5/rlvr_acecoder 16 saurabh5/the-algorithm-python 16 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 6144 \
     --max_prompt_token_length 2048 \
     --response_length 4096 \
     --pack_length 6144 \
     --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-DPO \
-    --apply_verifiable_reward false \
-    --apply_code_reward true \
+    --apply_verifiable_reward true \
     --code_api_url \$CODE_API_URL/test_program \
     --non_stop_penalty True \
     --oe_eval_tasks gsm8k::tulu,bbh:cot-v1::tulu,codex_humanevalplus:0-shot-chat-n5,mbppplus::openinstruct,truthfulqa::tulu,cruxeval_input:pass@5,cruxeval_output:pass@5,ifeval::tulu \

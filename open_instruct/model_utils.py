@@ -19,13 +19,15 @@ import logging
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import List, Literal, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 try:
     import deepspeed
     from deepspeed.runtime.engine import DeepSpeedEngine
 except ImportError:
     pass
+import asyncio
+
 import pandas as pd
 import torch
 import transformers
@@ -39,7 +41,7 @@ from rich.table import Table
 from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
-from open_instruct.ground_truth_utils import REWARD_FN_MAPPING
+from open_instruct.ground_truth_utils import VerifierFunction
 from open_instruct.utils import retry_on_exception
 
 logger = logging.getLogger(__name__)
@@ -208,19 +210,28 @@ def get_reward(
     )
 
 
-def apply_verifiable_reward(
+async def apply_verifiable_reward(
+    reward_fn_mapping: Dict[str, VerifierFunction],
     responses: List[torch.Tensor],
     decoded_responses: List[str],
     ground_truths: List[str],
     datasets: List[Union[str, List[str]]],
     reward_mult: int = 10,
+    queries: Optional[List[str]] = None,
 ):
-    rewards = []
-    per_func_rewards = []
-    for tok_prediction, prediction, ground_truth, dataset in zip(
-        responses, decoded_responses, ground_truths, datasets
+    if queries is None:
+        queries = [None] * len(responses)
+
+    # Collect all async tasks for parallel execution
+    async_tasks = []
+    task_metadata = []
+
+    for i, (tok_prediction, prediction, ground_truth, dataset, query) in enumerate(
+        zip(responses, decoded_responses, ground_truths, datasets, queries)
     ):
         # allow multiple ground truths and datasets for a single response
+
+        # TODO: both code and lm_judge might have list of ground_truth *per instance*
         if isinstance(ground_truth, str):
             ground_truth_list = [ground_truth]
         else:
@@ -230,28 +241,54 @@ def apply_verifiable_reward(
         else:
             dataset_list = dataset
         assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
-        # for now, we just assume rewards are additive, rather than more complex functions.
-        reward = 0
-        per_func_reward = {}
+
+        # Create async tasks for each ground truth/dataset pair
         for gt, ds in zip(ground_truth_list, dataset_list):
-            reward_func = REWARD_FN_MAPPING.get(ds.lower())
+            reward_func = reward_fn_mapping.get(ds.lower())
             if reward_func is None:
                 logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
                 continue
-            reward_weight = reward_func.weight
-            # compare with ground truth.
-            # sometimes we need the tokenized pred.
-            reward_result = reward_func(
+
+            # Create async task
+            task = reward_func.async_call(
                 tokenized_prediction=tok_prediction,
                 prediction=prediction,
                 label=gt,
+                query=query,
             )
-            logger.info("Applying ground truth reward 🤗")
-            reward += reward_mult * reward_result * reward_weight
-            per_func_reward[ds] = per_func_reward.get(ds, 0) + (reward_mult * reward_result * reward_weight)
-        rewards.append(reward)
-        per_func_rewards.append(per_func_reward)
-    return rewards, per_func_rewards
+            async_tasks.append(task)
+            task_metadata.append(
+                {"response_idx": i, "dataset": ds, "reward_weight": reward_func.weight, "reward_mult": reward_mult}
+            )
+
+    # Execute all tasks in parallel
+    if async_tasks:
+        reward_results = await asyncio.gather(*async_tasks)
+        logger.info(f"Applied {len(reward_results)} ground truth rewards in parallel 🤗")
+    else:
+        reward_results = []
+
+    # Initialize results for each response
+    response_rewards = [0] * len(responses)
+    response_per_func_rewards = [{} for _ in range(len(responses))]
+
+    # Process results
+    for result, metadata in zip(reward_results, task_metadata):
+        response_idx = metadata["response_idx"]
+        dataset = metadata["dataset"]
+        reward_weight = metadata["reward_weight"]
+        reward_mult = metadata["reward_mult"]
+
+        # Extract score from VerificationResult
+        score = result.score if hasattr(result, "score") else result
+        weighted_reward = reward_mult * score * reward_weight
+
+        response_rewards[response_idx] += weighted_reward
+        response_per_func_rewards[response_idx][dataset] = (
+            response_per_func_rewards[response_idx].get(dataset, 0) + weighted_reward
+        )
+
+    return response_rewards, response_per_func_rewards
 
 
 def forward(
