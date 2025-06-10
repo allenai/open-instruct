@@ -58,6 +58,7 @@ from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Callable, Dict, Iterator, List, Literal, Optional
 
+
 import numpy as np
 import pandas as pd
 import ray
@@ -83,6 +84,7 @@ from open_instruct.dataset_transformation import (
     DATASET_SOURCE_KEY,
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
+    SOLUTION_KEY,
     TokenizerConfig,
     get_cached_dataset_tulu,
     visualize_token,
@@ -200,6 +202,8 @@ class Args:
     """The number of unique prompts during rollout"""
     num_samples_per_prompt_rollout: int = 4
     """the number of samples to generate per prompt during rollout, useful for easy-star"""
+    max_num_gen_batches: int = 1
+    """The maximum number of batches to generate in dynamic sampling until we saturate the unique prompts w/o zero gradient"""
     stop_strings: Optional[List[str]] = None
     """List of strings that stop the generation when they are generated.
     The returned output will not contain the stop strings."""
@@ -250,6 +254,12 @@ class Args:
 
     aggregate_maj: bool = False
     """whether to aggregate the majority of the verifiable rewards"""
+    sft_on_hard_prompts: bool = False
+    """whether to apply SFT on hard prompts"""
+    sft_alpha: float = 0.7
+    """the alpha value for SFT on hard prompts"""
+    dynamic_sampling: bool = False
+    """whether to perform dynamic sampling as in DAPO paper"""
 
     # -- non stop penalty
     non_stop_penalty: bool = False
@@ -647,6 +657,7 @@ class PolicyTrainerRayProcess(RayProcess):
             attn_implementation="flash_attention_2",
             use_cache=False,
         )
+        
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
         # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
@@ -889,8 +900,7 @@ class PolicyTrainerRayProcess(RayProcess):
             
 
             for epoch_idx in range(args.num_epochs):
-                accumulated_diffs = torch.tensor(0.0, device=collated_advantages[0].device)
-                single_advantages = torch.zeros(args.num_samples_per_prompt_rollout, device=collated_advantages[0].device)
+                
                 for i in range(len(collated_query_responses)):
                     mb_ref_logprob = collated_ref_logprobs[i]
                     mb_query_responses = collated_query_responses[i]
@@ -919,17 +929,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     # Calculate the policy's loss
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
 
-                    if args.aggregate_maj:
-                        accumulated_diffs += torch.sum(logprobs_diff)
-                        response_index = i % args.num_samples_per_prompt_rollout
-                        
-                        # single advantage is sum(nb_advantages[:, 1:]) / length of non zero entries in nb_advantages[:, 1:]
-                        # if all advantages are 0, then single advantage is 0
-                       
-                        if torch.sum(mb_advantages[:, 1:] != 0) == 0:
-                            single_advantages[response_index] = torch.tensor(0.0, device=mb_advantages.device)
-                        else:
-                            single_advantages[response_index] = torch.sum(mb_advantages[:, 1:]) / torch.sum(mb_advantages[:, 1:] != 0)
 
                     ratio = torch.exp(logprobs_diff)
                     
@@ -953,37 +952,18 @@ class PolicyTrainerRayProcess(RayProcess):
 
                     # grpo change: directly subtract KL in loss (add)
                     
-                    if not args.aggregate_maj:
-                        pg_losses = -mb_advantages[:, 1:] * ratio
-                        pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
-                        pg_loss_max = torch.max(pg_losses, pg_losses2)
+                    pg_losses = -mb_advantages[:, 1:] * ratio
+                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
+                    pg_loss_max = torch.max(pg_losses, pg_losses2)
 
-                        loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
-                        loss = loss / accumulation_steps
-                        # Check if loss is valid before backward pass
-                        self.model.backward(loss)
-                        if (local_step + 1) % accumulation_steps == 0:
-                            self.model.step()
-                        local_step += 1
-                    else:
-                        if (i + 1) % args.num_samples_per_prompt_rollout == 0:
-                            sum_ratios = torch.exp(accumulated_diffs).unsqueeze(-1)
-                            single_advantages = single_advantages.unsqueeze(-1)
-
-                            pg_losses = -single_advantages * sum_ratios
-                            pg_losses2 = -single_advantages * torch.clamp(sum_ratios, 1.0 - args.cliprange, 1.0 + args.cliprange)
-                            pg_loss_max = torch.max(pg_losses, pg_losses2)
-                            
-                            loss_maj = pg_loss_max.sum() / accumulation_steps
-                            self.model.backward(loss_maj)
-                            local_step += args.num_samples_per_prompt_rollout
-                            
-                            if local_step % accumulation_steps == 0:
-                                self.model.step()
-                                
-                            
-                            single_advantages = torch.zeros(args.num_samples_per_prompt_rollout, device=collated_advantages[0].device)
-                            accumulated_diffs = 0.0
+                    loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
+                    loss = loss / accumulation_steps
+                    # Check if loss is valid before backward pass
+                    self.model.backward(loss)
+                    if (local_step + 1) % accumulation_steps == 0:
+                        self.model.step()
+                    local_step += 1
+                    
 
                     with torch.no_grad():
                         # NOTE: in packed implementation, kl calculation are averages over response tokens
@@ -999,12 +979,12 @@ class PolicyTrainerRayProcess(RayProcess):
                             kl_loss_stats[i] = kl3_stats[i] * args.beta
                         elif args.kl_estimator == "kl4":
                             kl_loss_stats[i] = kl4_stats[i] * args.beta
-                        # pg_clipfrac_stats[i] = masked_mean(
-                        #     (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
-                        # )
-                        # pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
-                        # loss_stats[i] = loss if not args.aggregate_maj else 0.0
-                        # ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
+                        pg_clipfrac_stats[i] = masked_mean(
+                            (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
+                        )
+                        pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
+                        loss_stats[i] = loss
+                        ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
                 
 
             with torch.no_grad():
@@ -1222,43 +1202,66 @@ def data_preparation_thread(
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
 ):
+    batch = None
+    num_prompts_per_batch = 0
+    num_gen_batches = 0
     for training_step in range(1, num_training_steps + 1):
         # Get next batch of prompts and responses
+        print(f"get the next batch")
         items = queries_prompt_Q.get()
-        queries, ground_truths, datasets = items
+        print(f"got the next batch, will go process it")
+        new_batch = {}
+        if args.sft_on_hard_prompts:
+            new_batch["queries"], new_batch["ground_truths"], new_batch["datasets"], new_batch["solution"] = items
+            
+        else:
+            new_batch["queries"], new_batch["ground_truths"], new_batch["datasets"] = items
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
         if args.num_samples_per_prompt_rollout > 1:
-            queries = [item for item in queries for _ in range(args.num_samples_per_prompt_rollout)]
-            ground_truths = [item for item in ground_truths for _ in range(args.num_samples_per_prompt_rollout)]
-            datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
+            new_batch["queries"] = [item for item in new_batch["queries"] for _ in range(args.num_samples_per_prompt_rollout)]
+            new_batch["ground_truths"] = [item for item in new_batch["ground_truths"] for _ in range(args.num_samples_per_prompt_rollout)]
+            new_batch["datasets"] = [item for item in new_batch["datasets"] for _ in range(args.num_samples_per_prompt_rollout)]
+            if args.sft_on_hard_prompts:
+                new_batch["solution"] = [item for item in new_batch["solution"] for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            responses, finish_reasons = inference_results_Q.get()
+            new_batch["responses"], finish_reasons = inference_results_Q.get()
+            
             for i in range(len(finish_reasons)):
-                if finish_reasons[i] == "stop" and responses[i][-1] != tokenizer.eos_token_id:
-                    responses[i].append(tokenizer.eos_token_id)
+                if finish_reasons[i] == "stop" and new_batch["responses"][i][-1] != tokenizer.eos_token_id:
+                    new_batch["responses"][i].append(tokenizer.eos_token_id)
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
-            decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
+            decoded_responses = tokenizer.batch_decode(new_batch["responses"], skip_special_tokens=True)
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-            scores, reward_metrics = reward_fn(responses, decoded_responses, ground_truths, datasets, finish_reasons, args.aggregate_maj)
-            scores = np.array(scores)
-            scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
-            mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
-            mean_grouped_rewards = np.repeat(mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
-            std_grouped_rewards = scores_per_prompt.std(axis=-1)
-            std_grouped_rewards = np.repeat(std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
-            if args.advantage_normalization_type == "standard":
-                advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
-            elif args.advantage_normalization_type == "centered":
-                advantages = scores - mean_grouped_rewards
-            elif args.advantage_normalization_type == "none":
-                advantages = scores
-            else:
-                raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
+            new_batch["scores"], reward_metrics = reward_fn(new_batch["responses"], 
+                                               decoded_responses, 
+                                               new_batch["ground_truths"], 
+                                               new_batch["datasets"], 
+                                               finish_reasons, 
+                                               args.aggregate_maj)
+            new_batch["scores"] = np.array(new_batch["scores"])
+
+            def _compute_advantages(scores):
+                scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
+                mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
+                mean_grouped_rewards = np.repeat(mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
+                std_grouped_rewards = scores_per_prompt.std(axis=-1)
+                std_grouped_rewards = np.repeat(std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
+                if args.advantage_normalization_type == "standard":
+                    advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
+                elif args.advantage_normalization_type == "centered":
+                    advantages = scores - mean_grouped_rewards
+                elif args.advantage_normalization_type == "none":
+                    advantages = scores
+                else:
+                    raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
+                return advantages, scores_per_prompt
+            
+            new_batch["advantages"], scores_per_prompt = _compute_advantages(new_batch["scores"])
 
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved
@@ -1268,35 +1271,98 @@ def data_preparation_thread(
                 max_possible_score += args.verification_reward
             if args.apply_r1_style_format_reward and args.additive_format_reward:
                 max_possible_score += args.r1_style_format_reward
-            unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
+            unsolved_batch_size_ratio = ((new_batch["scores"] != max_possible_score) > 0).sum() / len(new_batch["scores"])
+
+
+            
+            hard_prompts = np.asarray([i for i, score in enumerate(scores_per_prompt) if not np.any(score == max_possible_score)], dtype=np.int64) 
+            len_hard_prompts = len(hard_prompts)
+                
+
             # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
             # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
-            if not args.aggregate_maj:
-                non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
-                real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(scores)
-                expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
-                non_zero_gradient_index = np.where(expanded_mask)[0]
-                advantages = advantages[non_zero_gradient_index]
-                scores = scores[non_zero_gradient_index]
-                responses = [responses[i] for i in non_zero_gradient_index]
-                queries = [queries[i] for i in non_zero_gradient_index]
-                ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
-                datasets = [datasets[i] for i in non_zero_gradient_index]
+            non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
+            real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(new_batch["scores"])
+            expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
+            non_zero_gradient_index = np.where(expanded_mask)[0]
+            
+                
+            new_batch["advantages"] = new_batch["advantages"][non_zero_gradient_index]
+            new_batch["scores"] = new_batch["scores"][non_zero_gradient_index]
+            new_batch["responses"] = [new_batch["responses"][i] for i in non_zero_gradient_index]
+            
+            if len_hard_prompts > 0 and args.sft_on_hard_prompts:
+                sft_tokenized = []
+                for hp in hard_prompts:
+                    sft_tokenized.append(tokenizer(solution[hp], add_special_tokens=False)['input_ids'])
+                
+                # post-pend 1s with the size of hard prompts to the advantage
+                new_batch["advantages"] = np.concatenate([new_batch["advantages"], 10.0 * np.ones(len_hard_prompts)])
+                new_batch["scores"] = np.concatenate([new_batch["scores"], 10.0 * np.ones(len_hard_prompts)])
+                
+                # post-pend sft tokenized to the responses
+                new_batch["responses"] = new_batch["responses"] + sft_tokenized
 
+                non_zero_gradient_index_with_hard_prompts = np.concatenate([non_zero_gradient_index, (hard_prompts * args.num_samples_per_prompt_rollout).astype(np.int64)])
+
+                print(f"non_zero_gradient_index_with_hard_prompts: {non_zero_gradient_index_with_hard_prompts}")
+                print(f"non_zero_gradient_index: {non_zero_gradient_index}")
+
+                new_batch["queries"] = [new_batch["queries"][i] for i in non_zero_gradient_index_with_hard_prompts]
+                new_batch["ground_truths"] = [new_batch["ground_truths"][i] for i in non_zero_gradient_index_with_hard_prompts]
+                new_batch["datasets"] = [new_batch["datasets"][i] for i in non_zero_gradient_index_with_hard_prompts]
+            else:
+                new_batch["queries"] = [new_batch["queries"][i] for i in non_zero_gradient_index]
+                new_batch["ground_truths"] = [new_batch["ground_truths"][i] for i in non_zero_gradient_index]
+                new_batch["datasets"] = [new_batch["datasets"][i] for i in non_zero_gradient_index]
+            
+            def _concat_batch(batch, new_batch):
+                for k, v in new_batch.items():
+                    if isinstance(v, list):
+                        batch[k] = batch[k] + v
+                    else:
+                        batch[k] = np.concatenate([batch[k], v])
+                return batch
+            def _select_batch_size(batch, num_elements):
+                for k, v in batch.items():
+                    batch[k] = v[:num_elements]
+                return batch
+            
+            if not args.dynamic_sampling:
+                batch = new_batch
+            else:
+                num_prompts_per_batch += non_zero_std_mask.sum()
+                batch = new_batch if batch is None else _concat_batch(batch, new_batch)
+
+                if num_prompts_per_batch < args.num_unique_prompts_rollout:
+                    print(f"{num_prompts_per_batch} < {args.num_unique_prompts_rollout}")
+                    if args.max_num_gen_batches <= 0 or num_gen_batches < args.max_num_gen_batches:
+                        print(f"{num_gen_batches}, keep generating")
+                        time.sleep(10)
+                        continue
+                    else:
+                        print(f"max num gen batches reached, stop generating although the batch is not full")
+                else:
+                    num_elements = args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+                    batch = _select_batch_size(batch, num_elements)
+
+            
+            
+               
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
-                queries=queries,
-                responses=responses,
+                queries=batch["queries"],
+                responses=batch["responses"],
                 pack_length=args.pack_length,
                 pad_token_id=tokenizer.pad_token_id,
-                pack=not args.aggregate_maj
+                pack=True
             )
             
             num_new_tokens = sum(len(seq) for seq in packed_sequences.query_responses)
             # Vectorized advantage calculation: create a lookup array where each index corresponds to a response mask value
             # and each value is the corresponding advantage score: index 0 is set to 0 since response masks start from 1 (1-indexed)
-            lookup_advantages = np.zeros(len(advantages) + 1, dtype=np.float32)
-            lookup_advantages[1:] = advantages
+            lookup_advantages = np.zeros(len(batch["advantages"]) + 1, dtype=np.float32)
+            lookup_advantages[1:] = batch["advantages"]
             packed_advantages = [
                 torch.tensor(lookup_advantages[packed_mask], dtype=torch.float32)
                 for packed_mask in packed_sequences.response_masks
@@ -1316,10 +1382,8 @@ def data_preparation_thread(
                 per_device_packed_response_masks = packed_sequences.response_masks[B * i : B * (i + 1)]
 
                 # Shuffle the batch and collate the data only if not aggregated with majority voting
-                if not args.aggregate_maj:
-                    b_inds = np.random.permutation(len(per_device_packed_query_responses))
-                else:
-                    b_inds = np.arange(len(per_device_packed_query_responses))
+                b_inds = np.random.permutation(len(per_device_packed_query_responses))
+                
                 collated_query_responses = []
                 collated_attention_masks = []
                 collated_position_ids = []
@@ -1355,32 +1419,33 @@ def data_preparation_thread(
                 )
 
         # Create a result package with metrics and data
-        sequence_lengths = np.array([len(response) for response in responses])
+        sequence_lengths = np.array([len(response) for response in batch["responses"]])
         sequence_length_solved = (
-            np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == max_possible_score])
+            np.array([]) if np.all(batch["scores"] == 0) else np.array(sequence_lengths[batch["scores"] == max_possible_score])
         )
         sequence_length_unsolved = (
-            np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
+            np.array([]) if np.all(batch["scores"] == max_possible_score) else np.array(sequence_lengths[batch["scores"] == 0])
         )
-        if len(responses) == 0:
+        if len(batch["responses"]) == 0:
             packed_ratio = 0
             seq_length_mean, seq_length_min, seq_length_max = 0, 0, 0
             advatages_mean, advatages_min, advatages_max = 0, 0, 0  
         else:
-            packed_ratio = len(packed_sequences.query_responses) / len(responses)
+            packed_ratio = len(packed_sequences.query_responses) / len(batch["responses"])
             seq_length_mean, seq_length_min, seq_length_max = sequence_lengths.mean(), sequence_lengths.min(), sequence_lengths.max()
-            advatages_mean, advatages_min, advatages_max = advantages.mean(), advantages.min(), advantages.max()
+            advatages_mean, advatages_min, advatages_max = batch["advantages"].mean(), batch["advantages"].min(), batch["advantages"].max()
 
         if args.aggregate_maj:
             mean_scores = reward_metrics["scores"]
         else:
-            if len(scores) > 0:
-                mean_scores = np.array(scores).mean()
+            if len(batch["scores"]) > 0:
+                mean_scores = np.array(batch["scores"]).mean()
             else:
                 mean_scores = 0.0
         metrics = {
             "scores": mean_scores,
-            "real_batch_size_ratio": 0, #real_batch_size_ratio
+            "hard_prompts": len(hard_prompts),
+            "real_batch_size_ratio": real_batch_size_ratio,
             "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
             "packed_ratio": packed_ratio,
             "val/sequence_lengths": seq_length_mean,
@@ -1396,18 +1461,18 @@ def data_preparation_thread(
             "val/advantages_mean": advatages_mean,
             "val/advantages_min": advatages_min,
             "val/advantages_max": advatages_max,
-            "val/advantages_hist": advantages,
+            "val/advantages_hist": batch["advantages"],
             **reward_metrics,
         }
 
         if args.save_traces:
             traces = {
-                "scores": scores.tolist(),
+                "scores": batch["scores"].tolist(),
                 "finish_reasons": finish_reasons,
-                "responses": responses,
-                "queries": queries,
-                "ground_truths": ground_truths,
-                "datasets": datasets,
+                "responses": batch["responses"],
+                "queries": batch["queries"],
+                "ground_truths": batch["ground_truths"],
+                "datasets": batch["datasets"],
                 "training_step": training_step,
                 **reward_metrics,
             }
@@ -1422,11 +1487,15 @@ def data_preparation_thread(
                 "packed_sequences": packed_sequences,  # for debugging purposes
                 "collated_data": collated_data,
                 "metrics": metrics,
-                "responses_count": len(responses),
+                "responses_count": len(batch["responses"]),
                 "num_new_tokens": num_new_tokens,
                 "B": B,
             }
         )
+
+        batch = None
+        num_prompts_per_batch = 0
+        num_gen_batches = 0
 
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
@@ -1665,14 +1734,17 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
     datasets_next = data_next[DATASET_SOURCE_KEY]
-    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
+    if args.sft_on_hard_prompts:
+        solution_next = data_next[SOLUTION_KEY]
+        queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next, solution_next))
+    else:
+        queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
     param_prompt_Q.put((None, queries_next))
 
     num_total_tokens = 0
     start_time = time.time()
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
-            print("-" * 100)
             episode += (
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
             )  # each sample is an episode
@@ -1685,9 +1757,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
                     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
                     datasets_next = data_next[DATASET_SOURCE_KEY]
+                    if args.sft_on_hard_prompts:
+                        solution_next = data_next[SOLUTION_KEY]
                     with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
                         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-                queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
+                if args.sft_on_hard_prompts:
+                    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next, solution_next))
+                else:
+                    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
                 param_prompt_Q.put((None, queries_next))
             else:
                 if training_step != 1:
@@ -1697,9 +1774,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
                     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
                     datasets_next = data_next[DATASET_SOURCE_KEY]
+                    if args.sft_on_hard_prompts:
+                        solution_next = data_next[SOLUTION_KEY]
                     with Timer("🔄 Loading weights using shared memory"):
                         ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-                    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
+                    if args.sft_on_hard_prompts:
+                        queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next, solution_next))
+                    else:
+                        queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
                     param_prompt_Q.put((None, queries_next))
 
             # ------------------------------------------------------------------------------------------------

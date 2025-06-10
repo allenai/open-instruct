@@ -329,6 +329,7 @@ def compute_a_single_reward(tok_prediction, prediction, ground_truth, dataset, r
             prediction=prediction,
             label=gt,
         )
+
         reward += reward_mult * reward_result * reward_weight
         per_func_reward[ds] = per_func_reward.get(ds, 0) + (reward_mult * reward_result * reward_weight)
     return reward, per_func_reward
