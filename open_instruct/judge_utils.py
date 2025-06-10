@@ -41,7 +41,7 @@ Notes:
 {output}
 
 [Your judgement]
-Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}
+Respond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}
 """
 
 
@@ -69,7 +69,7 @@ Use the following criteria to evaluate the response:
 {output}
 
 [Your judgement]
-Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}"""
+Respond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}"""
 
 
 general_quality_ref_template = """
@@ -94,7 +94,7 @@ Notes:
 {label}
 
 [Your judgement]
-Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}"""
+Respond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}"""
 
 # create empty template (TODO, incomplete)
 safety_template = """
@@ -112,7 +112,7 @@ Question: {{input}}
 Provided Answer: {{output}}
 Reference Answer:{{label}}
 Correct:
-Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}
+Respond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}
 """
 
 web_instruct_general_verifier_template = """User: ### Question: {input}
@@ -136,7 +136,7 @@ Question: {{input}}
 Provided Answer: {{output}}
 Reference Answer:{{label}}
 Correct:
-Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}
+Respond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}
 """
 
 # TODO: just a copy (need to be updated)
@@ -147,7 +147,7 @@ Question: {{input}}
 Provided Answer: {{output}}
 Reference Answer:{{label}}
 Correct:
-Respond in JSON format. {"REASONING": "[...]", "SCORE": "<your-score>"}
+Respond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}
 """
 
 
