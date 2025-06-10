@@ -1174,7 +1174,9 @@ def vllm_generate_thread(
         return response_ids, finish_reasons
 
     for training_step in range(resume_training_step, num_training_steps + 1):
+        print("get prompts for inference")
         items = param_prompt_Q.get()
+        print("got some prompts for inference, will go generate responses")
         if items is None:
             break
         _, g_queries_list = items
@@ -1338,7 +1340,7 @@ def data_preparation_thread(
                     print(f"{num_prompts_per_batch} < {args.num_unique_prompts_rollout}")
                     if args.max_num_gen_batches <= 0 or num_gen_batches < args.max_num_gen_batches:
                         print(f"{num_gen_batches}, keep generating")
-                        time.sleep(10)
+                        num_gen_batches += 1
                         continue
                     else:
                         print(f"max num gen batches reached, stop generating although the batch is not full")
@@ -1752,6 +1754,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             # ------------------------------------------------------------------------------------------------
             # Sync weights and send the next batch of prompts to vLLM
             if args.async_mode:
+                print("put things in queue")
                 if training_step != 1:
                     data_next = train_dataset[next(iter_dataloader)]
                     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
@@ -1767,6 +1770,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
                 param_prompt_Q.put((None, queries_next))
             else:
+                print("put things in queue")
                 if training_step != 1:
                     # NOTE: important: the indent here is different for sync mode
                     # we also set to use `queries = queries_next` immediately
@@ -1787,13 +1791,17 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             # ------------------------------------------------------------------------------------------------
             # Get the packed sequences with advantages from the packing thread
             with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
-                packed_data = packed_sequences_Q.get()
-                data_thread_metrics = packed_data["metrics"]
-                B = packed_data["B"]
-                collated_data = packed_data["collated_data"]
-                num_total_tokens += packed_data["num_new_tokens"]
-                if B == 0:
-                    print("[Main Thread] 🤡 After packing, there is not enough data to train")
+                try:
+                    packed_data = packed_sequences_Q.get(timeout=60)  # Wait up to 10 seconds
+                    data_thread_metrics = packed_data["metrics"]
+                    B = packed_data["B"]
+                    collated_data = packed_data["collated_data"]
+                    num_total_tokens += packed_data["num_new_tokens"]
+                    if B == 0:
+                        print("[Main Thread] 🤡 After packing, there is not enough data to train")
+                        continue
+                except Empty:
+                    print("[Main Thread] ⚠️ Timeout waiting for packed sequences. Retrying...")
                     continue
 
             # ------------------------------------------------------------------------------------------------
