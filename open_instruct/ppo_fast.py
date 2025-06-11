@@ -282,6 +282,12 @@ class Args:
     llm_judge_timeout: int = 60
     """the timeout to use for the llm judge"""
 
+    # -- code verifier
+    code_api_url: str = os.environ.get("CODE_API_URL", "http://localhost:1234") + "/test_program"
+    """the api url to use for the code verifier"""
+    code_max_execution_time: float = 1.0
+    """the max execution time to use for the code verifier"""
+
     # -- non stop penalty
     non_stop_penalty: bool = False
     """whether to penalize responses which did not finish generation"""
@@ -1926,13 +1932,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 if __name__ == "__main__":
     parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
-    verifier_config = VerifierConfig.from_args(args)
     assert isinstance(args, Args)
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
-    assert isinstance(verifier_config, VerifierConfig)
 
-    reward_fn_mapping = build_all_verifiers(verifier_config)
+    reward_fn_mapping = build_all_verifiers(args)
 
     async def reward_fn(
         responses: List[torch.Tensor],
