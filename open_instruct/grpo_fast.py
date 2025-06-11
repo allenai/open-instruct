@@ -596,9 +596,11 @@ class PolicyTrainerRayProcess(RayProcess):
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
         if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            HfDeepSpeedConfig(ds_config)
+            dschf = HfDeepSpeedConfig(ds_config)
         else:
-            pass
+            dschf = None
+        print(f"{dschf=}")
+
         self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
