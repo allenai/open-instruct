@@ -55,7 +55,7 @@ import traceback
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
-from queue import Empty, Queue
+from queue import Empty, Queue, Full
 from typing import Callable, Dict, Iterator, List, Literal, Optional
 
 
@@ -202,7 +202,7 @@ class Args:
     """The number of unique prompts during rollout"""
     num_samples_per_prompt_rollout: int = 4
     """the number of samples to generate per prompt during rollout, useful for easy-star"""
-    max_num_gen_batches: int = 1
+    max_num_gen_batches: int = 10
     """The maximum number of batches to generate in dynamic sampling until we saturate the unique prompts w/o zero gradient"""
     stop_strings: Optional[List[str]] = None
     """List of strings that stop the generation when they are generated.
@@ -882,6 +882,8 @@ class PolicyTrainerRayProcess(RayProcess):
                     ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:].bool(), INVALID_LOGPROB)
                     collated_ref_logprobs.append(ref_logprob)
                     torch.cuda.empty_cache()
+                # Final cache flush after all reference policy calculations
+                torch.cuda.empty_cache()
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
@@ -999,6 +1001,10 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("val/ratio", ratio_stats.mean())
                 self.local_metrics.add("val/ratio_var", ratio_stats.var())
                 self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
+                
+                # Ensure all ranks flush their caches at the same time to prevent memory pressure
+                torch.cuda.empty_cache()
+                
                 return self.local_metrics.get_metrics_list()
 
     def save_checkpoint_state(self, checkpoint_state_dir: str, client_state: Dict[str, str]) -> None:
@@ -1173,26 +1179,38 @@ def vllm_generate_thread(
             finish_reasons.extend([out.finish_reason for output in outputs for out in output.outputs])
         return response_ids, finish_reasons
 
-    for training_step in range(resume_training_step, num_training_steps + 1):
-        print("get prompts for inference")
+    current_step = resume_training_step
+    while current_step <= num_training_steps:
+        print(f"vLLM thread: processing step {current_step}/{num_training_steps}")
         items = param_prompt_Q.get()
-        print("got some prompts for inference, will go generate responses")
         if items is None:
+            print("vLLM thread: received None, exiting")
             break
         _, g_queries_list = items
 
         with Timer("🔥 Generation time"):
             response_ids, finish_reasons = generate_with_engines(g_queries_list, generation_config)
         inference_results_Q.put((response_ids, finish_reasons))
+        print(f"vLLM thread: put the response ids and finish reasons into the queue")
 
         # Evaluate the model
         if (
             eval_prompt_token_ids is not None
             and num_evals > 0
-            and ((training_step - 1) % eval_freq == 0 or training_step == num_training_steps)
+            and ((current_step - 1) % eval_freq == 0 or current_step == num_training_steps)
         ):
+            print(f"vLLM thread: evaluate the model")
             response_ids, finish_reasons = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
-            evaluation_inference_results_Q.put((response_ids, finish_reasons))
+            try:
+                evaluation_inference_results_Q.put((response_ids, finish_reasons), block=False)
+                print(f"vLLM thread: put evaluation results into queue")
+            except Full:
+                print(f"vLLM thread: evaluation queue full, skipping evaluation results")
+        
+        current_step += 1
+        print(f"vLLM thread: go to next step")
+
+    print(f"vLLM thread: completed {current_step-1} steps, exiting")
 
 
 def data_preparation_thread(
@@ -1203,15 +1221,26 @@ def data_preparation_thread(
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
+    need_data_event: threading.Event,
 ):
     batch = None
     num_prompts_per_batch = 0
     num_gen_batches = 0
-    for training_step in range(1, num_training_steps + 1):
+    current_step = 0
+    
+    while current_step < num_training_steps:
+        current_step += 1
+        print(f"Data prep thread: processing step {current_step}/{num_training_steps}")
         # Get next batch of prompts and responses
-        print(f"get the next batch")
-        items = queries_prompt_Q.get()
+        print("get the next batch")
+        items = queries_prompt_Q.get()  # Add timeout to check if we need more data
+        
+        if items is None:
+            print("Data prep thread: received None signal, exiting")
+            break
+            
         print(f"got the next batch, will go process it")
+
         new_batch = {}
         if args.sft_on_hard_prompts:
             new_batch["queries"], new_batch["ground_truths"], new_batch["datasets"], new_batch["solution"] = items
@@ -1265,6 +1294,10 @@ def data_preparation_thread(
             
             new_batch["advantages"], scores_per_prompt = _compute_advantages(new_batch["scores"])
 
+        # Clear decoded responses to free memory
+        del decoded_responses
+        torch.cuda.empty_cache()
+
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved
             max_possible_score = 0
@@ -1296,11 +1329,11 @@ def data_preparation_thread(
             if len_hard_prompts > 0 and args.sft_on_hard_prompts:
                 sft_tokenized = []
                 for hp in hard_prompts:
-                    sft_tokenized.append(tokenizer(solution[hp], add_special_tokens=False)['input_ids'])
+                    sft_tokenized.append(tokenizer(new_batch["solution"][hp], add_special_tokens=False)['input_ids'])
                 
                 # post-pend 1s with the size of hard prompts to the advantage
-                new_batch["advantages"] = np.concatenate([new_batch["advantages"], 10.0 * np.ones(len_hard_prompts)])
-                new_batch["scores"] = np.concatenate([new_batch["scores"], 10.0 * np.ones(len_hard_prompts)])
+                new_batch["advantages"] = np.concatenate([new_batch["advantages"], np.ones(len_hard_prompts)])
+                new_batch["scores"] = np.concatenate([new_batch["scores"], np.ones(len_hard_prompts)])
                 
                 # post-pend sft tokenized to the responses
                 new_batch["responses"] = new_batch["responses"] + sft_tokenized
@@ -1330,7 +1363,7 @@ def data_preparation_thread(
                     batch[k] = v[:num_elements]
                 return batch
             
-            if not args.dynamic_sampling:
+            if not args.dynamic_sampling or current_step == args.num_training_steps: # if last step, or not dynamic sampling, just use the new batch
                 batch = new_batch
             else:
                 num_prompts_per_batch += non_zero_std_mask.sum()
@@ -1340,6 +1373,7 @@ def data_preparation_thread(
                     print(f"{num_prompts_per_batch} < {args.num_unique_prompts_rollout}")
                     if args.max_num_gen_batches <= 0 or num_gen_batches < args.max_num_gen_batches:
                         print(f"{num_gen_batches}, keep generating")
+                        need_data_event.set()
                         num_gen_batches += 1
                         continue
                     else:
@@ -1348,7 +1382,9 @@ def data_preparation_thread(
                     num_elements = args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
                     batch = _select_batch_size(batch, num_elements)
 
-            
+            # Clear intermediate variables to free memory
+            del new_batch, scores_per_prompt, non_zero_std_mask, expanded_mask, non_zero_gradient_index
+            torch.cuda.empty_cache()
             
                
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
@@ -1475,7 +1511,7 @@ def data_preparation_thread(
                 "queries": batch["queries"],
                 "ground_truths": batch["ground_truths"],
                 "datasets": batch["datasets"],
-                "training_step": training_step,
+                "training_step": current_step,
                 **reward_metrics,
             }
             os.makedirs(args.output_dir, exist_ok=True)
@@ -1495,10 +1531,76 @@ def data_preparation_thread(
             }
         )
 
+        # Clear batch data and force garbage collection to free memory
+        del batch, packed_sequences, collated_data, lookup_advantages, packed_advantages
+        del sequence_lengths, sequence_length_solved, sequence_length_unsolved
+        torch.cuda.empty_cache()
+
         batch = None
         num_prompts_per_batch = 0
         num_gen_batches = 0
 
+    print(f"Data prep thread: completed {current_step-1} steps, exiting")
+
+
+class DataFeederThread(threading.Thread):
+    def __init__(
+        self,
+        train_dataset,
+        iter_dataloader: ShufflingIterator,
+        queries_prompt_Q: Queue,
+        param_prompt_Q: Queue,
+        policy_group: ModelGroup,
+        args: Args,
+        need_data_event: threading.Event,
+    ):
+        super().__init__()
+        self.train_dataset = train_dataset
+        self.iter_dataloader = iter_dataloader
+        self.queries_prompt_Q = queries_prompt_Q
+        self.param_prompt_Q = param_prompt_Q
+        self.policy_group = policy_group
+        self.args = args
+        self.need_data_event = need_data_event
+        self.running = True
+        self.current_step = 0
+
+    def run(self):
+        while self.running:
+            # Wait for signal that more data is needed
+            self.need_data_event.wait()
+            
+            # Check if we should stop
+            if self.current_step >= self.args.num_training_steps:
+                print(f"DataFeederThread: completed {self.current_step} steps, exiting")
+                self.running = False
+                break
+            print(f"DataFeederThread: step {self.current_step} / {self.args.num_training_steps}")
+            # Get next batch of data
+            data_next = self.train_dataset[next(self.iter_dataloader)]
+            queries_next = data_next[INPUT_IDS_PROMPT_KEY]
+            ground_truths_next = data_next[GROUND_TRUTHS_KEY]
+            datasets_next = data_next[DATASET_SOURCE_KEY]
+            
+            # Load weights if needed
+            if self.current_step != 1:
+                with Timer("🔄 Loading weights using shared memory"):
+                    ray.get([m.broadcast_to_vllm.remote() for m in self.policy_group.models])
+            
+            # Put data in queues
+            if self.args.sft_on_hard_prompts:
+                solution_next = data_next[SOLUTION_KEY]
+                self.queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next, solution_next))
+            else:
+                self.queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
+            self.param_prompt_Q.put((None, queries_next))
+            
+            # Increment step counter and clear the event
+            self.current_step += 1
+            self.need_data_event.clear()
+
+    def stop(self):
+        self.running = False
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
     # ------------------------------------------------------------
@@ -1716,6 +1818,23 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     thread.start()
     print("======== ✅ vllm generate thread starts =========")
 
+    # Create synchronization event for data feeding
+    need_data_event = threading.Event()
+
+    # Create and start data feeder thread
+    data_feeder = DataFeederThread(
+        train_dataset=train_dataset,
+        iter_dataloader=iter_dataloader,
+        queries_prompt_Q=queries_prompt_Q,
+        param_prompt_Q=param_prompt_Q,
+        policy_group=policy_group,
+        args=args,
+        need_data_event=need_data_event,
+    )
+    data_feeder.start()
+    print("======== ✅ Data feeder thread starts =========")
+
+    # Create and start data preparation thread
     packing_thread = threading.Thread(
         target=data_preparation_thread,
         args=(
@@ -1726,82 +1845,34 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             args,
             tokenizer,
             args.num_training_steps,
+            need_data_event,
         ),
     )
     packing_thread.start()
     print("======== ✅ data preparation thread starts =========")
 
     # Send initial data to both threads
-    data_next = train_dataset[next(iter_dataloader)]
-    queries_next = data_next[INPUT_IDS_PROMPT_KEY]
-    ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-    datasets_next = data_next[DATASET_SOURCE_KEY]
-    if args.sft_on_hard_prompts:
-        solution_next = data_next[SOLUTION_KEY]
-        queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next, solution_next))
-    else:
-        queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
-    param_prompt_Q.put((None, queries_next))
+    need_data_event.set()
+    
 
     num_total_tokens = 0
     start_time = time.time()
     try:
-        for training_step in range(resume_training_step, args.num_training_steps + 1):
+        while data_feeder.current_step < args.num_training_steps:
+            print(f"Main thread: current step: {data_feeder.current_step}, num training steps: {args.num_training_steps}")
             episode += (
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-            )  # each sample is an episode
+            )  # each sample is an episode; TODO: this is probably wrong since we might call data feeder with dynamic sampling
+            need_data_event.set()
 
-            # ------------------------------------------------------------------------------------------------
-            # Sync weights and send the next batch of prompts to vLLM
-            if args.async_mode:
-                print("put things in queue")
-                if training_step != 1:
-                    data_next = train_dataset[next(iter_dataloader)]
-                    queries_next = data_next[INPUT_IDS_PROMPT_KEY]
-                    ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-                    datasets_next = data_next[DATASET_SOURCE_KEY]
-                    if args.sft_on_hard_prompts:
-                        solution_next = data_next[SOLUTION_KEY]
-                    with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
-                        ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-                if args.sft_on_hard_prompts:
-                    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next, solution_next))
-                else:
-                    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
-                param_prompt_Q.put((None, queries_next))
-            else:
-                print("put things in queue")
-                if training_step != 1:
-                    # NOTE: important: the indent here is different for sync mode
-                    # we also set to use `queries = queries_next` immediately
-                    data_next = train_dataset[next(iter_dataloader)]
-                    queries_next = data_next[INPUT_IDS_PROMPT_KEY]
-                    ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-                    datasets_next = data_next[DATASET_SOURCE_KEY]
-                    if args.sft_on_hard_prompts:
-                        solution_next = data_next[SOLUTION_KEY]
-                    with Timer("🔄 Loading weights using shared memory"):
-                        ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-                    if args.sft_on_hard_prompts:
-                        queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next, solution_next))
-                    else:
-                        queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
-                    param_prompt_Q.put((None, queries_next))
-
-            # ------------------------------------------------------------------------------------------------
-            # Get the packed sequences with advantages from the packing thread
             with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
-                try:
-                    packed_data = packed_sequences_Q.get(timeout=60)  # Wait up to 10 seconds
-                    data_thread_metrics = packed_data["metrics"]
-                    B = packed_data["B"]
-                    collated_data = packed_data["collated_data"]
-                    num_total_tokens += packed_data["num_new_tokens"]
-                    if B == 0:
-                        print("[Main Thread] 🤡 After packing, there is not enough data to train")
-                        continue
-                except Empty:
-                    print("[Main Thread] ⚠️ Timeout waiting for packed sequences. Retrying...")
+                packed_data = packed_sequences_Q.get()
+                data_thread_metrics = packed_data["metrics"]
+                B = packed_data["B"]
+                collated_data = packed_data["collated_data"]
+                num_total_tokens += packed_data["num_new_tokens"]
+                if B == 0:
+                    print("[Main Thread] 🤡 After packing, there is not enough data to train")
                     continue
 
             # ------------------------------------------------------------------------------------------------
@@ -1820,7 +1891,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 )
                 if (
                     args.ref_policy_update_freq is not None
-                    and training_step % args.ref_policy_update_freq == 0
+                    and data_feeder.current_step % args.ref_policy_update_freq == 0
                     and args.alpha > 0
                 ):
                     update_ref_policy_future.extend(
@@ -1830,7 +1901,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
                 metrics = {
                     "episode": episode,
-                    "training_step": training_step,
+                    "training_step": data_feeder.current_step,
                     "val/num_total_tokens": num_total_tokens,
                     "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
                     "tokens_per_second": num_total_tokens / (time.time() - start_time),
@@ -1847,25 +1918,25 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                             writer.add_histogram(key, value, episode)
                 print_rich_single_line_metrics(scalar_metrics)
 
-                if args.save_freq > 0 and training_step % args.save_freq == 0:
+                if args.save_freq > 0 and data_feeder.current_step % args.save_freq == 0:
                     with Timer("[Main Thread] 🗡️ Saving model"):
                         checkpoint_dir = f"{args.output_dir}_checkpoints"
-                        step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-                        print(f"Saving model at step {training_step} to {step_dir}")
+                        step_dir = os.path.join(checkpoint_dir, f"step_{data_feeder.current_step}")
+                        print(f"Saving model at step {data_feeder.current_step} to {step_dir}")
                         ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
                         if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
-                            leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
+                            leaderboard_name = f"{args.hf_repo_revision}_step_{data_feeder.current_step}"
                             for i in range(args.world_size):
                                 policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                                    step_dir, leaderboard_name, wandb_url, training_step
+                                    step_dir, leaderboard_name, wandb_url, data_feeder.current_step
                                 )
                 if (
                     args.checkpoint_state_freq > 0
-                    and training_step % args.checkpoint_state_freq == 0
+                    and data_feeder.current_step % args.checkpoint_state_freq == 0
                     and args.checkpoint_state_dir is not None
                 ):
                     with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
-                        client_state = {"training_step": training_step}
+                        client_state = {"training_step": data_feeder.current_step}
                         ray.get(
                             [
                                 policy_group.models[i].save_checkpoint_state.remote(
@@ -1874,7 +1945,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                                 for i in range(args.world_size)
                             ]
                         )
-                        print(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+                        print(f"Saved checkpoint state at step {data_feeder.current_step} to {args.checkpoint_state_dir}")
 
             if len(update_ref_policy_future) > 0:
                 with Timer("[Main Thread] 🔃 Updating reference policy"):
@@ -1885,7 +1956,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             try:
                 # timeout 0.01 if this is the last training step or we're not evaluating
                 # otherwise, wait to get the last evaluation generations (long timeout just in case)
-                timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else 100
+                timeout = 0.01 if (data_feeder.current_step < args.num_training_steps or args.eval_freq < 0) else 100
                 eval_responses, eval_finish_reasons = evaluation_inference_results_Q.get(timeout=timeout)
                 print("[Main Thread] 📊 Evaluation responses received")
 
@@ -1930,15 +2001,19 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             except Empty:
                 print("[Main Thread] 🙈 Evaluation responses not received")
 
-        print(f"Saving final model at step {training_step} to {args.output_dir}")
+        print(f"Saving final model at step {data_feeder.current_step} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):
             ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
             if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                 leaderboard_name = args.hf_repo_revision
                 for i in range(args.world_size):
                     policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                        args.output_dir, leaderboard_name, wandb_url, training_step
+                        args.output_dir, leaderboard_name, wandb_url, data_feeder.current_step
                     )
+
+        
+        
+        
 
     except Exception as e:
         print(f"Training error occurred: {str(e)}")
@@ -1946,13 +2021,18 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         ray.shutdown()
         os._exit(1)
         raise  # Re-raise the exception after shutdown
-
-    # Clean up threads
+    
+    print("[Main Thread] Waiting for threads to finish")
     thread.join()
     print("======== ✅ vllm generate thread ends =========")
     packing_thread.join()
     print("======== ✅ data preparation thread ends =========")
-    ray.shutdown()
+    
+    # Signal data feeder thread to stop
+    need_data_event.set()  # Wake up the thread so it can check running flag
+    data_feeder.stop()
+    data_feeder.join()
+    print("======== ✅ data feeder thread ends =========")
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
     # make a copy of the model to `/output` in the end.
