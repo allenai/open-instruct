@@ -525,9 +525,10 @@ class PolicyTrainerRayProcess(RayProcess):
         # next line instructs transformers to partition the model directly over multiple gpus using
         # deepspeed.zero.Init when model's `from_pretrained` method is called.
         if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            HfDeepSpeedConfig(ds_config)
+            dschf = HfDeepSpeedConfig(ds_config)
         else:
-            pass
+            dschf = None
+        print(f"{dschf=}")
 
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
