@@ -1230,6 +1230,28 @@ def data_preparation_thread(
             ]
             packed_sequences.advantages = packed_advantages
 
+        # if we have less batches than world size, we need to pad out so each world is fine
+        # ideally, you should avoid this since its wasting computation.
+        with Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
+            shortfall = args.world_size - len(packed_sequences.query_responses)
+            if shortfall > 0:
+                print(f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this.")
+                # construct "dummy" sequences for padding out the world size
+                dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
+                dummy_tool_mask = torch.zeros_like(dummy_qr)
+                dummy_attention = torch.tensor([1, 1], dtype=torch.long)
+                dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
+                dummy_response_mask = torch.zeros_like(dummy_qr)
+                dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
+                # pad out the world size
+                for _ in range(shortfall):
+                    packed_sequences.query_responses.append(dummy_qr)
+                    packed_sequences.tool_masks.append(dummy_tool_mask)
+                    packed_sequences.attention_masks.append(dummy_attention)
+                    packed_sequences.position_ids.append(dummy_position_ids)
+                    packed_sequences.response_masks.append(dummy_response_mask)
+                    packed_sequences.advantages.append(dummy_advantage)
+
         with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
             B = (
                 len(packed_sequences.query_responses) // args.world_size
