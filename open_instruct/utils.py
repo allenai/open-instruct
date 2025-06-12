@@ -11,20 +11,40 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# isort: off
+import os
 
+os.environ["NCCL_CUMEM_ENABLE"] = "0"  # NOQA
+try:
+    from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
+    from deepspeed.runtime.zero.offload_config import OffloadDeviceEnum
+
+    # @vwxyzjn: when importing on CPU-only machines, we get the following error:
+    # RuntimeError: 0 active drivers ([]). There should only be one.
+    # so we need to catch the exception and do nothing
+    # https://github.com/deepspeedai/DeepSpeed/issues/7028
+except Exception:
+    pass
+# isort: on
 import dataclasses
 import functools
 import json
 import logging
 import os
+import random
 import shutil
+import socket
 import subprocess
 import sys
 import time
+from ctypes import CDLL, POINTER, Structure, c_char_p, c_int, c_ulong, c_void_p
 from dataclasses import dataclass
 from typing import Any, List, NewType, Optional, Tuple, Union
 
+import numpy as np
+import ray
 import requests
+import torch
 from accelerate.logging import get_logger
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from datasets.builder import DatasetGenerationError
@@ -675,7 +695,7 @@ def get_last_checkpoint_path(args, incomplete: bool = False) -> str:
     # else, start from scratch.
     # if incomplete is true, include folders without "COMPLETE" in the folder.
     last_checkpoint_path = None
-    if args.output_dir and os.path.isdir(args.output_dir) and not args.overwrite_output_dir:
+    if args.output_dir and os.path.isdir(args.output_dir):
         last_checkpoint_path = get_last_checkpoint(args.output_dir, incomplete=incomplete)
         if last_checkpoint_path is None:
             logger.warning("Output directory exists but no checkpoint found. Starting from scratch.")
@@ -698,6 +718,97 @@ def clean_last_n_checkpoints(output_dir: str, keep_last_n_checkpoints: int) -> N
             logger.info(f"Removing checkpoint {checkpoint}")
             shutil.rmtree(os.path.join(output_dir, checkpoint))
     logger.info("Remaining files:" + str(os.listdir(output_dir)))
+
+
+def clean_last_n_checkpoints_deepspeed(output_dir: str, keep_last_n_checkpoints: int) -> None:
+    # Identify checkpoint files that follow the pattern global_step{number}
+    all_files = os.listdir(output_dir)
+    checkpoint_files = []
+    for file in all_files:
+        if file.startswith("global_step") and file[len("global_step") :].isdigit():
+            checkpoint_files.append(file)
+
+    # Sort checkpoints by step number
+    checkpoints = sorted(checkpoint_files, key=lambda x: int(x[len("global_step") :]), reverse=True)
+
+    # Keep the N most recent checkpoints and remove the rest
+    if keep_last_n_checkpoints >= 0 and len(checkpoints) > keep_last_n_checkpoints:
+        for checkpoint in checkpoints[keep_last_n_checkpoints:]:
+            print(f"Removing checkpoint {checkpoint}")
+            checkpoint_path = os.path.join(output_dir, checkpoint)
+            if os.path.isdir(checkpoint_path):
+                shutil.rmtree(checkpoint_path)
+            elif os.path.isfile(checkpoint_path):
+                os.remove(checkpoint_path)
+
+    # Keep special files like zero_to_fp32.py and latest
+    print("Remaining files:" + str(os.listdir(output_dir)))
+
+
+def calibrate_checkpoint_state_dir(checkpoint_state_dir: str) -> None:
+    """
+    Find the latest valid checkpoint directory and update the 'latest' file.
+
+    Edge case:
+    it's possible sometimes the checkpoint save / upload (1) completely or (2) partially failed (i.e., having incomplete files),
+    so we should fall back to a checkpoint that actually exists -- we should pick the latest folder which has the most files.
+    The folders look like this:
+    checkpoint_state_dir/global_step14
+    checkpoint_state_dir/global_step15
+    ...
+    checkpoint_state_dir/global_step20
+    we would then update the `checkpoint_state_dir/latest` file
+    with the latest global_step number.
+    """
+    if not os.path.exists(checkpoint_state_dir):
+        return
+
+    # Get all checkpoint directories
+    checkpoint_dirs = [
+        d
+        for d in os.listdir(checkpoint_state_dir)
+        if d.startswith("global_step") and os.path.isdir(os.path.join(checkpoint_state_dir, d))
+    ]
+
+    if not checkpoint_dirs:
+        return
+
+    # Create a list of (dir_name, step_number, file_count) tuples
+    checkpoint_info = []
+    for dir_name in checkpoint_dirs:
+        step_number = int(dir_name.replace("global_step", ""))
+        dir_path = os.path.join(checkpoint_state_dir, dir_name)
+        # Count files in the directory, not directories
+        file_count = len(os.listdir(dir_path))
+        checkpoint_info.append((dir_name, step_number, file_count))
+
+    # Find the maximum file count
+    max_file_count = max(info[2] for info in checkpoint_info)
+
+    # Filter to only include checkpoints with the maximum file count
+    valid_checkpoints = [info for info in checkpoint_info if info[2] >= max_file_count]
+    invalid_checkpoints = [info for info in checkpoint_info if info[2] < max_file_count]
+
+    # Remove invalid checkpoint directories
+    for dir_name, _, _ in invalid_checkpoints:
+        checkpoint_path = os.path.join(checkpoint_state_dir, dir_name)
+        print(f"Removing incomplete checkpoint: {dir_name}")
+        shutil.rmtree(checkpoint_path)
+
+    # Sort by step number (descending)
+    valid_checkpoints.sort(key=lambda x: x[1], reverse=True)
+
+    # Get the latest valid checkpoint
+    latest_checkpoint, latest_step, file_count = valid_checkpoints[0]
+
+    # Update the 'latest' file
+    with open(os.path.join(checkpoint_state_dir, "latest"), "w") as f:
+        f.write(f"global_step{latest_step}")
+
+    print(
+        f"Found latest checkpoint: {latest_checkpoint} with {file_count} files, "
+        f"updated 'latest' file to global_step{latest_step}"
+    )
 
 
 # ----------------------------------------------------------------------------
@@ -783,6 +894,7 @@ def get_beaker_dataset_ids(experiment_id: str, sort=False) -> Optional[List[str]
     return [dataset.id for dataset in dataset_infos]
 
 
+@functools.lru_cache(maxsize=1)
 def get_beaker_whoami() -> Optional[str]:
     get_beaker_whoami_command = "beaker account whoami --format json"
     process = subprocess.Popen(
@@ -810,6 +922,164 @@ def maybe_get_beaker_config():
         beaker_dataset_ids=get_beaker_dataset_ids(os.environ["BEAKER_WORKLOAD_ID"]),
         beaker_dataset_id_urls=beaker_dataset_id_urls,
     )
+
+
+def live_subprocess_output(cmd: List[str]) -> str:
+    output_lines = []
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    # Display output in real-time and collect it
+    for line in iter(process.stdout.readline, ""):
+        if line.strip():
+            print(line.strip())
+            output_lines.append(line.strip())
+    process.wait()
+    if process.returncode != 0:
+        # Get the actual error message from the process
+        process_error = process.stderr.read() if process.stderr else "No error message available"
+        error_message = f"gsutil command failed with return code {process.returncode}: {process_error}"
+        print(error_message)
+        raise Exception(error_message)
+
+    return "\n".join(output_lines)
+
+
+def download_from_hf(model_name_or_path: str, revision: str) -> None:
+    cmd = ["huggingface-cli", "download", model_name_or_path, "--revision", revision]
+    print(f"Downloading from HF with command: {cmd}")
+    return live_subprocess_output(cmd)
+
+
+def download_from_gs_bucket(src_path: str, dest_path: str) -> None:
+    cmd = [
+        "gsutil",
+        "-o",
+        "GSUtil:parallel_thread_count=1",
+        "-o",
+        "GSUtil:sliced_object_download_threshold=150",
+        "-m",
+        "cp",
+        "-r",
+        src_path,
+        dest_path,
+    ]
+    print(f"Downloading from GS bucket with command: {cmd}")
+    live_subprocess_output(cmd)
+
+
+def gs_folder_exists(path: str) -> bool:
+    cmd = ["gsutil", "ls", path]
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    # print(f"GS stat command: {cmd}")
+    # print(f"GS stat stdout: {stdout}")
+    # print(f"GS stat stderr: {stderr}")
+    if process.returncode == 0:
+        return True
+    else:
+        return False
+
+
+def upload_to_gs_bucket(src_path: str, dest_path: str) -> None:
+    cmd = ["gsutil", "-o", "GSUtil:parallel_composite_upload_threshold=150M", "cp", "-r", src_path, dest_path]
+    print(f"Copying model to GS bucket with command: {cmd}")
+    live_subprocess_output(cmd)
+
+
+def sync_gs_bucket(src_path: str, dest_path: str) -> None:
+    cmd = [
+        "gsutil",
+        "-o",
+        "GSUtil:parallel_composite_upload_threshold=150M",
+        "-m",
+        "rsync",
+        "-r",
+        "-d",
+        src_path,
+        dest_path,
+    ]
+    print(f"Copying model to GS bucket with command: {cmd}")
+    live_subprocess_output(cmd)
+
+
+def download_latest_checkpoint_from_gs(gs_checkpoint_state_dir: str, checkpoint_state_dir: str) -> None:
+    """Download the latest checkpoint from GCS and update the latest file."""
+    if gs_folder_exists(gs_checkpoint_state_dir):
+        os.makedirs(checkpoint_state_dir, exist_ok=True)
+        print(f"Downloading model checkpoint from GCS to {checkpoint_state_dir}")
+        sync_gs_bucket(gs_checkpoint_state_dir, checkpoint_state_dir)
+
+
+def launch_ai2_evals_on_weka(
+    path: str,
+    leaderboard_name: str,
+    oe_eval_max_length: Optional[int] = None,
+    wandb_url: Optional[str] = None,
+    training_step: Optional[int] = None,
+    oe_eval_tasks: Optional[List[str]] = None,
+    stop_strings: Optional[List[str]] = None,
+    gs_bucket_path: Optional[str] = None,
+    eval_priority: Optional[str] = "normal",
+) -> None:
+    weka_cluster = "ai2/saturn-cirrascale ai2/neptune-cirrascale"
+    gcp_cluster = "ai2/augusta-google-1"
+    cluster = weka_cluster if gs_bucket_path is None else gcp_cluster
+    beaker_users = get_beaker_whoami()
+
+    if gs_bucket_path is not None:
+        if beaker_users is not None:
+            gs_saved_path = f"{gs_bucket_path}/{beaker_users}/{path}"
+        else:
+            gs_saved_path = f"{gs_bucket_path}/{path}"
+        # save the model to the gs bucket first
+        # TODO: use upload_to_gs_bucket instead
+        gs_command = f"""gsutil \\
+            -o "GSUtil:parallel_composite_upload_threshold=150M" \\
+            cp -r {path} \\
+            {gs_saved_path}"""
+        print(f"Copying model to GS bucket with command: {gs_command}")
+        process = subprocess.Popen(["bash", "-c", gs_command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+        print(f"GS bucket copy stdout:\n{stdout.decode()}")
+        print(f"GS bucket copy stderr:\n{stderr.decode()}")
+        print(f"GS bucket copy process return code: {process.returncode}")
+
+        # Update path to use the GS bucket path for evaluation
+        path = gs_saved_path
+
+    command = f"""\
+python scripts/submit_eval_jobs.py \
+--model_name {leaderboard_name} \
+--location {path} \
+--cluster {cluster} \
+--is_tuned \
+--workspace "tulu-3-results" \
+--priority {eval_priority} \
+--preemptible \
+--use_hf_tokenizer_template \
+--run_oe_eval_experiments \
+--skip_oi_evals"""
+    if wandb_url is not None:
+        command += f" --run_id {wandb_url}"
+    if oe_eval_max_length is not None:
+        command += f" --oe_eval_max_length {oe_eval_max_length}"
+    if training_step is not None:
+        command += f" --step {training_step}"
+    if cluster == weka_cluster:
+        command += " --evaluate_on_weka"
+    if oe_eval_tasks is not None:
+        command += f" --oe_eval_tasks {','.join(oe_eval_tasks)}"
+    if stop_strings is not None:
+        command += f" --oe_eval_stop_sequences '{','.join(stop_strings)}'"
+    print(f"Launching eval jobs with command: {command}")
+    process = subprocess.Popen(["bash", "-c", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    print(f"Submit jobs after model training is finished - Stdout:\n{stdout.decode()}")
+    print(f"Submit jobs after model training is finished - Stderr:\n{stderr.decode()}")
+    print(f"Submit jobs after model training is finished - process return code: {process.returncode}")
+
+
+# ----------------------------------------------------------------------------
+# HF utilities
 
 
 def retry_on_exception(max_attempts=4, delay=1, backoff=2):
@@ -849,6 +1119,7 @@ def retry_on_exception(max_attempts=4, delay=1, backoff=2):
 
 
 @retry_on_exception()
+@functools.lru_cache(maxsize=1)
 def maybe_use_ai2_wandb_entity() -> Optional[str]:
     """Ai2 internal logic: try use the ai2-llm team if possible. Should not affect external users."""
     import wandb
@@ -864,9 +1135,15 @@ def maybe_use_ai2_wandb_entity() -> Optional[str]:
 
 
 @retry_on_exception()
+@functools.lru_cache(maxsize=1)
+def hf_whoami() -> List[str]:
+    return HfApi().whoami()
+
+
+@functools.lru_cache(maxsize=1)
 def maybe_use_ai2_hf_entity() -> Optional[str]:
     """Ai2 internal logic: try use the allenai entity if possible. Should not affect external users."""
-    orgs = HfApi().whoami()
+    orgs = hf_whoami()
     orgs = [item["name"] for item in orgs["orgs"]]
     if "allenai" in orgs:
         return "allenai"
@@ -893,3 +1170,232 @@ def upload_metadata_to_hf(
         repo_type="dataset",
     )
     os.remove("tmp.json")
+
+
+# ----------------------------------------------------------------------------
+# Ray utilities
+# Taken from https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero
+def get_train_ds_config(
+    offload,
+    adam_offload=False,
+    stage=0,
+    bf16=True,
+    max_norm=1.0,
+    zpg=8,
+    grad_accum_dtype=None,
+    disable_trace_cache=False,
+):
+    device = "cpu" if offload else "none"
+    zero_opt_dict = {
+        "stage": stage,
+        "offload_param": {"device": device},
+        "offload_optimizer": {
+            "device": "cpu" if adam_offload else "none",
+            "pin_memory": True,
+        },
+        "sub_group_size": "auto",
+        "stage3_max_live_parameters": "auto",
+        "stage3_max_reuse_distance": "auto",
+        "stage3_param_persistence_threshold": "auto",
+        "stage3_prefetch_bucket_size": "auto",
+        "reduce_bucket_size": "auto",
+        # ZeRO++
+        "zero_hpz_partition_size": zpg,
+        "zero_quantized_weights": False,
+        "zero_quantized_gradients": False,
+    }
+    if disable_trace_cache:
+        zero_opt_dict["stage3_prefetch_bucket_size"] = 0
+        zero_opt_dict["stage3_max_live_parameters"] = 0
+        zero_opt_dict["stage3_max_reuse_distance"] = 0
+
+    return {
+        "steps_per_print": 100,
+        "zero_optimization": zero_opt_dict,
+        "bf16": {
+            "enabled": bf16,
+        },
+        "gradient_clipping": max_norm,
+        "prescale_gradients": False,
+        "wall_clock_breakdown": False,
+        "data_types": {"grad_accum_dtype": grad_accum_dtype if grad_accum_dtype else "fp32"},
+    }
+
+
+def get_eval_ds_config(
+    offload,
+    stage=0,
+    bf16=True,
+):
+    zero_opt_dict = {
+        "stage": stage,
+        "stage3_param_persistence_threshold": "auto",
+        "offload_param": {
+            "device": "cpu" if offload else "none",
+            "pin_memory": True,
+        },
+    }
+    return {
+        "steps_per_print": 100,
+        "zero_optimization": zero_opt_dict,
+        "bf16": {
+            "enabled": bf16,
+        },
+        "prescale_gradients": False,
+        "wall_clock_breakdown": False,
+    }
+
+
+def get_optimizer_grouped_parameters(
+    model: torch.nn.Module,
+    weight_decay: float,
+    no_decay_name_list=["bias", "layer_norm.weight", "layernorm.weight", "norm.weight", "ln_f.weight"],
+):
+    optimizer_grouped_parameters = [
+        {
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if (not any(nd in n for nd in no_decay_name_list) and p.requires_grad)
+            ],
+            "weight_decay": weight_decay,
+        },
+        {
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if (any(nd in n for nd in no_decay_name_list) and p.requires_grad)
+            ],
+            "weight_decay": 0.0,
+        },
+    ]
+    return optimizer_grouped_parameters
+
+
+def _z3_params_to_fetch(param_list):
+    return [p for p in param_list if hasattr(p, "ds_id") and p.ds_status == ZeroParamStatus.NOT_AVAILABLE]
+
+
+def get_ray_address() -> Optional[str]:
+    """Get the Ray address from the environment variable."""
+    return os.environ.get("RAY_ADDRESS")
+
+
+_SET_AFFINITY = False
+
+
+class RayProcess:
+    def __init__(self, world_size, rank, local_rank, master_addr, master_port):
+        logging.basicConfig(
+            format="%(asctime)s %(levelname)-8s %(message)s",
+            level=logging.INFO,
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        self.world_size = world_size
+        self.rank = rank
+        self.local_rank = local_rank
+        self.master_addr = master_addr if master_addr else self.get_current_node_ip()
+        self.master_port = master_port if master_port else self.get_free_port()
+        os.environ["MASTER_ADDR"] = self.master_addr
+        os.environ["MASTER_PORT"] = str(self.master_port)
+        os.environ["WORLD_SIZE"] = str(self.world_size)
+        os.environ["RANK"] = str(self.rank)
+        # NOTE: Ray will automatically set the CUDA_VISIBLE_DEVICES
+        # environment variable for each actor, so always set device to 0
+        # os.environ["LOCAL_RANK"] = str(self._local_rank)
+        os.environ["LOCAL_RANK"] = "0"
+        random.seed(self.rank)
+        np.random.seed(self.rank)
+        torch.manual_seed(self.rank)
+
+    @staticmethod
+    def get_current_node_ip():
+        address = ray._private.services.get_node_ip_address()
+        # strip ipv6 address
+        return address.strip("[]")
+
+    @staticmethod
+    def get_free_port():
+        with socket.socket() as sock:
+            sock.bind(("", 0))
+            return sock.getsockname()[1]
+
+    def get_master_addr_port(self):
+        return self.master_addr, self.master_port
+
+    def empty_cache(self) -> None:
+        torch.cuda.empty_cache()
+
+    def _set_numa_affinity(self, rank):
+        def local_rank_to_real_gpu_id(local_rank):
+            cuda_visible_devices = [
+                int(x) for x in os.environ.get("CUDA_VISIBLE_DEVICES", "0,1,2,3,4,5,6,7").split(",")
+            ]
+            return cuda_visible_devices[local_rank]
+
+        rank = local_rank_to_real_gpu_id(rank)
+
+        global _SET_AFFINITY
+        if _SET_AFFINITY:
+            return
+
+        from ctypes.util import find_library
+
+        class bitmask_t(Structure):
+            _fields_ = [
+                ("size", c_ulong),
+                ("maskp", POINTER(c_ulong)),
+            ]
+
+        LIBNUMA = CDLL(find_library("numa"))
+        LIBNUMA.numa_parse_nodestring.argtypes = [c_char_p]
+        LIBNUMA.numa_parse_nodestring.restype = POINTER(bitmask_t)
+        LIBNUMA.numa_run_on_node_mask.argtypes = [POINTER(bitmask_t)]
+        LIBNUMA.numa_run_on_node_mask.restype = c_int
+        LIBNUMA.numa_set_membind.argtypes = [POINTER(bitmask_t)]
+        LIBNUMA.numa_set_membind.restype = c_void_p
+        LIBNUMA.numa_num_configured_nodes.argtypes = []
+        LIBNUMA.numa_num_configured_nodes.restype = c_int
+
+        def numa_bind(nid: int):
+            bitmask = LIBNUMA.numa_parse_nodestring(bytes(str(nid), "ascii"))
+            LIBNUMA.numa_run_on_node_mask(bitmask)
+            LIBNUMA.numa_set_membind(bitmask)
+
+        numa_nodes = LIBNUMA.numa_num_configured_nodes()
+        num_gpu_pre_numa_node = 8 // numa_nodes
+        numa_bind(self.local_rank // num_gpu_pre_numa_node)
+        _SET_AFFINITY = True
+
+    def offload_to_cpu(self, model, pin_memory=True, non_blocking=True):
+        """This function guaratees the memory are all released (only torch context cache <100M will remain)."""
+        self._set_numa_affinity(torch.distributed.get_rank() % torch.cuda.device_count())
+
+        if model.zero_optimization_stage() == 3:
+            from deepspeed.runtime.zero.offload_config import OffloadStateTypeEnum
+
+            model.optimizer.offload_states(
+                include=[
+                    OffloadStateTypeEnum.optim_states,
+                    OffloadStateTypeEnum.contiguous_grad_buffer,
+                    OffloadStateTypeEnum.hp_params,
+                    # OffloadStateTypeEnum.lp_grads,
+                    # OffloadStateTypeEnum.lp_params, # dangerous
+                ],
+                device=OffloadDeviceEnum.cpu,
+                pin_memory=pin_memory,
+                non_blocking=non_blocking,
+            )
+            torch.cuda.synchronize()
+            return
+
+        raise NotImplementedError("Zero stage 2 is not supported yet")
+
+    def backload_to_gpu(self, model, non_blocking=True):
+        # NOTE: this function reloads the weights, ensuring the calculation
+        if model.zero_optimization_stage() == 3:
+            model.reload_states(non_blocking=non_blocking)
+            torch.cuda.synchronize()
+            return
+
+        raise NotImplementedError("Zero stage 2 is not supported yet")

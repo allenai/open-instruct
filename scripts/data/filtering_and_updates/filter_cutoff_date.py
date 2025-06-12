@@ -5,6 +5,7 @@ from typing import List, Dict
 from datasets import Features, Value, Sequence
 
 """
+Script to remove mentions of a date cutoff from post-training datasets.
 Motivated by: realizing the SFT mix has lots of "as my last update in April 2023" snippets. for next version, we should really template these, so we can add exact cutoff date.
 
 Run with:

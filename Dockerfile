@@ -21,10 +21,14 @@ RUN /opt/miniconda3/bin/pip install --no-cache-dir \
 
 WORKDIR /stage/
 
+# install google cloud sdk
+RUN apt-get update && apt-get install -y gnupg curl
+RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && apt-get update -y && apt-get install google-cloud-cli -y
+
 # TODO When updating flash-attn or torch in the future, make sure to update the version in the requirements.txt file. 
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 RUN pip install --upgrade pip "setuptools<70.0.0" wheel 
-RUN pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
+RUN pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
 RUN pip install packaging
 RUN pip install flash-attn==2.7.2.post1 --no-build-isolation
 COPY requirements.txt .
@@ -44,5 +48,3 @@ COPY scripts scripts
 COPY mason.py mason.py
 RUN chmod +x scripts/*
 
-# for interactive session
-RUN chmod -R 777 /stage/

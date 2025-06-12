@@ -14,17 +14,15 @@
 # limitations under the License.
 import os
 import re
-import requests
-import ray
 from dataclasses import dataclass
-from typing import List, Dict, Tuple, Any
+from typing import Any, Dict, List, Tuple
 
-from open_instruct.vllm_utils2 import WorkerWrap
-from open_instruct.search_utils.semantic_scholar_search_api import semantic_scholar_search_for_query
+import ray
+
+from open_instruct.search_utils.massive_ds import get_snippets_for_query
 
 
-
-def process_vllm_output_for_search(text: str) -> str:
+def process_vllm_output_for_search(text: str, number_documents_to_search: int = 10) -> str:
     """
     Extracts a query from the given text and returns a snippet wrapped in a tag.
     If no query is found or no snippet is returned, an empty string is returned.
@@ -32,65 +30,56 @@ def process_vllm_output_for_search(text: str) -> str:
     query_match = re.search(r"<query>(.*?)</query>", text)
     if not query_match:
         return ""
-    
+
     query = query_match.group(1).strip()
-    snippets_str = semantic_scholar_search_for_query(query)
-    if not snippets_str:
-        return "<snippet>Nothing relevant was found.</snippet>"
-    
-    return f"<snippet>{snippets_str}</snippet>"
+    print(f"Searching: {query}")
+    snippets = get_snippets_for_query(query, number_of_results=number_documents_to_search)
+    if not snippets:
+        return "<document>Query failed.</document>"
+
+    return f"<document>{snippets[0]}</document>"
 
 
 @dataclass
 class GenerationOutput:
     token_ids: List[int]
     text: str
+    finish_reason: str = "stop"
+
 
 @dataclass
 class CompletionList:
     outputs: List[GenerationOutput]
 
+
 @ray.remote
 class LLMSearchRayActor:
-    def __init__(self, *args, **kwargs):
-        import vllm
+    def __init__(self, *args, bundle_indices: list = None, **kwargs):
+        noset_visible_devices = kwargs.pop("noset_visible_devices")
+        self.max_output_length = kwargs.pop("max_output_len", 8192)
+        self.max_searches = kwargs.pop("max_searches", 5)
+        self.number_documents_to_search = kwargs.pop("number_documents_to_search", 10)
+        if kwargs.get("distributed_executor_backend") == "ray":
+            # a hack to make the script work.
+            # stop ray from manipulating *_VISIBLE_DEVICES
+            # at the top-level when the distributed_executor_backend is ray.
+            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+            os.environ.pop("ROCR_VISIBLE_DEVICES", None)
+        elif noset_visible_devices:
+            # We need to set CUDA_VISIBLE_DEVICES to the ray assigned GPU
+            # when the distributed_executor_backend is not ray and
+            # RAY_EXPERIMENTAL_NOSET_*_VISIBLE_DEVICES is set.
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(ray.get_gpu_ids()[0])
 
-        self.__version__ = vllm.__version__
-        assert self.__version__ >= "0.4.1", "OpenRLHF only supports vLLM >= 0.4.1"
+        num_gpus = kwargs.pop("num_gpus")
+        if bundle_indices is not None:
+            os.environ["VLLM_RAY_PER_WORKER_GPUS"] = str(num_gpus)
+            os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
+            print(f"creating LLM with bundle_indices={bundle_indices}")
 
-        self.use_gpu_executor = kwargs["tensor_parallel_size"] == 1
+        from vllm import LLM
 
-        # See https://github.com/vllm-project/vllm/blob/main/vllm/executor/gpu_executor.py
-        if self.use_gpu_executor:
-
-            vllm.worker.worker.Worker = WorkerWrap
-        else:
-            # RayGPUExecutor
-            # See the patch https://github.com/vllm-project/vllm/commit/479d69fad0538f04cb22bf13e76ff91cfeb8a4e5
-            kwargs["worker_use_ray"] = True
-
-            if vllm.__version__ > "0.4.1":
-                RayWorkerWrapperPath = vllm.executor.ray_utils
-            else:
-                RayWorkerWrapperPath = vllm.engine.ray_utils
-
-            # patch for newer vllm from openrlhf:
-            # https://github.com/OpenRLHF/OpenRLHF/blob/main/openrlhf/trainer/ray/vllm_engine.py#L40
-            if vllm.__version__ > "0.6.4.post1":
-                # https://github.com/vllm-project/vllm/pull/10555
-                kwargs["worker_cls"] = "open_instruct.vllm_utils2.WorkerWrap"
-            else:
-                RayWorkerWrapperPath = vllm.executor.ray_utils
-
-                class RayWorkerWrapper(RayWorkerWrapperPath.RayWorkerWrapper):
-                    def __init__(self, *args, **kwargs) -> None:
-                        kwargs["worker_module_name"] = "open_instruct.vllm_utils2"
-                        kwargs["worker_class_name"] = "WorkerWrap"
-                        super().__init__(*args, **kwargs)
-
-                RayWorkerWrapperPath.RayWorkerWrapper = RayWorkerWrapper
-
-        self.llm = vllm.LLM(*args, **kwargs)
+        self.llm = LLM(*args, **kwargs)
         self.tokenizer = self.llm.get_tokenizer()
 
     def generate(
@@ -99,9 +88,10 @@ class LLMSearchRayActor:
         prompt_token_ids: List[List[int]],
         use_tqdm: bool,
     ) -> List[List[GenerationOutput]]:
-        max_searches = 3
+        max_searches = self.max_searches
+        number_documents_to_search = self.number_documents_to_search
 
-        # if num samples > 1, remove from sampling params and instead duplicate prompts.
+        # If num samples > 1, duplicate prompts and set sampling_params.n to 1.
         original_n = sampling_params.n
         if sampling_params.n > 1:
             new_prompt_token_ids = []
@@ -112,44 +102,67 @@ class LLMSearchRayActor:
 
         # Initialize queries as a list of tuples: (index, decoded query text)
         queries: List[Tuple[int, str]] = [
-            (i, self.tokenizer.decode(tokens))
-            for i, tokens in enumerate(prompt_token_ids)
+            (i, self.tokenizer.decode(tokens)) for i, tokens in enumerate(prompt_token_ids)
         ]
         original_queries: Dict[int, str] = {i: q for i, q in queries}
         finished_queries: Dict[int, str] = {}
 
+        # Track token counts for each query.
+        # init with 0, we just want max output length
+        query_token_counts: Dict[int, int] = {i: 0 for i, _ in enumerate(prompt_token_ids)}
+
         # Iteratively update queries with snippet responses.
-        for depth_id in range(max_searches):
+        for _ in range(max_searches):
             if not queries:
                 break
 
             query_texts = [q for _, q in queries]
-            outputs = self.llm.generate(
-                sampling_params=sampling_params, prompts=query_texts, use_tqdm=use_tqdm
-            )
+            outputs = self.llm.generate(sampling_params=sampling_params, prompts=query_texts, use_tqdm=use_tqdm)
             updated_queries: List[Tuple[int, str]] = []
+            # Process each query and update its text.
             for (idx, current_text), output in zip(queries, outputs):
-                # Assume each output has at least one result.
                 output_text = output.outputs[0].text
-                snippet_response = process_vllm_output_for_search(output_text)
-                updated_text = current_text + output_text + snippet_response
-                if snippet_response:
-                    # Continue iterating if a snippet was appended.
-                    updated_queries.append((idx, updated_text))
-                    # If it reached the maximum depth, force it to generate the answer.
-                    if depth_id == max_searches - 1:
-                        updated_text += "You have reached the maximum number times of search. Now generate your answer between tags <answer>{answer}</answer>."
-                        output = self.llm.generate(
-                            sampling_params=sampling_params, prompts=[updated_text], use_tqdm=use_tqdm
-                        )[0]
-                        output_text = output.outputs[0].text
-                        updated_text += output_text
-                        # Mark this query as finished as it has reached the maximum number of searches.
-                        finished_queries[idx] = updated_text
+                output_tokens = self.tokenizer.encode(output_text)
+                remaining_tokens = self.max_output_length - query_token_counts[idx]
+
+                # Truncate output_text if it exceeds the remaining token budget.
+                if len(output_tokens) > remaining_tokens:
+                    truncated_output_tokens = output_tokens[:remaining_tokens]
+                    truncated_output = self.tokenizer.decode(truncated_output_tokens)
+                    finished_queries[idx] = current_text + truncated_output
+                    query_token_counts[idx] = self.max_output_length
+                    continue
                 else:
-                    # Mark this query as finished if no snippet was added.
-                    finished_queries[idx] = updated_text
+                    query_token_counts[idx] += len(output_tokens)
+
+                # Process potential snippet.
+                snippet_response = process_vllm_output_for_search(
+                    output_text, number_documents_to_search=number_documents_to_search
+                )
+
+                if snippet_response:
+                    snippet_tokens = self.tokenizer.encode(snippet_response)
+                    remaining_tokens = self.max_output_length - query_token_counts[idx]
+                    if len(snippet_tokens) > remaining_tokens:
+                        if remaining_tokens > 0:
+                            truncated_snippet_tokens = snippet_tokens[:remaining_tokens]
+                            truncated_snippet = self.tokenizer.decode(truncated_snippet_tokens)
+                            query_token_counts[idx] += len(truncated_snippet_tokens)
+                            finished_queries[idx] = current_text + output_text + truncated_snippet
+                        else:
+                            finished_queries[idx] = current_text + output_text
+                    else:
+                        query_token_counts[idx] += len(snippet_tokens)
+                        updated_queries.append((idx, current_text + output_text + snippet_response))
+                else:
+                    finished_queries[idx] = current_text + output_text
+
             queries = updated_queries
+
+        # Finalize any queries that haven't been marked finished ---
+        for idx, current_text in queries:
+            if idx not in finished_queries:
+                finished_queries[idx] = current_text
 
         # Postprocess: remove the original prompt from finished outputs.
         final_texts: List[str] = []
@@ -158,61 +171,69 @@ class LLMSearchRayActor:
             original = original_queries.get(i, "")
             # Remove only the first occurrence of the original prompt.
             final_texts.append(full_text.replace(original, "", 1))
-        
+
         # Encode final outputs and wrap in GenerationOutput objects.
-        encoded_outputs = [self.tokenizer.encode(text) for text in final_texts]
-        # recreate the outputs based on the original `n` value
+        # Truncate to max_context_length.
+        encoded_outputs = [
+            self.tokenizer.encode(text, max_length=self.max_output_length, truncation=True) for text in final_texts
+        ]
+        # Re-decode with max length.
+        final_texts = [self.tokenizer.decode(tokens) for tokens in encoded_outputs]
+        # Recreate the outputs based on the original `n` value.
         generation_outputs = []
+
+        # just hardcoding things as stop finish for now... TODO: also add length finish reason.
         for i in range(0, len(encoded_outputs), original_n):
             start, stop = i, i + original_n
             generation_outputs.append(
-                CompletionList([
-                    GenerationOutput(token_ids=tokens, text=text)
-                    for tokens, text in zip(encoded_outputs[start:stop], final_texts[start:stop])
-                ])
+                CompletionList(
+                    [
+                        GenerationOutput(token_ids=tokens, text=text, finish_reason="stop")
+                        for tokens, text in zip(encoded_outputs[start:stop], final_texts[start:stop])
+                    ]
+                )
             )
-        print("🤓 (Debugging) Final actor output: ", final_texts[0])
+        # set the sampling params back to original
+        sampling_params.n = original_n
+
         return generation_outputs
-    
-    def init_process_group(self, master_address, master_port, rank_offset, world_size, group_name, backend):
-        if self.use_gpu_executor:
-            return self.llm.llm_engine.model_executor.driver_worker.init_process_group(
-                master_address, master_port, rank_offset, world_size, group_name, backend
-            )
-        else:
-            return self.llm.llm_engine.model_executor._run_workers(
-                "init_process_group", master_address, master_port, rank_offset, world_size, group_name, backend
-            )
+
+    def init_process_group(
+        self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
+    ):
+        return self.llm.collective_rpc(
+            "init_process_group",
+            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
+        )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        self.stop_remote_worker_execution_loop()
+        return self.llm.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
-        if self.use_gpu_executor:
-            return self.llm.llm_engine.model_executor.driver_worker.update_weight(name, dtype, shape, empty_cache)
-        else:
-            return self.llm.llm_engine.model_executor._run_workers("update_weight", name, dtype, shape, empty_cache)
+    def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
+        return self.llm.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
 
-    def stop_remote_worker_execution_loop(self):
-        # Fix error for using 2 communication group
-        # https://github.com/vllm-project/vllm/commit/eb6d3c264d0cd8e44dec16bca7947fbe96415ce9#diff-e1ad69e38e033accddfa5480ec808c4740eb39244d1ef51cc3407e20dde8cfd4
-        if self.__version__ > "0.4.2":
-            self.llm.llm_engine.model_executor.stop_remote_worker_execution_loop()
+    def reset_prefix_cache(self):
+        self.llm.llm_engine.reset_prefix_cache()
+
+    def sleep(self, level=1):
+        self.llm.sleep(level=level)
+
+    def wake_up(self):
+        self.llm.wake_up()
 
 
 # Debugging code
 if __name__ == "__main__":
-    from vllm import SamplingParams
     from transformers import AutoTokenizer
+    from vllm import SamplingParams
+
     ray.init()
-    
+
     # Load the tokenizer
     tokenizer = AutoTokenizer.from_pretrained("allenai/Llama-3.1-Tulu-3-8B")
-    
+
     # Instantiate the actor. The scheduling strategy has been removed for clarity.
-    actor = LLMSearchRayActor.options(
-        num_cpus=4,
-        num_gpus=0.48
-    ).remote(
+    actor = LLMSearchRayActor.options(num_cpus=4, num_gpus=0.48).remote(
         "allenai/Llama-3.1-Tulu-3-8B",
         revision="main",
         tokenizer_revision="main",
@@ -222,26 +243,27 @@ if __name__ == "__main__":
         dtype="bfloat16",
         seed=42,
         enable_prefix_caching=True,
-        max_model_len=8192,
+        max_model_len=8192,  # This will be used as default max_context_length if not explicitly set
+        max_context_length=4096,  # Explicitly set a custom max context length
         gpu_memory_utilization=0.95,
     )
-    
+
     # Create a prompt using a chat template.
     prompt = tokenizer.apply_chat_template(
         [
             {
                 "role": "user",
                 "content": (
-                    "How much money, in euros, was the surgeon held responsible for Stella Obasanjo\'s death ordered to pay her son? "
+                    "How much money, in euros, was the surgeon held responsible for Stella Obasanjo's death ordered to pay her son? "
                     "Search the web by wrapping a query in query tags like so: <query>{query}</query> "
-                    "Then, based on the snippet, provide the answer, or another query if you need."
+                    "Then, based on the document, provide the answer, or another query if you need."
                 ),
             }
         ],
         add_generation_prompt=True,
         tokenize=False,
     )
-    
+
     # Encode the prompt to token ids.
     prompt_token_ids = [tokenizer.encode(prompt, add_special_tokens=False)]
 
@@ -253,7 +275,7 @@ if __name__ == "__main__":
         n=1,
         stop=["</query>"],
     )
-    
+
     # Generate output using the actor.
     result = ray.get(
         actor.generate.remote(
