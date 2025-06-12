@@ -56,6 +56,7 @@ python mason.py \
     --add_r1_style_format_reward true \
     --vllm_num_engines 4 \
     --vllm_gpu_memory_utilization 0.9 \
+    --local_rollout_forward_batch_size 32 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward false \
     --seed 1 \
