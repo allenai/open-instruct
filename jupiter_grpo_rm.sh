@@ -5,11 +5,11 @@
 # tulu3-rewritten with ref base lm judge + ifeval: ai2-adapt-dev/tulu_3_rewritten_100k-v2-ifeval
 # general-thoughts-100k-rewritten with ref base lm judge + ifeval: ai2-adapt-dev/general-thoughts-100k-rewritten-v2-ifeval
 
-reward_model_revision="rm_qwen_2p5_7b_base_2e-5_1_skyworkstulufull__1__1747624686"
+reward_model_revision="rm_qwen_2p5_14b_base_2e-5_1_skyworkstulufull__1__1749531657"
 # reward_model_revision="main"
 # exp_name="0504_qwen2.5_7B_thinker_grpo_fast_llm_judge__gpt-4o_quality_ref_${RANDOM}_large"
 # exp_name="0508_qwen2.5_7B_thinker_grpo_rm_judge_${RANDOM}_tulu_3_rewritten_no_verifiable"
-exp_name="test_rm_during_grpo_match_faeze_hparams_mostly_binary_format"
+exp_name="grpo_rm_only_14b_rm"
 python mason.py \
     --description $exp_name \
     --cluster ai2/jupiter-cirrascale-2 \

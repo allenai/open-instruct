@@ -1,0 +1,22 @@
+# RUN_ID=
+# for eval in minerva_math::hamish_zs_reasoning bbh:cot::hamish_zs_reasoning gsm8k::hamish_zs_reasoning minerva_math_500::hamish_zs_reasoning zebralogic::hamish_zs_reasoning aime::hamish_zs_reasoning agi_eval_english:0shot_cot::hamish_zs_reasoning gpqa:0shot_cot::hamish_zs_reasoning alpaca_eval_v2::tulu ifeval::tulu popqa::tulu drop::llama3 codex_humanevalplus::tulu mmlu:cot::summarize; do
+# python oe_eval/launch.py \
+#   --model lmeval-test_grpo_rm_with_valpy_code__1__1748026885_step_${step} \
+#   --beaker-workspace ai2/tulu-3-results \
+#   --beaker-budget ai2/oe-adapt \
+#   --task $eval \
+#   --model-type vllm \
+#   --batch-size 10000 \
+#   --model-args "{\"model_path\":\"/weka-mount/oe-adapt-default/allennlp/deletable_checkpoint/jacobm/test_grpo_rm_with_valpy_code__1__1748026885_checkpoints/step_${step}\", \"max_length\": 32768, \"process_output\": \"r1_style\"}" \
+#   --task-args '{ "generation_kwargs": { "max_gen_toks": 32768, "truncate_context": false, "stop_sequences": ["</answer>"] } }' \
+#   --gpus 1 \
+#   --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "env":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", "env-secret#2":"HF_TOKEN=HF_TOKEN", "mount": "/mnt/filestore_1:/filestore", "env#111": "HF_HOME=/filestore/.cache/huggingface", "env#112": "HF_DATASETS_CACHE=/filestore/.cache/huggingface", "env#113": "HF_HUB_CACHE=/filestore/.cache/hub", "weka": "oe-adapt-default:/weka-mount/oe-adapt-default"}' \
+#   --cluster ai2/jupiter-cirrascale-2 \
+#   --beaker-retries 2 \
+#   --beaker-image oe-eval-beaker/oe_eval_auto \
+#   --beaker-priority high \
+#   --push-datalake \
+#   --datalake-tags run_id=https://wandb.ai/ai2-llm/open_instruct_internal/runs/f5appobz
+# done
+
+./scripts/eval/oe-eval.sh --model-name flex-olmo-sft-2_epoch-1e-5_lr --model-location /weka/oe-adapt-default/jacobm/flexolmo/checkpoints/sft/flex-olmo-sft-2_epoch-1e-5_lr__8__1749620925 --evaluate_on_weka --num_gpus 4 --priority high --beaker-image jacobm/flex-olmo-oe-eval-vllm --cluster ai2/jupiter-cirrascale-2 ai2/saturn-cirrascale
