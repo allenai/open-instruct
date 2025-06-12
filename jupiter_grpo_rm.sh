@@ -50,11 +50,11 @@ python mason.py \
     --per_device_train_batch_size 1 \
     --local_rollout_forward_batch_size 1 \
     --num_mini_batches 2 \
-    --actor_num_gpus_per_node 6 8 8 8 \
+    --actor_num_gpus_per_node 2 8 8 8 \
     --num_epochs 1 \
     --vllm_tensor_parallel_size 1 \
     --add_r1_style_format_reward true \
-    --vllm_num_engines 4 \
+    --vllm_num_engines 6 \
     --vllm_gpu_memory_utilization 0.9 \
     --local_rollout_forward_batch_size 32 \
     --lr_scheduler_type constant \
