@@ -273,7 +273,7 @@ class IFEvalVerifier(VerifierFunction):
         instruction_keys = constraint_dict["instruction_id"]
         args_list = constraint_dict["kwargs"]
         rewards = []
-        if len(prediction) == 0:
+        if len(prediction) == 0 or len(answer) == 0:
             logger.warning("Empty prediction received for IFEvalVerifier.")
             return VerificationResult(score=0.0)
         for instruction_key, args in zip(instruction_keys, args_list):
