@@ -122,7 +122,8 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     sync_gs_bucket,
 )
-from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
+from open_instruct.vllm_utils3 import batch_vllm_engine_call, create_vllm_engines, init_process_group
+
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -385,6 +386,7 @@ class Args:
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
         ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+
         if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
@@ -514,7 +516,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         ds_config = get_train_ds_config(
             offload=False,
-            adam_offload=False,
+            adam_offload=args.deepspeed_adam_offload,
             stage=args.deepspeed_stage,
             bf16=True,
         )
@@ -533,11 +535,13 @@ class PolicyTrainerRayProcess(RayProcess):
             model_config.model_name_or_path,
             revision=model_config.model_revision,
             torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
+            attn_implementation=model_config.attn_implementation,
             use_cache=False,
         )
+
         disable_dropout_in_model(self.policy)
-        self.policy.gradient_checkpointing_enable()
+        if model_config.gradient_checkpointing:
+            self.policy.gradient_checkpointing_enable()
         # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
         # AdamOptimizer = FusedAdam
         if args.set_weight_decay_on_bias_and_norm:
@@ -545,6 +549,7 @@ class PolicyTrainerRayProcess(RayProcess):
         else:
             optim_params = self.policy.parameters()
         # self.optimizer = AdamOptimizer(optim_params, lr=args.learning_rate)
+
         self.optimizer = torch.optim.AdamW(optim_params, lr=args.learning_rate, fused=args.fused_optimizer)
         num_scheduler_steps = args.num_training_steps * args.num_epochs * args.num_mini_batches
         warm_up_steps = args.warm_up_steps
@@ -598,16 +603,17 @@ class PolicyTrainerRayProcess(RayProcess):
             HfDeepSpeedConfig(ds_config)
         else:
             pass
-        self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            model_config.model_name_or_path,
-            revision=model_config.model_revision,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-            use_cache=False,
-        )
-        disable_dropout_in_model(self.ref_policy)
-        self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
-        self.ref_policy.eval()
+        if args.beta > 0:
+            self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+                model_config.model_name_or_path,
+                revision=model_config.model_revision,
+                torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2",
+                use_cache=False,
+            )
+            disable_dropout_in_model(self.ref_policy)
+            self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
+            self.ref_policy.eval()
         self.local_metrics = MetricsTracker(max_metrics=32, device=self.device)
         return optimization_steps_done
 
@@ -682,6 +688,9 @@ class PolicyTrainerRayProcess(RayProcess):
         model = self.model.module
         count, num_params = 0, len(list(model.named_parameters()))
         refss = []
+        if self.args.vllm_sleep_level > 0:
+            batch_vllm_engine_call(self.vllm_engines, "wake_up", rank_0_only=False)
+
         if self.args.gather_whole_model:
             with deepspeed.zero.GatheredParameters(model.parameters(), enabled=self.args.deepspeed_stage == 3):
                 for name, param in model.named_parameters():
@@ -715,7 +724,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
         if torch.distributed.get_rank() == 0:
             ray.get(refss)
-        if args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
+        if self.args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
             ray.get(cache_reset_refs)
 
     def update_ref_policy(self):
@@ -759,6 +768,9 @@ class PolicyTrainerRayProcess(RayProcess):
             collated_response_masks = collated_response_masks[0:-leftover]
 
         # Calculate the logprob of the reference policy
+        if self.args.offload_ref:
+            with Timer("[Training Processes] Move Ref to GPU", noop=self.rank != 0):
+                self.ref_policy.to(self.device)
         collated_ref_logprobs = []
         with Timer("Inference Calculation", noop=self.rank != 0):
             with torch.no_grad():
@@ -784,6 +796,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
                     collated_ref_logprobs.append(ref_logprob)
                     torch.cuda.empty_cache()
+        if self.args.offload_ref:
+            with Timer("[Training Processes] Move Ref to CPU", noop=self.rank != 0):
+                self.ref_policy.to("cpu")
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
@@ -795,6 +810,7 @@ class PolicyTrainerRayProcess(RayProcess):
             kl_loss_stats = torch.zeros(len(collated_query_responses))
             pg_clipfrac_stats = torch.zeros(len(collated_query_responses))
             pg_loss_stats = torch.zeros(len(collated_query_responses))
+            kl_loss_stats = torch.zeros(len(collated_query_responses))
             loss_stats = torch.zeros(len(collated_query_responses))
             ratio_stats = torch.zeros(len(collated_query_responses))
             for epoch_idx in range(args.num_epochs):
@@ -1047,6 +1063,7 @@ def vllm_generate_thread(
     eval_freq: int,
     resume_training_step: int = 1,
     tool_use: bool = False,
+    vllm_sleep_level: int = 0,
 ):
     def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
         # Split queries between engines
@@ -1101,16 +1118,24 @@ def vllm_generate_thread(
             break
         _, g_queries_list = items
 
+        # if vllm_sleep_level > 0:
+        #     batch_vllm_engine_call(vllm_engines, "wake_up", rank_0_only=False)
+
         with Timer("🔥 Generation time"):
             response_ids, finish_reasons, masks, info = generate_with_engines(g_queries_list, generation_config)
         inference_results_Q.put((response_ids, finish_reasons, masks, info))
 
         # Evaluate the model
-        if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-            response_ids, finish_reasons, masks, info = generate_with_engines(
-                eval_prompt_token_ids, eval_generation_config
-            )
-            evaluation_inference_results_Q.put((response_ids, finish_reasons, masks, info))
+        if eval_prompt_token_ids is not None and training_step % eval_freq == 0:
+            with Timer("🔥 Generating Eval"):
+                if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
+                    response_ids, finish_reasons, masks, info = generate_with_engines(
+                        eval_prompt_token_ids, eval_generation_config
+                    )
+                    evaluation_inference_results_Q.put((response_ids, finish_reasons, masks, info))
+
+        if vllm_sleep_level > 0:
+            batch_vllm_engine_call(vllm_engines, "sleep", level=vllm_sleep_level, rank_0_only=False)
 
 
 def data_preparation_thread(
@@ -1162,6 +1187,7 @@ def data_preparation_thread(
                     responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries
                 )
             )
+
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
             mean_grouped_rewards = scores_per_prompt.mean(axis=-1)
@@ -1174,6 +1200,15 @@ def data_preparation_thread(
                 advantages = scores - mean_grouped_rewards
             else:
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
+
+        if args.print_samples:
+            table = {}
+            table["ground_truth"] = ground_truths[:3]
+            table["prompt"] = tokenizer.batch_decode(queries[:3])
+            table["response"] = decoded_responses[:3]
+            table["reward"] = scores[:3]
+            df = pd.DataFrame(table)
+            print_rich_table(df)
 
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved
@@ -1301,13 +1336,17 @@ def data_preparation_thread(
                 0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
             ),
             "val/sequence_lengths_solved": 0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean(),
-            "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
-            "val/sequence_lengths_solved_hist": sequence_length_solved,
+            # "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
+            # "val/sequence_lengths_solved_hist": sequence_length_solved,
             "val/stop_rate": stop_rate,
+            # "val/correct_lengths": safe_mean(sequence_lengths[np_scores == 1]),
+            # "val/incorrect_lengths": safe_mean(sequence_lengths[np_scores == 0.1]),
+            # "val/long_answer_correct": safe_mean(np_scores[sequence_lengths > 100]),
+            # "val/short_answer_correct": safe_mean(np_scores[sequence_lengths <= 100]),
             "val/advantages_mean": advantages.mean(),
             "val/advantages_min": advantages.min(),
             "val/advantages_max": advantages.max(),
-            "val/advantages_hist": advantages,
+            # "val/advantages_hist": advantages,
             "val/num_calls_rate": np.array(num_calls).mean(),
             "val/timeouts_rate": np.array(timeouts).mean(),
             "val/tool_errors_rate": np.array([len(item) > 0 for item in tool_errors]).mean(),
@@ -1525,6 +1564,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.vllm_gpu_memory_utilization,
         args.single_gpu_mode,
         pg=pg if args.single_gpu_mode else None,
+        vllm_enable_sleep=False,
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,
     )
@@ -1591,6 +1631,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             args.eval_freq,
             resume_training_step,
             args.tool_use,
+            None,
         ),
     )
     thread.start()

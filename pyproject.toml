@@ -55,7 +55,7 @@ explicit = true
 
 # flash-attn related setups
 [project.optional-dependencies]
-compile = ["flash-attn>=2.7.2.post1"]
+compile = ["flash-attn>=2.7.4.post1"]
 liger = ["liger-kernel>=0.5.4"]
 code = [
     "fastapi>=0.100.0",
@@ -71,7 +71,7 @@ no-build-isolation-package = ["flash-attn"]
 
 [[tool.uv.dependency-metadata]]
 name = "flash-attn"
-version = "2.7.2.post1"
+version = "2.7.4.post1"
 requires-dist = ["torch", "setuptools"]
 
 [dependency-groups]
@@ -86,5 +86,20 @@ dev = [
     "pytest>=8.3.4",
 ]
 
-[tool.isort]
-known_first_party = ["open_instruct"]
+[tool.ruff]
+target-version = "py37"
+line-length = 119
+
+[tool.ruff.lint]
+ignore = [
+    "B028", # warning without explicit stacklevel
+    "C408", # dict() calls (stylistic)
+    "C901", # function complexity
+    "E501",
+    "T201", # ignore print
+]
+extend-select = ["E", "F", "I", "W", "UP", "B", "T", "C"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+known-first-party = ["open-instruct"]

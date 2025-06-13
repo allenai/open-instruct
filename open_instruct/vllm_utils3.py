@@ -15,7 +15,6 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
-
 import os
 from datetime import timedelta
 from typing import Any, List, Optional, Union
@@ -117,7 +116,6 @@ def init_process_group(
 
 @ray.remote
 class LLMRayActor:
-
     def __init__(self, *args, bundle_indices: list = None, tool_use: bool = False, **kwargs):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
@@ -151,18 +149,36 @@ class LLMRayActor:
         return self.llm.generate(*args, **kwargs)
 
     def init_process_group(
-        self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
+        self,
+        master_address,
+        master_port,
+        rank_offset,
+        world_size,
+        group_name,
+        backend,
+        use_ray=False,
     ):
         return self.llm.collective_rpc(
             "init_process_group",
-            args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
+            args=(
+                master_address,
+                master_port,
+                rank_offset,
+                world_size,
+                group_name,
+                backend,
+                use_ray,
+            ),
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
         return self.llm.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        return self.llm.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
+        return self.llm.collective_rpc(
+            "update_weight_cuda_ipc",
+            args=(name, dtype, shape, ipc_handles, empty_cache),
+        )
 
     def reset_prefix_cache(self):
         self.llm.llm_engine.reset_prefix_cache()
@@ -263,7 +279,7 @@ def create_vllm_engines(
                 max_model_len=max_model_len,
                 gpu_memory_utilization=vllm_gpu_memory_utilization,
                 bundle_indices=bundle_indices,
-                num_gpus=0.2 if use_hybrid_engine else 1,
+                num_gpus=num_gpus if use_hybrid_engine else 1,
                 enable_sleep_mode=vllm_enable_sleep,
                 noset_visible_devices=ray_noset_visible_devices(),
                 tool_use=tool_use,
@@ -271,8 +287,8 @@ def create_vllm_engines(
             )
         )
 
-    if vllm_enable_sleep:
-        batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)
+    # if vllm_enable_sleep:
+    #     batch_vllm_engine_call(vllm_engines, "sleep", rank_1_only=False)
 
     return vllm_engines
 
