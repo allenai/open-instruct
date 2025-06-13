@@ -282,7 +282,7 @@ class IFEvalVerifier(VerifierFunction):
         constraint_dict = constraint_dict[0]
         if isinstance(constraint_dict, str):
             constraint_dict = json.loads(constraint_dict)
-        answer = remove_thinking_section(prediction)
+        answer = remove_thinking_section(prediction).strip()
         instruction_keys = constraint_dict["instruction_id"]
         args_list = constraint_dict["kwargs"]
         rewards = []
