@@ -163,7 +163,7 @@ def remove_thinking_section(prediction: str) -> str:
     prediction = prediction.split("</think>")[-1]
     # remove answer tags from the prediction
     prediction = prediction.replace("<answer>", "").replace("</answer>", "")
-    return prediction
+    return prediction.strip()
 
 
 class GSM8KVerifier(VerifierFunction):
@@ -282,7 +282,7 @@ class IFEvalVerifier(VerifierFunction):
         constraint_dict = constraint_dict[0]
         if isinstance(constraint_dict, str):
             constraint_dict = json.loads(constraint_dict)
-        answer = remove_thinking_section(prediction).strip()
+        answer = remove_thinking_section(prediction)
         instruction_keys = constraint_dict["instruction_id"]
         args_list = constraint_dict["kwargs"]
         rewards = []
