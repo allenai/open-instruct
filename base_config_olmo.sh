@@ -10,7 +10,7 @@ python mason.py \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name valpy_if_from_base_qwen3 \
     --beta 0.0 \
-    --add_bos False \
+    --add_bos True \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 128 \
     --num_mini_batches 1 \
@@ -28,9 +28,9 @@ python mason.py \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
     --pack_length 16384 \
-    --model_name_or_path Qwen/Qwen2.5-7B \
+    --model_name_or_path /weka/oe-training-default/ai2-llm/checkpoints/dustins/lc_7b_cont_pretrain_final_anneal/step11921-hf \
     --model_revision main \
-    --tokenizer_name_or_path hamishivi/Qwen-2.5-7b-tokenizer \
+    --tokenizer_name_or_path /weka/oe-training-default/ai2-llm/checkpoints/dustins/lc_7b_cont_pretrain_final_anneal/step11921-hf \
     --stop_strings "</answer>" \
     --apply_verifiable_reward True \
     --non_stop_penalty False \
