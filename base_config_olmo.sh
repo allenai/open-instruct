@@ -1,5 +1,5 @@
 python mason.py \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-thinker \
     --priority high \
     --image valpy/open_instruct_dev_multi --pure_docker_mode \
@@ -8,7 +8,7 @@ python mason.py \
     --budget ai2/oe-adapt \
     --max_retries 0 \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --exp_name valpy_if_from_base_qwen3 \
+    --exp_name valpy_if_from_base_olmo \
     --beta 0.0 \
     --add_bos True \
     --num_samples_per_prompt_rollout 16 \
