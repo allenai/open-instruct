@@ -955,16 +955,6 @@ def download_from_hf(model_name_or_path: str, revision: str) -> None:
     return output
 
 
-['gsutil', '-o', 'GSUtil:parallel_composite_upload_threshold=150M', 'cp', '-r', '/root/.cache/huggingface/hub/models--Qwen--Qwen3-8B/snapshots/9c925d64d72725edaf899c6cb9c377fd0709d9c5', 'gs://ai2-llm/post-training/deletable_cache_models/Qwen/Qwen3-8B/9c925d64d72725edaf899c6cb9c377fd0709d9c5']
-
-
-
-
-
-
-
-
-
 def download_from_gs_bucket(src_path: str, dest_path: str) -> None:
     cmd = [
         "gsutil",
