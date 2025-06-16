@@ -516,7 +516,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         ds_config = get_train_ds_config(
             offload=False,
-            adam_offload=args.deepspeed_adam_offload,
+            adam_offload=False,
             stage=args.deepspeed_stage,
             bf16=True,
         )
