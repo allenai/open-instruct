@@ -29,7 +29,6 @@ python mason.py \
     --response_length 8192 \
     --pack_length 16384 \
     --model_name_or_path Qwen/Qwen3-8B \
-    --model_revision main \
     --tokenizer_name_or_path Qwen/Qwen3-8B \
     --stop_strings "</answer>" \
     --apply_verifiable_reward True \
