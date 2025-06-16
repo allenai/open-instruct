@@ -1118,9 +1118,6 @@ def vllm_generate_thread(
             break
         _, g_queries_list = items
 
-        # if vllm_sleep_level > 0:
-        #     batch_vllm_engine_call(vllm_engines, "wake_up", rank_0_only=False)
-
         with Timer("🔥 Generation time"):
             response_ids, finish_reasons, masks, info = generate_with_engines(g_queries_list, generation_config)
         inference_results_Q.put((response_ids, finish_reasons, masks, info))
