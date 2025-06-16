@@ -159,8 +159,8 @@ class CountdownVerifier(VerifierFunction):
     and compares it (case-insensitively) to the ground truth.
     """
 
-    def __init__(self) -> None:
-        super().__init__("countdown", weight=1.0)
+    def __init__(self, name: str, weight: float = 1.0, verifier_config: Optional[VerifierConfig] = None) -> None:
+        super().__init__("countdown", weight=weight, verifier_config=verifier_config)
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: tuple[int, List[int]]) -> float:
         target = label[0]

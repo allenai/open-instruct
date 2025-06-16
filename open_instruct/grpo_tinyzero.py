@@ -120,6 +120,16 @@ class Args:
     """The maximum token length to use for the dataset"""
     max_prompt_token_length: int = 256
     """The maximum prompt token length to use for the dataset"""
+    dataset_cache_mode: Literal["hf", "local"] = "local"
+    """The mode to use for caching the dataset."""
+    dataset_local_cache_dir: str = "local_dataset_cache"
+    """The directory to save the local dataset cache to."""
+    dataset_config_hash: Optional[str] = None
+    """The hash of the dataset configuration."""
+    dataset_config_eval_hash: Optional[str] = None
+    """The hash of the dataset configuration for evaluation."""
+    dataset_skip_cache: bool = False
+    """Whether to skip the cache."""
 
     # Experiment
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -322,8 +332,6 @@ class Args:
     code_tool_api_endpoint: Optional[str] = None
 
     # Ai2 specific settings
-    is_ai2: bool = False
-    """flag for ai2 stuff"""
     try_launch_beaker_eval_jobs_on_weka: bool = False
     """Whether to launch beaker evaluation jobs after training on weka"""
     try_auto_save_to_beaker: bool = False
@@ -534,16 +542,16 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     run_name_suffix = job_id if job_id is not None else f"{args.seed}__{int(time.time())}"
     args.run_name = f"{args.exp_name}__{run_name_suffix}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
-    # args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
-    # if is_beaker_job():
-    #     args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+    args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
+    if is_beaker_job():
+        args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
     args.world_size = sum(args.num_learners_per_node)
     args.num_training_steps = args.total_episodes // (
         args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     )
     args.eval_freq = max(1, args.num_training_steps // args.num_evals)
-    if args.is_ai2:
-        args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
+    # if args.is_ai2:
+    #     args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
             args.hf_repo_id = "open_instruct_dev"
@@ -597,6 +605,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
     # ------------------------------------------------------------
     # Create the model and optimizer
+    ray.init(dashboard_host="0.0.0.0", runtime_env={'excludes': ['.git/']})  # enable debugging from a different machine (e.g., phobos)
     pg = None
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")

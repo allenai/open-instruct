@@ -1,12 +1,7 @@
 #!/bin/bash
-#SBATCH --gres=gpu:a100l:1
-#SBATCH --mem=24G
-#SBATCH -c 4
-#SBATCH --time=8:00:00
-#SBATCH -p main
-
-source mila.sh
 exp_name="grpo_qwen3_1.7b_base"
+
+HF_HOME=/weka/oe-adapt-default/allennlp/.cache/huggingface
 
 uv run open_instruct/grpo_tinyzero.py \
     --exp_name $exp_name \
@@ -50,6 +45,8 @@ uv run open_instruct/grpo_tinyzero.py \
     --offload_ref \
     --vllm_sleep_level 1 \
     --fused_optimizer \
+    --wandb_project_name r1 \
+    --wandb_entity mila-language-drift \
     --with_tracking $@
     #
 
