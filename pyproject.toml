@@ -12,6 +12,7 @@ dependencies = [
     "debugpy>=1.8.13",
     "deepspeed==0.15.4", # 0.16.0 bugs out https://github.com/microsoft/DeepSpeed/issues/6793
     "hf-transfer>=0.1.8",
+    "litellm",
     "matplotlib>=3.9.3",
     "nltk>=3.9.1",
     "numpy<2",
@@ -54,6 +55,13 @@ explicit = true
 [project.optional-dependencies]
 compile = ["flash-attn>=2.7.2.post1"]
 liger = ["liger-kernel>=0.5.4"]
+code = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0", 
+    "pydantic>=2.0.0",
+    "datasets>=3.1.0",
+    "requests>=2.28.0",
+]
 
 [tool.uv]
 python-preference = "only-managed"

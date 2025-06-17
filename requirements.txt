@@ -257,6 +257,7 @@ lark==1.2.2
     # via
     #   outlines
     #   vllm
+litellm==1.72.0
 llguidance==0.7.9 ; platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
     # via vllm
 llvmlite==0.44.0
@@ -387,9 +388,7 @@ nvidia-nvjitlink-cu12==12.4.127 ; platform_machine == 'x86_64' and sys_platform 
 nvidia-nvtx-cu12==12.4.127 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
 nvitop==1.4.2
-    # via open-instruct
-openai==1.59.5
-    # via vllm
+openai==1.84.0
 opencensus==0.11.4
     # via ray
 opencensus-context==0.1.3

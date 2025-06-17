@@ -437,7 +437,9 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
         tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
     else:
         try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision).chat_template
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(
+                tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
+            ).chat_template
         except Exception:
             raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
 
@@ -506,7 +508,9 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
         tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
     else:
         try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision).chat_template
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(
+                tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
+            ).chat_template
         except Exception:
             raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
 
@@ -581,7 +585,9 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
         tokenizer.chat_template = CHAT_TEMPLATES[tc.chat_template_name]
     else:
         try:
-            tokenizer.chat_template = AutoTokenizer.from_pretrained(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision).chat_template
+            tokenizer.chat_template = AutoTokenizer.from_pretrained(
+                tc.tokenizer_name_or_path, revision=tc.tokenizer_revision
+            ).chat_template
         except Exception:
             raise ValueError(f"Could not find chat template for {tc.tokenizer_name_or_path}.")
 
@@ -930,6 +936,38 @@ def rlvr_tokenize_v1(
     row[DATASET_SOURCE_KEY] = row[dataset_source_key]
     return row
 
+def rlvr_tokenize_v2(
+    row: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
+    ground_truths_key: str = GROUND_TRUTHS_KEY,
+    dataset_source_key: str = DATASET_SOURCE_KEY,
+):
+    if len(row[sft_messages_key]) == 1:
+        prompt = row[sft_messages_key]
+    else:
+        prompt = row[sft_messages_key][:-1]
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
+        prompt,
+        add_generation_prompt=True,
+    )
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
+    row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
+    labels = copy.deepcopy(row[INPUT_IDS_KEY])
+    row[LABELS_KEY] = labels
+    row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
+    row[DATASET_SOURCE_KEY] = row[dataset_source_key]
+    # some basic transformations:
+    # if ground truths is a string, make it a list
+    if isinstance(row[ground_truths_key], str):
+        row[ground_truths_key] = [row[ground_truths_key]]
+    # if dataset source is a string, make it a list
+    if isinstance(row[dataset_source_key], str):
+        row[dataset_source_key] = [row[dataset_source_key]]
+    # drop the messages field as it often causes issues.
+    row.pop(sft_messages_key)
+    return row
+
 
 def rlvr_filter_v1(
     row: Dict[str, Any],
@@ -960,7 +998,7 @@ TRANSFORM_FNS = {
     "preference_filter_v1": (preference_filter_v1, "filter"),
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1, "map"),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
-    "rlvr_tokenize_v1": (rlvr_tokenize_v1, "map"),
+    "rlvr_tokenize_v1": (rlvr_tokenize_v2, "map"),
     "rlvr_filter_v1": (rlvr_filter_v1, "filter"),
 }
 

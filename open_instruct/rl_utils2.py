@@ -29,7 +29,7 @@ class Timer:
             return
         self.end_time = time.perf_counter()
         self.duration = self.end_time - self.start_time
-        print(f"{self.description}: {self.duration} seconds")
+        print(f"{self.description}: {self.duration:.3f} seconds")
 
 
 @dataclass

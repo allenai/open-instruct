@@ -2059,7 +2059,7 @@ dev = [
 
 [[package]]
 name = "openai"
-version = "1.59.5"
+version = "1.84.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },

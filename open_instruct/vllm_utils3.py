@@ -195,8 +195,9 @@ def create_vllm_engines(
     assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
 
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
-    assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), \
-        "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
+    assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(
+        tools
+    ), "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
     # tool key is the end_str
     if len(max_tool_calls) == 1:
         max_tool_calls_dict = {tool: max_tool_calls[0] for tool in tools.keys()} if tools else {}
