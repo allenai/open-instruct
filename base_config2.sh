@@ -50,5 +50,6 @@ python mason.py \
     --seed 1 \
     --num_evals 5 \
     --save_freq 100 \
+    --save_traces True \
     --gradient_checkpointing \
     --with_tracking
