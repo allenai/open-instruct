@@ -121,6 +121,7 @@ parser.add_argument("--oe_eval_tasks", type=str, default=None, help="Evaluate OE
 parser.add_argument("--step", type=int, default=None, help="Step number for postgresql logging.")
 parser.add_argument("--run_id", type=str, default=None, help="A unique run ID for postgresql logging.")
 parser.add_argument("--oe_eval_stop_sequences", type=str, default=None, help="Comma-separated list of stop sequences for OE eval.")
+parser.add_argument("--process_output", type=str, default="r1_style", help="Process output type for OE eval (e.g., 'r1_style'). Defaults to 'r1_style', which should work for most of our models, including non-thinking ones.")
 args = parser.parse_args()
 
 
@@ -643,6 +644,10 @@ if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
     # Add stop sequences if provided
     if args.oe_eval_stop_sequences:
         oe_eval_cmd += f" --stop-sequences '{args.oe_eval_stop_sequences}'"
+        
+    # Add process output if provided
+    if args.process_output:
+        oe_eval_cmd += f" --process-output {args.process_output}"
         
     # Add beaker image from existing argument
     if args.beaker_image:
