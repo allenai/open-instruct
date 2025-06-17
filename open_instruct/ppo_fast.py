@@ -92,6 +92,7 @@ from open_instruct.dataset_transformation import (
     visualize_token,
 )
 from open_instruct.ground_truth_utils import (
+    VerifierConfig,
     build_all_verifiers,
     cleanup_all_llm_judge_clients,
     soft_format_reward_func,

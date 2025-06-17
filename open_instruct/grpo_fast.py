@@ -44,7 +44,6 @@ except Exception:
 
 import asyncio
 import json
-import math
 import os
 import shutil
 import socket
@@ -57,6 +56,7 @@ from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Callable, Dict, Iterator, List, Literal, Optional, Union
 
+import math
 import numpy as np
 import pandas as pd
 import ray
@@ -1238,9 +1238,7 @@ def data_preparation_thread(
             with Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
                 shortfall = args.world_size - len(packed_sequences.query_responses)
                 if shortfall > 0:
-                    print(
-                        f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
-                    )
+                    print(f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this.")
                     # construct "dummy" sequences for padding out the world size
                     dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
                     dummy_tool_mask = torch.zeros_like(dummy_qr)
