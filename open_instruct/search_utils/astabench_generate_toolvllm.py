@@ -99,8 +99,8 @@ for generation in generations:
     reasoning = generation.split("</think>")[0]
     answer = generation.split("</think>")[-1]
     answer = answer.replace("<finish>", "").replace("</finish>", "")
-    reasonings.append(reasoning)
-    answers.append(answer)
+    reasonings.append(reasoning.strip())
+    answers.append(answer.strip())
 
 
 # construct outputs. We need jsonl with question/answer
