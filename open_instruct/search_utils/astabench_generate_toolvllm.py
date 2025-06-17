@@ -104,7 +104,6 @@ for generation in generations:
 
 
 # construct outputs. We need jsonl with question/answer
-os.makedirs(args.output_path, exist_ok=True)
 with open(f"{args.output_path}", "w") as f:
     for sample, reasoning, answer in zip(ds, reasonings, answers):
         f.write(json.dumps({**sample, "reasoning": reasoning, "answer": answer}) + "\n")
