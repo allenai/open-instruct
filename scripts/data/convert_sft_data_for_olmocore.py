@@ -103,7 +103,7 @@ def main():
     transform_functions_and_args = [
         (
             "sft_tulu_tokenize_and_truncate_v1",
-            {"max_seq_length": args.max_seq_length, "warn_on_truncation": True},
+            {"max_seq_length": args.max_seq_length},
         ),
         ("sft_tulu_filter_v1", {}),  # remove examples that don't have any labels
     ]
