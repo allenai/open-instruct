@@ -10,12 +10,13 @@ python quantize_autogptq.py \
 
 
 import argparse
-from transformers import AutoTokenizer
-from auto_gptq import AutoGPTQForCausalLM, BaseQuantizeConfig
-from datasets import load_dataset
+import time
+
 import numpy as np
 import torch
-import time
+from auto_gptq import AutoGPTQForCausalLM, BaseQuantizeConfig
+from datasets import load_dataset
+from transformers import AutoTokenizer
 
 
 def get_wikitext2(nsamples, seed, seqlen, model):

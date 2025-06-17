@@ -3,8 +3,9 @@ This script is largely copied from the Vicuna repo: https://github.com/lm-sys/Fa
 We fixed a bug in `split_one_sample`, which previously includes long conversations in the processed data. Now we skip these long conversations.
 """
 import argparse
-from concurrent.futures import ProcessPoolExecutor
 import json
+from concurrent.futures import ProcessPoolExecutor
+
 import transformers
 from tqdm import tqdm
 

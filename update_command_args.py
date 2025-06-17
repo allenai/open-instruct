@@ -11,9 +11,9 @@ python update_command_args.py scripts/train/tulu3/grpo_fast_8b.sh \
 would replace the `--cluster`, `--priority`, `--image` arguments in the script with the ones specified.
 """
 
-import sys
-import re
 import argparse
+import sys
+
 
 def read_shell_script(filename):
     with open(filename, 'r') as f:
@@ -52,7 +52,7 @@ def modify_command(content, new_args):
                     new_content.append(f"--{flag}")
                     if isinstance(flag_args, list):
                         new_content.extend(flag_args)
-                    else:   
+                    else:
                         new_content.append(flag_args)
                 flag = part.split('--')[1]
                 flag_args = []
@@ -71,16 +71,16 @@ def modify_command(content, new_args):
             new_content.extend(value)
         else:
             formatted += f" --{part}"
-    
+
     return formatted
 
 def main():
     if len(sys.argv) < 2:
         print("Usage: python update_command_args.py <shell_script> [--arg value ...]")
         sys.exit(1)
-    
+
     script_file = sys.argv[1]
-    
+
     # Parse remaining arguments as key-value pairs
     # NOTE: we need to handle `nargs` for cases like `--dataset_mixer_list xxx 1.0`
     parser = argparse.ArgumentParser()
@@ -105,7 +105,7 @@ def main():
     # Read and modify the script
     content = read_shell_script(script_file)
     modified_content = modify_command(content, new_args)
-    
+
     print(modified_content)
 
 if __name__ == "__main__":

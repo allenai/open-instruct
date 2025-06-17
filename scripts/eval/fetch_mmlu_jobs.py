@@ -3,11 +3,10 @@ A script for quickly collecting beaker results given a prefix.
 Computes mmlu average quckly.
 '''
 import argparse
+
 from beaker import Beaker
 
-from eval.utils import (
-    upload_results_to_hf
-)
+from eval.utils import upload_results_to_hf
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--prefix", type=str, required=True)

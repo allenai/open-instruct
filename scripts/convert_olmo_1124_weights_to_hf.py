@@ -22,11 +22,8 @@ from typing import Any, Dict
 import torch
 import yaml
 from tokenizers import Tokenizer
-
-from transformers import Olmo1124Config
-from transformers import Olmo1124ForCausalLM
+from transformers import Olmo1124Config, Olmo1124ForCausalLM
 from transformers.models.gpt2.tokenization_gpt2_fast import GPT2TokenizerFast
-
 
 """
 Sample usage:

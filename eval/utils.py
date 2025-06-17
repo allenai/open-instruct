@@ -1,13 +1,14 @@
+import asyncio
+import functools
+import json
+import os
+import time
+from importlib import import_module
+
 import torch
 import tqdm
-import json
-import time
-import functools
-import asyncio
-import os
-from importlib import import_module
-from transformers import StoppingCriteria
 from huggingface_hub import HfApi
+from transformers import StoppingCriteria
 
 from eval.dispatch_openai_requests import dispatch_openai_chat_requesets, dispatch_openai_prompt_requesets
 
@@ -64,8 +65,8 @@ class KeyWordsCriteria(StoppingCriteria):
                     break
             sequences_should_be_stopped.append(sequence_should_be_stopped)
         return all(sequences_should_be_stopped)
-    
-    
+
+
 @torch.no_grad()
 def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequences=None, add_special_tokens=True, disable_tqdm=False, **generation_kwargs):
     generations = []
@@ -91,7 +92,7 @@ def generate_completions(model, tokenizer, prompts, batch_size=1, stop_id_sequen
                 stopping_criteria=[KeyWordsCriteria(stop_id_sequences)] if stop_id_sequences else None,
                 **generation_kwargs
             )
-        
+
             # the stopping criteria is applied at batch level, so if other examples are not stopped, the entire batch will continue to generate.
             # so some outputs still have the stop sequence, which we need to remove.
             if stop_id_sequences:
@@ -181,7 +182,7 @@ def score_completions(model, tokenizer, scoring_examples, batch_size=1, aggregat
     - prompt: the prompt to score
     - completions: a list of completions to score
     '''
-    
+
     # unroll the scoring examples
     unrolled_examples = []
     for scoring_example in scoring_examples:
@@ -191,7 +192,7 @@ def score_completions(model, tokenizer, scoring_examples, batch_size=1, aggregat
                 "prompt": prompt,
                 "completion": completion
             })
-    
+
     if not disable_tqdm:
         progress = tqdm.tqdm(total=len(unrolled_examples), desc="Scoring Completions")
 
@@ -214,11 +215,11 @@ def score_completions(model, tokenizer, scoring_examples, batch_size=1, aggregat
             tokenized_prompt = tokenizer(prompt, padding=False, return_tensors="pt").input_ids.squeeze(0)
             tokenized_example = tokenizer(example, padding=False, return_tensors="pt").input_ids.squeeze(0)
             completion_ids = tokenized_example[len(tokenized_prompt):]
-            
+
             # get the logits for the entire example, removing the padding logits
             if tokenizer.padding_side == "right":
                 example_logits = outputs.logits[example_idx, :len(tokenized_example), :]
-            else:            
+            else:
                 example_logits = outputs.logits[example_idx, -len(tokenized_example):, :]
 
             # get the logits for the completion portion - note we need to shift the index left by 1 because logits are computed for the next token
@@ -254,9 +255,9 @@ def score_completions(model, tokenizer, scoring_examples, batch_size=1, aggregat
 def load_hf_lm(
         model_name_or_path,
         revision=None,
-        device_map="auto", 
+        device_map="auto",
         torch_dtype="auto",
-        load_in_8bit=False, 
+        load_in_8bit=False,
         convert_to_half=False,
         gptq_model=False,
         token=os.getenv("HF_TOKEN", None),
@@ -270,18 +271,18 @@ def load_hf_lm(
     else:
         trust_remote_code = False
 
-    from transformers import AutoModelForCausalLM, AutoTokenizer, OPTForCausalLM, GPTNeoXForCausalLM
+    from transformers import AutoModelForCausalLM
     if gptq_model:
         from auto_gptq import AutoGPTQForCausalLM
         model_wrapper = AutoGPTQForCausalLM.from_quantized(
             model_name_or_path, device="cuda:0", use_triton=True, trust_remote_code=trust_remote_code
         )
-        model = model_wrapper.model  
+        model = model_wrapper.model
     elif load_in_8bit:
         model = AutoModelForCausalLM.from_pretrained(
-            model_name_or_path, 
+            model_name_or_path,
             revision=revision,
-            device_map=device_map, 
+            device_map=device_map,
             load_in_8bit=True,
             token=token,
             trust_remote_code=trust_remote_code
@@ -312,9 +313,9 @@ def load_hf_lm(
     return model
 
 def load_hf_tokenizer(
-        model_name_or_path, 
+        model_name_or_path,
         revision=None,
-        tokenizer_name_or_path=None, 
+        tokenizer_name_or_path=None,
         use_fast_tokenizer=True,
         padding_side="left",
         token=os.getenv("HF_TOKEN", None),
@@ -336,12 +337,12 @@ def load_hf_tokenizer(
         return tokenizer
 
 def load_hf_lm_and_tokenizer(
-        model_name_or_path, 
+        model_name_or_path,
         revision=None,
         tokenizer_name_or_path=None,
-        device_map="auto", 
+        device_map="auto",
         torch_dtype="auto",
-        load_in_8bit=False, 
+        load_in_8bit=False,
         convert_to_half=False,
         gptq_model=False,
         padding_side="left",
@@ -421,7 +422,7 @@ def query_openai_chat_model(engine, instances, output_path=None, batch_size=10, 
                 break
             except Exception as e:
                 retry_count += 1
-                print(f"Error while requesting OpenAI API.")
+                print("Error while requesting OpenAI API.")
                 print(e)
                 print(f"Sleep for {30*retry_count} seconds.")
                 time.sleep(30*retry_count)
@@ -430,7 +431,7 @@ def query_openai_chat_model(engine, instances, output_path=None, batch_size=10, 
             raise RuntimeError(f"Failed to get response from OpenAI API after {retry_limit} retries.")
         assert len(outputs) == len(batch)
         for instance, output in zip(batch, outputs):
-            instance[f"output"] = output.choices[0].message.content
+            instance["output"] = output.choices[0].message.content
             instance["response_metadata"] = output.json()
             results.append(instance)
             if output_path is not None:
@@ -438,7 +439,7 @@ def query_openai_chat_model(engine, instances, output_path=None, batch_size=10, 
                 fout.flush()
         progress_bar.update(batch_size)
     return results
- 
+
 
 def query_openai_model(engine, instances, output_path=None, batch_size=10, retry_limit=5, reuse_existing_outputs=True, **completion_kwargs):
     '''
@@ -488,7 +489,7 @@ def query_openai_model(engine, instances, output_path=None, batch_size=10, retry
                 break
             except Exception as e:
                 retry_count += 1
-                print(f"Error while requesting OpenAI API.")
+                print("Error while requesting OpenAI API.")
                 print(e)
                 print(f"Sleep for {30*retry_count} seconds.")
                 time.sleep(30*retry_count)
@@ -497,7 +498,7 @@ def query_openai_model(engine, instances, output_path=None, batch_size=10, retry
             raise RuntimeError(f"Failed to get response from OpenAI API after {retry_limit} retries.")
         assert len(outputs) == len(batch)
         for instance, output in zip(batch, outputs):
-            instance[f"output"] = output.choices[0].text
+            instance["output"] = output.choices[0].text
             instance["response_metadata"] = output.json()
             results.append(instance)
             if output_path is not None:
@@ -515,7 +516,7 @@ def dynamic_import_function(function_path):
     module = import_module(module_path)
     function = getattr(module, function_name)
     return function
- 
+
 def upload_results_to_hf(
         results_dict,
         hf_dataset_name,
@@ -575,9 +576,8 @@ def check_and_upload_model_metadata(model_name_or_path, hf_dataset_name, hf_data
             print(e)
             return
         api.upload_file(
-            path_or_fileobj=f"metadata.json",
+            path_or_fileobj="metadata.json",
             path_in_repo=f"{hf_dataset_save_dir}/metadata.json",
             repo_id=hf_dataset_name,
             repo_type="dataset",
         )
-    

@@ -1,6 +1,7 @@
-from huggingface_hub import HfApi
-import os
 import json
+import os
+
+from huggingface_hub import HfApi
 
 # metadata scheme:
 # {

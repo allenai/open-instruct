@@ -4,7 +4,8 @@ from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
-from eval.mbpp.execution import check_correctness 
+
+from eval.mbpp.execution import check_correctness
 
 # https://github.com/bigcode-project/bigcode-evaluation-harness/blob/main/bigcode_eval/tasks/custom_metrics/code_eval.py#L129
 

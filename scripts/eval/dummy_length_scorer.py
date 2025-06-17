@@ -2,9 +2,10 @@
 Dummy evaluator that uses a given metric to determine winners in pairwise comparisons. Used to further investigate correlations.
 '''
 import argparse
-from transformers import AutoTokenizer
-from datasets import load_dataset
 import json
+
+from datasets import load_dataset
+from transformers import AutoTokenizer
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--candidate_file", type=str, help="Candidate file for candidate model outputs.")

@@ -1,10 +1,10 @@
+import os
 from abc import ABC, abstractmethod
 from warnings import warn
-import os
 
 from datasets import load_dataset
-
 from evaluation import compute_code_eval
+
 
 class Task(ABC):
     """A task represents an entire benchmark including its dataset, problems,

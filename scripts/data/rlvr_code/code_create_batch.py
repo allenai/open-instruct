@@ -92,14 +92,13 @@ Note:
 """
 import json
 import os
-import time
-from openai import AzureOpenAI
-from datasets import load_dataset
-from pydantic import BaseModel
-from typing import List
-from collections import Counter
 import random
-from open_instruct.ground_truth_utils import extract_python_code
+import time
+from typing import List
+
+from datasets import load_dataset
+from openai import AzureOpenAI
+from pydantic import BaseModel
 
 client = AzureOpenAI(
     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
@@ -188,9 +187,9 @@ def find_cached_results(id: str):
             if file.endswith(f"openai_response_{id}.json"):
                 full_path = os.path.join(root, file)
                 all_files.append(full_path)
-    
+
     all_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-    
+
     if all_files:
         with open(all_files[0], "r") as f:
             try:
@@ -201,13 +200,13 @@ def find_cached_results(id: str):
                 return response
             except Exception:
                 return None
-    
+
     return None
 
 def main():
     global SAMPLE_LIMIT
     input_dataset = load_dataset(INPUT_HF_DATASET, SPLIT, split=SPLIT)
-    
+
     # First get all unique IDs
     unique_ids = set()
     unique_rows = []
@@ -215,15 +214,15 @@ def main():
         if row['id'] not in unique_ids:
             unique_ids.add(row['id'])
             unique_rows.append(row)
-    
+
     print(f"Found {len(unique_rows)} unique rows out of {len(input_dataset)} total rows")
-    
+
     # Now sample from unique rows
     random.seed(42)
     if SAMPLE_LIMIT is None:
         SAMPLE_LIMIT = len(unique_rows)
     sampled_rows = random.sample(unique_rows, min(SAMPLE_LIMIT, len(unique_rows)))
-    
+
     print(f"Processing {len(sampled_rows)} unique rows")
 
     master_prompt = r"""

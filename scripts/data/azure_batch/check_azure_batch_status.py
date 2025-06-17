@@ -31,14 +31,14 @@ def download_file(file_id: str, dest: pathlib.Path) -> None:
     """Download a file from Azure OpenAI API to the specified destination."""
     endpoint = os.environ["AZURE_OPENAI_ENDPOINT"].rstrip("/")
     url = f"{endpoint}/openai/files/{file_id}/content?api-version=2024-07-01-preview"
-    
+
     response = requests.get(
         url,
         headers={"api-key": os.environ["AZURE_OPENAI_API_KEY"]},
         timeout=120
     )
     response.raise_for_status()
-    
+
     with dest.open("wb") as f:
         f.write(response.content)
 
@@ -90,14 +90,14 @@ def show_errors_with_requests(job: dict) -> None:
 
         print("\nErrors with corresponding requests (showing first 10):")
         print("-" * 80)
-        
+
         for error in errors[:10]:  # Only show first 10 errors
             request_id = error.get("id")
             result = results_by_id.get(request_id, {})
-            
+
             print(f"\nError ID: {request_id}")
             print(f"Error: {error.get('error', {}).get('message', 'Unknown error')}")
-            
+
             # Show the original request data from the error file
             if "request" in error:
                 print(f"Original Request: {json.dumps(error['request'], indent=2)}")
@@ -137,7 +137,7 @@ def check_batch_status(batch_id: str) -> tuple[bool, bool]:
     )
     r.raise_for_status()
     job = r.json()
-    
+
     print(f"\nBatch ID: {batch_id}")
     print_status(job)
 
@@ -145,7 +145,7 @@ def check_batch_status(batch_id: str) -> tuple[bool, bool]:
         if job.get("error_file_id"):
             show_errors_with_requests(job)
         return True, job["status"] == "completed"
-    
+
     return False, False
 
 
@@ -156,7 +156,7 @@ def main() -> None:
     while True:
         all_terminal = True
         all_success = True
-        
+
         for batch_id in batch_ids:
             is_terminal, is_success = check_batch_status(batch_id)
             all_terminal = all_terminal and is_terminal

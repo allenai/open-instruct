@@ -375,12 +375,12 @@ class Args:
     code_tool_api_endpoint: Optional[str] = None
 
     def __post_init__(self):
-        assert (
-            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
-        ), "At least one reward must be applied!"
-        assert (
-            self.pack_length >= self.max_prompt_token_length + self.response_length
-        ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+        assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
+            "At least one reward must be applied!"
+        )
+        assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
+            "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+        )
 
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
@@ -1079,9 +1079,9 @@ class PolicyTrainerRayProcess(RayProcess):
             if getattr(model_to_save.config, "tie_word_embeddings", False) and "lm_head.weight" in state_dict_keys:
                 state_dict_keys.remove("lm_head.weight")
 
-            assert state_dict_keys.issubset(
-                output_state_dict_keys
-            ), f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
+            assert state_dict_keys.issubset(output_state_dict_keys), (
+                f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
+            )
 
             # only save peft weights https://github.com/microsoft/DeepSpeed/issues/4295
             if isinstance(model_to_save, PeftModel):

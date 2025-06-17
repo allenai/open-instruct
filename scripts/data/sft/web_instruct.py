@@ -1,11 +1,8 @@
 import argparse
-import os
-from collections import defaultdict
-from typing import List, Optional
+
 from datasets import load_dataset
 
 from scripts.data.sft.utils import convert_sft_dataset
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -48,20 +45,20 @@ if __name__ == "__main__":
         help="Apply empty message filters to the dataset.",
     )
     args = parser.parse_args()
-    
+
     ds = load_dataset("TIGER-Lab/WebInstructSub")
     stack_exchange_sub = ds.filter(lambda example: example["source"] in ["mathstackexchange", "stackexchange"])
     socratic_sub = ds.filter(lambda example: example["source"] == "socratic")
     assert len(stack_exchange_sub["train"]) + len(socratic_sub["train"]) == len(ds["train"]), \
         "There are some examples that are not in either stack exchange or socratic"
-        
+
     conversion_func = lambda example: {
         "messages": [
             {"role": "user", "content": example["question"]},
             {"role": "assistant", "content": example["answer"]}
         ],
     }
-        
+
     stack_exchange_sub_readme_content = (
         "This is a converted version of the stack exchange subset of the WebInstruct dataset into Tulu SFT training format.\n\n"
         "The conversion script can be found in our "
@@ -78,7 +75,7 @@ if __name__ == "__main__":
         "Please refer to the [original dataset](https://huggingface.co/datasets/TIGER-Lab/WebInstructSub) "
         "for more information about this dataset and the license."
     )
-    
+
     socratic_sub_readme_content = (
         "This is a converted version of the socratic subset of the WebInstruct dataset into Tulu SFT training format.\n\n"
         "The conversion script can be found in our "
@@ -95,7 +92,7 @@ if __name__ == "__main__":
         "Please refer to the [original dataset](https://huggingface.co/datasets/TIGER-Lab/WebInstructSub) "
         "for more information about this dataset and the license."
     )
-    
+
     convert_sft_dataset(
         ds=stack_exchange_sub,
         hf_dataset_id=None,
@@ -109,7 +106,7 @@ if __name__ == "__main__":
         local_save_dir=args.local_save_dir,
         readme_content=stack_exchange_sub_readme_content,
     )
-    
+
     convert_sft_dataset(
         ds=socratic_sub,
         hf_dataset_id=None,

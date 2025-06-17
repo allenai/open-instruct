@@ -3,6 +3,7 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
+
 tc = TokenizerConfig(
     tokenizer_name_or_path="meta-llama/Llama-3.1-8B",
     tokenizer_revision="main",

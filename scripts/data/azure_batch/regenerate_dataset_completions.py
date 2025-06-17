@@ -51,12 +51,12 @@ def create_batch_files(prompts: List[PromptData], base_batch_file_name: str, mod
     """Create multiple batch files in the format required by Azure OpenAI Batch API.
     Returns a list of created batch file paths."""
     batch_file_paths = []
-    
+
     # Split prompts into chunks of MAX_PROMPTS_PER_BATCH
     for i in range(0, len(prompts), MAX_PROMPTS_PER_BATCH):
         chunk = prompts[i:i + MAX_PROMPTS_PER_BATCH]
         batch_file_name = f"{base_batch_file_name}_{i//MAX_PROMPTS_PER_BATCH}.jsonl"
-        
+
         with open(batch_file_name, "w") as f:
             for prompt in chunk:
                 # Format each request according to batch API requirements
@@ -73,9 +73,9 @@ def create_batch_files(prompts: List[PromptData], base_batch_file_name: str, mod
                     }
                 }
                 f.write(json.dumps(batch_request) + "\n")
-        
+
         batch_file_paths.append(batch_file_name)
-    
+
     return batch_file_paths
 
 def find_cached_results(id: str, response_dir: str) -> dict | None:
@@ -85,7 +85,7 @@ def find_cached_results(id: str, response_dir: str) -> dict | None:
             if file.endswith(f"openai_response_{id}.json"):
                 full_path = os.path.join(root, file)
                 all_files.append(full_path)
-    
+
     all_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
     if not all_files:
         return None
@@ -179,19 +179,19 @@ def main(sample_limit: int | None = None,
          max_completion_tokens: int = 8192,
          add_reasoning_summary: bool = False,
          tool_choice: str = "auto") -> None:
-    
-    current_dir = current_dir or os.getcwd()    
+
+    current_dir = current_dir or os.getcwd()
     timestamp = int(time.time())
     base_batch_file_name = f"{current_dir}/batch_files/{timestamp}"
-    
+
     # Make sure that the batch files directory exists.
     os.makedirs(f"{current_dir}/batch_files", exist_ok=True)
 
     print(f"Loading dataset {input_dataset_name} with split {split}")
     input_dataset = datasets.load_dataset(input_dataset_name, split=split)
-    
-    # First get all unique IDs    
-    print(f'Processing dataset with {len(input_dataset)} rows')    
+
+    # First get all unique IDs
+    print(f'Processing dataset with {len(input_dataset)} rows')
     unique_rows = list({row['id']: row for row in input_dataset}.values())
     print(f"Found {len(unique_rows)} unique rows out of {len(input_dataset)} total rows.")
 
@@ -199,7 +199,7 @@ def main(sample_limit: int | None = None,
     random.seed(42)
     sample_limit = len(unique_rows) if sample_limit is None else sample_limit
     sampled_rows = random.sample(unique_rows, min(sample_limit, len(unique_rows)))
-    
+
     print(f"Processing {len(sampled_rows)} unique rows")
 
     prompts: List[PromptData] = []
@@ -212,24 +212,24 @@ def main(sample_limit: int | None = None,
             id=row['id'],
             prompt=row['prompt']
         ))
-        
+
         # Count tokens
         prompt_tokens = len(tokenizer.encode(prompts[-1].prompt))
         output = ''.join([message['content'] for message in row['messages'] if message['role'] == 'assistant'])
         output_tokens = len(tokenizer.encode(output))
         input_tokens += prompt_tokens
         output_tokens += output_tokens
-    
-    estimated_cost = (input_tokens * MODEL_COSTS_PER_1M_TOKENS[model]["input"] + 
+
+    estimated_cost = (input_tokens * MODEL_COSTS_PER_1M_TOKENS[model]["input"] +
                       output_tokens * MODEL_COSTS_PER_1M_TOKENS[model]["output"]) / 1_000_000
     print(f"Input tokens: {input_tokens}, output tokens: {output_tokens}. "
           f"Estimated cost: ${estimated_cost:.2f} (assuming # of output "
           "tokens is the same with the new model).")
-    
+
     if dry_run:
         print("Dry run mode - exiting without making API calls")
         sys.exit(0)
-        
+
     time.sleep(10)
     print("Waiting 10 seconds to allow you to cancel the script if you don't want to proceed...")
 
@@ -239,15 +239,15 @@ def main(sample_limit: int | None = None,
 
     # Initialize the client with your API key
     client = openai.AzureOpenAI(
-      azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT"), 
-      api_key=os.getenv("AZURE_OPENAI_API_KEY"),  
+      azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT"),
+      api_key=os.getenv("AZURE_OPENAI_API_KEY"),
       api_version="2025-04-01-preview"
     )
 
     # Submit the batch jobs
     print("Submitting batch jobs to Azure OpenAI...")
     batch_ids = []
-    
+
     for batch_file_path in batch_file_paths:
         batch_file = client.files.create(
             file=open(batch_file_path, "rb"),
@@ -259,7 +259,7 @@ def main(sample_limit: int | None = None,
             endpoint="/v1/chat/completions",
             completion_window="24h"
         )
-        
+
         batch_ids.append(batch_job.id)
         print(f"Submitted batch job with ID: {batch_job.id}")
 

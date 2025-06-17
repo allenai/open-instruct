@@ -807,9 +807,9 @@ class PolicyTrainerRayProcess(RayProcess):
             self.reward_model, *_ = deepspeed.initialize(model=self.reward_model, config=ds_config)
             self.reward_model.eval()
 
-        assert (
-            args.reward_model_multiplier or args.apply_verifiable_reward
-        ), "Either `reward_model_multiplier` must be non-zero or `apply_verifiable_reward` must be True."
+        assert args.reward_model_multiplier or args.apply_verifiable_reward, (
+            "Either `reward_model_multiplier` must be non-zero or `apply_verifiable_reward` must be True."
+        )
 
     def forward(
         self,
@@ -1160,9 +1160,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 per_func_rewards = {k: [] for k in reward_types}
                 if self.rank == 0:
                     g_response_token_ids = response_ids_Q.get()
-                    DUMMY_PAD_TOKEN = (
-                        args.stop_token_id
-                    )  # we can't use tokenizer.pad_token_id because it's outside vocab and `torch.gather(all_logprob, 2, response.unsqueeze(-1))` will error out
+                    DUMMY_PAD_TOKEN = args.stop_token_id  # we can't use tokenizer.pad_token_id because it's outside vocab and `torch.gather(all_logprob, 2, response.unsqueeze(-1))` will error out
                     g_padded_response_ids = [
                         response + [DUMMY_PAD_TOKEN] * (args.response_length - len(response))
                         for response in g_response_token_ids
@@ -1558,9 +1556,9 @@ class PolicyTrainerRayProcess(RayProcess):
             if getattr(model_to_save.config, "tie_word_embeddings", False) and "lm_head.weight" in state_dict_keys:
                 state_dict_keys.remove("lm_head.weight")
 
-            assert state_dict_keys.issubset(
-                output_state_dict_keys
-            ), f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
+            assert state_dict_keys.issubset(output_state_dict_keys), (
+                f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
+            )
 
             # only save peft weights https://github.com/microsoft/DeepSpeed/issues/4295
             if isinstance(model_to_save, PeftModel):
@@ -1693,9 +1691,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     args.eval_freq = max(1, args.num_training_steps // args.num_evals)
     # PPO logic: do checks and set up dataloader batch size
     if args.whiten_rewards:
-        assert (
-            args.local_mini_batch_size >= 8
-        ), f"Per-rank minibatch size {args.local_mini_batch_size} is insufficient for whitening"
+        assert args.local_mini_batch_size >= 8, (
+            f"Per-rank minibatch size {args.local_mini_batch_size} is insufficient for whitening"
+        )
     args.local_dataloader_batch_size = args.rollout_batch_size
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one

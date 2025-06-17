@@ -1,12 +1,14 @@
-import tqdm
+import logging
+from time import sleep
+
 import numpy as np
 import pandas as pd
+import tqdm
 from openai import OpenAI
-from time import sleep
+
 from eval.truthfulqa.utilities import format_end2end_prompt
 from eval.utils import score_completions
 
-import logging
 logger = logging.getLogger()
 logger.setLevel(logging.CRITICAL)
 
@@ -89,12 +91,12 @@ def run_gpt_classifier_eval(model_key, tag, engine, frame, info=False):
                     break
                 except Exception as e:
                     retry_count += 1
-                    print(f"Error while requesting OpenAI API.")
+                    print("Error while requesting OpenAI API.")
                     print(e)
                     print(f"Sleep for {30*retry_count} seconds.")
                     sleep(30*retry_count)
                     print(f"Retry for the {retry_count} time.")
-                    
+
             sleep(0.1)  # avoid OpenAI's max calls limit
             logprobs = response.choices[0].logprobs
             output_str = logprobs['tokens'][0]
@@ -149,7 +151,7 @@ def run_hf_classifier_eval(model_key, tag, model, tokenizer, frame, info=False):
             prompt = format_end2end_prompt(question, answer, info=info)
             score = yes_scores[prompt]["yes"]
             frame.loc[idx, '{0} {1}'.format(model_key, tag)] = np.exp(score)
-            
+
     # threshold at 0.5
     frame['{0} {1} acc'.format(model_key, tag)] = (frame['{0} {1}'.format(model_key, tag)] >= 0.5).astype(int)
     return frame

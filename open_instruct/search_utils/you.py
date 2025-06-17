@@ -21,7 +21,10 @@ def get_snippets_for_query(query: str, number_of_results=10) -> List[str]:
     params = {"query": query, "num_web_results": 1}
     try:
         response = session.get(
-            "https://api.ydc-index.io/search", params=params, headers=headers, timeout=10  # seconds
+            "https://api.ydc-index.io/search",
+            params=params,
+            headers=headers,
+            timeout=10,  # seconds
         )
         response.raise_for_status()
         data = response.json()

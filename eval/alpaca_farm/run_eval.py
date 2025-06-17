@@ -1,14 +1,26 @@
-import os
-import json
-import ast
 import argparse
+import ast
+import json
 import logging
+import os
 import random
-import torch
+
 import datasets
+import torch
 import vllm
 from alpaca_eval import evaluate as alpaca_farm_evaluate
-from eval.utils import query_openai_chat_model, query_openai_model, generate_completions, dynamic_import_function, load_hf_lm, load_hf_tokenizer, upload_results_to_hf, check_and_upload_model_metadata
+
+from eval.utils import (
+    check_and_upload_model_metadata,
+    dynamic_import_function,
+    generate_completions,
+    load_hf_lm,
+    load_hf_tokenizer,
+    query_openai_chat_model,
+    query_openai_model,
+    upload_results_to_hf,
+)
+
 
 def main(args):
     random.seed(42)
@@ -40,7 +52,7 @@ def main(args):
                 tokenizer_revision=args.hf_revision,
                 revision=args.hf_revision,
             )
-            
+
             sampling_params = vllm.SamplingParams(
                 temperature=0,  # greedy decoding
                 max_tokens=args.max_new_tokens,
@@ -54,7 +66,7 @@ def main(args):
                     formatted_prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
                     formatted_prompts.append(formatted_prompt)
                 prompts = formatted_prompts
-                    
+
             outputs = model.generate(prompts, sampling_params)
             outputs = [it.outputs[0].text for it in outputs]
         else:
@@ -135,7 +147,7 @@ def main(args):
     print(df_leaderboard.to_string(float_format="%.2f"))
 
     # save to json
-    with open(os.path.join(args.save_dir, f"metrics.json"), "w") as fout:
+    with open(os.path.join(args.save_dir, "metrics.json"), "w") as fout:
         json.dump(df_leaderboard.to_dict(), fout)
 
     if args.upload_to_hf is not None:
@@ -162,7 +174,7 @@ def main(args):
         check_and_upload_model_metadata(
             args.model_name_or_path, args.upload_to_hf, args.hf_upload_name, hf_revision=args.hf_revision
         )
-        
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -179,7 +191,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--save_dir",
-        type=str, 
+        type=str,
         default="results/alpaca_farm")
     parser.add_argument(
         "--model_name_or_path",
@@ -217,9 +229,9 @@ if __name__ == "__main__":
         help="Maximum number of new tokens to generate."
     )
     parser.add_argument(
-        "--eval_batch_size", 
-        type=int, 
-        default=1, 
+        "--eval_batch_size",
+        type=int,
+        default=1,
         help="Batch size for evaluation."
     )
     parser.add_argument(
@@ -233,14 +245,14 @@ if __name__ == "__main__":
         help="If given, we're evaluating a 4-bit quantized GPTQ model.",
     )
     parser.add_argument(
-        "--use_chat_format", 
-        action="store_true", 
+        "--use_chat_format",
+        action="store_true",
         help="If given, we will use the chat format for the prompts."
     )
     parser.add_argument(
-        "--chat_formatting_function", 
-        type=str, 
-        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        "--chat_formatting_function",
+        type=str,
+        default="eval.templates.create_prompt_with_tulu_chat_format",
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
     )
     parser.add_argument(

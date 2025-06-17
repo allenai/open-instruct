@@ -1,10 +1,6 @@
 import argparse
-import os
-from collections import defaultdict
-from typing import List, Optional
 
 from scripts.data.sft.utils import convert_sft_dataset
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -47,12 +43,12 @@ if __name__ == "__main__":
         help="Apply empty message filters to the dataset.",
     )
     args = parser.parse_args()
-    
+
     def conversion_func(example):
         # the original dataset already has the `messages` key
         # our code here is mainly for keyword filtering
         return example
-    
+
     cot_subset_readme_content = (
         "This is a converted version of the NuminaMath-CoT subset into Tulu SFT training format.\n\n"
         "The conversion script can be found in our "
@@ -67,7 +63,7 @@ if __name__ == "__main__":
         "Please refer to the [original CoT dataset](https://huggingface.co/datasets/AI-MO/NuminaMath-CoT) "
         "for more information about this dataset and the license."
     )
-    
+
     convert_sft_dataset(
         ds=None,
         hf_dataset_id="AI-MO/NuminaMath-CoT",
@@ -81,7 +77,7 @@ if __name__ == "__main__":
         local_save_dir=args.local_save_dir,
         readme_content=cot_subset_readme_content,
     )
-    
+
     tir_subset_readme_content = cot_subset_readme_content.replace("CoT", "TIR")
 
     convert_sft_dataset(

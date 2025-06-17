@@ -1,11 +1,8 @@
 import argparse
-import os
-from collections import defaultdict
-from typing import List, Optional
-from datasets import load_dataset, Dataset
+
+from datasets import Dataset, load_dataset
 
 from scripts.data.sft.utils import convert_sft_dataset
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -41,9 +38,9 @@ if __name__ == "__main__":
         help="Number of times to repeat the hard-coded examples",
     )
     args = parser.parse_args()
-    
+
     ds = load_dataset("allenai/tulu-3-hardcoded-prompts")["train"]
-    
+
     readme_content = (
         "This dataset contains a set of hard-coded examples for Tulu, "
         "a virtual assistant developed by AI2. "
@@ -53,12 +50,12 @@ if __name__ == "__main__":
         "The creation script can be found in our "
         "[open-instruct](https://github.com/allenai/open-instruct/blob/main/scripts/data/sft/tulu_hard_coded.py) repo.\n"
     )
-    
+
     ds = Dataset.from_list(ds.to_list() * args.repeat_n)
-    
+
     if args.converted_dataset_name is None:
         args.converted_dataset_name = f"tulu_hard_coded_repeated_{args.repeat_n}"
-    
+
     convert_sft_dataset(
         ds=ds,
         hf_dataset_id=None,

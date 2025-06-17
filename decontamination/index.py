@@ -1,10 +1,10 @@
-import os
 import argparse
-import yaml
+import os
 
-from tqdm import tqdm
+import yaml
 from datasets import load_dataset
 from elasticsearch import Elasticsearch, helpers
+from tqdm import tqdm
 
 
 def create_text_index(es, index_name):
@@ -19,7 +19,7 @@ def create_text_index(es, index_name):
     # fewer characters. This is not perfect either, but is a better choice across evals.
     settings = {
         "analysis": {
-            "analyzer": { 
+            "analyzer": {
                 "tulu_analyzer": {
                     "type": "pattern",
                     "pattern": "[ ,.?!:;()\"-]|\\n|\\\\",
@@ -128,7 +128,7 @@ def index_dataset_vectors(data_to_index, es, index_name, model_name, max_batch_t
                 max_seq_tokens = 0
                 batch_size = 0
                 while True:
-                    datum = data_to_index[idx] 
+                    datum = data_to_index[idx]
                     datum_seq_length = len(tokenizer.tokenize(datum["text"]))
                     if datum_seq_length > max_batch_tokens:
                         # One really long instance

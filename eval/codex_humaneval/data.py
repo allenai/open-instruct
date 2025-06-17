@@ -1,8 +1,7 @@
-from typing import Iterable, Dict
 import gzip
 import json
 import os
-
+from typing import Dict, Iterable
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 HUMAN_EVAL = os.path.join(ROOT, "..", "data", "HumanEval.jsonl.gz")

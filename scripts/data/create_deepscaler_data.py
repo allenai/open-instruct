@@ -1,5 +1,6 @@
-from datasets import load_dataset, Dataset
 import random
+
+from datasets import Dataset, load_dataset
 from tqdm import tqdm
 
 random_gen = random.Random(42)

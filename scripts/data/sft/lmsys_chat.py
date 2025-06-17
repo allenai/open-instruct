@@ -1,12 +1,9 @@
 import argparse
-import os
 import re
-from collections import defaultdict
-from typing import List, Optional
+
 from datasets import load_dataset
 
 from scripts.data.sft.utils import convert_sft_dataset
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -55,7 +52,7 @@ if __name__ == "__main__":
         help="A regular expression. We will only keep instances where the model name contains this regular expression.",
     )
     args = parser.parse_args()
-    
+
     readme_content = (
         "This is a converted version of the lmsys_chat_1m dataset into Tulu SFT training format.\n\n"
         "The conversion script can be found in our "
@@ -71,7 +68,7 @@ if __name__ == "__main__":
         "Please refer to the [original dataset](https://huggingface.co/datasets/lmsys/lmsys-chat-1m) "
         "for more information about this dataset and the license."
     )
-    
+
     ds = load_dataset("lmsys/lmsys-chat-1m")
     if args.model_name_regex:
         ds = ds.filter(lambda example: re.search(args.model_name_regex, example["model"]))
@@ -89,4 +86,4 @@ if __name__ == "__main__":
         local_save_dir=args.local_save_dir,
         readme_content=readme_content,
     )
-    
+

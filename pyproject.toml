@@ -84,7 +84,29 @@ dev = [
     "mkdocs-material>=9.6.8",
     "markdown-include>=0.8.1",
     "pytest>=8.3.4",
+    "ruff>=0.8.0",
 ]
 
 [tool.isort]
 known_first_party = ["open_instruct"]
+
+[tool.ruff]
+line-length = 119
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings  
+    "F",  # pyflakes
+    "I",  # isort
+]
+ignore = [
+    "E501",  # line too long (handled by line-length)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["open_instruct"]
+
+[tool.ruff.format]
+quote-style = "double"
