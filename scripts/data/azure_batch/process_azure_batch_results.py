@@ -4,7 +4,13 @@ Process Azure OpenAI batch results, update completions, and (optionally) push a
 new Hugging Face dataset that keeps the original prompts.
 
 Example:
-    python open_code_reasoning_upload_batch.py <batch_id> \
+    python process_azure_batch_results.py <batch_id> \
+        --input-dataset nvidia/OpenCodeReasoning \
+        --output-dataset your-hf-username/new-dataset \
+        --split split_0
+
+    # Can also process multiple batches:
+    python process_azure_batch_results.py batch1,batch2,batch3 \
         --input-dataset nvidia/OpenCodeReasoning \
         --output-dataset your-hf-username/new-dataset \
         --split split_0
@@ -15,7 +21,7 @@ import json
 import os
 import pathlib
 from dataclasses import dataclass
-from typing import Tuple
+from typing import List, Optional, Tuple
 
 import datasets
 import openai
@@ -31,7 +37,6 @@ class TokenUsage:
 
     @property
     def cost(self) -> float:
-        
         cost = (self.prompt_tokens * MODEL_COSTS_PER_1M_TOKENS["o3-batch"]["input"] +
                 self.completion_tokens  * MODEL_COSTS_PER_1M_TOKENS["o3-batch"]["output"]) / 1_000_000
         return cost
@@ -41,7 +46,6 @@ class TokenUsage:
 class BatchResult:
     result_id: str
     content: str
-    reasoning_summary: str
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,7 +53,7 @@ def parse_args() -> argparse.Namespace:
         description="Create a new dataset with updated completions "
         "from an Azure OpenAI batch run."
     )
-    p.add_argument("batch_id", help="Azure batch job ID to process")
+    p.add_argument("batch_id", help="Azure batch job ID(s) to process (comma-separated for multiple)")
     p.add_argument(
         "--input-dataset",
         default="allenai/tulu-3-sft-personas-code",
@@ -69,6 +73,11 @@ def parse_args() -> argparse.Namespace:
         "--no-upload",
         action="store_true",
         help="Skip pushing to the Hub (dry-run)",
+    )
+    p.add_argument(
+        "--max-rows",
+        type=int,
+        help="Limit the number of rows in the output dataset (for testing purposes)",
     )
     return p.parse_args()
 
@@ -122,27 +131,34 @@ def get_batch_results(batch_id: str) -> Tuple[dict[str, str], TokenUsage]:
         if not line.strip():
             continue
         try:
+            # Load the JSON line using the default UTF-8 text encoding
             result = json.loads(line)
         except json.JSONDecodeError as e:
             print(f"Error decoding JSON from line: {e}")
             continue
         result_id = extract_id_from_custom_id(result["custom_id"])
-        content = result["response"]["body"]["choices"][0]["message"]["content"]
+        
+        # Check for content filtering
+        choice = result["response"]["body"]["choices"][0]
+        if choice.get("finish_reason") == "content_filter":
+            filtered_categories = []
+            for category, details in choice.get("content_filter_results", {}).items():
+                if details.get("filtered"):
+                    filtered_categories.append(f"{category} ({details.get('severity', 'unknown')})")
+            print(f"Content filtered for {result_id}. Filtered categories: {', '.join(filtered_categories)}")
+            continue
 
+        content = choice["message"]["content"]
+        
         # Extract token usage from the response
         usage = result["response"]["body"]["usage"]
         total_prompt_tokens += usage["prompt_tokens"]
         total_completion_tokens += usage["completion_tokens"]
         total_tokens += usage["total_tokens"]
         
-        if "reasoning" in result["response"]["body"]:
-            reasoning_summary = result["response"]["body"]["reasoning"]["summary"]
-        else:
-            reasoning_summary = ""
         results[result_id] = BatchResult(
             result_id=result_id,
             content=content,
-            reasoning_summary=reasoning_summary
         )
 
     token_usage = TokenUsage(
@@ -176,21 +192,21 @@ def load_jsonl(file_path: pathlib.Path) -> list[dict]:
         return [json.loads(line) for line in f]
 
 
-def process_batch_results(
-    *,
-    batch_id: str,
-    input_dataset: str,
-    output_dataset: str,
-    split: str,
-    push: bool,
-):
+def process_single_batch(batch_id: str, id_lookup: dict) -> Tuple[dict[str, BatchResult], TokenUsage]:
+    """Process a single batch and return its results and token usage.
+    
+    Args:
+        batch_id: The ID of the batch to process
+        id_lookup: Dictionary mapping IDs to original dataset rows
+        
+    Returns:
+        Tuple containing:
+        - Dictionary of result_id -> BatchResult
+        - TokenUsage object with token counts and cost
+    """
     if not check_batch_status(batch_id):
-        print("Batch not complete; aborting.")
-        return
-
-    # Load the original dataset first so we can look up failed prompts
-    original_ds = datasets.load_dataset(input_dataset, split=split)
-    id_lookup = {row["id"]: row for row in original_ds}
+        print(f"Batch {batch_id} not complete; skipping.")
+        return {}, TokenUsage(0, 0, 0)
 
     # Get batch details to check for errors
     endpoint = os.environ["AZURE_OPENAI_ENDPOINT"].rstrip("/")
@@ -204,6 +220,7 @@ def process_batch_results(
     job = r.json()
 
     # Show errors if they exist
+    num_errors = 0
     if job.get("error_file_id"):
         error_file = pathlib.Path(".errors.jsonl")
         
@@ -211,11 +228,14 @@ def process_batch_results(
             # Download error file
             download_file(job["error_file_id"], error_file)
             errors = load_jsonl(error_file)
+            num_errors = len(errors)
 
-            print("\nBatch Errors:")
+            print(f"\nBatch {batch_id} Errors: {num_errors}")
             print("-" * 80)
             
-            for error in errors:
+            for i, error in enumerate(errors):
+                if i > 3:
+                    break
                 request_id = error['custom_id']
                 error_id = extract_id_from_custom_id(request_id)
                 original_row = id_lookup.get(error_id)
@@ -235,22 +255,63 @@ def process_batch_results(
 
     batch_results, token_usage = get_batch_results(batch_id)
     if not batch_results:
-        print("No results found.")
-        return
+        print(f"No results found for batch {batch_id}.")
+        return {}, TokenUsage(0, 0, 0)
 
-    print("\nToken Usage Statistics:")
+    print(f"\nBatch {batch_id} Token Usage Statistics:")
     print(f"Prompt tokens: {token_usage.prompt_tokens:,}")
     print(f"Completion tokens: {token_usage.completion_tokens:,}")
     print(f"Total tokens: {token_usage.total_tokens:,}")
     print(f"Estimated cost: ${token_usage.cost:.4f}\n")
 
+    return batch_results, token_usage
+
+
+def process_batch_results(
+    *,
+    batch_ids: List[str],
+    input_dataset: str,
+    output_dataset: str,
+    split: str,
+    push: bool,
+    max_rows: Optional[int] = None,
+):
+    # Load the original dataset first so we can look up failed prompts
+    original_ds = datasets.load_dataset(input_dataset, split=split)
+    id_lookup = {row["id"]: row for row in original_ds}
+
+    all_batch_results = {}
+    total_token_usage = TokenUsage(0, 0, 0)
+    for batch_id in batch_ids:
+        batch_results, token_usage = process_single_batch(batch_id, id_lookup)
+        
+        # Accumulate results and token usage
+        all_batch_results.update(batch_results)
+        total_token_usage.prompt_tokens += token_usage.prompt_tokens
+        total_token_usage.completion_tokens += token_usage.completion_tokens
+        total_token_usage.total_tokens += token_usage.total_tokens
+
+    if not all_batch_results:
+        print("No results found in any batch.")
+        return
+
+    print("\nTotal Token Usage Statistics:")
+    print(f"Prompt tokens: {total_token_usage.prompt_tokens:,}")
+    print(f"Completion tokens: {total_token_usage.completion_tokens:,}")
+    print(f"Total tokens: {total_token_usage.total_tokens:,}")
+    print(f"Estimated cost: ${total_token_usage.cost:.4f}\n")
+
     new_rows = []
 
-    for result_id, batch_result in batch_results.items():
+    for result_id, batch_result in all_batch_results.items():
+        # Check that row has all required features
         row = id_lookup.get(result_id)
         if row is None:
             print(f"[skip] id {result_id=} not in source dataset")
             continue
+        missing_features = set(original_ds.features.keys()) - set(row.keys())
+        if missing_features:
+            raise ValueError(f"Row {result_id=} missing features: {missing_features}")
 
         # --- build updated example -----------------------------------------
         updated = copy.deepcopy(row)
@@ -258,17 +319,39 @@ def process_batch_results(
         # We should always have two messages: user and assistant.
         assert len(updated["messages"]) == 2
         updated["messages"][1]["content"] = batch_result.content
-        updated["reasoning_summary"] = batch_result.reasoning_summary
-        updated["dataset"] = output_dataset
 
         new_rows.append(updated)
 
-    print(f"Kept {len(new_rows)} / {len(batch_results)} examples.")
+    print(f"Kept {len(all_batch_results)} examples.")
+    print(f"Previous dataset had {len(original_ds)} examples.")
+    print(f"New dataset has {len(all_batch_results)} examples.")
+
+    if abs(len(all_batch_results) - len(original_ds)) > 0.01 * len(original_ds):
+        raise ValueError(f"New dataset has {len(all_batch_results)} examples, but "
+                         f"original dataset had {len(original_ds)} examples."
+                          "We automatically reject if there's more than a 1% difference.")
 
     if not new_rows:
         return
 
-    ds_out = datasets.Dataset.from_list(new_rows)
+    # Create dataset using features from the original dataset
+    ds_out = datasets.Dataset.from_list(new_rows, features=original_ds.features)
+    
+    # Apply row limit if specified
+    if max_rows is not None:
+        ds_out = ds_out.select(range(min(max_rows, len(ds_out))))
+        print(f"Limited output dataset to {len(ds_out)} rows (max_rows={max_rows})")
+    
+    print(f"Previous dataset had {len(original_ds)} examples.")
+    print(f"New dataset has {len(ds_out)} examples.")
+    
+    # Sanity check that features match
+    if ds_out.features != original_ds.features:
+        print("Warning: Features of new dataset don't match original dataset!")
+        print("Original features:", original_ds.features)
+        print("New features:", ds_out.features)
+        raise ValueError("Feature mismatch between original and new dataset")
+    
     if push:
         token = os.environ.get("HF_TOKEN")
         ds_out.push_to_hub(output_dataset, split=split, token=token)
@@ -279,12 +362,15 @@ def process_batch_results(
 
 def main():
     args = parse_args()
+    # Split batch_id into list if comma-separated
+    batch_ids = args.batch_id.split(',')
     process_batch_results(
-        batch_id=args.batch_id,
+        batch_ids=batch_ids,
         input_dataset=args.input_dataset,
         output_dataset=args.output_dataset,
         split=args.split,
         push=not args.no_upload,
+        max_rows=args.max_rows,
     )
 
 
