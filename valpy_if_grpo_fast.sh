@@ -7,7 +7,7 @@ python mason.py \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --exp_name valpy_if_multi_tulu3.1_8b_grpo_seed4 \
+    --exp_name valpy_if_multi_tulu3.1_8b_grpo_seed6 \
     --beta 0.01 \
     --num_unique_prompts_rollout 48 \
     --num_samples_per_prompt_rollout 16 \
@@ -40,7 +40,7 @@ python mason.py \
     --vllm_num_engines 10 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
-    --seed 3 \
+    --seed 6 \
     --num_evals 100 \
     --save_freq 10 \
     --gradient_checkpointing \
