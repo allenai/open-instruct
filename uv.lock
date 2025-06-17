@@ -1,4 +1,5 @@
 version = 1
+revision = 1
 requires-python = ">=3.10, <3.12"
 resolution-markers = [
     "python_version < '0'",
@@ -2008,11 +2009,12 @@ requires-dist = [
     { name = "vllm", specifier = ">=0.8.2" },
     { name = "wandb", specifier = "==0.18.1" },
 ]
+provides-extras = ["compile", "liger"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "autoflake", specifier = ">=2.3.1" },
-    { name = "beaker-py", specifier = ">=1.32.2,<2.0" },
+    { name = "beaker-py", specifier = ">=1.32.2" },
     { name = "black", specifier = ">=24.10.0" },
     { name = "flake8", specifier = ">=7.1.1" },
     { name = "isort", specifier = ">=5.13.2" },
