@@ -36,7 +36,7 @@ parser.add_argument("--model_path", type=str, help="Path to the model.")
 parser.add_argument("--model_revision", type=str, default="main", help="Model revision.")
 parser.add_argument("--tokenizer_revision", type=str, default="main", help="Tokenizer revision.")
 parser.add_argument("--model_len", type=int, default=8192, help="Max model length.")
-parser.add_argument("--output_dir", type=str, default="tmp", help="Output directory.")
+parser.add_argument("--output_path", type=str, default="tmp", help="Output path.")
 parser.add_argument("--num_docs", type=int, default=3, help="Number of documents to retrieve.")
 parser.add_argument("--search_api_endpoint", type=str, default="http://localhost:8000", help="Search API endpoint.")
 args = parser.parse_args()
@@ -107,7 +107,7 @@ for generation in generations:
 
 
 # construct outputs. We need jsonl with question/answer
-os.makedirs(args.output_dir, exist_ok=True)
-with open(f"{args.output_dir}/predictions.jsonl", "w") as f:
+os.makedirs(args.output_path, exist_ok=True)
+with open(f"{args.output_path}", "w") as f:
     for sample, reasoning, answer in zip(ds, reasoning, answer):
         f.write(json.dumps({**sample, "reasoning": reasoning, "answer": answer}) + "\n")
