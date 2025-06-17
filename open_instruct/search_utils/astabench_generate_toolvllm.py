@@ -93,18 +93,18 @@ generations = [x.outputs[0].token_ids for x in result]
 generations = [tokenizer.decode(x, skip_special_tokens=True) for x in generations]
 
 # decompose into reasoning and answer
-reasoning = []
-answer = []
+reasonings = []
+answers = []
 for generation in generations:
     reasoning = generation.split("</think>")[0]
     answer = generation.split("</think>")[-1]
     answer = answer.replace("<finish>", "").replace("</finish>", "")
-    reasoning.append(reasoning)
-    answer.append(answer)
+    reasonings.append(reasoning)
+    answers.append(answer)
 
 
 # construct outputs. We need jsonl with question/answer
 os.makedirs(args.output_path, exist_ok=True)
 with open(f"{args.output_path}", "w") as f:
-    for sample, reasoning, answer in zip(ds, reasoning, answer):
+    for sample, reasoning, answer in zip(ds, reasonings, answers):
         f.write(json.dumps({**sample, "reasoning": reasoning, "answer": answer}) + "\n")
