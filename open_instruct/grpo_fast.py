@@ -306,6 +306,10 @@ class Args:
     """whether to enable prefix caching"""
     vllm_top_p: float = 1.0
     """vLLM top p for nucleus sampling"""
+    vllm_sleep_mode: bool = False
+    """vLLM enable sleep mode and call sleep level=2 after generation to discard model weights and KV cache
+    reducing the amount of GPU memory until next generation call. This is only useful for single GPU mode to fit 
+    larger models"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
@@ -688,7 +692,7 @@ class PolicyTrainerRayProcess(RayProcess):
         model = self.model.module
         count, num_params = 0, len(list(model.named_parameters()))
         refss = []
-        if self.args.vllm_sleep_level > 0:
+        if self.args.vllm_sleep_mode:
             batch_vllm_engine_call(self.vllm_engines, "wake_up", rank_0_only=False)
 
         if self.args.gather_whole_model:
@@ -1063,7 +1067,7 @@ def vllm_generate_thread(
     eval_freq: int,
     resume_training_step: int = 1,
     tool_use: bool = False,
-    vllm_sleep_level: int = 0,
+    vllm_sleep_mode: bool = False,
 ):
     def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
         # Split queries between engines
@@ -1131,8 +1135,8 @@ def vllm_generate_thread(
                     )
                     evaluation_inference_results_Q.put((response_ids, finish_reasons, masks, info))
 
-        if vllm_sleep_level > 0:
-            batch_vllm_engine_call(vllm_engines, "sleep", level=vllm_sleep_level, rank_0_only=False)
+        if vllm_sleep_mode:
+            batch_vllm_engine_call(vllm_engines, "sleep", level=2, rank_0_only=False)
 
 
 def data_preparation_thread(
@@ -1198,14 +1202,6 @@ def data_preparation_thread(
             else:
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
-        if args.print_samples:
-            table = {}
-            table["ground_truth"] = ground_truths[:3]
-            table["prompt"] = tokenizer.batch_decode(queries[:3])
-            table["response"] = decoded_responses[:3]
-            table["reward"] = scores[:3]
-            df = pd.DataFrame(table)
-            print_rich_table(df)
 
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved
@@ -1239,7 +1235,7 @@ def data_preparation_thread(
                 ground_truths = [ground_truths[i] for i in stop_idxes]
                 datasets = [datasets[i] for i in stop_idxes]
                 finish_reasons = [finish_reasons[i] for i in stop_idxes]
-
+            
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
                 queries=queries,

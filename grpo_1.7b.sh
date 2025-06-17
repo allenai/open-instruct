@@ -3,9 +3,9 @@ exp_name="grpo_qwen3_1.7b_base"
 
 HF_HOME=/weka/oe-adapt-default/allennlp/.cache/huggingface
 
-uv run open_instruct/grpo_tinyzero.py \
+uv run open_instruct/grpo_fast.py \
     --exp_name $exp_name \
-    --output_dir $SCRATCH/open_instruct/results/ \
+    --output_dir tmp \
     --dataset_name Jiayi-Pan/Countdown-Tasks-3to4 \
     --dataset_train_split train[1000:] \
     --dataset_eval_split train[:1000] \
@@ -43,11 +43,11 @@ uv run open_instruct/grpo_tinyzero.py \
     --gradient_checkpointing \
     --vllm_sync_backend gloo \
     --offload_ref \
-    --vllm_sleep_level 1 \
+    --vllm_sleep_mode \
     --fused_optimizer \
     --wandb_project_name r1 \
     --wandb_entity mila-language-drift \
-    --with_tracking $@
+    --with_tracking False $@
     #
 
     # --liger_kernel \
