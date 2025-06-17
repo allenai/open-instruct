@@ -310,6 +310,9 @@ class Args:
     """vLLM enable sleep mode and call sleep level=2 after generation to discard model weights and KV cache
     reducing the amount of GPU memory until next generation call. This is only useful for single GPU mode to fit 
     larger models"""
+    offload_ref: bool = False
+    """whether to offload the reference model to CPU after inference, and reload right before. This is only
+     useful for single GPU mode to fit larger models"""
     deepspeed_stage: int = 0
     """the deepspeed stage"""
     gather_whole_model: bool = True
@@ -772,7 +775,7 @@ class PolicyTrainerRayProcess(RayProcess):
             collated_response_masks = collated_response_masks[0:-leftover]
 
         # Calculate the logprob of the reference policy
-        if self.args.offload_ref:
+        if args.offload_ref:
             with Timer("[Training Processes] Move Ref to GPU", noop=self.rank != 0):
                 self.ref_policy.to(self.device)
         collated_ref_logprobs = []
@@ -800,7 +803,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
                     collated_ref_logprobs.append(ref_logprob)
                     torch.cuda.empty_cache()
-        if self.args.offload_ref:
+        if args.offload_ref:
             with Timer("[Training Processes] Move Ref to CPU", noop=self.rank != 0):
                 self.ref_policy.to("cpu")
         local_step = 0
