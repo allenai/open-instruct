@@ -1,5 +1,13 @@
 """
 Eval short-form QA using the search actor.
+example:
+python -m open_instruct.search_utils.astabench_generate_toolvllm \
+    --dataset_file rubrics_v1.json \
+    --add_prompt \
+    --model_path /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/1006_rl_rag_open_scholar_ppo__1__1749687970_checkpoints/step_700 \
+    --output_dir astabench_ppo_generate_file.jsonl \
+    --num_docs 3 \
+    --search_api_endpoint http://root@saturn-cs-aus-232.reviz.ai2.in:47695/search
 """
 
 import argparse
@@ -87,8 +95,19 @@ result = actor.generate(
 generations = [x.outputs[0].token_ids for x in result]
 generations = [tokenizer.decode(x, skip_special_tokens=True) for x in generations]
 
+# decompose into reasoning and answer
+reasoning = []
+answer = []
+for generation in generations:
+    reasoning = generation.split("</think>")[0]
+    answer = generation.split("</think>")[-1]
+    answer = answer.replace("<finish>", "").replace("</finish>", "")
+    reasoning.append(reasoning)
+    answer.append(answer)
+
+
 # construct outputs. We need jsonl with question/answer
 os.makedirs(args.output_dir, exist_ok=True)
 with open(f"{args.output_dir}/predictions.jsonl", "w") as f:
-    for sample, generation in zip(ds, generations):
-        f.write(json.dumps({**sample, "answer": generation}) + "\n")
+    for sample, reasoning, answer in zip(ds, reasoning, answer):
+        f.write(json.dumps({**sample, "reasoning": reasoning, "answer": answer}) + "\n")
