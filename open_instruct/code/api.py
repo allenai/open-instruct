@@ -22,12 +22,12 @@ curl -X POST http://localhost:1234/test_program -H "Content-Type: application/js
 """
 
 import logging
-from typing import List
+from typing import List, Any
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from .code_utils import get_successful_tests_fast
+from open_instruct.code.code_utils import get_successful_tests_fast, get_successful_tests_stdio
 
 app = FastAPI()
 
@@ -37,9 +37,13 @@ logger = logging.getLogger(__name__)
 
 class TestRequest(BaseModel):
     program: str
-    tests: List[str]
+    tests: List[Any]
     max_execution_time: float = 1.0
 
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 
 @app.post("/test_program")
 async def test_program(request: TestRequest):
@@ -53,15 +57,59 @@ async def test_program(request: TestRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
+@app.post("/test_program_stdio")
+async def test_program_stdio(request: TestRequest):
+    # run tests with the stdio format
+    try:
+        results = get_successful_tests_stdio(
+            program=request.program, tests=request.tests, max_execution_time=request.max_execution_time
+        )
+        return {"results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
     import requests
+    stdio_url = "http://localhost:1234/test_program_stdio"
 
-    # API endpoint
+
+
+
+    stdio_payload = {
+        "program": """
+X = int(input())
+total_sum = 2025
+
+count_X = 0
+for i in range(1, 10):
+    if X % i == 0:
+        j = X // i
+        if 1 <= j <= 9:
+            count_X += 1
+
+result = total_sum - (count_X * X)
+print(result)
+""",
+    "tests": [{"input": "1", "output": "2024"}, 
+              {"input": "11", "output": "2025"}, 
+              {"input": "24", "output": "1929"},
+              {"input": "1", "output": "1"},
+              {"input": "1", "output": "2024"},
+              {"input": "11", "output": "2025"},
+              {"input": "24", "output": "1"}
+              ],
+    "max_execution_time": 6.0,
+    }
+
+    response = requests.post(stdio_url, json=stdio_payload)
+
+    response_json = response.json()
+    print("Status Code:", response.status_code)
+    print("Response:", response_json)
+
+    assert response_json["results"] == [1, 1, 1, 0, 1, 1, 0]
+
     url = "http://localhost:1234/test_program"
 
     # Test data

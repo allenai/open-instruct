@@ -2,8 +2,19 @@ import logging
 import multiprocessing
 import os
 import shutil
+import ast
+import time
+import signal
+import faulthandler
+import math
+from typing import Callable, List, Tuple, Dict, Any, Optional
+from types import ModuleType
+from collections import defaultdict
+from functools import partial
+from io import StringIO
 from ctypes import c_int
 from typing import Any, Dict, List, Optional
+from .testing_util import grade_stdio
 
 # taken from https://github.com/TIGER-AI-Lab/AceCoder/blob/62bb7fc25d694fed04a5270c89bf2cdc282804f7/data/inference/EvaluateInferencedCode.py#L372
 # we save the current working directory and restore them later
@@ -126,7 +137,7 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
 
     reliability_guard()
 
-    # Reset test results
+    # reset test results
     for i in range(len(tests)):
         test_results[i] = 0
 
@@ -140,13 +151,41 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
 
     return [test_results[i] for i in range(len(tests))]
 
+# -------------------------------------------------------------
+# Stdio format - mostly copied from livecodebench
+# -------------------------------------------------------------
+
+def get_successful_tests_stdio(program: str, tests: List[Any], max_execution_time: float = 1.0) -> List[int]:
+    """Same as above but for stdio format.
+    Parameter:
+        program: a string representation of the python program you want to run
+        tests: a list of (input, output) pairs
+        max_execution_time: the number of second each individual test can run before
+            it is considered failed and terminated
+    Return:
+        a list of 0/1 indicating passed or not
+    """
+    test_ct = len(tests)
+    if test_ct == 0:
+        return []
+    if not should_execute(program=program, tests=tests):
+        logger.info("Not executing program %s", program)
+        return [0] * len(tests)
+
+    reliability_guard()
+    all_inputs = [test["input"] for test in tests]
+    all_outputs = [test["output"] for test in tests]
+    timeout = math.ceil(max_execution_time)
+    results, metadata = grade_stdio(program, all_inputs, all_outputs, timeout)
+    partial_undo_reliability_guard()
+    return [1 if x is True else 0 for x in results]
 
 # -------------------------------------------------------------
 # Utility
 # -------------------------------------------------------------
 
 
-def should_execute(program: str, tests: List[str]) -> bool:
+def should_execute(program: str, tests: List[Any]) -> bool:
     """Determine if we should try to execute this program at all for safety
     reasons."""
     dangerous_commands = [
@@ -222,7 +261,7 @@ def reliability_guard(maximum_memory_bytes: Optional[int] = None):
     builtins.exit = None
     builtins.quit = None
     # builtins.open = None
-    builtins.print = lambda *args, **kwargs: None
+    # builtins.print = lambda *args, **kwargs: None
 
     import os
 

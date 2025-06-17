@@ -257,6 +257,7 @@ def grade_call_based(
 
     total_execution = 0
     all_results = []
+    first_failure_info = None
     for idx, (gt_inp, gt_out) in enumerate(zip(all_inputs, all_outputs)):
         signal.alarm(timeout)
         faulthandler.enable()
@@ -278,8 +279,8 @@ def grade_call_based(
 
             all_results.append(tmp_result)
 
-            if not tmp_result:
-                return all_results, {
+            if not tmp_result and not first_failure_info:
+                first_failure_info = {
                     "output": truncatefn(prediction),
                     "inputs": truncatefn(gt_inp),
                     "expected": truncatefn(gt_out),
@@ -290,28 +291,32 @@ def grade_call_based(
             signal.alarm(0)
             if "timeoutexception" in repr(e).lower():
                 all_results.append(-3)
-                return all_results, {
-                    "error": repr(e),
-                    "error_code": -3,
-                    "error_message": "Time Limit Exceeded",
-                    "inputs": truncatefn(gt_inp),
-                    "expected": truncatefn(gt_out),
-                }
+                if not first_failure_info:
+                    first_failure_info = {
+                        "error": repr(e),
+                        "error_code": -3,
+                        "error_message": "Time Limit Exceeded",
+                        "inputs": truncatefn(gt_inp),
+                        "expected": truncatefn(gt_out),
+                    }
             else:
                 all_results.append(-4)
-                return all_results, {
-                    "error": repr(e),
-                    "error_code": -4,
-                    "error_message": "Runtime Error",
-                    "inputs": truncatefn(gt_inp),
-                    "expected": truncatefn(gt_out),
-                }
-
+                if not first_failure_info:
+                    first_failure_info = {
+                        "error": repr(e),
+                        "error_code": -4,
+                        "error_message": "Runtime Error",
+                        "inputs": truncatefn(gt_inp),
+                        "expected": truncatefn(gt_out),
+                    }
         finally:
             signal.alarm(0)
             faulthandler.disable()
 
-    return all_results, {"execution time": total_execution}
+    final_metadata = {"execution time": total_execution}
+    if first_failure_info:
+        final_metadata.update(first_failure_info)
+    return all_results, final_metadata
 
 
 def grade_stdio(
@@ -337,97 +342,95 @@ def grade_stdio(
 
     all_results = []
     total_execution_time = 0
+    first_failure_info = None
     for idx, (gt_inp, gt_out) in enumerate(zip(all_inputs, all_outputs)):
         signal.alarm(timeout)
         faulthandler.enable()
 
-        signal.alarm(timeout)
-        with Capturing() as captured_output:
-            try:
+        prediction = None
+        try:
+            with Capturing() as captured_output:
                 start = time.time()
                 call_method(method, gt_inp)
                 total_execution_time += time.time() - start
                 # reset the alarm
-                signal.alarm(0)
-            except Exception as e:
-                signal.alarm(0)
-                if "timeoutexception" in repr(e).lower():
-                    all_results.append(-3)
-                    return all_results, {
-                        "error": repr(e),
-                        "error_code": -3,
-                        "error_message": "Time Limit Exceeded",
-                        "inputs": truncatefn(gt_inp),
-                        "expected": truncatefn(gt_out),
-                    }
-                else:
-                    all_results.append(-4)
-                    return all_results, {
-                        "error": repr(e),
-                        "error_code": -4,
-                        "error_message": "Runtime Error",
-                        "inputs": truncatefn(gt_inp),
-                        "expected": truncatefn(gt_out),
-                    }
+            signal.alarm(0)
+            prediction = captured_output[0] if captured_output else ""
 
-            finally:
-                signal.alarm(0)
-                faulthandler.disable()
+        except Exception as e:
+            signal.alarm(0)
+            if "timeoutexception" in repr(e).lower():
+                all_results.append(-3)
+                if not first_failure_info:
+                    first_failure_info = {"error_code": -3, "error_message": "Time Limit Exceeded"}
+                continue
+            else:
+                all_results.append(-4)
+                if not first_failure_info:
+                    first_failure_info = {"error_code": -4, "error_message": "Runtime Error"}
+                continue
+        finally:
+            signal.alarm(0)
+            faulthandler.disable()
 
-        prediction = captured_output[0]
+        if prediction is None:
+            # Should not happen if there was no exception, but as a safeguard.
+            all_results.append(-4)  # Runtime error
+            if not first_failure_info:
+                first_failure_info = {
+                    "error_code": -4,
+                    "error_message": "Runtime Error: No output produced",
+                }
+            continue
 
         stripped_prediction_lines = get_stripped_lines(prediction)
         stripped_gt_out_lines = get_stripped_lines(gt_out)
 
-        ## WA happens in multiple circumstances
-        ## so cache the return to make it clean!
-        WA_send_args = {
-            "output": truncatefn(prediction),
-            "inputs": truncatefn(gt_inp),
-            "expected": truncatefn(gt_out),
-            "error_code": -2,
-        }
-
         if len(stripped_prediction_lines) != len(stripped_gt_out_lines):
             all_results.append(-2)
-            WA_send_args["error_message"] = "Wrong answer: mismatched output length"
-            return all_results, WA_send_args
+            if not first_failure_info:
+                first_failure_info = {
+                    "error_code": -2,
+                    "error_message": "Wrong answer: mismatched output length",
+                }
+            continue
 
-        for output_line_idx, (
-            stripped_prediction_line,
-            stripped_gt_out_line,
-        ) in enumerate(zip(stripped_prediction_lines, stripped_gt_out_lines)):
-            WA_send_args["error_message"] = (
-                f"Wrong answer at {output_line_idx=}: {truncatefn(stripped_prediction_line)} != {truncatefn(stripped_gt_out_line)}"
-            )
-
-            ## CASE 1: exact match
+        test_case_failed = False
+        for stripped_prediction_line, stripped_gt_out_line in zip(
+            stripped_prediction_lines, stripped_gt_out_lines
+        ):
             if stripped_prediction_line == stripped_gt_out_line:
                 continue
-
-            ## CASE 2: element-wise comparision
-            ## if there are floating elements
-            ## use `decimal` library for good floating point comparision
-            ## otherwise gotcha: np.isclose(50000000000000000, 50000000000000001) = True
-            ## note that we should always be able to convert to decimals
 
             success, decimal_prediction_line = convert_line_to_decimals(
                 stripped_prediction_line
             )
             if not success:
-                all_results.append(-2)
-                return all_results, WA_send_args
-            success, decimal_gtout_line = convert_line_to_decimals(stripped_gt_out_line)
+                test_case_failed = True
+                break
+            success, decimal_gtout_line = convert_line_to_decimals(
+                stripped_gt_out_line
+            )
             if not success:
-                all_results.append(-2)
-                return all_results, WA_send_args
+                test_case_failed = True
+                break
 
             if decimal_prediction_line == decimal_gtout_line:
                 continue
 
+            test_case_failed = True
+            break
+
+        if test_case_failed:
             all_results.append(-2)
-            return all_results, WA_send_args
+            if not first_failure_info:
+                first_failure_info = {"error_code": -2, "error_message": "Wrong Answer"}
+            continue
+
         all_results.append(True)
+
+    if first_failure_info:
+        return all_results, first_failure_info
 
     return all_results, {"execution time": total_execution_time}
 
