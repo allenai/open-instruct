@@ -11,11 +11,13 @@ Usage:
         --chat_template_name tulu \
         --add_bos \
         --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture-0225 1.0 \
-        --max_seq_length 4096 \
         --output_dir /weka/oe-adapt-default/tylerr/tulu-3-sft-olmo-2-mixture-0225-olmocore
 
 NOTE: allenai/OLMo-2-1124-7B tokenizer is the same as allenai/dolma2-tokenizer, but allenai/OLMo-2-1124-7B
 has additional metadata required for this script.
+
+Recommendations:
+ * Don't use max-seq-length, keep full sequences and allow Olmo-core to truncate if needed.
 """
 
 import argparse
@@ -24,6 +26,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
+from tqdm import tqdm
 
 from open_instruct.dataset_transformation import (
     ATTENTION_MASK_KEY,
@@ -61,7 +64,10 @@ def main():
         "--dataset_split", type=str, default="train", help="Dataset split to use"
     )
     parser.add_argument(
-        "--max_seq_length", type=int, default=4096, help="Maximum sequence length"
+        "--max_seq_length",
+        type=int,
+        default=None,
+        help="Maximum sequence length. If not provided, no truncation will be performed.",
     )
     parser.add_argument(
         "--num_examples",
@@ -86,7 +92,10 @@ def main():
 
     # TODO: improve configurability of transform factory
     transform_functions_and_args = [
-        ("sft_tulu_tokenize_and_truncate_v1", {"max_seq_length": args.max_seq_length}),
+        (
+            "sft_tulu_tokenize_and_truncate_v1",
+            {"max_seq_length": args.max_seq_length, "warn_on_truncation": True},
+        ),
         ("sft_tulu_filter_v1", {}),  # remove examples that don't have any labels
     ]
 
@@ -97,6 +106,7 @@ def main():
         dataset_transform_fn=[func for func, _ in transform_functions_and_args],
         transform_fn_args=[args for _, args in transform_functions_and_args],
         target_columns=TOKENIZED_SFT_DATASET_KEYS,
+        dataset_skip_cache=True,
     )
 
     if args.visualize:
@@ -114,13 +124,12 @@ def main():
     labels = []
     attention_mask = []
     sample: Mapping[str, Any]
-    for i, sample in enumerate(train_dataset):
-        if i % 5000 == 0:
-            print(f"Processing sample {i}/{len(train_dataset)}")
+    for sample in tqdm(train_dataset, desc="Collecting tokens"):  # type: ignore
         token_ids.extend(sample[INPUT_IDS_KEY])
         labels.extend(sample[LABELS_KEY])
         attention_mask.extend(sample[ATTENTION_MASK_KEY])
 
+    print(f"Total sequences: {len(train_dataset)}")
     print(f"Total tokens: {len(token_ids)}")
     print(f"Maximum token ID: {max(token_ids)}")
     print("Writing data to numpy files...")
@@ -130,7 +139,7 @@ def main():
     output_dir = os.path.join(args.output_dir, tokenizer_name)
     os.makedirs(output_dir, exist_ok=True)
 
-    def write_memmap_chunked(base_filename, data, dtype, max_size_gb=2):
+    def write_memmap_chunked(base_filename, data, dtype, max_size_gb=1):
         """Write data to multiple memmap files if size exceeds max_size_gb."""
         # Calculate size in bytes
         item_size = np.dtype(dtype).itemsize
