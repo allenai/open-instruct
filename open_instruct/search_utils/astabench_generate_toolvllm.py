@@ -5,7 +5,7 @@ python -m open_instruct.search_utils.astabench_generate_toolvllm \
     --dataset_file rubrics_v1.json \
     --add_prompt \
     --model_path /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/1006_rl_rag_open_scholar_ppo__1__1749687970_checkpoints/step_700 \
-    --output_dir astabench_ppo_generate_file.jsonl \
+    --output_path astabench_ppo_generate_file.jsonl \
     --num_docs 3 \
     --search_api_endpoint http://root@saturn-cs-aus-232.reviz.ai2.in:47695/search
 """
@@ -40,9 +40,6 @@ parser.add_argument("--output_path", type=str, default="tmp", help="Output path.
 parser.add_argument("--num_docs", type=int, default=3, help="Number of documents to retrieve.")
 parser.add_argument("--search_api_endpoint", type=str, default="http://localhost:8000", help="Search API endpoint.")
 args = parser.parse_args()
-
-# make output directory
-os.makedirs(args.output_dir, exist_ok=True)
 
 # Load the tokenizer
 tokenizer = AutoTokenizer.from_pretrained(args.model_path, revision=args.tokenizer_revision)
