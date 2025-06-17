@@ -1205,7 +1205,6 @@ def data_preparation_thread(
             else:
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
 
-
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved
             max_possible_score = 0

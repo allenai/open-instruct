@@ -162,7 +162,9 @@ class CountdownVerifier(VerifierFunction):
     def __init__(self, name: str, weight: float = 1.0, verifier_config: Optional[VerifierConfig] = None) -> None:
         super().__init__("countdown", weight=weight, verifier_config=verifier_config)
 
-    def __call__(self, tokenized_prediction: List[int], prediction: str, label: tuple[int, List[int]]) -> float:
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
         target = label[0]
         numbers = label[1:]
         try:

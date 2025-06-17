@@ -6,9 +6,10 @@ HF_HOME=/weka/oe-adapt-default/allennlp/.cache/huggingface
 uv run open_instruct/grpo_fast.py \
     --exp_name $exp_name \
     --output_dir tmp \
-    --dataset_name Jiayi-Pan/Countdown-Tasks-3to4 \
-    --dataset_train_split train[1000:] \
-    --dataset_eval_split train[:1000] \
+    --dataset_mixer_list mnoukhov/rlvr_countdown 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list mnoukhov/rlvr_countdown 1.0 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 256 \
     --max_prompt_token_length 256 \
     --response_length 1024 \
@@ -18,15 +19,14 @@ uv run open_instruct/grpo_fast.py \
     --num_samples_per_prompt_rollout 8 \
     --total_episodes 64000 \
     --model_name_or_path Qwen/Qwen3-1.7B-Base \
-    --base_prompt \
     --stop_strings "<|endoftext|>" "</answer>" \
+    --chat_template_name r1_simple_chat_postpend_think \
     --apply_r1_style_format_reward \
     --r1_style_format_reward 0.1 \
     --apply_verifiable_reward \
     --verification_reward 0.9 \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --eval_temperature 0.7 \
     --learning_rate 1e-6 \
     --num_epochs 1 \
     --num_learners_per_node 1 \
@@ -50,6 +50,8 @@ uv run open_instruct/grpo_fast.py \
     --with_tracking False $@
     #
 
+    # --eval_temperature 0.7 \
+    # --base_prompt \
     # --liger_kernel \
     # --vllm_enforce_eager \
     # --dataset_mixer_list_splits train \
