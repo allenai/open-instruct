@@ -8,7 +8,6 @@ OLMoCore accepts data in numpy mmap format. One file is for the input tokens, on
 Usage:
     python scripts/data/convert_sft_data_for_olmocore.py \
         --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
-        --chat_template_name tulu \
         --add_bos \
         --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture-0225 1.0 \
         --output_dir /weka/oe-adapt-default/tylerr/tulu-3-sft-olmo-2-mixture-0225-olmocore
@@ -29,10 +28,10 @@ Recommendations:
  * Don't use max-seq-length, keep full sequences and allow Olmo-core to truncate if needed.
 """
 
-import argparse
 import os
 from collections.abc import Mapping
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, List, Optional
 
 import numpy as np
 from tqdm import tqdm
@@ -46,59 +45,47 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
+from open_instruct.utils import ArgumentParserPlus
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Convert SFT data for OLMoCore format")
-    parser.add_argument(
-        "--tokenizer_name_or_path",
-        type=str,
-        default="allenai/OLMo-2-1124-7B",
-        help="Tokenizer name or path",
+@dataclass
+class ConvertSFTDataArguments:
+    """
+    Arguments for converting SFT data to OLMoCore format.
+    """
+
+    output_dir: str = field(
+        metadata={"help": "Output directory"},
     )
-    parser.add_argument(
-        "--chat_template_name", type=str, default="tulu", help="Chat template name"
+    dataset_mixer_list: List[str] = field(
+        default_factory=lambda: ["allenai/tulu-3-sft-olmo-2-mixture-0225", "1.0"],
+        metadata={
+            "help": "Dataset mixer list [dataset_name, weight, dataset_name, weight, ...]"
+        },
     )
-    parser.add_argument(
-        "--add_bos", action="store_true", default=True, help="Add BOS token"
+    dataset_split: str = field(
+        default="train",
+        metadata={"help": "Dataset split to use"},
     )
-    parser.add_argument(
-        "--dataset_mixer_list",
-        type=str,
-        nargs="+",
-        default=["allenai/tulu-3-sft-olmo-2-mixture-0225", "1.0"],
-        help="Dataset mixer list [dataset_name, weight, dataset_name, weight, ...]",
-    )
-    parser.add_argument(
-        "--dataset_split", type=str, default="train", help="Dataset split to use"
-    )
-    parser.add_argument(
-        "--max_seq_length",
-        type=int,
+    max_seq_length: Optional[int] = field(
         default=None,
-        help="Maximum sequence length. If not provided, no truncation will be performed.",
+        metadata={
+            "help": "Maximum sequence length. If not provided, no truncation will be performed."
+        },
     )
-    parser.add_argument(
-        "--num_examples",
-        type=int,
+    num_examples: int = field(
         default=0,
-        help="Number of examples to process for debugging. 0 means process all examples.",
+        metadata={
+            "help": "Number of examples to process for debugging. 0 means process all examples."
+        },
     )
-    parser.add_argument(
-        "--output_dir", type=str, required=True, help="Output directory"
-    )
-    parser.add_argument(
-        "--visualize", action="store_true", help="Visualize first token sequence"
-    )
-
-    args = parser.parse_args()
-
-    tc = TokenizerConfig(
-        tokenizer_name_or_path=args.tokenizer_name_or_path,
-        chat_template_name=args.chat_template_name,
-        add_bos=args.add_bos,
+    visualize: bool = field(
+        default=False,
+        metadata={"help": "Visualize first token sequence"},
     )
 
+
+def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     # TODO: improve configurability of transform factory
     transform_functions_and_args = [
         (
@@ -187,4 +174,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = ArgumentParserPlus((ConvertSFTDataArguments, TokenizerConfig))
+    args, tc = parser.parse_args_into_dataclasses()
+    main(args, tc)
