@@ -29,6 +29,11 @@ MODEL_COSTS_PER_1M_TOKENS = {
         "input": 10 * 0.5,
         "output": 40 * 0.5,
     },
+    # Annoyingly, this is actually the same as o3-batch, but it varies by region.
+    "o3": {
+        "input": 10 * 0.5,
+        "output": 40 * 0.5,
+    },
 }
 
 # Maximum number of prompts per batch file
