@@ -95,6 +95,7 @@ include = 'my_dir/.*\.py$'
 [tool.isort]
 known_first_party = ["open_instruct"]
 profile = "black"
+src_paths = ["open_instruct"]
 
 [tool.ruff]
 target-version = "py310"
