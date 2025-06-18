@@ -65,8 +65,8 @@ class PythonCodeTool(Tool):
         super().__init__(*args, **kwargs)
 
     def __call__(self, prompt: str) -> ToolOutput:
-        """
-        NOTE: We avoid using `r'<tool>\s*(.*?)\s*</tool>'` because it will fail in this case # noqa: W605
+        r"""
+        NOTE: We avoid using `r'<tool>\s*(.*?)\s*</tool>'` because it will fail in this case  # noqa: W605
         Let's implement this in Python using the `<code>` tag to execute the code and get the result.
         </think>
 
