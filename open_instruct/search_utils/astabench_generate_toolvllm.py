@@ -4,10 +4,10 @@ example:
 python -m open_instruct.search_utils.astabench_generate_toolvllm \
     --dataset_file rubrics_v1.json \
     --add_prompt \
-    --model_path /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/1006_rl_rag_open_scholar_ppo__1__1749687970_checkpoints/step_700 \
-    --output_path astabench_ppo_generate_file.jsonl \
+    --model_path /weka/oe-adapt-default/hamishi/model_checkpoints/rl_rag/0306_rl_rag_tool_s2_ppo_with_f1_reward__1__1748998407_checkpoints/step_800 \
+    --output_path ppo_s2_endpoint.jsonl \
     --num_docs 3 \
-    --search_api_endpoint http://root@saturn-cs-aus-232.reviz.ai2.in:47695/search
+    --search_api_endpoint https://api.semanticscholar.org/graph/v1/snippet/search
 """
 
 import argparse
@@ -25,7 +25,7 @@ from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 
 ray.init()
 
-PROMPT = "Answer the given question. You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, if you find you lack some knowledge, you can call a search engine by <query> query </query>, and it will return the top searched results between <document> and </document>. You can search as many times as you want. If you find no further external knowledge needed, you can directly provide the answer inside <finish> and </finish>. For example, <finish> xxx </finish>. Question: <question>"
+PROMPT = "Answer the given question. You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, if you find you lack some knowledge, you can call a search engine by <query> query </query>, and it will return the top searched results between <document> and </document>. You can search as many times as you want. If you find no further external knowledge needed, you can directly provide the answer inside <finish> and </finish>. For example, <finish> xxx </finish>. Question:"
 
 parser = argparse.ArgumentParser(description="Eval SimpleQA using the search actor.")
 parser.add_argument(
@@ -96,11 +96,12 @@ generations = [tokenizer.decode(x, skip_special_tokens=True) for x in generation
 reasonings = []
 answers = []
 for generation in generations:
-    reasoning = generation.split("</think>")[0]
-    answer = generation.split("</think>")[-1]
-    answer = answer.replace("<finish>", "").replace("</finish>", "")
-    reasonings.append(reasoning.strip())
-    answers.append(answer.strip())
+    think_matches = re.findall(r"<think>(.*?)</think>", generation, re.DOTALL)
+    finish_matches = re.findall(r"<finish>(.*?)</finish>", generation, re.DOTALL)
+    reasoning = think_matches[-1].strip() if think_matches else ""
+    answer = finish_matches[-1].strip() if finish_matches else ""
+    reasonings.append(reasoning)
+    answers.append(answer)
 
 
 # construct outputs. We need jsonl with question/answer
