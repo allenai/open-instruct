@@ -1626,7 +1626,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             args.eval_freq,
             resume_training_step,
             args.tool_use,
-            None,
+            args.vllm_sleep_mode,
         ),
     )
     thread.start()

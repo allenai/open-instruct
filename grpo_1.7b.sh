@@ -3,7 +3,7 @@ exp_name="grpo_qwen3_1.7b_base"
 
 HF_HOME=/weka/oe-adapt-default/allennlp/.cache/huggingface
 
-uv run open_instruct/grpo_fast.py \
+uv run open_instruct/grpo_dev.py \
     --exp_name $exp_name \
     --output_dir tmp \
     --dataset_mixer_list mnoukhov/rlvr_countdown 1.0 \
@@ -13,15 +13,16 @@ uv run open_instruct/grpo_fast.py \
     --max_token_length 256 \
     --max_prompt_token_length 256 \
     --response_length 1024 \
-    --pack_length 4096 \
+    --pack_length 2048 \
     --per_device_train_batch_size 1 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 8 \
     --total_episodes 64000 \
     --model_name_or_path Qwen/Qwen3-1.7B-Base \
     --stop_strings "<|endoftext|>" "</answer>" \
-    --chat_template_name r1_simple_chat_postpend_think \
+    --chat_template_name simple_concat_with_new_line \
     --apply_r1_style_format_reward \
+    --additive_format_reward \
     --r1_style_format_reward 0.1 \
     --apply_verifiable_reward \
     --verification_reward 0.9 \

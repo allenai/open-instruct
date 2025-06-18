@@ -615,7 +615,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 model_config.model_name_or_path,
                 revision=model_config.model_revision,
                 torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2",
+                attn_implementation=model_config.attn_implementation,
                 use_cache=False,
             )
             disable_dropout_in_model(self.ref_policy)
@@ -806,6 +806,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if args.offload_ref:
             with Timer("[Training Processes] Move Ref to CPU", noop=self.rank != 0):
                 self.ref_policy.to("cpu")
+                torch.cuda.empty_cache()
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
@@ -1380,16 +1381,20 @@ def data_preparation_thread(
         )
 
 
-def create_datasets(args: Args, tokenizer): # SYSTEM_MESSAGE = "You are a helpful assistant. You first thinks about the reasoning process in the mind and then provides the user with the answer."
+def create_datasets(args: Args, tokenizer): 
     from datasets import load_dataset
     def preprocess_example(example, tokenizer,):
         base_prompt = example["messages"][0]['content']
         full_prompt = base_prompt + (
-            "First reason about the question in <think> </think> tags. "
-            "Then return the final answer as an equation without = in <answer> </answer> tags. "
+            "Return the final answer as an equation without = in <answer> </answer> tags. "
             "For example <answer> (1 + 2) / 3 </answer>."
-            "\n\n<think>"
         ) 
+        # full_prompt = base_prompt + (
+        #     "First reason about the question in <think> </think> tags. "
+        #     "Then return the final answer as an equation without = in <answer> </answer> tags. "
+        #     "For example <answer> (1 + 2) / 3 </answer>."
+        #     "\n\n<think>"
+        # ) 
         input_ids = tokenizer.encode(full_prompt, add_special_tokens=False)
 
         return {
@@ -1674,7 +1679,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             args.eval_freq,
             resume_training_step,
             args.tool_use,
-            None,
+            args.vllm_sleep_mode,
         ),
     )
     thread.start()
@@ -1968,7 +1973,7 @@ if __name__ == "__main__":
 
         if args.apply_r1_style_format_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
-                format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
+                format_scores = simple_format_reward_func(decoded_responses, args.r1_style_format_reward)
                 if len(format_scores) != len(scores):
                     raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
                 for i in range(len(format_scores)):
