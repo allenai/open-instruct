@@ -163,8 +163,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     print("Writing data to numpy files...")
 
     # Create output directory with tokenizer name
-    tokenizer_name = args.tokenizer_name_or_path.split("/")[-1]  # Drop org name
-    output_dir = os.path.join(args.output_dir, tokenizer_name)
+    output_dir = args.output_dir
     os.makedirs(output_dir, exist_ok=True)
 
     def write_memmap_chunked(base_filename, data, dtype, max_size_gb=1):
