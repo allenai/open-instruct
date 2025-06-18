@@ -11,11 +11,62 @@ Example:
 
 import re
 import logging
+import hashlib
+import uuid
 from typing import Dict, Any, Optional
 
-from paper_rubrics_utils import RubricCorpusQaGenericMetric
+from open_instruct.search_rewards.global_rewards_utils import RubricCorpusQaGenericMetric
 
 LOGGER = logging.getLogger(__name__)
+
+
+def generate_snippet_id() -> str:
+    """
+    Generate a unique random ID for snippets.
+    Should be used when inserting snippets into the context.
+    
+    Returns:
+        A unique string ID in format: '<hash>'
+    """
+    # Generate a random UUID and create a shorter hash
+    random_uuid = str(uuid.uuid4())
+    hash_object = hashlib.md5(random_uuid.encode())
+    short_hash = hash_object.hexdigest()[:8]  # Take first 8 characters
+    return f"{short_hash}"
+
+
+def extract_citations_from_context(context: str) -> Dict[str, str]:
+    """
+    Extract citations from the context.
+    
+    Citations are expected to be in the format:
+    <snippets id="a1b2c3d4" metadata='{"author": "smith", "source": "arxiv", "year": 2023}'>
+        Search result content here
+    </snippets>
+    
+    The id can be any string, including hash-like IDs (e.g., a1b2c3d4)
+    
+    Args:
+        context: The context string containing citations
+        
+    Returns:
+        Dictionary mapping id to search results content for all found citations
+    """
+    citations = {}
+    
+    # Pattern to match <snippets id="xxx" ...> content </snippets>
+    # Updated to handle quoted attributes in HTML-like format
+    pattern = r'<snippets\s+id=(["\'])([^"\']+)\1[^>]*>(.*?)</snippets>'
+    
+    matches = re.findall(pattern, context, re.DOTALL)
+    
+    for quote_char, snippet_id, search_results in matches:
+        # Clean up the id and search results (remove extra whitespace)
+        clean_id = snippet_id.strip()
+        clean_search_results = search_results.strip()
+        citations[clean_id] = clean_search_results
+    
+    return citations
 
 
 def compute_paper_reward(response: str, test_case: Dict[str, Any]) -> Dict[str, Any]:
@@ -23,8 +74,9 @@ def compute_paper_reward(response: str, test_case: Dict[str, Any]) -> Dict[str, 
     Compute a reward score for a response based on a test case.
     
     This function:
-    1. Extracts the final answer from the response (content between <answer> and </answer> tags)
-    2. Applies the scoring function from paper_rubrics_utils.py using the test case configuration
+    1. Extracts citations from the context (content before <answer> tag)
+    2. Extracts the final answer from the response (content between <answer> and </answer> tags)
+    3. Applies the scoring function from paper_rubrics_utils.py using the test case configuration
     
     Args:
         response: The full response text containing the answer
@@ -33,6 +85,7 @@ def compute_paper_reward(response: str, test_case: Dict[str, Any]) -> Dict[str, 
     Returns:
         Dictionary containing:
         - 'reward': The computed reward score (0-1)
+        - 'citations': Dictionary mapping citation identifiers to text
         - 'answer_extracted': The extracted answer text
         - 'extraction_success': Boolean indicating if answer extraction was successful
         - 'scoring_results': Full scoring results from the rubric metric
@@ -40,6 +93,7 @@ def compute_paper_reward(response: str, test_case: Dict[str, Any]) -> Dict[str, 
     """
     result = {
         'reward': 0.0,
+        'citations': {},
         'answer_extracted': None,
         'extraction_success': False,
         'scoring_results': None,
@@ -47,7 +101,20 @@ def compute_paper_reward(response: str, test_case: Dict[str, Any]) -> Dict[str, 
     }
     
     try:
-        # Step 1: Extract the answer from the response
+        # Step 1: Extract citations from the context (content before <answer> tag)
+        answer_pattern = r'<answer>'
+        answer_match = re.search(answer_pattern, response)
+        
+        if answer_match:
+            context_text = response[:answer_match.start()].strip()
+            extracted_citations = extract_citations_from_context(context_text)
+            result['citations'] = extracted_citations
+        else:
+            # If no <answer> tag found, extract citations from entire response
+            extracted_citations = extract_citations_from_context(response)
+            result['citations'] = extracted_citations
+        
+        # Step 2: Extract the answer from the response
         # Pattern to match content between <answer> and </answer> tags
         pattern = r'<answer>(.*?)</answer>'
         match = re.search(pattern, response, re.DOTALL)
@@ -61,18 +128,18 @@ def compute_paper_reward(response: str, test_case: Dict[str, Any]) -> Dict[str, 
         result['answer_extracted'] = extracted_answer
         result['extraction_success'] = True
         
-        # Step 2: Get the metric configuration from the test case
+        # Step 3: Get the metric configuration from the test case
         if 'metric_config' not in test_case or 'config' not in test_case['metric_config']:
             result['error'] = "Invalid test case format - missing metric_config.config"
             return result
         
         metric_config = test_case['metric_config']['config']
         
-        # Step 3: Initialize the scoring metric
+        # Step 4: Initialize the scoring metric
         metric = RubricCorpusQaGenericMetric(metric_config)
         
-        # Step 4: Apply the scoring function
-        scoring_results = metric.score_output(extracted_answer)
+        # Step 5: Apply the scoring function
+        scoring_results = metric.score_output(extracted_answer, extracted_citations)
         
         result['scoring_results'] = scoring_results
         result['reward'] = scoring_results['score']  # Use the overall score as reward

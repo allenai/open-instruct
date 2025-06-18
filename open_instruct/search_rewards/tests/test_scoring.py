@@ -7,7 +7,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Add current directory to path for test files
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from paper_rubrics_utils import RubricCorpusQaGenericMetric
+from open_instruct.search_rewards.global_rewards_utils import RubricCorpusQaGenericMetric
 from test_case import test_case
 from test_answer import test_answer
 

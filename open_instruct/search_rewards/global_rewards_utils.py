@@ -148,10 +148,11 @@ Split the response into individual claims, citations, and excerpts from the cita
 
         return {"citations": citation_score, "excerpts": excerpt_score}
 
-    def score_output(self, response: str) -> Dict[str, Any]:
+    def score_output(self, response: str, citations: Dict[str, str] = None) -> Dict[str, Any]:
         """
         Compute the cumulative weighted score for a system response such that the final score is between 0 and 1.
         :param response:
+        :param citations:
         :return: final weighted score with and without the static components
         """
         score_weights = {
@@ -179,7 +180,10 @@ Split the response into individual claims, citations, and excerpts from the cita
             self.config.question,
             "The level of expertise required to understand the answer should be roughly aligned with the estimated expertise of a typical person who would ask the question.",
         )
-        score_components.update(self._score_citations_excerpts(response))
+        if citations:
+            score_components.update(self._score_in_context_citations_excerpts(response, citations))
+        else:
+            score_components.update(self._score_citations_excerpts(response))
 
         for x in self.config.other_properties:
             if x.criterion:
