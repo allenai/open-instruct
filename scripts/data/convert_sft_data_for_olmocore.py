@@ -31,7 +31,7 @@ Recommendations:
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 
 import numpy as np
 from tqdm import tqdm
@@ -45,7 +45,7 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
-from open_instruct.utils import ArgumentParserPlus
+from open_instruct.utils import ArgumentParserPlus, is_beaker_job
 
 
 @dataclass
@@ -54,38 +54,67 @@ class ConvertSFTDataArguments:
     Arguments for converting SFT data to OLMoCore format.
     """
 
-    output_dir: str = field(
-        metadata={"help": "Output directory"},
-    )
+    """Output directory"""
+    output_dir: str = field()
+
+    """The name of the dataset to use (via the datasets library)."""
+    dataset_name: Optional[str] = field(default=None)
+
+    """A dictionary of datasets (local or HF) to sample from."""
+    dataset_mixer: Optional[dict] = field(default=None)
+
+    """A list of datasets (local or HF) to sample from."""
     dataset_mixer_list: List[str] = field(
-        default_factory=lambda: ["allenai/tulu-3-sft-olmo-2-mixture-0225", "1.0"],
-        metadata={
-            "help": "Dataset mixer list [dataset_name, weight, dataset_name, weight, ...]"
-        },
+        default_factory=lambda: ["allenai/tulu-3-sft-olmo-2-mixture-0225", "1.0"]
     )
-    dataset_split: str = field(
-        default="train",
-        metadata={"help": "Dataset split to use"},
+
+    """The dataset splits to use for training"""
+    dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
+
+    """The list of transform functions to apply to the dataset."""
+    dataset_transform_fn: list[str] = field(
+        default_factory=lambda: [
+            "sft_tulu_tokenize_and_truncate_v1",
+            "sft_tulu_filter_v1",
+        ]
     )
-    max_seq_length: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": "Maximum sequence length. If not provided, no truncation will be performed."
-        },
+
+    """The columns to use for the dataset."""
+    dataset_target_columns: List[str] = field(
+        default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS
     )
-    num_examples: int = field(
-        default=0,
-        metadata={
-            "help": "Number of examples to process for debugging. 0 means process all examples."
-        },
-    )
-    visualize: bool = field(
-        default=False,
-        metadata={"help": "Visualize first token sequence"},
-    )
+
+    """The mode to use for caching the dataset."""
+    dataset_cache_mode: Literal["hf", "local"] = "local"
+
+    """The directory to save the local dataset cache to."""
+    dataset_local_cache_dir: str = "local_dataset_cache"
+
+    """The hash of the dataset configuration."""
+    dataset_config_hash: Optional[str] = None
+
+    """Whether to skip the cache."""
+    dataset_skip_cache: bool = False
+
+    """Maximum sequence length. If not provided, no truncation will be performed."""
+    max_seq_length: Optional[int] = field(default=None)
+
+    """Number of examples to process for debugging. 0 means process all examples."""
+    num_examples: int = field(default=0)
+
+    """Visualize first token sequence"""
+    visualize: bool = field(default=False)
 
 
 def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
+    args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
+    if is_beaker_job():
+        beaker_cache_dir = (
+            "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
+        )
+        if os.path.exists(beaker_cache_dir):
+            args.dataset_local_cache_dir = beaker_cache_dir
+
     # TODO: improve configurability of transform factory
     transform_functions_and_args = [
         (
@@ -97,12 +126,15 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
 
     train_dataset = get_cached_dataset_tulu(
         dataset_mixer_list=args.dataset_mixer_list,
-        dataset_mixer_list_splits=[args.dataset_split],
+        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
         tc=tc,
         dataset_transform_fn=[func for func, _ in transform_functions_and_args],
         transform_fn_args=[args for _, args in transform_functions_and_args],
-        target_columns=TOKENIZED_SFT_DATASET_KEYS,
-        dataset_skip_cache=True,
+        target_columns=args.dataset_target_columns,
+        dataset_cache_mode=args.dataset_cache_mode,
+        dataset_config_hash=args.dataset_config_hash,
+        dataset_local_cache_dir=args.dataset_local_cache_dir,
+        dataset_skip_cache=args.dataset_skip_cache,
     )
 
     if args.visualize:
