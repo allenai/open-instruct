@@ -10,7 +10,7 @@ import base64
 import sys
 import faulthandler
 import platform
-
+import traceback
 # used for debugging to time steps
 from datetime import datetime
 
@@ -233,92 +233,6 @@ def get_stripped_lines(val: str):
     return [val_line.strip() for val_line in val.split("\n")]
 
 
-def grade_call_based(
-    code: str, all_inputs: list, all_outputs: list, fn_name: str, timeout: int
-):
-    # call-based clean up logic
-    # need to wrap in try-catch logic after to catch the correct errors, but for now this is fine.
-    code = import_string + "\n\n" + code
-    compiled_sol = compile_code(code, timeout)
-
-    if compiled_sol is None:
-        return
-
-    method = get_function(compiled_sol, fn_name)
-
-    if method is None:
-        return
-
-    all_inputs = [
-        [json.loads(line) for line in inputs.split("\n")] for inputs in all_inputs
-    ]
-
-    all_outputs = [json.loads(output) for output in all_outputs]
-
-    total_execution = 0
-    all_results = []
-    first_failure_info = None
-    for idx, (gt_inp, gt_out) in enumerate(zip(all_inputs, all_outputs)):
-        signal.alarm(timeout)
-        faulthandler.enable()
-        try:
-            # can lock here so time is useful
-            start = time.time()
-            prediction = method(*gt_inp)
-            total_execution += time.time() - start
-            signal.alarm(0)
-
-            # don't penalize model if it produces tuples instead of lists
-            # ground truth sequences are not tuples
-            if isinstance(prediction, tuple):
-                prediction = list(prediction)
-
-            tmp_result = prediction == gt_out
-
-            # handle floating point comparisons
-
-            all_results.append(tmp_result)
-
-            if not tmp_result and not first_failure_info:
-                first_failure_info = {
-                    "output": truncatefn(prediction),
-                    "inputs": truncatefn(gt_inp),
-                    "expected": truncatefn(gt_out),
-                    "error_code": -2,
-                    "error_message": "Wrong Answer",
-                }
-        except Exception as e:
-            signal.alarm(0)
-            if "timeoutexception" in repr(e).lower():
-                all_results.append(-3)
-                if not first_failure_info:
-                    first_failure_info = {
-                        "error": repr(e),
-                        "error_code": -3,
-                        "error_message": "Time Limit Exceeded",
-                        "inputs": truncatefn(gt_inp),
-                        "expected": truncatefn(gt_out),
-                    }
-            else:
-                all_results.append(-4)
-                if not first_failure_info:
-                    first_failure_info = {
-                        "error": repr(e),
-                        "error_code": -4,
-                        "error_message": "Runtime Error",
-                        "inputs": truncatefn(gt_inp),
-                        "expected": truncatefn(gt_out),
-                    }
-        finally:
-            signal.alarm(0)
-            faulthandler.disable()
-
-    final_metadata = {"execution time": total_execution}
-    if first_failure_info:
-        final_metadata.update(first_failure_info)
-    return all_results, final_metadata
-
-
 def grade_stdio(
     code: str,
     all_inputs: list,
@@ -330,13 +244,11 @@ def grade_stdio(
 
     ## we wrap the given code inside another function
     code = make_function(code)
-
     compiled_sol = compile_code(code, timeout)
     if compiled_sol is None:
         return
 
     method = get_function(compiled_sol, "wrapped_function")
-
     if method is None:
         return
 
@@ -433,84 +345,3 @@ def grade_stdio(
         return all_results, first_failure_info
 
     return all_results, {"execution time": total_execution_time}
-
-
-def run_test(sample, test=None, debug=False, timeout=6):
-    """
-    if test(generated_code) is not None it'll try to run the code.
-    otherwise it'll just return an input and output pair.
-    """
-    signal.signal(signal.SIGALRM, timeout_handler)
-
-    # Disable functionalities that can make destructive changes to the test.
-    # max memory is set to 4GB
-    reliability_guard()
-
-    if debug:
-        print(f"start = {datetime.now().time()}")
-
-    try:
-        in_outs = json.loads(sample["input_output"])
-    except ValueError as e:
-        raise e
-        in_outs = None
-
-    if in_outs:
-        if in_outs.get("fn_name") is None:
-            which_type = CODE_TYPE.standard_input  # Standard input
-            method_name = None
-
-        else:
-            which_type = CODE_TYPE.call_based  # Call-based
-            method_name = in_outs["fn_name"]
-
-    if debug:
-        print(f"loaded input_output = {datetime.now().time()}")
-
-    if test is None:
-        assert False, "should not happen: test code is none"
-        return in_outs, {"error": "no test code provided"}
-    elif test is not None:
-        results = []
-        sol = import_string
-        if debug:
-            print(f"loading test code = {datetime.now().time()}")
-
-        if which_type == CODE_TYPE.call_based:
-            signal.alarm(timeout)
-            try:
-                results, metadata = grade_call_based(
-                    code=test,
-                    all_inputs=in_outs["inputs"],
-                    all_outputs=in_outs["outputs"],
-                    fn_name=method_name,
-                    timeout=timeout,
-                )
-                return results, metadata
-            except Exception as e:
-                return [-4], {
-                    "error_code": -4,
-                    "error_message": f"Error during testing: {e}",
-                }
-            finally:
-                signal.alarm(0)
-        elif which_type == CODE_TYPE.standard_input:
-            # sol
-            # if code has if __name__ == "__main__": then remove it
-
-            signal.alarm(timeout)
-            try:
-                results, metadata = grade_stdio(
-                    code=test,
-                    all_inputs=in_outs["inputs"],
-                    all_outputs=in_outs["outputs"],
-                    timeout=timeout,
-                )
-                return results, metadata
-            except Exception as e:
-                return [-4], {
-                    "error_code": -4,
-                    "error_message": f"Error during testing: {e}",
-                }
-            finally:
-                signal.alarm(0)
