@@ -31,7 +31,9 @@ def main(args: Args):
         example["dataset"] = "countdown"
         prompt = (f"Using the numbers {example['nums']}, create an equation that equals {example['target']}. "
             "You can use basic arithmetic operations (+, -, *, /) "
-            "and each number can only be used once, though not all numbers need to be used.")
+            "and each number can only be used once, though not all numbers need to be used. "
+            "Return the final answer as an equation without = in <answer> </answer> tags. "
+            "For example <answer> (1 + 2) / 3 </answer>.")
         example["messages"] = [
             {"role": "user", "content": prompt},
         ]
