@@ -46,7 +46,7 @@ babel==2.17.0
 backrefs==5.8
     # via mkdocs-material
 beaker-py==1.34.3
-bitsandbytes==0.46.0
+bitsandbytes==0.46.0 ; sys_platform != 'darwin'
     # via open-instruct
 black==25.1.0
 blake3==1.0.5
@@ -161,7 +161,7 @@ filelock==3.18.0
 flake8==7.2.0
 flash-attn==2.7.4.post1
     # via open-instruct
-fonttools==4.58.2
+fonttools==4.58.1
     # via matplotlib
 frozenlist==1.6.2
     # via
@@ -272,9 +272,9 @@ lark==1.2.2
     #   vllm
 liger-kernel==0.5.10
     # via open-instruct
-litellm==1.72.1
+litellm==1.72.0
     # via open-instruct
-llguidance==0.7.29 ; platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
+llguidance==0.7.27 ; platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
     # via vllm
 llvmlite==0.44.0
     # via numba
@@ -473,7 +473,7 @@ packaging==25.0
     #   transformers
 paginate==0.5.7
     # via mkdocs-material
-pandas==2.3.0
+pandas==2.2.3
     # via datasets
 partial-json-parser==0.2.1.1.post5
     # via vllm
@@ -729,7 +729,6 @@ tomli==2.2.1 ; python_full_version < '3.11'
 torch==2.6.0 ; sys_platform == 'darwin'
     # via
     #   accelerate
-    #   bitsandbytes
     #   compressed-tensors
     #   deepspeed
     #   flash-attn
