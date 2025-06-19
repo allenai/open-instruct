@@ -928,6 +928,8 @@ def rlvr_tokenize_v1(
         prompt,
         add_generation_prompt=True,
     )
+    print("debug1")
+    print(row[INPUT_IDS_PROMPT_KEY])
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
