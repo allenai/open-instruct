@@ -946,7 +946,7 @@ def rlvr_tokenize_v2(
     ground_truths_key: str = GROUND_TRUTHS_KEY,
     dataset_source_key: str = DATASET_SOURCE_KEY,
 ):
-    if len(row[sft_messages_key]) == 1:
+    if len(row[sft_messages_key]) == 1 or len(row[sft_messages_key]) == 3:
         prompt = row[sft_messages_key]
     else:
         prompt = row[sft_messages_key][:-1]
