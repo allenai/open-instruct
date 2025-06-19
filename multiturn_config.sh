@@ -27,7 +27,7 @@ python mason.py \
     --non_stop_penalty True \
     --non_stop_penalty_value 0.0 \
     --temperature 1.0 \
-    --chat_template_name tulu \
+    --chat_template_name tulu_thinker \
     --oe_eval_tasks  ifeval::tulu \
     --oe_eval_max_length 2048 \
     --total_episodes 2000000 \

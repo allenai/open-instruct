@@ -221,8 +221,6 @@ async def apply_verifiable_reward(
 ):
     if queries is None:
         queries = [None] * len(responses)
-    print("DEBUGGING!")
-    print(queries)
     # Collect all async tasks for parallel execution
     async_tasks = []
     task_metadata = []
