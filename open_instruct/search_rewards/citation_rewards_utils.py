@@ -61,20 +61,6 @@ Please provide the rating first, followed by the analysis, in the format "Rating
 
 
 
-def run_llm_judge(user_prompt: str, model_name: str="gpt-4.5-preview", deployment: str="gpt-4.5-preview-standard") -> str:
-    response = run_azure_openai(
-        model_name,
-        None,
-        user_prompt=user_prompt,
-        deployment=deployment,
-        max_completion_tokens=800,
-        top_p=1.0,
-        frequency_penalty=0.0,
-        presence_penalty=0.0)
-    return response
-
-
-
 def score_in_context_citations(question: str, response: str, citations: Dict[str, str]) -> Dict[str, float]:
     """
     Compute the cumulative weighted score for a system response such that the final score is between 0 and 1.
@@ -221,6 +207,20 @@ def extract_relevant_rating_from_response(response: str) -> int:
             return 0
     else:
         return 0
+
+
+def run_llm_judge(user_prompt: str, model_name: str="gpt-4.5-preview", deployment: str="gpt-4.5-preview-standard") -> str:
+    response = run_azure_openai(
+        model_name,
+        None,
+        user_prompt=user_prompt,
+        deployment=deployment,
+        max_completion_tokens=800,
+        top_p=1.0,
+        frequency_penalty=0.0,
+        presence_penalty=0.0)
+    return response
+
 
 
 if __name__ == "__main__":

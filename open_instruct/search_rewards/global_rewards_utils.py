@@ -4,7 +4,8 @@ from typing import Any, Dict, List
 
 from pydantic.v1 import BaseModel, Field
 
-from run_utils import extract_json_from_response, run_chatopenai
+from run_utils import extract_json_from_response
+from citation_rewards_utils import score_in_context_citations, run_llm_judge
 
 LOGGER = logging.getLogger(__name__)
 
@@ -57,13 +58,13 @@ class RubricCorpusQaGenericMetric:
         :param prop: the rubric/criterion to be satisfied
         :return: score between 0 and 1 after normalizing the LLM score
         """
-        resp = run_chatopenai(
+        system_prompt = """You will be given a question someone asked (in <question></question> tags) and the corresponding response (in <response></response> tags) given to them by an assistant.  You will then be given a specific criterion of the response to evaluate (in <criterion></criterion> tags).
+Return a score on a scale of 0 to 10 indicating how appropriate the response is based on the given criterion.  Judge only the specified aspect(s), not any other qualities of the answer.  Output JSON in the format: {{"score": x}}."""
+        user_prompt = f"""<question>{question}</question>\n<response>{response}</response>\n<criterion>{prop}</criterion>"""
+        
+        resp = run_llm_judge(
+            f"{system_prompt}\n\n{user_prompt}",
             self.config.model_name,
-            system_prompt="""You will be given a question someone asked (in <question></question> tags) and the corresponding response (in <response></response> tags) given to them by an assistant.  You will then be given a specific criterion of the response to evaluate (in <criterion></criterion> tags).
-Return a score on a scale of 0 to 10 indicating how appropriate the response is based on the given criterion.  Judge only the specified aspect(s), not any other qualities of the answer.  Output JSON in the format: {{"score": x}}.""",
-            user_prompt=f"""<question>{question}</question>\n<response>{response}</response>\n<criterion>{prop}</criterion>""",
-            json_mode=True,
-            max_tokens=100,
         )
 
         obj = extract_json_from_response(resp)
@@ -81,17 +82,16 @@ Return a score on a scale of 0 to 10 indicating how appropriate the response is 
         :return: normalized count of snippets present in the response
         """
         snippets = "\n".join(f"{i + 1}. {x}" for i, x in enumerate(evidence))
-        resp = run_chatopenai(
-            self.config.model_name,
-            system_prompt=f"""You are given the response given by a scientific assistant to a user query enclosed in <response></response> tags.
+        system_prompt = f"""You are given the response given by a scientific assistant to a user query enclosed in <response></response> tags.
               In addition you are also given a list of snippets numbered from 1 to {len(evidence)} enclosed in <snippets></snippets> tags, which should be present in the true answer. 
               Your job is to count how many snippets out of the given list are relevant to the provided response. 
               A snippet is relevant if the information provided by it is partly or completely present in the response. Count every snippet only once. 
-              Output JSON with the count as a number in the format: {{"score": x}}.""",
-            user_prompt=f"""<response>{response}</response>\n<snippets>{snippets}</snippets>""",
-            json_mode=True,
-            max_tokens=100,
-
+              Output JSON with the count as a number in the format: {{"score": x}}."""
+        user_prompt = f"""<response>{response}</response>\n<snippets>{snippets}</snippets>"""
+        
+        resp = run_llm_judge(
+            f"{system_prompt}\n\n{user_prompt}",
+            self.config.model_name,
         )
 
         obj = extract_json_from_response(resp)
@@ -109,6 +109,16 @@ Return a score on a scale of 0 to 10 indicating how appropriate the response is 
 
         return score_components
 
+    def _score_in_context_citations_excerpts(self, response: str, citations: Dict[str, str]) -> Dict[str, float]:
+        """
+        Score the response for presence of citations and associated excerpts.
+        The response is split into claims with associated citations and excerpts by an LLM.
+        The score is calculated as the fraction of claims that have an associated citation and the fraction of citations
+        that have an associated excerpt.
+        """
+        return score_in_context_citations(self.config.question, response, citations)
+        
+
     def _score_citations_excerpts_inner(self, response: str) -> Dict[str, float]:
         """
         Score the response for presence of citations and associated excerpts.
@@ -118,16 +128,17 @@ Return a score on a scale of 0 to 10 indicating how appropriate the response is 
         :param response:
         :return: dict of scores for citations per claim and excerpts per citation
         """
-        resp = run_chatopenai(
-            self.config.model_name,
-            system_prompt="You are a helpful assistant.",
-            user_prompt=f"""Here is a response to a question that includes several claims and citations:
+        system_prompt = "You are a helpful assistant."
+        user_prompt = f"""Here is a response to a question that includes several claims and citations:
 Response: {response}
 
-Split the response into individual claims, citations, and excerpts from the citations, in JSON format: """
-                        '{"claims": [{"claim_text": "...", "citations": [{"citation_text": "...", "excerpts": ["...", ...]}, ...]}, ...]}'
-                        "\n\nIf a claim is missing citations or a citation is not accompanied by excerpts, some lists may be empty in your output.",
-            json_mode=True,
+Split the response into individual claims, citations, and excerpts from the citations, in JSON format: {{"claims": [{{"claim_text": "...", "citations": [{{"citation_text": "...", "excerpts": ["...", ...]}}, ...]}}, ...]}}
+
+If a claim is missing citations or a citation is not accompanied by excerpts, some lists may be empty in your output."""
+        
+        resp = run_llm_judge(
+            f"{system_prompt}\n\n{user_prompt}",
+            self.config.model_name,
         )
 
         extracted_json = extract_json_from_response(resp)
@@ -183,6 +194,7 @@ Split the response into individual claims, citations, and excerpts from the cita
         if citations:
             score_components.update(self._score_in_context_citations_excerpts(response, citations))
         else:
+            # TODO: only when ground-truth evidence is provided, use this.
             score_components.update(self._score_citations_excerpts(response))
 
         for x in self.config.other_properties:

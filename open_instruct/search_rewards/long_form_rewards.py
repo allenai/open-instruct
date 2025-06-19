@@ -147,8 +147,10 @@ def compute_paper_reward(response: str, test_case: Dict[str, Any]) -> Dict[str, 
         LOGGER.info(f"Successfully computed reward: {result['reward']:.4f}")
         
     except Exception as e:
+        import traceback
         error_msg = f"Error computing reward: {str(e)}"
         LOGGER.error(error_msg)
+        LOGGER.error(f"Full traceback: {traceback.format_exc()}")
         result['error'] = error_msg
     
     return result
@@ -174,5 +176,3 @@ def batch_compute_paper_rewards(responses: list, test_cases: list) -> list:
         results.append(result)
     
     return results
-
-
