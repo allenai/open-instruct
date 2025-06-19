@@ -1811,6 +1811,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     writer.add_scalar(key, value, episode)
                 table = {}
                 table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
+                print("DEBUGgggg")
+                print(eval_prompt_token_ids)
+                print(table["prompt"])
                 table["response"] = eval_decoded_responses
                 table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
                 table["scores"] = eval_scores
