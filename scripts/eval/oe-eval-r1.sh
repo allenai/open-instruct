@@ -256,7 +256,7 @@ for TASK in "${TASKS[@]}"; do
             --task "$TASK" \
             $MODEL_TYPE \
             --batch-size "$BATCH_SIZE" \
-            --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"chat_template\": \"tulu_thinker_r1_style\"}" \
+            --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"chat_template\": \"tulu_thinker_r1_style\", \"process_output\": \"r1_style\"}" \
             --task-args "{ \"generation_kwargs\": { \"do_sample\": true, \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
@@ -276,7 +276,7 @@ for TASK in "${TASKS[@]}"; do
         --task "$TASK" \
         $MODEL_TYPE \
         --batch-size "$BATCH_SIZE" \
-        --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"chat_template\": \"tulu_thinker_r1_style\"}" \
+        --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"chat_template\": \"tulu_thinker_r1_style\", \"process_output\": \"r1_style\"}" \
         --task-args "{ \"generation_kwargs\": { \"do_sample\": true, \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
         ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT" \
