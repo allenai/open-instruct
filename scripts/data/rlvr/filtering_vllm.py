@@ -102,7 +102,7 @@ def main():
     prompts = [
         tokenizer.apply_chat_template(
             sample["messages"][:-1] if len(sample["messages"]) > 1 else sample["messages"],
-            add_generation=True,
+            add_generation_prompt=True,
             tokenize=False
         )
         for sample in subset
