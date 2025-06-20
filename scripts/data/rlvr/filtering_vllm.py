@@ -22,6 +22,7 @@ from datasets import load_dataset
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
 from open_instruct.dataset_transformation import CHAT_TEMPLATES
+
 def main():
     parser = argparse.ArgumentParser(
         description="Bulk-generate N samples per HF dataset record using vLLM."
@@ -86,6 +87,7 @@ def main():
 
     # 1. Load and slice dataset
     ds = load_dataset(args.dataset, split=args.split)
+    ds = ds.shuffle(seed=42)  # so we dont just take first n samples
     up_to = min(args.offset + args.size, len(ds))
     subset = ds.select(range(args.offset, up_to))
 
