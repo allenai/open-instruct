@@ -75,6 +75,7 @@ WEKA_CLUSTERS = [
     "ai2/allennlp-elara-cirrascale",
     "ai2/ceres-cirrascale",
     "ai2/ganymede-cirrascale",
+    "ai2/rhea-cirrascale",
     "ai2/test-h100",
 ]
 GCP_CLUSTERS = [
