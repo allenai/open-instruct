@@ -8,7 +8,7 @@ python mason.py \
     --budget ai2/oe-adapt \
     --max_retries 0 \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --exp_name valpy_if_from_instruct_olmo_multi \
+    --exp_name valpy_if_from_instruct_olmo_single \
     --beta 0.0 \
     --add_bos True \
     --num_samples_per_prompt_rollout 16 \
@@ -20,9 +20,9 @@ python mason.py \
     --per_device_train_batch_size 1 \
     --try_launch_beaker_eval_jobs_on_weka \
     --kl_estimator kl3 \
-    --dataset_mixer_list valpy/IF_multiturn2 1.0 \
+    --dataset_mixer_list allenai/IF_multi_constraints_upto5 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list valpy/IF_multiturn2 16 \
+    --dataset_mixer_eval_list allenai/IF_multi_constraints_upto5 16 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 10240 \
     --max_prompt_token_length 2048 \
@@ -37,7 +37,7 @@ python mason.py \
     --temperature 1.0 \
     --ground_truths_key ground_truth \
     --sft_messages_key messages \
-    --chat_template_name tulu_thinker_r1_style \
+    --chat_template_name None \
     --oe_eval_tasks  ifeval::tulu \
     --oe_eval_max_length 32768 \
     --total_episodes 10000000 \
