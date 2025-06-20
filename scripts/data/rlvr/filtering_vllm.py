@@ -101,7 +101,7 @@ def main():
     # 3. Build prompts
     prompts = [
         tokenizer.apply_chat_template(
-            sample["messages"],
+            sample["messages"][:-1] if len(sample["messages"]) > 1 else sample["messages"],
             add_generation=True,
             tokenize=False
         )
