@@ -114,10 +114,9 @@ ignore = [
     "C408", # dict() calls (stylistic)
     "C901", # function complexity
     "E501", # Line too long (handled by line-length setting)
-    "W503", # Line break before binary operator
 ]
 
 [tool.ruff.lint.isort]
-lines-after-imports = 2
 known-first-party = ["open-instruct"]
-profile = "black"
+# case-sensitive false will match isort --profile black
+case-sensitive = false
