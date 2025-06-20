@@ -1,5 +1,5 @@
 python mason.py \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-thinker \
     --priority high \
     --image valpy/open_instruct_dev_multi --pure_docker_mode \
@@ -7,7 +7,7 @@ python mason.py \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --exp_name valpy_multiturn-if_test \
+    --exp_name valpy_multiturn-if_tulu3 \
     --beta 0.01 \
     --num_unique_prompts_rollout 48 \
     --num_samples_per_prompt_rollout 16 \
