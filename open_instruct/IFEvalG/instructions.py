@@ -1085,7 +1085,11 @@ class ForbiddenWords(Instruction):
     def check_following(self, value):
         """Check if the response does not contain the expected keywords."""
         for word in self._forbidden_words:
-            if re.search(r"\b" + word + r"\b", value, flags=re.IGNORECASE):
+            try:
+                if re.search(r"\b" + word + r"\b", value, flags=re.IGNORECASE):
+                    return False
+            except re.error:
+                # If the word is not a valid regex, we skip it.
                 return False
         return True
 
