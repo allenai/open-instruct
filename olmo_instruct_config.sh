@@ -1,0 +1,54 @@
+python mason.py \
+    --cluster ai2/jupiter-cirrascale-2 \
+    --workspace ai2/tulu-thinker \
+    --priority high \
+    --image valpy/open_instruct_dev_multi --pure_docker_mode \
+    --preemptible \
+    --num_nodes 2 \
+    --budget ai2/oe-adapt \
+    --max_retries 0 \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+    --exp_name valpy_if_from_instruct_olmo_mix \
+    --beta 0.0 \
+    --add_bos True \
+    --num_samples_per_prompt_rollout 16 \
+    --num_unique_prompts_rollout 128 \
+    --num_mini_batches 1 \
+    --gather_whole_model False \
+    --num_epochs 1 \
+    --learning_rate 5e-7 \
+    --per_device_train_batch_size 1 \
+    --try_launch_beaker_eval_jobs_on_weka \
+    --kl_estimator kl3 \
+    --dataset_mixer_list valpy/IF_multiturn2 1.0 allenai/IF_multi_constraints_upto5 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/IF_multi_constraints_upto5 16 \
+    --dataset_mixer_eval_list_splits train \
+    --max_token_length 10240 \
+    --max_prompt_token_length 2048 \
+    --response_length 8192 \
+    --pack_length 16384 \
+    --model_name_or_path /weka/oe-adapt-default/jacobm/rl-sft/checkpoints/olmo-2-lc-tulu-3-sft \
+    --model_revision main \
+    --tokenizer_name_or_path /weka/oe-adapt-default/jacobm/rl-sft/checkpoints/olmo-2-lc-tulu-3-sft \
+    --stop_strings "</answer>" \
+    --apply_verifiable_reward True \
+    --non_stop_penalty False \
+    --temperature 1.0 \
+    --ground_truths_key ground_truth \
+    --sft_messages_key messages \
+    --chat_template_name tulu_thinker_r1_style \
+    --oe_eval_tasks  ifeval::tulu \
+    --oe_eval_max_length 32768 \
+    --total_episodes 10000000 \
+    --deepspeed_stage 2 \
+    --num_learners_per_node 6 \
+    --vllm_tensor_parallel_size 1 \
+    --vllm_num_engines 10 \
+    --lr_scheduler_type constant \
+    --apply_verifiable_reward true \
+    --seed 1 \
+    --num_evals 5 \
+    --save_freq 100 \
+    --gradient_checkpointing \
+    --with_tracking
