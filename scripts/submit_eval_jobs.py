@@ -121,6 +121,7 @@ parser.add_argument("--oe_eval_tasks", type=str, default=None, help="Evaluate OE
 parser.add_argument("--step", type=int, default=None, help="Step number for postgresql logging.")
 parser.add_argument("--run_id", type=str, default=None, help="A unique run ID for postgresql logging.")
 parser.add_argument("--oe_eval_stop_sequences", type=str, default=None, help="Comma-separated list of stop sequences for OE eval.")
+parser.add_argument("--oe_eval_model_args", type=str, default=None, help="JSON string containing model arguments for OE eval.")
 args = parser.parse_args()
 
 
@@ -602,7 +603,7 @@ if not args.skip_oi_evals:
 
 if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
     # if so, run oe-eval. We assume it is cloned in the top-level repo directory.
-    oe_eval_cmd = f"scripts/eval/oe-eval.sh --model-name {model_name}"
+    oe_eval_cmd = f"scripts/eval/oe-eval-r1.sh --model-name {model_name}"
     if args.upload_to_hf:
         oe_eval_cmd += f" --upload_to_hf {args.upload_to_hf}"
     ## model location munging: if beaker, use beaker://. If hf, just name
@@ -643,6 +644,10 @@ if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
     # Add stop sequences if provided
     if args.oe_eval_stop_sequences:
         oe_eval_cmd += f" --stop-sequences '{args.oe_eval_stop_sequences}'"
+        
+    # Add model args if provided
+    if args.oe_eval_model_args:
+        oe_eval_cmd += f" --model-args '{args.oe_eval_model_args}'"
         
     # Add beaker image from existing argument
     if args.beaker_image:
