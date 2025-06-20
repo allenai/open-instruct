@@ -100,7 +100,8 @@ src_paths = ["open_instruct"]
 [tool.ruff]
 target-version = "py310"
 line-length = 119
-src = ["open_instruct"]
+# do both . and open_instruct to make sure known-first-party below works
+src = [".", "open_instruct"]
 exclude = ["wandb"]
 
 [tool.ruff.lint]
@@ -118,5 +119,5 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["open-instruct"]
-# case-sensitive false will match isort --profile black
-case-sensitive = false
+# case insensitive to match isort --profile black
+case-sensitive = false      
