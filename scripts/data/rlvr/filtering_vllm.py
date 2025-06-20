@@ -55,8 +55,14 @@ def main():
     )
     parser.add_argument(
         "--output-file",
-        required=True,
+        default=None,
         help="Path for output JSONL"
+    )
+    parser.add_argument(
+        "--push_to_hub",
+        default=None,
+        type=str,
+        help="Give a dataset name to push this data to the hub."
     )
     parser.add_argument(
         "--chat_template",
@@ -115,12 +121,17 @@ def main():
     outputs = llm.generate(prompts, sampling_params)
 
     # 5. Write out JSONL
-    with open(args.output_file, "w", encoding="utf-8") as out_f:
-        for sample, req_out in zip(subset, outputs):
-            gen_texts = [o.text for o in req_out.outputs]
-            enriched = dict(sample)
-            enriched["output"] = gen_texts
-            out_f.write(json.dumps(enriched, ensure_ascii=False) + "\n")
+    if args.output_file is not None:
+        with open(args.output_file, "w", encoding="utf-8") as out_f:
+            for sample, req_out in zip(subset, outputs):
+                gen_texts = [o.text for o in req_out.outputs]
+                enriched = dict(sample)
+                enriched["output"] = gen_texts
+                out_f.write(json.dumps(enriched, ensure_ascii=False) + "\n")
+
+    if args.push_to_hub is not None:
+        dataset = load_dataset(args.dataset, split=args.split)
+        dataset.push_to_hub(args.push_to_hub)
 
 
 if __name__ == "__main__":

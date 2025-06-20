@@ -53,7 +53,7 @@ def main():
     parser.add_argument(
         "--output_file",
         type=str,
-        required=True,
+        default=None,
         help="Path to save filtered samples"
     )
     parser.add_argument(
@@ -73,6 +73,12 @@ def main():
         type=str,
         default="hist.png",
         help="Name of the histogram file"
+    )
+    parser.add_argument(
+        "--push_to_hub",
+        default=None,
+        type=str,
+        help="Give a dataset name to push this data to the hub."
     )
     args = parser.parse_args()
 
@@ -118,9 +124,14 @@ def main():
     )
 
     # Save filtered samples
-    with open(args.output_file, "w") as f:
-        for sample in filtered_samples:
-            f.write(json.dumps(sample) + "\n")
+    if args.output_file is not None:
+        with open(args.output_file, "w") as f:
+            for sample in filtered_samples:
+                f.write(json.dumps(sample) + "\n")
+
+    if args.push_to_hub is not None:
+        dataset = load_dataset(args.dataset, split=args.split)
+        dataset.push_to_hub(args.push_to_hub)
 
 
 if __name__ == "__main__":
