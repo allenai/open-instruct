@@ -1,5 +1,5 @@
 python mason.py \
-    --cluster ai2/augusta-google-1 \
+    --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-thinker \
     --priority high \
     --image valpy/open_instruct_dev_multi --pure_docker_mode \
@@ -28,7 +28,7 @@ python mason.py \
     --add_bos False \
     --stop_token eos \
     --temperature 1.0 \
-    --chat_template_name tulu \
+    --chat_template_name tulu_thinker_r1_style \
     --total_episodes 2000000 \
     --penalty_reward_value 0.0 \
     --deepspeed_stage 2 \
