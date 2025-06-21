@@ -7,7 +7,7 @@ python mason.py \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_vllm_thread_ray_gtrl.py \
-    --exp_name valpy_if_old_from_base_llama3.1_mix \
+    --exp_name valpy_if_old_from_base_llama3.1_single \
     --beta 0.0 \
     --add_bos False \
     --local_mini_batch_size 32 \
@@ -15,7 +15,7 @@ python mason.py \
     --local_rollout_batch_size 4 \
     --kl_estimator kl3 \
     --learning_rate 5e-7 \
-    --dataset_mixer_list valpy/IF_multiturn2 1.0 allenai/IF_multi_constraints_upto5 1.0 \
+    --dataset_mixer_list allenai/IF_multi_constraints_upto5 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list allenai/IF_multi_constraints_upto5 16 \
     --dataset_mixer_eval_list_splits train \
