@@ -7,7 +7,7 @@ python mason.py \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_vllm_thread_ray_gtrl.py \
-    --exp_name valpy_if_from_base_llama3.1_multi \
+    --exp_name valpy_if_old_from_base_llama3.1_multi \
     --beta 0.0 \
     --add_bos False \
     --local_mini_batch_size 32 \
