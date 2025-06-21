@@ -7,7 +7,7 @@ python mason.py \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_vllm_thread_ray_gtrl.py \
-    --exp_name valpy_if_old_from_base_qwen2.5_multi \
+    --exp_name valpy_if_from_base_llama3.1_multi \
     --beta 0.0 \
     --add_bos False \
     --local_mini_batch_size 32 \
@@ -22,8 +22,9 @@ python mason.py \
     --max_token_length 10240 \
     --max_prompt_token_length 2048 \
     --response_length 8192 \
-    --model_name_or_path Qwen/Qwen2.5-7B \
-    --tokenizer_name_or_path hamishivi/Qwen-2.5-7b-tokenizer \
+    --model_name_or_path meta-llama/Llama-3.1-8B \
+    --model_revision main \
+    --tokenizer_name_or_path meta-llama/Llama-3.1-8B \
     --non_stop_penalty \
     --add_bos False \
     --stop_token eos \
@@ -41,11 +42,11 @@ python mason.py \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --stop_strings "</answer>" \
     --num_evals 100 \
     --save_freq 100 \
     --reward_model_multiplier 0.0 \
     --no_try_launch_beaker_eval_jobs \
     --try_launch_beaker_eval_jobs_on_weka \
     --gradient_checkpointing \
+    --stop_strings "</answer>" \
     --with_tracking
