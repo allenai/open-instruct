@@ -81,16 +81,16 @@ Notes:
 - Besides comparing to the referennce answer, your evaluation should consider factors such as the helpfulness, relevance, accuracy, depth, creativity, and appropriate level of detail of the response.
 - Note that sometimes the reference answer is not the only answer. So any valid variation of the reference answer is also acceptable and can get a full score.
 - Begin your evaluation by providing a short explanation.
-- Be as objective as possible. After providing your explanation, please output a score on a scale of 1 to 10.
+- Be as objective as possible. After providing your short explanation, please output a score on a scale of 1 to 10.
 - Please adhere to the following format.
 
 [Query]
 {input}
 
-[Answer]
+[AI Answer]
 {output}
 
-[Reference Answer]
+[Reference Gold Answer]
 {label}
 
 [Your judgement]

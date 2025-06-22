@@ -270,6 +270,8 @@ class Args:
     """the model to use for the llm judge"""
     llm_judge_max_tokens: int = 2048
     """the max tokens to use for the llm judge"""
+    llm_judge_max_context_length: int = 8192
+    """the max context length to use for the llm judge"""
     llm_judge_temperature: float = 1.0
     """the temperature to use for the llm judge"""
     llm_judge_timeout: int = 60
