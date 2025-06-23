@@ -16,7 +16,7 @@
 
 import itertools
 import logging
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict, defaultdict, Counter
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple, Union
@@ -41,7 +41,14 @@ from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from open_instruct.ground_truth_utils import REWARD_FN_MAPPING
 from open_instruct.utils import retry_on_exception
+from sympy.parsing.latex import parse_latex
+import sympy
 from collections import Counter
+import numpy as np
+import multiprocessing  # re-introduced for timeout handling
+import concurrent.futures as cf  # for persistent process pool
+import atexit
+from typing import List as _ListForType
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +215,184 @@ def get_reward(
         sequence_lengths,
     )
 
+# -----------------------------------------------------------------------------
+# Module-level helper for safe math processing in a separate process (picklable)
+# -----------------------------------------------------------------------------
+
+
+def _compute_canonical_form(ans: str, q):
+    """Worker function: parse LaTeX, simplify with sympy, and return float value.
+
+    This MUST live at module level so that it can be pickled when the 'spawn'
+    start method is used (default on macOS). It writes a tuple to ``q``:
+    ('success', result) on success, or ('error', <str>) on failure.
+    """
+    try:
+        expr = parse_latex(str(ans))
+        expr = sympy.simplify(expr)
+        res = float(sympy.N(expr))
+        q.put(("success", res))
+    except Exception as exc:
+        q.put(("error", str(exc)))
+
+# When using a persistent ProcessPoolExecutor we can't rely on Queue; define
+# a lightweight wrapper that simply returns the same tuple so it can be used
+# with ``executor.submit``.
+
+
+def _compute_canonical_form_sync_wrapper(ans: str):
+    try:
+        expr = parse_latex(str(ans))
+        expr = sympy.simplify(expr)
+        res = float(sympy.N(expr))
+        return ("success", res)
+    except Exception as exc:
+        return ("error", str(exc))
+
+class EquivalenceGroup: 
+    def __init__(self, use_cache=True, timeout_seconds=20, skip_normalization=False):
+        self.use_cache = use_cache
+        self.cached_answer_to_id = {}
+        self.cur_id = 0
+        self.timeout_seconds = timeout_seconds
+        self.skip_normalization = skip_normalization
+        # Persistent pool (single worker). We will recycle it periodically to
+        # avoid memory growth that slows the worker down over time.
+        try:
+            self._mp_ctx = multiprocessing.get_context("fork")
+        except ValueError:
+            self._mp_ctx = multiprocessing.get_context()
+        self._executor = cf.ProcessPoolExecutor(max_workers=1, mp_context=self._mp_ctx)
+        _register_executor(self._executor)
+        self._tasks_processed = 0
+        self._restart_every = 300  # restart worker every N tasks to keep it fresh
+
+    # ---------------------------------------------------------------------
+    # Internal helpers
+    # ---------------------------------------------------------------------
+
+    def _process_answer(self, ans: str):
+        """Compute canonical form in a separate process with timeout."""
+        # Submit task to executor; it will reuse the existing worker process.
+        future = self._executor.submit(_compute_canonical_form_sync_wrapper, ans)
+        try:
+            status, payload = future.result(timeout=self.timeout_seconds)
+        except cf.TimeoutError:
+            # cancel the future and restart the worker process so that the
+            # hung computation doesn't block subsequent tasks.
+            future.cancel()
+            # Tear down the (possibly hung) worker immediately; don't wait for
+            # graceful termination because it may be stuck in native code.
+            try:
+                self._executor.shutdown(wait=False)
+            except Exception:
+                pass
+            self._executor = cf.ProcessPoolExecutor(max_workers=1, mp_context=self._mp_ctx)
+            _register_executor(self._executor)
+            raise TimeoutError(
+                f"Canonical form computation timed out after {self.timeout_seconds} s for answer: {ans}"
+            )
+
+        if status == "success":
+            # Track completed tasks and recycle the executor periodically.
+            self._tasks_processed += 1
+            if self._tasks_processed % self._restart_every == 0:
+                self._executor.shutdown(wait=True)
+                self._executor = cf.ProcessPoolExecutor(max_workers=1, mp_context=self._mp_ctx)
+                _register_executor(self._executor)
+            return payload
+        else:
+            raise Exception(payload)
+
+    # ---------------------------------------------------------------------
+    # Public API
+    # ---------------------------------------------------------------------
+        
+    def _normalize_answer(self, answer):
+        if answer == "no answer":
+            self.cur_id += 1
+            return self.cur_id - 1
+        # Check cache first
+        if answer in self.cached_answer_to_id:
+            return self.cached_answer_to_id[answer]
+        
+        # skip normalization makes things faster, but does string matching instead of canonical form matching
+        if self.skip_normalization:
+            canonical_form = str(answer)
+            if canonical_form not in self.cached_answer_to_id:
+                self.cached_answer_to_id[canonical_form] = self.cur_id
+                self.cur_id += 1
+            return self.cached_answer_to_id[canonical_form]
+        try:
+            try:
+                canonical_form = self._process_answer(answer)
+            except TimeoutError as te:
+                canonical_form = str(answer)
+            except Exception as e:
+                canonical_form = str(answer)
+
+            # Cache and assign ID
+            if canonical_form not in self.cached_answer_to_id:
+                self.cached_answer_to_id[canonical_form] = self.cur_id
+                self.cur_id += 1
+
+            return self.cached_answer_to_id[canonical_form]
+
+        except Exception as unexpected:
+            # Fallback to raw string representation
+            if str(answer) not in self.cached_answer_to_id:
+                self.cached_answer_to_id[str(answer)] = self.cur_id
+                self.cur_id += 1
+            return self.cached_answer_to_id[str(answer)]
+        
+    def create_equivalence_groups(self, answers):
+        canonical_answers = []
+        if not self.use_cache:
+            self.cached_answer_to_id = {}
+            self.cur_id = 0
+        for a in answers:
+            canonical_answer = self._normalize_answer(a)
+            canonical_answers.append(canonical_answer)
+        
+    
+        return canonical_answers
+
+    def calc_bootstrap_confidence(self, samples, bootstrap_reps=50):
+        k = len(samples)
+        canonical_answers = self.create_equivalence_groups(samples)
+        
+        initial_majority = Counter(canonical_answers).most_common(1)[0][0]
+        
+        
+        answer_ids = np.array(canonical_answers)
+
+        # Vectorized bootstrap: shape (num_samples, k)
+        bootstrap_samples = np.random.choice(answer_ids, size=(bootstrap_reps, k), replace=True)
+
+        # Use bincount and argmax to find majority for each sample
+        majority_ids = np.apply_along_axis(lambda x: np.bincount(x).argmax(), 1, bootstrap_samples)
+        
+
+        # Compare with majority_answer
+        matches = majority_ids == initial_majority
+        return [np.mean(matches)] * k
+
+
+def extract_answers(dataset, decoded_responses):
+    if isinstance(dataset, str):
+        ds = dataset
+    if isinstance(dataset, list):
+        if isinstance(dataset[0], str):
+            ds = dataset[0]
+        else:
+            ds = dataset[0][0]
+    reward_func = REWARD_FN_MAPPING.get(ds.lower())
+    
+    # extract answers is only implemented for math verifier, so assert it is math verifier
+    assert reward_func.__class__.__name__ == "MathVerifier" or reward_func.__class__.__name__ == "GSM8KVerifier", "extract answers is only implemented for math verifier"
+    answers = [reward_func.extract_answer(response) for response in decoded_responses]
+    return answers, ds
+
 
 def compute_majority_reward_per_prompt(
     responses: List[torch.Tensor],
@@ -224,20 +409,10 @@ def compute_majority_reward_per_prompt(
     Compute the most-frequent answer and the second-most-frequent answer.
     Compute the margin between the counts of the most-frequent answer and the second-most-frequent answer.
     """
-    if isinstance(dataset, str):
-        ds = dataset
-    if isinstance(dataset, list):
-        if isinstance(dataset[0], str):
-            ds = dataset[0]
-        else:
-            ds = dataset[0][0]
-    reward_func = REWARD_FN_MAPPING.get(ds.lower())
     
-    # extract answers is only implemented for math verifier, so assert it is math verifier
-    assert reward_func.__class__.__name__ == "MathVerifier" or reward_func.__class__.__name__ == "GSM8KVerifier", "extract answers is only implemented for math verifier"
 
     # extract answers
-    answers = [reward_func.extract_answer(response) for response in decoded_responses]
+    answers, ds = extract_answers(dataset, decoded_responses)
     
     # compute majority and margin
     counts = Counter(answers)
@@ -284,8 +459,6 @@ def compute_majority_reward_per_prompt(
             ds,
             reward_mult
         )
-
-        
         
 
         results = [0] * len(decoded_responses)
@@ -342,10 +515,11 @@ def apply_verifiable_reward(
     reward_mult: int = 10,
     num_samples_per_prompt_rollout: int = 1,
     aggregate_maj: bool = False,
+    equivalence_group = None,
 ):
     rewards = []
     per_func_rewards = []
-    
+    confidence = []
     if aggregate_maj:
         assert num_samples_per_prompt_rollout > 1, "num_samples_per_prompt_rollout must be greater than 1 when aggregate_maj is True"
         # process responses in batches of num_samples_per_prompt_rollout
@@ -359,7 +533,7 @@ def apply_verifiable_reward(
             )
             rewards.extend(majority_rewards)
             per_func_rewards.extend(per_func_rewards)
-        return rewards, per_func_rewards
+        return rewards, per_func_rewards, confidence
 
     
     for tok_prediction, prediction, ground_truth, dataset in zip(
@@ -368,7 +542,26 @@ def apply_verifiable_reward(
         reward, per_func_reward = compute_a_single_reward(tok_prediction, prediction, ground_truth, dataset, reward_mult)
         rewards.append(reward)
         per_func_rewards.append(per_func_reward)
-    return rewards, per_func_rewards
+
+    if equivalence_group is not None:
+        assert num_samples_per_prompt_rollout > 1, "num_samples_per_prompt_rollout must be greater than 1 when aggregate_maj is True"
+        # process responses in batches of num_samples_per_prompt_rollout
+        for i in range(0, len(responses), num_samples_per_prompt_rollout):
+            responses_batch = responses[i:i+num_samples_per_prompt_rollout]
+            decoded_responses_batch = decoded_responses[i:i+num_samples_per_prompt_rollout]
+            ground_truths_batch = ground_truths[i:i+num_samples_per_prompt_rollout]
+            datasets_batch = datasets[i:i+num_samples_per_prompt_rollout]
+            
+            print("getting answers")
+            answers, ds = extract_answers(datasets_batch, decoded_responses_batch)
+            print("answers are", answers)
+            confidence_batch = equivalence_group.calc_bootstrap_confidence(answers)
+            print(f"confidence is {confidence_batch[0]}")
+            confidence.extend(confidence_batch)
+            
+                
+            
+    return rewards, per_func_rewards, confidence
 
 
 def forward(
@@ -746,3 +939,29 @@ def exact_div(a, b, custom_error_message=""):
     if a != q * b:
         raise ValueError(f"{custom_error_message}, inexact division: {a} / {b} = {a / b}")
     return q
+
+
+# -----------------------------------------------------------------------------
+# Global registry to ensure all process-pool executors shut down cleanly before
+# interpreter teardown (prevents the "'NoneType' object has no attribute 'util'"
+# traceback seen on exit).
+# -----------------------------------------------------------------------------
+
+_EXECUTOR_REGISTRY: _ListForType[cf.ProcessPoolExecutor] = []
+
+
+def _register_executor(exec_: cf.ProcessPoolExecutor):
+    """Track an executor for automatic shutdown at interpreter exit."""
+    _EXECUTOR_REGISTRY.append(exec_)
+
+
+def _shutdown_executors():
+    for exec_ in _EXECUTOR_REGISTRY:
+        try:
+            exec_.shutdown(wait=False)
+        except Exception:
+            # Ignore errors that can happen during late interpreter shutdown
+            pass
+
+
+atexit.register(_shutdown_executors)

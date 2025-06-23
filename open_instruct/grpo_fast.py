@@ -98,6 +98,7 @@ from open_instruct.model_utils import (
     print_rich_single_line_metrics,
     print_rich_table,
     push_folder_to_hub,
+    EquivalenceGroup,
 )
 from open_instruct.rl_utils2 import pack_sequences
 from open_instruct.utils import (
@@ -256,11 +257,21 @@ class Args:
     """whether to aggregate the majority of the verifiable rewards"""
     sft_on_hard_prompts: bool = False
     """whether to apply SFT on hard prompts"""
-    sft_alpha: float = 0.7
-    """the alpha value for SFT on hard prompts"""
     dynamic_sampling: bool = False
     """whether to perform dynamic sampling as in DAPO paper"""
+    filtering_strategy: Literal["none", "pass@k", "std", "confidence"] = "none"
+    skip_normalization: bool = False
+    """whether to skip normalization when computing confidence"""
+    pass_k_filter_threshold: List[float] = field(default_factory=lambda: [0.0625, 0.5])
+    """the threshold for pass@k filtering"""
+    std_filter_threshold: float = 5.0
+    """the threshold for std filtering"""
+    confidence_filter_threshold: float = 0.8
+    """the threshold for confidence filtering"""
+    use_confidence_cache: bool = True
+    """whether to use the confidence cache"""
 
+    
     # -- non stop penalty
     non_stop_penalty: bool = False
     """whether to penalize responses which did not finish generation"""
@@ -1090,7 +1101,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 args.gs_bucket_path,
                 args.eval_priority,
             )
-
+    
 
 class ModelGroup:
     def __init__(
@@ -1191,7 +1202,6 @@ def vllm_generate_thread(
         with Timer("🔥 Generation time"):
             response_ids, finish_reasons = generate_with_engines(g_queries_list, generation_config)
         inference_results_Q.put((response_ids, finish_reasons))
-        print(f"vLLM thread: put the response ids and finish reasons into the queue")
 
         # Evaluate the model
         if (
@@ -1199,16 +1209,12 @@ def vllm_generate_thread(
             and num_evals > 0
             and ((current_step - 1) % eval_freq == 0 or current_step == num_training_steps)
         ):
-            print(f"vLLM thread: evaluate the model")
             response_ids, finish_reasons = generate_with_engines(eval_prompt_token_ids, eval_generation_config)
             try:
                 evaluation_inference_results_Q.put((response_ids, finish_reasons), block=False)
-                print(f"vLLM thread: put evaluation results into queue")
             except Full:
-                print(f"vLLM thread: evaluation queue full, skipping evaluation results")
-        
+                print("vLLM thread: evaluation queue is full, skipping evaluation")
         current_step += 1
-        print(f"vLLM thread: go to next step")
 
     print(f"vLLM thread: completed {current_step-1} steps, exiting")
 
@@ -1232,14 +1238,12 @@ def data_preparation_thread(
         current_step += 1
         print(f"Data prep thread: processing step {current_step}/{num_training_steps}")
         # Get next batch of prompts and responses
-        print("get the next batch")
         items = queries_prompt_Q.get()  # Add timeout to check if we need more data
         
         if items is None:
             print("Data prep thread: received None signal, exiting")
             break
             
-        print(f"got the next batch, will go process it")
 
         new_batch = {}
         if args.sft_on_hard_prompts:
@@ -1268,13 +1272,14 @@ def data_preparation_thread(
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-            new_batch["scores"], reward_metrics = reward_fn(new_batch["responses"], 
+            new_batch["scores"], reward_metrics, confidence = reward_fn(new_batch["responses"], 
                                                decoded_responses, 
                                                new_batch["ground_truths"], 
                                                new_batch["datasets"], 
                                                finish_reasons, 
                                                args.aggregate_maj)
             new_batch["scores"] = np.array(new_batch["scores"])
+            confidence = np.array(confidence)
 
             def _compute_advantages(scores):
                 scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
@@ -1298,6 +1303,33 @@ def data_preparation_thread(
         del decoded_responses
         torch.cuda.empty_cache()
 
+        def _calc_filter_mask(scores_per_prompt, max_possible_score, confidence):
+            non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
+            expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
+            # calc number of prompts that are filtered out
+            num_filtered_prompts_gradient = (1 - expanded_mask).sum() / args.num_samples_per_prompt_rollout
+
+            if args.filtering_strategy == "pass@k":
+                # calc pass@k for each prompt
+                pass_k = (scores_per_prompt == max_possible_score).sum(axis=-1) / args.num_samples_per_prompt_rollout
+                filter_mask = np.logical_and(pass_k <= args.pass_k_filter_threshold[1], pass_k >= args.pass_k_filter_threshold[0])
+            elif args.filtering_strategy == "std":
+                filter_mask = scores_per_prompt.std(axis=-1) >= args.std_filter_threshold
+            elif args.filtering_strategy == "confidence":
+                filter_mask = confidence <= args.confidence_filter_threshold
+            else:
+                filter_mask = np.ones(len(scores_per_prompt))
+
+            if args.filtering_strategy != "confidence":
+                filter_mask = np.repeat(filter_mask, args.num_samples_per_prompt_rollout)
+            
+            # calc number of prompts that are filtered out
+            num_filtered_prompts = (1 - filter_mask).sum() / args.num_samples_per_prompt_rollout
+
+            # intersect the two masks
+            non_filtered_mask = np.logical_and(expanded_mask, filter_mask)
+            non_filtered_mask = np.where(non_filtered_mask)[0]
+            return non_filtered_mask, num_filtered_prompts, num_filtered_prompts_gradient
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved
             max_possible_score = 0
@@ -1316,15 +1348,12 @@ def data_preparation_thread(
 
             # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
             # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
-            non_zero_std_mask = scores_per_prompt.std(axis=-1) != 0
-            real_batch_size_ratio = non_zero_std_mask.sum() * args.num_samples_per_prompt_rollout / len(new_batch["scores"])
-            expanded_mask = np.repeat(non_zero_std_mask, args.num_samples_per_prompt_rollout)
-            non_zero_gradient_index = np.where(expanded_mask)[0]
+            non_filtered_mask, num_filtered_prompts, num_filtered_prompts_gradient = _calc_filter_mask(scores_per_prompt, max_possible_score, confidence)
             
                 
-            new_batch["advantages"] = new_batch["advantages"][non_zero_gradient_index]
-            new_batch["scores"] = new_batch["scores"][non_zero_gradient_index]
-            new_batch["responses"] = [new_batch["responses"][i] for i in non_zero_gradient_index]
+            new_batch["advantages"] = new_batch["advantages"][non_filtered_mask]
+            new_batch["scores"] = new_batch["scores"][non_filtered_mask]
+            new_batch["responses"] = [new_batch["responses"][i] for i in non_filtered_mask]
             
             if len_hard_prompts > 0 and args.sft_on_hard_prompts:
                 sft_tokenized = []
@@ -1338,18 +1367,16 @@ def data_preparation_thread(
                 # post-pend sft tokenized to the responses
                 new_batch["responses"] = new_batch["responses"] + sft_tokenized
 
-                non_zero_gradient_index_with_hard_prompts = np.concatenate([non_zero_gradient_index, (hard_prompts * args.num_samples_per_prompt_rollout).astype(np.int64)])
+                non_zero_gradient_index_with_hard_prompts = np.concatenate([non_filtered_mask, (hard_prompts * args.num_samples_per_prompt_rollout).astype(np.int64)])
 
-                print(f"non_zero_gradient_index_with_hard_prompts: {non_zero_gradient_index_with_hard_prompts}")
-                print(f"non_zero_gradient_index: {non_zero_gradient_index}")
 
                 new_batch["queries"] = [new_batch["queries"][i] for i in non_zero_gradient_index_with_hard_prompts]
                 new_batch["ground_truths"] = [new_batch["ground_truths"][i] for i in non_zero_gradient_index_with_hard_prompts]
                 new_batch["datasets"] = [new_batch["datasets"][i] for i in non_zero_gradient_index_with_hard_prompts]
             else:
-                new_batch["queries"] = [new_batch["queries"][i] for i in non_zero_gradient_index]
-                new_batch["ground_truths"] = [new_batch["ground_truths"][i] for i in non_zero_gradient_index]
-                new_batch["datasets"] = [new_batch["datasets"][i] for i in non_zero_gradient_index]
+                new_batch["queries"] = [new_batch["queries"][i] for i in non_filtered_mask]
+                new_batch["ground_truths"] = [new_batch["ground_truths"][i] for i in non_filtered_mask]
+                new_batch["datasets"] = [new_batch["datasets"][i] for i in non_filtered_mask]
             
             def _concat_batch(batch, new_batch):
                 for k, v in new_batch.items():
@@ -1361,12 +1388,15 @@ def data_preparation_thread(
             def _select_batch_size(batch, num_elements):
                 for k, v in batch.items():
                     batch[k] = v[:num_elements]
+                
                 return batch
             
             if not args.dynamic_sampling or current_step == args.num_training_steps: # if last step, or not dynamic sampling, just use the new batch
                 batch = new_batch
             else:
-                num_prompts_per_batch += non_zero_std_mask.sum()
+                
+
+                num_prompts_per_batch += len(non_filtered_mask) // args.num_samples_per_prompt_rollout
                 batch = new_batch if batch is None else _concat_batch(batch, new_batch)
 
                 if num_prompts_per_batch < args.num_unique_prompts_rollout:
@@ -1381,9 +1411,11 @@ def data_preparation_thread(
                 else:
                     num_elements = args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
                     batch = _select_batch_size(batch, num_elements)
-
+                    
+            
+            real_batch_size_ratio = len(batch["scores"]) / (args.num_samples_per_prompt_rollout * args.num_unique_prompts_rollout)
             # Clear intermediate variables to free memory
-            del new_batch, scores_per_prompt, non_zero_std_mask, expanded_mask, non_zero_gradient_index
+            del new_batch, scores_per_prompt, non_filtered_mask
             torch.cuda.empty_cache()
             
                
@@ -1484,6 +1516,8 @@ def data_preparation_thread(
             "scores": mean_scores,
             "hard_prompts": len(hard_prompts),
             "real_batch_size_ratio": real_batch_size_ratio,
+            "num_filtered_prompts": num_filtered_prompts,
+            "num_filtered_prompts_gradient": num_filtered_prompts_gradient,
             "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
             "packed_ratio": packed_ratio,
             "val/sequence_lengths": seq_length_mean,
@@ -1601,6 +1635,7 @@ class DataFeederThread(threading.Thread):
 
     def stop(self):
         self.running = False
+
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
     # ------------------------------------------------------------
@@ -1856,10 +1891,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     
 
     num_total_tokens = 0
+    save_steps = 0
     start_time = time.time()
     try:
         while data_feeder.current_step < args.num_training_steps:
-            print(f"Main thread: current step: {data_feeder.current_step}, num training steps: {args.num_training_steps}")
+            print(f"Main thread: current step: {data_feeder.current_step}, num training steps: {args.num_training_steps}, num save steps: {save_steps}")
             episode += (
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
             )  # each sample is an episode; TODO: this is probably wrong since we might call data feeder with dynamic sampling
@@ -1918,25 +1954,25 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                             writer.add_histogram(key, value, episode)
                 print_rich_single_line_metrics(scalar_metrics)
 
-                if args.save_freq > 0 and data_feeder.current_step % args.save_freq == 0:
+                if args.save_freq > 0 and save_steps % args.save_freq == 0:
                     with Timer("[Main Thread] 🗡️ Saving model"):
                         checkpoint_dir = f"{args.output_dir}_checkpoints"
-                        step_dir = os.path.join(checkpoint_dir, f"step_{data_feeder.current_step}")
-                        print(f"Saving model at step {data_feeder.current_step} to {step_dir}")
+                        step_dir = os.path.join(checkpoint_dir, f"step_{save_steps}")
+                        print(f"Saving model at step {save_steps} to {step_dir}")
                         ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
                         if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
-                            leaderboard_name = f"{args.hf_repo_revision}_step_{data_feeder.current_step}"
+                            leaderboard_name = f"{args.hf_repo_revision}_step_{save_steps}"
                             for i in range(args.world_size):
                                 policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                                    step_dir, leaderboard_name, wandb_url, data_feeder.current_step
+                                    step_dir, leaderboard_name, wandb_url, save_steps
                                 )
                 if (
                     args.checkpoint_state_freq > 0
-                    and data_feeder.current_step % args.checkpoint_state_freq == 0
+                    and save_steps % args.checkpoint_state_freq == 0
                     and args.checkpoint_state_dir is not None
                 ):
                     with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
-                        client_state = {"training_step": data_feeder.current_step}
+                        client_state = {"training_step": save_steps}
                         ray.get(
                             [
                                 policy_group.models[i].save_checkpoint_state.remote(
@@ -1945,7 +1981,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                                 for i in range(args.world_size)
                             ]
                         )
-                        print(f"Saved checkpoint state at step {data_feeder.current_step} to {args.checkpoint_state_dir}")
+                        print(f"Saved checkpoint state at step {save_steps} to {args.checkpoint_state_dir}")
+            
 
             if len(update_ref_policy_future) > 0:
                 with Timer("[Main Thread] 🔃 Updating reference policy"):
@@ -1967,7 +2004,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 )
 
                 # get and log evaluation metrics
-                eval_scores, eval_reward_metrics = reward_fn(
+                eval_scores, eval_reward_metrics, _ = reward_fn(
                     eval_responses,
                     eval_decoded_responses,
                     eval_ground_truths,
@@ -2000,15 +2037,17 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 del table
             except Empty:
                 print("[Main Thread] 🙈 Evaluation responses not received")
+            
+            save_steps += 1
 
-        print(f"Saving final model at step {data_feeder.current_step} to {args.output_dir}")
+        print(f"Saving final model at step {save_steps} to {args.output_dir}")
         with Timer("[Main Thread] 🗡️ Saving model"):
             ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
             if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                 leaderboard_name = args.hf_repo_revision
                 for i in range(args.world_size):
                     policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                        args.output_dir, leaderboard_name, wandb_url, data_feeder.current_step
+                        args.output_dir, leaderboard_name, wandb_url, save_steps
                     )
 
         
@@ -2064,6 +2103,11 @@ if __name__ == "__main__":
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
 
+    if args.filtering_strategy == "confidence":
+        equivalence_group = EquivalenceGroup(use_cache=args.use_confidence_cache, skip_normalization=args.skip_normalization)
+    else:
+        equivalence_group = None
+
     def reward_fn(
         responses: List[torch.Tensor],
         decoded_responses: List[str],
@@ -2086,7 +2130,7 @@ if __name__ == "__main__":
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
-                verifiable_rewards, mean_per_func_rewards = apply_verifiable_reward(
+                verifiable_rewards, mean_per_func_rewards, confidence = apply_verifiable_reward(
                     responses,
                     decoded_responses,
                     ground_truths,
@@ -2094,9 +2138,10 @@ if __name__ == "__main__":
                     reward_mult=args.verification_reward,
                     num_samples_per_prompt_rollout=args.num_samples_per_prompt_rollout,
                     aggregate_maj=aggregate_maj,
+                    equivalence_group=equivalence_group,
                 )
                 if aggregate_maj:
-                    mean_verifiable_rewards, mean_per_func_rewards = apply_verifiable_reward(
+                    mean_verifiable_rewards, mean_per_func_rewards, confidence = apply_verifiable_reward(
                     responses,
                     decoded_responses,
                     ground_truths,
@@ -2121,7 +2166,7 @@ if __name__ == "__main__":
                 else:
                     np_mean_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["scores"] = np_mean_verifiable_rewards.mean()
-
+                metrics["confidence"] = np.mean(confidence)
                 metrics["objective/verifiable_reward"] = np_mean_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_mean_verifiable_rewards > 0.0).mean()
                 # reshuffle around per_func rewards
@@ -2143,6 +2188,6 @@ if __name__ == "__main__":
                     if finish_reasons[i] != "stop":
                         scores[i] = args.non_stop_penalty_value
 
-        return scores, metrics
+        return scores, metrics, confidence
 
     main(args, tokenizer_config, model_config, reward_fn)
