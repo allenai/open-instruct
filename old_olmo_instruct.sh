@@ -26,7 +26,6 @@ python mason.py \
     --model_revision main \
     --tokenizer_name_or_path /weka/oe-adapt-default/jacobm/rl-sft/checkpoints/olmo-2-lc-tulu-3-sft \
     --non_stop_penalty \
-    --add_bos False \
     --stop_token eos \
     --temperature 1.0 \
     --chat_template_name None \

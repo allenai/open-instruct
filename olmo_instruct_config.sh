@@ -10,7 +10,7 @@ python mason.py \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name valpy_if_from_instruct_olmo_single \
     --beta 0.0 \
-    --add_bos True \
+    --add_bos False \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 128 \
     --num_mini_batches 1 \
