@@ -12,10 +12,11 @@ tasks:
         "pip install vllm && \
           VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 vllm serve Qwen/Qwen3-32B \
             --tensor-parallel-size 2 \
-            --max-model-len 8192 \
+            --max-model-len 32768 \
             --trust-remote-code \
             --port 8001 \
-            --enforce-eager"
+            --enforce-eager \
+            --chat-template '/weka/oe-adapt-default/faezeb/qwen_no_think_tokenizer_config.jinja'"
       ]
     datasets:
       - mountPath: /weka/oe-adapt-default
