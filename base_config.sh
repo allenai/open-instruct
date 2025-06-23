@@ -20,7 +20,7 @@ python mason.py \
     --per_device_train_batch_size 1 \
     --try_launch_beaker_eval_jobs_on_weka \
     --kl_estimator kl3 \
-    --dataset_mixer_list allenai/IF_multi_constraints_upto5 1.0 \
+    --dataset_mixer_list allenai/IF_multi_constraints_upto5 1.0 allenai/IF_multi_constraints_upto5 1.0 \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list allenai/IF_multi_constraints_upto5 16 \
     --dataset_mixer_eval_list_splits train \
