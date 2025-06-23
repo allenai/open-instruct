@@ -7,7 +7,7 @@ token_length.png
 # For generating datasets.
 *.jsonl
 
-# for on policy preferences 
+# for on policy preferences
 birr/
 
 oe-eval-internal/
@@ -157,3 +157,5 @@ dmypy.json
 **/open_ai_responses/**
 **/batch_files/**
 cache/
+local_dataset_cache/
+scratch/
