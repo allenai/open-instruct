@@ -213,4 +213,4 @@ If a claim is missing citations or a citation is not accompanied by excerpts, so
         ann_score = sum(
             score_weights[key] * score_components[key] for key in score_weights if key not in static_score_keys) / 0.6
         return {"score": score, "ann_score": ann_score, **score_components}
-    
+

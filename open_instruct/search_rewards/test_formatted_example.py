@@ -121,5 +121,6 @@ def test_formatted_example():
     
     print("=" * 60)
 
+
 if __name__ == "__main__":
     test_formatted_example() 

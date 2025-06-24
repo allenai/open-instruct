@@ -76,5 +76,6 @@ def test_scoring_function():
         import traceback
         traceback.print_exc()
 
+
 if __name__ == "__main__":
     test_scoring_function() 

@@ -176,3 +176,4 @@ def batch_compute_paper_rewards(responses: list, test_cases: list) -> list:
         results.append(result)
     
     return results
+

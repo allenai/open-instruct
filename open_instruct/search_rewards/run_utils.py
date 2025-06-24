@@ -54,16 +54,16 @@ def run_chatopenai(
 
     return resp.choices[0].message.content
 
+
 def load_jsonlines(file):
     with jsonlines.open(file, 'r') as jsonl_f:
         lst = [obj for obj in jsonl_f]
     return lst
 
+
 def save_file_jsonl(data, fp):
     with jsonlines.open(fp, mode='w') as writer:
         writer.write_all(data)
-
-
 
 
 def run_azure_openai(
@@ -163,6 +163,7 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Test failed with error: {e}")
     
+    
     def test_run_azure():
         """Test the run_azure_openai function with a simple prompt"""
         try:
@@ -183,6 +184,7 @@ if __name__ == "__main__":
             
         except Exception as e:
             print(f"Test failed with error: {e}")
+    
     
     # test_run_chatopenai()
     test_run_azure()

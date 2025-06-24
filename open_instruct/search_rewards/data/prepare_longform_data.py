@@ -55,7 +55,5 @@ def load_scholarqabench_data(path: str) -> List[Dict[str, Any]]:
     return formatted_data
 
 
-
-
 if __name__ == "__main__":
     data = load_scholarqabench_data('test_configs_snippets.json')
