@@ -11,8 +11,8 @@ from open_instruct.tool_utils.tool_vllm import Tool, ToolOutput
 class SearchTool(Tool):
     def __init__(self, api_endpoint: str, *args, **kwargs):
         self.api_endpoint = api_endpoint
-        self.start_str = "<query>"
-        self.end_str = "</query>"
+        self.start_str = "<search>"
+        self.end_str = "</search>"
         self.number_documents_to_search = kwargs.pop("number_documents_to_search", 3)
         super().__init__(*args, **kwargs)
 
