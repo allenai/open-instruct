@@ -19,9 +19,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
 import requests
-from IFEvalG import instructions_registry
 from litellm import acompletion
 
+from IFEvalG import instructions_registry
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.judge_utils import (
     EXTRACTOR_MAP,
@@ -153,46 +153,17 @@ class VerifierFunction(ABC):
         return f"{self.__class__.__name__}(name={self.name}, weight={self.weight})"
 
 
-class CountdownVerifier(VerifierFunction):
-    """
-    Verifier for Countdown tasks that extracts the equation from the prediction
-    and compares it (case-insensitively) to the ground truth.
-    """
-
-    def __init__(self, name: str, weight: float = 1.0, verifier_config: Optional[VerifierConfig] = None) -> None:
-        super().__init__("countdown", weight=weight, verifier_config=verifier_config)
-
-    def __call__(
-        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
-    ) -> VerificationResult:
-        target = label[0]
-        numbers = label[1:]
-        try:
-            # Check if the format is correct
-            match = re.search(r"<answer>(.*?)</answer>", prediction)
-            assert match is not None
-            # Extract the "answer" part from the completion
-            equation = match.group(1).strip()
-            # Extract all numbers from the equation
-            used_numbers = [int(n) for n in re.findall(r"\d+", equation)]
-
-            # Check if all numbers are used exactly once
-            assert sorted(used_numbers) == sorted(numbers)
-
-            # Define a regex pattern that only allows numbers, operators, parentheses, and whitespace
-            allowed_pattern = r"^[\d+\-*/().\s]+$"
-            assert re.match(allowed_pattern, equation)
-
-            # Evaluate the equation with restricted globals and locals
-            result = eval(equation, {"__builtins__": None}, {})
-            # Check if the equation is correct and matches the ground truth
-            if abs(float(result) - float(target)) < 1e-5:
-                return 1.0
-            else:
-                return 0.0
-        except Exception:
-            # If any fails, reward is 0
-            return 0.0
+# small helper to optionally remove thinking section + answer output.
+# assumes a certain format, so might not always be useful.
+# we don't always need this -- for example, math evaluations just extract a final
+# number, so we don't need to remove the thinking section.
+def remove_thinking_section(prediction: str) -> str:
+    prediction = prediction.replace("<|assistant|>", "").strip()
+    # remove thinking section from the prediction
+    prediction = prediction.split("</think>")[-1]
+    # remove answer tags from the prediction
+    prediction = prediction.replace("<answer>", "").replace("</answer>", "")
+    return prediction.strip()
 
 
 class GSM8KVerifier(VerifierFunction):
@@ -311,10 +282,13 @@ class IFEvalVerifier(VerifierFunction):
         constraint_dict = constraint_dict[0]
         if isinstance(constraint_dict, str):
             constraint_dict = json.loads(constraint_dict)
-        answer = prediction.split("<|assistant|>\n")[-1].strip()
+        answer = remove_thinking_section(prediction)
         instruction_keys = constraint_dict["instruction_id"]
         args_list = constraint_dict["kwargs"]
         rewards = []
+        if len(prediction) == 0 or len(answer) == 0:
+            logger.warning("Empty prediction received for IFEvalVerifier.")
+            return VerificationResult(score=0.0)
         for instruction_key, args in zip(instruction_keys, args_list):
             if args is None:
                 args = {}
@@ -345,7 +319,7 @@ class IFEvalVerifierOld(VerifierFunction):
         self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], query: Optional[str] = None
     ) -> VerificationResult:
         constraint = label
-        answer = prediction.split("<|assistant|>\n")[-1].strip()
+        answer = remove_thinking_section(prediction)
         if isinstance(constraint, str):
             constraint = json.loads(constraint)
         if "func_name" not in constraint:
@@ -479,7 +453,7 @@ class ReSearchVerifierF1(VerifierFunction):
             return VerificationResult(score=0.0)
         # if label is list, max over labels
         if isinstance(label, list):
-            f1 = max(f1_score(answer_string, lab)["f1"] for lab in label)
+            f1 = max(f1_score(answer_string, str(lab))["f1"] for lab in label)
         else:
             label = str(label)  # safety.
             f1 = f1_score(answer_string, label)["f1"]

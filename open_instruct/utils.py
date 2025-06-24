@@ -572,7 +572,7 @@ class ArgumentParserPlus(HfArgumentParser):
                         inputs[arg] = [str(v) for v in val.split(",")]
 
                     # bool of a non-empty string is True, so we manually check for bools
-                    if base_type == bool:
+                    if base_type is bool:
                         if val in ["true", "True"]:
                             inputs[arg] = True
                         else:
@@ -947,7 +947,23 @@ def live_subprocess_output(cmd: List[str]) -> str:
 def download_from_hf(model_name_or_path: str, revision: str) -> None:
     cmd = ["huggingface-cli", "download", model_name_or_path, "--revision", revision]
     print(f"Downloading from HF with command: {cmd}")
-    return live_subprocess_output(cmd)
+    output = live_subprocess_output(cmd)
+    # for some reason, sometimes the output includes the line including some loading message.
+    # so do some minor cleaning.
+    if "\n" in output:
+        output = output.split("\n")[-1].strip()
+    return output
+
+
+[
+    "gsutil",
+    "-o",
+    "GSUtil:parallel_composite_upload_threshold=150M",
+    "cp",
+    "-r",
+    "/root/.cache/huggingface/hub/models--Qwen--Qwen3-8B/snapshots/9c925d64d72725edaf899c6cb9c377fd0709d9c5",
+    "gs://ai2-llm/post-training/deletable_cache_models/Qwen/Qwen3-8B/9c925d64d72725edaf899c6cb9c377fd0709d9c5",
+]
 
 
 def download_from_gs_bucket(src_path: str, dest_path: str) -> None:

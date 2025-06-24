@@ -2071,6 +2071,8 @@ class FirstWordAnswerChecker(Instruction):
           True if the first word of each sentence is the expected word;
           otherwise, False.
         """
+        if not value.strip() or len(value.split()) == 0:
+            return False
         first_word = value.split()[0].strip()
         if first_word.lower() != self._first_word.lower():
             return False
