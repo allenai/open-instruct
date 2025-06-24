@@ -37,8 +37,9 @@ from open_instruct.math_utils import (
     normalize_final_answer,
     remove_boxed,
 )
-from open_instruct.utils import extract_final_answer
 from open_instruct.search_rewards.long_form_rewards import compute_paper_reward
+from open_instruct.utils import extract_final_answer
+
 logger = logging.getLogger(__name__)
 
 
@@ -854,7 +855,6 @@ async def cleanup_all_llm_judge_clients():
     await LMJudgeVerifier.cleanup_all_clients()
 
 
-
 class RLRAGLongFormVerifier(VerifierFunction):
     """
     Verifier that computes the RL-RAG (long form) score between the prediction and the label.
@@ -867,7 +867,6 @@ class RLRAGLongFormVerifier(VerifierFunction):
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> VerificationResult:
         test_case = json.loads(label)
-        result= compute_paper_reward(prediction, test_case)
-        score = result['reward']
+        result = compute_paper_reward(prediction, test_case)
+        score = result["reward"]
         return VerificationResult(score=score)
-

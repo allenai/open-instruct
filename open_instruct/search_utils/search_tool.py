@@ -1,6 +1,7 @@
 import re
 import time
 
+from open_instruct.search_rewards.long_form_rewards import generate_snippet_id
 from open_instruct.search_utils.massive_ds import get_snippets_for_query
 from open_instruct.tool_utils.tool_vllm import Tool, ToolOutput
 
@@ -61,6 +62,6 @@ class SearchTool(Tool):
             error=error,
             timeout=timeout,
             runtime=time.time() - start_time,
-            start_str="<document>\n",
-            end_str="\n</document>",
+            start_str="<snippet id=" + generate_snippet_id() + ">\n",
+            end_str="\n</snippet>",
         )

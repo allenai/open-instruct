@@ -19,4 +19,4 @@ Several publicly available datasets are used for evaluating type inference syste
 5. **InferTypes4Py**: A test set derived from the source code of Typilus, Type4Py, and other tools, none of which were used as CodeT5's pre-training data.
 
 Type inference approaches in Python can be categorized into three main groups: rule-based, supervised, and cloze-style approaches. Rule-based methods ensure accuracy but suffer from low coverage due to dynamic features and external calls. Supervised approaches are feature-agnostic and can mitigate coverage problems but require large, high-quality annotated datasets and are limited to pre-defined types. Cloze-style approaches reformulate type inference as a fill-in-the-blank problem using pre-trained code models, though they may ignore domain knowledge from static typing rules.
-""" 
+"""
