@@ -870,3 +870,4 @@ class RLRAGLongFormVerifier(VerifierFunction):
         result= compute_paper_reward(prediction, test_case)
         score = result['reward']
         return VerificationResult(score=score)
+
