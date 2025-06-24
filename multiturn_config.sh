@@ -7,16 +7,16 @@ python mason.py \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
-    --exp_name valpy_if_tulu3_multi \
+    --exp_name valpy_if_tulu3_mix \
     --beta 0.01 \
     --num_unique_prompts_rollout 48 \
     --num_samples_per_prompt_rollout 16 \
     --try_launch_beaker_eval_jobs_on_weka \
     --kl_estimator kl3 \
     --learning_rate 5e-7 \
-    --dataset_mixer_list valpy/IF_multiturn2 1.0 \
+    --dataset_mixer_list valpy/IF_multiturn2 1.0 allenai/IF_multi_constraints_upto5 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list valpy/IF_multiturn2 16 \
+    --dataset_mixer_eval_list allenai/IF_multi_constraints_upto5 16 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
