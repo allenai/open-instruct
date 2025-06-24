@@ -976,6 +976,48 @@ def rlvr_tokenize_v2(
     return row
 
 
+def rlvr_tokenize_v3(
+    row: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
+    ground_truths_key: str = GROUND_TRUTHS_KEY,
+    dataset_source_key: str = DATASET_SOURCE_KEY,
+):
+    # only truncate last message if it's not an assistant message
+    if len(row[sft_messages_key]) == 1:
+        prompt = row[sft_messages_key]
+    elif row[sft_messages_key][-1]["role"] != "assistant":
+        prompt = row[sft_messages_key]
+    else:
+        prompt = row[sft_messages_key][:-1]
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
+        prompt,
+        add_generation_prompt=True,
+    )
+    row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
+    # weird issue with qwen: sometimes the padding token ends up in the input ids?
+    # ill look into this more later, for now this guard should be enough
+    if tokenizer.pad_token_id in row[INPUT_IDS_KEY]:
+        row[INPUT_IDS_KEY] = [x for x in row[INPUT_IDS_KEY] if x != tokenizer.pad_token_id]
+    if tokenizer.pad_token_id in row[INPUT_IDS_PROMPT_KEY]:
+        row[INPUT_IDS_PROMPT_KEY] = [x for x in row[INPUT_IDS_PROMPT_KEY] if x != tokenizer.pad_token_id]
+    row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
+    labels = copy.deepcopy(row[INPUT_IDS_KEY])
+    row[LABELS_KEY] = labels
+    row[GROUND_TRUTHS_KEY] = row[ground_truths_key]
+    row[DATASET_SOURCE_KEY] = row[dataset_source_key]
+    # some basic transformations:
+    # if ground truths is a string, make it a list
+    if isinstance(row[ground_truths_key], str):
+        row[ground_truths_key] = [row[ground_truths_key]]
+    # if dataset source is a string, make it a list
+    if isinstance(row[dataset_source_key], str):
+        row[dataset_source_key] = [row[dataset_source_key]]
+    # drop the messages field as it often causes issues.
+    row.pop(sft_messages_key)
+    return row
+
+
 def rlvr_filter_v1(
     row: Dict[str, Any],
     tokenizer: PreTrainedTokenizer,
@@ -1005,7 +1047,7 @@ TRANSFORM_FNS = {
     "preference_filter_v1": (preference_filter_v1, "filter"),
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1, "map"),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
-    "rlvr_tokenize_v1": (rlvr_tokenize_v2, "map"),
+    "rlvr_tokenize_v1": (rlvr_tokenize_v3, "map"),
     "rlvr_filter_v1": (rlvr_filter_v1, "filter"),
 }
 
