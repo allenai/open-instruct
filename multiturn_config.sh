@@ -14,9 +14,9 @@ python mason.py \
     --try_launch_beaker_eval_jobs_on_weka \
     --kl_estimator kl3 \
     --learning_rate 5e-7 \
-    --dataset_mixer_list valpy/IF_multiturn2 1.0 allenai/IF_multi_constraints_upto5 1.0 \
+    --dataset_mixer_list valpy/IF_multiturn2 1.0 allenai/IF_multi_constraints_upto5_no_lang 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list allenai/IF_multi_constraints_upto5 16 \
+    --dataset_mixer_eval_list allenai/IF_multi_constraints_upto5_no_lang 16 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 4048 \
     --max_prompt_token_length 4048 \
