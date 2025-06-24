@@ -10,16 +10,17 @@ Usage:
         --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
         --add_bos \
         --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture-0225 1.0 \
-        --output_dir /weka/oe-adapt-default/tylerr/tulu-3-sft-olmo-2-mixture-0225-olmocore
+        --output_dir ./data/tulu-3-sft-olmo-2-mixture-0225-olmocore
 
 Ai2 Internal Usage:
     gantry run --cluster ai2/phobos-cirrascale --timeout -1 -y --budget ai2/oe-training \
         --install "curl -LsSf https://astral.sh/uv/install.sh | sh && /root/.local/bin/uv sync" \
-        --weka=oe-training-default:/data \
+        --weka=oe-training-default:/weka/oe-training-default \
         -- \
         /root/.local/bin/uv run python scripts/data/convert_sft_data_for_olmocore.py \
+        --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
         --add_bos \
-        --output_dir /data/tylerr/data/sft/tulu-3-sft-olmo-2-mixture-0225-olmocore
+        --output_dir /weka/oe-training-default/tylerr/data/sft/tulu-3-sft-olmo-2-mixture-0225-olmocore
 
 NOTE: allenai/OLMo-2-1124-7B tokenizer is the same as allenai/dolma2-tokenizer, but allenai/OLMo-2-1124-7B
 has additional metadata required for this script.
@@ -198,10 +199,17 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
                 )
             return chunks
 
+    print(f"Writing converted data to {output_dir}")
     write_memmap_chunked(f"{output_dir}/token_ids", token_ids, np.uint32)
     write_memmap_chunked(f"{output_dir}/labels", labels, np.int32)
     write_memmap_chunked(f"{output_dir}/attention_mask", attention_mask, np.int32)
     print("Data conversion completed successfully")
+
+    tokenizer_output_dir = os.path.join(output_dir, "tokenizer")
+    os.makedirs(tokenizer_output_dir, exist_ok=True)
+    print(f"Saving tokenizer to {tokenizer_output_dir}...")
+    tc.tokenizer.save_pretrained(tokenizer_output_dir)
+    print("Tokenizer saved successfully.")
 
 
 if __name__ == "__main__":
