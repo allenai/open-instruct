@@ -535,6 +535,7 @@ class PolicyTrainerRayProcess(RayProcess):
             OlmoeConfig,
             OlmoeForSequenceClassification,
         )
+
         AutoModelForSequenceClassification.register(Olmo2Config, Olmo2ForSequenceClassification)
         AutoModelForSequenceClassification.register(OlmoeConfig, OlmoeForSequenceClassification)
         self.value_model: PreTrainedModel = AutoModelForSequenceClassification.from_pretrained(

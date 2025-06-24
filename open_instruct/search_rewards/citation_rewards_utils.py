@@ -388,7 +388,6 @@ if __name__ == "__main__":
 
     print("\nTest completed successfully!")
 
-
     async def test_async_scoring():
         """Test the async scoring function in an async context"""
         example_response = "The Great Wall of China, one of the most iconic structures in human history, stretches approximately 13,000 miles across northern China. <cite id=a1b2c3d4>Construction of the Great Wall began during the 7th century BC under various warring states, but the most famous sections were built during the Ming Dynasty (1368-1644).</cite>"
@@ -404,10 +403,8 @@ if __name__ == "__main__":
         print(f"Async citation score: {score}")
         print("Async test completed successfully!")
 
-
     # Uncomment the line below to run the async test
     # asyncio.run(test_async_scoring())
-
 
     def example_usage():
         """
@@ -468,7 +465,6 @@ if __name__ == "__main__":
         print("\n" + "=" * 50)
         print("Note: The async version is most beneficial when processing multiple examples")
         print("or when you have multiple claims that need to be evaluated simultaneously.")
-
 
     # Uncomment the line below to run the example
     # example_usage()

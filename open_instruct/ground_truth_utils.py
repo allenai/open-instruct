@@ -834,7 +834,6 @@ class RLRAGLongFormVerifier(VerifierFunction):
         return VerificationResult(score=score)
 
 
-
 def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     """
     Build all verifiers with the given judge config.
