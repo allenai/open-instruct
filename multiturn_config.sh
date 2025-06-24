@@ -18,10 +18,10 @@ python mason.py \
     --dataset_mixer_list_splits train \
     --dataset_mixer_eval_list allenai/IF_multi_constraints_upto5 16 \
     --dataset_mixer_eval_list_splits train \
-    --max_token_length 2048 \
-    --max_prompt_token_length 2048 \
-    --response_length 2048 \
-    --pack_length 4096 \
+    --max_token_length 4048 \
+    --max_prompt_token_length 4048 \
+    --response_length 4048 \
+    --pack_length 8096 \
     --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-DPO \
     --apply_verifiable_reward True \
     --non_stop_penalty True \
@@ -29,7 +29,7 @@ python mason.py \
     --temperature 1.0 \
     --chat_template_name tulu_thinker \
     --oe_eval_tasks  ifeval::tulu \
-    --oe_eval_max_length 2048 \
+    --oe_eval_max_length 4048 \
     --total_episodes 2000000 \
     --deepspeed_stage 2 \
     --per_device_train_batch_size 1 \
