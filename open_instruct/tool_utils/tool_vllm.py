@@ -238,7 +238,7 @@ class ToolUseLLM(LLM):
                     last_prompt_token_ids = last_output.prompt_token_ids
                     last_token_ids = last_o.token_ids
                     tool_output_token_ids = tokenizer.encode(
-                        "<output>\n" + tool_result.output + "</output>\n", add_special_tokens=False
+                        tool_result.start_str + tool_result.output + tool_result.end_str, add_special_tokens=False
                     )
                     timeout[req_id] = tool_result.timeout
                     tool_error[req_id] += "" if tool_result.error is None else tool_result.error

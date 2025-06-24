@@ -19,6 +19,7 @@ data/*
 # !data/processed
 output/
 configs/beaker_configs/auto_created
+local_dataset_cache/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
