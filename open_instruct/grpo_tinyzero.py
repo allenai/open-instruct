@@ -99,7 +99,6 @@ from open_instruct.utils import (
 )
 from open_instruct.vllm_utils3 import create_vllm_engines
 
-
 api = HfApi()
 INVALID_LOGPROB = 1.0
 logger = logging.Logger(__name__)
@@ -605,7 +604,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
     # ------------------------------------------------------------
     # Create the model and optimizer
-    ray.init(dashboard_host="0.0.0.0", runtime_env={'excludes': ['.git/']})  # enable debugging from a different machine (e.g., phobos)
+    ray.init(
+        dashboard_host="0.0.0.0", runtime_env={"excludes": [".git/"]}
+    )  # enable debugging from a different machine (e.g., phobos)
     pg = None
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
