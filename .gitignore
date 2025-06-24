@@ -158,5 +158,3 @@ dmypy.json
 **/batch_files/**
 cache/
 
-
-scripts/eval/oe-eval.sh
