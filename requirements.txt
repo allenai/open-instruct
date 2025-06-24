@@ -38,6 +38,7 @@ async-timeout==5.0.1 ; python_full_version < '3.11'
 attrs==25.3.0
     # via
     #   aiohttp
+    #   jsonlines
     #   jsonschema
     #   referencing
 autoflake==2.3.1
@@ -229,6 +230,7 @@ idna==3.10
     #   requests
     #   yarl
 immutabledict==1.2.0
+    # via open-instruct
 importlib-metadata==8.0.0
     # via
     #   litellm
@@ -254,6 +256,8 @@ jiter==0.10.0
     # via openai
 joblib==1.5.1
     # via nltk
+jsonlines==4.0.0
+    # via open-instruct
 jsonschema==4.24.0
     # via
     #   litellm
@@ -266,6 +270,7 @@ jsonschema-specifications==2025.4.1
 kiwisolver==1.4.8
     # via matplotlib
 langdetect==1.0.9
+    # via open-instruct
 lark==1.2.2
     # via
     #   outlines
@@ -689,6 +694,7 @@ shellingham==1.5.4
 six==1.17.0
     # via
     #   docker-pycreds
+    #   langdetect
     #   opencensus
     #   python-dateutil
     #   tensorboard
