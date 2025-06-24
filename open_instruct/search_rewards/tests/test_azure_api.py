@@ -1,4 +1,5 @@
 import os
+
 from openai import AzureOpenAI
 
 endpoint = "https://ai-olmohub1163464654570.openai.azure.com/"
@@ -32,7 +33,7 @@ response = client.chat.completions.create(
         {
             "role": "user",
             "content": "What is so great about #1?",
-        }
+        },
     ],
     # chatHistory=10,
     max_completion_tokens=800,
@@ -40,7 +41,7 @@ response = client.chat.completions.create(
     top_p=1.0,
     frequency_penalty=0.0,
     presence_penalty=0.0,
-    model=deployment
+    model=deployment,
 )
 
 print(response.choices[0].message.content)
