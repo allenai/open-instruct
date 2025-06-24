@@ -2,9 +2,9 @@ import itertools
 import logging
 from typing import Any, Dict, List
 
-from citation_rewards_utils import run_llm_judge, score_in_context_citations
+from .citation_rewards_utils import run_llm_judge, score_in_context_citations
 from pydantic.v1 import BaseModel, Field
-from run_utils import extract_json_from_response
+from .run_utils import extract_json_from_response
 
 LOGGER = logging.getLogger(__name__)
 

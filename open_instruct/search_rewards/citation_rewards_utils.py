@@ -2,7 +2,7 @@ import asyncio
 import re
 from typing import Dict, List
 
-from run_utils import run_azure_openai
+from .run_utils import run_azure_openai
 
 citation_recall_has_citation_prompt = """You are an expert in evaluating text quality. You will receive a user's question about an uploaded document, a factual statement from an AI assistant's response based on that document, and a snippet from the document (since the document is too long to display in full). Your task is to carefully assess whether this statement is supported by the snippet. Please use the following scale to generate your rating:
 - [[Fully supported]] - Most information in the statement is supported by or extracted from the snippet. This applies only to cases where the statement and parts of the snippet are almost identical.
@@ -389,86 +389,86 @@ if __name__ == "__main__":
     print("\nTest completed successfully!")
 
 
-async def test_async_scoring():
-    """Test the async scoring function in an async context"""
-    example_response = "The Great Wall of China, one of the most iconic structures in human history, stretches approximately 13,000 miles across northern China. <cite id=a1b2c3d4>Construction of the Great Wall began during the 7th century BC under various warring states, but the most famous sections were built during the Ming Dynasty (1368-1644).</cite>"
+    async def test_async_scoring():
+        """Test the async scoring function in an async context"""
+        example_response = "The Great Wall of China, one of the most iconic structures in human history, stretches approximately 13,000 miles across northern China. <cite id=a1b2c3d4>Construction of the Great Wall began during the 7th century BC under various warring states, but the most famous sections were built during the Ming Dynasty (1368-1644).</cite>"
 
-    test_citations = {
-        "a1b2c3d4": "The Great Wall of China is a series of fortifications built across the historical northern borders of ancient Chinese states. While walls were built as early as the 7th century BC by various warring states, the most famous sections of the wall were constructed during the Ming Dynasty between 1368 and 1644.",
-    }
+        test_citations = {
+            "a1b2c3d4": "The Great Wall of China is a series of fortifications built across the historical northern borders of ancient Chinese states. While walls were built as early as the 7th century BC by various warring states, the most famous sections of the wall were constructed during the Ming Dynasty between 1368 and 1644.",
+        }
 
-    test_question = "What is the history and construction of the Great Wall of China?"
+        test_question = "What is the history and construction of the Great Wall of China?"
 
-    print("Testing async version in async context...")
-    score = await score_in_context_citations_async(test_question, example_response, test_citations)
-    print(f"Async citation score: {score}")
-    print("Async test completed successfully!")
-
-
-# Uncomment the line below to run the async test
-# asyncio.run(test_async_scoring())
+        print("Testing async version in async context...")
+        score = await score_in_context_citations_async(test_question, example_response, test_citations)
+        print(f"Async citation score: {score}")
+        print("Async test completed successfully!")
 
 
-def example_usage():
-    """
-    Example showing how to use both synchronous and asynchronous versions
-    of the citation scoring functions.
-    """
-    print("=== Citation Scoring Example ===\n")
+    # Uncomment the line below to run the async test
+    # asyncio.run(test_async_scoring())
 
-    # Example data
-    question = "What are the health benefits of exercise?"
-    response = "Regular exercise has numerous health benefits. <cite id=ref1>Exercise can reduce the risk of heart disease by up to 30%.</cite> Additionally, <cite id=ref2>physical activity helps maintain healthy body weight and improves mental health.</cite>"
 
-    citations = {
-        "ref1": "Studies have shown that regular physical activity can reduce the risk of cardiovascular disease by approximately 30% when compared to sedentary lifestyles.",
-        "ref2": "Exercise plays a crucial role in weight management and has been linked to improved mental health outcomes, including reduced symptoms of depression and anxiety.",
-    }
+    def example_usage():
+        """
+        Example showing how to use both synchronous and asynchronous versions
+        of the citation scoring functions.
+        """
+        print("=== Citation Scoring Example ===\n")
 
-    print("Question:", question)
-    print("Response:", response)
-    print("Citations:", citations)
-    print("\n" + "=" * 50 + "\n")
+        # Example data
+        question = "What are the health benefits of exercise?"
+        response = "Regular exercise has numerous health benefits. <cite id=ref1>Exercise can reduce the risk of heart disease by up to 30%.</cite> Additionally, <cite id=ref2>physical activity helps maintain healthy body weight and improves mental health.</cite>"
 
-    # Synchronous version (original)
-    print("1. Using synchronous version (sequential API calls):")
-    import time
+        citations = {
+            "ref1": "Studies have shown that regular physical activity can reduce the risk of cardiovascular disease by approximately 30% when compared to sedentary lifestyles.",
+            "ref2": "Exercise plays a crucial role in weight management and has been linked to improved mental health outcomes, including reduced symptoms of depression and anxiety.",
+        }
 
-    start_time = time.time()
-    score_sync = score_in_context_citations(question, response, citations)
-    sync_time = time.time() - start_time
-    print(f"   Score: {score_sync:.4f}")
-    print(f"   Time: {sync_time:.2f} seconds")
+        print("Question:", question)
+        print("Response:", response)
+        print("Citations:", citations)
+        print("\n" + "=" * 50 + "\n")
 
-    print("\n2. Using asynchronous version (parallel API calls):")
-    start_time = time.time()
-    score_async = score_in_context_citations_async_wrapper(question, response, citations)
-    async_time = time.time() - start_time
-    print(f"   Score: {score_async:.4f}")
-    print(f"   Time: {async_time:.2f} seconds")
+        # Synchronous version (original)
+        print("1. Using synchronous version (sequential API calls):")
+        import time
 
-    if async_time < sync_time:
-        speedup = sync_time / async_time
-        print(f"   Speedup: {speedup:.2f}x faster")
-    else:
-        print("   Note: Async version may be slower for single examples due to overhead")
-
-    print("\n3. Using async version in async context:")
-
-    async def demo_async():
         start_time = time.time()
-        score = await score_in_context_citations_async(question, response, citations)
+        score_sync = score_in_context_citations(question, response, citations)
+        sync_time = time.time() - start_time
+        print(f"   Score: {score_sync:.4f}")
+        print(f"   Time: {sync_time:.2f} seconds")
+
+        print("\n2. Using asynchronous version (parallel API calls):")
+        start_time = time.time()
+        score_async = score_in_context_citations_async_wrapper(question, response, citations)
         async_time = time.time() - start_time
-        print(f"   Score: {score:.4f}")
+        print(f"   Score: {score_async:.4f}")
         print(f"   Time: {async_time:.2f} seconds")
 
-    # Run the async demo
-    asyncio.run(demo_async())
+        if async_time < sync_time:
+            speedup = sync_time / async_time
+            print(f"   Speedup: {speedup:.2f}x faster")
+        else:
+            print("   Note: Async version may be slower for single examples due to overhead")
 
-    print("\n" + "=" * 50)
-    print("Note: The async version is most beneficial when processing multiple examples")
-    print("or when you have multiple claims that need to be evaluated simultaneously.")
+        print("\n3. Using async version in async context:")
+
+        async def demo_async():
+            start_time = time.time()
+            score = await score_in_context_citations_async(question, response, citations)
+            async_time = time.time() - start_time
+            print(f"   Score: {score:.4f}")
+            print(f"   Time: {async_time:.2f} seconds")
+
+        # Run the async demo
+        asyncio.run(demo_async())
+
+        print("\n" + "=" * 50)
+        print("Note: The async version is most beneficial when processing multiple examples")
+        print("or when you have multiple claims that need to be evaluated simultaneously.")
 
 
-# Uncomment the line below to run the example
-example_usage()
+    # Uncomment the line below to run the example
+    # example_usage()

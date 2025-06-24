@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 
+import json
+import logging
 import os
 import sys
+from unittest.mock import Mock, patch
 
-# Add parent directory to path for paper_rubrics_utils
+# Add parent directory to path to import run_utils
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# Add current directory to path for test files
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from test_answer import test_answer
-from test_case import test_case
+from .test_answer import test_answer
+from .test_case import test_case
 
 from open_instruct.search_rewards.global_rewards_utils import (
     RubricCorpusQaGenericMetric,
