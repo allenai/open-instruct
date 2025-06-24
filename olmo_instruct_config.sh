@@ -10,7 +10,7 @@ python mason.py \
     --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
     --exp_name valpy_if_from_instruct_olmo_mix \
     --beta 0.0 \
-    --add_bos False \
+    --add_bos True \
     --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 128 \
     --num_mini_batches 1 \
@@ -37,7 +37,7 @@ python mason.py \
     --temperature 1.0 \
     --ground_truths_key ground_truth \
     --sft_messages_key messages \
-    --chat_template_name None \
+    --chat_template_name tulu_thinker \
     --oe_eval_tasks  ifeval::tulu \
     --oe_eval_max_length 32768 \
     --total_episodes 10000000 \
