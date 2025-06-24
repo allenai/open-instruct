@@ -1,4 +1,4 @@
-export HOSTED_VLLM_API_BASE=http://saturn-cs-aus-244.reviz.ai2.in:8001/v1
+export HOSTED_VLLM_API_BASE=http://saturn-cs-aus-230.reviz.ai2.in:8001/v1
 
 # new version
 python open_instruct/grpo_fast.py \
@@ -41,8 +41,8 @@ python open_instruct/grpo_fast.py \
     --push_to_hub false \
     --llm_judge_model "hosted_vllm/Qwen/Qwen3-32B" \
     --llm_judge_timeout 600 \
-    --llm_judge_max_tokens 512 \
-    --llm_judge_max_context_length 4096
+    --llm_judge_max_tokens 1024 \
+    --llm_judge_max_context_length 8192
 
 # 8192
 # initial saurabh version

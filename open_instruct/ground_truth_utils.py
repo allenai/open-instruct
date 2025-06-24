@@ -601,7 +601,9 @@ class LMJudgeVerifier(VerifierFunction):
             return reasoning, score
 
         try:
-            content = completion.choices[0].message.content
+            # remove anything between <think> and </think> including the tags using regex
+            pattern = r"<think>\s*.*?\s*</think>\s*"
+            content = re.sub(pattern, "", completion.choices[0].message.content, flags=re.DOTALL)
             reasoning, score = self.extractor(content)
 
         except Exception as e:
@@ -638,7 +640,7 @@ class LMJudgeVerifier(VerifierFunction):
         for attempt in range(max_retries):
             # judges the quality of a response
             try:
-                system_prompt = "You are a concise assistant who gives very short explanations before giving a quality score."
+                system_prompt = "Do not generate text between the <think> and </think> tags." # "You are a concise assistant who gives very short explanations before giving a quality score."
                 messages = build_messages(prompt, system_prompt)
 
                 # Faeze: check if the request would exceed context window
