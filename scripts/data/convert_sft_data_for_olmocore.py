@@ -191,13 +191,20 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     write_memmap_chunked(f"{output_dir}/token_ids", token_ids, np.uint32)
     write_memmap_chunked(f"{output_dir}/labels", labels, np.int32)
     write_memmap_chunked(f"{output_dir}/attention_mask", attention_mask, np.int32)
-    print("Data conversion completed successfully")
+    print("Data conversion completed successfully!")
 
     tokenizer_output_dir = os.path.join(output_dir, "tokenizer")
     os.makedirs(tokenizer_output_dir, exist_ok=True)
     print(f"Saving tokenizer to {tokenizer_output_dir}...")
     tc.tokenizer.save_pretrained(tokenizer_output_dir)
-    print("Tokenizer saved successfully.")
+    print("Tokenizer saved successfully!")
+
+    # Print tokenizer information
+    print("Verify these values match the tokenizer config used in Olmo-core:")
+    print(f"Tokenizer vocab_size: {tc.tokenizer.vocab_size}")
+    print(f"Tokenizer bos_token_id: {tc.tokenizer.bos_token_id}")
+    print(f"Tokenizer pad_token_id: {tc.tokenizer.pad_token_id}")
+    print(f"Tokenizer eos_token_id: {tc.tokenizer.eos_token_id}")
 
 
 if __name__ == "__main__":
