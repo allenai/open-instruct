@@ -17,7 +17,7 @@ import os
 import random
 import sys
 import time
-from typing import List
+from typing import List, Sequence, Any
 
 import datasets
 import openai
@@ -170,6 +170,15 @@ def parse_args():
 
     return args
 
+def load_input_dataset(dataset_name: str, split: str) -> Sequence[dict[str, Any]]:
+    if dataset_name.endswith(".jsonl"):
+        with Path(dataset_name).open("r", encoding="utf-8") as f:
+            input_dataset = [json.loads(raw.strip()) for raw in f]
+    else:
+        input_dataset = datasets.load_dataset(dataset_name, split=split)
+    return input_dataset
+
+
 def main(sample_limit: int | None = None,
          input_dataset_name: str = "allenai/tulu-3-sft-personas-code",
          split: str = "split_0",
@@ -188,7 +197,7 @@ def main(sample_limit: int | None = None,
     os.makedirs(f"{current_dir}/batch_files", exist_ok=True)
 
     print(f"Loading dataset {input_dataset_name} with split {split}")
-    input_dataset = datasets.load_dataset(input_dataset_name, split=split)
+    input_dataset = load_input_dataset(input_dataset_name, split)
     
     # First get all unique IDs    
     print(f'Processing dataset with {len(input_dataset)} rows')    
