@@ -199,7 +199,6 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     tc.tokenizer.save_pretrained(tokenizer_output_dir)
     print("Tokenizer saved successfully!")
 
-    # Print tokenizer information
     print("Verify these values match the tokenizer config used in Olmo-core:")
     print(f"Tokenizer vocab_size: {tc.tokenizer.vocab_size}")
     print(f"Tokenizer bos_token_id: {tc.tokenizer.bos_token_id}")
