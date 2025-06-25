@@ -42,6 +42,6 @@ python mason.py \
     --apply_verifiable_reward true \
     --seed 4 \
     --num_evals 100 \
-    --save_freq 10 \
+    --save_freq 100 \
     --gradient_checkpointing \
     --with_tracking
