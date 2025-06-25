@@ -20,7 +20,7 @@ Ai2 Internal Usage:
         /root/.local/bin/uv run python scripts/data/convert_sft_data_for_olmocore.py \
         --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
         --add_bos \
-        --output_dir /weka/oe-training-default/tylerr/data/sft/tulu-3-sft-olmo-2-mixture-0225-olmocore
+        --output_dir /weka/oe-training-default/ai2-llm/tylerr/data/sft/tulu-3-sft-olmo-2-mixture-0225-olmocore
 
 NOTE: allenai/OLMo-2-1124-7B tokenizer is the same as allenai/dolma2-tokenizer, but allenai/OLMo-2-1124-7B
 has additional metadata required for this script.
@@ -65,9 +65,7 @@ class ConvertSFTDataArguments:
     dataset_mixer: Optional[dict] = field(default=None)
 
     """A list of datasets (local or HF) to sample from."""
-    dataset_mixer_list: List[str] = field(
-        default_factory=lambda: ["allenai/tulu-3-sft-olmo-2-mixture-0225", "1.0"]
-    )
+    dataset_mixer_list: List[str] = field(default_factory=lambda: ["allenai/tulu-3-sft-olmo-2-mixture-0225", "1.0"])
 
     """The dataset splits to use for training"""
     dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
@@ -81,9 +79,7 @@ class ConvertSFTDataArguments:
     )
 
     """The columns to use for the dataset."""
-    dataset_target_columns: List[str] = field(
-        default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS
-    )
+    dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS)
 
     """The mode to use for caching the dataset."""
     dataset_cache_mode: Literal["hf", "local"] = "local"
@@ -110,9 +106,7 @@ class ConvertSFTDataArguments:
 def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
     if is_beaker_job():
-        beaker_cache_dir = (
-            "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
-        )
+        beaker_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
         if os.path.exists(beaker_cache_dir):
             args.dataset_local_cache_dir = beaker_cache_dir
 
@@ -175,9 +169,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         max_size_bytes = max_size_gb * 1024**3
 
         if total_size_bytes <= max_size_bytes:  # record in single file
-            mmap = np.memmap(
-                f"{base_filename}.npy", mode="w+", dtype=dtype, shape=(len(data),)
-            )
+            mmap = np.memmap(f"{base_filename}.npy", mode="w+", dtype=dtype, shape=(len(data),))
             mmap[:] = data
             mmap.flush()
             print(f"Written {base_filename}.npy ({total_size_bytes / 1024**3:.2f} GB)")
@@ -188,15 +180,11 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
             for i in range(0, len(data), chunk_size):
                 chunk_data = data[i : i + chunk_size]
                 filename = f"{base_filename}_part_{i // chunk_size:04d}.npy"
-                mmap = np.memmap(
-                    filename, mode="w+", dtype=dtype, shape=(len(chunk_data),)
-                )
+                mmap = np.memmap(filename, mode="w+", dtype=dtype, shape=(len(chunk_data),))
                 mmap[:] = chunk_data
                 mmap.flush()
                 chunks.append(mmap)
-                print(
-                    f"Written {filename} ({len(chunk_data) * item_size / 1024**3:.2f} GB)"
-                )
+                print(f"Written {filename} ({len(chunk_data) * item_size / 1024**3:.2f} GB)")
             return chunks
 
     print(f"Writing converted data to {output_dir}")
