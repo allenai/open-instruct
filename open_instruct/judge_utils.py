@@ -208,7 +208,8 @@ def extract_json_score_with_fallback(score_str: str) -> float:
         reasoning = data.get("REASONING", "")
         return reasoning, float(data.get("SCORE", 0.0))
     except (json.JSONDecodeError, TypeError, ValueError):
-        return score_str, extract_score_from_string(score_str)
+        logger.warning(f"Could not parse score from due to invalid json: {score_str}, defaulting to 0.0")
+        return score_str, 0.0
 
 
 def extract_score_with_fallback_max_10(score_str: str) -> float:
