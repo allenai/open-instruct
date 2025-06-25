@@ -3,7 +3,7 @@ exp_name="grpo_qwen3_1.7b_base"
 
 HF_HOME=/weka/oe-adapt-default/allennlp/.cache/huggingface
 
-uv run open_instruct/grpo_dev.py \
+uv run open_instruct/grpo_fast.py \
     --exp_name $exp_name \
     --output_dir tmp \
     --dataset_mixer_list mnoukhov/rlvr_countdown 1.0 \
@@ -20,7 +20,7 @@ uv run open_instruct/grpo_dev.py \
     --total_episodes 64000 \
     --model_name_or_path Qwen/Qwen3-1.7B-Base \
     --stop_strings "<|endoftext|>" "</answer>" \
-    --chat_template_name simple_concat_with_new_line \
+    --chat_template_name r1_simple_chat_postpend_think \
     --apply_r1_style_format_reward \
     --additive_format_reward \
     --r1_style_format_reward 0.1 \
@@ -37,7 +37,7 @@ uv run open_instruct/grpo_dev.py \
     --seed 3 \
     --num_evals 4 \
     --save_freq 1000 \
-    --vllm_gpu_memory_utilization 0.55 \
+    --vllm_gpu_memory_utilization 0.5 \
     --single_gpu_mode \
     --deepspeed_stage 2 \
     --async_mode False \
