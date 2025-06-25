@@ -50,7 +50,7 @@ def print_status(job: dict) -> None:
         "-"
         if not errors
         else ";".join(
-            f"{e.get('code') or e.get('error_code')}:{e.get('message')}" for e in errors
+            f"{e.get('code') or e.get('error_code')}: {e.get('message')}" for e in errors['data']
         )
     )
     line = (
