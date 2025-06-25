@@ -90,7 +90,6 @@ dev = [
 [tool.black]
 line-length = 119
 target-version = ['py310']
-include = 'my_dir/.*\.py$'
 
 [tool.isort]
 known_first_party = ["open_instruct"]
