@@ -48,7 +48,7 @@ def get_snippets_for_query(query, api_endpoint="https://api.semanticscholar.org/
     except requests.exceptions.RequestException as e:
         print(f"Error: {e}")
 
-    print("Failed to retrieve S2 snippets for one query:", query, res)
+    print("Failed to retrieve S2 snippets for one query:", query)
     return None
 
 
