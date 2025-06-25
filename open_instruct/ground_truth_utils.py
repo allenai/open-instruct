@@ -648,8 +648,9 @@ class LMJudgeVerifier(VerifierFunction):
                 try:
                     from open_instruct.context_window_checker import (
                         check_context_window_limit,
-                        truncate_messages_to_fit_context
+                        truncate_messages_to_fit_context,
                     )
+
                     context_check_available = True
                 except ImportError:
                     logger.warning("Context window checker not available. Proceeding without context checking.")
@@ -662,7 +663,7 @@ class LMJudgeVerifier(VerifierFunction):
                         max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                         model_name=self.verifier_config.llm_judge_model,
                         max_context_length=self.verifier_config.llm_judge_max_context_length,  # Adjust based on your model
-                        safety_margin=100
+                        safety_margin=100,
                     ):
                         # Try to truncate messages to fit
                         messages = truncate_messages_to_fit_context(
@@ -670,16 +671,16 @@ class LMJudgeVerifier(VerifierFunction):
                             max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                             model_name=self.verifier_config.llm_judge_model,
                             max_context_length=self.verifier_config.llm_judge_max_context_length,
-                            safety_margin=100
+                            safety_margin=100,
                         )
-                        
+
                         # Check again after truncation
                         if not check_context_window_limit(
                             messages=messages,
                             max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                             model_name=self.verifier_config.llm_judge_model,
                             max_context_length=self.verifier_config.llm_judge_max_context_length,
-                            safety_margin=10
+                            safety_margin=10,
                         ):
                             logger.error("Cannot fit request within context window even after truncation.")
                             return VerificationResult(score=0.0, cost=0.0, reasoning="Error: Context window exceeded")
