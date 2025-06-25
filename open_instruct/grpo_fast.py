@@ -1524,8 +1524,8 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 from open_instruct.search_utils.search_tool import SearchTool
 
                 tool = SearchTool(
-                    start_str="<query>",
-                    end_str="</query>",
+                    start_str="<search>",
+                    end_str="</search>",
                     api_endpoint=args.search_api_endpoint,
                     number_documents_to_search=args.number_documents_to_search,
                 )
