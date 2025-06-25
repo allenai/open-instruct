@@ -676,22 +676,37 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.distributed.barrier()
 
     def broadcast_to_vllm(self):
-        # clear vllm cache if we need to
-        cache_reset_refs = []
-        if self.args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
-            for engine in self.vllm_engines:
-                cache_reset_refs.append(engine.reset_prefix_cache.remote())
+        with Timer(" 🧑‍🧑‍🧒‍🧒🧑‍🧑‍🧒‍🧒 [broadcast_to_vllm] Broadcast to VLLM", noop=self.rank != 0):
+            # clear vllm cache if we need to
+            cache_reset_refs = []
+            if self.args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
+                for engine in self.vllm_engines:
+                    cache_reset_refs.append(engine.reset_prefix_cache.remote())
 
-        # avoid OOM
-        torch.cuda.empty_cache()
-        model = self.model.module
-        count, num_params = 0, len(list(model.named_parameters()))
-        refss = []
-        if self.args.gather_whole_model:
-            with deepspeed.zero.GatheredParameters(model.parameters(), enabled=self.args.deepspeed_stage == 3):
+            # avoid OOM
+            torch.cuda.empty_cache()
+            model = self.model.module
+            count, num_params = 0, len(list(model.named_parameters()))
+            refss = []
+            if self.args.gather_whole_model:
+                with deepspeed.zero.GatheredParameters(model.parameters(), enabled=self.args.deepspeed_stage == 3):
+                    for name, param in model.named_parameters():
+                        count += 1  # empty_cache at last param
+                        # Fire all vllm engines for broadcast
+                        if torch.distributed.get_rank() == 0:
+                            shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
+                            refs = [
+                                engine.update_weight.remote(
+                                    name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
+                                )
+                                for engine in self.vllm_engines
+                            ]
+                            refss.extend(refs)
+                        if torch.distributed.get_rank() == 0:
+                            torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+            else:  # broadcast each parameter independently
                 for name, param in model.named_parameters():
-                    count += 1  # empty_cache at last param
-                    # Fire all vllm engines for broadcast
+                    count += 1
                     if torch.distributed.get_rank() == 0:
                         shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
                         refs = [
@@ -701,27 +716,13 @@ class PolicyTrainerRayProcess(RayProcess):
                             for engine in self.vllm_engines
                         ]
                         refss.extend(refs)
-                    if torch.distributed.get_rank() == 0:
-                        torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
-        else:  # broadcast each parameter independently
-            for name, param in model.named_parameters():
-                count += 1
-                if torch.distributed.get_rank() == 0:
-                    shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
-                    refs = [
-                        engine.update_weight.remote(
-                            name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
-                        )
-                        for engine in self.vllm_engines
-                    ]
-                    refss.extend(refs)
-                with deepspeed.zero.GatheredParameters([param], enabled=self.args.deepspeed_stage == 3):
-                    if torch.distributed.get_rank() == 0:
-                        torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
-        if torch.distributed.get_rank() == 0:
-            ray.get(refss)
-        if args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
-            ray.get(cache_reset_refs)
+                    with deepspeed.zero.GatheredParameters([param], enabled=self.args.deepspeed_stage == 3):
+                        if torch.distributed.get_rank() == 0:
+                            torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
+            if torch.distributed.get_rank() == 0:
+                ray.get(refss)
+            if args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
+                ray.get(cache_reset_refs)
 
     def update_ref_policy(self):
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
