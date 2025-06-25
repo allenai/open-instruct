@@ -66,23 +66,14 @@ def upload_scholarqabench_data(use_system_prompt: bool = True) -> List[Dict[str,
                 {"role": "user", "content": ex["initial_prompt"]},
             ]
         else:
-            messages = [{"role": "user", "content": ex["initial_prompt"]}]
+            messages = [{"content": ex["initial_prompt"], "role": "user"}]
         ground_truth = json.dumps(ex)
         dataset = "rl_rag_longform"
         formatted_example = {"messages": messages, "ground_truth": ground_truth, "dataset": dataset}
         formatted_data.append(formatted_example)
 
     # push to huggingface
-    dataset = Dataset.from_list(
-        formatted_data,
-        features=Features(
-            {
-                "messages": Sequence(feature=Value(dtype="string")),
-                "ground_truth": Value(dtype="string"),
-                "dataset": Value(dtype="string"),
-            }
-        ),
-    )
+    dataset = Dataset.from_list(formatted_data)
     dataset.push_to_hub(
         "rulins/scholarqabench_rlvr_no_prompt"
         if not use_system_prompt
