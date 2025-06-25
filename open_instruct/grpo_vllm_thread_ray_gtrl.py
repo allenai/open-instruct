@@ -1197,7 +1197,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
                         decoded_response = tokenizer.batch_decode(postprocessed_response)
-                        verifiable_reward, per_func_reward = asyncio.run(
+                        # for now, not supporting arb log values in non-fast scripts.
+                        verifiable_reward, per_func_reward, _ = asyncio.run(
                             apply_verifiable_reward(
                                 reward_fn_mapping=reward_fn_mapping,
                                 responses=[

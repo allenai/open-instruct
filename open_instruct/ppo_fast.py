@@ -1965,7 +1965,7 @@ if __name__ == "__main__":
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
-                verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
+                verifiable_rewards, per_func_rewards, log_values = await apply_verifiable_reward(
                     reward_fn_mapping,
                     responses,
                     decoded_responses,
@@ -1988,6 +1988,9 @@ if __name__ == "__main__":
                 np_verifiable_rewards = np.array(verifiable_rewards)
                 metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
                 metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
+                if log_values is not None:
+                    for key, value in log_values.items():
+                        metrics[f"objective/reward_log_values/{key}"] = np.array(value).mean()
                 # reshuffle around per_func rewards
                 per_func_lists = defaultdict(list)
                 for reward_dict in per_func_rewards:

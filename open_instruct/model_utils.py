@@ -272,6 +272,7 @@ async def apply_verifiable_reward(
     response_rewards = [0] * len(responses)
     response_per_func_rewards = [{} for _ in range(len(responses))]
 
+    reward_log_values = defaultdict(list)
     # Process results
     for result, metadata in zip(reward_results, task_metadata):
         response_idx = metadata["response_idx"]
@@ -283,12 +284,17 @@ async def apply_verifiable_reward(
         score = result.score if hasattr(result, "score") else result
         weighted_reward = reward_mult * score * reward_weight
 
+        # gather the log values.
+        if result.log_values is not None:
+            for key, value in result.log_values.items():
+                reward_log_values[key].append(value)
+
         response_rewards[response_idx] += weighted_reward
         response_per_func_rewards[response_idx][dataset] = (
             response_per_func_rewards[response_idx].get(dataset, 0) + weighted_reward
         )
 
-    return response_rewards, response_per_func_rewards
+    return response_rewards, response_per_func_rewards, reward_log_values
 
 
 def forward(

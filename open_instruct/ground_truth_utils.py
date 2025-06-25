@@ -87,6 +87,7 @@ class CodeVerifierConfig(VerifierConfig):
 class VerificationResult:
     score: float
     cost: float = 0.0
+    log_values: Optional[Dict[str, float]] = None
     reasoning: Optional[str] = None
 
 
@@ -831,7 +832,7 @@ class RLRAGLongFormVerifier(VerifierFunction):
         test_case = json.loads(label)
         result = compute_paper_reward(prediction, test_case)
         score = result["reward"]
-        return VerificationResult(score=score)
+        return VerificationResult(score=score, log_values=result["log_values"])
 
 
 def build_all_verifiers(args) -> Dict[str, VerifierFunction]:

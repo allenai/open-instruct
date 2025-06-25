@@ -1174,7 +1174,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         # we need to batch the gt to match query.
                         ground_truth = ground_truths[i : i + args.local_rollout_forward_batch_size]
                         dataset = datasets[i : i + args.local_rollout_forward_batch_size]
-                        verifiable_reward, per_func_reward = apply_verifiable_reward(
+                        # for now, not supporting arb log values in non-fast scripts.
+                        verifiable_reward, per_func_reward, _ = apply_verifiable_reward(
                             responses=postprocessed_response,
                             decoded_responses=decoded_response,
                             ground_truths=ground_truth,

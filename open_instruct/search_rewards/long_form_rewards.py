@@ -100,6 +100,10 @@ def compute_paper_reward(response: str, test_case: Dict[str, Any]) -> Dict[str, 
         "extraction_success": False,
         "scoring_results": None,
         "error": None,
+        "log_values": {
+            "format_correct": 0.0,
+            
+        },
     }
 
     try:
@@ -126,6 +130,9 @@ def compute_paper_reward(response: str, test_case: Dict[str, Any]) -> Dict[str, 
             LOGGER.warning("No <answer></answer> tags found in response")
             return result
 
+        # if we got here, we have a valid format.
+        result["log_values"]["format_correct"] = 1.0
+
         extracted_answer = match.group(1).strip()
         result["answer_extracted"] = extracted_answer
         result["extraction_success"] = True
@@ -145,6 +152,8 @@ def compute_paper_reward(response: str, test_case: Dict[str, Any]) -> Dict[str, 
 
         result["scoring_results"] = scoring_results
         result["reward"] = scoring_results["score"]  # Use the overall score as reward
+        # add the breakdowns to the log values.
+        result["log_values"].update(scoring_results)
 
         LOGGER.info(f"Successfully computed reward: {result['reward']:.4f}")
 
