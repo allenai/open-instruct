@@ -12,6 +12,7 @@ If you have code data, you might have to launch code server too before running:
 source configs/beaker_configs/code_api_setup.sh
 """
 import argparse
+from functools import partial
 import json
 from multiprocessing import Pool, cpu_count, set_start_method
 from tqdm import tqdm
@@ -19,7 +20,7 @@ import matplotlib.pyplot as plt
 from open_instruct.ground_truth_utils import build_all_verifiers
 
 
-def _avg_correctness(sample):
+def _avg_correctness(sample, reward_fn_mapping):
     """
     Compute the mean correctness for one sample (called in worker).
     """
@@ -27,8 +28,8 @@ def _avg_correctness(sample):
     gt = sample["ground_truth"][0]
     outputs = sample["output"]
 
-    reward_fn = REWARD_FN_MAPPING[dataset]
-    scores = [reward_fn(None, o, gt) for o in outputs]
+    reward_fn = reward_fn_mapping[dataset]
+    scores = [reward_fn(None, o, gt).score for o in outputs]
     return sum(scores) / len(scores) if scores else 0.0
 
 
@@ -80,9 +81,56 @@ def main():
         type=str,
         help="Give a dataset name to push this data to the hub."
     )
+    parser.add_argument(
+        "--code_api_url",
+        default=None,
+        type=str,
+        help="Give a code api url to use for code verifier."
+    )
+    parser.add_argument(
+        "--code_max_execution_time",
+        default=1.0,
+        type=float,
+        help="Give a max execution time for code verifier."
+    )
+    parser.add_argument(
+        "--llm_judge_model",
+        default=None,
+        type=str,
+        help="Give a llm judge model to use for llm verifier."
+    )
+    parser.add_argument(
+        "--llm_judge_max_tokens",
+        default=2048,
+        type=int,
+        help="Give a max tokens for llm judge."
+    )
+    parser.add_argument(
+        "--llm_judge_temperature",
+        default=1.0,
+        type=float,
+        help="Give a temperature for llm judge."
+    )
+    parser.add_argument(
+        "--llm_judge_timeout",
+        default=60,
+        type=int,
+        help="Give a timeout for llm judge."
+    )
+    parser.add_argument(
+        "--seed",
+        default=42,
+        type=int,
+        help="Give a seed for llm judge."
+    )
     args = parser.parse_args()
+    if args.lower_bound == 0 and args.upper_bound == 1:
+        print("Upper bound is 1 and lower bound is 0. No filtering will be done, is this intended?")
 
     reward_fn_mapping = build_all_verifiers(args)
+
+    # currying the avg_correctness function
+    avg_correctness = partial(_avg_correctness, reward_fn_mapping=reward_fn_mapping)
 
     # Prefer 'spawn' for better safety on macOS / Jupyter
     try:
@@ -99,7 +147,7 @@ def main():
     with Pool(processes=workers) as pool:
         avg_scores = list(
             tqdm(
-                pool.imap(_avg_correctness, samples, chunksize=chunk_size),
+                pool.imap(avg_correctness, samples, chunksize=chunk_size),
                 total=len(samples),
                 desc="Scoring"
             )
@@ -117,7 +165,7 @@ def main():
     # Filter out everything outside of this range
     filtered_samples = [
         sample for sample, score in zip(samples, avg_scores)
-        if lower_bound < score < upper_bound
+        if lower_bound <= score <= upper_bound
     ]
     print(
         f"Filtered {len(samples) - len(filtered_samples)} samples out of {len(samples)}"

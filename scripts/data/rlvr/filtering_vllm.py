@@ -74,7 +74,7 @@ def main():
     parser.add_argument(
         "--number_samples",
         type=int,
-        default=16,
+        default=8,
         help="Number of samples to generate per record"
     )
     parser.add_argument(
@@ -107,7 +107,6 @@ def main():
         )
         for sample in subset
     ]
-
     # 4. vLLM bulk generate
     llm = LLM(
         model=args.model,
@@ -118,7 +117,6 @@ def main():
         temperature=args.temperature,
         n=args.number_samples,
         max_tokens=32768,
-        stop=["</answer>"]
     )
     outputs = llm.generate(prompts, sampling_params)
 
