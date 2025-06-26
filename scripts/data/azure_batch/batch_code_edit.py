@@ -88,8 +88,9 @@ class CodeError:
     prompt: str
 
 
-SUPPORTED_LANGUAGES = ["python", "javascript", "java", "C++", "Rust", "Bash"]
-
+SUPPORTED_LANGUAGES = ["python", "javascript", "java", "C++", "Rust", "Bash",
+                       # Need to add errors for:
+                       "go", "swift", "kotlin", "haskell", "lean", "typescript"]
 
 # Language-specific coding errors
 LANGUAGE_ERRORS: dict[str, list[CodeError]] = {
@@ -168,31 +169,37 @@ LANGUAGE_ERRORS: dict[str, list[CodeError]] = {
         ),
     ],
     "javascript": [
-        CodeError(tag="missing-semi", prompt="Insert a missing semicolon."),
-        CodeError(
-            tag="undefined-var", prompt="Replace a variable with an undefined one."
-        ),
-        CodeError(
-            tag="ill-decl",
-            prompt="Change a function declaration to a variable assignment.",
-        ),
-        CodeError(
-            tag="unclose-par",
-            prompt="Remove the closing parenthesis of the longest expression.",
-        ),
-        CodeError(tag="bad-obj", prompt="Change an object literal to a function call."),
+        CodeError(tag="missing-import", prompt="Remove a required import/require statement."),
+        CodeError(tag="undefined-var", prompt="Replace a variable with an undefined one."),
+        CodeError(tag="ill-decl", prompt="Change a function declaration to an assignment."),
+        CodeError(tag="miss-semi", prompt="Delete a semicolon."),
+        CodeError(tag="bad-class", prompt="Replace a class declaration with a variable assignment."),
         CodeError(tag="miss-ret", prompt="Remove the return statement."),
         CodeError(tag="ill-arr", prompt="Change an array literal to a function call."),
-        CodeError(
-            tag="miss-decl", prompt="Insert a missing var/let/const declaration."
-        ),
-        CodeError(
-            tag="str-concat",
-            prompt="Swap one string concatenation for a template literal.",
-        ),
-        CodeError(
-            tag="miss-try", prompt="Insert a try/catch block around the function."
-        ),
+        CodeError(tag="global-leak", prompt="Drop let/const, leaking the variable to global scope."),
+        CodeError(tag="str-concat", prompt="Swap a template literal for \"+\" string concatenation."),
+        CodeError(tag="loose-eq", prompt="Replace === with == in a comparison."),
+        CodeError(tag="assign-in-cond", prompt="Substitute = for === inside an if condition."),
+        CodeError(tag="miss-await", prompt="Call an async function without await."),
+        CodeError(tag="unhandled-promise", prompt="Remove the catch() from a promise chain."),
+        CodeError(tag="callback-err-ignore", prompt="Omit the err argument in a Node-style callback."),
+        CodeError(tag="missing-break", prompt="Delete the break in a switch case."),
+        CodeError(tag="offby1", prompt="Change loop bound i < n to i <= n."),
+        CodeError(tag="NaN-comp", prompt="Compare a value to NaN with ===."),
+        CodeError(tag="parseInt-no-radix", prompt="Call parseInt(str) without the radix."),
+        CodeError(tag="for-in-array", prompt="Iterate over an array with for…in instead of for…of."),
+        CodeError(tag="hoist-use-before-def", prompt="Use a variable before declaring it."),
+        CodeError(tag="idx-oob", prompt="Replace arr[i] with arr[i + 1]."),
+        CodeError(tag="json-circular", prompt="JSON.stringify a self-referential object."),
+        CodeError(tag="insecure-eval", prompt="Pass raw user input to eval()."),
+        CodeError(tag="typo-length", prompt="Misspell .length as .lenght."),
+        CodeError(tag="const-reassign", prompt="Reassign a const variable."),
+        CodeError(tag="shadow-var", prompt="Declare an inner variable that hides an outer one."),
+        CodeError(tag="ill-comment", prompt="Insert an unterminated /* comment."),
+        CodeError(tag="array-copy-ref", prompt="Assign one array to another with = instead of slice()."),
+        CodeError(tag="float-prec", prompt="Compare two floats with ==."),
+        CodeError(tag="miss-brace", prompt="Delete a closing } from a block."),
+        CodeError(tag="inf-loop", prompt="Remove the increment in a while loop, creating an infinite loop."),
     ],
     "java": [
         CodeError(tag="missing-import", prompt="Add a missing import statement."),
@@ -218,51 +225,502 @@ LANGUAGE_ERRORS: dict[str, list[CodeError]] = {
         CodeError(
             tag="miss-try", prompt="Insert a try/catch block around the function."
         ),
+        CodeError(tag="eq-asgn", prompt="Replace == with = inside an if condition."),
+        CodeError(tag="offby1", prompt="Change loop bound i < n to i <= n."),
+        CodeError(tag="str-eq", prompt="Compare two strings with == instead of .equals()."),
+        CodeError(tag="miss-brace", prompt="Delete a closing } from a method or control block."),
+        CodeError(tag="unclose-par", prompt="Remove a closing parenthesis from a method call."),
+        CodeError(tag="nullptr", prompt="Set obj = null just before calling obj.method()."),
+        CodeError(tag="idx-oob", prompt="Replace arr[i] with arr[i + 1]."),
+        CodeError(tag="var-uninit", prompt="Declare int x; and read x before assigning it."),
+        CodeError(tag="ill-comment", prompt="Insert an unterminated /* comment."),
+        CodeError(tag="illegal-kw", prompt="Rename a local variable to a reserved word like enum."),
+        CodeError(tag="res-leak", prompt="Replace a try-with-resources block with manual new FileInputStream(...) and omit close()."),
+        CodeError(tag="magic-num", prompt="Inline the constant 0.75 multiple times."),
+        CodeError(tag="path-traversal", prompt="Pass raw user input to new File(userInputPath)."),
+        CodeError(tag="n2-slop", prompt="Move an expensive query() call inside a nested loop, creating O(N²) work."),
+        CodeError(tag="inf-loop", prompt="Remove the increment i++ from a while (i < n) loop."),
+        CodeError(tag="div-zero", prompt="Compute value / (den - den) after setting den at runtime."),
+        CodeError(tag="shadow-var", prompt="Declare a variable inside a method that hides an outer variable."),
+        CodeError(tag="shallow-copy", prompt="Assign one array to another with = instead of calling .clone()."),
+        CodeError(tag="float-prec", prompt="Compare two double values with ==."),
+        CodeError(tag="mutable-static", prompt="Make a static List<?> cache and mutate it from multiple threads without synchronization."),
     ],
     "C++": [
-        CodeError(tag="missing-semi", prompt="Insert a missing semicolon."),
         CodeError(
-            tag="undefined-var", prompt="Replace a variable with an undefined one."
+            tag="eq-asgn",
+            prompt="Replace == with = inside an if condition.",
         ),
         CodeError(
-            tag="ill-decl",
-            prompt="Change a function declaration to a variable assignment.",
+            tag="offby1",
+            prompt="Change loop bound i < n to i <= n.",
+        ),
+        CodeError(
+            tag="missing-semi",
+            prompt="Delete the semicolon at the end of a statement.",
+        ),
+        CodeError(
+            tag="unclosed-brace",
+            prompt="Remove the closing } of a function or class.",
         ),
         CodeError(
             tag="unclose-par",
-            prompt="Remove the closing parenthesis of the longest expression.",
+            prompt="Drop the closing ) of a function call.",
         ),
-        CodeError(tag="bad-obj", prompt="Change an object literal to a function call."),
+        CodeError(
+            tag="bad-break",
+            prompt="Omit break; in one case of a switch.",
+        ),
+        CodeError(
+            tag="nullptr",
+            prompt="Set a pointer to nullptr just before dereferencing it.",
+        ),
+        CodeError(
+            tag="idx-oob",
+            prompt="Change vec[i] to vec[i + 1].",
+        ),
+        CodeError(
+            tag="var-uninit",
+            prompt="Declare int x; and read x before assigning it.",
+        ),
+        CodeError(
+            tag="double-delete",
+            prompt="delete the same pointer twice.",
+        ),
+        CodeError(
+            tag="mem-leak",
+            prompt="new an object but never delete it.",
+        ),
+        CodeError(
+            tag="dangling-ref",
+            prompt="Return a reference to a local variable.",
+        ),
+        CodeError(
+            tag="signed-mix",
+            prompt="Compare int vs size_t without cast.",
+        ),
+        CodeError(
+            tag="int-overflow",
+            prompt="Multiply two large ints without widening.",
+        ),
+        CodeError(
+            tag="shadow-var",
+            prompt="Declare a local size that hides the member size.",
+        ),
+        CodeError(
+            tag="const-corrupt",
+            prompt="Remove const from a parameter and mutate it.",
+        ),
+        CodeError(
+            tag="race-cond",
+            prompt="Eliminate the mutex lock around shared data.",
+        ),
+        CodeError(
+            tag="exc-leak",
+            prompt="Throw inside a constructor without RAII guards.",
+        ),
+        CodeError(
+            tag="iter-invalid",
+            prompt="erase() an element from a vector while range-iterating it.",
+        ),
+        CodeError(
+            tag="float-prec",
+            prompt="Compare two double values with ==.",
+        ),
+        CodeError(
+            tag="ub-reinterpret",
+            prompt="Cast an object to an unrelated type with reinterpret_cast.",
+        ),
+        CodeError(
+            tag="magic-num",
+            prompt="Inline the constant 0.75 multiple times.",
+        ),
     ],
     "Rust": [
-        CodeError(tag="missing-semi", prompt="Insert a missing semicolon."),
         CodeError(
-            tag="undefined-var", prompt="Replace a variable with an undefined one."
+            tag="eq-asgn",
+            prompt="Replace == with = inside an if (won't compile—ownership tests still catch it).",
         ),
         CodeError(
-            tag="ill-decl",
-            prompt="Change a function declaration to a variable assignment.",
+            tag="offby1",
+            prompt="Change loop bound i < n to i <= n in a for/while.",
+        ),
+        CodeError(
+            tag="missing-semi",
+            prompt="Delete the trailing ; so an expression becomes the function's return.",
+        ),
+        CodeError(
+            tag="unclosed-brace",
+            prompt="Drop the closing } of a match arm block.",
         ),
         CodeError(
             tag="unclose-par",
-            prompt="Remove the closing parenthesis of the longest expression.",
+            prompt="Remove a ) from a function call.",
         ),
-        CodeError(tag="bad-obj", prompt="Change an object literal to a function call."),
+        CodeError(
+            tag="bad-break",
+            prompt="Omit break inside a loop { … }, causing an infinite loop.",
+        ),
+        CodeError(
+            tag="nullptr",
+            prompt="Use std::ptr::null() and then unsafe { *ptr }.",
+        ),
+        CodeError(
+            tag="idx-oob",
+            prompt="Change vec[i] to vec[i + 1] (runtime panic).",
+        ),
+        CodeError(
+            tag="var-uninit",
+            prompt="Declare let x: i32; and use x before assignment (compile-error).",
+        ),
+        CodeError(
+            tag="move-after",
+            prompt="Move let v = s; and later read s again.",
+        ),
+        CodeError(
+            tag="immut-mut",
+            prompt="Hold an immutable borrow let r = &val; then call val.push(…) without ending r.",
+        ),
+        CodeError(
+            tag="borrow-alias",
+            prompt="Borrow &mut x twice concurrently in the same scope.",
+        ),
+        CodeError(
+            tag="raw-ub",
+            prompt="unsafe { *(0xdead as *const i32) } to cause undefined behavior.",
+        ),
+        CodeError(
+            tag="unwrap-err",
+            prompt="Call .unwrap() on an Err result.",
+        ),
+        CodeError(
+            tag="expect-none",
+            prompt=".expect('val') on a None option.",
+        ),
+        CodeError(
+            tag="match-miss",
+            prompt="Write a match with one enum variant unhandled, fallback to _ => unreachable!().",
+        ),
+        CodeError(
+            tag="panic-div0",
+            prompt="Divide by 0 using integer types.",
+        ),
+        CodeError(
+            tag="float-prec",
+            prompt="Compare two f64 values with ==.",
+        ),
+        CodeError(tag="string-slice", prompt="Slice &s[0..1] on a UTF-8 multi-byte char (runtime panic)."),
+        CodeError(
+            tag="shadow-var", prompt="let count = …; … { let count = 0; … } hides the outer count."
+        ),
+        CodeError(
+            tag="magic-num",
+            prompt="Hard-code 0.75 multiple times instead of a const.",
+        ),
+        CodeError(
+            tag="mem-leak",
+            prompt="Call std::mem::forget(obj) so Drop isn't run.",
+        ),
+        CodeError(tag="error-ignore", prompt="Assign let _ = fallible_call(); and ignore the Result."),
     ],
     "Bash": [
-        CodeError(tag="missing-semi", prompt="Insert a missing semicolon."),
         CodeError(
-            tag="undefined-var", prompt="Replace a variable with an undefined one."
+            tag="unquoted-expansion",
+            prompt="Remove the double-quotes around \"$var\" so it becomes $var.",
         ),
         CodeError(
-            tag="ill-decl",
-            prompt="Change a function declaration to a variable assignment.",
+            tag="glob-accident",
+            prompt="Replace a literal path \"$file\" with $file so any * and ? expand.",
         ),
         CodeError(
-            tag="unclose-par",
-            prompt="Remove the closing parenthesis of the longest expression.",
+            tag="offby1-seq",
+            prompt="Change seq 0 $((n-1)) to seq 1 $n.",
         ),
-        CodeError(tag="bad-obj", prompt="Change an object literal to a function call."),
+        CodeError(
+            tag="wrong-test",
+            prompt="Swap [[ $a -eq $b ]] for [ $a == $b ] (string-vs-integer mix-up).",
+        ),
+        CodeError(
+            tag="backtick-old",
+            prompt="Convert $(cmd) to obsolete `cmd`.",
+        ),
+        CodeError(
+            tag="pipe-fail",
+            prompt="Delete set -o pipefail, letting the left side of pipes fail silently.",
+        ),
+        CodeError(
+            tag="unset-var",
+            prompt="Remove set -u, allowing reads of undeclared variables.",
+        ),
+        CodeError(
+            tag="ifs-leak",
+            prompt="Insert IFS=$'\\n' at function start and forget to restore it.",
+        ),
+        CodeError(
+            tag="subshell-loss",
+            prompt="Wrap a critical assignment in ( … ), losing the value outside.",
+        ),
+        CodeError(
+            tag="tmp-unsafe",
+            prompt="Replace mktemp with tmp=/tmp/file.$$ (race-condition temp file).",
+        ),
+        CodeError(
+            tag="command-inject",
+            prompt="Build eval \"$cmd $user_input\" from unchecked $user_input.",
+        ),
+        CodeError(
+            tag="null-glob",
+            prompt="Enable shopt -s nullglob but assume globs always return something.",
+        ),
+        CodeError(
+            tag="array-as-string",
+            prompt="Output echo $arr instead of echo \"${arr[@]}\".",
+        ),
+        CodeError(
+            tag="bad-shebang",
+            prompt="Use #!/bin/sh yet rely on Bash-only features like [[ ]].",
+        ),
+        CodeError(
+            tag="var-global",
+            prompt="Omit local before a variable inside a function, clobbering globals.",
+        ),
+        CodeError(
+            tag="missing-exit",
+            prompt="Drop exit 1 after a detected fatal error, script continues.",
+        ),
+        CodeError(
+            tag="piped-err-ignore",
+            prompt="somecmd | grep foo without || exit—errors swallowed.",
+        ),
+        CodeError(
+            tag="2>&1-order",
+            prompt="Write cmd 2>&1 >out (stderr still goes to tty).",
+        ),
+        CodeError(
+            tag="trap-sigint",
+            prompt="Set trap 'cleanup $1' INT inside a function that lacks $1.",
+        ),
+        CodeError(
+            tag="line-endings",
+            prompt="Paste a CRLF line, adding hidden ^M that breaks bash.",
+        ),
+        CodeError(
+            tag="missing-quotes-path",
+            prompt="rm $dir/* where $dir might contain spaces.",
+        ),
+        CodeError(
+            tag="here-doc-tabs",
+            prompt="Use tabs before the delimiter in a here-doc, making it never terminate.",
+        ),
+        CodeError(
+            tag="arith-str",
+            prompt="Do count=$((count + \"one\"))—string in arithmetic context.",
+        ),
+        CodeError(
+            tag="race-mkdir",
+            prompt="mkdir /tmp/job without -p or mktemp, risking concurrent runs.",
+        ),
+    ],
+    "go": [
+        CodeError(tag="missing-import", prompt="Remove a needed import line."),
+        CodeError(tag="undefined-var", prompt="Replace a variable with an undefined identifier."),
+        CodeError(tag="ill-decl", prompt="Change a func declaration into a var assignment."),
+        CodeError(tag="miss-comma", prompt="Delete a trailing comma in a multi-line composite literal."),
+        CodeError(tag="miss-ret", prompt="Omit the required return statement from a non-void function."),
+        CodeError(tag="nil-deref", prompt="Set a pointer to nil immediately before using it."),
+        CodeError(tag="idx-oob", prompt="Replace slice[i] with slice[i+1]."),
+        CodeError(tag="slice-copy-ref", prompt="Assign one slice to another with = and then mutate it."),
+        CodeError(tag="shadow-var", prompt="Declare an inner variable that hides an outer one."),
+        CodeError(tag="err-ignore", prompt="Call a function and discard the returned error."),
+        CodeError(tag="race-access", prompt="Remove the mutex around a shared variable used by goroutines."),
+        CodeError(tag="deadlock-chan", prompt="Block both sender and receiver on an unbuffered channel."),
+        CodeError(tag="miss-go", prompt="Call a long-running function without the go keyword."),
+        CodeError(tag="leak-goroutine", prompt="Launch a goroutine in a loop that captures the loop variable."),
+        CodeError(tag="panic-assert", prompt="Use a type assertion without checking the ok value."),
+        CodeError(tag="wrong-fmt", prompt="Print a string with %d instead of %s."),
+        CodeError(tag="float-prec", prompt="Compare two float64 values with ==."),
+        CodeError(tag="miss-defer-close", prompt="Open a file and forget defer file.Close()."),
+        CodeError(tag="miss-struct-field", prompt="Omit a required field in a struct composite literal."),
+        CodeError(tag="global-leak", prompt="Declare a package-level var that should be local."),
+        CodeError(tag="ill-arr", prompt="Replace a slice literal with a meaningless function call."),
+        CodeError(tag="fallthrough-misuse", prompt="Add an unnecessary fallthrough in a switch case."),
+        CodeError(tag="ill-comment", prompt="Insert an unterminated /* comment."),
+        CodeError(tag="magic-num", prompt="Inline the constant 0.75 multiple times instead of using a const."),
+        CodeError(tag="offby1", prompt="Change loop condition i < n to i <= n."),
+        CodeError(tag="unclose-par", prompt="Remove a closing parenthesis from a function call."),
+        CodeError(tag="eq-asgn", prompt="Use = in an if condition where a comparison was intended."),
+        CodeError(tag="chan-close-send", prompt="Close a channel and then send to it."),
+        CodeError(tag="inf-loop", prompt="Remove the increment in for i < n {}, creating an infinite loop."),
+    ],
+    "swift": [
+        CodeError(tag="missing-import", prompt="Delete a needed import statement."),
+        CodeError(tag="undefined-var", prompt="Replace a variable with an undefined identifier."),
+        CodeError(tag="ill-decl", prompt="Change a func declaration into a let assignment."),
+        CodeError(tag="miss-ret", prompt="Omit the required return statement from a non-Void function."),
+        CodeError(tag="miss-try", prompt="Call a throwing function without try/try? or try!."),
+        CodeError(tag="force-unwrap", prompt="Add a ! to force-unwrap an optional that might be nil."),
+        CodeError(tag="optional-chain", prompt="Replace optional chaining with force-unwraps."),
+        CodeError(tag="mutating-miss", prompt="Modify a struct property inside a non-mutating method."),
+        CodeError(tag="idx-oob", prompt="Replace array[i] with array[i + 1]."),
+        CodeError(tag="offby1", prompt="Change loop bound i < n to i <= n."),
+        CodeError(tag="inf-loop", prompt="Remove the increment in while i < n {}, creating an infinite loop."),
+        CodeError(tag="nil-deref", prompt="Set an optional to nil just before accessing it."),
+        CodeError(tag="shadow-var", prompt="Declare an inner variable that hides an outer one."),
+        CodeError(tag="weak-miss", prompt="Capture self strongly in a escaping closure, causing a retain cycle."),
+        CodeError(tag="unowned-use", prompt="Use an unowned reference after the object has deallocated."),
+        CodeError(tag="dispatch-deadlock", prompt="Call DispatchQueue.main.sync inside code already on the main queue."),
+        CodeError(tag="err-ignore", prompt="Use try! instead of handling the thrown error."),
+        CodeError(tag="panic-assert", prompt="Force-cast with as! without checking the result."),
+        CodeError(tag="float-prec", prompt="Compare two Double values with ==."),
+        CodeError(tag="string-eq", prompt="Compare Strings with === instead of ==."),
+        CodeError(tag="miss-default", prompt="Omit the default case in a switch over a non-exhaustive enum."),
+        CodeError(tag="fallthrough-misuse", prompt="Add an unnecessary fallthrough in a switch case."),
+        CodeError(tag="miss-breakpoint", prompt="Forget break inside a for-case pattern, executing unintended code."),
+        CodeError(tag="miss-defer-close", prompt="Open a file and omit defer file.close()."),
+        CodeError(tag="global-leak", prompt="Declare a global var that should be local."),
+        CodeError(tag="magic-num", prompt="Inline the constant 0.75 multiple times."),
+        CodeError(tag="ill-comment", prompt="Insert an unterminated /* comment."),
+        CodeError(tag="res-leak", prompt="Create a Timer without invalidating it, leaking the resource."),
+        CodeError(tag="path-traversal", prompt="Pass raw user input to FileManager.default.contents(atPath:)."),
+        CodeError(tag="eq-asgn", prompt="Use = inside an if condition where == was intended (requires var, compiles with warning)."),
+    ],
+    "kotlin": [
+        CodeError(tag="missing-import", prompt="Delete a needed import statement."),
+        CodeError(tag="undefined-var", prompt="Replace a variable with an unresolved identifier."),
+        CodeError(tag="ill-decl", prompt="Change a fun declaration into a val assignment."),
+        CodeError(tag="miss-ret", prompt="Omit the required return statement from a non-Unit function."),
+        CodeError(tag="force-unwrap", prompt="Add !! to a nullable value that may be null."),
+        CodeError(tag="null-deref", prompt="Set a variable to null just before calling a method via !!."),
+        CodeError(tag="idx-oob", prompt="Replace list[i] with list[i + 1]."),
+        CodeError(tag="offby1", prompt="Change loop bound i < n to i <= n."),
+        CodeError(tag="var-over-val", prompt="Declare a var where a val would suffice."),
+        CodeError(tag="shadow-var", prompt="Declare an inner variable that hides an outer one."),
+        CodeError(tag="lateinit-not-init", prompt="Access a lateinit var before it is initialized."),
+        CodeError(tag="miss-when-else", prompt="Omit the else branch in a non-exhaustive when expression."),
+        CodeError(tag="string-ref-eq", prompt="Compare two Strings with === instead of ==."),
+        CodeError(tag="float-prec", prompt="Compare two Double/Float values with ==."),
+        CodeError(tag="miss-null-check", prompt="Replace safe ?. with a force unwrap or direct access."),
+        CodeError(tag="err-ignore", prompt="Call a function returning Result or throwing errors and ignore failure."),
+        CodeError(tag="miss-use", prompt="Open a resource without wrapping it in use { … }."),
+        CodeError(tag="res-leak", prompt="Create a Cursor/FileInputStream and forget to close it."),
+        CodeError(tag="coroutine-leak", prompt="Launch a coroutine in a loop capturing the loop variable and never cancel it."),
+        CodeError(tag="race-access", prompt="Remove synchronization around shared mutable state."),
+        CodeError(tag="deadlock-channel", prompt="Send and receive on the same unbuffered channel from the same coroutine."),
+        CodeError(tag="magic-num", prompt="Inline the constant 0.75 multiple times instead of using a const val."),
+        CodeError(tag="ill-comment", prompt="Insert an unterminated /* comment."),
+        CodeError(tag="unclose-par", prompt="Remove a closing parenthesis from a function call."),
+        CodeError(tag="miss-brace", prompt="Delete a closing } from a block."),
+        CodeError(tag="inf-loop", prompt="Remove the increment or exit condition in a while/for loop."),
+        CodeError(tag="unsafe-cast", prompt="Force-cast with as without checking the result."),
+        CodeError(tag="assign-in-cond", prompt="Replace == with = inside an if condition (compiles to Unit, logic bug)."),
+        CodeError(tag="global-leak", prompt="Declare a top-level mutable var that should be local."),
+        CodeError(tag="path-traversal", prompt="Pass raw user input to File(userInputPath)."),
+    ],
+    "haskell": [
+        CodeError(tag="missing-import", prompt="Delete a required import."),
+        CodeError(tag="undefined-var", prompt="Replace an identifier with one that's not in scope."),
+        CodeError(tag="ill-decl", prompt="Turn a function definition into a plain value binding."),
+        CodeError(tag="miss-dollar", prompt="Remove a $ causing precedence/parentheses errors."),
+        CodeError(tag="wrong-type-sig", prompt="Change a type signature so it no longer matches the definition."),
+        CodeError(tag="missing-type-sig", prompt="Strip a top-level type signature."),
+        CodeError(tag="type-mismatch", prompt="Replace an Int literal with a String literal (or similar) to break type inference."),
+        CodeError(tag="nonexhaustive-case", prompt="Omit at least one pattern in a case expression."),
+        CodeError(tag="partial-head", prompt="Call head on a potentially empty list."),
+        CodeError(tag="partial-fromJust", prompt="Use fromJust on a Maybe Nothing."),
+        CodeError(tag="idx-oob", prompt="Replace xs!!i with xs!!(i+1)."),
+        CodeError(tag="pattern-shadow", prompt="Introduce a pattern variable that hides an outer one."),
+        CodeError(tag="lazy-io-leak", prompt="Read a file with readFile and drop the handle before forcing the contents."),
+        CodeError(tag="infinite-rec", prompt="Remove the base case of a recursive function."),
+        CodeError(tag="bang-miss", prompt="Delete a BangPattern (!) on a strict field, re-introducing thunks."),
+        CodeError(tag="monad-mismatch", prompt="Use an IO action inside pure code without lifting."),
+        CodeError(tag="missing-return", prompt="Drop return in do-notation, yielding the raw value."),
+        CodeError(tag="let-in-do", prompt="Add a let binding in do but forget the in keyword."),
+        CodeError(tag="do-vs-pure", prompt="Write do notation for a pure (non-Monad) expression."),
+        CodeError(tag="ambiguous-type", prompt="Use read \"123\" without an explicit type annotation."),
+        CodeError(tag="err-ignored", prompt="Call error or undefined and leave it reachable."),
+        CodeError(tag="unsafePerformIO", prompt="Wrap side-effecting code in unsafePerformIO."),
+        CodeError(tag="nonstrict-eval", prompt="Build an infinite list and attempt to fully evaluate it."),
+        CodeError(tag="wrong-eq", prompt="Replace == with = inside a guard or if."),
+        CodeError(tag="ill-comment", prompt="Insert an unterminated {- comment."),
+        CodeError(tag="magic-num", prompt="Inline the constant 0.75 multiple times instead of a named value."),
+        CodeError(tag="module-cycle", prompt="Create two modules that import each other."),
+        CodeError(tag="space-leak", prompt="Accumulate a large lazy list instead of streaming via foldl'."),
+        CodeError(tag="deadlock-mvar", prompt="Take and never put an MVar, blocking indefinitely."),
+    ],
+    "lean": [
+        CodeError(tag="missing-import", prompt="Delete a required import."),
+        CodeError(tag="undefined-ident", prompt="Swap an identifier for one that's not in scope."),
+        CodeError(tag="ill-decl", prompt="Turn a def into a let inside a tactic block."),
+        CodeError(tag="wrong-type-sig", prompt="Change a declaration's type so it no longer matches the body."),
+        CodeError(tag="missing-by", prompt="Remove the by keyword before a proof term."),
+        CodeError(tag="sorry-proof", prompt="Replace a proof with by sorry."),
+        CodeError(tag="partial-func", prompt="Define a recursive function without a termination proof."),
+        CodeError(tag="nonexhaustive-match", prompt="Omit a pattern in a match expression."),
+        CodeError(tag="idx-oob", prompt="Replace list.nth xs i with list.nth xs (i + 1)."),
+        CodeError(tag="nat-int-confuse", prompt="Apply Nat.succ to an Int."),
+        CodeError(tag="eq-asgn", prompt="Use := where = was meant in a proof step."),
+        CodeError(tag="rewrite-dir", prompt="Use rw the wrong way around, reversing the equality."),
+        CodeError(tag="simproc-loop", prompt="Add a simp lemma that rewrites a to a, causing a loop."),
+        CodeError(tag="shadow-var", prompt="Introduce a local binding that hides an outer variable."),
+        CodeError(tag="magic-num", prompt="Inline the constant 37 multiple times instead of naming it."),
+        CodeError(tag="ill-comment", prompt="Insert an unterminated /- comment."),
+        CodeError(tag="missing-open", prompt="Call simp without open Nat, leaving names unresolved."),
+        CodeError(tag="term-hole", prompt="Leave a _ hole in a term."),
+        CodeError(tag="unqualified-name", prompt="Use map instead of List.map without open List."),
+        CodeError(tag="implicit-miss", prompt="Omit required implicit argument brackets {} in a call."),
+        CodeError(tag="typeclass-miss", prompt="Delete an implicit instance argument [inst]."),
+        CodeError(tag="inf-loop-tactic", prompt="Write repeat exact?, leading to non-termination."),
+        CodeError(tag="coercion-confuse", prompt="Rely on a nonexistent coercion from Nat to Int."),
+        CodeError(tag="rfl-abuse", prompt="Prove a non-trivial equality with plain rfl."),
+        CodeError(tag="dec_trivial", prompt="Use decide on an undecidable proposition."),
+        CodeError(tag="prop-vs-type", prompt="Supply a Type where Prop is expected."),
+        CodeError(tag="unreachable", prompt="Add code after exact—it compiles but is dead."),
+        CodeError(tag="unfold-loop", prompt="Mark a lemma @[simp, unfold], causing infinite unfolding."),
+    ],
+    "typescript": [
+        CodeError(tag="missing-import", prompt="Remove a required import statement."),
+        CodeError(tag="undefined-var", prompt="Replace a variable with an undeclared one."),
+        CodeError(tag="ill-decl", prompt="Turn a function foo() into const foo = () => but leave downstream calls untouched."),
+        CodeError(tag="miss-semi", prompt="Delete a semicolon."),
+        CodeError(tag="bad-class", prompt="Replace a class Foo {} with const Foo = {};."),
+        CodeError(tag="miss-ret", prompt="Remove the return in a non-void function."),
+        CodeError(tag="ill-arr", prompt="Change [1, 2] to Array(1, 2)."),
+        CodeError(tag="global-leak", prompt="Drop let/const, leaking to the global scope."),
+        CodeError(tag="str-concat", prompt="Swap a template literal for + concatenation."),
+        CodeError(tag="loose-eq", prompt="Replace === with ==."),
+        CodeError(tag="assign-in-cond", prompt="Use = instead of === inside an if."),
+        CodeError(tag="miss-await", prompt="Call an async fn without await."),
+        CodeError(tag="unhandled-promise", prompt="Delete .catch(...) from a promise chain."),
+        CodeError(tag="missing-break", prompt="Remove break in a switch case."),
+        CodeError(tag="offby1", prompt="Change i < n to i <= n."),
+        CodeError(tag="NaN-comp", prompt="Compare to NaN with ===."),
+        CodeError(tag="parseInt-no-radix", prompt="Call parseInt(str) without the radix."),
+        CodeError(tag="for-in-array", prompt="Iterate over an array with for…in."),
+        CodeError(tag="hoist-use-before-def", prompt="Use a var before it's declared."),
+        CodeError(tag="idx-oob", prompt="Replace arr[i] with arr[i + 1]."),
+        CodeError(tag="json-circular", prompt="JSON.stringify a self-referential object."),
+        CodeError(tag="insecure-eval", prompt="Pipe raw input to eval()."),
+        CodeError(tag="typo-length", prompt="Misspell .length as .lenght."),
+        CodeError(tag="shadow-var", prompt="Declare an inner variable hiding an outer one."),
+        CodeError(tag="ill-comment", prompt="Insert an unterminated /* comment."),
+        CodeError(tag="array-copy-ref", prompt="Do b = a instead of a.slice()."),
+        CodeError(tag="float-prec", prompt="Compare floats with ==."),
+        CodeError(tag="miss-brace", prompt="Delete a closing }."),
+        CodeError(tag="inf-loop", prompt="Drop the increment in a while loop."),
+        CodeError(tag="implicit-any", prompt="Omit a type so it defaults to any with noImplicitAny on."),
+        CodeError(tag="any-abuse", prompt="Change a typed variable to any."),
+        CodeError(tag="wrong-type-assign", prompt="Assign a string to a number-typed variable."),
+        CodeError(tag="interface-mismatch", prompt="Return an object missing a required interface field."),
+        CodeError(tag="excess-prop", prompt="Pass an object with an extra property to a strictly typed function."),
+        CodeError(tag="wrong-generic-arg", prompt="Supply the wrong type parameter to a generic (e.g., Promise<string> → Promise<number>)."),
+        CodeError(tag="enum-misuse", prompt="Assign 42 to a variable of enum type."),
+        CodeError(tag="readonly-reassign", prompt="Write to a readonly property."),
+        CodeError(tag="const-assertion-remove", prompt="Delete as const, widening the type."),
+        CodeError(tag="non-null-misuse", prompt="Add ! to silence a nullable warning where value may be null."),
+        CodeError(tag="type-cast-wrong", prompt="Force-cast (as) to an incompatible type."),
+        CodeError(tag="decorator-misorder", prompt="Swap class and property decorator order."),
+        CodeError(tag="ambient-missing", prompt="Use a package lacking @types and skip a manual declaration."),
+        CodeError(tag="strict-null-off", prompt="Dereference undefined with strictNullChecks off."),
     ],
 }
 
@@ -308,8 +766,10 @@ def create_prompt(code: str, errors: List[CodeError], language: str) -> str:
         f"{len(errors)} errors:\n\n{errors_str}\n\nWhen you write the code "
         f"out at the end, make sure to surround it with ```{language} "
         f"and ```, like this: \n```{language}\n{{code}}\n```\n\n"
-        "If some of the errors are not applicable to the code, ignore them. "
-        "If you don't have any valid errors to apply, just print 'ERROR'."
+        "Do not change anything else about the code. Do not add any comments "
+        " or mention the errors in the code. If some of the errors are not "
+        "applicable to the code, ignore them. If you don't have any valid "
+        "errors to apply, just print 'ERROR'."
     )
 
 
@@ -476,12 +936,9 @@ def make_requests_for_dataset(
         # Create prompt
         prompt_text = create_prompt(code, sampled_errors, column_mapping["language"])
 
-        # Create unique ID for this prompt
-        prompt_id = f"{dataset_name.replace('/', '_')}_{row_id}_{timestamp}"
-
         # Create PromptData object
         prompt_data = PromptData(
-            id=prompt_id,
+            id=row_id,
             prompt=prompt_text,
             dataset_name=dataset_name,
             original_row_id=row_id,
@@ -491,7 +948,7 @@ def make_requests_for_dataset(
 
         # Create metadata entry
         metadata_entry = {
-            "prompt_id": prompt_id,
+            "prompt_id": row_id,
             "dataset_name": dataset_name,
             "original_row_id": row_id,
             "language": column_mapping["language"],
@@ -633,7 +1090,6 @@ def main(
 
             batch_id = batch_job.id
             dataset_batch_ids[dataset_name].append(batch_id)
-            all_batch_ids.append(batch_id)
             logger.info(f"Submitted batch job with ID: {batch_id} for {dataset_name}")
 
     # Print batch IDs in the requested format
@@ -641,7 +1097,7 @@ def main(
     for dataset_name, batch_ids in dataset_batch_ids.items():
         logger.info(f"{dataset_name}: {', '.join(batch_ids)}")
     all_batch_ids = [batch_id for batch_ids in dataset_batch_ids.values() for batch_id in batch_ids]
-    logger.info(f"\nAll batches: {', '.join(all_batch_ids)}")
+    logger.info(f"\nAll batches: {','.join(all_batch_ids)}")
     logger.info("\nYou can check the status of your batch jobs using the IDs above.")
 
 
