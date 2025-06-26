@@ -15,17 +15,19 @@
 
 
 import itertools
+import logging
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import List, Literal, Optional, Tuple, Union
-import logging
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 try:
     import deepspeed
     from deepspeed.runtime.engine import DeepSpeedEngine
 except ImportError:
     pass
+import asyncio
+
 import pandas as pd
 import torch
 import transformers
@@ -39,13 +41,8 @@ from rich.table import Table
 from torch.nn.parallel.distributed import DistributedDataParallel
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
-from open_instruct.ground_truth_utils import (
-    verify_gsm8k_sample,
-    verify_ifeval_sample,
-    verify_math_sample,
-)
+from open_instruct.ground_truth_utils import VerifierFunction
 from open_instruct.utils import retry_on_exception
-
 
 logger = logging.getLogger(__name__)
 
@@ -56,18 +53,6 @@ class ModelConfig:
     """The model checkpoint for weights initialization."""
     model_revision: Optional[str] = None
     """The specific model version to use (can be a branch name, tag name or commit id)."""
-    tokenizer_name: Optional[str] = None
-    """The tokenizer checkpoint for weights initialization. (by default the model_name_or_path is used)"""
-    tokenizer_revision: Optional[str] = None
-    """The specific tokenizer version to use (can be a branch name, tag name or commit id)."""
-    use_slow_tokenizer: bool = False
-    """Whether to use the slow tokenizer or not."""
-    add_bos: bool = False
-    """Whether to add the BOS token to the input."""
-    chat_template_name: Optional[str] = None
-    """The chat template for the tokenizer."""
-    trust_remote_code: bool = False
-    """Trust remote code when loading a model."""
     torch_dtype: Optional[str] = None
     """Override the default `torch.dtype` and load the model under this dtype."""
     attn_implementation: Optional[Literal["flash_attention_2"]] = None
@@ -225,41 +210,85 @@ def get_reward(
     )
 
 
-def apply_verifiable_reward(
-    responses: torch.Tensor,
-    query_responses: torch.Tensor,
-    tokenizer,
+async def apply_verifiable_reward(
+    reward_fn_mapping: Dict[str, VerifierFunction],
+    responses: List[torch.Tensor],
+    decoded_responses: List[str],
     ground_truths: List[str],
-    datasets: List[str],
-    verify_reward: int = 10,
+    datasets: List[Union[str, List[str]]],
+    reward_mult: int = 10,
+    queries: Optional[List[str]] = None,
 ):
-    # decode the responses
-    decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
-    # for now, below is not used. but keeping it around in case we need it.
-    decoded_query_responses = tokenizer.batch_decode(query_responses, skip_special_tokens=True)  # noqa: F841
-    # compare with ground truth.
-    rewards = []
-    for prediction, ground_truth, dataset in zip(decoded_responses, ground_truths, datasets):
-        verified = False
-        if ground_truth is None:
-            logger.warning("No ground truth provided for a sample, applying 0 reward.")
-            rewards.append(0)
-            continue
-        if dataset.lower() == "gsm8k":
-            verified = verify_gsm8k_sample(prediction, ground_truth)
-        elif dataset.lower() == "math":
-            verified = verify_math_sample(prediction, ground_truth)
-        elif dataset.lower() == "ifeval":
-            verified = verify_ifeval_sample(prediction, ground_truth)
-        # if verified, give reward
-        if verified:
-            logger.info("Applying ground truth reward 🤗")
-            rewards.append(verify_reward)
+    if queries is None:
+        queries = [None] * len(responses)
+
+    # Collect all async tasks for parallel execution
+    async_tasks = []
+    task_metadata = []
+
+    for i, (tok_prediction, prediction, ground_truth, dataset, query) in enumerate(
+        zip(responses, decoded_responses, ground_truths, datasets, queries)
+    ):
+        # allow multiple ground truths and datasets for a single response
+
+        # TODO: both code and lm_judge might have list of ground_truth *per instance*
+        if isinstance(ground_truth, str):
+            ground_truth_list = [ground_truth]
         else:
-            rewards.append(0)
-    rewards_tensors = torch.tensor(rewards, device=query_responses.device)
-    # return rewards and count of times we applied reward
-    return rewards_tensors, (rewards_tensors > 0).sum().float().view(-1)
+            ground_truth_list = ground_truth
+        if isinstance(dataset, str):
+            dataset_list = [dataset]
+        else:
+            dataset_list = dataset
+        assert len(ground_truth_list) == len(dataset_list), "Ground truth and dataset list lengths do not match."
+
+        # Create async tasks for each ground truth/dataset pair
+        for gt, ds in zip(ground_truth_list, dataset_list):
+            reward_func = reward_fn_mapping.get(ds.lower())
+            if reward_func is None:
+                logger.warning("No reward function found for dataset %s. Skipping reward.", ds)
+                continue
+
+            # Create async task
+            task = reward_func.async_call(
+                tokenized_prediction=tok_prediction,
+                prediction=prediction,
+                label=gt,
+                query=query,
+            )
+            async_tasks.append(task)
+            task_metadata.append(
+                {"response_idx": i, "dataset": ds, "reward_weight": reward_func.weight, "reward_mult": reward_mult}
+            )
+
+    # Execute all tasks in parallel
+    if async_tasks:
+        reward_results = await asyncio.gather(*async_tasks)
+        logger.info(f"Applied {len(reward_results)} ground truth rewards in parallel 🤗")
+    else:
+        reward_results = []
+
+    # Initialize results for each response
+    response_rewards = [0] * len(responses)
+    response_per_func_rewards = [{} for _ in range(len(responses))]
+
+    # Process results
+    for result, metadata in zip(reward_results, task_metadata):
+        response_idx = metadata["response_idx"]
+        dataset = metadata["dataset"]
+        reward_weight = metadata["reward_weight"]
+        reward_mult = metadata["reward_mult"]
+
+        # Extract score from VerificationResult
+        score = result.score if hasattr(result, "score") else result
+        weighted_reward = reward_mult * score * reward_weight
+
+        response_rewards[response_idx] += weighted_reward
+        response_per_func_rewards[response_idx][dataset] = (
+            response_per_func_rewards[response_idx].get(dataset, 0) + weighted_reward
+        )
+
+    return response_rewards, response_per_func_rewards
 
 
 def forward(
@@ -427,6 +456,20 @@ def save_with_accelerate(
     if accelerator.is_main_process:
         tokenizer.save_pretrained(output_dir)
     # customize model card (TODO (Costa): this can be prettier)
+
+
+@torch.compile(dynamic=True)
+def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
+    """
+    torch compiled version of the common `log_softmax -> gather` operation.
+
+    The compiled version of this opration avoids the (significant) memory overhead of
+    allocating a new (batch_size, seq_len, vocab_size) tensor to store the logprobs.
+
+    See https://github.com/allenai/open-instruct/pull/584
+    """
+    logprobs = logits.log_softmax(dim=-1)
+    return torch.gather(logprobs, dim=-1, index=index.unsqueeze(-1)).squeeze(-1)
 
 
 @retry_on_exception()

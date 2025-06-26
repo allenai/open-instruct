@@ -1,8 +1,8 @@
 python open_instruct/ppo_vllm_thread_ray_gtrl.py \
-    --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ground_truth": 1.0}' \
-    --dataset_eval_splits test \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -11,9 +11,7 @@ python open_instruct/ppo_vllm_thread_ray_gtrl.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
-    --chat_template tulu \
-    --sft_messages_key messages \
+    --chat_template_name tulu \
     --learning_rate 3e-7 \
     --total_episodes 10000000 \
     --penalty_reward_value -10.0 \

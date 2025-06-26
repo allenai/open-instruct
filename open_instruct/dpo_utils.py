@@ -25,6 +25,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import DataCollatorForSeq2Seq
 
+from open_instruct.model_utils import log_softmax_and_gather
+
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
@@ -162,7 +164,7 @@ def _get_batch_logps(
     # dummy token; we'll ignore the losses on these tokens later
     labels[labels == -100] = 0
 
-    per_token_logps = torch.gather(logits.log_softmax(-1), dim=2, index=labels.unsqueeze(2)).squeeze(2)
+    per_token_logps = log_softmax_and_gather(logits, labels)
 
     if average_log_prob:
         return (per_token_logps * loss_mask).sum(-1) / loss_mask.sum(-1)

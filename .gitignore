@@ -4,6 +4,12 @@ rejection_sampling/shards1
 token_length.png
 *.tfevents.*
 
+# For generating datasets.
+*.jsonl
+
+# for on policy preferences
+birr/
+
 oe-eval-internal/
 
 results
@@ -147,3 +153,9 @@ dmypy.json
 .idea/
 .vscode
 .DS_Store
+
+**/open_ai_responses/**
+**/batch_files/**
+cache/
+local_dataset_cache/
+scratch/

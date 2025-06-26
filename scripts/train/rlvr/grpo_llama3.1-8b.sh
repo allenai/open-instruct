@@ -1,4 +1,13 @@
-python open_instruct/grpo_vllm_thread_ray_gtrl.py \
+exp_name="0302_qwen2.5_7B_math_grpo_fast1_${RANDOM}"
+python mason.py \
+    --cluster ai2/jupiter-cirrascale-2  \
+    --workspace ai2/tulu-3-dev \
+    --priority normal \
+    --preemptible \
+    --num_nodes 1 \
+    --max_retries 0 \
+    --budget ai2/oe-adapt \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --exp_name $exp_name \
     --output_dir /weka/oe-adapt-default/costah/models/$exp_name \
     --dataset_mixer_list ai2-adapt-dev/rlvr_gsm8k_zs 1.0 \
@@ -10,7 +19,7 @@ python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --response_length 2048 \
     --number_samples_per_prompt 4 \
     --model_name_or_path meta-llama/Llama-3.1-8B \
-    --stop_strings '"</answer>"' \
+    --stop_strings "</answer>" \
     --add_r1_style_format_reward \
     --non_stop_penalty False \
     --stop_token eos \

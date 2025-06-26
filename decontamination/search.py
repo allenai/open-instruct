@@ -236,7 +236,7 @@ def main():
         ("openai/openai_humaneval", None, "test", ["prompt"], None),
         ("openai/gsm8k", "main", "test", ["question"], None),
         ("ucinlp/drop", None, "validation", ["passage", "question"], None),
-        ("lighteval/MATH", "all", "test", ["problem"], None),
+        ("EleutherAI/hendrycks_math", None, "test", ["problem"], None),
         ("google/IFEval", None, "train", ["prompt"], None),
         ("akariasai/PopQA", None, "test", ["subj", "prop", "obj"], None),
         ("tatsu-lab/alpaca_eval", None, "eval", ["instruction"], None),

@@ -241,10 +241,10 @@ python mason.py \
     --save_freq 60 \
     --try_launch_beaker_eval_jobs_on_weka \
     --hf_metadata_dataset allenai/olmo-instruct-evals \
-    --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -255,9 +255,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
-    --chat_template tulu \
-    --sft_messages_key messages \
+    --chat_template_name tulu \
     --total_episodes 100000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -300,10 +298,10 @@ python mason.py \
     --save_freq 60 \
     --try_launch_beaker_eval_jobs_on_weka \
     --hf_metadata_dataset allenai/olmo-instruct-evals \
-    --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -314,9 +312,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
-    --chat_template tulu \
-    --sft_messages_key messages \
+    --chat_template_name tulu \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -379,7 +375,7 @@ python mason.py \
     --dataset_eval_splits test_prefs \
     --model_name_or_path allenai/open_instruct_dev \
     --model_revision 1206_finetune_epoch_2_lr_1e-5_loss_type_sum__4__1733525407 \
-    --chat_template tulu \
+    --chat_template_name tulu \
     --learning_rate 3e-6 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
@@ -434,7 +430,7 @@ python mason.py \
     --dataset_eval_splits test_prefs \
     --model_name_or_path allenai/open_instruct_dev \
     --model_revision 1208_bsz64_13b_finetune_epoch_2_lr_5e-6_loss_type_sum__1__1733711678 \
-    --chat_template tulu \
+    --chat_template_name tulu \
     --learning_rate 3e-6 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 1 \
@@ -474,10 +470,10 @@ python mason.py \
     --save_freq 60 \
     --try_launch_beaker_eval_jobs_on_weka \
     --hf_metadata_dataset allenai/olmo-instruct-evals \
-    --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -488,9 +484,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
-    --chat_template tulu \
-    --sft_messages_key messages \
+    --chat_template_name tulu \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -546,9 +540,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
-    --chat_template tulu \
-    --sft_messages_key messages \
+    --chat_template_name tulu \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -590,10 +582,10 @@ python mason.py \
     --save_freq 60 \
     --try_launch_beaker_eval_jobs_on_weka \
     --hf_metadata_dataset allenai/olmo-instruct-evals \
-    --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -604,9 +596,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
-    --chat_template tulu \
-    --sft_messages_key messages \
+    --chat_template_name tulu \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -649,10 +639,10 @@ python mason.py \
     --save_freq 60 \
     --try_launch_beaker_eval_jobs_on_weka \
     --hf_metadata_dataset allenai/olmo-instruct-evals \
-    --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -663,9 +653,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
-    --chat_template tulu \
-    --sft_messages_key messages \
+    --chat_template_name tulu \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -707,10 +695,10 @@ python mason.py \
     --save_freq 60 \
     --try_launch_beaker_eval_jobs_on_weka \
     --hf_metadata_dataset allenai/olmo-instruct-evals \
-    --dataset_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"ai2-adapt-dev/gsm8k_math_ifeval_ground_truth_mixed": 128}' \
-    --dataset_eval_splits train \
+    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \
     --response_length 2048 \
@@ -721,9 +709,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
-    --chat_template tulu \
-    --sft_messages_key messages \
+    --chat_template_name tulu \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -781,9 +767,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
-    --chat_template tulu \
-    --sft_messages_key messages \
+    --chat_template_name tulu \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -839,9 +823,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
-    --chat_template tulu \
-    --sft_messages_key messages \
+    --chat_template_name tulu \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \
@@ -897,9 +879,7 @@ python mason.py \
     --non_stop_penalty \
     --stop_token eos \
     --temperature 1.0 \
-    --ground_truths_key ground_truth \
-    --chat_template tulu \
-    --sft_messages_key messages \
+    --chat_template_name tulu \
     --total_episodes 200000 \
     --penalty_reward_value -10.0 \
     --deepspeed_stage 3 \

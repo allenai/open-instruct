@@ -47,8 +47,10 @@ set -ex
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--hf-upload] [--revision REVISION] [--max-length <max_length>] [--unseen-evals] [--priority priority] [--tasks TASKS] [--evaluate_on_weka]"
+    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--unseen-evals] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>]"
     echo "TASKS should be a comma-separated list of task specifications (e.g., 'gsm8k::tulu,bbh:cot::tulu')"
+    echo "STOP_SEQUENCES should be a comma-separated list of strings to stop generation at (e.g., '</answer>,\\n\\n')"
+    echo "PROCESS_OUTPUT should be a string specifying how to process the model output (e.g., 'r1_style')"
     exit 1
 }
 
@@ -67,10 +69,15 @@ while [[ "$#" -gt 0 ]]; do
         --evaluate_on_weka) EVALUATE_ON_WEKA="true" ;;
         --step) STEP="$2"; shift ;;
         --run-id) RUN_ID="$2"; shift ;;
+        --stop-sequences) STOP_SEQUENCES="$2"; shift ;;
+        --beaker-image) BEAKER_IMAGE="$2"; shift ;;
+        --cluster) CLUSTER="$2"; shift ;;
+        --process-output) PROCESS_OUTPUT="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
 done
+
 
 # Optional: Default number of GPUs if not specified
 NUM_GPUS="${NUM_GPUS:-1}"
@@ -85,13 +92,28 @@ fi
 MODEL_NAME_SAFE=${MODEL_NAME//\//_}
 
 # Set defaults for optional arguments
-UPLOAD_TO_HF="${UPLOAD_TO_HF:-allenai/olmo-instruct-evals}"
 MAX_LENGTH="${MAX_LENGTH:-4096}"
 UNSEEN_EVALS="${UNSEEN_EVALS:-false}"
 PRIORITY="${PRIORITY:normal}"
 EVALUATE_ON_WEKA="${EVALUATE_ON_WEKA:-false}"
 RUN_ID="${RUN_ID:-}"
 STEP="${STEP:-}"
+
+# Process stop sequences if provided
+STOP_SEQUENCES_JSON=""
+if [[ -n "$STOP_SEQUENCES" ]]; then
+    # Convert comma-separated list to JSON array
+    IFS=',' read -ra STOP_SEQS <<< "$STOP_SEQUENCES"
+    STOP_SEQUENCES_JSON=", \"stop_sequences\": ["
+    for i in "${!STOP_SEQS[@]}"; do
+        if [ $i -gt 0 ]; then
+            STOP_SEQUENCES_JSON+=", "
+        fi
+        STOP_SEQUENCES_JSON+="\"${STOP_SEQS[$i]}\""
+    done
+    STOP_SEQUENCES_JSON+="]"
+fi
+
 DATALAKE_ARGS=""
 if [[ -n "$RUN_ID" ]]; then
     DATALAKE_ARGS+="run_id=$RUN_ID"
@@ -100,11 +122,15 @@ if [[ -n "$STEP" ]]; then
     DATALAKE_ARGS+=",step=$STEP"
 fi
 
-# if UNSEEN_EVALS, save results to a different directory
-if [ "$UNSEEN_EVALS" == "true" ]; then
-    HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}-unseen//results/${MODEL_NAME_SAFE}"
+# Set HF_UPLOAD_ARG only if UPLOAD_TO_HF is specified
+if [[ -n "$UPLOAD_TO_HF" ]]; then
+    if [ "$UNSEEN_EVALS" == "true" ]; then
+        HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}-unseen//results/${MODEL_NAME_SAFE}"
+    else
+        HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}//results/${MODEL_NAME_SAFE}"
+    fi
 else
-    HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}//results/${MODEL_NAME_SAFE}"
+    HF_UPLOAD_ARG=""
 fi
 
 # Set REVISION if not provided
@@ -115,6 +141,7 @@ else
 fi
 
 # Define default tasks if no custom tasks provided
+#    "alpaca_eval_v2::tulu" # Removed for high cost of judge
 DEFAULT_TASKS=(
     "gsm8k::tulu"
     "bbh:cot-v1::tulu"
@@ -126,7 +153,8 @@ DEFAULT_TASKS=(
     "popqa::tulu"
     "mmlu:mc::tulu"
     "mmlu:cot::summarize"
-    "alpaca_eval_v2::tulu"
+    "alpaca_eval_v3::tulu" # GPT 4.1 judge on OpenAI
+    # "alpaca_eval_v4::tulu" # GPT 4.1, judge on Azure 
     "truthfulqa::tulu"
 )
 UNSEEN_TASKS=(
@@ -157,6 +185,13 @@ GPU_COUNT="$NUM_GPUS"
 GPU_COUNT_OTHER=$((NUM_GPUS * 2))
 MODEL_TYPE_OTHER=""
 
+# Build model args JSON with optional process_output
+MODEL_ARGS="{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}"
+if [[ -n "$PROCESS_OUTPUT" ]]; then
+    MODEL_ARGS+=", \"process_output\": \"${PROCESS_OUTPUT}\""
+fi
+MODEL_ARGS+="}"
+
 for TASK in "${TASKS[@]}"; do
     # mmlu and truthfulqa need different batch sizes and gpu counts because they are multiple choice and we cannot use vllm.
     if [[ "$TASK" == "mmlu:mc::tulu" || "$TASK" == "truthfulqa::tulu" ]]; then
@@ -169,6 +204,7 @@ for TASK in "${TASKS[@]}"; do
         GPU_COUNT="$NUM_GPUS"
     fi
 
+    # NOTE: For gantry args here and below, random numbers like #42 are added to the env variables because they need to be unique names. The numbers are ignored.
     if [ "$EVALUATE_ON_WEKA" == "true" ]; then
         python oe-eval-internal/oe_eval/launch.py \
             --model "$MODEL_NAME" \
@@ -177,14 +213,15 @@ for TASK in "${TASKS[@]}"; do
             --task "$TASK" \
             $MODEL_TYPE \
             --batch-size "$BATCH_SIZE" \
-            --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
-            --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false } }" \
+            --model-args "$MODEL_ARGS" \
+            --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
             ${HF_UPLOAD_ARG} \
             --gpus "$GPU_COUNT" \
-            --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1"}' \
+            --gantry-args '{"env-secret": "OPENAI_API_KEY=openai_api_key", "weka": "oe-adapt-default:/weka/oe-adapt-default", "env#132":"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", "env-secret#42": "AZURE_EVAL_API_KEY=azure_eval_api_key"}' \
             ${REVISION_ARG} \
-            --cluster ai2/neptune-cirrascale,ai2/saturn-cirrascale,ai2/jupiter-cirrascale-2 \
+            --cluster "$CLUSTER" \
             --beaker-retries 2 \
+            --beaker-image "$BEAKER_IMAGE" \
             --beaker-priority "$PRIORITY" \
             --push-datalake \
             --datalake-tags "$DATALAKE_ARGS"
@@ -196,14 +233,16 @@ for TASK in "${TASKS[@]}"; do
         --task "$TASK" \
         $MODEL_TYPE \
         --batch-size "$BATCH_SIZE" \
-        --model-args "{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}}" \
-        --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false } }" \
+        --model-args "$MODEL_ARGS" \
+        --task-args "{ \"generation_kwargs\": { \"max_gen_toks\": ${MAX_LENGTH}, \"truncate_context\": false${STOP_SEQUENCES_JSON} } }" \
         ${HF_UPLOAD_ARG} \
         --gpus "$GPU_COUNT" \
-        --gantry-args "{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\"}" \
+        --gantry-args "{\"env-secret\": \"OPENAI_API_KEY=openai_api_key\", \"env-secret#43\": \"AZURE_EVAL_API_KEY=azure_eval_api_key\", \"env\":\"VLLM_ALLOW_LONG_MAX_MODEL_LEN=1\", \"env-secret#2\":\"HF_TOKEN=HF_TOKEN\", \"mount\": \"/mnt/filestore_1:/filestore\", \"env#111\": \"HF_HOME=/filestore/.cache/huggingface\", \"env#112\": \"HF_DATASETS_CACHE=/filestore/.cache/huggingface\", \"env#113\": \"HF_HUB_CACHE=/filestore/.cache/hub\"}" \
         ${REVISION_ARG} \
+        --cluster ai2/augusta-google-1 \
         --beaker-retries 2 \
-        --beaker-priority "$PRIORITY" \
+        --beaker-image "$BEAKER_IMAGE" \
+        --beaker-priority  "$PRIORITY" \
         --push-datalake \
         --datalake-tags "$DATALAKE_ARGS"
     fi

@@ -51,7 +51,7 @@ Our setup mostly follows our [Dockerfile](./Dockerfile), which uses Python 3.10.
 ```bash
 pip install --upgrade pip "setuptools<70.0.0" wheel 
 # TODO, unpin setuptools when this issue in flash attention is resolved
-pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
+pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
 pip install packaging
 pip install flash-attn==2.7.2.post1 --no-build-isolation
 pip install -r requirements.txt
@@ -62,7 +62,7 @@ python -m nltk.downloader punkt
 * **Local installation with uv (preview)**: We are experimenting with using [uv](https://docs.astral.sh/uv/). You can install via
 ```bash
 uv sync
-uv sync --extra compile # to install flash attention
+uv sync --extra compile --extra liger # to install flash attention and liger-kernel
 ```
 
 
@@ -85,7 +85,7 @@ docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg
 * **Docker with uv**: You can also use the Dockerfile to build a Docker image with uv. You can build the image with the following command:
 
 ```bash
-docker build -f Dockerfile.uv -t open_instruct_dev_uv .
+docker build -f Dockerfile.uv --build-arg UV_CACHE_DIR=$UV_CACHE_DIR -t open_instruct_dev_uv .
 # if you are interally at AI2, you can create an image like this:
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 beaker image delete $beaker_user/open_instruct_dev_uv 
@@ -124,10 +124,10 @@ bash scripts/train/dpo/tulu_preference_mix.sh
 ### Reinforcement Learning with Verifiable Rewards (RLVR)
 
 ```bash
-# quick debugging run using 2 GPU (1 for inference, 1 for training)
-# here we are using `HuggingFaceTB/SmolLM2-360M-Instruct`; it's prob not
-# gonna work, but it's easy to test run and print stuff.
-bash scripts/train/rlvr/mini.sh
+# quick debugging run using 1 GPU (0.5 for inference, 0.5 for training)
+# here we are using a small model, so it's prob not gonna train good models, but it's easy to test run and print stuff.
+bash scripts/train/rlvr/ppo_mini.sh
+bash scripts/train/rlvr/ppo2_mini.sh # experimental support (ppo2 adds kl to loss directly instead of using KL penalty in rewards)
 bash scripts/train/rlvr/grpo_mini.sh
 
 # train an 8B tulu3 model using 8 GPU (1 for inference, 7 for training)
@@ -222,7 +222,7 @@ Tulu 2.5:
 ```
 
 Tulu 3:
-```
+```bibtex
 @article{lambert2024tulu3,
   title = {Tülu 3: Pushing Frontiers in Open Language Model Post-Training},
   author = {

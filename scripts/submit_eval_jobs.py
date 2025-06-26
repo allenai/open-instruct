@@ -69,7 +69,6 @@ WEKA_CLUSTERS = [
     "ai2/jupiter-cirrascale-2",
     "ai2/saturn-cirrascale",
     "ai2/neptune-cirrascale",
-    "ai2/allennlp-elara-cirrascale",
     "ai2/ceres-cirrascale"
 ]
 GCP_CLUSTERS = [
@@ -84,14 +83,13 @@ parser.add_argument("--workspace", type=str, default="oe-adapt-general")
 parser.add_argument("--model_name", type=str, default="hf-opt-7B")
 parser.add_argument("--hf_revision", type=str, default=None)
 parser.add_argument("--location", type=str, default=None)
-parser.add_argument("--beaker_image", type=str, default="nathanl/open_instruct_auto", help="If given, use this Beaker image.")
+parser.add_argument("--beaker_image", type=str, default="oe-eval-beaker/oe_eval_auto", help="If given, use this Beaker image.")
+# image refernece: https://github.com/allenai/oe-eval-internal/blob/493660aca07d05384c6bd1860c4180860ccc7d53/oe_eval_internal/utilities/launch_utils.py#L143
+# image: https://legacy.beaker.org/im/01JRZWRN4FSGK7FWKV1DRPP1R1/details
 parser.add_argument("--beaker_subfolder", type=str, default=None)
 parser.add_argument("--cluster", nargs='+', default=[
-    "ai2/allennlp-cirrascale",
-    "ai2/general-cirrascale",
-    "ai2/s2-cirrascale-l40",
-    "ai2/allennlp-elara-cirrascale",
-    "ai2/pluto-cirrascale",
+    # "ai2/s2-cirrascale-l40",
+    "ai2/ceres-cirrascale",
     "ai2/neptune-cirrascale",
     "ai2/saturn-cirrascale",
     "ai2/jupiter-cirrascale-2",
@@ -116,9 +114,14 @@ parser.add_argument("--oe_eval_max_length", type=int, default=4096, help="Max le
 parser.add_argument("--oe_eval_unseen_evals", action="store_true", help="Run unseen task evals instead of dev task evals on OE Eval.")
 parser.add_argument("--use_alternate_safety_image", type=str, default=None, help="Use a different image for safety eval.")
 parser.add_argument("--evaluate_on_weka", action="store_true", help="Evaluate OE eval on Beaker.")
+# NOTE: evaluate on weka is expected to be on by default. If not, the evals will run on the google augusta cluster.
+# TODO: fix this logic at a future date
+
 parser.add_argument("--oe_eval_tasks", type=str, default=None, help="Evaluate OE eval on Beaker.")
 parser.add_argument("--step", type=int, default=None, help="Step number for postgresql logging.")
 parser.add_argument("--run_id", type=str, default=None, help="A unique run ID for postgresql logging.")
+parser.add_argument("--oe_eval_stop_sequences", type=str, default=None, help="Comma-separated list of stop sequences for OE eval.")
+parser.add_argument("--process_output", type=str, default="r1_style", help="Process output type for OE eval (e.g., 'r1_style'). Defaults to 'r1_style', which should work for most of our models, including non-thinking ones.")
 args = parser.parse_args()
 
 
@@ -149,6 +152,7 @@ if all(c in WEKA_CLUSTERS for c in cluster):
     weka_available = True
 
 
+# NOTE: Remove in the future, not sure if this effects oe-eval jobs
 # Use a different image if requested.
 if args.beaker_image is not None:
     d1['tasks'][0]['image']['beaker'] = args.beaker_image
@@ -607,6 +611,8 @@ if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
         oe_eval_cmd += f" --model-location {model_info[1]}"
     elif model_info[1].startswith("/"):
         oe_eval_cmd += f" --model-location {model_info[1]}"
+    elif model_info[1].startswith("gs://"):
+        oe_eval_cmd += f" --model-location {model_info[1]}"
     else:
         oe_eval_cmd += f" --model-location beaker://{model_info[1]}"
     if args.hf_revision:
@@ -634,6 +640,25 @@ if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
         oe_eval_cmd += " --unseen-evals"
     # add priority
     oe_eval_cmd += f" --priority {args.priority}"
+    
+    # Add stop sequences if provided
+    if args.oe_eval_stop_sequences:
+        oe_eval_cmd += f" --stop-sequences '{args.oe_eval_stop_sequences}'"
+        
+    # Add process output if provided
+    if args.process_output:
+        oe_eval_cmd += f" --process-output {args.process_output}"
+        
+    # Add beaker image from existing argument
+    if args.beaker_image:
+        oe_eval_cmd += f" --beaker-image {args.beaker_image}"
+    
+    # Add cluster parameter - use the existing cluster argument
+    # Join the list with commas since oe-eval.sh expects a comma-separated string
+    if args.cluster and len(args.cluster) > 0:
+        cluster_str = ",".join(args.cluster)
+        oe_eval_cmd += f" --cluster '{cluster_str}'"
+    
     print(f"Running OE eval with command: {oe_eval_cmd}")
     subprocess.Popen(oe_eval_cmd, shell=True)
 
@@ -658,13 +683,15 @@ VLLM_WORKER_MULTIPROC_METHOD=spawn PYTHONPATH=. python evaluation/run_all_genera
     --save_individual_results_path /output/all.json \
 '''
     # some copied logic
-    if model_info[0].startswith("hf-"):  # if it's a huggingface model, load it from the model hub
+    if model_info[0].startswith("hf-"):  # if it's a huggingface model, load it from the model hub and delete mount `/model`
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", f"--model_name_or_path {model_info[1]} --hf_revision {args.hf_revision}")]
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", f"--tokenizer_name_or_path {model_info[1]}")]
-    elif model_info[1].startswith("/"):  # if it's a local model, load it from the local directory
+        del task_spec['datasets'][1]
+    elif model_info[1].startswith("/"):  # if it's a local model, load it from the local directory and delete mount `/model`
         assert weka_available, "NFS / Weka is required for path-based models."  # to be safe.
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path "+model_info[1])]
+        del task_spec['datasets'][1]
     else:  # if it's a beaker model, mount the beaker dataset to `/model`
         task_spec['datasets'][1]['source']['beaker'] = model_info[1]
 

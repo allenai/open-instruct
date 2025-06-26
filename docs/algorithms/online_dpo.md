@@ -8,6 +8,7 @@
 In the sections below, we will include some examples on how to train models and demonstrating different features. A couple of notes:
 
 * You should adjust your `per_device_train_batch_size` and `gradient_accumulation_steps` accordingly to maximize throughput on a particular GPU type.
+* If you set `take_top_bottom_generation`, you can use a `num_generation_per_prompt` larger than 2 -- it just takes the top and bottom scoring generations for each prompt.
 * For the examples below, we use `mason.py` to invoke experiment orchastration on Ai2's cluster. For external users, you can copy the command after the `--` and run it on your system or debug locally. For example: the documentation will have commands like the following, but you can just run `$YOUR_COMMAND` on your system and make sure it matches `$NUM_GPUS`.
     * You can you `--image costah/open_instruct_onlinedpo2` to specify a custom image or if you don't specify any it's going to use the default image.
     * If you installed your python on NFS you can run a debug mode by **not toggling** `--pure_docker_mode` and it will mount your python environment on the docker container.
@@ -21,15 +22,17 @@ python mason.py \
     --gpus $NUM_GPUS -- $YOUR_COMMAND
 ```
 
+**WARNING: This script is not battle-tested. There may be bugs and issues -- please report them! Use at your own risk.**
+
 
 ### Level 0: single GPU; quick debug. Should take less than 10 minutes to finish
 
 ```bash
 python open_instruct/online_dpo_vllm_thread.py \
-    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
-    --dataset_eval_splits validation \
+    --dataset_mixer_list trl-internal-testing/tldr-preference-sft-trl-style 1.0 \
+    --dataset_mixer_eval_list trl-internal-testing/tldr-preference-sft-trl-style 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list_splits validation \
     --max_token_length 1024 \
     --max_prompt_token_length 512 \
     --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr \
@@ -38,31 +41,32 @@ python open_instruct/online_dpo_vllm_thread.py \
     --stop_token eos \
     --chat_template simple_concat_with_space \
     --learning_rate 3e-6 \
-    --total_episodes 4000 \
+    --total_episodes 3000 \
     --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 2 \
     --gradient_accumulation_steps 64 \
-    --max_token_length 2048 \
+    --max_token_length 1024 \
     --max_prompt_token_length 512 \
-    --num_train_epochs 1 \
     --beta 0.1 \
     --output_dir models/rm/rm_sentiment_1b \
-    --vllm_device cuda:0 \
-    --vllm_gpu_memory_utilization 0.1 \
-    --sanity_check \
-    --sanity_check_max_samples 2048 \
+    --single_gpu_mode \
     --hf_metadata_dataset "" \
     --no_try_launch_beaker_eval_jobs \
     --gradient_checkpointing \
     --with_tracking \
-    --push_to_hub
+    --push_to_hub \
+    --vllm_gpu_memory_utilization 0.5 \
+    --actor_num_gpus_per_node 1 \
+    --local_mini_batch_size 32 \
+    --num_mini_batches 1 \
+    --vllm_sync_backend gloo
 
 # LEVEL 0.1: two GPU; quick debug; using 1 GPU for training and 1 GPU for vllm generation via --vllm_device cuda:1
 python open_instruct/online_dpo_vllm_thread.py \
-    --dataset_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
-    --dataset_train_splits train \
-    --dataset_eval_mixer '{"trl-internal-testing/tldr-preference-sft-trl-style": 1.0}' \
-    --dataset_eval_splits validation \
+    --dataset_mixer_list trl-internal-testing/tldr-preference-sft-trl-style 1.0 \
+    --dataset_mixer_eval_list trl-internal-testing/tldr-preference-sft-trl-style 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list_splits validation \
     --max_token_length 1024 \
     --max_prompt_token_length 512 \
     --model_name_or_path cleanrl/EleutherAI_pythia-1b-deduped__sft__tldr \
@@ -80,17 +84,21 @@ python open_instruct/online_dpo_vllm_thread.py \
     --num_train_epochs 1 \
     --beta 0.1 \
     --output_dir models/rm/rm_sentiment_1b \
-    --vllm_device cuda:1 \
-    --sanity_check \
-    --sanity_check_max_samples 2048 \
-    --hf_metadata_dataset "" \
+    --single_gpu_mode \
+    --vllm_gpu_memory_utilization 0.5 \
+    --actor_num_gpus_per_node 1 \
+    --local_mini_batch_size 32 \
+    --num_mini_batches 1 \
+    --vllm_sync_backend gloo
     --no_try_launch_beaker_eval_jobs \
     --gradient_checkpointing \
     --with_tracking \
     --push_to_hub
 ```
 
+## Old examples
 
+These examples use the older form of the script available at https://github.com/allenai/open-instruct/blob/efa36849bd65db7614e6729344df94ace83b7228/open_instruct/online_dpo_vllm_thread.py. These require older package versions, use at your own risk.
 
 
 ### LEVEL 1: 8 GPU; TL;DR summarization
@@ -131,7 +139,7 @@ python mason.py \
     --push_to_hub \
     --hf_metadata_dataset '""' \
     --no_try_launch_beaker_eval_jobs \
-    --vllm_device cuda:7
+    --single_gpu_mode
 ```
 
 * Tracked experiment: https://wandb.ai/ai2-llm/open_instruct_internal/runs/fub45jhm
