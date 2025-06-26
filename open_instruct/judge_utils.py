@@ -191,7 +191,7 @@ def extract_score_from_string(score_str: str) -> float:
         return 0.0
 
 
-def extract_score_web_instruct(score_str: str) -> float:
+def extract_score_web_instruct(score_str: str) -> "tuple[str, float]":
     """Extractor based on web instruct format"""
     if "final decision: yes" in score_str.lower():
         return score_str, 1.0
@@ -201,10 +201,22 @@ def extract_score_web_instruct(score_str: str) -> float:
     return score_str, 0.0
 
 
-def extract_json_score_with_fallback(score_str: str) -> float:
+def extract_json_score_with_fallback(score_str: str) -> "tuple[str, float]":
     """Extractor based on json score with fallback"""
     try:
-        data = json.loads(score_str)
+        # Strip markdown code blocks if present
+        cleaned_str = score_str.strip()
+        if cleaned_str.startswith('```json'):
+            cleaned_str = cleaned_str[7:]  # Remove ```json
+        elif cleaned_str.startswith('```'):
+            cleaned_str = cleaned_str[3:]  # Remove ```
+        
+        if cleaned_str.endswith('```'):
+            cleaned_str = cleaned_str[:-3]  # Remove trailing ```
+        
+        cleaned_str = cleaned_str.strip()
+        
+        data = json.loads(cleaned_str)
         reasoning = data.get("REASONING", "")
         return reasoning, float(data.get("SCORE", 0.0))
     except (json.JSONDecodeError, TypeError, ValueError):
@@ -212,7 +224,7 @@ def extract_json_score_with_fallback(score_str: str) -> float:
         return score_str, 0.0
 
 
-def extract_score_with_fallback_max_10(score_str: str) -> float:
+def extract_score_with_fallback_max_10(score_str: str) -> "tuple[str, float]":
     """Extractor based on score with fallback"""
     reasoning, score = extract_json_score_with_fallback(score_str)
     return reasoning, score / 10.0
