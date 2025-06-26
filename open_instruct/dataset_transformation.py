@@ -481,6 +481,7 @@ def sft_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrained
     row[ATTENTION_MASK_KEY] = attention_mask.flatten()
     return row
 
+
 def last_turn_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer, max_seq_length: int):
     """taken directly from https://github.com/allenai/open-instruct/blob/ba11286e5b9eb00d4ce5b40ef4cac1389888416a/open_instruct/finetune.py#L385"""
     messages = row["messages"]
@@ -498,7 +499,7 @@ def last_turn_tulu_tokenize_and_truncate_v1(row: Dict[str, Any], tokenizer: PreT
     labels = input_ids.clone()
     # mask all turns but the last for avoiding loss
     for message_idx, message in enumerate(messages):
-        if message_idx<len(messages)-1:
+        if message_idx < len(messages) - 1:
             # we calculate the start index of this non-assistant message
             if message_idx == 0:
                 message_start_idx = 0
@@ -615,6 +616,42 @@ def preference_tulu_tokenize_and_truncate_v1(
     if len(rejected_messages) == 0:
         raise ValueError("rejected messages field is empty.")
 
+    chosen_encoded = sft_tulu_tokenize_and_truncate_v1(
+        {DEFAULT_SFT_MESSAGES_KEY: chosen_messages}, tokenizer, max_seq_length
+    )
+    rejected_encoded = sft_tulu_tokenize_and_truncate_v1(
+        {DEFAULT_SFT_MESSAGES_KEY: rejected_messages}, tokenizer, max_seq_length
+    )
+
+    return {
+        CHOSEN_INPUT_IDS_KEY: chosen_encoded["input_ids"],
+        CHOSEN_LABELS_KEY: chosen_encoded["labels"],
+        CHOSEN_ATTENTION_MASK_KEY: chosen_encoded["attention_mask"],
+        REJECTED_INPUT_IDS_KEY: rejected_encoded["input_ids"],
+        REJECTED_LABELS_KEY: rejected_encoded["labels"],
+        REJECTED_ATTENTION_MASK_KEY: rejected_encoded["attention_mask"],
+    }
+
+
+def preference_tulu_tokenize_and_truncate_v1_2(
+    row: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    max_seq_length: int,
+    chosen_key: str = DEFAULT_CHOSEN_KEY,
+    rejected_key: str = DEFAULT_REJECTED_KEY,
+):
+    """
+    Here we assume each example has a rejected and chosen field, both of which are a list of messages.
+    Each message is a dict with 'role' and 'content' fields.
+    We assume only the last message is different, and the prompt is contained in the list of messages.
+    """
+    chosen_messages = row[chosen_key]
+    rejected_messages = row[rejected_key]
+    if len(chosen_messages) == 0:
+        raise ValueError("chosen messages field is empty.")
+    if len(rejected_messages) == 0:
+        raise ValueError("rejected messages field is empty.")
+
     chosen_encoded = last_turn_tulu_tokenize_and_truncate_v1(
         {DEFAULT_SFT_MESSAGES_KEY: chosen_messages}, tokenizer, max_seq_length
     )
@@ -687,7 +724,7 @@ TRANSFORM_FNS = {
     "sft_tulu_filter_v1": (sft_tulu_filter_v1, "filter"),
     "preference_tokenize_v1": (preference_tokenize_v1, "map"),
     "preference_filter_v1": (preference_filter_v1, "filter"),
-    "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1, "map"),
+    "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1_2, "map"),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
     "rlvr_tokenize_v1": (rlvr_tokenize_v1, "map"),
     "rlvr_filter_v1": (rlvr_filter_v1, "filter"),
@@ -710,7 +747,7 @@ class DatasetConfig:
 
     def __post_init__(self):
         # if the file exists locally, use the local file
-        if os.path.exists(self.dataset_name) and self.dataset_name.endswith('.jsonl'):
+        if os.path.exists(self.dataset_name) and self.dataset_name.endswith(".jsonl"):
             assert self.dataset_split is "train", "Only train split is supported for local jsonl files."
             self.dataset = load_dataset(
                 "json",
@@ -719,7 +756,9 @@ class DatasetConfig:
             )
         else:
             # commit hash only works for hf datasets
-            self.dataset_commit_hash = get_commit_hash(self.dataset_name, self.dataset_revision, "README.md", "dataset")
+            self.dataset_commit_hash = get_commit_hash(
+                self.dataset_name, self.dataset_revision, "README.md", "dataset"
+            )
             self.dataset = load_dataset(
                 self.dataset_name,
                 split=self.dataset_split,
