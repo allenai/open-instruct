@@ -26,7 +26,8 @@ class CorpusQaRubricConfig(BaseModel):
     citations_weight: float = 0  # 0.2
     excerpts_weight: float = 0  # 0.1
     other_properties: List[CorpusQaRubricPropertyConfig] = Field(default_factory=list)
-    model_name: str = "gpt-4-turbo"
+    model_name: str = "gpt-4.1"
+    deployment: str = "gpt-4.1-standard"
 
 
 class RubricCorpusQaGenericMetric:
@@ -64,6 +65,7 @@ Return a score on a scale of 0 to 10 indicating how appropriate the response is 
         resp = run_llm_judge(
             f"{system_prompt}\n\n{user_prompt}",
             self.config.model_name,
+            self.config.deployment,
         )
 
         obj = extract_json_from_response(resp)
@@ -91,6 +93,7 @@ Return a score on a scale of 0 to 10 indicating how appropriate the response is 
         resp = run_llm_judge(
             f"{system_prompt}\n\n{user_prompt}",
             self.config.model_name,
+            self.config.deployment,
         )
 
         obj = extract_json_from_response(resp)
@@ -137,6 +140,7 @@ If a claim is missing citations or a citation is not accompanied by excerpts, so
         resp = run_llm_judge(
             f"{system_prompt}\n\n{user_prompt}",
             self.config.model_name,
+            self.config.deployment,
         )
 
         extracted_json = extract_json_from_response(resp)

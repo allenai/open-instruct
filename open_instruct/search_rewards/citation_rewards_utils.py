@@ -215,7 +215,7 @@ def extract_relevant_rating_from_response(response: str) -> int:
 
 
 def run_llm_judge(
-    user_prompt: str, model_name: str = "gpt-4.5-preview", deployment: str = "gpt-4.5-preview-standard"
+    user_prompt: str, model_name: str = "gpt-4.1", deployment: str = "gpt-4.1-standard"
 ) -> str:
     response = run_azure_openai(
         model_name,
@@ -231,7 +231,7 @@ def run_llm_judge(
 
 
 async def run_llm_judge_async(
-    user_prompt: str, model_name: str = "gpt-4.5-preview", deployment: str = "gpt-4.5-preview-standard"
+    user_prompt: str, model_name: str = "gpt-4.1", deployment: str = "gpt-4.1-standard"
 ) -> str:
     # For now, we'll use the sync version in a thread pool to avoid blocking
     # In the future, you might want to implement a proper async Azure OpenAI client
