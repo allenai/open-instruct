@@ -367,6 +367,12 @@ class FlatArguments:
         default=False,
         metadata={"help": "Whether to use padding-free collation via TensorDataCollatorWithFlattening"},
     )
+    clean_checkpoints_at_end: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to clean up all previous checkpoints at the end of the run.",
+        },
+    )
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -932,7 +938,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         )
 
     # remove all checkpoints to save space
-    if accelerator.is_local_main_process:
+    if args.clean_checkpoints_at_end and accelerator.is_local_main_process:
         clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
 
     if (
