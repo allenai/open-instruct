@@ -44,7 +44,6 @@ except Exception:
 
 import asyncio
 import json
-import math
 import os
 import shutil
 import socket
@@ -57,6 +56,7 @@ from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Callable, Dict, Iterator, List, Literal, Optional, Union
 
+import math
 import numpy as np
 import pandas as pd
 import ray
@@ -122,11 +122,8 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     sync_gs_bucket,
 )
-from open_instruct.vllm_utils3 import (
-    batch_vllm_engine_call,
-    create_vllm_engines,
-    init_process_group,
-)
+from open_instruct.vllm_utils3 import batch_vllm_engine_call, create_vllm_engines, init_process_group
+
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -174,12 +171,7 @@ class Args:
     learning_rate: float = 2e-5
     """The initial learning rate for AdamW optimizer."""
     lr_scheduler_type: Literal[
-        "linear",
-        "cosine",
-        "cosine_with_restarts",
-        "polynomial",
-        "constant",
-        "constant_with_warmup",
+        "linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"
     ] = "linear"
     """Which scheduler to use"""
     warm_up_steps: int = 0
@@ -208,8 +200,6 @@ class Args:
     """RUNTIME VALUE: The frequency of evaluation steps"""
     save_freq: int = -1
     """How many train steps to save the model"""
-    allow_world_padding: bool = False
-    """Whether to allow world padding. This is useful for model sweeps, but wastes compute."""
 
     # Generation
     response_length: int = 256
@@ -318,7 +308,7 @@ class Args:
     """vLLM top p for nucleus sampling"""
     vllm_sleep_mode: bool = False
     """vLLM enable sleep mode and call sleep level=2 after generation to discard model weights and KV cache
-    reducing the amount of GPU memory until next generation call. This is only useful for single GPU mode to fit
+    reducing the amount of GPU memory until next generation call. This is only useful for single GPU mode to fit 
     larger models"""
     offload_ref: bool = False
     """whether to offload the reference model to CPU after inference, and reload right before. This is only
@@ -397,12 +387,12 @@ class Args:
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             print("WARNING: num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE. ")
-        assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
-            "At least one reward must be applied!"
-        )
-        assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
-            "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
-        )
+        assert (
+            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
+        ), "At least one reward must be applied!"
+        assert (
+            self.pack_length >= self.max_prompt_token_length + self.response_length
+        ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
 
         if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
@@ -544,10 +534,9 @@ class PolicyTrainerRayProcess(RayProcess):
         # next line instructs transformers to partition the model directly over multiple gpus using
         # deepspeed.zero.Init when model's `from_pretrained` method is called.
         if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            dschf = HfDeepSpeedConfig(ds_config)
+            HfDeepSpeedConfig(ds_config)
         else:
-            dschf = None
-        print(f"{dschf=}")
+            pass
 
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
@@ -618,28 +607,15 @@ class PolicyTrainerRayProcess(RayProcess):
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
         if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            dschf = HfDeepSpeedConfig(ds_config)
+            HfDeepSpeedConfig(ds_config)
         else:
-            dschf = None
-        print(f"{dschf=}")
-
+            pass
         if args.beta > 0:
             self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
                 model_config.model_name_or_path,
                 revision=model_config.model_revision,
                 torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2",
-                use_cache=False,
-            )
-            disable_dropout_in_model(self.ref_policy)
-            self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
-            self.ref_policy.eval()
-        else:
-            self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-                model_config.model_name_or_path,
-                revision=model_config.model_revision,
-                torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2",
+                attn_implementation=model_config.attn_implementation,
                 use_cache=False,
             )
             disable_dropout_in_model(self.ref_policy)
@@ -731,10 +707,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
                         refs = [
                             engine.update_weight.remote(
-                                name,
-                                dtype=param.dtype,
-                                shape=shape,
-                                empty_cache=count == num_params,
+                                name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
                             )
                             for engine in self.vllm_engines
                         ]
@@ -748,10 +721,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     shape = param.shape if self.args.deepspeed_stage != 3 else param.ds_shape
                     refs = [
                         engine.update_weight.remote(
-                            name,
-                            dtype=param.dtype,
-                            shape=shape,
-                            empty_cache=count == num_params,
+                            name, dtype=param.dtype, shape=shape, empty_cache=count == num_params
                         )
                         for engine in self.vllm_engines
                     ]
@@ -836,6 +806,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if args.offload_ref:
             with Timer("[Training Processes] Move Ref to CPU", noop=self.rank != 0):
                 self.ref_policy.to("cpu")
+                torch.cuda.empty_cache()
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
@@ -906,11 +877,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         kl = kl4
 
                     # grpo change: directly subtract KL in loss (add)
-                    loss = masked_mean(
-                        pg_loss_max + (args.beta * kl),
-                        mb_response_masks_bool,
-                        args.masked_mean_axis,
-                    )
+                    loss = masked_mean(pg_loss_max + (args.beta * kl), mb_response_masks_bool, args.masked_mean_axis)
                     loss = loss / accumulation_steps
                     self.model.backward(loss)
                     if (local_step + 1) % accumulation_steps == 0:
@@ -931,9 +898,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         elif args.kl_estimator == "kl4":
                             kl_loss_stats[i] = kl4_stats[i] * args.beta
                         pg_clipfrac_stats[i] = masked_mean(
-                            (pg_losses2 > pg_losses).float(),
-                            mb_response_masks_bool,
-                            args.masked_mean_axis,
+                            (pg_losses2 > pg_losses).float(), mb_response_masks_bool, args.masked_mean_axis
                         )
                         pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
                         loss_stats[i] = loss
@@ -1003,9 +968,9 @@ class PolicyTrainerRayProcess(RayProcess):
             if getattr(model_to_save.config, "tie_word_embeddings", False) and "lm_head.weight" in state_dict_keys:
                 state_dict_keys.remove("lm_head.weight")
 
-            assert state_dict_keys.issubset(output_state_dict_keys), (
-                f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
-            )
+            assert state_dict_keys.issubset(
+                output_state_dict_keys
+            ), f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
 
             # only save peft weights https://github.com/microsoft/DeepSpeed/issues/4295
             if isinstance(model_to_save, PeftModel):
@@ -1114,11 +1079,7 @@ def vllm_generate_thread(
         split_queries = [prompts[i : i + queries_per_engine] for i in range(0, len(prompts), queries_per_engine)]
         # Generate responses in parallel across engines
         futures = [
-            vllm_engine.generate.remote(
-                sampling_params=sampling_params,
-                prompt_token_ids=queries,
-                use_tqdm=False,
-            )
+            vllm_engine.generate.remote(sampling_params=sampling_params, prompt_token_ids=queries, use_tqdm=False)
             for vllm_engine, queries in zip(vllm_engines, split_queries)
         ]
         # Gather all responses
@@ -1156,14 +1117,7 @@ def vllm_generate_thread(
             response_ids,
             finish_reasons,
             masks,
-            (
-                num_calls,
-                timeouts,
-                tool_errors,
-                tool_outputs,
-                tool_runtimes,
-                tool_calleds,
-            ),
+            (num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds),
         )
 
     for training_step in range(resume_training_step, num_training_steps + 1):
@@ -1211,14 +1165,7 @@ def data_preparation_thread(
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             responses, finish_reasons, masks, infos = inference_results_Q.get()
-            (
-                num_calls,
-                timeouts,
-                tool_errors,
-                tool_outputs,
-                tool_runtimes,
-                tool_calleds,
-            ) = infos
+            num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
             good_outputs = [
                 len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
                 for i in range(len(tool_outputs))
@@ -1242,13 +1189,7 @@ def data_preparation_thread(
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
             scores, reward_metrics = asyncio.run(
                 reward_fn(
-                    responses,
-                    decoded_responses,
-                    ground_truths,
-                    datasets,
-                    finish_reasons,
-                    infos,
-                    decoded_queries,
+                    responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries
                 )
             )
 
@@ -1297,7 +1238,7 @@ def data_preparation_thread(
                 ground_truths = [ground_truths[i] for i in stop_idxes]
                 datasets = [datasets[i] for i in stop_idxes]
                 finish_reasons = [finish_reasons[i] for i in stop_idxes]
-
+            
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
                 queries=queries,
@@ -1316,34 +1257,6 @@ def data_preparation_thread(
                 for packed_mask in packed_sequences.response_masks
             ]
             packed_sequences.advantages = packed_advantages
-
-        # if we have less batches than world size, we need to pad out so each world is fine
-        # ideally, you should avoid this since its wasting computation.
-        if args.allow_world_padding:
-            with Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
-                shortfall = args.world_size - len(packed_sequences.query_responses)
-                if shortfall > 0:
-                    print(
-                        f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
-                    )
-                    # construct "dummy" sequences for padding out the world size
-                    dummy_qr = torch.tensor(
-                        [tokenizer.pad_token_id, tokenizer.eos_token_id],
-                        dtype=torch.long,
-                    )
-                    dummy_tool_mask = torch.zeros_like(dummy_qr)
-                    dummy_attention = torch.tensor([1, 1], dtype=torch.long)
-                    dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
-                    dummy_response_mask = torch.zeros_like(dummy_qr)
-                    dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
-                    # pad out the world size
-                    for _ in range(shortfall):
-                        packed_sequences.query_responses.append(dummy_qr)
-                        packed_sequences.tool_masks.append(dummy_tool_mask)
-                        packed_sequences.attention_masks.append(dummy_attention)
-                        packed_sequences.position_ids.append(dummy_position_ids)
-                        packed_sequences.response_masks.append(dummy_response_mask)
-                        packed_sequences.advantages.append(dummy_advantage)
 
         with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
             B = (
@@ -1366,47 +1279,27 @@ def data_preparation_thread(
                 collated_position_ids = []
                 collated_response_masks = []
                 collated_advantages = []
-                for j in range(
-                    0,
-                    len(per_device_packed_query_responses),
-                    args.per_device_train_batch_size,
-                ):
+                for j in range(0, len(per_device_packed_query_responses), args.per_device_train_batch_size):
                     micro_range = b_inds[j : j + args.per_device_train_batch_size]
                     collated_query_responses.append(
                         collate_fn(
-                            [per_device_packed_query_responses[idx] for idx in micro_range],
-                            tokenizer.pad_token_id,
+                            [per_device_packed_query_responses[idx] for idx in micro_range], tokenizer.pad_token_id
                         )
                     )
                     collated_tool_masks.append(
-                        collate_fn(
-                            [per_device_packed_tool_masks[idx] for idx in micro_range],
-                            0,
-                        )
+                        collate_fn([per_device_packed_tool_masks[idx] for idx in micro_range], 0)
                     )
                     collated_attention_masks.append(
-                        collate_fn(
-                            [per_device_packed_attention_masks[idx] for idx in micro_range],
-                            0,
-                        )
+                        collate_fn([per_device_packed_attention_masks[idx] for idx in micro_range], 0)
                     )
                     collated_position_ids.append(
-                        collate_fn(
-                            [per_device_packed_position_ids[idx] for idx in micro_range],
-                            0,
-                        )
+                        collate_fn([per_device_packed_position_ids[idx] for idx in micro_range], 0)
                     )
                     collated_response_masks.append(
-                        collate_fn(
-                            [per_device_packed_response_masks[idx] for idx in micro_range],
-                            0,
-                        )
+                        collate_fn([per_device_packed_response_masks[idx] for idx in micro_range], 0)
                     )
                     collated_advantages.append(
-                        collate_fn(
-                            [per_device_packed_advantages[idx] for idx in micro_range],
-                            0,
-                        )
+                        collate_fn([per_device_packed_advantages[idx] for idx in micro_range], 0)
                     )
                 collated_data.append(
                     {
@@ -1488,6 +1381,56 @@ def data_preparation_thread(
         )
 
 
+def create_datasets(args: Args, tokenizer): 
+    from datasets import load_dataset
+    def preprocess_example(example, tokenizer,):
+        base_prompt = example["messages"][0]['content']
+        full_prompt = base_prompt + (
+            "Return the final answer as an equation without = in <answer> </answer> tags. "
+            "For example <answer> (1 + 2) / 3 </answer>."
+        ) 
+        # full_prompt = base_prompt + (
+        #     "First reason about the question in <think> </think> tags. "
+        #     "Then return the final answer as an equation without = in <answer> </answer> tags. "
+        #     "For example <answer> (1 + 2) / 3 </answer>."
+        #     "\n\n<think>"
+        # ) 
+        input_ids = tokenizer.encode(full_prompt, add_special_tokens=False)
+
+        return {
+            "input_ids_prompt": input_ids,
+            "prompt": full_prompt,
+        }
+    train_dataset = load_dataset(args.dataset_mixer_list[0], split="train")
+    train_dataset = train_dataset.map(
+        preprocess_example,
+        num_proc=6,
+        fn_kwargs={
+            "tokenizer": tokenizer,
+        },
+    ) 
+    eval_dataset = load_dataset(args.dataset_mixer_eval_list[0], split="train[:100]")
+    eval_dataset = eval_dataset.map(
+        preprocess_example,
+        num_proc=6,
+        fn_kwargs={
+            "tokenizer": tokenizer,
+        },
+    )
+    return train_dataset, eval_dataset
+
+
+import re
+def simple_format_reward_func(responses: List[str], reward_scale: float = 1.0) -> List[float]:
+    """
+    Check if the completion has a specific format defined by a pattern.
+
+    Returns a list of rewards scaled by reward_scale.
+    """
+    pattern = r".*<answer>.*?</answer>"
+    matches = [re.match(pattern, r, re.DOTALL) for r in responses]
+    return [reward_scale if match else 0.0 for match in matches]
+
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
     # ------------------------------------------------------------
     # Setup tokenizer
@@ -1564,42 +1507,44 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
     # ------------------------------------------------------------
     # Set up datasets
-    transform_fn_args = [
-        {},
-        {
-            "max_token_length": args.max_token_length,
-            "max_prompt_token_length": args.max_prompt_token_length,
-        },
-    ]
-    train_dataset = get_cached_dataset_tulu(
-        dataset_mixer_list=args.dataset_mixer_list,
-        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
-        tc=tc,
-        dataset_transform_fn=args.dataset_transform_fn,
-        transform_fn_args=transform_fn_args,
-        dataset_cache_mode=args.dataset_cache_mode,
-        dataset_config_hash=args.dataset_config_hash,
-        hf_entity=args.hf_entity,
-        dataset_local_cache_dir=args.dataset_local_cache_dir,
-        dataset_skip_cache=args.dataset_skip_cache,
-    )
-    train_dataset = train_dataset.shuffle(seed=args.seed)
-    eval_dataset = None
-    if len(args.dataset_mixer_eval_list) > 0:
-        eval_dataset = get_cached_dataset_tulu(
-            args.dataset_mixer_eval_list,
-            args.dataset_mixer_eval_list_splits,
-            tc,
-            args.dataset_transform_fn,
-            transform_fn_args,
-            hf_entity=args.hf_entity,
-            dataset_cache_mode=args.dataset_cache_mode,
-            dataset_config_hash=args.dataset_config_eval_hash,
-            dataset_local_cache_dir=args.dataset_local_cache_dir,
-            dataset_skip_cache=args.dataset_skip_cache,
-        )
-        if args.shuffle_eval_dataset:
-            eval_dataset = eval_dataset.shuffle(seed=args.seed)
+    # transform_fn_args = [
+    #     {},
+    #     {
+    #         "max_token_length": args.max_token_length,
+    #         "max_prompt_token_length": args.max_prompt_token_length,
+    #     },
+    # ]
+    # train_dataset = get_cached_dataset_tulu(
+    #     dataset_mixer_list=args.dataset_mixer_list,
+    #     dataset_mixer_list_splits=args.dataset_mixer_list_splits,
+    #     tc=tc,
+    #     dataset_transform_fn=args.dataset_transform_fn,
+    #     transform_fn_args=transform_fn_args,
+    #     dataset_cache_mode=args.dataset_cache_mode,
+    #     dataset_config_hash=args.dataset_config_hash,
+    #     hf_entity=args.hf_entity,
+    #     dataset_local_cache_dir=args.dataset_local_cache_dir,
+    #     dataset_skip_cache=args.dataset_skip_cache,
+    # )
+    # train_dataset = train_dataset.shuffle(seed=args.seed)
+    # eval_dataset = None
+    # if len(args.dataset_mixer_eval_list) > 0:
+    #     eval_dataset = get_cached_dataset_tulu(
+    #         args.dataset_mixer_eval_list,
+    #         args.dataset_mixer_eval_list_splits,
+    #         tc,
+    #         args.dataset_transform_fn,
+    #         transform_fn_args,
+    #         hf_entity=args.hf_entity,
+    #         dataset_cache_mode=args.dataset_cache_mode,
+    #         dataset_config_hash=args.dataset_config_eval_hash,
+    #         dataset_local_cache_dir=args.dataset_local_cache_dir,
+    #         dataset_skip_cache=args.dataset_skip_cache,
+    #     )
+    #     if args.shuffle_eval_dataset:
+    #         eval_dataset = eval_dataset.shuffle(seed=args.seed)
+    
+    train_dataset, eval_dataset = create_datasets(args, tokenizer)
     visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
     if args.cache_dataset_only:
         return
@@ -2028,7 +1973,7 @@ if __name__ == "__main__":
 
         if args.apply_r1_style_format_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
-                format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
+                format_scores = simple_format_reward_func(decoded_responses, args.r1_style_format_reward)
                 if len(format_scores) != len(scores):
                     raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
                 for i in range(len(format_scores)):

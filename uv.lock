@@ -16,7 +16,7 @@ resolution-markers = [
 
 [[manifest.dependency-metadata]]
 name = "flash-attn"
-version = "2.7.2.post1"
+version = "2.7.4.post1"
 requires-dist = ["torch", "setuptools"]
 
 [[package]]
@@ -814,7 +814,7 @@ name = "flash-attn"
 version = "2.7.4.post1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "einops" },
+    { name = "setuptools" },
     { name = "torch", version = "2.6.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.6.0+cu124", source = { registry = "https://download.pytorch.org/whl/cu124" }, marker = "sys_platform != 'darwin'" },
 ]
@@ -2115,7 +2115,7 @@ requires-dist = [
     { name = "debugpy", specifier = ">=1.8.13" },
     { name = "deepspeed", specifier = "==0.15.4" },
     { name = "fastapi", marker = "extra == 'code'", specifier = ">=0.100.0" },
-    { name = "flash-attn", marker = "extra == 'compile'", specifier = ">=2.7.2.post1" },
+    { name = "flash-attn", marker = "extra == 'compile'", specifier = "==2.7.4.post1" },
     { name = "hf-transfer", specifier = ">=0.1.8" },
     { name = "immutabledict", specifier = "==1.2.0" },
     { name = "langdetect", specifier = "==1.0.9" },
@@ -2128,7 +2128,7 @@ requires-dist = [
     { name = "packaging", specifier = ">=24.2" },
     { name = "peft", specifier = ">=0.13.2" },
     { name = "pydantic", marker = "extra == 'code'", specifier = ">=2.0.0" },
-    { name = "ray", extras = ["default"], specifier = ">=2.44.1" },
+    { name = "ray", extras = ["default"], specifier = ">=2.44.1,<=2.46.0" },
     { name = "requests", marker = "extra == 'code'", specifier = ">=2.28.0" },
     { name = "setuptools", specifier = ">=75.6.0" },
     { name = "tensorboard", specifier = ">=2.18.0" },
