@@ -2,7 +2,7 @@ python mason.py \
     --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-thinker \
     --priority high \
-    --image valpy/open_instruct_dev_multi --pure_docker_mode \
+    --image valpy/open_instruct_dev_multi2 --pure_docker_mode \
     --preemptible \
     --num_nodes 2 \
     --budget ai2/oe-adapt \
