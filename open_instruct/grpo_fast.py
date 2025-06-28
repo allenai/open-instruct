@@ -1236,7 +1236,7 @@ def data_preparation_thread(
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
             decoded_queries = tokenizer.batch_decode(queries, skip_special_tokens=True)
-            decoded_queries = [extract_user_query(query) for query in decoded_queries]
+            decoded_queries = [extract_user_query(query, args.chat_template_name) for query in decoded_queries]
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
@@ -1264,6 +1264,10 @@ def data_preparation_thread(
                 advantages = scores - mean_grouped_rewards
             else:
                 raise ValueError(f"Invalid advantage normalization type: {args.advantage_normalization_type}")
+
+        # import pdb
+        #
+        # pdb.set_trace()
 
         with Timer("📦 [Data Preparation Thread] Filtering sequences"):
             # Here we get the max possible score for each prompt, and see how many prompts are unsolved

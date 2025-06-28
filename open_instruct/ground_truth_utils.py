@@ -816,6 +816,48 @@ class CodeVerifier(VerifierFunction):
         return CodeVerifierConfig
 
 
+class CountdownVerifier(VerifierFunction):
+    """
+    Verifier for Countdown tasks that extracts the equation from the prediction
+    and compares it (case-insensitively) to the ground truth.
+    """
+
+    def __init__(self, name: str, weight: float = 1.0, verifier_config: Optional[VerifierConfig] = None) -> None:
+        super().__init__("countdown", weight=weight, verifier_config=verifier_config)
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
+        target = label[0]
+        numbers = label[1:]
+        try:
+            # Check if the format is correct
+            match = re.search(r"<answer>(.*?)</answer>", prediction)
+            assert match is not None
+            # Extract the "answer" part from the completion
+            equation = match.group(1).strip()
+            # Extract all numbers from the equation
+            used_numbers = [int(n) for n in re.findall(r"\d+", equation)]
+
+            # Check if all numbers are used exactly once
+            assert sorted(used_numbers) == sorted(numbers)
+
+            # Define a regex pattern that only allows numbers, operators, parentheses, and whitespace
+            allowed_pattern = r"^[\d+\-*/().\s]+$"
+            assert re.match(allowed_pattern, equation)
+
+            # Evaluate the equation with restricted globals and locals
+            result = eval(equation, {"__builtins__": None}, {})
+            # Check if the equation is correct and matches the ground truth
+            if abs(float(result) - float(target)) < 1e-5:
+                return 1.0
+            else:
+                return 0.0
+        except Exception:
+            # If any fails, reward is 0
+            return 0.0
+
+
 def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     """
     Build all verifiers with the given judge config.
