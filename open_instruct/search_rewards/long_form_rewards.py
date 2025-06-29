@@ -102,7 +102,6 @@ def compute_paper_reward(response: str, test_case: Dict[str, Any]) -> Dict[str, 
         "error": None,
         "log_values": {
             "format_correct": 0.0,
-            
         },
     }
 

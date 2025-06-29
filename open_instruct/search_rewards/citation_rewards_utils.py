@@ -214,9 +214,7 @@ def extract_relevant_rating_from_response(response: str) -> int:
         return 0
 
 
-def run_llm_judge(
-    user_prompt: str, model_name: str = "gpt-4.1", deployment: str = "gpt-4.1-standard"
-) -> str:
+def run_llm_judge(user_prompt: str, model_name: str = "gpt-4.1", deployment: str = "gpt-4.1-standard") -> str:
     response = run_azure_openai(
         model_name,
         None,

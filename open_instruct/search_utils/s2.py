@@ -27,7 +27,9 @@ def create_session_with_retries(
     return session
 
 
-def get_snippets_for_query(query, api_endpoint="https://api.semanticscholar.org/graph/v1/snippet/search", number_of_results=10):
+def get_snippets_for_query(
+    query, api_endpoint="https://api.semanticscholar.org/graph/v1/snippet/search", number_of_results=10
+):
     api_key = os.environ.get("S2_API_KEY")
     if not api_key:
         raise ValueError("Missing S2_API_KEY environment variable.")
