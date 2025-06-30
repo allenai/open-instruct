@@ -22,13 +22,16 @@ curl -X POST http://localhost:1234/test_program -H "Content-Type: application/js
 """
 
 import logging
-from typing import List, Any
 import traceback
+from typing import Any, List
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from open_instruct.code.code_utils import get_successful_tests_fast, get_successful_tests_stdio
+from open_instruct.code.code_utils import (
+    get_successful_tests_fast,
+    get_successful_tests_stdio,
+)
 
 app = FastAPI()
 
@@ -45,6 +48,7 @@ class TestRequest(BaseModel):
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
 
 @app.post("/test_program")
 async def test_program(request: TestRequest):
@@ -74,6 +78,7 @@ async def test_program_stdio(request: TestRequest):
 
 if __name__ == "__main__":
     import requests
+
     stdio_url = "http://localhost:1234/test_program_stdio"
 
     program1 = """
@@ -92,15 +97,16 @@ print(result)
 """
     stdio_payload = {
         "program": program1,
-    "tests": [{"input": "1", "output": "2024"}, 
-              {"input": "11", "output": "2025"}, 
-              {"input": "24", "output": "1929"},
-              {"input": "1", "output": "1"},
-              {"input": "1", "output": "2024"},
-              {"input": "11", "output": "2025"},
-              {"input": "24", "output": "1"}
-              ],
-    "max_execution_time": 6.0,
+        "tests": [
+            {"input": "1", "output": "2024"},
+            {"input": "11", "output": "2025"},
+            {"input": "24", "output": "1929"},
+            {"input": "1", "output": "1"},
+            {"input": "1", "output": "2024"},
+            {"input": "11", "output": "2025"},
+            {"input": "24", "output": "1"},
+        ],
+        "max_execution_time": 6.0,
     }
 
     response = requests.post(stdio_url, json=stdio_payload)
@@ -111,7 +117,7 @@ print(result)
 
     assert response_json["results"] == [1, 1, 1, 0, 1, 1, 0]
 
-    #test multi-line inputs
+    # test multi-line inputs
     program2 = """
 def is_prime(num):
     if num <= 1:
@@ -149,19 +155,19 @@ if __name__ == "__main__":
 """
     stdio_payload = {
         "program": program2,
-    "tests": [
-  {"input": "2\n9\n0\n", "output": "5\n100\n"},
-  {"input": "1\n0\n", "output": "2\n"},
-  {"input": "0\n", "output": ""},
-  {"input": "10\n0\n", "output": "129\n"},
-  {"input": "5\n3\n2\n0\n", "output": "28\n10\n5\n"},
-  {"input": "10000\n0\n", "output": "496165411\n"},
-  {"input": "10000\n0\n", "output": "goop\n"},
-  {"input": "1\n2\n3\n4\n0\n", "output": "2\n5\n10\n17\n"},
-  {"input": "3\n1\n0\n", "output": "10\n2\n"},
-  {"input": "3\n1\n0\n", "output": "10\n3\n"}
-],
-    "max_execution_time": 6.0,
+        "tests": [
+            {"input": "2\n9\n0\n", "output": "5\n100\n"},
+            {"input": "1\n0\n", "output": "2\n"},
+            {"input": "0\n", "output": ""},
+            {"input": "10\n0\n", "output": "129\n"},
+            {"input": "5\n3\n2\n0\n", "output": "28\n10\n5\n"},
+            {"input": "10000\n0\n", "output": "496165411\n"},
+            {"input": "10000\n0\n", "output": "goop\n"},
+            {"input": "1\n2\n3\n4\n0\n", "output": "2\n5\n10\n17\n"},
+            {"input": "3\n1\n0\n", "output": "10\n2\n"},
+            {"input": "3\n1\n0\n", "output": "10\n3\n"},
+        ],
+        "max_execution_time": 6.0,
     }
 
     response = requests.post(stdio_url, json=stdio_payload)
@@ -192,4 +198,3 @@ def add(a, b):
     print("Response:", response_json)
 
     assert response_json["results"] == [1, 1, 0]
-

@@ -7,6 +7,7 @@ They are then automatically added to the REWARD_FN_MAPPING.
 
 import ast
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -17,7 +18,6 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
-import copy
 
 import requests
 from litellm import acompletion
@@ -835,8 +835,8 @@ def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
             stdio_config = copy.deepcopy(verifier_config)
             stdio_config.code_api_url = stdio_config.code_api_url.replace("/test_program", "/test_program_stdio")
             instance = CodeVerifier(stdio_config)
-            instance.name = 'code_stdio'
-            verifiers['code_stdio'] = instance
+            instance.name = "code_stdio"
+            verifiers["code_stdio"] = instance
 
     for judge_type in JUDGE_PROMPT_MAP.keys():
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args))

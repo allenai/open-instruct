@@ -1,20 +1,12 @@
 import logging
+import math
 import multiprocessing
 import os
 import shutil
-import ast
-import time
-import signal
-import faulthandler
-import math
-from typing import Callable, List, Tuple, Dict, Any, Optional
-from types import ModuleType
-from collections import defaultdict
-from functools import partial
-from io import StringIO
 from ctypes import c_int
 from typing import Any, Dict, List, Optional
-from .testing_util import grade_stdio, import_string
+
+from .testing_util import grade_stdio
 
 # taken from https://github.com/TIGER-AI-Lab/AceCoder/blob/62bb7fc25d694fed04a5270c89bf2cdc282804f7/data/inference/EvaluateInferencedCode.py#L372
 # we save the current working directory and restore them later
@@ -151,10 +143,12 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
 
     return [test_results[i] for i in range(len(tests))]
 
+
 # -------------------------------------------------------------
 # Stdio format - mostly copied from livecodebench
 # -------------------------------------------------------------
 stdio_test_results = multiprocessing.Array("i", 1000)  # Support up to 1000 tests for stdio
+
 
 def run_tests_stdio_helper(program: str, tests: List[Any], max_execution_time: float):
     """Helper to run stdio tests in a separate process."""
@@ -200,9 +194,7 @@ def get_successful_tests_stdio(program: str, tests: List[Any], max_execution_tim
     # Total timeout needs to account for all tests running sequentially.
     total_timeout = max_execution_time * test_ct + 5.0
 
-    p = multiprocessing.Process(
-        target=run_tests_stdio_helper, args=(program, tests, max_execution_time)
-    )
+    p = multiprocessing.Process(target=run_tests_stdio_helper, args=(program, tests, max_execution_time))
     p.start()
     p.join(timeout=total_timeout)
 
@@ -210,6 +202,7 @@ def get_successful_tests_stdio(program: str, tests: List[Any], max_execution_tim
         p.kill()
 
     return [1 if stdio_test_results[i] == 1 else 0 for i in range(test_ct)]
+
 
 # -------------------------------------------------------------
 # Utility

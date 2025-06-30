@@ -2,34 +2,25 @@
 copied directly from livecodebench
 https://github.com/LiveCodeBench/LiveCodeBench/blob/main/lcb_runner/evaluation/testing_util.py
 """
+
 import ast
-import json
-import pickle
-import zlib
-import base64
-import sys
 import faulthandler
-import platform
-import traceback
-# used for debugging to time steps
-from datetime import datetime
 
 # to run the solution files we're using a timing based approach
 import signal
+import sys
+import time
 
-import numpy as np
-
+# used for debugging to time steps
+from decimal import Decimal
+from enum import Enum
 from io import StringIO
-
-# used for testing the code that reads from input
-from unittest.mock import patch, mock_open
 
 # from pyext import RuntimeModule
 from types import ModuleType
 
-from enum import Enum
-from decimal import Decimal
-import time
+# used for testing the code that reads from input
+from unittest.mock import mock_open, patch
 
 import_string = "from string import *\nfrom re import *\nfrom datetime import *\nfrom collections import *\nfrom heapq import *\nfrom bisect import *\nfrom copy import *\nfrom math import *\nfrom random import *\nfrom statistics import *\nfrom itertools import *\nfrom functools import *\nfrom operator import *\nfrom io import *\nfrom sys import *\nfrom json import *\nfrom builtins import *\nfrom typing import *\nimport string\nimport re\nimport datetime\nimport collections\nimport heapq\nimport bisect\nimport copy\nimport math\nimport random\nimport statistics\nimport itertools\nimport functools\nimport operator\nimport io\nimport sys\nimport json\nsys.setrecursionlimit(50000)\n"
 
@@ -117,10 +108,8 @@ def clean_if_name(code: str) -> str:
         if isinstance(last_block, ast.If):
             condition = last_block.test
             if ast.unparse(condition).strip() == "__name__ == '__main__'":
-                code = (
-                    ast.unparse(astree.body[:-1]) + "\n" + ast.unparse(last_block.body)  # type: ignore
-                )
-    except:
+                code = ast.unparse(astree.body[:-1]) + "\n" + ast.unparse(last_block.body)  # type: ignore
+    except Exception:
         pass
 
     return code
@@ -139,9 +128,7 @@ def make_function(code: str) -> str:
 
         function_ast = ast.FunctionDef(
             name="wrapped_function",
-            args=ast.arguments(
-                posonlyargs=[], args=[], kwonlyargs=[], kw_defaults=[], defaults=[]
-            ),
+            args=ast.arguments(posonlyargs=[], args=[], kwonlyargs=[], kw_defaults=[], defaults=[]),
             body=all_other_stmts,
             decorator_list=[],
             lineno=-1,
@@ -154,7 +141,7 @@ def make_function(code: str) -> str:
             + ast.unparse(function_ast)  # type: ignore
         )
         return main_code
-    except Exception as e:
+    except Exception:
         return code
 
 
@@ -180,7 +167,7 @@ def call_method(method, inputs):
     def _inner_call_method(_method):
         try:
             return _method()
-        except SystemExit as e:
+        except SystemExit:
             pass
         finally:
             pass
@@ -192,7 +179,7 @@ def get_function(compiled_sol, fn_name: str):  # type: ignore
     try:
         assert hasattr(compiled_sol, fn_name)
         return getattr(compiled_sol, fn_name)
-    except Exception as e:
+    except Exception:
         return
 
 
@@ -223,13 +210,13 @@ def compile_code(code: str, timeout: int):
 def convert_line_to_decimals(line: str) -> tuple[bool, list[Decimal]]:
     try:
         decimal_line = [Decimal(elem) for elem in line.split()]
-    except:
+    except Exception:
         return False, []
     return True, decimal_line
 
 
 def get_stripped_lines(val: str):
-    ## you don't want empty lines to add empty list after splitlines!
+    # you don't want empty lines to add empty list after splitlines!
     val = val.strip()
 
     return [val_line.strip() for val_line in val.split("\n")]
@@ -242,10 +229,10 @@ def grade_stdio(
     timeout: int,
 ):
     signal.signal(signal.SIGALRM, timeout_handler)
-    ## runtime doesn't interact well with __name__ == '__main__'
+    # runtime doesn't interact well with __name__ == '__main__'
     code = clean_if_name(code)
 
-    ## we wrap the given code inside another function
+    # we wrap the given code inside another function
     code = make_function(code)
     compiled_sol = compile_code(code, timeout)
     if compiled_sol is None:
@@ -311,21 +298,15 @@ def grade_stdio(
             continue
 
         test_case_failed = False
-        for stripped_prediction_line, stripped_gt_out_line in zip(
-            stripped_prediction_lines, stripped_gt_out_lines
-        ):
+        for stripped_prediction_line, stripped_gt_out_line in zip(stripped_prediction_lines, stripped_gt_out_lines):
             if stripped_prediction_line == stripped_gt_out_line:
                 continue
 
-            success, decimal_prediction_line = convert_line_to_decimals(
-                stripped_prediction_line
-            )
+            success, decimal_prediction_line = convert_line_to_decimals(stripped_prediction_line)
             if not success:
                 test_case_failed = True
                 break
-            success, decimal_gtout_line = convert_line_to_decimals(
-                stripped_gt_out_line
-            )
+            success, decimal_gtout_line = convert_line_to_decimals(stripped_gt_out_line)
             if not success:
                 test_case_failed = True
                 break
