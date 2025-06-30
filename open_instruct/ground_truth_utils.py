@@ -7,6 +7,7 @@ They are then automatically added to the REWARD_FN_MAPPING.
 
 import ast
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -825,8 +826,17 @@ def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
         if subclass == LMJudgeVerifier:
             continue
 
-        instance = subclass(subclass.get_config_class().from_args(args))
+        verifier_config = subclass.get_config_class().from_args(args)
+        instance = subclass(verifier_config)
         verifiers[instance.name.lower()] = instance
+
+        # add the code_stdio verifier
+        if subclass == CodeVerifier:
+            stdio_config = copy.deepcopy(verifier_config)
+            stdio_config.code_api_url = stdio_config.code_api_url.replace("/test_program", "/test_program_stdio")
+            instance = CodeVerifier(stdio_config)
+            instance.name = "code_stdio"
+            verifiers["code_stdio"] = instance
 
     for judge_type in JUDGE_PROMPT_MAP.keys():
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args))
