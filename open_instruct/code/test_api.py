@@ -5,13 +5,13 @@ Put this file alongside your source, adjust nothing else,
 and run `python -m unittest -v` (or any test runner you like).
 """
 
-import os
-import time
-import subprocess
-import unittest
-import requests
 import logging
-from contextlib import contextmanager
+import os
+import subprocess
+import time
+import unittest
+
+import requests
 
 # Set up global logger
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 class APITestServer:
     """Manages starting and stopping the API server for testing."""
-    
+
     def __init__(self, host="0.0.0.0", port=1234, startup_timeout=30):
         self.host = host
         self.port = port
@@ -27,7 +27,7 @@ class APITestServer:
         self.base_url = f"http://localhost:{port}"
         self.health_url = f"{self.base_url}/health"
         self.process = None
-        
+
     def is_running(self):
         """Check if the server is already running."""
         try:
@@ -35,34 +35,33 @@ class APITestServer:
             return response.status_code == 200
         except requests.exceptions.RequestException:
             return False
-    
+
     def start(self):
         """Start the server if it's not already running."""
         if self.is_running():
             logger.info("Server already running, using existing instance")
             return True
-            
+
         logger.info("Starting API server...")
-        self.process = subprocess.Popen([
-            "uv", "run", "uvicorn", 
-            "open_instruct.code.api:app", 
-            "--host", self.host, 
-            "--port", str(self.port)
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        
+        self.process = subprocess.Popen(
+            ["uv", "run", "uvicorn", "open_instruct.code.api:app", "--host", self.host, "--port", str(self.port)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
         # Wait for server to start
         for _ in range(self.startup_timeout):
             if self.is_running():
                 logger.info("Server started successfully")
                 return True
             time.sleep(1)
-        
+
         # Server failed to start
         if self.process:
             self.process.terminate()
             self.process = None
         raise RuntimeError(f"Failed to start server within {self.startup_timeout} seconds")
-    
+
     def stop(self):
         """Stop the server if we started it."""
         if self.process:
@@ -74,12 +73,12 @@ class APITestServer:
                 self.process.kill()
                 self.process.wait()
             self.process = None
-    
+
     def __enter__(self):
         """Enter the context manager."""
         self.start()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Exit the context manager."""
         self.stop()
@@ -95,7 +94,7 @@ class TestAddProgramAPI(unittest.TestCase):
         # Initialize the test server
         cls.server = APITestServer()
         cls.server.start()
-        
+
         # Allow overriding the URL via env var for CI flexibility.
         cls.url = os.getenv("ADD_API_URL", f"{cls.server.base_url}/test_program")
 
@@ -143,13 +142,13 @@ class TestAddProgramAPI(unittest.TestCase):
 
 class TestAPIServerContextManager(unittest.TestCase):
     """Example of using the TestAPIServer as a context manager."""
-    
+
     def test_health_check_with_context_manager(self):
         """Test using the server context manager for a single test."""
         with APITestServer() as server:
             response = requests.get(server.health_url, timeout=5)
             self.assertEqual(response.status_code, 200)
-            
+
             # Test that the health endpoint returns expected structure
             data = response.json()
             self.assertIn("status", data)
@@ -157,13 +156,13 @@ class TestAPIServerContextManager(unittest.TestCase):
 
 class TestAPIServerStandalone(unittest.TestCase):
     """Example of using the TestAPIServer manually in individual tests."""
-    
+
     def setUp(self):
         self.server = APITestServer()
-        
+
     def tearDown(self):
         self.server.stop()
-    
+
     def test_health_endpoint(self):
         """Test the health endpoint."""
         self.server.start()
