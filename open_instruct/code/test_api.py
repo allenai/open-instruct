@@ -44,7 +44,7 @@ class APITestServer:
 
         logger.info("Starting API server...")
         self.process = subprocess.Popen(
-            ["uv", "run", "uvicorn", "open_instruct.code.api:app", "--host", self.host, "--port", str(self.port)],
+            ["uvicorn", "open_instruct.code.api:app", "--host", self.host, "--port", str(self.port)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
