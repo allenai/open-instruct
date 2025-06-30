@@ -55,7 +55,7 @@ def run_single_test_against_program_helper(func: str, test: str) -> int:
 
 
 # very unstable, seems to work, seeing there are no uses will be deprecated for now.
-def get_successful_tests_slow(program: str, tests: List[str], max_execution_time: float = 1.0) -> List[bool]:
+def get_successful_tests_slow(program: str, tests: List[str], max_execution_time: float = 1.0) -> List[int]:
     """Run a program against a list of tests, if the program exited successfully then we consider
     the test to be passed. Note that you SHOULD ONLY RUN THIS FUNCTION IN A VIRTUAL ENVIRONMENT
     as we do not gurantee the safety of the program provided.
@@ -72,7 +72,7 @@ def get_successful_tests_slow(program: str, tests: List[str], max_execution_time
     if test_ct == 0:
         return []
     if not should_execute(program=program, tests=tests):
-        return [False] * len(tests)
+        return [0] * len(tests)
 
     result = []
     for test in tests:
@@ -84,7 +84,7 @@ def get_successful_tests_slow(program: str, tests: List[str], max_execution_time
             p.kill()
         result.append(return_var.value)
 
-    return [bool(x) for x in result]
+    return result
 
 
 # -------------------------------------------------------------
@@ -139,7 +139,7 @@ def run_individual_test_helper(func: str, test: str, result_array, index: int) -
         partial_undo_reliability_guard()
 
 
-def get_successful_tests_fast(program: str, tests: List[str], max_execution_time: float = 1.0) -> List[bool]:
+def get_successful_tests_fast(program: str, tests: List[str], max_execution_time: float = 1.0) -> List[int]:
     """Run a program against a list of tests, if the program exited successfully then we consider
     the test to be passed. Note that you SHOULD ONLY RUN THIS FUNCTION IN A VIRTUAL ENVIRONMENT
     as we do not guarantee the safety of the program provided.
@@ -157,7 +157,7 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
         return []
     if not should_execute(program=program, tests=tests):
         logger.info("Not executing program %s", program)
-        return [False] * len(tests)
+        return [0] * len(tests)
 
     # Run each test individually to handle timeouts properly
     shared_test_results = multiprocessing.Array("i", len(tests))
@@ -174,7 +174,7 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
         if p.is_alive():
             p.kill()
 
-    return [bool(shared_test_results[i]) for i in range(len(tests))]
+    return [shared_test_results[i] for i in range(len(tests))]
 
 
 # -------------------------------------------------------------
