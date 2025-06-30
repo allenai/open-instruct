@@ -24,6 +24,6 @@ jobs:
       - name: Set up Python
         run: uv python install
       - name: Install dependencies
-        run: uv sync --locked --all-extras --dev
+        run: uv pip install pytest torch datasets transformers==4.40.2 accelerate rich ray
       - name: Run unit tests
         run: uv run pytest
