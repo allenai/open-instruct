@@ -23,9 +23,5 @@ jobs:
           version: "0.7.17"
       - name: Set up Python
         run: uv python install
-      - name: Create virtual environment
-        run: uv venv
-      - name: Install dependencies
-        run: uv pip install -r test_requirements.txt
       - name: Run unit tests
         run: uv run pytest
