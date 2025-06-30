@@ -24,6 +24,6 @@ jobs:
       - name: Set up Python
         run: uv python install
       - name: Install dependencies
-        run: uv pip install -r test_requirements.txt
+        run: uv pip install --system -r test_requirements.txt
       - name: Run unit tests
         run: uv run pytest
