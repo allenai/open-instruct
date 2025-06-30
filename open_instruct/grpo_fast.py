@@ -763,7 +763,7 @@ class PolicyTrainerRayProcess(RayProcess):
             collated_position_ids = collated_position_ids[0:-leftover]
             collated_advantages = collated_advantages[0:-leftover]
             collated_response_masks = collated_response_masks[0:-leftover]
-
+            print(f"Warning: {leftover} samples are dropped due to batch size {num_mini_batches}")
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
         with Timer("Inference Calculation", noop=self.rank != 0):
@@ -1322,8 +1322,7 @@ def data_preparation_thread(
             "scores": np.array(scores).mean(),
             "real_batch_size_ratio": real_batch_size_ratio,
             "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
-            "packed_ratio": len(packed_sequences.query_responses) / len(responses),
-            "val/sequence_lengths": sequence_lengths.mean(),
+            "packed_ratio": len(packed_sequences.query_responses) / len(responses) if len(responses) > 0 else 0,            "val/sequence_lengths": sequence_lengths.mean(),
             "val/sequence_lengths_min": sequence_lengths.min(),
             "val/sequence_lengths_max": sequence_lengths.max(),
             "val/sequence_lengths_unsolved": (
@@ -1361,6 +1360,9 @@ def data_preparation_thread(
             with open(f"{args.output_dir}/traces_{args.run_name}.jsonl", "a") as f:
                 json.dump(traces, f)
                 f.write("\n")
+
+        if len(responses) == 0:
+            print(f"Warning: no responses in batch {training_step}.")
 
         # Put the packed sequences and metrics into the output queue
         packed_sequences_Q.put(
