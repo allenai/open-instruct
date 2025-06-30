@@ -154,6 +154,28 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
 # -------------------------------------------------------------
 # Stdio format - mostly copied from livecodebench
 # -------------------------------------------------------------
+stdio_test_results = multiprocessing.Array("i", 1000)  # Support up to 1000 tests for stdio
+
+def run_tests_stdio_helper(program: str, tests: List[Any], max_execution_time: float):
+    """Helper to run stdio tests in a separate process."""
+    reliability_guard()
+    try:
+        all_inputs = [test["input"] for test in tests]
+        all_outputs = [test["output"] for test in tests]
+        timeout = math.ceil(max_execution_time)
+        results, _ = grade_stdio(program, all_inputs, all_outputs, timeout)
+
+        if results is not None:
+            processed_results = [1 if r is True else int(r) for r in results]
+            for i, res in enumerate(processed_results):
+                if i < len(stdio_test_results):
+                    stdio_test_results[i] = res
+    except Exception:
+        # On any failure, results in the shared array will remain as they were initialized (0), indicating failure.
+        pass
+    finally:
+        partial_undo_reliability_guard()
+
 
 def get_successful_tests_stdio(program: str, tests: List[Any], max_execution_time: float = 1.0) -> List[int]:
     """Same as above but for stdio format.
@@ -172,14 +194,22 @@ def get_successful_tests_stdio(program: str, tests: List[Any], max_execution_tim
         logger.info("Not executing program %s", program)
         return [0] * len(tests)
 
-    reliability_guard()
-    all_inputs = [test["input"] for test in tests]
-    all_outputs = [test["output"] for test in tests]
-    timeout = math.ceil(max_execution_time)
+    for i in range(test_ct):
+        stdio_test_results[i] = 0  # Initialize results to 0 (failure)
 
-    results, metadata = grade_stdio(program, all_inputs, all_outputs, timeout)
-    partial_undo_reliability_guard()
-    return [1 if x is True else 0 for x in results]
+    # Total timeout needs to account for all tests running sequentially.
+    total_timeout = max_execution_time * test_ct + 5.0
+
+    p = multiprocessing.Process(
+        target=run_tests_stdio_helper, args=(program, tests, max_execution_time)
+    )
+    p.start()
+    p.join(timeout=total_timeout)
+
+    if p.is_alive():
+        p.kill()
+
+    return [1 if stdio_test_results[i] == 1 else 0 for i in range(test_ct)]
 
 # -------------------------------------------------------------
 # Utility
@@ -214,7 +244,6 @@ def should_execute(program: str, tests: List[Any]) -> bool:
 
 def partial_undo_reliability_guard():
     """Undo the chmod, fchmod, print and open operation"""
-    return 
     import builtins
 
     os.chmod = tmp_chmod
@@ -245,7 +274,6 @@ def reliability_guard(maximum_memory_bytes: Optional[int] = None):
     Codex paper for more information about OpenAI's code sandbox, and proceed
     with caution.
     """
-    return 
     import faulthandler
     import platform
 

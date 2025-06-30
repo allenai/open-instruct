@@ -45,7 +45,8 @@ def print_status(job: dict) -> None:
     c = job.get("request_counts", {})
     errors = job.get("errors", [])
     error_str = "-" if not errors else ";".join(
-        f"{e.get('code') or e.get('error_code')}:{e.get('message')}" for e in errors
+        (f"{e.get('code') or e.get('error_code')}:{e.get('message')}" if isinstance(e, dict) else str(e))
+        for e in errors
     )
     line = (
         f"{job['status']}"
@@ -134,6 +135,9 @@ def main() -> None:
         job = r.json()
         
         print_status(job)
+
+        if job["status"] in {"failed"} and "errors" in job:
+            print(json.dumps(job["errors"], indent=2))
 
         if job["status"] in {"completed", "failed", "cancelled", "expired"}:
             if job.get("error_file_id"):

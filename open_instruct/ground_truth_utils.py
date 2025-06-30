@@ -17,6 +17,7 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
+import copy
 
 import requests
 from IFEvalG import instructions_registry
@@ -812,8 +813,17 @@ def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
         if subclass == LMJudgeVerifier:
             continue
 
-        instance = subclass(subclass.get_config_class().from_args(args))
+        verifier_config = subclass.get_config_class().from_args(args)
+        instance = subclass(verifier_config)
         verifiers[instance.name.lower()] = instance
+
+        # add the code_stdio verifier
+        if subclass == CodeVerifier:
+            stdio_config = copy.deepcopy(verifier_config)
+            stdio_config.code_api_url = stdio_config.code_api_url.replace("/test_program", "/test_program_stdio")
+            instance = CodeVerifier(stdio_config)
+            instance.name = 'code_stdio'
+            verifiers['code_stdio'] = instance
 
     for judge_type in JUDGE_PROMPT_MAP.keys():
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args))

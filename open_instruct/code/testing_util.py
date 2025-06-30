@@ -212,6 +212,8 @@ def compile_code(code: str, timeout: int):
             compiled_sol = tmp_sol
 
         assert compiled_sol is not None
+    except Exception:
+        compiled_sol = None
     finally:
         signal.alarm(0)
 
@@ -239,6 +241,7 @@ def grade_stdio(
     all_outputs: list,
     timeout: int,
 ):
+    signal.signal(signal.SIGALRM, timeout_handler)
     ## runtime doesn't interact well with __name__ == '__main__'
     code = clean_if_name(code)
 
@@ -246,11 +249,11 @@ def grade_stdio(
     code = make_function(code)
     compiled_sol = compile_code(code, timeout)
     if compiled_sol is None:
-        return
+        return ([-1] * len(all_outputs), {"error_code": -1, "error_message": "Compilation Error or Timeout"})
 
     method = get_function(compiled_sol, "wrapped_function")
     if method is None:
-        return
+        return ([-1] * len(all_outputs), {"error_code": -1, "error_message": "Method not found"})
 
     all_results = []
     total_execution_time = 0

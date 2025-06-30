@@ -55,7 +55,7 @@ async def test_program(request: TestRequest):
         )
         return {"results": results}
     except Exception as e:
-        traceback = traceback.print_exc()
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -68,7 +68,7 @@ async def test_program_stdio(request: TestRequest):
         )
         return {"results": results}
     except Exception as e:
-        traceback = traceback.print_exc()
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
