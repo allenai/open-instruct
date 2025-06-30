@@ -17,6 +17,7 @@ tmp_chmod = os.chmod
 tmp_fchmod = os.fchmod
 tmp_chdir = os.chdir
 tmp_rmdir = os.rmdir
+tmp_getcwd = os.getcwd
 # tmp_open = open
 tmp_print = print
 tmp_rm_tree = shutil.rmtree
@@ -34,20 +35,27 @@ return_var = multiprocessing.Value(c_int, 0)
 
 def run_single_test_against_program_helper(func: str, test: str) -> int:
     """Return 1 if func finish running, 0 otherwise"""
-    execution_context = {}
-    execution_context.update({"__builtins__": __builtins__})
+    # Apply reliability guard in the child process
+    reliability_guard()
+
     try:
-        exec(func, execution_context)
-        exec(test, execution_context)
-        return_var.value = 1
-        return 1
-    except Exception:
-        return_var.value = 0
-        return 0
+        execution_context = {}
+        execution_context.update({"__builtins__": __builtins__})
+        try:
+            exec(func, execution_context)
+            exec(test, execution_context)
+            return_var.value = 1
+            return 1
+        except Exception:
+            return_var.value = 0
+            return 0
+    finally:
+        # Restore in child process (though it will terminate anyway)
+        partial_undo_reliability_guard()
 
 
 # very unstable, seems to work, seeing there are no uses will be deprecated for now.
-def get_successful_tests_slow(program: str, tests: List[str], max_execution_time: float = 1.0) -> List[int]:
+def get_successful_tests_slow(program: str, tests: List[str], max_execution_time: float = 1.0) -> List[bool]:
     """Run a program against a list of tests, if the program exited successfully then we consider
     the test to be passed. Note that you SHOULD ONLY RUN THIS FUNCTION IN A VIRTUAL ENVIRONMENT
     as we do not gurantee the safety of the program provided.
@@ -64,9 +72,8 @@ def get_successful_tests_slow(program: str, tests: List[str], max_execution_time
     if test_ct == 0:
         return []
     if not should_execute(program=program, tests=tests):
-        return [0] * len(tests)
+        return [False] * len(tests)
 
-    reliability_guard()
     result = []
     for test in tests:
         return_var.value = 0
@@ -77,8 +84,7 @@ def get_successful_tests_slow(program: str, tests: List[str], max_execution_time
             p.kill()
         result.append(return_var.value)
 
-    partial_undo_reliability_guard()
-    return result
+    return [bool(x) for x in result]
 
 
 # -------------------------------------------------------------
@@ -87,27 +93,53 @@ def get_successful_tests_slow(program: str, tests: List[str], max_execution_time
 test_results = multiprocessing.Array("i", 1000)  # Support up to 1000 tests
 
 
-def run_tests_against_program_helper_2(func: str, tests: List[str]) -> None:
+def run_tests_against_program_helper_2(func: str, tests: List[str], shared_results) -> None:
     """Run all tests against the program and store results in shared array"""
-    execution_context: Dict[str, Any] = {}
-    execution_context.update({"__builtins__": __builtins__})
+    # Apply reliability guard in the child process
+    reliability_guard()
 
     try:
-        exec(func, execution_context)
-    except Exception:
-        for i in range(len(tests)):
-            test_results[i] = 0
-        return
+        execution_context: Dict[str, Any] = {}
+        execution_context.update({"__builtins__": __builtins__})
 
-    for idx, test in enumerate(tests):
         try:
-            exec(test, execution_context)
-            test_results[idx] = 1
+            exec(func, execution_context)
         except Exception:
-            test_results[idx] = 0
+            for i in range(len(tests)):
+                shared_results[i] = 0
+            return
+
+        for idx, test in enumerate(tests):
+            try:
+                exec(test, execution_context)
+                shared_results[idx] = 1
+            except Exception:
+                shared_results[idx] = 0
+    finally:
+        # Restore in child process (though it will terminate anyway)
+        partial_undo_reliability_guard()
 
 
-def get_successful_tests_fast(program: str, tests: List[str], max_execution_time: float = 1.0) -> List[int]:
+def run_individual_test_helper(func: str, test: str, result_array, index: int) -> None:
+    """Run a single test and store result in shared array at given index"""
+    # Apply reliability guard in the child process
+    reliability_guard()
+
+    try:
+        execution_context = {}
+        execution_context.update({"__builtins__": __builtins__})
+        try:
+            exec(func, execution_context)
+            exec(test, execution_context)
+            result_array[index] = 1
+        except Exception:
+            result_array[index] = 0
+    finally:
+        # Restore in child process (though it will terminate anyway)
+        partial_undo_reliability_guard()
+
+
+def get_successful_tests_fast(program: str, tests: List[str], max_execution_time: float = 1.0) -> List[bool]:
     """Run a program against a list of tests, if the program exited successfully then we consider
     the test to be passed. Note that you SHOULD ONLY RUN THIS FUNCTION IN A VIRTUAL ENVIRONMENT
     as we do not guarantee the safety of the program provided.
@@ -125,23 +157,24 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
         return []
     if not should_execute(program=program, tests=tests):
         logger.info("Not executing program %s", program)
-        return [0] * len(tests)
+        return [False] * len(tests)
 
-    reliability_guard()
+    # Run each test individually to handle timeouts properly
+    shared_test_results = multiprocessing.Array("i", len(tests))
 
-    # reset test results
+    # Initialize results
     for i in range(len(tests)):
-        test_results[i] = 0
+        shared_test_results[i] = 0
 
-    p = multiprocessing.Process(target=run_tests_against_program_helper_2, args=(program, tests))
-    p.start()
-    p.join(timeout=max_execution_time)
-    if p.is_alive():
-        p.kill()
+    # Run each test in its own process
+    for idx, test in enumerate(tests):
+        p = multiprocessing.Process(target=run_individual_test_helper, args=(program, test, shared_test_results, idx))
+        p.start()
+        p.join(timeout=max_execution_time)
+        if p.is_alive():
+            p.kill()
 
-    partial_undo_reliability_guard()
-
-    return [test_results[i] for i in range(len(tests))]
+    return [bool(shared_test_results[i]) for i in range(len(tests))]
 
 
 # -------------------------------------------------------------
@@ -244,6 +277,7 @@ def partial_undo_reliability_guard():
     os.chdir = tmp_chdir
     os.unlink = tmp_unlink
     os.rmdir = tmp_rmdir
+    os.getcwd = tmp_getcwd
     # shutil.rmtree = tmp_rmtree
     # builtins.open = tmp_open
     builtins.print = tmp_print
