@@ -22,7 +22,7 @@ jobs:
         with:
           version: "0.5.11"
       - name: Set up Python
-        run: uv python install 3.10.10
+        run: uv python install 3.10
       - name: Install dependencies
         run: uv sync --group dev
       - name: Code quality
