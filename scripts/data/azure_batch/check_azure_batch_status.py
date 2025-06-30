@@ -48,8 +48,7 @@ def print_status(job: dict) -> None:
     errors = job.get("errors", [])
     print(f'{errors=}')
     error_str = "-" if not errors else ";".join(
-        (f"{e.get('code') or e.get('error_code')}:{e.get('message')}" if isinstance(e, dict) else str(e))
-        for e in errors
+        f"{e.get('code') or e.get('error_code')}:{e.get('message')}" for e in errors
     )
     line = (
         f"{job['status']}"
