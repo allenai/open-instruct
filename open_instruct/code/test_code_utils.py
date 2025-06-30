@@ -4,7 +4,7 @@ import unittest
 
 from datasets import load_dataset
 
-from .code_utils import get_successful_tests_fast
+from open_instruct.code.code_utils import get_successful_tests_fast
 
 
 class GetSuccessfulTestsFastTests(unittest.TestCase):
