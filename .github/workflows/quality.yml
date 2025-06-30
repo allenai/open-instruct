@@ -27,4 +27,4 @@ jobs:
         run: uv sync --group dev
       - name: Code quality
         run: |
-          make quality
+          uv run make quality
