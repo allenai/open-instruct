@@ -1,9 +1,13 @@
 """Unit-tests for `get_successful_tests_fast`."""
 
+import sys
+import os
 import unittest
 
-from datasets import load_dataset
+# Add the project root to the Python path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
+from datasets import load_dataset
 from open_instruct.code.code_utils import get_successful_tests_fast
 
 
