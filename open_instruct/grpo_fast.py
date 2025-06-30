@@ -664,9 +664,10 @@ class PolicyTrainerRayProcess(RayProcess):
         logits = output.logits
         logits /= temperature + 1e-7
         
-        # Calculate entropy from logits
-        probs = torch.softmax(logits, dim=-1)
-        entropy = torch.logsumexp(logits, dim=-1) - torch.sum(probs * logits, dim=-1)
+        # fow now, entropy is just for monitoring, and we don't pass gradients through it.
+        with torch.no_grad():
+            probs = torch.softmax(logits, dim=-1)
+            entropy = torch.logsumexp(logits, dim=-1) - torch.sum(probs * logits, dim=-1)
         
         logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
         return logprob, entropy
