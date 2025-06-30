@@ -108,9 +108,9 @@ You will be given a Question, a Provided Answer and a Reference Answer. Judge wh
 NOTES:
 1- Differently formatted dates, people with missing middle names, and alternative spellings should all be considered the same. If the Provided Answer is correct say exactly "True", otherwise say "False".
 
-Question: {input}
-Provided Answer: {output}
-Reference Answer:{label}
+Question: {{input}}
+Provided Answer: {{output}}
+Reference Answer:{{label}}
 Correct:
 Respond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}
 """
@@ -132,9 +132,9 @@ If the student's answer is correct, output \"Final Decision: Yes\". If the stude
 creative_writing_template = """
 ### Task Description
 You will be given a Question, a Provided Answer and a Reference Answer. Judge whether the Provided Answer is correct by comparing it to the Reference Answer. Differently formatted dates, people with missing middle names, and alternative spellings should all be considered the same. If the Provided Answer is correct say exactly "True", otherwise say "False".
-Question: {input}
-Provided Answer: {output}
-Reference Answer:{label}
+Question: {{input}}
+Provided Answer: {{output}}
+Reference Answer:{{label}}
 Correct:
 Respond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}
 """
@@ -143,9 +143,9 @@ Respond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}
 refusal_template = """
 ### Task Description
 You will be given a Question, a Provided Answer and a Reference Answer. Judge whether the Provided Answer is correct by comparing it to the Reference Answer. Differently formatted dates, people with missing middle names, and alternative spellings should all be considered the same. If the Provided Answer is correct say exactly "True", otherwise say "False".
-Question: {input}
-Provided Answer: {output}
-Reference Answer:{label}
+Question: {{input}}
+Provided Answer: {{output}}
+Reference Answer:{{label}}
 Correct:
 Respond in JSON format. {{"REASONING": "[...]", "SCORE": "<your-score>"}}
 """
