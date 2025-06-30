@@ -937,6 +937,7 @@ class PolicyTrainerRayProcess(RayProcess):
             pg_loss_stats = torch.zeros(len(collated_query_responses))
             loss_stats = torch.zeros(len(collated_query_responses))
             ratio_stats = torch.zeros(len(collated_query_responses))
+            entropy_stats = torch.zeros(len(collated_query_responses))
             for epoch_idx in range(args.num_epochs):
                 for i in range(len(collated_query_responses)):
                     mb_ref_logprob = collated_ref_logprobs[i]
@@ -946,7 +947,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     mb_response_masks_bool = mb_response_masks[:, 1:].bool()
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
-                    mb_new_logprobs = self.forward(
+                    mb_new_logprobs, mb_entropy = self.forward_with_entropy(
                         self.model,
                         mb_query_responses,
                         mb_attention_mask,
@@ -1014,6 +1015,8 @@ class PolicyTrainerRayProcess(RayProcess):
                         pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
                         loss_stats[i] = loss
                         ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
+                        # Calculate entropy statistics
+                        entropy_stats[i] = masked_mean(mb_entropy, mb_response_masks_bool, args.masked_mean_axis).float()
 
             with torch.no_grad():
                 self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
@@ -1033,6 +1036,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("val/adv_mean", adv_mean)
                 self.local_metrics.add("val/adv_abs_mean", adv_abs_mean)
                 self.local_metrics.add("val/adv_std", adv_std)
+                self.local_metrics.add("policy/entropy_avg", entropy_stats.mean())
+                self.local_metrics.add("policy/entropy_var", entropy_stats.var())
                 metrics_list = self.local_metrics.get_metrics_list()
                 # metrics_list["val/advantages_mean"] = adv.mean()
                 # metrics_list["val/advantages_min"] = adv.min()
@@ -1112,6 +1117,33 @@ class PolicyTrainerRayProcess(RayProcess):
                 args.gs_bucket_path,
                 args.eval_priority,
             )
+
+    def forward_with_entropy(
+        self,
+        model: PreTrainedModel,
+        query_response: torch.LongTensor,
+        attention_mask: torch.LongTensor,
+        position_ids: torch.LongTensor,
+        pad_token_id: int,
+        temperature: float,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # Replace pad tokens with 0s so that we don't run into index out of bounds errors
+        padding_mask = query_response != pad_token_id
+        input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
+        # NOTE: the [:-1] and [1:] are because the logits and generated tokens are off by 1 in index
+        output = model(
+            input_ids=input_ids[:, :-1],
+            attention_mask=attention_mask[:, :-1].clamp(0, 1),
+            position_ids=position_ids[:, :-1],
+            return_dict=True,
+        )
+        logits = output.logits
+        logits /= temperature + 1e-7
+        probs = torch.softmax(logits, dim=-1)
+        log_probs = torch.log_softmax(logits, dim=-1)
+        entropy = -torch.sum(probs * log_probs, dim=-1)
+        logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
+        return logprob, entropy
 
 
 class ModelGroup:
