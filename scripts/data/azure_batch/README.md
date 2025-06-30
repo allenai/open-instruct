@@ -103,3 +103,7 @@ There are two main docs with the credentials you need:
 - [NAIRR Pilot Azure AI Foundry Access for using OpenAI Models for OLMo](https://docs.google.com/document/d/1PKygtkH-JmvayUwXQ-QaI_wj58P1KAF4uGRSh6yrBqs/edit?tab=t.0)  for access to GPT 4o, 4o-mini, 4.1, o3, o4-mini. 
 
 Reach out to [finbarrt@](finbarrt@allenai.org) for access to these docs if you don't have it. 
+
+## Validation
+
+I have a [Colab](https://colab.research.google.com/drive/1rGmHyjIwlpg7T81RR9HSCJtX8YG7OQEi?usp=sharing) with a bunch of sanity checks when creating a new dataset.

@@ -20,9 +20,9 @@ from typing import Any, Dict, List, Optional, Union
 import copy
 
 import requests
-from IFEvalG import instructions_registry
 from litellm import acompletion
 
+from IFEvalG import instructions_registry
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.judge_utils import (
     EXTRACTOR_MAP,
@@ -154,6 +154,19 @@ class VerifierFunction(ABC):
         return f"{self.__class__.__name__}(name={self.name}, weight={self.weight})"
 
 
+# small helper to optionally remove thinking section + answer output.
+# assumes a certain format, so might not always be useful.
+# we don't always need this -- for example, math evaluations just extract a final
+# number, so we don't need to remove the thinking section.
+def remove_thinking_section(prediction: str) -> str:
+    prediction = prediction.replace("<|assistant|>", "").strip()
+    # remove thinking section from the prediction
+    prediction = prediction.split("</think>")[-1]
+    # remove answer tags from the prediction
+    prediction = prediction.replace("<answer>", "").replace("</answer>", "")
+    return prediction.strip()
+
+
 class GSM8KVerifier(VerifierFunction):
     """
     Verifier for GSM8K tasks that extracts the last number from the prediction
@@ -270,7 +283,7 @@ class IFEvalVerifier(VerifierFunction):
         constraint_dict = constraint_dict[0]
         if isinstance(constraint_dict, str):
             constraint_dict = json.loads(constraint_dict)
-        answer = prediction.split("<|assistant|>\n")[-1].strip()
+        answer = remove_thinking_section(prediction)
         instruction_keys = constraint_dict["instruction_id"]
         args_list = constraint_dict["kwargs"]
         rewards = []
@@ -307,7 +320,7 @@ class IFEvalVerifierOld(VerifierFunction):
         self, tokenized_prediction: List[int], prediction: str, label: Union[str, Dict], query: Optional[str] = None
     ) -> VerificationResult:
         constraint = label
-        answer = prediction.split("<|assistant|>\n")[-1].strip()
+        answer = remove_thinking_section(prediction)
         if isinstance(constraint, str):
             constraint = json.loads(constraint)
         if "func_name" not in constraint:
