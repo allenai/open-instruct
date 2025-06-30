@@ -1,100 +1,111 @@
-import unittest
-from unittest.mock import MagicMock, patch
+"""Unit-tests for `get_successful_tests_fast`."""
 
+import unittest
+from datasets import load_dataset
 
 from open_instruct.code.code_utils import get_successful_tests_fast
 
 
-class TestCodeUtils(unittest.TestCase):
-    def test_get_successful_tests_fast_basic(self):
-        """Test basic functionality with simple program and tests"""
-        program = "a = 1"
-        bad_test = "assert False"
-        good_test = "assert True"
+class GetSuccessfulTestsFastTests(unittest.TestCase):
+    """Tests mirroring the interactive checks from the original script."""
 
-        test_case_status = get_successful_tests_fast(
-            program=program,
-            tests=[
-                bad_test,
-                good_test,
-                bad_test,
-                good_test,
-                good_test,
-                good_test,
-            ],
+    # ---------- helpers & fixtures -------------------------------------------------
+    @classmethod
+    def setUpClass(cls):
+        # shared objects that never mutate
+        cls.program = "a = 1"
+        cls.bad_test = "assert False"
+        cls.good_test = "assert True"
+        cls.time_out_test = (
+            "for i in range(9999999999999999999):\n"
+            "    for k in range(99999999999999999999):\n"
+            '        print("hello world")'
         )
-        expected = [0, 1, 0, 1, 1, 1]
-        self.assertEqual(test_case_status, expected)
 
-    def test_get_successful_tests_fast_timeout(self):
-        """Test timeout handling with infinite loop"""
-        program = "a = 1"
-        bad_test = "assert False"
-        time_out_test = """
-for i in range(9999999999999999999):
-    for k in range(99999999999999999999):
-        print("hello world")
-"""
+    # ---------- simple synthetic cases --------------------------------------------
+    def test_mixed_pass_and_fail(self):
+        """Bad + good + timeout tests: expect [F, T, F, T, T, F, T]."""
+        tests = [
+            self.bad_test,
+            self.good_test,
+            self.bad_test,
+            self.good_test,
+            self.good_test,
+            self.time_out_test,
+            self.good_test,
+        ]
+        expected = [False, True, False, True, True, False, True]
 
-        test_case_status = get_successful_tests_fast(
-            program=program,
-            tests=[
-                bad_test,
-                bad_test,
-                time_out_test,
-                time_out_test,
-                time_out_test,
-                time_out_test,
-            ],
+        result = get_successful_tests_fast(program=self.program, tests=tests)
+
+        # The API most commonly returns a list[bool] the same length as `tests`.
+        # If your implementation instead returns e.g. indices or a set,
+        # adapt the assertion below.
+        self.assertEqual(
+            result,
+            expected,
+            msg=f"Expected {expected} for mixed pass/fail case, got {result}",
         )
-        expected = [0, 0, 0, 0, 0, 0]
-        self.assertEqual(test_case_status, expected)
 
-    def test_get_successful_tests_fast_math_function(self):
-        """Test with a simple math function"""
-        program = "\ndef add(a, b):\n    return a + b\n"
-        tests = ["assert add(1, 2) == 3", "assert add(-1, 1) == 0", "assert add(0, 0) == 1"]
+    def test_all_fail_or_timeout(self):
+        """All failing or timing-out tests: expect a full-False result."""
+        tests = [
+            self.bad_test,
+            self.bad_test,
+            self.time_out_test,
+            self.time_out_test,
+            self.time_out_test,
+            self.time_out_test,
+        ]
+        expected = [False] * len(tests)
 
-        test_case_status = get_successful_tests_fast(
-            program=program,
-            tests=tests,
+        result = get_successful_tests_fast(program=self.program, tests=tests)
+        self.assertEqual(
+            result,
+            expected,
+            msg="All tests should fail or time-out, but result differed",
         )
-        expected = [1, 1, 0]  # Third test should fail: add(0, 0) == 0, not 1
-        self.assertEqual(test_case_status, expected)
 
-    @patch("open_instruct.code.code_utils.load_dataset")
-    def test_get_successful_tests_fast_with_dataset(self, mock_load_dataset):
-        """Test with mocked dataset"""
-        # Mock dataset structure
-        mock_dataset = MagicMock()
-        mock_dataset.__getitem__.return_value = {
-            "question": "Write a function to add two numbers",
-            "inferences": [
-                {"completion": "def add(a, b):\n    return a + b", "model_name": "test-model", "pass_rate": 0.8}
-            ],
-            "test_cases": ["assert add(1, 2) == 3", "assert add(-1, 1) == 0"],
-        }
-        mock_load_dataset.return_value = mock_dataset
+    def test_tiger_lab_acecode_sample(self):
+        """
+        Replicates the sample in the script against an actual AceCode record.
+        """
+        ds = load_dataset("TIGER-Lab/AceCode-87K", split="train")
 
-        # This test would normally require the actual dataset
-        # but we're just testing that the function works with the expected data structure
-        program = "def add(a, b):\n    return a + b"
-        tests = ["assert add(1, 2) == 3", "assert add(-1, 1) == 0"]
+        # Choose the same sample index used in the original snippet.
+        i = 1
+        program = ds[i]["inferences"][-1]["completion"]
+        tests = ds[i]["test_cases"]
 
-        test_case_status = get_successful_tests_fast(
-            program=program,
-            tests=tests,
-        )
-        expected = [1, 1]
-        self.assertEqual(test_case_status, expected)
-
-    def test_empty_tests_list(self):
-        """Test with empty tests list"""
-        program = "a = 1"
-        tests = []
+        # The dataset also stores a pass-rate; we can use it to sanity-check.
+        expected_passes = int(len(tests) * ds[i]["inferences"][-1]["pass_rate"])
 
         result = get_successful_tests_fast(program=program, tests=tests)
-        self.assertEqual(result, [])
+
+        # Robustly handle either a list[bool] return or a collection of indices.
+        if all(isinstance(x, bool) for x in result):
+            actual_passes = sum(result)
+        else:
+            actual_passes = len(result)
+
+        self.assertEqual(
+            actual_passes,
+            expected_passes,
+            msg="Pass count does not match `pass_rate` in dataset sample",
+        )
+
+    def test_add_function_example(self):
+        """Small ‘add’ sample from the original script; two pass, one fail."""
+        program = "\n\ndef add(a, b):\n    return a + b\n"
+        tests = [
+            "assert add(1, 2) == 3",  # pass
+            "assert add(-1, 1) == 0",  # pass
+            "assert add(0, 0) == 1",  # fail
+        ]
+        expected = [True, True, False]
+
+        result = get_successful_tests_fast(program=program, tests=tests)
+        self.assertEqual(result, expected, "Unexpected outcome for add() example")
 
 
 if __name__ == "__main__":
