@@ -34,11 +34,11 @@ class GetSuccessfulTestsFastTests(unittest.TestCase):
             self.time_out_test,
             self.good_test,
         ]
-        expected = [False, True, False, True, True, False, True]
+        expected = [0, 1, 0, 1, 1, 0, 1]
 
         result = get_successful_tests_fast(program=self.program, tests=tests)
 
-        # The API most commonly returns a list[bool] the same length as `tests`.
+        # The API most commonly returns a list[int] the same length as `tests`.
         # If your implementation instead returns e.g. indices or a set,
         # adapt the assertion below.
         self.assertEqual(
@@ -57,7 +57,7 @@ class GetSuccessfulTestsFastTests(unittest.TestCase):
             self.time_out_test,
             self.time_out_test,
         ]
-        expected = [False] * len(tests)
+        expected = [0] * len(tests)
 
         result = get_successful_tests_fast(program=self.program, tests=tests)
         self.assertEqual(
@@ -82,8 +82,8 @@ class GetSuccessfulTestsFastTests(unittest.TestCase):
 
         result = get_successful_tests_fast(program=program, tests=tests)
 
-        # Robustly handle either a list[bool] return or a collection of indices.
-        if all(isinstance(x, bool) for x in result):
+        # Robustly handle either a list[int] return or a collection of indices.
+        if all(isinstance(x, int) for x in result):
             actual_passes = sum(result)
         else:
             actual_passes = len(result)
@@ -102,7 +102,7 @@ class GetSuccessfulTestsFastTests(unittest.TestCase):
             "assert add(-1, 1) == 0",  # pass
             "assert add(0, 0) == 1",  # fail
         ]
-        expected = [True, True, False]
+        expected = [1, 1, 0]
 
         result = get_successful_tests_fast(program=program, tests=tests)
         self.assertEqual(result, expected, "Unexpected outcome for add() example")
