@@ -26,4 +26,4 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pytest torch datasets transformers==4.40.2 accelerate rich ray
       - name: Run unit tests
-        run: pytest open_instruct/test_utils.py
+        run: pytest
