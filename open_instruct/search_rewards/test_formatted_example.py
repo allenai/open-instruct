@@ -8,6 +8,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from open_instruct.search_rewards.long_form_rewards import compute_paper_reward
+from open_instruct.search_rewards.reasoning_model_rewards import compute_hle_reward
 
 # Import the example from formatted_test_answer.py
 from open_instruct.search_rewards.tests.formatted_test_answer import example_answer
@@ -61,7 +62,6 @@ test_case = {
     "case_id": "great_wall_test_001",
 }
 
-
 def test_formatted_example():
     """Test the reward computation with the formatted example from formatted_test_answer.py"""
     print("Testing reward computation with formatted example...")
@@ -79,7 +79,11 @@ def test_formatted_example():
     print()
 
     print("Computing reward...")
-    result = compute_paper_reward(full_response, test_case)
+    # result = compute_paper_reward(full_response, test_case)
+    
+    question = test_case['metric_config']['config']['question']
+    correct_answer = "The Great Wall of China, one of the most iconic structures in human history, stretches approximately 13,000 miles across northern China. Construction of the Great Wall began during the 8th century BC under various warring states, but the most famous sections were built during the Ming Dynasty (1368-1644)."
+    result = compute_hle_reward(full_response, correct_answer, question)
 
     print("Results:")
     print("-" * 40)
@@ -100,7 +104,10 @@ def test_formatted_example():
             if key not in ["score", "ann_score"]:
                 print(f"  {key}: {value:.4f}")
         print(f"\nOverall score: {scoring_results['score']:.4f}")
-        print(f"Annotation score: {scoring_results['ann_score']:.4f}")
+        if "ann_score" in scoring_results:
+            print(f"Annotation score: {scoring_results['ann_score']:.4f}")
+        else:
+            print("No annotation score found")
 
         # Analyze the score
         print("\nScore Analysis:")

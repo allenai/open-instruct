@@ -189,6 +189,56 @@ def run_litellm(
     return response.choices[0].message.content
 
 
+async def run_litellm_async(
+    model_name: str,
+    system_prompt: Optional[str],
+    user_prompt: str,
+    **chat_kwargs,
+) -> str:
+    """
+    Async version of run_litellm for the given model.
+    matches api for the run_azure_openai function.
+    We assume that the right env vars are set for the model.
+    e.g. for vLLM, need HOSTED_VLLM_API_BASE
+    e.g., for azure, need AZURE_API_KEY, AZURE_API_BASE, AZURE_API_VERSION
+
+    Args:
+        model_name: The model name (used as deployment if deployment not specified)
+        system_prompt: Optional system prompt
+        user_prompt: User prompt
+        **chat_kwargs: Additional arguments to pass to the chat completion
+
+    Returns:
+        The response content from the model
+    """
+
+    # Set default parameters
+    chat_kwargs["temperature"] = chat_kwargs.get("temperature", 0)
+    chat_kwargs["max_completion_tokens"] = chat_kwargs.get("max_completion_tokens", 800)
+    chat_kwargs["top_p"] = chat_kwargs.get("top_p", 1.0)
+    chat_kwargs["frequency_penalty"] = chat_kwargs.get("frequency_penalty", 0.0)
+    chat_kwargs["presence_penalty"] = chat_kwargs.get("presence_penalty", 0.0)
+
+    # Prepare messages
+    msgs = (
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        if system_prompt is not None
+        else [{"role": "user", "content": user_prompt}]
+    )
+
+    # Create chat completion
+    response = await litellm.acompletion(
+        messages=msgs,
+        model=model_name,
+        **chat_kwargs,
+    )
+
+    return response.choices[0].message.content
+
+
 if __name__ == "__main__":
     # Simple test case for run_chatopenai function
     def test_run_chatopenai():
@@ -250,7 +300,30 @@ if __name__ == "__main__":
             # for now, azure
             assert os.environ.get("HOSTED_VLLM_API_BASE") is not None
 
-            response = run_litellm("hosted_vllm/Qwen/Qwen3-32B", system_prompt, user_prompt)
+            response = run_litellm("hosted_vllm/Qwen/QwQ-32B-Preview", system_prompt, user_prompt)
+            print(f"Response: {response}")
+
+            print("Test completed successfully!")
+
+        except Exception as e:
+            print(f"Test failed with error: {e}")
+
+    async def test_run_litellm_async():
+        """Test the run_litellm_async function with a simple prompt"""
+        try:
+            # Test with a simple prompt
+            system_prompt = "You are a helpful assistant."
+            user_prompt = "What is 2 + 2?"
+
+            print("Testing run_litellm_async function...")
+            print(f"System prompt: {system_prompt}")
+            print(f"User prompt: {user_prompt}")
+
+            # assert env vars are set
+            # for now, azure
+            assert os.environ.get("HOSTED_VLLM_API_BASE") is not None
+
+            response = await run_litellm_async("hosted_vllm/Qwen/QwQ-32B-Preview", system_prompt, user_prompt)
             print(f"Response: {response}")
 
             print("Test completed successfully!")
@@ -260,4 +333,8 @@ if __name__ == "__main__":
 
     # test_run_chatopenai()
     # test_run_azure()
-    test_run_litellm()
+    # test_run_litellm()
+    
+    # Run async test
+    import asyncio
+    asyncio.run(test_run_litellm_async())
