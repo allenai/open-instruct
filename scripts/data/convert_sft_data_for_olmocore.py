@@ -152,7 +152,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         desc="Collecting tokens",
         file=sys.stdout,
         bar_format="{l_bar}{bar}{r_bar}\n",  # better printing in beaker
-        mininterval=10.0,  # update at most every 10 seconds
+        mininterval=10.0,
     ):
         token_ids.extend(sample[INPUT_IDS_KEY])
         labels_mask.extend([1 if label != -100 else 0 for label in sample[LABELS_KEY]])
