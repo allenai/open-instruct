@@ -196,7 +196,6 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
             token_dtype = dtype
             print(f"Using dtype '{dtype}' for token_ids based on vocab size {vocab_size}")
             break
-
     if token_dtype is None:
         raise ValueError(f"Vocab size {vocab_size} is too big for any numpy integer dtype!")
 
