@@ -203,7 +203,9 @@ def get_reward(
         reward_logits[
             torch.arange(reward_logits.size(0), device=reward_logits.device),
             sequence_lengths,
-        ].squeeze(-1),  # Shape: (batch_size,)
+        ].squeeze(
+            -1
+        ),  # Shape: (batch_size,)
         sequence_lengths,
     )
 

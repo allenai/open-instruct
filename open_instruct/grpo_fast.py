@@ -397,12 +397,12 @@ class Args:
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             print("WARNING: num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE. ")
-        assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
-            "At least one reward must be applied!"
-        )
-        assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
-            "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
-        )
+        assert (
+            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
+        ), "At least one reward must be applied!"
+        assert (
+            self.pack_length >= self.max_prompt_token_length + self.response_length
+        ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
 
         if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
@@ -1003,9 +1003,9 @@ class PolicyTrainerRayProcess(RayProcess):
             if getattr(model_to_save.config, "tie_word_embeddings", False) and "lm_head.weight" in state_dict_keys:
                 state_dict_keys.remove("lm_head.weight")
 
-            assert state_dict_keys.issubset(output_state_dict_keys), (
-                f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
-            )
+            assert state_dict_keys.issubset(
+                output_state_dict_keys
+            ), f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
 
             # only save peft weights https://github.com/microsoft/DeepSpeed/issues/4295
             if isinstance(model_to_save, PeftModel):

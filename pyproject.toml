@@ -24,10 +24,13 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch>=2.6.0",
     "transformers>=4.52.4",
-    "vllm>=0.8.5.post1",    
+    "vllm>=0.8.5.post1",
     "wandb==0.18.1",
     "langdetect==1.0.9",
-    "immutabledict==1.2.0"
+    "immutabledict==1.2.0",
+    "autotools-language-server>=0.0.22",
+    "lsp-tree-sitter>=0.0.17",
+    "lsprotocol>=2023.0.1",
 ]
 
 [build-system]
@@ -90,7 +93,6 @@ dev = [
 [tool.black]
 line-length = 119
 target-version = ['py310']
-include = 'my_dir/.*\.py$'
 
 [tool.isort]
 known_first_party = ["open_instruct"]
