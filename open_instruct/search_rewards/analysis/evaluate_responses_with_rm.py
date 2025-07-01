@@ -123,7 +123,8 @@ def load_reference_answers(file_path: str) -> Dict[str, str]:
 def evaluate_answers_with_hle(answers_data: List[Dict[str, Any]], 
                              reference_answers: Dict[str, str] = None,
                              skip_evaluated: bool = True,
-                             evaluated_questions: set = None) -> List[Dict[str, Any]]:
+                             evaluated_questions: set = None,
+                             no_reasoning: bool = False) -> List[Dict[str, Any]]:
     """
     Evaluate all answers using the HLE reward system.
     
@@ -175,7 +176,7 @@ def evaluate_answers_with_hle(answers_data: List[Dict[str, Any]],
             
             try:
                 # Score the answer using HLE reward
-                result = compute_hle_reward('<answer>'+answer_text+'</answer>', correct_answer, question)
+                result = compute_hle_reward('<answer>'+answer_text+'</answer>', correct_answer, question, no_reasoning)
                 
                 evaluation = {
                     'num_rubrics_provided': num_rubrics,
@@ -729,9 +730,10 @@ def analyze_existing_results(file_path: str, evaluation_type: str = "hle"):
 def main():
     """Main function to evaluate generated answers with HLE reward."""
     # File paths
+    no_reasoning = False
     generated_answers_file = "/fsx-comem/rulin/open-instruct/generated_answers/generated_answers.jsonl"
     reference_answers_file = "/fsx-comem/rulin/open-instruct/generated_reference_answers/reference_answers.jsonl"
-    hle_output_file = "./evaluation_results/hle_evaluation_results.jsonl"
+    hle_output_file = "./evaluation_results/hle_evaluation_results.jsonl" if not no_reasoning else "./evaluation_results/hle_evaluation_results_direct_socre.jsonl"
     paper_output_file = "./evaluation_results/paper_evaluation_results.jsonl"
     
     # Check if input file exists
@@ -791,7 +793,8 @@ def main():
             evaluation_results = evaluate_answers_with_hle(
                 new_answers_data, 
                 reference_answers=reference_answers,
-                evaluated_questions=evaluated_questions
+                evaluated_questions=evaluated_questions,
+                no_reasoning=no_reasoning,
             )
         
         # Save results

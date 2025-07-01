@@ -111,6 +111,19 @@ score: return a score between 0 and 10 based on the fraction of the statement th
 confidence: The extracted confidence score between 0|\%| and 100|\%| from [response]. Put 100 if there is no confidence score available."""
 
 
+HLE_JUDGE_SCORE_NO_REASONING_PROMPT = """Judge whether the following [response] to [question] is correct or not based on the precise and unambiguous [correct_answer] below.
+
+[question]: {question}
+
+[response]: {response}
+
+[correct_answer]: {correct_answer}
+
+You must directly return a score between 0 and 10 based on the fraction of the statement that is correct.
+
+confidence: The extracted confidence score between 0|\%| and 100|\%| from [response]. Put 100 if there is no confidence score available."""
+
+
 def extract_hle_score_judge_response_from_response(response: str) -> Dict[str, Any]:
     """
     Extract reward score from judge response.
