@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class APITestServer:
     """Manages starting and stopping the API server for testing."""
 
-    def __init__(self, host="0.0.0.0", port=1234, startup_timeout=30):
+    def __init__(self, host="0.0.0.0", port=1234, startup_timeout=120):
         self.host = host
         self.port = port
         self.startup_timeout = startup_timeout
