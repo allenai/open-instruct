@@ -1427,7 +1427,12 @@ def extract_user_query(conversation: str, chat_template_name: str = None) -> str
     # else:
     #     # runtime error, the template is not supported
     #     raise ValueError(f"Can not extract user query for template {chat_template_name}.")
-    pattern = r"\n\n<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
+    if chat_template_name == "r1_simple_chat_postpend_think":
+        pattern = r"User:(.*?)\nAssistant: <think>"
+    elif chat_template_name == "simple_format":
+        pattern = r"(.*?) Put your final answer inside <answer> </answer> tags, i.e. <answer> answer here </answer>."
+    else:
+        pattern = r"\n\n<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
 
     match = re.search(pattern, conversation, re.DOTALL)
     # Return the captured group if found, else return None

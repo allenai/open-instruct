@@ -371,6 +371,31 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    "simple_concat_answer_format": (
+        "{% for message in messages %}"
+        "{{ ' ' if not loop.first else '' }}"
+        "{{ message['content'] }}"
+        "{% if loop.last and add_generation_prompt %}"
+        # TODO fix
+        "{{ ' First reason about the problem. After reasoning, return the equation as a final answer in <answer> </answer> tags. For example <answer> (1 + 2) / 3 </answer>. Let's solve this step by step.' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "simple_chat_answer_format": (
+        "A conversation between User and Assistant. "
+        "The user asks a question, and the Assistant solves it. "
+        "The assistant first thinks about the reasoning process "
+        " and then provides the user with the final answer in <answer> tags, "
+        "i.e. <answer> answer here </answer>."
+        "\n\n"
+        "{% for message in messages %}"
+        "{{ '\n\n' if not loop.first else '' }}"
+        "{{ message['role'].capitalize() + ': ' + message['content'] + '\n' }}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ 'Assistant:' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
 }
 # flake8: noqa
 
@@ -622,7 +647,7 @@ class TokenizerConfig:
     tokenizer_revision: Optional[str] = None
     trust_remote_code: bool = False
     use_fast: bool = True
-    chat_template_name: str = "tulu"  # TODO: should I give an option to force override?
+    chat_template_name: str = None  # TODO: should I give an option to force override?
     add_bos: bool = False
     get_tokenizer_fn: str = "get_tokenizer_tulu_v2_2"
 
