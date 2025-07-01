@@ -30,6 +30,7 @@ Recommendations:
 """
 
 import os
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, List, Literal, Optional
@@ -146,7 +147,13 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     token_ids = []
     labels_mask = []
     sample: Mapping[str, Any]
-    for sample in tqdm(train_dataset, desc="Collecting tokens"):  # type: ignore
+    for sample in tqdm(  # type: ignore
+        train_dataset,
+        desc="Collecting tokens",
+        file=sys.stdout,
+        bar_format="{l_bar}{bar}{r_bar}\n",  # better printing in beaker
+        mininterval=10.0,  # update at most every 10 seconds
+    ):
         token_ids.extend(sample[INPUT_IDS_KEY])
         labels_mask.extend([1 if label != -100 else 0 for label in sample[LABELS_KEY]])
 
