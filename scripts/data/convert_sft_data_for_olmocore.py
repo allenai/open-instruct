@@ -3,7 +3,7 @@ This script converts SFT datasets to OLMoCore format. OLMoCore has a more effici
 implementation of the OLMo models (espeically for MoE), and so it can be preferable
 to use it for training on next-token prediction tasks (e.g. SFT).
 
-OLMoCore accepts data in numpy mmap format. One file is for the input tokens, one for the labels, and one for the attention mask.
+OLMoCore accepts data in numpy mmap format. One file is for the input tokens and one for the labels mask.
 
 Usage:
     python scripts/data/convert_sft_data_for_olmocore.py \
@@ -47,6 +47,9 @@ from open_instruct.dataset_transformation import (
     visualize_token,
 )
 from open_instruct.utils import ArgumentParserPlus, is_beaker_job
+
+# Add new constant for labels mask
+LABELS_MASK_KEY = "labels_mask"
 
 
 @dataclass
@@ -144,17 +147,21 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
 
     print("Collecting tokens from dataset...")
     token_ids = []
-    labels = []
-    attention_mask = []
+    labels_mask = []
     sample: Mapping[str, Any]
     for sample in tqdm(train_dataset, desc="Collecting tokens"):  # type: ignore
         token_ids.extend(sample[INPUT_IDS_KEY])
-        labels.extend(sample[LABELS_KEY])
-        attention_mask.extend(sample[ATTENTION_MASK_KEY])
+        labels_mask.extend([1 if label != -100 else 0 for label in sample[LABELS_KEY]])
+
+        # Assert that attention mask is all 1s
+        assert all(mask == 1 for mask in sample[ATTENTION_MASK_KEY]), (
+            f"Expected all attention mask values to be 1, but found: {sample[ATTENTION_MASK_KEY]}"
+        )
 
     print(f"Total sequences: {len(train_dataset)}")
     print(f"Total tokens: {len(token_ids)}")
     print(f"Maximum token ID: {max(token_ids)}")
+    print(f"Labels mask sum (trainable tokens): {sum(labels_mask)}")
     print("Writing data to numpy files...")
 
     # Create output directory with tokenizer name
@@ -165,32 +172,48 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         """Write data to multiple memmap files if size exceeds max_size_gb."""
         # Calculate size in bytes
         item_size = np.dtype(dtype).itemsize
-        total_size_bytes = len(data) * item_size
         max_size_bytes = max_size_gb * 1024**3
 
-        if total_size_bytes <= max_size_bytes:  # record in single file
-            mmap = np.memmap(f"{base_filename}.npy", mode="w+", dtype=dtype, shape=(len(data),))
-            mmap[:] = data
+        chunk_size = max_size_bytes // item_size
+        chunks = []
+        chunk_boundaries = []
+
+        for i in range(0, len(data), chunk_size):
+            chunk_data = data[i : i + chunk_size]
+            filename = f"{base_filename}_part_{i // chunk_size:04d}.npy"
+            mmap = np.memmap(filename, mode="w+", dtype=dtype, shape=(len(chunk_data),))
+            mmap[:] = chunk_data
             mmap.flush()
-            print(f"Written {base_filename}.npy ({total_size_bytes / 1024**3:.2f} GB)")
-            return [mmap]
-        else:  # record in multiple files (if too large)
-            chunk_size = max_size_bytes // item_size
-            chunks = []
-            for i in range(0, len(data), chunk_size):
-                chunk_data = data[i : i + chunk_size]
-                filename = f"{base_filename}_part_{i // chunk_size:04d}.npy"
-                mmap = np.memmap(filename, mode="w+", dtype=dtype, shape=(len(chunk_data),))
-                mmap[:] = chunk_data
-                mmap.flush()
-                chunks.append(mmap)
-                print(f"Written {filename} ({len(chunk_data) * item_size / 1024**3:.2f} GB)")
-            return chunks
+            chunks.append(mmap)
+            chunk_boundaries.append((i, i + len(chunk_data)))
+            print(f"Written {filename} ({len(chunk_data) * item_size / 1024**3:.2f} GB)")
+
+        return chunks, chunk_boundaries
+
+    # Choose dtype based on vocab size - Olmo-core does the
+    # same operation to infer the dtype of the token_ids array.
+    vocab_size = tc.tokenizer.vocab_size
+    token_dtype = None
+    for dtype in (np.uint8, np.uint16, np.uint32, np.uint64):
+        if (vocab_size - 1) <= np.iinfo(dtype).max:
+            token_dtype = dtype
+            print(f"Using dtype '{dtype}' for token_ids based on vocab size {vocab_size}")
+            break
+
+    if token_dtype is None:
+        raise ValueError(f"Vocab size {vocab_size} is too big for any numpy integer dtype!")
 
     print(f"Writing converted data to {output_dir}")
-    write_memmap_chunked(f"{output_dir}/token_ids", token_ids, np.uint32)
-    write_memmap_chunked(f"{output_dir}/labels", labels, np.int32)
-    write_memmap_chunked(f"{output_dir}/attention_mask", attention_mask, np.int32)
+    _, token_chunk_boundaries = write_memmap_chunked(f"{output_dir}/token_ids", token_ids, token_dtype)
+
+    # Write labels_mask using the same chunk boundaries as token_ids
+    for i, (start, end) in enumerate(token_chunk_boundaries):
+        chunk_data = labels_mask[start:end]
+        filename = f"{output_dir}/labels_mask_part_{i:04d}.npy"
+        mmap = np.memmap(filename, mode="w+", dtype=np.bool_, shape=(len(chunk_data),))
+        mmap[:] = chunk_data
+        mmap.flush()
+        print(f"Written {filename} ({len(chunk_data) * np.dtype(np.bool_).itemsize / 1024**3:.2f} GB)")
     print("Data conversion completed successfully!")
 
     tokenizer_output_dir = os.path.join(output_dir, "tokenizer")
