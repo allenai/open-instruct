@@ -2,7 +2,7 @@ import asyncio
 import re
 from typing import Dict, List
 
-from .run_utils import run_azure_openai
+from .run_utils import run_litellm, run_litellm_async
 
 citation_recall_has_citation_prompt = """You are an expert in evaluating text quality. You will receive a user's question about an uploaded document, a factual statement from an AI assistant's response based on that document, and a snippet from the document (since the document is too long to display in full). Your task is to carefully assess whether this statement is supported by the snippet. Please use the following scale to generate your rating:
 - [[Fully supported]] - Most information in the statement is supported by or extracted from the snippet. This applies only to cases where the statement and parts of the snippet are almost identical.
@@ -145,7 +145,15 @@ def score_with_citation_recall(question: str, claim: str, concatenated_citations
     user_prompt = citation_recall_has_citation_prompt.format(
         question=question, statement=claim, concatenated_cited_snippets=concatenated_citations
     )
-    response = run_llm_judge(user_prompt)
+    response = run_litellm(
+        model_name="gpt-4.1",
+        system_prompt=None,
+        user_prompt=user_prompt,
+        max_tokens=800,
+        top_p=1.0,
+        frequency_penalty=0.0,
+        presence_penalty=0.0,
+    )
     return extract_recall_rating_from_response(response)
 
 
@@ -153,7 +161,15 @@ def score_no_citation_recall(question: str, claim: str, full_response: str) -> f
     user_prompt = citation_recall_no_citation_prompt.format(
         question=question, statement=claim, full_response=full_response
     )
-    response = run_llm_judge(user_prompt)
+    response = run_litellm(
+        model_name="gpt-4.1",
+        system_prompt=None,
+        user_prompt=user_prompt,
+        max_tokens=800,
+        top_p=1.0,
+        frequency_penalty=0.0,
+        presence_penalty=0.0,
+    )
     return extract_yes_no_from_response(response)
 
 
@@ -163,7 +179,15 @@ def score_citation_precision(question: str, claim: str, concatenated_citations: 
     user_prompt = citation_precision_prompt.format(
         question=question, statement=claim, concatenated_cited_snippets=concatenated_citations
     )
-    response = run_llm_judge(user_prompt)
+    response = run_litellm(
+        model_name="gpt-4.1",
+        system_prompt=None,
+        user_prompt=user_prompt,
+        max_tokens=800,
+        top_p=1.0,
+        frequency_penalty=0.0,
+        presence_penalty=0.0,
+    )
     return extract_relevant_rating_from_response(response)
 
 
@@ -215,12 +239,11 @@ def extract_relevant_rating_from_response(response: str) -> int:
 
 
 def run_llm_judge(user_prompt: str, model_name: str = "gpt-4.1", deployment: str = "gpt-4.1-standard") -> str:
-    response = run_azure_openai(
+    response = run_litellm(
         model_name,
         None,
         user_prompt=user_prompt,
-        deployment=deployment,
-        max_completion_tokens=800,
+        max_tokens=800,
         top_p=1.0,
         frequency_penalty=0.0,
         presence_penalty=0.0,
@@ -231,21 +254,14 @@ def run_llm_judge(user_prompt: str, model_name: str = "gpt-4.1", deployment: str
 async def run_llm_judge_async(
     user_prompt: str, model_name: str = "gpt-4.1", deployment: str = "gpt-4.1-standard"
 ) -> str:
-    # For now, we'll use the sync version in a thread pool to avoid blocking
-    # In the future, you might want to implement a proper async Azure OpenAI client
-    loop = asyncio.get_event_loop()
-    response = await loop.run_in_executor(
-        None,
-        lambda: run_azure_openai(
-            model_name,
-            None,
-            user_prompt=user_prompt,
-            deployment=deployment,
-            max_completion_tokens=800,
-            top_p=1.0,
-            frequency_penalty=0.0,
-            presence_penalty=0.0,
-        ),
+    response = await run_litellm_async(
+        model_name,
+        system_prompt=None,
+        user_prompt=user_prompt,
+        max_tokens=800,
+        top_p=1.0,
+        frequency_penalty=0.0,
+        presence_penalty=0.0,
     )
     return response
 
@@ -270,7 +286,15 @@ async def score_with_citation_recall_async(question: str, claim: str, concatenat
     user_prompt = citation_recall_has_citation_prompt.format(
         question=question, statement=claim, concatenated_cited_snippets=concatenated_citations
     )
-    response = await run_llm_judge_async(user_prompt)
+    response = await run_litellm_async(
+        model_name="gpt-4.1",
+        system_prompt=None,
+        user_prompt=user_prompt,
+        max_tokens=800,
+        top_p=1.0,
+        frequency_penalty=0.0,
+        presence_penalty=0.0,
+    )
     return extract_recall_rating_from_response(response)
 
 
@@ -278,7 +302,15 @@ async def score_no_citation_recall_async(question: str, claim: str, full_respons
     user_prompt = citation_recall_no_citation_prompt.format(
         question=question, statement=claim, full_response=full_response
     )
-    response = await run_llm_judge_async(user_prompt)
+    response = await run_litellm_async(
+        model_name="gpt-4.1",
+        system_prompt=None,
+        user_prompt=user_prompt,
+        max_tokens=800,
+        top_p=1.0,
+        frequency_penalty=0.0,
+        presence_penalty=0.0,
+    )
     return extract_yes_no_from_response(response)
 
 
@@ -288,7 +320,15 @@ async def score_citation_precision_async(question: str, claim: str, concatenated
     user_prompt = citation_precision_prompt.format(
         question=question, statement=claim, concatenated_cited_snippets=concatenated_citations
     )
-    response = await run_llm_judge_async(user_prompt)
+    response = await run_litellm_async(
+        model_name="gpt-4.1",
+        system_prompt=None,
+        user_prompt=user_prompt,
+        max_tokens=800,
+        top_p=1.0,
+        frequency_penalty=0.0,
+        presence_penalty=0.0,
+    )
     return extract_relevant_rating_from_response(response)
 
 

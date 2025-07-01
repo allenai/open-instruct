@@ -15,7 +15,7 @@ LOGGER = logging.getLogger(__name__)
 async def hle_judge_reward_async(question: str, response: str, correct_answer: str) -> Dict[str, Any]:
     judge_prompt = HLE_JUDGE_PROMPT.format(question=question, response=response, correct_answer=correct_answer)
     judge_response = await run_litellm_async(
-        model_name="gpt-4o-mini", 
+        model_name="gpt-4.1", 
         system_prompt=None, 
         user_prompt=judge_prompt,
     )
