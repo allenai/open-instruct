@@ -48,9 +48,6 @@ from open_instruct.dataset_transformation import (
 )
 from open_instruct.utils import ArgumentParserPlus, is_beaker_job
 
-# Add new constant for labels mask
-LABELS_MASK_KEY = "labels_mask"
-
 
 @dataclass
 class ConvertSFTDataArguments:
