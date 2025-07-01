@@ -852,7 +852,7 @@ class CountdownVerifier(VerifierFunction):
             if abs(float(result) - float(target)) < 1e-5:
                 return 1.0
             else:
-                return 0.0
+                return 0.1  # we're gonna cheat and put the format reward here
         except Exception:
             # If any fails, reward is 0
             return 0.0

@@ -44,6 +44,7 @@ except Exception:
 
 import asyncio
 import json
+import math
 import os
 import shutil
 import socket
@@ -56,7 +57,6 @@ from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import Callable, Dict, Iterator, List, Literal, Optional, Union
 
-import math
 import numpy as np
 import pandas as pd
 import ray
@@ -83,13 +83,11 @@ from open_instruct.dataset_transformation import (
     GROUND_TRUTHS_KEY,
     INPUT_IDS_PROMPT_KEY,
     TokenizerConfig,
-    get_cached_dataset_tulu,
     visualize_token,
 )
 from open_instruct.ground_truth_utils import (
     build_all_verifiers,
     cleanup_all_llm_judge_clients,
-    soft_format_reward_func,
 )
 from open_instruct.model_utils import (
     ModelConfig,
@@ -122,8 +120,11 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     sync_gs_bucket,
 )
-from open_instruct.vllm_utils3 import batch_vllm_engine_call, create_vllm_engines, init_process_group
-
+from open_instruct.vllm_utils3 import (
+    batch_vllm_engine_call,
+    create_vllm_engines,
+    init_process_group,
+)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -387,12 +388,12 @@ class Args:
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             print("WARNING: num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE. ")
-        assert (
-            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
-        ), "At least one reward must be applied!"
-        assert (
-            self.pack_length >= self.max_prompt_token_length + self.response_length
-        ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+        assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
+            "At least one reward must be applied!"
+        )
+        assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
+            "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+        )
 
         if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
@@ -968,9 +969,9 @@ class PolicyTrainerRayProcess(RayProcess):
             if getattr(model_to_save.config, "tie_word_embeddings", False) and "lm_head.weight" in state_dict_keys:
                 state_dict_keys.remove("lm_head.weight")
 
-            assert state_dict_keys.issubset(
-                output_state_dict_keys
-            ), f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
+            assert state_dict_keys.issubset(output_state_dict_keys), (
+                f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
+            )
 
             # only save peft weights https://github.com/microsoft/DeepSpeed/issues/4295
             if isinstance(model_to_save, PeftModel):
@@ -1238,7 +1239,7 @@ def data_preparation_thread(
                 ground_truths = [ground_truths[i] for i in stop_idxes]
                 datasets = [datasets[i] for i in stop_idxes]
                 finish_reasons = [finish_reasons[i] for i in stop_idxes]
-            
+
         with Timer("📦 [Data Preparation Thread] Packing sequences"):
             packed_sequences = pack_sequences(
                 queries=queries,
@@ -1381,26 +1382,31 @@ def data_preparation_thread(
         )
 
 
-def create_datasets(args: Args, tokenizer): 
+def create_datasets(args: Args, tokenizer):
     from datasets import load_dataset
-    def preprocess_example(example, tokenizer,):
-        base_prompt = example["messages"][0]['content']
+
+    def preprocess_example(
+        example,
+        tokenizer,
+    ):
+        base_prompt = example["messages"][0]["content"]
         full_prompt = base_prompt + (
             "Return the final answer as an equation without = in <answer> </answer> tags. "
             "For example <answer> (1 + 2) / 3 </answer>."
-        ) 
+        )
         # full_prompt = base_prompt + (
         #     "First reason about the question in <think> </think> tags. "
         #     "Then return the final answer as an equation without = in <answer> </answer> tags. "
         #     "For example <answer> (1 + 2) / 3 </answer>."
         #     "\n\n<think>"
-        # ) 
+        # )
         input_ids = tokenizer.encode(full_prompt, add_special_tokens=False)
 
         return {
             "input_ids_prompt": input_ids,
             "prompt": full_prompt,
         }
+
     train_dataset = load_dataset(args.dataset_mixer_list[0], split="train")
     train_dataset = train_dataset.map(
         preprocess_example,
@@ -1408,7 +1414,7 @@ def create_datasets(args: Args, tokenizer):
         fn_kwargs={
             "tokenizer": tokenizer,
         },
-    ) 
+    )
     eval_dataset = load_dataset(args.dataset_mixer_eval_list[0], split="train[:100]")
     eval_dataset = eval_dataset.map(
         preprocess_example,
@@ -1421,6 +1427,8 @@ def create_datasets(args: Args, tokenizer):
 
 
 import re
+
+
 def simple_format_reward_func(responses: List[str], reward_scale: float = 1.0) -> List[float]:
     """
     Check if the completion has a specific format defined by a pattern.
@@ -1430,6 +1438,7 @@ def simple_format_reward_func(responses: List[str], reward_scale: float = 1.0) -
     pattern = r".*<answer>.*?</answer>"
     matches = [re.match(pattern, r, re.DOTALL) for r in responses]
     return [reward_scale if match else 0.0 for match in matches]
+
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
     # ------------------------------------------------------------
@@ -1543,7 +1552,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     #     )
     #     if args.shuffle_eval_dataset:
     #         eval_dataset = eval_dataset.shuffle(seed=args.seed)
-    
+
     train_dataset, eval_dataset = create_datasets(args, tokenizer)
     visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
     if args.cache_dataset_only:

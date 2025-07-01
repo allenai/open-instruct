@@ -8,7 +8,7 @@ uv run open_instruct/grpo_fast.py \
     --output_dir tmp \
     --dataset_mixer_list mnoukhov/rlvr_countdown 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list mnoukhov/rlvr_countdown 1.0 \
+    --dataset_mixer_eval_list mnoukhov/rlvr_countdown 100 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 256 \
     --max_prompt_token_length 256 \
@@ -19,13 +19,9 @@ uv run open_instruct/grpo_fast.py \
     --num_samples_per_prompt_rollout 8 \
     --total_episodes 64000 \
     --model_name_or_path Qwen/Qwen3-1.7B-Base \
-    --stop_strings "<|endoftext|>" "</answer>" \
-    --chat_template_name r1_simple_chat_postpend_think \
-    --apply_r1_style_format_reward \
-    --additive_format_reward \
-    --r1_style_format_reward 0.1 \
+    --stop_strings "<|endoftext|>" \
+    --chat_template_name simple_concat_answer_format \
     --apply_verifiable_reward \
-    --verification_reward 0.9 \
     --non_stop_penalty False \
     --temperature 1.0 \
     --learning_rate 1e-6 \
