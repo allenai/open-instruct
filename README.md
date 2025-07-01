@@ -146,6 +146,8 @@ make style
 make quality
 ```
 
+Run the tests with `uv run pytest`.
+
 ### Repo structure
 ```
 ├── assets/                     <- Images, licenses, etc.

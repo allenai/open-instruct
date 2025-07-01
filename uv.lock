@@ -2104,6 +2104,9 @@ dev = [
     { name = "pytest" },
     { name = "ruff" },
 ]
+test = [
+    { name = "pytest" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -2153,6 +2156,7 @@ dev = [
     { name = "pytest", specifier = ">=8.3.4" },
     { name = "ruff", specifier = ">=0.11.13" },
 ]
+test = [{ name = "pytest", specifier = ">=8.3.4" }]
 
 [[package]]
 name = "openai"
