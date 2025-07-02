@@ -670,11 +670,10 @@ class PolicyTrainerRayProcess(RayProcess):
         logits /= temperature + 1e-7
         logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
         
-        # fow now, entropy is just for monitoring, and we don't pass gradients through it.
+        # For now, entropy is just for monitoring, and we don't pass gradients through it.
         with torch.no_grad():
             entropy = entropy_from_logits(logits)
         
-        logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
         return logprob, entropy
 
     def setup_model_update_group(self, vllm_engines):
@@ -841,6 +840,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         tool_mask = collated_tool_masks[i]
                         attention_mask = collated_attention_masks[i]
                         position_id = collated_position_ids[i]
+                        response_mask = collated_response_masks[i]
                         old_logprob = self.forward(
                             self.model,
                             query_response,
