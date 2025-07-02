@@ -1,7 +1,6 @@
 """Integration test for the /test_program endpoint."""
 
 import logging
-import os
 import subprocess
 import time
 import unittest
@@ -80,14 +79,9 @@ class APITestServer:
 
 
 class TestAddProgramAPI(unittest.TestCase):
-    """Replicates the manual `requests.post` call with real assertions."""
-
     def test_add_program_results(self):
         """POST to the endpoint and verify JSON response structure & content."""
         with APITestServer() as server:
-            # Allow overriding the URL via env var for CI flexibility.
-            url = os.getenv("ADD_API_URL", f"{server.base_url}/test_program")
-
             payload = {
                 "program": ("def add(a, b):\n    return a + b\n"),
                 "tests": [
@@ -101,16 +95,9 @@ class TestAddProgramAPI(unittest.TestCase):
             # Expected result mirrors the original script: first two pass, last fails.
             expected_results = [1, 1, 0]
 
-            try:
-                response = requests.post(url, json=payload, timeout=10)
-            except requests.exceptions.RequestException as exc:
-                self.fail(f"Failed to connect to {url}: {exc}")
+            response = requests.post(f"{server.base_url}/test_program", json=payload, timeout=10)
 
-            self.assertEqual(
-                response.status_code,
-                200,
-                f"Unexpected status code from {url}: {response.status_code}",
-            )
+            self.assertEqual(response.status_code, 200)
 
             data = response.json()
             self.assertIn("results", data, "Response JSON missing 'results' field")
