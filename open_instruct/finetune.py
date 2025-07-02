@@ -96,8 +96,6 @@ class FlatArguments:
 
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
-    run_name: Optional[str] = None
-    """A unique name of this run"""
     do_not_randomize_output_dir: bool = False
     """By default the output directory will be randomized"""
     model_name_or_path: Optional[str] = field(
@@ -119,6 +117,10 @@ class FlatArguments:
     model_revision: Optional[str] = field(
         default=None,
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+    )
+    additional_model_arguments: Optional[Union[dict, str]] = field(
+        default_factory=dict,
+        metadata={"help": "A dictionary of additional model args used to construct the model."},
     )
     low_cpu_mem_usage: bool = field(
         default=False,
@@ -361,6 +363,8 @@ class FlatArguments:
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
+    add_seed_and_date_to_exp_name: bool = True
+    """Append the seed and date to exp_name"""
 
     # Ai2 specific settings
     try_auto_save_to_beaker: bool = True
@@ -371,11 +375,6 @@ class FlatArguments:
     """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
-
-    additional_model_arguments: Optional[Union[dict, str]] = field(
-        default_factory=dict,
-        metadata={"help": "A dictionary of additional model args used to construct the model."},
-    )
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -439,9 +438,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     # ------------------------------------------------------------
     # Set up runtime variables
-    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+
+    if args.add_seed_and_date_to_exp_name:
+        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    else:
+        args.exp_name = args.exp_name
     if not args.do_not_randomize_output_dir:
-        args.output_dir = os.path.join(args.output_dir, args.run_name)
+        args.output_dir = os.path.join(args.output_dir, args.exp_name)
     logger.info("using the output directory: %s", args.output_dir)
     args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
     if is_beaker_job():
@@ -455,7 +458,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             args.hf_entity = HfApi().whoami()["name"]
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
         if args.hf_repo_revision is None:
-            args.hf_repo_revision = args.run_name
+            args.hf_repo_revision = args.exp_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
         if is_beaker_job():
             beaker_config = maybe_get_beaker_config()
@@ -479,7 +482,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             experiment_config,
             init_kwargs={
                 "wandb": {
-                    "name": args.run_name,
+                    "name": args.exp_name,
                     "entity": args.wandb_entity,
                     "tags": [args.exp_name] + get_wandb_tags(),
                 }
