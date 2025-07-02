@@ -2,7 +2,7 @@ import asyncio
 import re
 from typing import Dict, List
 
-from .run_utils import run_litellm, run_litellm_async
+from run_utils import run_litellm, run_litellm_async
 
 citation_recall_has_citation_prompt = """You are an expert in evaluating text quality. You will receive a user's question about an uploaded document, a factual statement from an AI assistant's response based on that document, and a snippet from the document (since the document is too long to display in full). Your task is to carefully assess whether this statement is supported by the snippet. Please use the following scale to generate your rating:
 - [[Fully supported]] - Most information in the statement is supported by or extracted from the snippet. This applies only to cases where the statement and parts of the snippet are almost identical.
@@ -146,7 +146,7 @@ def score_with_citation_recall(question: str, claim: str, concatenated_citations
         question=question, statement=claim, concatenated_cited_snippets=concatenated_citations
     )
     response = run_litellm(
-        model_name="gpt-4.1",
+        model_name="gpt-4o-mini",
         system_prompt=None,
         user_prompt=user_prompt,
         max_tokens=800,
@@ -162,7 +162,7 @@ def score_no_citation_recall(question: str, claim: str, full_response: str) -> f
         question=question, statement=claim, full_response=full_response
     )
     response = run_litellm(
-        model_name="gpt-4.1",
+        model_name="gpt-4o-mini",
         system_prompt=None,
         user_prompt=user_prompt,
         max_tokens=800,
@@ -180,7 +180,7 @@ def score_citation_precision(question: str, claim: str, concatenated_citations: 
         question=question, statement=claim, concatenated_cited_snippets=concatenated_citations
     )
     response = run_litellm(
-        model_name="gpt-4.1",
+        model_name="gpt-4o-mini",
         system_prompt=None,
         user_prompt=user_prompt,
         max_tokens=800,
@@ -287,7 +287,7 @@ async def score_with_citation_recall_async(question: str, claim: str, concatenat
         question=question, statement=claim, concatenated_cited_snippets=concatenated_citations
     )
     response = await run_litellm_async(
-        model_name="gpt-4.1",
+        model_name="gpt-4o-mini",
         system_prompt=None,
         user_prompt=user_prompt,
         max_tokens=800,
@@ -303,7 +303,7 @@ async def score_no_citation_recall_async(question: str, claim: str, full_respons
         question=question, statement=claim, full_response=full_response
     )
     response = await run_litellm_async(
-        model_name="gpt-4.1",
+        model_name="gpt-4o-mini",
         system_prompt=None,
         user_prompt=user_prompt,
         max_tokens=800,
@@ -321,7 +321,7 @@ async def score_citation_precision_async(question: str, claim: str, concatenated
         question=question, statement=claim, concatenated_cited_snippets=concatenated_citations
     )
     response = await run_litellm_async(
-        model_name="gpt-4.1",
+        model_name="gpt-4o-mini",
         system_prompt=None,
         user_prompt=user_prompt,
         max_tokens=800,
