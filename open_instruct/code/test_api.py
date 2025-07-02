@@ -87,12 +87,11 @@ class TestAPI(unittest.TestCase):
                 "tests": [
                     "assert add(1, 2) == 3",
                     "assert add(-1, 1) == 0",
-                    "assert add(0, 0) == 1",  # expected to fail
+                    "assert add(0, 0) == 1",  # Should fail.
                 ],
                 "max_execution_time": 1.0,
             }
 
-            # Expected result mirrors the original script: first two pass, last fails.
             expected_results = [1, 1, 0]
 
             response = requests.post(f"{server.base_url}/test_program", json=payload, timeout=10)
@@ -114,25 +113,17 @@ class TestAPI(unittest.TestCase):
             # Use the same payload for all requests
             test_payload = {
                 "program": "def multiply(a, b):\n    return a * b",
-                "tests": [
-                    "assert multiply(2, 3) == 6",
-                    "assert multiply(0, 5) == 0",
-                    "assert multiply(-1, 4) == -4"
-                ],
-                "max_execution_time": 1.0
+                "tests": ["assert multiply(2, 3) == 6", "assert multiply(0, 5) == 0", "assert multiply(-1, 4) == -4"],
+                "max_execution_time": 1.0,
             }
-            
+
             # Make multiple calls with the same payload
             for i in range(num_requests):
-                response = requests.post(
-                    f"{server.base_url}/test_program", 
-                    json=test_payload,
-                    timeout=5
-                )
+                response = requests.post(f"{server.base_url}/test_program", json=test_payload, timeout=5)
                 self.assertEqual(response.status_code, 200)
                 data = response.json()
                 self.assertIn("results", data)
-                self.assertEqual(data["results"], [1, 1, 1], f"Call {i+1} to /test_program failed")
+                self.assertEqual(data["results"], [1, 1, 1], f"Call {i + 1} to /test_program failed")
 
     def test_multiple_calls_to_test_program_stdio(self, num_requests=3):
         """Test making multiple calls to /test_program_stdio endpoint."""
@@ -143,23 +134,21 @@ class TestAPI(unittest.TestCase):
                 "tests": [
                     {"input": "5 3", "output": "8"},
                     {"input": "10 -2", "output": "8"},
-                    {"input": "0 0", "output": "0"}
+                    {"input": "0 0", "output": "0"},
                 ],
-                "max_execution_time": 1.0
+                "max_execution_time": 1.0,
             }
-            
+
             # Make multiple calls with the same payload
             for i in range(num_requests):
-                response = requests.post(
-                    f"{server.base_url}/test_program_stdio", 
-                    json=stdio_payload,
-                    timeout=5
-                )
+                response = requests.post(f"{server.base_url}/test_program_stdio", json=stdio_payload, timeout=5)
                 self.assertEqual(response.status_code, 200)
                 data = response.json()
                 self.assertIn("results", data)
                 # Verify we get a list of results with the expected length
-                self.assertEqual(len(data["results"]), 3, f"Call {i+1} to /test_program_stdio returned wrong number of results")
+                self.assertEqual(
+                    len(data["results"]), 3, f"Call {i + 1} to /test_program_stdio returned wrong number of results"
+                )
                 # Verify results are integers (0 or 1)
                 for result in data["results"]:
                     self.assertIn(result, [0, 1], f"Invalid result value: {result}")

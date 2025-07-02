@@ -92,95 +92,26 @@ except:
         )
         self.assertEqual(result, [1])
 
-    @parameterized.parameterized.expand([
-        ("threading_with_socket", "import threading\nimport socket\ns = socket.socket()"),
-        ("multiprocessing_with_socket", "from multiprocessing import Pool\nimport socket\ns = socket.socket()"),
-    ])
+    @parameterized.parameterized.expand(
+        [
+            ("threading_with_socket", "import threading\nimport socket\ns = socket.socket()"),
+            ("multiprocessing_with_socket", "from multiprocessing import Pool\nimport socket\ns = socket.socket()"),
+        ]
+    )
     def test_dangerous_imports_with_networking(self, name, program):
         """Test that certain networking-related imports are blocked."""
         result = code_utils.get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
-        self.assertEqual(result, [0])
-
-    def test_apiserver_multiple_calls(self):
-        """Test making multiple calls to /test_program and /test_program_stdio endpoints."""
-        program = """
-# Test using APITestServer to call /test_program and /test_program_stdio endpoints
-from open_instruct.code.test_api import APITestServer
-import requests
-
-results = []
-
-# Use APITestServer context manager
-with APITestServer(port=8889) as server:
-    # Test program that we'll send to the API
-    test_payload = {
-        "program": "def multiply(a, b):\\n    return a * b",
-        "tests": [
-            "assert multiply(2, 3) == 6",
-            "assert multiply(0, 5) == 0",
-            "assert multiply(-1, 4) == -4"
-        ],
-        "max_execution_time": 1.0
-    }
-    
-    # Make multiple calls to /test_program
-    for i in range(2):
-        try:
-            response = requests.post(
-                f"{server.base_url}/test_program", 
-                json=test_payload,
-                timeout=5
-            )
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("results") == [1, 1, 1]:
-                    results.append(f"test_program call {i+1}: Success")
-                else:
-                    results.append(f"test_program call {i+1}: Wrong results {data.get('results')}")
-            else:
-                results.append(f"test_program call {i+1}: Failed with status {response.status_code}")
-        except Exception as e:
-            results.append(f"test_program call {i+1}: Error - {str(e)}")
-    
-    # Make multiple calls to /test_program_stdio
-    for i in range(2):
-        try:
-            response = requests.post(
-                f"{server.base_url}/test_program_stdio", 
-                json=test_payload,
-                timeout=5
-            )
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("results") == [1, 1, 1]:
-                    results.append(f"test_program_stdio call {i+1}: Success")
-                else:
-                    results.append(f"test_program_stdio call {i+1}: Wrong results {data.get('results')}")
-            else:
-                results.append(f"test_program_stdio call {i+1}: Failed with status {response.status_code}")
-        except Exception as e:
-            results.append(f"test_program_stdio call {i+1}: Error - {str(e)}")
-
-# Verify all calls succeeded
-test_passed = (
-    len(results) == 4 and
-    all("Success" in result for result in results)
-)
-"""
-        # This should fail because APITestServer requires subprocess which is blocked
-        result = code_utils.get_successful_tests_fast(
-            program=program, 
-            tests=["assert test_passed == True"], 
-            max_execution_time=10.0
-        )
         self.assertEqual(result, [0])
 
 
 class ReliabilityGuardFileSystemTests(unittest.TestCase):
     """Tests to ensure file system operations are properly sandboxed."""
 
-    @parameterized.parameterized.expand([
-        ("file_operations", """
+    @parameterized.parameterized.expand(
+        [
+            (
+                "file_operations",
+                """
 try:
     with open('test_file.txt', 'w') as f:
         f.write('test')
@@ -189,16 +120,25 @@ try:
     file_ops_work = content == 'test'
 except:
     file_ops_work = False
-""", ["assert file_ops_work == True"], 1),
-        ("os_chdir_disabled", """
+""",
+                ["assert file_ops_work == True"],
+                1,
+            ),
+            (
+                "os_chdir_disabled",
+                """
 try:
     import os
     os.chdir('..')
     chdir_works = True
 except:
     chdir_works = False
-""", ["assert chdir_works == False"], 0),
-    ])
+""",
+                ["assert chdir_works == False"],
+                0,
+            ),
+        ]
+    )
     def test_file_operations_sandboxed(self, name, program, tests, expected):
         """Test that file operations are properly sandboxed."""
         result = code_utils.get_successful_tests_fast(
@@ -208,24 +148,32 @@ except:
         )
         self.assertEqual(result, [expected])
 
-    @parameterized.parameterized.expand([
-        ("os_remove", """
+    @parameterized.parameterized.expand(
+        [
+            (
+                "os_remove",
+                """
 try:
     import os
     os.remove('some_file.txt')
     remove_worked = True
 except:
     remove_worked = False
-"""),
-        ("os_unlink", """
+""",
+            ),
+            (
+                "os_unlink",
+                """
 try:
     import os
     os.unlink('some_file.txt')
     unlink_worked = True
 except:
     unlink_worked = False
-"""),
-    ])
+""",
+            ),
+        ]
+    )
     def test_file_deletion_blocked(self, name, program):
         """Test that file deletion operations are blocked."""
         # These will be blocked by should_execute due to "import os"
@@ -275,7 +223,9 @@ try:
 except:
     result = False
 """
-        result = code_utils.get_successful_tests_fast(program=program, tests=["assert result == True"], max_execution_time=0.5)
+        result = code_utils.get_successful_tests_fast(
+            program=program, tests=["assert result == True"], max_execution_time=0.5
+        )
         # This will be blocked due to "import os"
         self.assertEqual(result, [0])
 
@@ -332,25 +282,29 @@ except:
 class ReliabilityGuardModuleImportTests(unittest.TestCase):
     """Tests to ensure dangerous module imports are blocked."""
 
-    @parameterized.parameterized.expand([
-        ("threading", "import threading\nthreading.Thread(target=lambda: None).start()"),
-        ("multiprocessing", "from multiprocessing import Pool\nPool()"),
-        ("os_system", "import os\nos.system('ls')"),
-        ("shutil_rmtree", "import shutil\nshutil.rmtree('/')"),
-        ("torch", "import torch\ntensor = torch.zeros(10)"),
-        ("sklearn", "from sklearn import datasets\ndata = datasets.load_iris()"),
-    ])
+    @parameterized.parameterized.expand(
+        [
+            ("threading", "import threading\nthreading.Thread(target=lambda: None).start()"),
+            ("multiprocessing", "from multiprocessing import Pool\nPool()"),
+            ("os_system", "import os\nos.system('ls')"),
+            ("shutil_rmtree", "import shutil\nshutil.rmtree('/')"),
+            ("torch", "import torch\ntensor = torch.zeros(10)"),
+            ("sklearn", "from sklearn import datasets\ndata = datasets.load_iris()"),
+        ]
+    )
     def test_dangerous_imports_blocked(self, name, program):
         """Test that imports of dangerous modules fail."""
         # These are checked by should_execute function
         result = code_utils.get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
         self.assertEqual(result, [0])
 
-    @parameterized.parameterized.expand([
-        ("math_sqrt", "import math\nresult = math.sqrt(16)", "assert result == 4.0"),
-        ("json_dumps", "import json\ndata = json.dumps({'a': 1})", "assert data == '{\"a\": 1}'"),
-        ("re_compile", "import re\npattern = re.compile(r'\\d+')", "assert pattern is not None"),
-    ])
+    @parameterized.parameterized.expand(
+        [
+            ("math_sqrt", "import math\nresult = math.sqrt(16)", "assert result == 4.0"),
+            ("json_dumps", "import json\ndata = json.dumps({'a': 1})", "assert data == '{\"a\": 1}'"),
+            ("re_compile", "import re\npattern = re.compile(r'\\d+')", "assert pattern is not None"),
+        ]
+    )
     def test_safe_imports_allowed(self, name, program, test):
         """Test that safe imports are allowed."""
         result = code_utils.get_successful_tests_fast(program=program, tests=[test], max_execution_time=0.5)
@@ -388,7 +342,9 @@ try:
 except:
     sandboxed = False
 """
-        result = code_utils.get_successful_tests_fast(program=program, tests=["assert sandboxed == True"], max_execution_time=0.5)
+        result = code_utils.get_successful_tests_fast(
+            program=program, tests=["assert sandboxed == True"], max_execution_time=0.5
+        )
         self.assertEqual(result, [1])
 
     def test_shutil_operations_blocked(self):
