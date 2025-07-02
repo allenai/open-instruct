@@ -88,60 +88,48 @@ class APITestServer:
 class TestAddProgramAPI(unittest.TestCase):
     """Replicates the manual `requests.post` call with real assertions."""
 
-    # ---- class-level fixtures -------------------------------------------------
-    @classmethod
-    def setUpClass(cls):
-        # Initialize the test server
-        cls.server = APITestServer()
-        cls.server.start()
-
-        # Allow overriding the URL via env var for CI flexibility.
-        cls.url = os.getenv("ADD_API_URL", f"{cls.server.base_url}/test_program")
-
-        cls.payload = {
-            "program": ("def add(a, b):\n    return a + b\n"),
-            "tests": [
-                "assert add(1, 2) == 3",
-                "assert add(-1, 1) == 0",
-                "assert add(0, 0) == 1",  # expected to fail
-            ],
-            "max_execution_time": 1.0,
-        }
-
-        # Expected result mirrors the original script: first two pass, last fails.
-        cls.expected_results = [1, 1, 0]
-
-    @classmethod
-    def tearDownClass(cls):
-        # Stop the server
-        cls.server.stop()
-
-    # ---- actual test ----------------------------------------------------------
     def test_add_program_results(self):
         """POST to the endpoint and verify JSON response structure & content."""
-        try:
-            response = requests.post(self.url, json=self.payload, timeout=10)
-        except requests.exceptions.RequestException as exc:
-            self.fail(f"Failed to connect to {self.url}: {exc}")
+        with APITestServer() as server:
+            # Allow overriding the URL via env var for CI flexibility.
+            url = os.getenv("ADD_API_URL", f"{server.base_url}/test_program")
 
-        self.assertEqual(
-            response.status_code,
-            200,
-            f"Unexpected status code from {self.url}: {response.status_code}",
-        )
+            payload = {
+                "program": ("def add(a, b):\n    return a + b\n"),
+                "tests": [
+                    "assert add(1, 2) == 3",
+                    "assert add(-1, 1) == 0",
+                    "assert add(0, 0) == 1",  # expected to fail
+                ],
+                "max_execution_time": 1.0,
+            }
 
-        data = response.json()
-        self.assertIn("results", data, "Response JSON missing 'results' field")
+            # Expected result mirrors the original script: first two pass, last fails.
+            expected_results = [1, 1, 0]
 
-        self.assertEqual(
-            data["results"],
-            self.expected_results,
-            "Returned pass/fail vector does not match expectation",
-        )
+            try:
+                response = requests.post(url, json=payload, timeout=10)
+            except requests.exceptions.RequestException as exc:
+                self.fail(f"Failed to connect to {url}: {exc}")
+
+            self.assertEqual(
+                response.status_code,
+                200,
+                f"Unexpected status code from {url}: {response.status_code}",
+            )
+
+            data = response.json()
+            self.assertIn("results", data, "Response JSON missing 'results' field")
+
+            self.assertEqual(
+                data["results"],
+                expected_results,
+                "Returned pass/fail vector does not match expectation",
+            )
 
 
-class TestAPIServerContextManager(unittest.TestCase):
-    """Example of using the TestAPIServer as a context manager."""
+class TestAPIServer(unittest.TestCase):
+    """Example of using the APITestServer as a context manager."""
 
     def test_health_check_with_context_manager(self):
         """Test using the server context manager for a single test."""
@@ -152,22 +140,6 @@ class TestAPIServerContextManager(unittest.TestCase):
             # Test that the health endpoint returns expected structure
             data = response.json()
             self.assertIn("status", data)
-
-
-class TestAPIServerStandalone(unittest.TestCase):
-    """Example of using the TestAPIServer manually in individual tests."""
-
-    def setUp(self):
-        self.server = APITestServer()
-
-    def tearDown(self):
-        self.server.stop()
-
-    def test_health_endpoint(self):
-        """Test the health endpoint."""
-        self.server.start()
-        response = requests.get(self.server.health_url, timeout=5)
-        self.assertEqual(response.status_code, 200)
 
 
 if __name__ == "__main__":  # pragma: no cover
