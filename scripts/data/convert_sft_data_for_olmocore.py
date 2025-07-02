@@ -29,6 +29,7 @@ Recommendations:
  * Don't use max-seq-length, keep full sequences and allow Olmo-core to truncate if needed.
 """
 
+import json
 import os
 import sys
 from collections.abc import Mapping
@@ -128,6 +129,20 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     os.makedirs(tokenizer_output_dir, exist_ok=True)
     print(f"Saving tokenizer to {tokenizer_output_dir}...")
     tc.tokenizer.save_pretrained(tokenizer_output_dir)
+
+    # Check if chat_template.jinja exists and add it to tokenizer_config.json
+    chat_template_path = os.path.join(tokenizer_output_dir, "chat_template.jinja")
+    tokenizer_config_path = os.path.join(tokenizer_output_dir, "tokenizer_config.json")
+    if os.path.exists(chat_template_path) and os.path.exists(tokenizer_config_path):
+        with open(chat_template_path, "r") as f:
+            chat_template_content = f.read()
+        with open(tokenizer_config_path, "r") as f:
+            tokenizer_config = json.load(f)
+        if "chat_template" not in tokenizer_config:
+            tokenizer_config["chat_template"] = chat_template_content
+            with open(tokenizer_config_path, "w") as f:
+                json.dump(tokenizer_config, f, indent=2)
+            print(f"Added chat_template from {chat_template_path} to tokenizer_config.json")
     print("Tokenizer saved successfully!")
 
     if args.tokenizer_config_only:
