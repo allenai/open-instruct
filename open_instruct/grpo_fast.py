@@ -93,6 +93,7 @@ from open_instruct.ground_truth_utils import (
 )
 from open_instruct.model_utils import (
     ModelConfig,
+    entropy_from_logits,
     apply_verifiable_reward,
     disable_dropout_in_model,
     log_softmax_and_gather,
@@ -249,6 +250,8 @@ class Args:
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
     mask_truncated_completions: bool = False
     """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
+    record_entropy: bool = True
+    """whether to record the entropy of the policy during training. Turn off to save memory."""
 
     # Reward
     # -- r1 style format reward
@@ -665,11 +668,11 @@ class PolicyTrainerRayProcess(RayProcess):
         )
         logits = output.logits
         logits /= temperature + 1e-7
+        logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
         
         # fow now, entropy is just for monitoring, and we don't pass gradients through it.
         with torch.no_grad():
-            probs = torch.softmax(logits, dim=-1)
-            entropy = torch.logsumexp(logits, dim=-1) - torch.sum(probs * logits, dim=-1)
+            entropy = entropy_from_logits(logits)
         
         logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
         return logprob, entropy
@@ -797,6 +800,8 @@ class PolicyTrainerRayProcess(RayProcess):
             collated_advantages = collated_advantages[0:-leftover]
             collated_response_masks = collated_response_masks[0:-leftover]
             print(f"Warning: {leftover} samples are dropped due to batch size {num_mini_batches}")
+        # recalculate the "real" number of mini-batches
+        num_mini_batches = len(collated_query_responses) // accumulation_steps
 
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
@@ -824,10 +829,37 @@ class PolicyTrainerRayProcess(RayProcess):
                     ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
                     collated_ref_logprobs.append(ref_logprob)
                     torch.cuda.empty_cache()
+        # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
+        # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
+        # from the generator (note that async mode means these are a bit diff!)
+        old_logprobs = [None for _ in range(len(collated_query_responses))]
+        if num_mini_batches > 1:
+            with Timer("Old logprobs Calculation", noop=self.rank != 0):
+                with torch.no_grad():
+                    for i in range(len(collated_query_responses)):
+                        query_response = collated_query_responses[i]
+                        tool_mask = collated_tool_masks[i]
+                        attention_mask = collated_attention_masks[i]
+                        position_id = collated_position_ids[i]
+                        old_logprob = self.forward(
+                            self.model,
+                            query_response,
+                            attention_mask,
+                            position_id,
+                            pad_token_id,
+                            args.temperature,
+                        )
+                        if args.mask_tool_use and args.tool_use:
+                            response_mask = response_mask.bool() & tool_mask.bool()
+                        else:
+                            response_mask = response_mask.bool()
+                        old_logprob = torch.masked_fill(old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
+                        old_logprobs[i] = old_logprob
+                        torch.cuda.empty_cache()
+
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
-            old_logprobs = [None for _ in range(len(collated_query_responses))]
             kl1_stats = torch.zeros(len(collated_query_responses))
             kl2_stats = torch.zeros(len(collated_query_responses))
             kl3_stats = torch.zeros(len(collated_query_responses))
@@ -851,21 +883,34 @@ class PolicyTrainerRayProcess(RayProcess):
                         mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
-                    mb_new_logprobs, mb_entropy = self.forward_with_entropy(
-                        self.model,
-                        mb_query_responses,
-                        mb_attention_mask,
-                        mb_position_id,
-                        pad_token_id,
-                        args.temperature,
-                    )
+                    if args.record_entropy:
+                        mb_new_logprobs, mb_entropy = self.forward_with_entropy(
+                            self.model,
+                            mb_query_responses,
+                            mb_attention_mask,
+                            mb_position_id,
+                            pad_token_id,
+                            args.temperature,
+                        )
+                    else:
+                        mb_new_logprobs = self.forward(
+                            self.model,
+                            mb_query_responses,
+                            mb_attention_mask,
+                            mb_position_id,
+                            pad_token_id,
+                            args.temperature,
+                        )
                     mb_new_logprobs = torch.masked_fill(mb_new_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
 
                     # Cache the old logprobs
-                    with torch.no_grad():
-                        if epoch_idx == 0:
-                            old_logprobs[i] = mb_new_logprobs
-                        mb_old_logprobs = old_logprobs[i].detach()
+                    if num_mini_batches > 1:
+                        mb_old_logprobs = old_logprobs[i]
+                    else:
+                        with torch.no_grad():
+                            if epoch_idx == 0:
+                                old_logprobs[i] = mb_new_logprobs
+                            mb_old_logprobs = old_logprobs[i].detach()
 
                     # Calculate the policy's loss
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
@@ -920,8 +965,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
                         loss_stats[i] = loss
                         ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
-                        # Calculate entropy statistics
-                        entropy_stats[i] = masked_mean(mb_entropy, mb_response_masks_bool, args.masked_mean_axis).float()
+                        if args.record_entropy:
+                            # Calculate entropy statistics
+                            entropy_stats[i] = masked_mean(mb_entropy, mb_response_masks_bool, args.masked_mean_axis).float()
 
             with torch.no_grad():
                 self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
@@ -934,8 +980,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("policy/clipfrac_avg", pg_clipfrac_stats.mean())
                 self.local_metrics.add("val/ratio", ratio_stats.mean())
                 self.local_metrics.add("val/ratio_var", ratio_stats.var())
-                self.local_metrics.add("policy/entropy_avg", entropy_stats.mean())
-                self.local_metrics.add("policy/entropy_var", entropy_stats.var())
+                if args.record_entropy:
+                    self.local_metrics.add("policy/entropy_avg", entropy_stats.mean())
                 self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
                 return self.local_metrics.get_metrics_list()
 

@@ -104,6 +104,16 @@ def disable_dropout_in_model(model: torch.nn.Module) -> None:
             module.p = 0
 
 
+def entropy_from_logits(logits: torch.Tensor) -> torch.Tensor:
+    """
+    Compute the entropy of the logits.
+    Borrowed from verl (https://github.com/volcengine/verl/blob/main/verl/utils/torch_functional.py#L145)
+    """
+    pd = torch.nn.functional.softmax(logits, dim=-1)
+    entropy = torch.logsumexp(logits, dim=-1) - torch.sum(pd * logits, dim=-1)
+    return entropy
+
+
 def first_true_indices(bools: torch.Tensor, dtype=torch.long) -> torch.Tensor:
     """
     Finds the index of the first `True` value in each row of a boolean tensor. If no `True` value exists in a row,
