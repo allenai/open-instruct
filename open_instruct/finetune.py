@@ -27,6 +27,7 @@ try:
 except Exception:
     pass
 # isort: on
+import json
 import logging
 import math
 import os
@@ -54,6 +55,7 @@ from transformers import (
     DataCollatorForSeq2Seq,
     get_scheduler,
 )
+from transformers.training_args import _convert_str_dict
 
 from open_instruct.dataset_transformation import (
     INPUT_IDS_KEY,
@@ -83,6 +85,14 @@ class FlatArguments:
     """
     Full arguments class for all fine-tuning jobs.
     """
+    # Sometimes users will pass in a `str` repr of a dict in the CLI
+    # We need to track what fields those can be. Each time a new arg
+    # has a dict type, it must be added to this list.
+    # Important: These should be typed with Optional[Union[dict,str,...]]
+    # Note: the suggested ellipses typing above causes errors on python 3.10, so they are omitted.
+    _VALID_DICT_FIELDS = [
+        "additional_model_arguments",
+    ]
 
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
@@ -362,6 +372,11 @@ class FlatArguments:
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
 
+    additional_model_arguments: Optional[Union[dict, str]] = field(
+        default_factory=dict,
+        metadata={"help": "A dictionary of additional model args used to construct the model."},
+    )
+
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
             raise ValueError("reduce_loss must be either 'mean' or 'sum'")
@@ -375,6 +390,17 @@ class FlatArguments:
             raise ValueError("Cannot provide two dataset selection mechanisms.")
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
+
+        # Parse in args that could be `dict` sent in from the CLI as a string
+        for dict_feld in self._VALID_DICT_FIELDS:
+            passed_value = getattr(self, dict_feld)
+            # We only want to do this if the str starts with a bracket to indicate a `dict`
+            # else its likely a filename if supported
+            if isinstance(passed_value, str) and passed_value.startswith("{"):
+                loaded_dict = json.loads(passed_value)
+                # Convert str values to types if applicable
+                loaded_dict = _convert_str_dict(loaded_dict)
+                setattr(self, dict_feld, loaded_dict)
 
 
 def main(args: FlatArguments, tc: TokenizerConfig):
@@ -522,12 +548,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             args.config_name,
             revision=args.model_revision,
             trust_remote_code=tc.trust_remote_code,
+            **args.additional_model_arguments,
         )
     elif args.model_name_or_path:
         config = AutoConfig.from_pretrained(
             args.model_name_or_path,
             revision=args.model_revision,
             trust_remote_code=tc.trust_remote_code,
+            **args.additional_model_arguments,
         )
     else:
         raise ValueError(
