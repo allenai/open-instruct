@@ -114,6 +114,13 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         if os.path.exists(beaker_cache_dir):
             args.dataset_local_cache_dir = beaker_cache_dir
 
+    print("Verify these values match the tokenizer config used in Olmo-core:")
+    print(f"Tokenizer vocab_size: {tc.tokenizer.vocab_size}")
+    print(f"Tokenizer bos_token_id: {tc.tokenizer.bos_token_id}")
+    print(f"Tokenizer pad_token_id: {tc.tokenizer.pad_token_id}")
+    print(f"Tokenizer eos_token_id: {tc.tokenizer.eos_token_id}")
+    print(f"Tokenizer chat_template: {tc.tokenizer.chat_template}")
+
     if args.print_tokenizer_config_only:
         return
 
@@ -125,13 +132,6 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     print(f"Saving tokenizer to {tokenizer_output_dir}...")
     tc.tokenizer.save_pretrained(tokenizer_output_dir)
     print("Tokenizer saved successfully!")
-
-    print("Verify these values match the tokenizer config used in Olmo-core:")
-    print(f"Tokenizer vocab_size: {tc.tokenizer.vocab_size}")
-    print(f"Tokenizer bos_token_id: {tc.tokenizer.bos_token_id}")
-    print(f"Tokenizer pad_token_id: {tc.tokenizer.pad_token_id}")
-    print(f"Tokenizer eos_token_id: {tc.tokenizer.eos_token_id}")
-    print(f"Tokenizer chat_template: {tc.tokenizer.chat_template}")
 
     # TODO: improve configurability of transform factory
     transform_functions_and_args = [
