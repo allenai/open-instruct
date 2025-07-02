@@ -289,6 +289,14 @@ class Args:
     non_stop_penalty_value: float = 0.0
     """the reward value for responses which did not finish generation"""
 
+    # -- random rewards
+    apply_random_rewards: bool = False
+    """Whether to add a random reward between [0,1]"""
+    random_reward: float = 1.0
+    """What the maximum random reward is"""
+    disable_reward_normalization: bool = False
+    """Whether to disable GRPO reward normalization"""
+
     # Ray
     single_gpu_mode: bool = False
     """whether to collocate vLLM and actor on the same node (mostly for debugging purposes)"""
@@ -384,7 +392,7 @@ class Args:
         if self.num_samples_per_prompt_rollout == 1:
             print("WARNING: num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE. ")
         assert (
-            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
+            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty or self.apply_random_rewards
         ), "At least one reward must be applied!"
         assert (
             self.pack_length >= self.max_prompt_token_length + self.response_length
@@ -1177,7 +1185,9 @@ def data_preparation_thread(
             mean_grouped_rewards = np.repeat(mean_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
             std_grouped_rewards = scores_per_prompt.std(axis=-1)
             std_grouped_rewards = np.repeat(std_grouped_rewards, args.num_samples_per_prompt_rollout, axis=0)
-            if args.advantage_normalization_type == "standard":
+            if args.disable_reward_normalization:
+                advantages = scores
+            elif args.advantage_normalization_type == "standard":
                 advantages = (scores - mean_grouped_rewards) / (std_grouped_rewards + 1e-8)
             elif args.advantage_normalization_type == "centered":
                 advantages = scores - mean_grouped_rewards
@@ -1191,6 +1201,8 @@ def data_preparation_thread(
                 max_possible_score += args.verification_reward
             if args.apply_r1_style_format_reward and args.additive_format_reward:
                 max_possible_score += args.r1_style_format_reward
+            if args.apply_random_rewards:
+                max_possible_score += args.random_reward
             unsolved_batch_size_ratio = ((scores != max_possible_score) > 0).sum() / len(scores)
             # In GRPO, if the std of grouped rewards is 0, then there is zero gradient for the batch
             # of args.num_samples_per_prompt_rollout responses, so we need to filter out those batches
@@ -1918,6 +1930,13 @@ if __name__ == "__main__":
         ]
         scores = [0] * len(decoded_responses)
         metrics = {}
+
+        if args.apply_random_reward:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating random reward"):
+                random_rewards = np.random.uniform(0, args.random_reward, size=len(decoded_responses))
+                for i in range(len(random_rewards)):
+                    scores[i] += random_rewards[i]
+                metrics["val/random_scores"] = np.array(random_rewards).mean()
 
         if args.apply_r1_style_format_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
