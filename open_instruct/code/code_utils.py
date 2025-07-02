@@ -1,9 +1,12 @@
 import logging
+import math
 import multiprocessing
 import os
 import shutil
 from ctypes import c_int
 from typing import Any, Dict, List, Optional
+
+from .testing_util import grade_stdio
 
 # taken from https://github.com/TIGER-AI-Lab/AceCoder/blob/62bb7fc25d694fed04a5270c89bf2cdc282804f7/data/inference/EvaluateInferencedCode.py#L372
 # we save the current working directory and restore them later
@@ -126,7 +129,7 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
 
     reliability_guard()
 
-    # Reset test results
+    # reset test results
     for i in range(len(tests)):
         test_results[i] = 0
 
@@ -142,11 +145,71 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
 
 
 # -------------------------------------------------------------
+# Stdio format - mostly copied from livecodebench
+# -------------------------------------------------------------
+stdio_test_results = multiprocessing.Array("i", 1000)  # Support up to 1000 tests for stdio
+
+
+def run_tests_stdio_helper(program: str, tests: List[Any], max_execution_time: float):
+    """Helper to run stdio tests in a separate process."""
+    reliability_guard()
+    try:
+        all_inputs = [test["input"] for test in tests]
+        all_outputs = [test["output"] for test in tests]
+        timeout = math.ceil(max_execution_time)
+        results, _ = grade_stdio(program, all_inputs, all_outputs, timeout)
+
+        if results is not None:
+            processed_results = [1 if r is True else int(r) for r in results]
+            for i, res in enumerate(processed_results):
+                if i < len(stdio_test_results):
+                    stdio_test_results[i] = res
+    except Exception:
+        # On any failure, results in the shared array will remain as they were initialized (0), indicating failure.
+        pass
+    finally:
+        partial_undo_reliability_guard()
+
+
+def get_successful_tests_stdio(program: str, tests: List[Any], max_execution_time: float = 1.0) -> List[int]:
+    """Same as above but for stdio format.
+    Parameter:
+        program: a string representation of the python program you want to run
+        tests: a list of (input, output) pairs
+        max_execution_time: the number of second each individual test can run before
+            it is considered failed and terminated
+    Return:
+        a list of 0/1 indicating passed or not
+    """
+    test_ct = len(tests)
+    if test_ct == 0:
+        return []
+    if not should_execute(program=program, tests=tests):
+        logger.info("Not executing program %s", program)
+        return [0] * len(tests)
+
+    for i in range(test_ct):
+        stdio_test_results[i] = 0  # Initialize results to 0 (failure)
+
+    # Total timeout needs to account for all tests running sequentially.
+    total_timeout = max_execution_time * test_ct + 5.0
+
+    p = multiprocessing.Process(target=run_tests_stdio_helper, args=(program, tests, max_execution_time))
+    p.start()
+    p.join(timeout=total_timeout)
+
+    if p.is_alive():
+        p.kill()
+
+    return [1 if stdio_test_results[i] == 1 else 0 for i in range(test_ct)]
+
+
+# -------------------------------------------------------------
 # Utility
 # -------------------------------------------------------------
 
 
-def should_execute(program: str, tests: List[str]) -> bool:
+def should_execute(program: str, tests: List[Any]) -> bool:
     """Determine if we should try to execute this program at all for safety
     reasons."""
     dangerous_commands = [
@@ -222,7 +285,7 @@ def reliability_guard(maximum_memory_bytes: Optional[int] = None):
     builtins.exit = None
     builtins.quit = None
     # builtins.open = None
-    builtins.print = lambda *args, **kwargs: None
+    # builtins.print = lambda *args, **kwargs: None
 
     import os
 
