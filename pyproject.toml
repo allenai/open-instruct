@@ -104,6 +104,14 @@ line-length = 119
 src = [".", "open_instruct"]
 exclude = ["wandb"]
 
+[tool.ruff.format]
+# Use black-compatible formatting
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+# Enable black-compatible string normalization
+docstring-code-format = false
+
 [tool.ruff.lint]
 # Enable rules equivalent to your autoflake and flake8:
 # F = Pyflakes (covers autoflake functionality)
