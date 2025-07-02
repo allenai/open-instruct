@@ -103,8 +103,8 @@ class ConvertSFTDataArguments:
     """Visualize first token sequence"""
     visualize: bool = field(default=False)
 
-    """Dry run - only print the number of samples that should be skipped"""
-    print_tokenizer_config_only: bool = field(default=False)
+    """Only write the tokenizer config to the output directory"""
+    tokenizer_config_only: bool = field(default=False)
 
 
 def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
@@ -121,9 +121,6 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     print(f"Tokenizer eos_token_id: {tc.tokenizer.eos_token_id}")
     print(f"Tokenizer chat_template: {tc.tokenizer.chat_template}")
 
-    if args.print_tokenizer_config_only:
-        return
-
     output_dir = args.output_dir
     os.makedirs(output_dir, exist_ok=True)
 
@@ -132,6 +129,9 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     print(f"Saving tokenizer to {tokenizer_output_dir}...")
     tc.tokenizer.save_pretrained(tokenizer_output_dir)
     print("Tokenizer saved successfully!")
+
+    if args.tokenizer_config_only:
+        return
 
     # TODO: improve configurability of transform factory
     transform_functions_and_args = [
