@@ -43,6 +43,18 @@ def load_generated_answers(file_path: str) -> List[Dict[str, Any]]:
     return answers_data
 
 
+def load_test_cases(file_path: str) -> Dict[str, Dict[str, Any]]:
+    """
+    Load test cases from JSON file.
+    """
+    all_test_cases = {}
+    with open(file_path, 'r', encoding='utf-8') as f:
+        raw_test_cases = json.load(f)
+        for test_case in raw_test_cases:
+            all_test_cases[test_case['initial_prompt']] = test_case
+    return all_test_cases
+
+
 def create_correct_answer_for_question(question: str) -> str:
     """
     Create a simple correct answer template for the given question.
@@ -124,7 +136,8 @@ def evaluate_answers_with_hle(answers_data: List[Dict[str, Any]],
                              reference_answers: Dict[str, str] = None,
                              skip_evaluated: bool = True,
                              evaluated_questions: set = None,
-                             no_reasoning: bool = False) -> List[Dict[str, Any]]:
+                             no_reasoning: bool = False,
+                             allow_missing_question: bool = False) -> List[Dict[str, Any]]:
     """
     Evaluate all answers using the HLE reward system.
     
@@ -147,6 +160,8 @@ def evaluate_answers_with_hle(answers_data: List[Dict[str, Any]],
     
     for entry in answers_data:
         question = entry.get('question', 'Unknown question')
+        if not allow_missing_question:
+            assert question in reference_answers, f"Question {question} not found in reference answers"
         
         # Skip if already evaluated
         if skip_evaluated and question in evaluated_questions:
@@ -215,29 +230,24 @@ def evaluate_answers_with_hle(answers_data: List[Dict[str, Any]],
     return evaluation_results
 
 
-def evaluate_answers_with_paper_reward(answers_data: List[Dict[str, Any]], 
-                                      test_cases: Dict[str, Dict[str, Any]] = None,
-                                      reference_answers: Dict[str, str] = None,
+def evaluate_answers_with_rubric_reward(answers_data: List[Dict[str, Any]], 
+                                      test_cases_path: str = "./open_instruct/search_rewards/data/test_configs_snippets.json",
                                       skip_evaluated: bool = True,
-                                      evaluated_questions: set = None) -> List[Dict[str, Any]]:
+                                      evaluated_questions: set = None,
+                                      allow_missing_question: bool = False) -> List[Dict[str, Any]]:
     """
     Evaluate all answers using the paper reward system, focusing only on properties score.
     
     Args:
         answers_data: List of dictionaries containing questions and answers
-        test_cases: Dictionary mapping questions to test case configurations
-        reference_answers: Dictionary mapping questions to reference answers
+        test_cases_path: Path to the test case configurations
         skip_evaluated: Whether to skip questions that have already been evaluated
         evaluated_questions: Set of questions that have already been evaluated
         
     Returns:
         List of evaluation results
     """
-    if test_cases is None:
-        test_cases = {}
-    
-    if reference_answers is None:
-        reference_answers = {}
+    test_cases = load_test_cases(test_cases_path)
     
     if evaluated_questions is None:
         evaluated_questions = set()
@@ -246,6 +256,8 @@ def evaluate_answers_with_paper_reward(answers_data: List[Dict[str, Any]],
     
     for entry in answers_data:
         question = entry.get('question', 'Unknown question')
+        if not allow_missing_question:
+            assert question in test_cases, f"Question {question} not found in test cases"
         
         # Skip if already evaluated
         if skip_evaluated and question in evaluated_questions:
@@ -254,43 +266,11 @@ def evaluate_answers_with_paper_reward(answers_data: List[Dict[str, Any]],
         
         all_answers = entry.get('all_answers', [])
         
-        # Get reference answer for this question
-        reference_answer = reference_answers.get(question, "")
-        
         # Get test case for this question
-        test_case = test_cases.get(question, {
-            "metric_config": {
-                "name": "rubric_corpusqa_generic",
-                "config": {
-                    "question": question,
-                    "low_length": 200,
-                    "high_length": 800,
-                    "length_weight": 0.0,  # Set to 0 to exclude length scoring
-                    "expertise_weight": 0.0,  # Set to 0 to exclude expertise scoring
-                    "citations_weight": 0.0,  # Set to 0 to exclude citations scoring
-                    "excerpts_weight": 0.0,  # Set to 0 to exclude excerpts scoring
-                    "model_name": "gpt-4.1",
-                    "other_properties": [
-                        {
-                            "name": "most_important_item_0",
-                            "criterion": "The answer should provide comprehensive information about the topic.",
-                            "weight": 0.5,
-                            "evidence": []
-                        },
-                        {
-                            "name": "most_important_item_1", 
-                            "criterion": "The answer should be well-structured and easy to understand.",
-                            "weight": 0.5,
-                            "evidence": []
-                        }
-                    ]
-                }
-            }
-        })
+        test_case = test_cases.get(question, {})
         
         entry_results = {
             'question': question,
-            'reference_answer': reference_answer,
             'test_case': test_case,
             'answer_evaluations': []
         }
@@ -302,7 +282,6 @@ def evaluate_answers_with_paper_reward(answers_data: List[Dict[str, Any]],
             print(f"Evaluating question: {question[:50]}...")
             print(f"  Number of rubrics: {num_rubrics}")
             print(f"  Answer length: {len(answer_text)} characters")
-            print(f"  Reference answer available: {'Yes' if reference_answer else 'No'}")
             
             try:
                 # Score the answer using paper reward
@@ -338,7 +317,6 @@ def evaluate_answers_with_paper_reward(answers_data: List[Dict[str, Any]],
                     'scoring_results': scoring_results,
                     'error': result.get('error'),
                     'citations': result.get('citations', {}),
-                    'has_reference_answer': bool(reference_answer)
                 }
                 
                 print(f"  Paper Score: {evaluation['paper_score']:.4f}")
@@ -358,7 +336,6 @@ def evaluate_answers_with_paper_reward(answers_data: List[Dict[str, Any]],
                     'scoring_results': {},
                     'error': str(e),
                     'citations': {},
-                    'has_reference_answer': bool(reference_answer)
                 }
             
             entry_results['answer_evaluations'].append(evaluation)
@@ -433,7 +410,7 @@ def calculate_correlation_analysis(results: List[Dict[str, Any]]) -> Dict[str, f
     for entry in results:
         for eval_info in entry['answer_evaluations']:
             if eval_info['extraction_success']:  # Only include successful evaluations
-                scores.append(eval_info['hle_score'])
+                scores.append(eval_info['hle_score'] if 'hle_score' in eval_info else eval_info['properties_score'])
                 rubrics.append(eval_info['num_rubrics_provided'])
     
     if len(scores) < 2:
@@ -616,7 +593,7 @@ def print_summary_statistics(results: List[Dict[str, Any]], evaluation_type: str
         for entry in results:
             for eval_info in entry['answer_evaluations']:
                 num_rubrics = eval_info['num_rubrics_provided']
-                score = eval_info['hle_score']
+                score = eval_info['hle_score'] if 'hle_score' in eval_info else eval_info['properties_score']
                 
                 if num_rubrics not in rubric_scores:
                     rubric_scores[num_rubrics] = []
@@ -731,10 +708,10 @@ def main():
     """Main function to evaluate generated answers with HLE reward."""
     # File paths
     no_reasoning = False
-    generated_answers_file = "/fsx-comem/rulin/open-instruct/generated_answers/generated_answers.jsonl"
-    reference_answers_file = "/fsx-comem/rulin/open-instruct/generated_reference_answers/reference_answers.jsonl"
+    generated_answers_file = "./generated_answers/generated_answers.jsonl"
+    reference_answers_file = "./generated_reference_answers/reference_answers.jsonl"
     hle_output_file = "./evaluation_results/hle_evaluation_results.jsonl" if not no_reasoning else "./evaluation_results/hle_evaluation_results_direct_socre.jsonl"
-    paper_output_file = "./evaluation_results/paper_evaluation_results.jsonl"
+    rubric_output_file = "./evaluation_results/rubric_evaluation_results.jsonl"
     
     # Check if input file exists
     if not os.path.exists(generated_answers_file):
@@ -743,12 +720,12 @@ def main():
         return
     
     # Choose evaluation type
-    evaluation_type = input("Choose evaluation type (hle/paper): ").strip().lower()
-    if evaluation_type not in ["hle", "paper"]:
+    evaluation_type = input("Choose evaluation type (hle/rubric): ").strip().lower()
+    if evaluation_type not in ["hle", "rubric"]:
         print("Invalid evaluation type. Using 'hle' as default.")
         evaluation_type = "hle"
     
-    output_file = hle_output_file if evaluation_type == "hle" else paper_output_file
+    output_file = hle_output_file if evaluation_type == "hle" else rubric_output_file
     
     try:
         # Load reference answers if using HLE reward
@@ -780,10 +757,10 @@ def main():
         
         print(f"Evaluating {len(new_answers_data)} new questions...")
         
-        if evaluation_type == "paper":
+        if evaluation_type == "rubric":
             # Evaluate answers with paper reward
             print("\nEvaluating answers with paper reward...")
-            evaluation_results = evaluate_answers_with_paper_reward(
+            evaluation_results = evaluate_answers_with_rubric_reward(
                 new_answers_data, 
                 evaluated_questions=evaluated_questions
             )

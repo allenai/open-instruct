@@ -2,7 +2,12 @@ import asyncio
 import re
 from typing import Dict, List
 
-from run_utils import run_litellm, run_litellm_async
+# Handle imports for both direct execution and module import
+try:
+    from .run_utils import run_litellm, run_litellm_async
+except ImportError:
+    # When running the file directly, use absolute import
+    from run_utils import run_litellm, run_litellm_async
 
 citation_recall_has_citation_prompt = """You are an expert in evaluating text quality. You will receive a user's question about an uploaded document, a factual statement from an AI assistant's response based on that document, and a snippet from the document (since the document is too long to display in full). Your task is to carefully assess whether this statement is supported by the snippet. Please use the following scale to generate your rating:
 - [[Fully supported]] - Most information in the statement is supported by or extracted from the snippet. This applies only to cases where the statement and parts of the snippet are almost identical.
