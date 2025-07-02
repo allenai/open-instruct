@@ -604,6 +604,7 @@ class LMJudgeVerifier(VerifierFunction):
             # remove anything between <think> and </think> including the tags using regex
             pattern = r"<think>\s*.*?\s*</think>\s*"
             content = re.sub(pattern, "", completion.choices[0].message.content, flags=re.DOTALL)
+            content = content.replace("<answer>", "").replace("</answer>", "")
             reasoning, score = self.extractor(content)
 
         except Exception as e:
