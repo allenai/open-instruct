@@ -212,10 +212,7 @@ INSTRUCTION_CONFLICTS = {
         _LENGTH + "nth_paragraph_first_word",
     },
     _LENGTH + "number_words": {_LENGTH + "number_words"},
-    _LENGTH + "nth_paragraph_first_word": {
-        _LENGTH + "nth_paragraph_first_word",
-        _LENGTH + "number_paragraphs",
-    },
+    _LENGTH + "nth_paragraph_first_word": {_LENGTH + "nth_paragraph_first_word", _LENGTH + "number_paragraphs"},
     _CONTENT + "number_placeholders": {_CONTENT + "number_placeholders"},
     _CONTENT + "postscript": {_CONTENT + "postscript"},
     _FORMAT + "number_bullet_lists": {_FORMAT + "number_bullet_lists"},
@@ -255,10 +252,7 @@ INSTRUCTION_CONFLICTS = {
         _CHANGE_CASES + "english_capital",
     },
     _CHANGE_CASES + "english_capital": {_CHANGE_CASES + "english_capital"},
-    _CHANGE_CASES + "english_lowercase": {
-        _CHANGE_CASES + "english_lowercase",
-        _CHANGE_CASES + "english_capital",
-    },
+    _CHANGE_CASES + "english_lowercase": {_CHANGE_CASES + "english_lowercase", _CHANGE_CASES + "english_capital"},
     _PUNCTUATION + "no_comma": {_PUNCTUATION + "no_comma"},
     _STARTEND + "quotation": {_STARTEND + "quotation", _FORMAT + "title"},
     _COPY + "repeat_phrase": {_COPY + "repeat_phrase"},

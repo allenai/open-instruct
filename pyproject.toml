@@ -109,6 +109,8 @@ exclude = ["wandb"]
 quote-style = "double"
 indent-style = "space"
 line-ending = "auto"
+# Preserve original parentheses style to minimize changes
+skip-magic-trailing-comma = true
 # Enable black-compatible string normalization
 docstring-code-format = false
 
@@ -128,4 +130,6 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["open-instruct"]
 # case insensitive to match isort --profile black
-case-sensitive = false      
+case-sensitive = false
+# Disable split-on-trailing-comma to work with skip-magic-trailing-comma
+split-on-trailing-comma = false      

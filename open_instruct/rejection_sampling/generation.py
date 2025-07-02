@@ -30,15 +30,8 @@ from rich.pretty import pprint
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
-from open_instruct.dataset_processor import (
-    INPUT_IDS_PROMPT_KEY,
-    DatasetConfig,
-    SFTDatasetProcessor,
-)
-from open_instruct.rejection_sampling.api_generate import (  # Import your classes
-    LLMGenerationConfig,
-    LLMProcessor,
-)
+from open_instruct.dataset_processor import INPUT_IDS_PROMPT_KEY, DatasetConfig, SFTDatasetProcessor
+from open_instruct.rejection_sampling.api_generate import LLMGenerationConfig, LLMProcessor  # Import your classes
 from open_instruct.utils import ArgumentParserPlus, combine_dataset
 
 api = HfApi()
@@ -145,9 +138,7 @@ def format_conversation(messages: list) -> str:
 
 def main(args: Args, dataset_config: DatasetConfig, gen_args: GenerationArgs):
     dataset = combine_dataset(
-        args.dataset_mixer_list,
-        splits=args.dataset_splits,
-        columns_to_keep=[dataset_config.sft_messages_key],
+        args.dataset_mixer_list, splits=args.dataset_splits, columns_to_keep=[dataset_config.sft_messages_key]
     )
     if args.dataset_end_idx is None:
         args.dataset_end_idx = len(dataset)
@@ -156,8 +147,7 @@ def main(args: Args, dataset_config: DatasetConfig, gen_args: GenerationArgs):
 
     if "gpt-3.5" in args.model_name_or_path or "gpt-4" in args.model_name_or_path:
         dataset = dataset.map(
-            lambda x: {"prompt": format_conversation(x["messages"][:-1])},
-            num_proc=NUM_CPUS_FOR_DATASET_MAP,
+            lambda x: {"prompt": format_conversation(x["messages"][:-1])}, num_proc=NUM_CPUS_FOR_DATASET_MAP
         )
         messages = dataset["prompt"]
         responses = asyncio.run(generate_with_openai(args.model_name_or_path, messages, args, gen_args))
@@ -207,10 +197,7 @@ def main(args: Args, dataset_config: DatasetConfig, gen_args: GenerationArgs):
         api.create_repo(full_repo_id, repo_type="dataset", exist_ok=True)
         for f in [__file__, args.save_filename]:
             api.upload_file(
-                path_or_fileobj=f,
-                path_in_repo=f.split("/")[-1],
-                repo_id=full_repo_id,
-                repo_type="dataset",
+                path_or_fileobj=f, path_in_repo=f.split("/")[-1], repo_id=full_repo_id, repo_type="dataset"
             )
         repo_full_url = f"https://huggingface.co/datasets/{full_repo_id}"
         print(f"Pushed to {repo_full_url}")
@@ -240,10 +227,7 @@ gen_args:
 2. Run `{run_command}`
 """
         )
-        sft_card.push_to_hub(
-            full_repo_id,
-            repo_type="dataset",
-        )
+        sft_card.push_to_hub(full_repo_id, repo_type="dataset")
 
 
 if __name__ == "__main__":

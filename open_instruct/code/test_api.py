@@ -101,11 +101,7 @@ class TestAPI(unittest.TestCase):
             data = response.json()
             self.assertIn("results", data, "Response JSON missing 'results' field")
 
-            self.assertEqual(
-                data["results"],
-                expected_results,
-                "Returned pass/fail vector does not match expectation",
-            )
+            self.assertEqual(data["results"], expected_results, "Returned pass/fail vector does not match expectation")
 
     def test_multiple_calls_to_test_program(self, num_requests=3):
         """Test making multiple calls to /test_program endpoint."""

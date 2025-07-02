@@ -83,10 +83,7 @@ class LLMSearchRayActor:
         self.tokenizer = self.llm.get_tokenizer()
 
     def generate(
-        self,
-        sampling_params: Any,
-        prompt_token_ids: List[List[int]],
-        use_tqdm: bool,
+        self, sampling_params: Any, prompt_token_ids: List[List[int]], use_tqdm: bool
     ) -> List[List[GenerationOutput]]:
         max_searches = self.max_searches
         number_documents_to_search = self.number_documents_to_search
@@ -268,12 +265,7 @@ if __name__ == "__main__":
     prompt_token_ids = [tokenizer.encode(prompt, add_special_tokens=False)]
 
     sampling_params = SamplingParams(
-        temperature=1.0,
-        top_p=1.0,
-        max_tokens=8192,
-        include_stop_str_in_output=True,
-        n=1,
-        stop=["</query>"],
+        temperature=1.0, top_p=1.0, max_tokens=8192, include_stop_str_in_output=True, n=1, stop=["</query>"]
     )
 
     # Generate output using the actor.

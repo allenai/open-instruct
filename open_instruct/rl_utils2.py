@@ -77,11 +77,7 @@ def reset_position_ids(attention_mask):
 
 
 def pack_sequences(
-    queries: List[List[int]],
-    responses: List[List[int]],
-    masks: List[List[int]],
-    pack_length: int,
-    pad_token_id: int,
+    queries: List[List[int]], responses: List[List[int]], masks: List[List[int]], pack_length: int, pad_token_id: int
 ) -> PackedSequences:
     assert not any(pad_token_id in query for query in queries)
     # TODO: for some reason vLLM *can* generate the padding token in the responses; investigate
@@ -175,11 +171,7 @@ def get_test_data():
         "User: What is the capital of France?\nAssistant: <think>",
         "User: What is the capital of Germany?\nAssistant: <think>",
     ]
-    outputs = [
-        "I'm good, thank you!",
-        "Paris",
-        "Berlin",
-    ]
+    outputs = ["I'm good, thank you!", "Paris", "Berlin"]
     queries = [tokenizer.encode(prompt) for prompt in prompts]
     responses = [tokenizer.encode(response) for response in outputs]
     prompt_max_len = 20
@@ -379,24 +371,16 @@ def test_calculate_advantages_packed():
 # @torch.no_grad()
 def test_pack_sequences_logits():
     import torch
-    from transformers import (
-        AutoModelForCausalLM,
-        AutoModelForSequenceClassification,
-        AutoTokenizer,
-    )
+    from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer
 
     AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
 
     model = AutoModelForCausalLM.from_pretrained(
-        "EleutherAI/pythia-14m",
-        attn_implementation="eager",
-        torch_dtype=torch.bfloat16,
+        "EleutherAI/pythia-14m", attn_implementation="eager", torch_dtype=torch.bfloat16
     )
     # set seed for reproducibility
     value_model = AutoModelForSequenceClassification.from_pretrained(
-        "EleutherAI/pythia-14m",
-        num_labels=1,
-        torch_dtype=torch.bfloat16,
+        "EleutherAI/pythia-14m", num_labels=1, torch_dtype=torch.bfloat16
     )
     value_model.train()
     value_head = value_model.score

@@ -323,12 +323,7 @@ if __name__ == "__main__":
 
     refs = [
         engine.init_process_group.remote(
-            master_address,
-            master_port,
-            i * tensor_parallel_size + 1,
-            world_size,
-            "openrlhf",
-            backend=backend,
+            master_address, master_port, i * tensor_parallel_size + 1, world_size, "openrlhf", backend=backend
         )
         for i, engine in enumerate(vllm_engines)
     ]

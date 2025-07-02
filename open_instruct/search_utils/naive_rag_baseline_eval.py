@@ -49,11 +49,7 @@ args = parser.parse_args()
 # Load the tokenizer
 tokenizer = AutoTokenizer.from_pretrained(args.model_path, revision=args.tokenizer_revision)
 
-model = vllm.LLM(
-    model=args.model_path,
-    revision=args.model_revision,
-    tokenizer_revision=args.tokenizer_revision,
-)
+model = vllm.LLM(model=args.model_path, revision=args.model_revision, tokenizer_revision=args.tokenizer_revision)
 
 # always use no prompt and just search.
 if args.dataset_name == "simpleqa":
@@ -96,10 +92,7 @@ sampling_params = SamplingParams(
     stop=["</query>", "</finish>"],  # needed for search actor (TODO: make this api nicer)
 )
 
-result = model.generate(
-    prompt_strings,
-    sampling_params=sampling_params,
-)
+result = model.generate(prompt_strings, sampling_params=sampling_params)
 # grab text answers
 generations = [x.outputs[0].text for x in result]
 # parse out answer

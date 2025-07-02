@@ -88,9 +88,7 @@ from pydantic import BaseModel
 # Configure logging (Cloud Run uses stdout/stderr)
 ###############################################################################
 logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s %(levelname)s %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%S%z",
+    level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s", datefmt="%Y-%m-%dT%H:%M:%S%z"
 )
 logger = logging.getLogger(__name__)
 
@@ -183,17 +181,9 @@ def _run_user_code(code: str, timeout: int = 5):
             # 👉 compile() directly without REPL transformation
             compiled = compile(code, "<user-snippet>", "exec")
             exec(compiled, {})  # noqa: S102
-        result = {
-            "output": stdout.getvalue(),
-            "error": stderr.getvalue() or None,
-            "success": True,
-        }
+        result = {"output": stdout.getvalue(), "error": stderr.getvalue() or None, "success": True}
     except Exception as exc:  # pylint: disable=broad-except
-        result = {
-            "output": "",
-            "error": f"{exc}\n{traceback.format_exc()}",
-            "success": False,
-        }
+        result = {"output": "", "error": f"{exc}\n{traceback.format_exc()}", "success": False}
     finally:
         signal.alarm(0)
 
@@ -233,19 +223,11 @@ async def execute_code(req: CodeRequest):  # noqa: D401
         result = await asyncio.wait_for(fut, timeout=req.timeout + 1)
     except asyncio.TimeoutError:
         fut.cancel()
-        result = {
-            "output": "",
-            "error": f"Execution timed out after {req.timeout} seconds (outer)",
-            "success": False,
-        }
+        result = {"output": "", "error": f"Execution timed out after {req.timeout} seconds (outer)", "success": False}
     except BrokenProcessPool:
         logger.error("Pool broken — recreating")
         process_pool = ProcessPoolExecutor(max_workers=POOL_SIZE, initializer=_worker_init)
-        result = {
-            "output": "",
-            "error": "Worker pool crashed and was restarted. Please retry.",
-            "success": False,
-        }
+        result = {"output": "", "error": "Worker pool crashed and was restarted. Please retry.", "success": False}
 
     latency_ms = (time.perf_counter() - start) * 1000
     logger.info(

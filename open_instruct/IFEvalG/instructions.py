@@ -1328,9 +1328,7 @@ class LetterFrequencyChecker(Instruction):
         )
 
         return self._description_pattern.format(
-            letter=self._letter,
-            let_frequency=self._frequency,
-            let_relation=self._comparison_relation,
+            letter=self._letter, let_frequency=self._frequency, let_relation=self._comparison_relation
         )
 
     def get_instruction_args(self):
@@ -1431,11 +1429,7 @@ class CommaChecker(Instruction):
 class CapitalWordFrequencyChecker(Instruction):
     """Checks frequency of words with all capital letters."""
 
-    def build_description(
-        self,
-        capital_frequency=None,
-        capital_relation=None,
-    ):
+    def build_description(self, capital_frequency=None, capital_relation=None):
         """Build the instruction description.
 
         Args:
@@ -1468,10 +1462,7 @@ class CapitalWordFrequencyChecker(Instruction):
 
     def get_instruction_args(self):
         """Returns the keyword args of build description."""
-        return {
-            "capital_frequency": self._frequency,
-            "capital_relation": self._comparison_relation,
-        }
+        return {"capital_frequency": self._frequency, "capital_relation": self._comparison_relation}
 
     def get_instruction_args_keys(self):
         """Returns the args keys of `build_description`."""

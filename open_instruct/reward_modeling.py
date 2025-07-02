@@ -17,11 +17,7 @@ from huggingface_hub import HfApi
 from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from transformers import (
-    AutoModelForSequenceClassification,
-    PreTrainedModel,
-    get_scheduler,
-)
+from transformers import AutoModelForSequenceClassification, PreTrainedModel, get_scheduler
 
 from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
@@ -261,10 +257,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # Set up datasets
     transform_fn_args = [
         {},
-        {
-            "max_token_length": args.max_token_length,
-            "max_prompt_token_length": args.max_prompt_token_length,
-        },
+        {"max_token_length": args.max_token_length, "max_prompt_token_length": args.max_prompt_token_length},
     ]
     with accelerator.main_process_first():
         train_dataset = get_cached_dataset_tulu(
@@ -334,18 +327,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     )
     data_collator = SimplePreferenceCollator(pad_token_id=tokenizer.pad_token_id)
     dataloader = DataLoader(
-        train_dataset,
-        batch_size=args.per_device_train_batch_size,
-        shuffle=True,
-        collate_fn=data_collator,
+        train_dataset, batch_size=args.per_device_train_batch_size, shuffle=True, collate_fn=data_collator
     )
     eval_dataloader = None
     if len(args.dataset_mixer_eval_list) > 0:
         eval_dataloader = DataLoader(
-            eval_dataset,
-            batch_size=args.per_device_eval_batch_size,
-            shuffle=False,
-            collate_fn=data_collator,
+            eval_dataset, batch_size=args.per_device_eval_batch_size, shuffle=False, collate_fn=data_collator
         )
 
     # sync random states for DataLoader(shuffle=True) before `accelerator.prepare`
@@ -437,19 +424,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
     # save model
     os.makedirs(os.path.dirname(args.output_dir), exist_ok=True)
-    save_with_accelerate(
-        accelerator,
-        model,
-        tokenizer,
-        args.output_dir,
-    )
+    save_with_accelerate(accelerator, model, tokenizer, args.output_dir)
     if args.push_to_hub:
-        push_folder_to_hub(
-            accelerator,
-            args.output_dir,
-            args.hf_repo_id,
-            args.hf_repo_revision,
-        )
+        push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
 
 
 if __name__ == "__main__":

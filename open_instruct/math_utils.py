@@ -58,10 +58,7 @@ def get_unnormalized_answer(text: str) -> str:
     INVALID_ANSWER = "[invalidanswer]"
     end_seq = "I hope it is correct."
     text += end_seq
-    match = re.search(
-        r"Final Answer: The final answer is(.*?). I hope it is correct.",
-        text,
-    )
+    match = re.search(r"Final Answer: The final answer is(.*?). I hope it is correct.", text)
     if match:
         return match.group(1).strip()
     else:
@@ -189,11 +186,7 @@ def is_equiv(x1: str, x2: str) -> bool:
             try:
                 parsed_x1 = parse_latex(x1)
                 parsed_x2 = parse_latex(x2)
-            except (
-                sympy.parsing.latex.errors.LaTeXParsingError,
-                sympy.SympifyError,
-                TypeError,
-            ):
+            except (sympy.parsing.latex.errors.LaTeXParsingError, sympy.SympifyError, TypeError):
                 eval_logger.debug(f"couldn't parse one of {x1} or {x2}")
                 return False
 

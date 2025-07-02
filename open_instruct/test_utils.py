@@ -45,26 +45,18 @@ class GetDatasetsTest(unittest.TestCase):
         self.assertEqual(len(datasets["test"]), 300)
 
     def test_loading_with_fractions_greater_than_unity(self):
-        dataset_mixer = {
-            "HuggingFaceH4/testing_alpaca_small": 0.7,
-            "HuggingFaceH4/testing_self_instruct_small": 0.4,
-        }
+        dataset_mixer = {"HuggingFaceH4/testing_alpaca_small": 0.7, "HuggingFaceH4/testing_self_instruct_small": 0.4}
         datasets = get_datasets(dataset_mixer, columns_to_keep=["prompt", "completion"])
         self.assertEqual(len(datasets["train"]), 70 + 40)
         self.assertEqual(len(datasets["test"]), 200)
 
     def test_loading_fails_with_negative_fractions(self):
-        dataset_mixer = {
-            "HuggingFaceH4/testing_alpaca_small": 0.7,
-            "HuggingFaceH4/testing_self_instruct_small": -0.3,
-        }
+        dataset_mixer = {"HuggingFaceH4/testing_alpaca_small": 0.7, "HuggingFaceH4/testing_self_instruct_small": -0.3}
         with pytest.raises(ValueError, match=r"Dataset fractions / lengths cannot be negative."):
             get_datasets(dataset_mixer, columns_to_keep=["prompt", "completion"])
 
     def test_loading_single_split_with_unit_fractions(self):
-        dataset_mixer = {
-            "HuggingFaceH4/testing_alpaca_small": 1.0,
-        }
+        dataset_mixer = {"HuggingFaceH4/testing_alpaca_small": 1.0}
         datasets = get_datasets(dataset_mixer, splits=["test"], columns_to_keep=["prompt", "completion"])
         self.assertEqual(len(datasets["test"]), 100)
         self.assertRaises(KeyError, lambda: datasets["train"])

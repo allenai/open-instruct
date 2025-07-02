@@ -157,9 +157,7 @@ def main(args: Args):
 
         # Submit a batch job with the file
         batch_response = client.batches.create(
-            input_file_id=file_id,
-            endpoint="/chat/completions",
-            completion_window="24h",
+            input_file_id=file_id, endpoint="/chat/completions", completion_window="24h"
         )
 
         # Save batch ID for later use
@@ -215,15 +213,7 @@ def main(args: Args):
             with open(args.output_file, "w") as outfile:
                 for idx, response in enumerate(responses):
                     outfile.write(
-                        json.dumps(
-                            {
-                                "custom_id": f"task-{idx}",
-                                "response": {
-                                    "body": response.model_dump(),
-                                },
-                            }
-                        )
-                        + "\n"
+                        json.dumps({"custom_id": f"task-{idx}", "response": {"body": response.model_dump()}}) + "\n"
                     )
             console.print(f"[bold green]Output saved to {args.output_file}[/bold green]")
 

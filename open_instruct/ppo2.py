@@ -373,10 +373,7 @@ def get_train_ds_config(
     zero_opt_dict = {
         "stage": stage,
         "offload_param": {"device": device},
-        "offload_optimizer": {
-            "device": "cpu" if adam_offload else "none",
-            "pin_memory": True,
-        },
+        "offload_optimizer": {"device": "cpu" if adam_offload else "none", "pin_memory": True},
         "sub_group_size": "auto",
         "stage3_max_live_parameters": "auto",
         "stage3_max_reuse_distance": "auto",
@@ -396,9 +393,7 @@ def get_train_ds_config(
     return {
         "steps_per_print": 100,
         "zero_optimization": zero_opt_dict,
-        "bf16": {
-            "enabled": bf16,
-        },
+        "bf16": {"enabled": bf16},
         "gradient_clipping": max_norm,
         "prescale_gradients": False,
         "wall_clock_breakdown": False,
@@ -406,25 +401,16 @@ def get_train_ds_config(
     }
 
 
-def get_eval_ds_config(
-    offload,
-    stage=0,
-    bf16=True,
-):
+def get_eval_ds_config(offload, stage=0, bf16=True):
     zero_opt_dict = {
         "stage": stage,
         "stage3_param_persistence_threshold": "auto",
-        "offload_param": {
-            "device": "cpu" if offload else "none",
-            "pin_memory": True,
-        },
+        "offload_param": {"device": "cpu" if offload else "none", "pin_memory": True},
     }
     return {
         "steps_per_print": 100,
         "zero_optimization": zero_opt_dict,
-        "bf16": {
-            "enabled": bf16,
-        },
+        "bf16": {"enabled": bf16},
         "prescale_gradients": False,
         "wall_clock_breakdown": False,
     }
@@ -578,9 +564,7 @@ class ShufflingIterator:
 class RayProcess:
     def __init__(self, world_size, rank, local_rank, master_addr, master_port):
         logging.basicConfig(
-            format="%(asctime)s %(levelname)-8s %(message)s",
-            level=logging.INFO,
-            datefmt="%Y-%m-%d %H:%M:%S",
+            format="%(asctime)s %(levelname)-8s %(message)s", level=logging.INFO, datefmt="%Y-%m-%d %H:%M:%S"
         )
         self.world_size = world_size
         self.rank = rank
@@ -630,12 +614,7 @@ class PolicyTrainerRayProcess(RayProcess):
         torch.cuda.set_device(self.local_rank)
         deepspeed.init_distributed()
 
-        ds_config = get_train_ds_config(
-            offload=False,
-            adam_offload=False,
-            stage=args.deepspeed_stage,
-            bf16=True,
-        )
+        ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["train_batch_size"] = args.mini_batch_size
         # Costa: MAGIC: it's actually needed to initialize this `dschf`, so
@@ -806,12 +785,7 @@ class PolicyTrainerRayProcess(RayProcess):
         attention_mask = query_response != pad_token_id
         position_ids = attention_mask.cumsum(1) - attention_mask.long()
         input_ids = torch.masked_fill(query_response, ~attention_mask, 0)
-        output = model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            return_dict=True,
-        )
+        output = model(input_ids=input_ids, attention_mask=attention_mask, position_ids=position_ids, return_dict=True)
         logits = output.logits[:, context_length - 1 : -1]
         logits /= temperature + 1e-7
         logprob = log_softmax_and_gather(logits, response)
@@ -841,10 +815,7 @@ class PolicyTrainerRayProcess(RayProcess):
             with socket.socket() as sock:
                 sock.bind(("", 0))
                 master_port = sock.getsockname()[1]
-            vllm_num_engines, vllm_tensor_parallel_size = (
-                args.vllm_num_engines,
-                args.vllm_tensor_parallel_size,
-            )
+            vllm_num_engines, vllm_tensor_parallel_size = (args.vllm_num_engines, args.vllm_tensor_parallel_size)
             world_size = vllm_num_engines * vllm_tensor_parallel_size + 1
             backend = args.vllm_sync_backend
             refs = [
@@ -1024,11 +995,7 @@ class PolicyTrainerRayProcess(RayProcess):
             device=device,
             dtype=torch.long,
         )
-        stats_shape = (
-            args.num_epochs,
-            args.num_mini_batches,
-            args.gradient_accumulation_steps,
-        )
+        stats_shape = (args.num_epochs, args.num_mini_batches, args.gradient_accumulation_steps)
         non_score_reward_sum_stats = torch.zeros(stats_shape, device=device)
         kl1_stats = torch.zeros((args.local_total_prompts), device=device)
         kl2_stats = torch.zeros((args.local_total_prompts), device=device)
@@ -1293,9 +1260,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         vpred = vpred_temp[:, context_length - 1 : -1].squeeze(-1)
                         vpred = torch.masked_fill(vpred, mb_padding_mask_p1, 0)
                         vpredclipped = torch.clamp(
-                            vpred,
-                            mb_values - args.cliprange_value,
-                            mb_values + args.cliprange_value,
+                            vpred, mb_values - args.cliprange_value, mb_values + args.cliprange_value
                         )
                         vf_losses1 = torch.square(vpred - mb_return)
                         vf_losses2 = torch.square(vpredclipped - mb_return)
@@ -1565,11 +1530,7 @@ def kill_ray_cluster_if_a_worker_dies(object_refs: List[Any], stop_event: thread
 
 class ModelGroup:
     def __init__(
-        self,
-        pg: PlacementGroup,
-        ray_process_cls: RayProcess,
-        num_gpus_per_node: List[int],
-        single_gpu_mode: bool,
+        self, pg: PlacementGroup, ray_process_cls: RayProcess, num_gpus_per_node: List[int], single_gpu_mode: bool
     ):
         self.pg = pg
         self.ray_process_cls = ray_process_cls
@@ -1608,8 +1569,7 @@ class ModelGroup:
         for rank in range(1, world_size):
             print(f"{rank=}, {world_size=}, {rank=}, {master_addr=}, {master_port=}")
             scheduling_strategy = PlacementGroupSchedulingStrategy(
-                placement_group=self.pg,
-                placement_group_bundle_index=get_bundle_index(rank, self.num_gpus_per_node),
+                placement_group=self.pg, placement_group_bundle_index=get_bundle_index(rank, self.num_gpus_per_node)
             )
             worker_policy = ray_process_cls.options(
                 num_cpus=self.num_cpus_per_actor,
@@ -1709,10 +1669,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # Set up datasets
     transform_fn_args = [
         {},
-        {
-            "max_token_length": args.max_token_length,
-            "max_prompt_token_length": args.max_prompt_token_length,
-        },
+        {"max_token_length": args.max_token_length, "max_prompt_token_length": args.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(
         dataset_mixer_list=args.dataset_mixer_list,
@@ -1758,12 +1715,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     ray.get(pg.ready())
 
     inits = []
-    policy_group = ModelGroup(
-        pg,
-        PolicyTrainerRayProcess,
-        args.actor_num_gpus_per_node,
-        args.single_gpu_mode,
-    )
+    policy_group = ModelGroup(pg, PolicyTrainerRayProcess, args.actor_num_gpus_per_node, args.single_gpu_mode)
     wandb_url = wandb.run.get_url() if args.with_tracking else None
     inits.extend(
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url) for model in policy_group.models
@@ -1872,12 +1824,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     accelerator.is_main_process = True  # hack
     if args.push_to_hub:
         print("Pushing model to hub")
-        push_folder_to_hub(
-            accelerator,
-            args.output_dir,
-            args.hf_repo_id,
-            args.hf_repo_revision,
-        )
+        push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
 
 
 if __name__ == "__main__":

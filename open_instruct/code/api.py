@@ -28,10 +28,7 @@ from typing import Any, List
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from open_instruct.code.code_utils import (
-    get_successful_tests_fast,
-    get_successful_tests_stdio,
-)
+from open_instruct.code.code_utils import get_successful_tests_fast, get_successful_tests_stdio
 
 app = FastAPI()
 
