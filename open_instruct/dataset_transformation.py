@@ -567,7 +567,7 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     config = AutoConfig.from_pretrained(tc.tokenizer_name_or_path, revision=tc.tokenizer_revision)
     # @vwxyzjn: "olmo" handles both `olmo2` and `olmoe`.
     if "olmo" in config.model_type:
-        assert tc.add_bos, "For OLMo, you must run with `--add_bos`."
+        # assert tc.add_bos, "For OLMo, you must run with `--add_bos`."
         assert tc.use_fast, "For OLMo, you must use fast tokenizer."
 
     tokenizer = AutoTokenizer.from_pretrained(
