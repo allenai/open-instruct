@@ -262,6 +262,13 @@ class FlatArguments:
         default=0.03,
         metadata={"help": "Linear warmup over warmup_ratio fraction of total steps."},
     )
+    final_lr_ratio: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "Set the final lr value at the end of training to be final_lr_ratio * learning_rate."
+            " Only for linear schedulers, currently."
+        },
+    )
     weight_decay: float = field(
         default=0.0,
         metadata={"help": "Weight decay for AdamW if we apply some."},
@@ -339,6 +346,12 @@ class FlatArguments:
         default=0.5,
         metadata={"help": "Weight for load balancing loss if applicable."},
     )
+    clean_checkpoints_at_end: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to clean up all previous checkpoints at the end of the run.",
+        },
+    )
 
     # Experiment tracking
     with_tracking: bool = False
@@ -375,14 +388,6 @@ class FlatArguments:
     """The beaker evaluation tasks to launch"""
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
-
-    final_lr_ratio: Optional[float] = field(
-        default=None,
-        metadata={
-            "help": "Set the final lr value at the end of training to be final_lr_ratio * learning_rate."
-            " Only for linear schedulers, currently."
-        },
-    )
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -957,7 +962,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         )
 
     # remove all checkpoints to save space
-    if accelerator.is_local_main_process:
+    if args.clean_checkpoints_at_end and accelerator.is_local_main_process:
         clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
 
     if (
