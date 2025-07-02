@@ -6,7 +6,7 @@ from typing import Any, Dict
 from .judge_prompts import HLE_JUDGE_SCORE_PROMPT as HLE_JUDGE_PROMPT, extract_hle_score_judge_response_from_response as extract_hle_judge_response_from_response
 from .judge_prompts import HLE_JUDGE_SCORE_NO_REASONING_PROMPT as HLE_JUDGE_PROMPT_NO_REASONING
 from .run_utils import run_litellm_async
-# from .citation_rewards_utils import score_in_context_citations
+from .citation_rewards_utils import score_in_context_citations
 from .format_utils import extract_answer_context_citations
 
 
@@ -81,18 +81,16 @@ async def compute_hle_reward_async(response: str, correct_answer: str, question:
         result["error"] = "Failed to extract JSON from judge response"
         return result
     
-    # TODO: add citation rewards
-    # citations_score = score_in_context_citations(question, response, extracted_citations)
-    # result["citations_score"] = citations_score
+    # Step 3: Score the citations
+    citations_score = score_in_context_citations(question, extracted_answer, extracted_citations)
     
+    # Step 4: Final score
     scoring_results = {
-        "hle_judge_reward": judge_reward["reward"],
-        "score": judge_reward["reward"],
-        "ann_score": judge_reward["reward"],
+        "judge_score": judge_reward["reward"],
+        "citations_score": citations_score,
     }
     
-    # Step 4: Score the response
-    result["reward"] = scoring_results["hle_judge_reward"]
+    result["reward"] = 0.7 * scoring_results["judge_score"] + 0.3 * scoring_results["citations_score"]
     result["log_values"] = scoring_results  
     result["scoring_results"] = scoring_results
     result["extraction_success"] = True

@@ -78,8 +78,8 @@ def extract_citations_from_context(context: str) -> Dict[str, str]:
     citations = {}
 
     # Pattern to match <snippets id="xxx" ...> content </snippets>
-    # Updated to handle quoted attributes in HTML-like format
-    pattern = r'<snippets\s+id=(["\'])([^"\']+)\1[^>]*>(.*?)</snippets>'
+    # Updated to handle both quoted and unquoted attributes in HTML-like format
+    pattern = r'<snippets\s+id=(["\']?)([^"\'>\s]+)\1[^>]*>(.*?)</snippets>'
 
     matches = re.findall(pattern, context, re.DOTALL)
 
@@ -90,5 +90,4 @@ def extract_citations_from_context(context: str) -> Dict[str, str]:
         citations[clean_id] = clean_search_results
 
     return citations
-
 

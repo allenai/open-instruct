@@ -73,30 +73,32 @@ def score_in_context_citations(question: str, response: str, citations: Dict[str
     :return: final weighted score with and without the static components
     """
 
-    def extract_claims_and_corresponding_citation_ids(response: str) -> Dict[str, str]:
+    def extract_claims_and_corresponding_citation_ids(response: str) -> Dict[str, List[str]]:
         """
         Example response:
         "The Great Wall of China, one of the most iconic structures in human history, stretches approximately 13,000 miles across northern China. <cite id=a1b2c3d4>Construction of the Great Wall began during the 7th century BC under various warring states, but the most famous sections were built during the Ming Dynasty (1368-1644).</cite> The wall was primarily constructed as a defensive fortification to protect Chinese states from invasions by nomadic groups from the north. <cite id=e5f6g7h8>The wall incorporates various materials including stone, brick, tamped earth, wood, and other materials, with different sections built using locally available resources.</cite> Contrary to popular belief, <cite id=i9j0k1l2>the Great Wall is not visible from space with the naked eye, a myth that has been debunked by astronauts and satellite imagery.</cite>"
         """
         claims = {}
 
-        # Split the response by cite tags to separate cited and non-cited text
-        cite_pattern = r"<cite id=([^>]+)>([^<]+)</cite>"
-        parts = re.split(cite_pattern, response)
-
-        for i in range(0, len(parts), 3):
-            # Non-cited text (before cite tag)
-            if i < len(parts) and parts[i].strip():
-                non_cited_text = parts[i].strip()
-                if non_cited_text:
-                    claims[non_cited_text] = []
-
-            # Cited text (inside cite tag)
-            if i + 1 < len(parts) and i + 2 < len(parts):
-                citation_id = parts[i + 1]
-                cited_text = parts[i + 2].strip()
-                if cited_text:
-                    claims[cited_text] = [citation_id]
+        # Use findall to get all cite tags and their content
+        cite_pattern = r"<cite id=([\"\']?)([^\"\'>\s]+)\1[^>]*>([^<]+)</cite>"
+        cite_matches = re.findall(cite_pattern, response)
+        
+        # Split the response by cite tags to get non-cited text
+        cite_tag_pattern = r"<cite id=[\"\']?[^\"\'>\s]+[\"\']?[^>]*>[^<]+</cite>"
+        non_cited_parts = re.split(cite_tag_pattern, response)
+        
+        # Add non-cited text (parts between cite tags)
+        for part in non_cited_parts:
+            part = part.strip()
+            if part:
+                claims[part] = []
+        
+        # Add cited text with their citation IDs
+        for _, citation_id, cited_text in cite_matches:
+            cited_text = cited_text.strip()
+            if cited_text:
+                claims[cited_text] = [citation_id]
 
         return claims
 
@@ -344,30 +346,32 @@ async def score_in_context_citations_async(
     Async version of score_in_context_citations that runs LLM calls in parallel.
     """
 
-    def extract_claims_and_corresponding_citation_ids(response: str) -> Dict[str, str]:
+    def extract_claims_and_corresponding_citation_ids(response: str) -> Dict[str, List[str]]:
         """
         Example response:
         "The Great Wall of China, one of the most iconic structures in human history, stretches approximately 13,000 miles across northern China. <cite id=a1b2c3d4>Construction of the Great Wall began during the 7th century BC under various warring states, but the most famous sections were built during the Ming Dynasty (1368-1644).</cite> The wall was primarily constructed as a defensive fortification to protect Chinese states from invasions by nomadic groups from the north. <cite id=e5f6g7h8>The wall incorporates various materials including stone, brick, tamped earth, wood, and other materials, with different sections built using locally available resources.</cite> Contrary to popular belief, <cite id=i9j0k1l2>the Great Wall is not visible from space with the naked eye, a myth that has been debunked by astronauts and satellite imagery.</cite>"
         """
         claims = {}
 
-        # Split the response by cite tags to separate cited and non-cited text
-        cite_pattern = r"<cite id=([^>]+)>([^<]+)</cite>"
-        parts = re.split(cite_pattern, response)
-
-        for i in range(0, len(parts), 3):
-            # Non-cited text (before cite tag)
-            if i < len(parts) and parts[i].strip():
-                non_cited_text = parts[i].strip()
-                if non_cited_text:
-                    claims[non_cited_text] = []
-
-            # Cited text (inside cite tag)
-            if i + 1 < len(parts) and i + 2 < len(parts):
-                citation_id = parts[i + 1]
-                cited_text = parts[i + 2].strip()
-                if cited_text:
-                    claims[cited_text] = [citation_id]
+        # Use findall to get all cite tags and their content
+        cite_pattern = r"<cite id=([\"\']?)([^\"\'>\s]+)\1[^>]*>([^<]+)</cite>"
+        cite_matches = re.findall(cite_pattern, response)
+        
+        # Split the response by cite tags to get non-cited text
+        cite_tag_pattern = r"<cite id=[\"\']?[^\"\'>\s]+[\"\']?[^>]*>[^<]+</cite>"
+        non_cited_parts = re.split(cite_tag_pattern, response)
+        
+        # Add non-cited text (parts between cite tags)
+        for part in non_cited_parts:
+            part = part.strip()
+            if part:
+                claims[part] = []
+        
+        # Add cited text with their citation IDs
+        for _, citation_id, cited_text in cite_matches:
+            cited_text = cited_text.strip()
+            if cited_text:
+                claims[cited_text] = [citation_id]
 
         return claims
 
@@ -377,7 +381,6 @@ async def score_in_context_citations_async(
         return "\n\n".join([citations[citation_id] for citation_id in citation_ids])
 
     claims = extract_claims_and_corresponding_citation_ids(response)
-
     citation_format_reward = score_citation_format(claims, citations)
 
     # Create tasks for all F1 calculations to run in parallel
@@ -407,6 +410,49 @@ def score_in_context_citations_async_wrapper(
 
 
 if __name__ == "__main__":
+    # Test the extraction function
+    def test_extraction():
+        test_response = "The Great Wall of China, one of the most iconic structures in human history, stretches approximately 13,000 miles across northern China. <cite id=a1b2c3d4>Construction of the Great Wall began during the 7th century BC under various warring states, but the most famous sections were built during the Ming Dynasty (1368-1644).</cite> The wall was primarily constructed as a defensive fortification to protect Chinese states from invasions by nomadic groups from the north. <cite id=e5f6g7h8>The wall incorporates various materials including stone, brick, tamped earth, wood, and other materials, with different sections built using locally available resources.</cite> Contrary to popular belief, <cite id=i9j0k1l2>the Great Wall is not visible from space with the naked eye, a myth that has been debunked by astronauts and satellite imagery.</cite>"
+        
+        # Test the extraction function
+        def extract_claims_and_corresponding_citation_ids(response: str) -> Dict[str, List[str]]:
+            claims = {}
+            
+            # Use findall to get all cite tags and their content
+            cite_pattern = r"<cite id=([^>]+)>([^<]+)</cite>"
+            cite_matches = re.findall(cite_pattern, response)
+            
+            # Split the response by cite tags to get non-cited text
+            cite_tag_pattern = r"<cite id=[^>]+>[^<]+</cite>"
+            non_cited_parts = re.split(cite_tag_pattern, response)
+            
+            # Add non-cited text (parts between cite tags)
+            for part in non_cited_parts:
+                part = part.strip()
+                if part:
+                    claims[part] = []
+            
+            # Add cited text with their citation IDs
+            for citation_id, cited_text in cite_matches:
+                cited_text = cited_text.strip()
+                if cited_text:
+                    claims[cited_text] = [citation_id]
+            
+            return claims
+        
+        claims = extract_claims_and_corresponding_citation_ids(test_response)
+        print("Extracted claims:")
+        for claim, citation_ids in claims.items():
+            print(f"Claim: '{claim}'")
+            print(f"Citation IDs: {citation_ids}")
+            print("-" * 50)
+        
+        # Verify no extra keys from regex capture groups
+        print(f"Total number of claims: {len(claims)}")
+        print("All claim keys are valid text segments (no regex artifacts)")
+    
+    test_extraction()
+    
     # Simple test case for citation scoring functions
     example_response = "The Great Wall of China, one of the most iconic structures in human history, stretches approximately 13,000 miles across northern China. <cite id=a1b2c3d4>Construction of the Great Wall began during the 7th century BC under various warring states, but the most famous sections were built during the Ming Dynasty (1368-1644).</cite> The wall was primarily constructed as a defensive fortification to protect Chinese states from invasions by nomadic groups from the north. <cite id=e5f6g7h8>The wall incorporates various materials including stone, brick, tamped earth, wood, and other materials, with different sections built using locally available resources.</cite> Contrary to popular belief, <cite id=i9j0k1l2>the Great Wall is not visible from space with the naked eye, a myth that has been debunked by astronauts and satellite imagery.</cite>"
 

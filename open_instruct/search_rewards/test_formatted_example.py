@@ -62,7 +62,7 @@ test_case = {
     "case_id": "great_wall_test_001",
 }
 
-def test_formatted_example():
+def test_formatted_example(reward_type: str = "hle"):
     """Test the reward computation with the formatted example from formatted_test_answer.py"""
     print("Testing reward computation with formatted example...")
     print("=" * 60)
@@ -79,11 +79,12 @@ def test_formatted_example():
     print()
 
     print("Computing reward...")
-    result = compute_paper_reward(full_response, test_case)
-    
-    # question = test_case['metric_config']['config']['question']
-    # correct_answer = "The Great Wall of China, one of the most iconic structures in human history, stretches approximately 13,000 miles across northern China. Construction of the Great Wall began during the 8th century BC under various warring states, but the most famous sections were built during the Ming Dynasty (1368-1644)."
-    # result = compute_hle_reward(full_response, correct_answer, question)
+    if reward_type == "paper":
+        result = compute_paper_reward(full_response, test_case)
+    elif reward_type == "hle":
+        question = test_case['metric_config']['config']['question']
+        correct_answer = "The Great Wall of China, one of the most iconic structures in human history, stretches approximately 13,000 miles across northern China. Construction of the Great Wall began during the 8th century BC under various warring states, but the most famous sections were built during the Ming Dynasty (1368-1644)."
+        result = compute_hle_reward(full_response, correct_answer, question)
 
     print("Results:")
     print("-" * 40)
@@ -132,4 +133,4 @@ def test_formatted_example():
 
 
 if __name__ == "__main__":
-    test_formatted_example()
+    test_formatted_example(reward_type="hle")
