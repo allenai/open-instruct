@@ -24,4 +24,4 @@ jobs:
       - name: Set up Python
         run: uv python install
       - name: Run unit tests
-        run: uv run --default-groups="test" pytest
+        run: uv run pytest
