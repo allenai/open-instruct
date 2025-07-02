@@ -54,8 +54,12 @@ def get_encoding_for_model(model_name: str):
     elif "claude" in model_name_lower:
         return tiktoken.get_encoding("cl100k_base")
 
-    # Models that use gpt2 encoding
-    gpt2_models = ["qwen", "llama", "llama2", "llama3", "mistral", "codellama"]
+    # Models that use gpt2 encoding (including OLMo and other AI2 models)
+    gpt2_models = [
+        "qwen", "llama", "llama2", "llama3", "mistral", "codellama",
+        "olmo", "olmoe", "olmo2",  # AI2 OLMo models use GPTNeoX tokenizer (GPT-2 based)
+        "allenai/olmo", "allenai/olmoe", "allenai/olmo2"  # Full model names
+    ]
     if any(model in model_name_lower for model in gpt2_models):
         return tiktoken.get_encoding("gpt2")
 
@@ -90,16 +94,8 @@ def check_context_window_limit(
         return True
 
     try:
-        # Determine the appropriate tokenizer based on model name
-        if "gpt-4" in model_name.lower() or "gpt-3.5" in model_name.lower():
-            encoding = tiktoken.get_encoding("cl100k_base")
-        elif "claude" in model_name.lower():
-            encoding = tiktoken.get_encoding("cl100k_base")  # Claude uses cl100k_base
-        else:
-            # Default to cl100k_base for other models
-            # encoding = tiktoken.get_encoding("cl100k_base")
-            # Get the appropriate encoding for the model
-            encoding = get_encoding_for_model(model_name)
+        # Get the appropriate encoding for the model
+        encoding = get_encoding_for_model(model_name)
 
         # Count tokens in all messages
         total_message_tokens = 0
