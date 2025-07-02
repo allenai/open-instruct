@@ -30,4 +30,3 @@ tasks:
     context:
       priority: high
       preemptible: False
-#  hamishivi/general-verifier
