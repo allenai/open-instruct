@@ -36,13 +36,12 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+# Import modules from batch_code_edit.py and regenerate_dataset_completions.py
+import batch_code_edit
 import datasets
 import openai
+import regenerate_dataset_completions
 import requests
-
-# Import DATASET_COLUMN_MAPPINGS from batch_code_edit.py
-from batch_code_edit import DATASET_COLUMN_MAPPINGS
-from regenerate_dataset_completions import MODEL_COSTS_PER_1M_TOKENS
 
 # Set up logging with file name and line number
 logging.basicConfig(
@@ -62,8 +61,8 @@ class TokenUsage:
     @property
     def cost(self) -> float:
         cost = (
-            self.prompt_tokens * MODEL_COSTS_PER_1M_TOKENS["o3-batch"]["input"]
-            + self.completion_tokens * MODEL_COSTS_PER_1M_TOKENS["o3-batch"]["output"]
+            self.prompt_tokens * regenerate_dataset_completions.MODEL_COSTS_PER_1M_TOKENS["o3-batch"]["input"]
+            + self.completion_tokens * regenerate_dataset_completions.MODEL_COSTS_PER_1M_TOKENS["o3-batch"]["output"]
         ) / 1_000_000
         return cost
 
@@ -79,18 +78,13 @@ def parse_args() -> argparse.Namespace:
         description="Process Azure OpenAI batch results and replace the code_column with generated code."
     )
     p.add_argument(
-        "batch_id",
-        help="Azure batch job ID(s) to process (comma-separated for multiple)",
+        "batch_file",
+        help="Path to a file whose lines are of the form '<dataset_name>: batch_id1,batch_id2,...' (batch IDs comma-separated)",
     )
     p.add_argument(
-        "--input-dataset",
-        required=True,
-        help="Source HF dataset containing the original data",
-    )
-    p.add_argument(
-        "--output-dataset",
-        required=True,
-        help="Target HF dataset to push the modified dataset",
+        "--output-suffix",
+        default="-edited",
+        help="Suffix to append to the original dataset name when pushing to the Hub",
     )
     p.add_argument(
         "--split",
@@ -318,13 +312,22 @@ def process_batch_results(
     split: str = "train",
     max_rows: Optional[int] = None,
     skip_validation: bool = False,
+    no_upload: bool = False,
 ):
     """Process batch results and replace code_column with generated code."""
     # Load the original dataset
     original_ds = datasets.load_dataset(input_dataset, split=split)
     
+    # Get language and handle dataset name like batch_code_edit.py does
+    language = batch_code_edit.get_language(input_dataset)
+    base_dataset_name = input_dataset
+    print(f'input_dataset: {input_dataset}, language: {language}')
+    if language in input_dataset:
+        base_dataset_name = input_dataset.replace(f"-{language}", "")
+        logger.info(f'Updated dataset_name: {base_dataset_name}')
+    
     # Get column mapping to determine how to create id_lookup
-    column_mapping = get_dataset_columns(input_dataset)
+    column_mapping = batch_code_edit.get_dataset_columns(base_dataset_name)
     
     # Create id_lookup based on the column mapping
     if column_mapping["id_column"] == "python_index":
@@ -359,8 +362,7 @@ def process_batch_results(
     generated_code_map = {}
     for result_id, batch_result in all_batch_results.items():
         # Extract code from the response using the language from the dataset configuration
-        print(batch_result.content)
-        extracted_code = extract_code_from_response(batch_result.content, column_mapping["language"])
+        extracted_code = extract_code_from_response(batch_result.content, language)
         if extracted_code is not None:
             generated_code_map[result_id] = extracted_code
     
@@ -380,21 +382,18 @@ def process_batch_results(
         modified_dataset = modified_dataset.select(range(min(max_rows, len(modified_dataset))))
         print(f"Limited output dataset to {len(modified_dataset)} rows (max_rows={max_rows})")
     
-    # Push to Hugging Face Hub
+    # Push to Hugging Face Hub, unless --no-upload was specified
+    if no_upload:
+        print("--no-upload flag set. Skipping push to the Hub.")
+        return
+
     token = os.environ.get("HF_TOKEN")
     if not token:
         print("Error: HF_TOKEN environment variable not set. Cannot push to Hub.")
         return
-    
+
     modified_dataset.push_to_hub(output_dataset, split=split, token=token)
     print(f"Pushed to {output_dataset} ({split})")
-
-
-def get_dataset_columns(dataset_name: str) -> Dict[str, str]:
-    """Get the column mappings for a specific dataset."""
-    if dataset_name not in DATASET_COLUMN_MAPPINGS:
-        raise ValueError(f"No column mapping found for dataset: {dataset_name}")
-    return DATASET_COLUMN_MAPPINGS[dataset_name]
 
 
 def extract_code_from_response(response_text: str, language: str) -> Optional[str]:
@@ -406,19 +405,13 @@ def extract_code_from_response(response_text: str, language: str) -> Optional[st
     if match:
         return match.group(1).strip()
     
-    # Fallback: try to find any code block
-    pattern = r"```\n(.*?)\n```"
-    match = re.search(pattern, response_text, re.DOTALL)
-    
-    if match:
-        return match.group(1).strip()
-    
     # If no code block found, check if response is just 'ERROR'
     if response_text.strip().upper() == "ERROR":
+        logger.warning(f"Response is just 'ERROR': {response_text}.")
         return None
     
-    # If no code block found, return the entire response as code
-    return response_text.strip()
+    logger.warning(f"No code block found in response: {response_text}. Must have pattern ```{language}\n(.*?)\n```")
+    return None
 
 
 def modify_dataset_with_generated_code(
@@ -426,59 +419,97 @@ def modify_dataset_with_generated_code(
     split: str,
     generated_code_map: Dict[str, str],
 ) -> datasets.Dataset:
-    """Modify the dataset by replacing the code_column with generated code.
-    
-    Only includes rows that have been modified with generated code.
+    """Return a copy of the dataset with a new column `edited_solution` that
+    contains the generated code for rows present in `generated_code_map`.
+    Rows without generated code will have an empty string for this column.
     """
     logger.info(f"Modifying dataset {dataset_name}...")
     
     # Load the original dataset
     dataset = datasets.load_dataset(dataset_name, split=split)
-    column_mapping = get_dataset_columns(dataset_name)
     
-    # Create a new dataset with only modified rows
-    modified_rows = []
+    # Get language and base dataset name like batch_code_edit.py does
+    language = batch_code_edit.get_language(dataset_name)
+    base_dataset_name = dataset_name
+    if language in dataset_name:
+        base_dataset_name = dataset_name.replace(f"-{language}", "")
+        logger.info(f'Updated dataset_name: {base_dataset_name}')
     
-    for i, row in enumerate(dataset):
-        # Get the row ID
-        row_id = row[column_mapping["id_column"]] if column_mapping["id_column"] != "python_index" else i
-        # Convert to string for consistent comparison with generated_code_map keys
-        row_id_str = str(row_id)
+    # Get column mapping from the base dataset name
+    column_mapping = batch_code_edit.get_dataset_columns(base_dataset_name)
+    
+    # Build a mapping from row ID to the original row for quick lookup
+    id_to_row: Dict[str, dict] = {
+            str(row[column_mapping["id_column"]]): row for row in dataset
+    }
 
-        # Only include rows that have generated code
-        if row_id_str in generated_code_map:
-            generated_code = generated_code_map[row_id_str]
-            if generated_code is not None:
-                # Create a new row with the generated code
-                new_row = dict(row)
-                new_row[column_mapping["code_column"]] = generated_code
-                modified_rows.append(new_row)
-    
-    # Create new dataset with only modified rows, preserving original features
-    try:
-        modified_dataset = datasets.Dataset.from_list(modified_rows, features=dataset.features)
-    except Exception as e:
-        print(f"Error creating modified dataset: {e}")
-        print(f"Modified rows: {modified_rows}")
-        print(f"Dataset features: {dataset.features}")
-        raise e
-    
-    logger.info(f"Modified dataset created with {len(modified_rows)} rows (only rows with generated code)")
-    
+    # Prepare features: copy existing and add edited_solution if not present
+    new_features = dataset.features.copy()
+    if "edited_solution" not in new_features:
+        from datasets import Value  # local import to avoid top-level dependency issues
+
+        new_features["edited_solution"] = Value("string")
+
+    # Create rows only for IDs that have generated code
+    modified_rows = []
+    for result_id, generated_code in generated_code_map.items():
+        new_row = dict(id_to_row[result_id])
+        new_row["edited_solution"] = generated_code
+        modified_rows.append(new_row)
+
+    modified_dataset = datasets.Dataset.from_list(modified_rows, features=new_features)
+
+    logger.info(
+        "Modified dataset created with %d rows (only rows with generated code) and added 'edited_solution' column",
+        len(modified_dataset),
+    )
+
     return modified_dataset
+
+
+def parse_batch_file(path: str) -> Dict[str, List[str]]:
+    """Parse the batch mapping file.
+
+    Expected line format:
+        <dataset_name>: batch1,batch2,batch3
+    Lines starting with '#' or empty lines are ignored.
+    """
+    mapping: Dict[str, List[str]] = {}
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if ":" not in line:
+                raise ValueError(f"Invalid line in batch file (missing ':'): {line}")
+            dataset_name, batches = line.split(":", 1)
+            batch_ids = [b.strip() for b in batches.split(",") if b.strip()]
+            mapping[dataset_name.strip()] = batch_ids
+    return mapping
 
 
 def main():
     args = parse_args()
-    # Split batch_id into list if comma-separated
-    batch_ids = args.batch_id.split(",")
-    process_batch_results(
-        batch_ids=batch_ids,
-        input_dataset=args.input_dataset,
-        output_dataset=args.output_dataset,
-        split=args.split,
-        max_rows=args.max_rows,
-    )
+    dataset_to_batches = parse_batch_file(args.batch_file)
+    for dataset_name, batch_ids in dataset_to_batches.items():
+        # Change username from saurabh5 to finbarr
+        output_dataset = dataset_name.replace("saurabh5/", "finbarr/") + args.output_suffix
+        logger.info(
+            "Processing dataset %s with %d batch(es) -> output dataset %s",
+            dataset_name,
+            len(batch_ids),
+            output_dataset,
+        )
+
+        process_batch_results(
+            batch_ids=batch_ids,
+            input_dataset=dataset_name,
+            output_dataset=output_dataset,
+            split=args.split,
+            max_rows=args.max_rows,
+            skip_validation=args.skip_validation,
+            no_upload=args.no_upload,
+        )
 
 
 if __name__ == "__main__":

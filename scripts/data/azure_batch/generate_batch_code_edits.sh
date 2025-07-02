@@ -2,22 +2,19 @@
 set -e
 
 # Define datasets
-datasets=(
-    #"saurabh5/llama-nemotron-rlvr"
-    #"saurabh5/the-algorithm-python"
-    #"saurabh5/rlvr_acecoder"
-    "saurabh5/open-code-reasoning-rlvr"
-    "saurabh5/tulu-3-personas-code-rlvr"
-)
-
-# Join datasets with commas
-dataset_string=$(IFS=','; echo "${datasets[*]}")
-
-echo "Processing datasets: $dataset_string"
+#languages=("JavaScript" "bash" "cpp" "Go" "Java" "Rust" "Swift" "Kotlin" "Haskell" "Lean" "TypeScript" "Python")
+# Removing the languages that have already been submitted. 
+languages=("Python")
+datasets=()
+for language in "${languages[@]}"; do
+    dataset="saurabh5/rlvr-code-data-$language"
+    datasets+=("$dataset")
+done
+echo "Processing datasets: ${datasets[@]}"
+datasets_str=$(IFS=','; echo "${datasets[*]}")
 python batch_code_edit.py \
-    --datasets "$dataset_string" \
+    --datasets "$datasets_str" \
     --num-errors 3 \
     --split "train" \
-    --sample-limit 10 \
     --model "o3" \
     --output-dir "output"

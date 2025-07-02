@@ -27,7 +27,7 @@ import tiktoken
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+    datefmt="%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ MODEL_COSTS_PER_1M_TOKENS = {
 }
 
 # Maximum number of prompts per batch file
-MAX_PROMPTS_PER_BATCH = 95_000
+MAX_PROMPTS_PER_BATCH = 50_000
 
 # Dataset-specific column mappings
 # TODO: Fill out these mappings for each dataset
@@ -79,6 +79,12 @@ DATASET_COLUMN_MAPPINGS = {
         "id_column": "id",
         "language": "python",
     },
+    "saurabh5/rlvr-code-data": {
+        "code_column": "translated_solution",
+        "test_column": "ground_truth",
+        "description_column": "translated_problem",
+        "id_column": "id",
+    },
 }
 
 
@@ -88,8 +94,7 @@ class CodeError:
     prompt: str
 
 
-SUPPORTED_LANGUAGES = ["python", "javascript", "java", "C++", "Rust", "Bash",
-                       # Need to add errors for:
+SUPPORTED_LANGUAGES = ["python", "javascript", "java", "cpp", "rust", "bash",
                        "go", "swift", "kotlin", "haskell", "lean", "typescript"]
 
 # Language-specific coding errors
@@ -246,7 +251,7 @@ LANGUAGE_ERRORS: dict[str, list[CodeError]] = {
         CodeError(tag="float-prec", prompt="Compare two double values with ==."),
         CodeError(tag="mutable-static", prompt="Make a static List<?> cache and mutate it from multiple threads without synchronization."),
     ],
-    "C++": [
+    "cpp": [
         CodeError(
             tag="eq-asgn",
             prompt="Replace == with = inside an if condition.",
@@ -336,7 +341,7 @@ LANGUAGE_ERRORS: dict[str, list[CodeError]] = {
             prompt="Inline the constant 0.75 multiple times.",
         ),
     ],
-    "Rust": [
+    "rust": [
         CodeError(
             tag="eq-asgn",
             prompt="Replace == with = inside an if (won't compile—ownership tests still catch it).",
@@ -423,7 +428,7 @@ LANGUAGE_ERRORS: dict[str, list[CodeError]] = {
         ),
         CodeError(tag="error-ignore", prompt="Assign let _ = fallible_call(); and ignore the Result."),
     ],
-    "Bash": [
+    "bash": [
         CodeError(
             tag="unquoted-expansion",
             prompt="Remove the double-quotes around \"$var\" so it becomes $var.",
@@ -741,7 +746,7 @@ def get_dataset_columns(dataset_name: str) -> Dict[str, str]:
     return DATASET_COLUMN_MAPPINGS[dataset_name]
 
 
-def sample_errors(language: str, num_errors: int) -> List[str]:
+def sample_errors(language: str, num_errors: int) -> List[CodeError]:
     """Sample random errors for the given language."""
     if language not in LANGUAGE_ERRORS:
         raise ValueError(f"No errors defined for language: {language}")
@@ -886,6 +891,20 @@ def parse_args():
     return args
 
 
+def get_language(dataset_name: str) -> str:
+    """Get the language for a dataset."""
+    if dataset_name.startswith("saurabh5/rlvr-code-data-"):
+        language = dataset_name.split("-")[-1]
+        if language in SUPPORTED_LANGUAGES:
+            return language
+        else:
+            raise ValueError(f"Unknown language: {language}. Supported languages: {SUPPORTED_LANGUAGES}.")
+    elif dataset_name in DATASET_COLUMN_MAPPINGS:
+        return DATASET_COLUMN_MAPPINGS[dataset_name]["language"]
+    else:
+        raise ValueError(f"Unknown dataset: {dataset_name}")
+
+
 def make_requests_for_dataset(
     dataset_name: str,
     num_errors: int,
@@ -898,14 +917,20 @@ def make_requests_for_dataset(
     timestamp: int,
 ) -> tuple[List[PromptData], List[Dict[str, Any]], int, int]:
     """Make requests for a dataset."""
-    logger.info(f"Processing dataset: {dataset_name}")
+    logger.info(f"Making requests for dataset: {dataset_name}")
 
     # Load dataset
     dataset = datasets.load_dataset(dataset_name, split=split)
     logger.info(f"Loaded {len(dataset)} rows from {dataset_name}")
 
     # Get column mappings
-    column_mapping = get_dataset_columns(dataset_name)
+    language = get_language(dataset_name)
+    # Use a separate variable for column mapping lookup to avoid modifying the original dataset_name
+    column_mapping_dataset_name = dataset_name
+    if language in dataset_name:
+        column_mapping_dataset_name = dataset_name.replace(f"-{language}", "")
+        logging.info(f'Using column mapping for: {column_mapping_dataset_name}')
+    column_mapping = get_dataset_columns(column_mapping_dataset_name)
 
     # Determine number of samples to process
     num_samples = (
@@ -918,12 +943,17 @@ def make_requests_for_dataset(
     prompts: List[PromptData] = []
     metadata: List[Dict[str, Any]] = []
     total_input_tokens, total_output_tokens = 0, 0
-
+    rows_without_code = 0
+    total_rows = 0
     for idx in sampled_indices:
         row = dataset[idx]
-
+        total_rows += 1
         # Extract data using column mappings
         code = row[column_mapping["code_column"]]
+        if code is None:
+            logger.warning(f"Code is None for row {idx} in {dataset_name}")
+            rows_without_code += 1
+            continue
         description = row[column_mapping["description_column"]]
         if column_mapping["id_column"] == "python_index":
             row_id = idx
@@ -931,16 +961,16 @@ def make_requests_for_dataset(
             row_id = row[column_mapping["id_column"]]
 
         # Sample errors
-        sampled_errors = sample_errors(column_mapping["language"], num_errors)
+        sampled_errors = sample_errors(language, num_errors)
 
         # Create prompt
-        prompt_text = create_prompt(code, sampled_errors, column_mapping["language"])
+        prompt_text = create_prompt(code, sampled_errors, language)
 
-        # Create PromptData object
+        # Create PromptData object - use the original dataset_name
         prompt_data = PromptData(
             id=row_id,
             prompt=prompt_text,
-            dataset_name=dataset_name,
+            dataset_name=dataset_name,  # Use original dataset_name, not modified one
             original_row_id=row_id,
             sampled_errors=sampled_errors,
         )
@@ -951,7 +981,7 @@ def make_requests_for_dataset(
             "prompt_id": row_id,
             "dataset_name": dataset_name,
             "original_row_id": row_id,
-            "language": column_mapping["language"],
+            "language": language,
             "sampled_errors": [error.tag for error in sampled_errors],
             "description": description,
             "timestamp": timestamp,
@@ -968,6 +998,7 @@ def make_requests_for_dataset(
         )  # Assume output is roughly 2x input
         total_output_tokens += estimated_output_tokens
 
+    logger.info(f"Total rows: {total_rows}, rows without code: {rows_without_code}")
     return prompts, metadata, total_input_tokens, total_output_tokens
 
 
@@ -982,7 +1013,7 @@ def main(
     output_dir: str = "./output",
 ) -> None:
     # Parse dataset list
-    dataset_names = [name.strip() for name in datasets.split(",")]
+    dataset_names = [name.strip().lower() for name in datasets.split(",")]
 
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
@@ -1014,6 +1045,10 @@ def main(
             tokenizer,
             timestamp,
         )
+        logger.info(f'{len(prompts)} prompts for {dataset_name}.')
+        prompt_names = set(p.dataset_name for p in prompts)
+        assert len(prompt_names) == 1 and next(iter(prompt_names)) == dataset_name, f"Prompts for {dataset_name} have different dataset names: {prompt_names}"
+        assert len(prompts) > 0, f"No prompts found for dataset: {dataset_name}"
         all_prompts.extend(prompts)
         all_metadata.extend(metadata)
         total_input_tokens += input_tokens
@@ -1026,20 +1061,21 @@ def main(
     ) / 1_000_000
 
     logger.info("\nSummary:")
-    logger.info(f"Total prompts: {len(all_prompts)}")
+    logger.info(f"Total prompts: {len(all_prompts):,}")
     logger.info(
-        f"Input tokens: {total_input_tokens}, estimated output tokens: {total_output_tokens}"
+        f"Input tokens: {total_input_tokens:,} (estimated output tokens: {total_output_tokens:,})"
     )
-    logger.info(f"Estimated cost: ${estimated_cost:.2f}")
+    logger.info(f"Estimated cost: ${estimated_cost:,.2f}")
 
     metadata_path = f"{output_dir}/metadata.json"
-    with open(metadata_path, "w") as f:
+    with open(metadata_path, "a") as f:
         json.dump(all_metadata, f, indent=2)
     logger.info(f"Saved metadata to {metadata_path}.")
 
     if dry_run:
         logger.info("Dry run mode - exiting without making API calls. Prompts:")
-        for prompt in all_prompts:
+        max_length = min(3, len(all_prompts))
+        for prompt in all_prompts[:max_length]:
             logger.info(prompt.prompt)
         sys.exit(0)
 
@@ -1058,7 +1094,7 @@ def main(
 
     # Process each dataset separately to track batch IDs
     for dataset_name in dataset_names:
-        logger.info(f"Processing dataset: {dataset_name}")
+        logger.info(f"Creating batch files for dataset: {dataset_name}")
         
         # Filter prompts for this dataset
         dataset_prompts = [p for p in all_prompts if p.dataset_name == dataset_name]
@@ -1076,7 +1112,6 @@ def main(
         # Submit batch jobs for this dataset
         dataset_batch_ids[dataset_name] = []
         logger.info(f"Submitting {len(batch_file_paths)} batch jobs for {dataset_name}...")
-        
         for batch_file_path in batch_file_paths:
             batch_file = client.files.create(
                 file=open(batch_file_path, "rb"), purpose="batch"
@@ -1096,6 +1131,10 @@ def main(
     logger.info("\nBatch job IDs by dataset:")
     for dataset_name, batch_ids in dataset_batch_ids.items():
         logger.info(f"{dataset_name}: {', '.join(batch_ids)}")
+    with open(f"{output_dir}/batch_ids.txt", "a") as f:
+        for dataset_name, batch_ids in dataset_batch_ids.items():
+            f.write(f"{dataset_name}: {', '.join(batch_ids)}\n")
+    logger.info(f"Saved batch IDs to {output_dir}/batch_ids.txt")
     all_batch_ids = [batch_id for batch_ids in dataset_batch_ids.values() for batch_id in batch_ids]
     logger.info(f"\nAll batches: {','.join(all_batch_ids)}")
     logger.info("\nYou can check the status of your batch jobs using the IDs above.")

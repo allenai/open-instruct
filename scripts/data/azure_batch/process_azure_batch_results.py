@@ -85,6 +85,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="Limit the number of rows in the output dataset (for testing purposes)",
     )
+    p.add_argument(
+        "--skip-validation",
+        action="store_true",
+        help="Skip validation that the number of rows are close to the original dataset",
+    )
     return p.parse_args()
 
 
@@ -287,6 +292,7 @@ def process_batch_results(
     split: str,
     push: bool,
     max_rows: Optional[int] = None,
+    skip_validation: bool = False,
 ):
     # Load the original dataset first so we can look up failed prompts
     original_ds = datasets.load_dataset(input_dataset, split=split)
@@ -314,12 +320,13 @@ def process_batch_results(
     print(f"Estimated cost: ${total_token_usage.cost:.4f}\n")
 
     new_rows = []
-
+    num_skipped = 0
     for result_id, batch_result in all_batch_results.items():
         # Check that row has all required features
         row = id_lookup.get(result_id)
         if row is None:
-            print(f"[skip] id {result_id=} not in source dataset")
+            num_skipped += 1
+            print(f"[skip] id {result_id=} not in source dataset. Row has keys: {batch_result=}")
             continue
         missing_features = set(original_ds.features.keys()) - set(row.keys())
         if missing_features:
@@ -329,21 +336,24 @@ def process_batch_results(
         updated = copy.deepcopy(row)
 
         # We should always have two messages: user and assistant.
-        assert len(updated["messages"]) == 2
+        assert len(updated["messages"]) == 2, f"Row {result_id=} has {len(updated['messages'])} messages: {updated['messages']}"
         updated["messages"][1]["content"] = batch_result.content
 
         new_rows.append(updated)
+    if num_skipped == len(all_batch_results):
+        raise ValueError("All examples were skipped. Exiting.")
 
     print(f"Kept {len(all_batch_results)} examples.")
     print(f"Previous dataset had {len(original_ds)} examples.")
     print(f"New dataset has {len(all_batch_results)} examples.")
 
-    if abs(len(all_batch_results) - len(original_ds)) > 0.01 * len(original_ds):
-        raise ValueError(
-            f"New dataset has {len(all_batch_results)} examples, but "
-            f"original dataset had {len(original_ds)} examples."
-            "We automatically reject if there's more than a 1% difference."
-        )
+    if not skip_validation:
+        if abs(len(all_batch_results) - len(original_ds)) > 0.01 * len(original_ds):
+            raise ValueError(
+                f"New dataset has {len(all_batch_results)} examples, but "
+                f"original dataset had {len(original_ds)} examples."
+                "We automatically reject if there's more than a 1% difference."
+            )
 
     if not new_rows:
         return
@@ -385,6 +395,7 @@ def main():
         split=args.split,
         push=not args.no_upload,
         max_rows=args.max_rows,
+        skip_validation=args.skip_validation,
     )
 
 

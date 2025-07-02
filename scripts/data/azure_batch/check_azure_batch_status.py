@@ -45,7 +45,6 @@ def download_file(file_id: str, dest: pathlib.Path) -> None:
 def print_status(job: dict) -> None:
     c = job.get("request_counts", {})
     errors = job.get("errors", [])
-    print(f"{errors=}")
     error_str = (
         "-"
         if not errors
@@ -157,16 +156,19 @@ def check_batch_status(batch_id: str) -> tuple[bool, bool]:
 def main() -> None:
     args = cli()
     batch_ids = [id.strip() for id in args.batch_ids.split(",")]
-
+    last_status_success = {batch_id: None for batch_id in batch_ids}
     while True:
         all_terminal = True
         all_success = True
 
         for batch_id in batch_ids:
             is_terminal, is_success = check_batch_status(batch_id)
+            last_status_success[batch_id] = is_success
             all_terminal = all_terminal and is_terminal
             all_success = all_success and is_success
 
+        # Filter out batches that have already completed successfully.
+        batch_ids = [batch_id for batch_id in batch_ids if not last_status_success[batch_id]]
         if all_terminal:
             sys.exit(0 if all_success else 1)
 
