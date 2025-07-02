@@ -1,9 +1,4 @@
-"""
-Integration test for the /test_program endpoint.
-
-Put this file alongside your source, adjust nothing else,
-and run `python -m unittest -v` (or any test runner you like).
-"""
+"""Integration test for the /test_program endpoint."""
 
 import logging
 import os
@@ -13,7 +8,6 @@ import unittest
 
 import requests
 
-# Set up global logger
 logger = logging.getLogger(__name__)
 
 
@@ -128,11 +122,8 @@ class TestAddProgramAPI(unittest.TestCase):
             )
 
 
-class TestAPIServer(unittest.TestCase):
-    """Example of using the APITestServer as a context manager."""
-
+class TestAPITestServer(unittest.TestCase):
     def test_health_check_with_context_manager(self):
-        """Test using the server context manager for a single test."""
         with APITestServer() as server:
             response = requests.get(server.health_url, timeout=5)
             self.assertEqual(response.status_code, 200)
