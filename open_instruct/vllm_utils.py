@@ -49,7 +49,6 @@ for output in outputs:
 ```
 """
 
-
 from typing import List, Optional
 
 import torch

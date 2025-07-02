@@ -164,7 +164,7 @@ class ToolUseLLM(LLM):
         """@vwxyzjn: we keep everything the same except override the sampling params to have n=1 for `ToolUseLLM`"""
         if guided_options is not None:
             warnings.warn(
-                "guided_options_request is deprecated, use " "SamplingParams.guided_decoding instead",
+                "guided_options_request is deprecated, use SamplingParams.guided_decoding instead",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -175,9 +175,9 @@ class ToolUseLLM(LLM):
 
         num_requests = len(prompts)
         if isinstance(params, list) and len(params) != num_requests:
-            raise ValueError("The lengths of prompts and params " "must be the same.")
+            raise ValueError("The lengths of prompts and params must be the same.")
         if isinstance(lora_request, list) and len(lora_request) != num_requests:
-            raise ValueError("The lengths of prompts and lora_request " "must be the same.")
+            raise ValueError("The lengths of prompts and lora_request must be the same.")
 
         for sp in params if isinstance(params, list) else (params,):
             if isinstance(sp, SamplingParams):
@@ -211,7 +211,7 @@ class ToolUseLLM(LLM):
                 total=num_requests,
                 desc="Processed prompts",
                 dynamic_ncols=True,
-                postfix=(f"est. speed input: {0:.2f} toks/s, " f"output: {0:.2f} toks/s"),
+                postfix=(f"est. speed input: {0:.2f} toks/s, output: {0:.2f} toks/s"),
             )
 
         # Run the engine.
@@ -352,7 +352,7 @@ class ToolUseLLM(LLM):
                                     total_out_toks += sum(len(stp.token_ids) for stp in output.outputs)
                                     out_spd = total_out_toks / pbar.format_dict["elapsed"]
                                     pbar.postfix = (
-                                        f"est. speed input: {in_spd:.2f} toks/s, " f"output: {out_spd:.2f} toks/s"
+                                        f"est. speed input: {in_spd:.2f} toks/s, output: {out_spd:.2f} toks/s"
                                     )
                                     pbar.update(n)
                                 else:

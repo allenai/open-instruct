@@ -131,7 +131,6 @@ def main(args: Args):
         all_comparison_pairs.extend(comparison_pairs)
 
     async def get_judgement(model: str, comparison_pair: List[Dict[str, str]], limiter: asyncio.Semaphore):
-
         task = comparison_pair[0]["messages"][:-1]
         # shuffle the order of the responses
         shuffled_index = random.randint(0, 1)

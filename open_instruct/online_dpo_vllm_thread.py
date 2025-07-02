@@ -870,9 +870,7 @@ class PolicyTrainerRayProcess(RayProcess):
         # For DPO, we only need half the rollout_batch_size from the dataset
         data = data_collator(
             global_data[
-                self.rank
-                * args.local_rollout_batch_size
-                // args.num_generation_per_prompt : (self.rank + 1)
+                self.rank * args.local_rollout_batch_size // args.num_generation_per_prompt : (self.rank + 1)
                 * args.local_rollout_batch_size
                 // args.num_generation_per_prompt
             ]
@@ -908,9 +906,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     global_data = next(iter_dataloader)
                     data = data_collator(
                         global_data[
-                            self.rank
-                            * args.local_rollout_batch_size
-                            // args.num_generation_per_prompt : (self.rank + 1)
+                            self.rank * args.local_rollout_batch_size // args.num_generation_per_prompt : (
+                                self.rank + 1
+                            )
                             * args.local_rollout_batch_size
                             // args.num_generation_per_prompt
                         ]
@@ -927,9 +925,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     global_data = next(iter_dataloader)
                     data = data_collator(
                         global_data[
-                            self.rank
-                            * args.local_rollout_batch_size
-                            // args.num_generation_per_prompt : (self.rank + 1)
+                            self.rank * args.local_rollout_batch_size // args.num_generation_per_prompt : (
+                                self.rank + 1
+                            )
                             * args.local_rollout_batch_size
                             // args.num_generation_per_prompt
                         ]
@@ -1315,9 +1313,9 @@ class PolicyTrainerRayProcess(RayProcess):
             if getattr(model_to_save.config, "tie_word_embeddings", False) and "lm_head.weight" in state_dict_keys:
                 state_dict_keys.remove("lm_head.weight")
 
-            assert state_dict_keys.issubset(
-                output_state_dict_keys
-            ), f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
+            assert state_dict_keys.issubset(output_state_dict_keys), (
+                f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
+            )
 
             if isinstance(model_to_save, PeftModel):
                 model_to_save.save_pretrained(output_dir)
