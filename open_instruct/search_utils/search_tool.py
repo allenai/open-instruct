@@ -1,7 +1,7 @@
 import re
 import time
 
-from open_instruct.search_rewards.long_form_rewards import generate_snippet_id
+from open_instruct.search_rewards.format_utils import generate_snippet_id
 
 # from open_instruct.search_utils.massive_ds import get_snippets_for_query
 from open_instruct.search_utils.s2 import get_snippets_for_query
