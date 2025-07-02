@@ -206,16 +206,16 @@ def extract_json_score_with_fallback(score_str: str) -> "tuple[str, float]":
     try:
         # Strip markdown code blocks if present
         cleaned_str = score_str.strip()
-        if cleaned_str.startswith('```json'):
+        if cleaned_str.startswith("```json"):
             cleaned_str = cleaned_str[7:]  # Remove ```json
-        elif cleaned_str.startswith('```'):
+        elif cleaned_str.startswith("```"):
             cleaned_str = cleaned_str[3:]  # Remove ```
-        
-        if cleaned_str.endswith('```'):
+
+        if cleaned_str.endswith("```"):
             cleaned_str = cleaned_str[:-3]  # Remove trailing ```
-        
+
         cleaned_str = cleaned_str.strip()
-        
+
         data = json.loads(cleaned_str)
         reasoning = data.get("REASONING", "")
         return reasoning, float(data.get("SCORE", 0.0))

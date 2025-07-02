@@ -56,9 +56,18 @@ def get_encoding_for_model(model_name: str):
 
     # Models that use gpt2 encoding (including OLMo and other AI2 models)
     gpt2_models = [
-        "qwen", "llama", "llama2", "llama3", "mistral", "codellama",
-        "olmo", "olmoe", "olmo2",  # AI2 OLMo models use GPTNeoX tokenizer (GPT-2 based)
-        "allenai/olmo", "allenai/olmoe", "allenai/olmo2"  # Full model names
+        "qwen",
+        "llama",
+        "llama2",
+        "llama3",
+        "mistral",
+        "codellama",
+        "olmo",
+        "olmoe",
+        "olmo2",  # AI2 OLMo models use GPTNeoX tokenizer (GPT-2 based)
+        "allenai/olmo",
+        "allenai/olmoe",
+        "allenai/olmo2",  # Full model names
     ]
     if any(model in model_name_lower for model in gpt2_models):
         return tiktoken.get_encoding("gpt2")
