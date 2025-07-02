@@ -84,17 +84,63 @@ Note:
 import json
 import os
 import sys
-from openai import AzureOpenAI, OpenAI
+from openai import AzureOpenAI
 import requests
 from datasets import Dataset, load_dataset
 from pydantic import BaseModel
 from typing import List
 
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+client = AzureOpenAI(
+    api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
+    azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
+    api_version="2024-12-01-preview"
+)
 
-INPUT_HF_DATASET = "nvidia/OpenCodeReasoning"
-OUTPUT_HF_DATASET = "saurabh5/open-code-reasoning-rlvr"
-SPLIT = "split_0"
+INPUT_HF_DATASET = "nvidia/OpenCodeReasoning-2"
+OUTPUT_HF_DATASET = "saurabh5/open-code-reasoning-rlvr-2"
+SPLIT = "python"
+
+hf_datasets = {
+    "taco": load_dataset("BAAI/TACO", trust_remote_code=True),
+    "apps": load_dataset("codeparrot/apps", trust_remote_code=True),
+    "code_contests": load_dataset("deepmind/code_contests"),
+    "open-r1/codeforces": load_dataset("open-r1/codeforces")
+}
+
+def get_question(ds_name, split, index):
+    benchmark = hf_datasets[ds_name][split][int(index)]
+    if ds_name == "code_contests":
+        if not benchmark["description"]:
+            return None
+        return benchmark["description"]
+    elif ds_name in ["taco", "apps"]:
+        return benchmark["question"]
+    elif ds_name == "open-r1/codeforces":
+        if not benchmark["description"]:
+            return None
+        question = benchmark["description"]
+        if benchmark["input_format"]:
+            question += "\n\nInput\n\n" + benchmark["input_format"]
+        if benchmark["output_format"]:
+            question += "\n\nOutput\n\n" + benchmark["output_format"]
+        if benchmark["examples"]:
+            question += "\n\nExamples"
+            for example in benchmark["examples"]:
+                if "input" in example:
+                    question += "\n\nInput\n\n" + example["input"]
+                if "output" in example:
+                    question += "\n\nOutput\n\n" + example["output"]
+        if benchmark["note"]:
+            question += "\n\nNote\n\n" + benchmark["note"]
+        return question
+
+    return None
+
+def get_input(row):
+    ds_name, ds_split, ds_index = row["dataset"], row["split"], int(row["index"])
+    if ds_name not in hf_datasets:
+        return None
+    return get_question(ds_name, ds_split, ds_index)
 
 def extract_id_from_custom_id(custom_id: str) -> str:
     # get rid of the timestamp
@@ -113,6 +159,8 @@ def check_batch_status(batch_id: str) -> bool:
     try:
         batch = client.batches.retrieve(batch_id)
         print(f"Batch status: {batch.status}")
+        if batch.status != "completed":
+            print(batch)
         return batch.status == "completed"
     except Exception as e:
         print(f"Error checking batch status: {e}")
@@ -207,8 +255,9 @@ def process_batch_results(batch_id: str):
                         "role": "user",
                         "content": result['rewritten_input']
                     }],
+                    "original_input": get_input(original_dataset_row),
                     "ground_truth": passed_test_cases,
-                    "dataset": OUTPUT_HF_DATASET,
+                    "dataset": "code",
                     "good_program": result["good_program"],
                     "rewritten_solution": rewritten_solution,
                     "rewritten_input": result['rewritten_input'],
