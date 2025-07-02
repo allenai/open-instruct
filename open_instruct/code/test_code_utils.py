@@ -101,6 +101,43 @@ except:
         result = code_utils.get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
         self.assertEqual(result, [0])
 
+    def test_apiserver_multiple_calls(self):
+        """Test that code can use APITestServer and make multiple HTTP calls to it."""
+        program = """
+# Test using APITestServer from open_instruct.code.test_api
+from open_instruct.code.test_api import APITestServer
+import requests
+
+results = []
+
+# Use APITestServer context manager
+with APITestServer(port=8888) as server:
+    # Make multiple calls to the same server
+    for i in range(3):
+        try:
+            # Call the health endpoint multiple times
+            response = requests.get(f"{server.base_url}/health", timeout=5)
+            if response.status_code == 200:
+                results.append(f"Call {i+1}: Success")
+            else:
+                results.append(f"Call {i+1}: Failed with status {response.status_code}")
+        except Exception as e:
+            results.append(f"Call {i+1}: Error - {str(e)}")
+
+# Verify all calls succeeded
+test_passed = (
+    len(results) == 3 and
+    all("Success" in result for result in results)
+)
+"""
+        # This should fail because APITestServer requires subprocess which is blocked
+        result = code_utils.get_successful_tests_fast(
+            program=program, 
+            tests=["assert test_passed == True"], 
+            max_execution_time=5.0
+        )
+        self.assertEqual(result, [0])
+
 
 class ReliabilityGuardFileSystemTests(unittest.TestCase):
     """Tests to ensure file system operations are properly sandboxed."""
