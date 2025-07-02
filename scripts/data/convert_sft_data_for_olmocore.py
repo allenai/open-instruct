@@ -170,6 +170,8 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         dataset_skip_cache=args.dataset_skip_cache,
     )
 
+    train_dataset = train_dataset.shuffle()
+
     if args.visualize:
         print("Visualizing first example...")
         visualize_token(train_dataset[0][INPUT_IDS_KEY], tc.tokenizer)
