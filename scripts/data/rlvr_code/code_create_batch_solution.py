@@ -28,14 +28,13 @@ Workflow:
 3.  Wait for the batch job to complete.
 4.  The results (generated code solutions) can then be retrieved using the batch job ID for further processing.
 """
+import hashlib
 import json
 import os
 import time
-from openai import AzureOpenAI
-from datasets import load_dataset
-import hashlib
-from tqdm import tqdm
 
+from datasets import load_dataset
+from openai import AzureOpenAI
 
 client = AzureOpenAI(
     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
@@ -108,7 +107,7 @@ def create_batch_file(prompts):
 def main():
     global SAMPLE_LIMIT
     input_dataset = load_dataset(INPUT_HF_DATASET, split=SPLIT)
-    
+
     print(f"Found {len(input_dataset)} total rows")
 
     # dedeuplicated on id
@@ -118,9 +117,9 @@ def main():
         if get_id(row) not in unique_ids:
             unique_ids.add(get_id(row))
             unique_rows.append(row)
-    
+
     sampled_rows = unique_rows
-    
+
     print(f"Processing {len(sampled_rows)} rows")
 
     master_prompt = r"""
@@ -140,7 +139,7 @@ Output should be a valid Python function. Feel free to think step by step before
         if input is None:
             continue
         prompts.append((get_id(row), master_prompt.replace("{input}", input)))
-    
+
 
     print(f"Creating batch file with {len(prompts)} prompts...")
     print(f"First prompt: {prompts[0]}")

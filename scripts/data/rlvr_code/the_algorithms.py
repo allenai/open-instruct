@@ -71,10 +71,11 @@ Note:
 import asyncio
 import json
 import os
-from openai import AsyncOpenAI
-from tqdm.asyncio import tqdm_asyncio
+
 import requests
 from datasets import Dataset
+from openai import AsyncOpenAI
+from tqdm.asyncio import tqdm_asyncio
 
 # Initialize the client with your API key
 client = AsyncOpenAI(
@@ -123,7 +124,7 @@ async def main():
     # base_dir = "Python/backtracking"
     base_dir = "Python"
     file_contents = []
-    
+
     # Walk through all directories and subdirectories
     for root, dirs, files in os.walk(base_dir):
         for file in files:
@@ -135,7 +136,7 @@ async def main():
                         file_contents.append(content)
                 except Exception as e:
                     print(f"Error reading {file_path}: {e}")
-    
+
     print(f"Processing {len(file_contents)} files")
     breakpoint()
 
@@ -170,7 +171,7 @@ If you don't think the file is a good candidate for this dataset, you can set th
     print(f"Processing {len(prompts)} prompts asynchronously...")
     results = await process_prompts(prompts)
 
-    # Filter: make sure reference solution is correct and solves the test cases 
+    # Filter: make sure reference solution is correct and solves the test cases
     url = "http://localhost:1234/test_program"
     new_results = []
     for i, result in enumerate(results):
@@ -204,7 +205,7 @@ If you don't think the file is a good candidate for this dataset, you can set th
         except Exception as e:
             print(f"Error parsing response: {e}")
             print(f"Response: {result['openai_response']}")
-    
+
     print(f"Filtered {len(new_results)} results out of {len(results)}")
 
 

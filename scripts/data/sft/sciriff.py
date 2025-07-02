@@ -1,11 +1,8 @@
 import argparse
-import os
-from collections import defaultdict
-from typing import List, Optional
+
 from datasets import load_dataset
 
 from scripts.data.sft.utils import convert_sft_dataset
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -48,12 +45,12 @@ if __name__ == "__main__":
         help="Apply empty message filters to the dataset.",
     )
     args = parser.parse_args()
-    
+
     sciriff_data = load_dataset("allenai/SciRIFF-train-mix")
-    
+
     # filter the dataset to only include science conversations
     sciriff_data = sciriff_data.filter(lambda example: example["dataset"].startswith("science"), num_proc=16)
-    
+
     readme_content = (
         "This is a converted version of the SciRIFF dataset into Tulu SFT training format.\n\n"
         "The conversion script can be found in our "
@@ -68,7 +65,7 @@ if __name__ == "__main__":
         "Please refer to the [original dataset](https://huggingface.co/datasets/allenai/SciRIFF-train-mix) "
         "for more information about this dataset and the license."
     )
-    
+
     convert_sft_dataset(
         ds=sciriff_data,
         hf_dataset_id=None,
@@ -81,4 +78,4 @@ if __name__ == "__main__":
         local_save_dir=args.local_save_dir,
         readme_content=readme_content,
     )
-    
+

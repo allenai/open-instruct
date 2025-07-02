@@ -1,12 +1,10 @@
-import json
 import datasets
 from tqdm import tqdm
-
 
 no_prompt = True
 if no_prompt:
     prompt = ""
-else:   
+else:
     prompt = " Answer the given question. You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, if you find you lack some knowledge, you can call a search engine by <query> query </query>, and it will return the top searched results between <document> and </document>. You can search as many times as you want. If you find no further external knowledge needed, you can directly provide the answer inside <finish> and </finish>. For example, <finish> xxx </finish>. Question: <question>"
 
 example_data = [
@@ -28,7 +26,7 @@ def convert_deepseek_long_form_reasoning_to_rl_format():
     dataset = dataset.train_test_split(test_size=0.1, seed=42)
     train_data = dataset["train"]
     test_data = dataset["test"]
-    
+
     rl_data = []
     for example in tqdm(train_data):
         question = example["prompt"]
@@ -38,11 +36,11 @@ def convert_deepseek_long_form_reasoning_to_rl_format():
             "ground_truth": example["response"], # Convert to string to match schema
             "no_reasoning_ground_truth": example["response"].split("</think>")[-1],
             "dataset": "long_re_search"})
-    
+
     # upload to huggingface
     dataset = datasets.Dataset.from_list(rl_data)
     dataset.push_to_hub("rulins/reasoning-v1-1m_rl" + ("_no_prompt" if no_prompt else ""), split="train")
-    
+
     # Prepare test set
     rl_data = []
     for example in tqdm(test_data):
@@ -53,7 +51,7 @@ def convert_deepseek_long_form_reasoning_to_rl_format():
             "ground_truth": example["response"],
             "no_reasoning_ground_truth": example["response"].split("</think>")[-1],
             "dataset": "long_re_search"})
-    
+
     # upload to huggingface
     dataset = datasets.Dataset.from_list(rl_data)
     dataset.push_to_hub("rulins/reasoning-v1-1m_rl" + ("_no_prompt" if no_prompt else ""), split="test")
@@ -67,7 +65,7 @@ def convert_os_to_rl_format():
     dataset = dataset.train_test_split(test_size=0.1, seed=42)
     train_data = dataset["train"]
     test_data = dataset["test"]
-    
+
     rl_data = []
     for example in train_data:
         message = example["messages"]
@@ -76,11 +74,11 @@ def convert_os_to_rl_format():
             "ground_truth": message[-1]["content"],
             "no_reasoning_ground_truth": message[-1]["content"],
             "dataset": "long_re_search"})
-    
+
     # upload to huggingface
     dataset = datasets.Dataset.from_list(rl_data)
     dataset.push_to_hub("rulins/open_scholar_rl" + ("_no_prompt" if no_prompt else ""), split="train")
-    
+
     # Prepare test set
     rl_data = []
     for example in test_data:
@@ -90,11 +88,11 @@ def convert_os_to_rl_format():
             "ground_truth": message[-1]["content"],
             "no_reasoning_ground_truth": message[-1]["content"],
             "dataset": "long_re_search"})
-    
+
     # upload to huggingface
     dataset = datasets.Dataset.from_list(rl_data)
     dataset.push_to_hub("rulins/open_scholar_rl" + ("_no_prompt" if no_prompt else ""), split="test")
-    
-    
+
+
 if __name__ == "__main__":
     convert_deepseek_long_form_reasoning_to_rl_format()

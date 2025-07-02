@@ -19,7 +19,9 @@ python scripts/data/filtering_and_updates/update_subsets.py \
 """
 
 import argparse
-from datasets import load_dataset, concatenate_datasets, Dataset
+
+from datasets import Dataset, concatenate_datasets, load_dataset
+
 
 def remove_specified_columns(dataset: Dataset, columns_to_remove: list) -> Dataset:
     """Removes specified columns from the dataset."""
@@ -36,14 +38,14 @@ def remove_specified_columns(dataset: Dataset, columns_to_remove: list) -> Datas
 
 def main():
     parser = argparse.ArgumentParser(description="Filter and merge Hugging Face datasets.")
-    
+
     # Base dataset
     parser.add_argument(
         "--base_ds",
         default="allenai/tulu-3-sft-mixture-filter-datecutoff",
         help="Name or path of the base dataset to load (from HF Hub or local)."
     )
-    
+
     # Remove sources
     parser.add_argument(
         "--remove_sources",
@@ -51,7 +53,7 @@ def main():
         default=[],
         help="List of sources to remove from the base dataset. If empty, no removal is done."
     )
-    
+
     # Add datasets (list)
     parser.add_argument(
         "--add_ds",
@@ -59,7 +61,7 @@ def main():
         default=[],
         help="Name(s) or path(s) of one or more datasets to load from HF Hub and append. If empty, no datasets are added."
     )
-    
+
     # Push options
     parser.add_argument(
         "--push_to_hub",
@@ -92,7 +94,7 @@ def main():
         print(f"Removing rows with source in: {args.remove_sources}")
         def keep_example(example):
             return example["source"] not in args.remove_sources
-        
+
         filtered_ds = base_ds.filter(keep_example)
     else:
         print("No sources to remove; skipping filter step.")
@@ -103,7 +105,7 @@ def main():
         print(f"Loading and concatenating additional datasets: {args.add_ds}")
         # Start with the filtered base dataset
         combined_ds = filtered_ds
-        
+
         for ds_name in args.add_ds:
             add_ds = load_dataset(ds_name, split="train")
             # add column to add_ds where 'source' is the name of the column (it shouldnt be in it for subset)
@@ -111,7 +113,7 @@ def main():
             add_ds = add_ds.add_column("source", source)
 
             combined_ds = concatenate_datasets([combined_ds, add_ds])
-        
+
         print(f"Resulting dataset size after adding: {len(combined_ds)}")
     else:
         print("No additional datasets to add.")

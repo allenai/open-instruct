@@ -1,7 +1,5 @@
-from datasets import load_dataset, Dataset
-from huggingface_hub import HfApi
-import json
 
+from datasets import Dataset, load_dataset
 
 """
 Example input:
@@ -22,15 +20,15 @@ def load_asqa_dataset():
     """
     # Load the dataset from Hugging Face
     dataset = load_dataset("din0s/asqa")
-    
+
     # Get the different splits
     train_data = dataset["train"]
     validation_data = dataset["dev"]
-    
-    print(f"Loaded ASQA dataset:")
+
+    print("Loaded ASQA dataset:")
     print(f"Train set size: {len(train_data)}")
     print(f"Validation set size: {len(validation_data)}")
-    
+
     return train_data, validation_data
 
 
@@ -47,8 +45,8 @@ def convert_asqa_to_open_instruct_format(data):
             "ground_truth": answer,
             "dataset": "re_search",
         })
-    
-    
+
+
     return formatted_data
 
 
@@ -64,13 +62,13 @@ def save_to_hf_repo(train_data, val_data, repo_id):
     # Convert to Datasets
     train_dataset = Dataset.from_list(train_data)
     val_dataset = Dataset.from_list(val_data)
-    
+
     # Create a dataset dictionary with splits
     dataset_dict = {
         "train": train_dataset,
         "test": val_dataset
     }
-    
+
     # Push to Hub
     from datasets import DatasetDict
     dataset_dict = DatasetDict(dataset_dict)
@@ -81,17 +79,17 @@ def save_to_hf_repo(train_data, val_data, repo_id):
 if __name__ == "__main__":
     # Example usage
     train, val = load_asqa_dataset()
-    
+
     # Format the data
     formatted_train = convert_asqa_to_open_instruct_format(train)
     formatted_val = convert_asqa_to_open_instruct_format(val)
-    
+
     # Save to Hugging Face with separate splits
     repo_id = "rulins/asqa_long_form_rlvr_no_prompt"
     save_to_hf_repo(formatted_train, formatted_val, repo_id)
-    
+
     # Print some statistics
-    print(f"\nDataset statistics:")
+    print("\nDataset statistics:")
     print(f"Train examples: {len(formatted_train)}")
     print(f"Validation examples: {len(formatted_val)}")
     print(f"Total examples: {len(formatted_train) + len(formatted_val)}")

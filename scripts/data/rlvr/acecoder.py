@@ -13,6 +13,7 @@ import datasets
 from huggingface_hub import HfApi
 from transformers import HfArgumentParser
 
+
 @dataclass
 class Args:
     push_to_hub: bool = False
@@ -28,10 +29,10 @@ def main(args: Args):
         example["ground_truth"] = example["test_cases"]
         example["dataset"] = "ace_coder"
         return example
-    
+
     dataset = dataset.map(process)
     # reorder columns
-    dataset = dataset.select_columns(["messages", "ground_truth", "dataset"]) 
+    dataset = dataset.select_columns(["messages", "ground_truth", "dataset"])
 
     if args.push_to_hub:
         api = HfApi()

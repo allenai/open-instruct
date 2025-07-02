@@ -1,14 +1,15 @@
-import os
-import json
-import yaml
 import argparse
+import json
+import os
 from collections import defaultdict
-from tqdm import tqdm
+
 import spacy
 import torch
-from transformers import AutoModel, AutoTokenizer
-from datasets import load_dataset, Dataset
+import yaml
+from datasets import Dataset, load_dataset
 from elasticsearch import Elasticsearch
+from tqdm import tqdm
+from transformers import AutoModel, AutoTokenizer
 
 SPACY_MODEL = spacy.load("en_core_web_lg")
 
@@ -23,7 +24,7 @@ def prepare_embedding_model(model_name):
         print("Found multiple gpus. Will use data parallel.")
         for module_key, module in model._modules.items():
             model._modules[module_key] = torch.nn.DataParallel(module)
-    
+
     return model, tokenizer
 
 
@@ -57,7 +58,7 @@ def exact_match(es, index_name, query_dataset, fields, search_size):
                             }
                         }
                         for query_str in query_strings
-                    ] 
+                    ]
                 }
             }
         )
@@ -116,7 +117,7 @@ def ngram_match(es, index_name, query_dataset, fields, ngram_size, search_size):
                                         "text": ngram
                                     }
                                 }
-                            ] 
+                            ]
                         }
                     }
                 )
@@ -130,7 +131,7 @@ def ngram_match(es, index_name, query_dataset, fields, ngram_size, search_size):
             query_string_match_scores.append({doc_id: len(matching_tokens) / query_string_length for doc_id, matching_tokens in train_doc_matches.items()})
             for doc_id, matching_tokens in train_doc_matches.items():
                 query_string_match_tokens[doc_id].append([query_string_tokens[t] for t in matching_tokens])
-        
+
         if matching_doc_ids:
             # Averaging the match scores of training documents over all query strings.
             aggregated_match_scores = {doc_id: sum([x.get(doc_id, 0.0) for x in query_string_match_scores]) / len(query_strings) for doc_id in matching_doc_ids}
@@ -296,7 +297,7 @@ def main():
                 else:
                     raise
 
-            if args.index_type == "text": 
+            if args.index_type == "text":
                 if args.ngram_size is None:
                     match_scores, output_data, train_indices = exact_match(es, index_name, query_dataset, fields, args.search_size)
                     contaminated_ids.update(train_indices)
@@ -312,7 +313,7 @@ def main():
                 if args.match_threshold is not None:
                     match_scores = [1 if score > args.match_threshold else 0 for score in match_scores]
                     contaminated_ids.update([_id for _id, score in train_indices_with_scores.items() if score > args.match_threshold])
- 
+
             mean_match_score = sum(match_scores) / len(match_scores)
             print(f"\tNumber of matching train instances: {len(contaminated_ids)}")
             print(f"\tMean match score: {mean_match_score}")
@@ -330,7 +331,7 @@ def main():
         print("\t" + "\t".join(ev[0] for ev in eval_sets), file=outfile)
         for index_name, mean_match_scores in zip(index_names, all_index_match_scores):
             print(index_name + "\t" + "\t".join([f"{mean_match_scores[ev[0]]:.4f}" for ev in eval_sets]), file=outfile)
-    
+
     if args.decontaminate:
         # Output training sets without the instances that match any of the test instances.
         for dataset_name, contaminated_ids in zip(dataset_names, all_index_contaminated_ids):

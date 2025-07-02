@@ -8,17 +8,17 @@ from collections import defaultdict
 import torch
 import vllm
 from tqdm import tqdm, trange
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from eval.utils import (
+    check_and_upload_model_metadata,
+    dynamic_import_function,
     generate_completions,
     load_hf_lm,
-    query_openai_chat_model,
     load_hf_tokenizer,
+    query_openai_chat_model,
     upload_results_to_hf,
-    check_and_upload_model_metadata,
 )
-from eval.utils import dynamic_import_function 
 
 
 @torch.no_grad()
@@ -39,7 +39,7 @@ def score_generations(
 def main(args):
     random.seed(42)
     os.makedirs(args.save_dir, exist_ok=True)
-    
+
     # Load the testing data
     examples = []
     prompt_files = glob.glob(os.path.join(args.data_dir, "*.txt"))
@@ -128,11 +128,11 @@ def main(args):
                 prompts=prompts,
                 max_new_tokens=512,
                 batch_size=args.eval_batch_size if args.eval_batch_size else 1,
-                stop_id_sequences=stop_sequences,  
+                stop_id_sequences=stop_sequences,
             )
     else:
         instances = [{
-            "id": str(i), 
+            "id": str(i),
             "prompt": "Complete the following: " + example["text"]
         } for i, example in enumerate(examples)]
         performance = query_openai_chat_model(
@@ -207,13 +207,13 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--data_dir", 
-        type=str, 
+        "--data_dir",
+        type=str,
         default="data/eval/toxigen"
     )
     parser.add_argument(
-        "--save_dir", 
-        type=str, 
+        "--save_dir",
+        type=str,
         default="results/toxigen"
     )
     parser.add_argument(
@@ -271,14 +271,14 @@ if __name__ == "__main__":
         help="If given, we're evaluating a 4-bit quantized GPTQ model.",
     )
     parser.add_argument(
-        "--use_chat_format", 
-        action="store_true", 
+        "--use_chat_format",
+        action="store_true",
         help="If given, we will use the chat format for the prompts."
     )
     parser.add_argument(
-        "--chat_formatting_function", 
-        type=str, 
-        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        "--chat_formatting_function",
+        type=str,
+        default="eval.templates.create_prompt_with_tulu_chat_format",
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
     )
     parser.add_argument(

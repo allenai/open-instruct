@@ -48,16 +48,17 @@ The script updates the target HuggingFace dataset with validated code solutions.
 - `rewritten_solution`: The validated stdio-based code solution.
 - `rewritten_input`: The stdio-based problem description.
 """
+import hashlib
 import json
 import os
 import sys
-import hashlib
 import traceback
-from openai import AzureOpenAI
-import requests
-from datasets import Dataset, load_dataset
-from pydantic import BaseModel
 from typing import List
+
+import requests
+from datasets import Dataset
+from openai import AzureOpenAI
+from pydantic import BaseModel
 
 client = AzureOpenAI(
     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
@@ -114,10 +115,10 @@ def get_batch_results(batch_id: str) -> list:
         # Download the output file
         output_file = client.files.retrieve(batch.output_file_id)
         output_content = client.files.content(output_file.id)
-        
+
         # Get the text content from the response
         content_str = output_content.text
-        
+
         # Process each line of the output
         results = []
         for line in content_str.split('\n'):
@@ -133,7 +134,7 @@ def get_batch_results(batch_id: str) -> list:
                         results.append(processed_result)
                 except Exception as e:
                     print(f"Error processing result line: {e}")
-        
+
         return results
     except Exception as e:
         print(f"Error retrieving batch results: {e}")
@@ -156,7 +157,7 @@ def process_batch_results(batch_ids: List[str]):
     if not all_batch_results:
         print("No results found in any of the batches.")
         return
-        
+
     print(f"Total results from all batches: {len(all_batch_results)}")
     print(f"Sample result: {all_batch_results[0]}")
 
@@ -164,7 +165,7 @@ def process_batch_results(batch_ids: List[str]):
     url = "http://localhost:1234/test_program_stdio"
     new_results = []
     #original_dataset = load_dataset(INPUT_HF_DATASET, "SFT", split=SPLIT)
-    
+
     # Create a lookup dictionary for O(1) access
     print('here')
     #id_to_row = {get_id(row): row for row in original_dataset}
@@ -176,7 +177,7 @@ def process_batch_results(batch_ids: List[str]):
             #    print(f"No matching row found for ID: {result['id']}")
             #    continue
             #original_dataset_row = id_to_row[result['id']]
-            
+
             test_cases_raw = result['test_cases']
             if isinstance(test_cases_raw, list) and len(test_cases_raw) > 0 and isinstance(test_cases_raw[0], str):
                 test_cases = [json.loads(tc) for tc in test_cases_raw]
@@ -184,22 +185,22 @@ def process_batch_results(batch_ids: List[str]):
                 test_cases = test_cases_raw
 
             rewritten_solution = result['rewritten_solution']
-            
+
             # Test data
             payload = {
                 "program": rewritten_solution,
                 "tests": test_cases,
                 "max_execution_time": 6.0
             }
-            
+
             # Send POST request
             response = requests.post(url, json=payload)
             response_json = response.json()
-            
+
             if response.ok and sum(response_json['results']) >= 0.8 * len(test_cases):
                 # Keep only passed test cases
                 passed_test_cases = [test_cases[j] for j in range(len(test_cases)) if response_json['results'][j] == 1]
-                
+
                 new_results.append({
                     #**original_dataset_row,
                     "messages": [{
@@ -222,7 +223,7 @@ def process_batch_results(batch_ids: List[str]):
 
     print(f"After filtering, {len(new_results)} results out of {len(all_batch_results)} remain. Do you want to upload?")
     breakpoint()
-    
+
     # Upload to Hugging Face
     if new_results:
         dataset = Dataset.from_list(new_results)
@@ -235,7 +236,7 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python open_code_reasoning_upload_batch.py <batch_ids_json_filepath>")
         sys.exit(1)
-    
+
     filepath = sys.argv[1]
     try:
         with open(filepath, 'r') as f:

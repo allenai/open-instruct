@@ -21,11 +21,10 @@ import re
 import string
 from typing import Dict, Optional, Sequence, Union
 
-from absl import logging
 import langdetect
+from absl import logging
 
 from eval.ifeval import instructions_util
-
 
 _InstructionArgsDtype = Optional[Dict[str, Union[int, str, Sequence[str]]]]
 

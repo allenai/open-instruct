@@ -1,13 +1,14 @@
-import copy
-import subprocess
-import yaml
-from datetime import datetime
 import argparse
-import re 
+import copy
+import re
 import shlex
-import getpass
+import subprocess
+from datetime import datetime
+
+import yaml
 
 from open_instruct.utils import get_beaker_whoami
+
 
 def load_yaml(file_path):
     with open(file_path, 'r') as f:
@@ -15,9 +16,9 @@ def load_yaml(file_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Run experiment with Beaker config")
-    parser.add_argument("--default_beaker_config", default="configs/beaker_configs/default_dpo.yaml", 
+    parser.add_argument("--default_beaker_config", default="configs/beaker_configs/default_dpo.yaml",
                         help="Path to the default Beaker config file")
-    parser.add_argument("--config", default=None, 
+    parser.add_argument("--config", default=None,
                         help="Path to an additional config file to override default settings")
     parser.add_argument("--cluster", type=str, default="ai2/allennlp-cirrascale", help="Beaker cluster to use")
     parser.add_argument("--priority", type=str, default="high", help="Priority of the job")
@@ -29,7 +30,7 @@ def main():
     parser.add_argument("--datasets", nargs='+', help="List of datasets to mount in form <beaker_id>:<mount_path>")
     # allow unknown args from CLI, use this to modify loaded config in bash scripts for sweeping
     # Note, can only override args in --config passed (not default FlatArguments class in open_instruct/utils.py)
-    
+
     # Use parse_known_args instead of parse_args
     args, unknown = parser.parse_known_args()
 
@@ -57,14 +58,14 @@ def main():
     # Print unknown arguments
     print("Unknown arguments:", unknown_args)
 
-        
+
     now = datetime.now().strftime("%m%d%Y%H%M%S")
     with open(args.default_beaker_config, 'r') as f:
         default_yaml = f.read()
     d1 = yaml.load(default_yaml, Loader=yaml.FullLoader)
 
     if args.num_nodes > 1:
-        assert args.num_gpus == 8, "`num_gpus` must be set to 8 when training with multiple nodes" 
+        assert args.num_gpus == 8, "`num_gpus` must be set to 8 when training with multiple nodes"
         d1['tasks'][0]['replicas'] = args.num_nodes
 
     d1['tasks'][0]['image']['beaker'] = args.image
@@ -272,7 +273,7 @@ def main():
         cmd_dict = {**post_dict}
         cmd_dict.update(train_config)
         cmd_dict.update(unknown_args)
-        
+
         # Reconstruct the command string
         new_cmd_parts = pre_script
         # add pre python args
@@ -297,7 +298,7 @@ def main():
         return ' '.join(new_cmd_parts)
 
     new_arguments = override_and_reconstruct_command(d1['tasks'][0]['arguments'][0], train_config, unknown_args)
-    
+
     # place --num_processes with args.num_gpus * args.num_nodes
     # will be --num_processes {N} before
     new_arguments = re.sub(r'--num_processes \d+', f'--num_processes {args.num_gpus * args.num_nodes}', new_arguments)
@@ -313,7 +314,7 @@ def main():
     exp_name = exp_name.replace("/", "_")
     # try given config only has one
     dataset_name, dataset_mixer, train_file = check_dataset_selection(new_arguments)
-    print(f"Dataset selection is valid.")
+    print("Dataset selection is valid.")
     print(f"Dataset name: {dataset_name}")
     print(f"Dataset mixer: {dataset_mixer}")
     print(f"Train file: {train_file}")

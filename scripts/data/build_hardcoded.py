@@ -1,8 +1,8 @@
 import argparse
-import os
 import logging
 from functools import partial
-from datasets import load_dataset, Dataset, DatasetDict
+
+from datasets import DatasetDict, load_dataset
 from huggingface_hub import HfApi
 
 """
@@ -17,7 +17,7 @@ python scripts/data/build_hardcoded.py \
     --posttrain_recipe "Tülu 3" \
     --context_length 4096 \
     --license "Llama 3.1 Community License Agreement" \
-    --target_namespace "allenai" \    
+    --target_namespace "allenai" \\    
     --weights_link "https://huggingface.co/allenai"
 
 For OLMo 2, run:
@@ -42,9 +42,9 @@ DEFAULT_TARGET_NAMESPACE = "allenai" # Or your HF username
 DEFAULT_PLACEHOLDERS = {
     "<|MODEL_NAME|>": "OLMo 2",
     "<|POSTTRAIN_RECIPE|>": "Tülu 3.1",
-    "<|CONTEXT_LENGTH|>": 4096, 
+    "<|CONTEXT_LENGTH|>": 4096,
     "<|BASE_MODEL|>": "OLMo 2",
-    "<|DATE_CUTOFF|>": "November 2024", 
+    "<|DATE_CUTOFF|>": "November 2024",
     "<|LICENSE|>": "Apache 2.0",
     "<|WEIGHTS_LINK|>": "",  # New placeholder for model weights link
 }
@@ -121,7 +121,7 @@ def parse_arguments():
     parser.add_argument(
         "--system_prompt_template",
         type=str,
-        default="You are <|MODEL_NAME|>, a helpful assistant built by Ai2. Your date cutoff is <|DATE_CUTOFF|> and you do not have access to external tools such as search and running code, but you're very happy to help users find their way with it." + 
+        default="You are <|MODEL_NAME|>, a helpful assistant built by Ai2. Your date cutoff is <|DATE_CUTOFF|> and you do not have access to external tools such as search and running code, but you're very happy to help users find their way with it." +
                 ("<|WEIGHTS_LINK|>" and " The model weights are available at <|WEIGHTS_LINK|>." or ""),
         help="Optional text for the system prompt. Can contain placeholders like <|MODEL_NAME|>."
     )
@@ -175,7 +175,7 @@ def process_example(example, replacements, formatted_system_prompt=None):
     2. Prepends the formatted system prompt (if provided) ONLY if there isn't already a system prompt.
     """
     processed_messages = []
-    
+
     # Check if the example already has a system prompt
     has_system_prompt = False
     if 'messages' in example and example['messages']:
@@ -183,7 +183,7 @@ def process_example(example, replacements, formatted_system_prompt=None):
             if isinstance(message, dict) and message.get('role') == 'system':
                 has_system_prompt = True
                 break
-    
+
     # 1. Add system prompt if provided AND example doesn't already have one
     if formatted_system_prompt and not has_system_prompt:
         processed_messages.append({
@@ -213,11 +213,11 @@ def should_keep_example(example, filter_tags):
     """
     if not filter_tags:
         return True
-    
+
     example_tags = example.get('tags', [])
     if not example_tags:
         return True
-    
+
     # Check if any of the filter tags match the example tags
     for tag in filter_tags:
         if tag == "olmo" and any(t in ["olmo", "OLMo"] for t in example_tags):
@@ -230,7 +230,7 @@ def should_keep_example(example, filter_tags):
             return False
         elif tag == "english-only" and "english-only" in example_tags:
             return False
-    
+
     return True
 
 # --- Main Execution ---
@@ -292,18 +292,18 @@ def main():
     if args.filter_tags:
         logging.info(f"Filtering out examples with tags: {args.filter_tags}")
         filtered_dataset = DatasetDict()
-        
+
         for split_name, split_dataset in original_dataset.items():
             filtered_split = split_dataset.filter(
                 lambda example: should_keep_example(example, args.filter_tags),
                 desc=f"Filtering {split_name} by tags"
             )
             filtered_dataset[split_name] = filtered_split
-            
+
             logging.info(f"Split '{split_name}': Kept {len(filtered_split)}/{len(split_dataset)} examples after filtering")
-        
+
         original_dataset = filtered_dataset
-        
+
     # --- Format System Prompt ---
     formatted_system_prompt = None
     if args.system_prompt_template:

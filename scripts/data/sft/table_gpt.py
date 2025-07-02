@@ -1,10 +1,8 @@
 import argparse
-import os
-from collections import defaultdict
-from typing import List, Optional
-from datasets import load_dataset
-from scripts.data.sft.utils import convert_sft_dataset
 
+from datasets import load_dataset
+
+from scripts.data.sft.utils import convert_sft_dataset
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -47,14 +45,14 @@ if __name__ == "__main__":
         help="Apply empty message filters to the dataset.",
     )
     args = parser.parse_args()
-    
+
     conversion_func = lambda example: {
         "messages": [
             {"role": "user", "content": example["prompt"]},
             {"role": "assistant", "content": example["completion"]}
         ]
     }
-    
+
     readme_content = (
         "This is a converted version of the Table-GPT dataset into Tulu SFT training format.\n\n"
         "The conversion script can be found in our "
@@ -69,7 +67,7 @@ if __name__ == "__main__":
         "Please refer to the [original dataset](https://huggingface.co/datasets/LipengCS/Table-GPT) "
         "for more information about this dataset and the license."
     )
-    
+
     ds = load_dataset("LipengCS/Table-GPT", "All")
     convert_sft_dataset(
         ds=ds,
@@ -83,4 +81,4 @@ if __name__ == "__main__":
         local_save_dir=args.local_save_dir,
         readme_content=readme_content,
     )
-    
+

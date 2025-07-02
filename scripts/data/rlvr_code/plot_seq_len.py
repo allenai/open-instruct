@@ -40,14 +40,15 @@ Examples:
     python plot_seq_len.py --dataset_name "my/dataset" --split "validation" --column_name "output" --num_bins 100 --show_plot
 """
 
-import datasets
-from transformers import AutoTokenizer
-import matplotlib.pyplot as plt
-import numpy as np
 import argparse
-from tqdm import tqdm
 import logging
 import sys
+
+import datasets
+import matplotlib.pyplot as plt
+import numpy as np
+from tqdm import tqdm
+from transformers import AutoTokenizer
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -134,7 +135,7 @@ def main(args):
                           temp_lengths.append(batch_lengths)
                  else:
                       # This might happen if get_sequence_lengths returned empty due to missing column
-                      logging.debug(f"'seq_len' key missing in a batch.")
+                      logging.debug("'seq_len' key missing in a batch.")
 
              sequence_lengths = temp_lengths
         else:

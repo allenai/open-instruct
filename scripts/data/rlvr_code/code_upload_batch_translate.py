@@ -29,13 +29,14 @@ Workflow:
 2. Wait for the batch jobs to complete.
 3. Run this script to retrieve the results and upload them to the HuggingFace Hub.
 """
+import hashlib
 import json
 import os
-import hashlib
-from openai import AzureOpenAI
-from datasets import Dataset, load_dataset
-from pydantic import BaseModel
 from typing import List
+
+from datasets import Dataset, load_dataset
+from openai import AzureOpenAI
+from pydantic import BaseModel
 
 client = AzureOpenAI(
     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
@@ -124,7 +125,7 @@ def check_batch_status(batch_id: str) -> bool:
             print(batch)
         return batch.status == "completed"
     except Exception as e:
-        print(f"Error checking batch status: {e}") 
+        print(f"Error checking batch status: {e}")
         return False
 
 def get_batch_results(batch_id: str) -> list:
@@ -138,10 +139,10 @@ def get_batch_results(batch_id: str) -> list:
         # Download the output file
         output_file = client.files.retrieve(batch.output_file_id)
         output_content = client.files.content(output_file.id)
-        
+
         # Get the text content from the response
         content_str = output_content.text
-        
+
         # Process each line of the output
         results = []
         for line in content_str.split('\n'):
@@ -157,7 +158,7 @@ def get_batch_results(batch_id: str) -> list:
                         results.append(processed_result)
                 except Exception as e:
                     print(f"Error processing result line: {e}")
-        
+
         return results
     except Exception as e:
         print(f"Error retrieving batch results: {e}")
@@ -176,7 +177,7 @@ def process_batch_results(batch_ids: list[str], target_language: str):
         if not batch_results:
             print("No results found in batch")
             continue
-    
+
     new_results = []
     for result in batch_results:
         try:
@@ -197,7 +198,7 @@ def process_batch_results(batch_ids: list[str], target_language: str):
             print(f"Result: {result}")
 
     print(f"About to upload {len(new_results)} results to Hugging Face out of {len(batch_results)}. Do you want to upload?")
-    
+
     # Upload to Hugging Face
     if new_results:
         dataset = Dataset.from_list(new_results)

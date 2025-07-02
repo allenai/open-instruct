@@ -1,7 +1,7 @@
-from collections import defaultdict, Counter
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Union, Iterable, Dict
 import itertools
+from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Union
 
 import numpy as np
 import tqdm

@@ -1,9 +1,8 @@
-from datasets import load_dataset, Dataset
-from tqdm import tqdm
-import random
-from typing import List
 import re
 import uuid
+
+from datasets import load_dataset
+
 LLAMA_NEMOTRON_REPO = "nvidia/Llama-Nemotron-Post-Training-Dataset"
 SFT_DEST_REPO = "saurabh5/llama-nemotron-sft"
 
@@ -13,10 +12,10 @@ def extract_python_code(model_output: str) -> str:
     # Find content between ``` markers
     pattern = r"```(?:python)?(.*?)```"
     matches = re.findall(pattern, model_output, re.DOTALL)
-    
+
     if not matches:
         return "NO SOLUTION"
-        
+
     # Return the first match, stripped of whitespace
     return matches[-1].strip()
 

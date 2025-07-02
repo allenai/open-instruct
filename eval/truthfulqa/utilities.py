@@ -1,6 +1,7 @@
-import pandas as pd
 import numpy as np
-from eval.truthfulqa.presets import preset_map, COMPARE_PRIMER
+import pandas as pd
+
+from eval.truthfulqa.presets import COMPARE_PRIMER, preset_map
 
 
 def load_questions(filename='questions.csv'):

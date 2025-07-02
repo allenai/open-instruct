@@ -1,21 +1,22 @@
 import argparse
-import os
 import json
+import os
 import random
-import torch
-import vllm
+
 import evaluate
 import numpy as np
-from eval.utils import (
-    generate_completions, 
-    load_hf_lm, 
-    query_openai_chat_model,
-    dynamic_import_function,
-    load_hf_tokenizer,
-    upload_results_to_hf,
-    check_and_upload_model_metadata,
-)
+import torch
+import vllm
 
+from eval.utils import (
+    check_and_upload_model_metadata,
+    dynamic_import_function,
+    generate_completions,
+    load_hf_lm,
+    load_hf_tokenizer,
+    query_openai_chat_model,
+    upload_results_to_hf,
+)
 
 encoding_templates_with_context = {
     "english": ("Answer the following question based on the information in the given passage.", "Passage:", "Question:", "Answer:"),
@@ -54,14 +55,14 @@ def main(args):
             for paragraph in article["paragraphs"]:
                 for qa in paragraph["qas"]:
                     example = {
-                        "id": qa["id"], 
+                        "id": qa["id"],
                         "lang": qa["id"].split("-")[0],
                         "context": paragraph["context"],
                         "question": qa["question"],
                         "answers": qa["answers"]
                     }
                     test_data.append(example)
-    data_languages = sorted(list(set([example["lang"] for example in test_data]))) 
+    data_languages = sorted(list(set([example["lang"] for example in test_data])))
     if args.max_num_examples_per_lang:
         sampled_examples = []
         for lang in data_languages:
@@ -70,7 +71,7 @@ def main(args):
                 examples_for_lang = random.sample(examples_for_lang, args.max_num_examples_per_lang)
             sampled_examples += examples_for_lang
         test_data = sampled_examples
-    
+
     print(f"Loaded {len(test_data)} examples from {len(data_languages)} languages: {data_languages}")
 
     if args.n_shot > 0:
@@ -96,10 +97,10 @@ def main(args):
         # assert that we have exactly n_shot examples for each language
         assert all([len(train_data_for_langs[lang]) == args.n_shot for lang in data_languages])
 
-    
+
     # assert we have templates for all data languages
     assert all([lang in encoding_templates_with_context.keys() for lang in data_languages])
-        
+
     if args.model_name_or_path:
         print("Loading model and tokenizer...")
         tokenizer = load_hf_tokenizer(
@@ -117,12 +118,12 @@ def main(args):
                 tokenizer_revision=args.hf_revision,
                 revision=args.hf_revision,
             )
-            
+
         else:
             model = load_hf_lm(
-                model_name_or_path=args.model_name_or_path, 
+                model_name_or_path=args.model_name_or_path,
                 revision=args.hf_revision,
-                load_in_8bit=args.load_in_8bit, 
+                load_in_8bit=args.load_in_8bit,
                 device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                 gptq_model=args.gptq,
             )
@@ -162,7 +163,7 @@ def main(args):
             prompt, p_template, q_template, a_template = encoding_templates_with_context[lang]
 
         prompt += "\n\n"
-        
+
         if args.n_shot > 0:
             formatted_demo_examples = []
             for train_example in train_data_for_langs[lang]:
@@ -175,7 +176,7 @@ def main(args):
                         p_template + " " + train_example["context"] + "\n" + q_template + " " + train_example["question"] + "\n" + a_template + " " + train_example["answers"][0]["text"]
                     )
             prompt += "\n\n".join(formatted_demo_examples) + "\n\n"
-        
+
         if args.no_context:
             prompt += q_template + " " + format(example["question"]) + "\n"
         else:
@@ -199,7 +200,7 @@ def main(args):
             sampling_params = vllm.SamplingParams(
                 temperature=0,
                 max_tokens=50,
-                stop=stop_sequences, 
+                stop=stop_sequences,
             )
             # We need to remap the outputs to the prompts because vllm might not return outputs for some prompts (e.g., if the prompt is too long)
             generations = model.generate(prompts, sampling_params)
@@ -233,7 +234,7 @@ def main(args):
             batch_size=args.eval_batch_size,
         )
         outputs = [result["output"].strip().split("\n")[0].strip() for result in results]
-    
+
     with open(os.path.join(args.save_dir, "tydiaqa_predictions.jsonl"), "w") as fout:
         for example, output in zip(test_data, outputs):
             example["prediction_text"] = output
@@ -241,7 +242,7 @@ def main(args):
 
     print("Calculating F1, EM ...")
     metric = evaluate.load("squad")
-    
+
     eval_scores = {}
     for lang in data_languages:
         lang_predictions = [{"id": example["id"], "prediction_text": output} for example, output in zip(test_data, outputs) if example["lang"] == lang]
@@ -262,7 +263,7 @@ def main(args):
 
     print("Scores:")
     print(json.dumps(eval_scores, indent=4))
-    
+
     with open(os.path.join(args.save_dir, "metrics.json"), "w") as fout:
         json.dump(eval_scores, fout, indent=4)
 
@@ -366,18 +367,18 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--use_vllm",
-        action="store_true", 
+        action="store_true",
         help="If given, we will use the vllm library, which will likely increase the inference throughput."
     )
     parser.add_argument(
-        "--use_chat_format", 
-        action="store_true", 
+        "--use_chat_format",
+        action="store_true",
         help="If given, we will use the chat format for the prompts."
     )
     parser.add_argument(
-        "--chat_formatting_function", 
-        type=str, 
-        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        "--chat_formatting_function",
+        type=str,
+        default="eval.templates.create_prompt_with_tulu_chat_format",
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
     )
     parser.add_argument(

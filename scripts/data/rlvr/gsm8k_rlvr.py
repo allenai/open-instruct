@@ -16,6 +16,7 @@ import datasets
 from huggingface_hub import HfApi
 from transformers import HfArgumentParser
 
+
 @dataclass
 class Args:
     push_to_hub: bool = False
@@ -38,7 +39,7 @@ def main(args: Args):
         dataset[key] = dataset[key].select_columns(
             ["messages", "ground_truth", "dataset"]
         )
-    
+
     if args.push_to_hub:
         api = HfApi()
         if not args.hf_entity:

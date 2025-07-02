@@ -35,18 +35,18 @@ The LLM is prompted to return a JSON object with the following keys:
 - `translated_solution`: The solution code, translated.
 - `translated_test_cases`: The test cases, translated.
 """
+import hashlib
 import json
 import os
-import time
-from openai import AzureOpenAI
-from datasets import load_dataset, Dataset
-from pydantic import BaseModel
-from typing import List
 import random
 import re
-import hashlib
 import subprocess
+import time
+from typing import List
 
+from datasets import Dataset, load_dataset
+from openai import AzureOpenAI
+from pydantic import BaseModel
 
 client = AzureOpenAI(
     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
@@ -203,9 +203,9 @@ def find_cached_results(id: str):
             if file.endswith(f"openai_response_{id}.json"):
                 full_path = os.path.join(root, file)
                 all_files.append(full_path)
-    
+
     all_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-    
+
     if all_files:
         with open(all_files[0], "r") as f:
             try:
@@ -216,7 +216,7 @@ def find_cached_results(id: str):
                 return response
             except Exception:
                 return None
-    
+
     return None
 
 def main(target_language):
@@ -226,7 +226,7 @@ def main(target_language):
     for INPUT_HF_DATASET in INPUT_HF_DATASETS:
         input_dataset = load_dataset(INPUT_HF_DATASET, split=SPLIT)
         input_rows.extend(input_dataset)
-    
+
     # First get all unique IDs
     unique_ids = set()
     unique_rows = []
@@ -234,15 +234,15 @@ def main(target_language):
         if get_id(row) not in unique_ids:
             unique_ids.add(get_id(row))
             unique_rows.append(row)
-    
+
     print(f"Found {len(unique_rows)} unique rows out of {len(input_rows)} total rows")
-    
+
     # Now sample from unique rows
     random.seed(42)
     if SAMPLE_LIMIT is None:
         SAMPLE_LIMIT = len(unique_rows)
     sampled_rows = random.sample(unique_rows, min(SAMPLE_LIMIT, len(unique_rows)))
-    
+
     print(f"Processing {len(sampled_rows)} unique rows")
     #create a new dataset with the rows
     new_dataset = Dataset.from_list(sampled_rows)
@@ -336,7 +336,7 @@ Output should be a JSON object with this structure:
         if test_cases is None or solution is None or input is None:
             continue
         prompts.append((get_id(row), master_prompt_fn.replace("{input}", input).replace("{solution}", solution).replace("{test_cases}", test_cases).replace("{target_language}", target_language)))
-    
+
 
     print(f"Creating batch file with {len(prompts)} prompts...")
     print(f"First prompt: {prompts[0]}")
@@ -366,7 +366,7 @@ Output should be a JSON object with this structure:
         # call split_and_submit_batch.py with the batch file, and name is the target language
         target_language_filename = f"{target_language}_batch_ids.json"
         script_path = os.path.join(os.path.dirname(__file__), "split_and_submit_batch.py")
-        
+
         # Construct the full path where the batch IDs file will be stored.
         batch_ids_dir = os.path.join(os.getcwd(), "batch_ids")
         full_path_to_ids_file = os.path.join(batch_ids_dir, target_language_filename)
@@ -390,6 +390,6 @@ if __name__ == "__main__":
     for target_language in TARGET_LANGUAGES:
         batch_ids[target_language] = main(target_language)
         break
-    
+
     #with open(f"{WD}/batch_ids_translate.json", "w") as f:
     #    json.dump(batch_ids, f)

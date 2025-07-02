@@ -288,7 +288,7 @@ Note:
 3. Your output should start with "User instruction:". Your output should not include an answer to the instruction.
 '''
 
-# (such as "write in more than 400 words") 
+# (such as "write in more than 400 words")
 
 code_template = '''{persona}
 

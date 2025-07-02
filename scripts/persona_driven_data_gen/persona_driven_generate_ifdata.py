@@ -11,21 +11,26 @@ python persona_driven_generate_ifdata.py --model "gpt-4o" --start_index 0 --end_
 
 import argparse
 import json
-# from openai import OpenAI
-from prompt_templates import instruction_template, knowledge_template, npc_template, math_template, math_solution_template, instruction_following, instruction_following_solution, rewrite_if_prompt
-from datasets import load_dataset
-from tqdm import tqdm
 import random
 import string
-import openai
-from datasets import Dataset
-import random
 
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_random_exponential,
-)  # for exponential backofff
+import openai
+from datasets import load_dataset
+
+# from openai import OpenAI
+from prompt_templates import (
+    instruction_following,
+    instruction_following_solution,
+    instruction_template,
+    knowledge_template,
+    math_solution_template,
+    math_template,
+    npc_template,
+    rewrite_if_prompt,
+)
+from tenacity import retry, stop_after_attempt, wait_random_exponential  # for exponential backofff
+from tqdm import tqdm
+
 
 @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
 def completion_with_backoff(**kwargs):
@@ -103,18 +108,18 @@ def main(args):
                 # randomly sample 1-3 constraints from the IFEval constraints list
                 candid_constraints = random.sample(list(CONSTRAINTS.keys()), random.choice([1,2,3]))
                 few_shot = random.choice(CONSTRAINTS[random.choice(candid_constraints)])
-    
+
             id = "personahub_" +''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(24))
             input_text = example[input_field].strip()
             persona = example['input persona'] if args.template in ["instruction_following_solution", "rewrite_if_prompt"] else input_text
             user_prompt = template.format(persona=input_text, example=few_shot, constraints=", ".join(candid_constraints), category=", ".join([ex.split(':')[0] for ex in candid_constraints]))
             gpt4o_out_text, in_tokens, out_tokens = get_response(args, user_prompt)
             o = {
-                "id": id, 
-                "prompt": input_text, 
-                "input_persona": persona, 
+                "id": id,
+                "prompt": input_text,
+                "input_persona": persona,
                 "messages": [
-                    {"role": "user", "content": input_text}, 
+                    {"role": "user", "content": input_text},
                     {"role": "assistant", "content": gpt4o_out_text}
                     ],
                 "constraints": example.get('constraints', [])
@@ -137,10 +142,10 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Synthesize text using a specified model and template.")
     parser.add_argument(
-        '--template', 
-        type=str, 
-        required=True, 
-        choices=['math', 'math_solution', 'instruction_following', 'instruction_following_solution', 'rewrite_if_prompt'], 
+        '--template',
+        type=str,
+        required=True,
+        choices=['math', 'math_solution', 'instruction_following', 'instruction_following_solution', 'rewrite_if_prompt'],
         help=(
             "Prompt templates. Choose from 'instruction', 'knowledge', 'math' or 'npc'. "
             "You can also add more customized templates in prompt_templates.py"

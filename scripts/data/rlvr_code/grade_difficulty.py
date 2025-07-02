@@ -13,11 +13,10 @@ The expected output from the language model for each problem is a JSON object co
 import json
 import os
 import time
-from openai import AzureOpenAI
-from datasets import load_dataset
-from pydantic import BaseModel, ConfigDict
-from typing import List
 
+from datasets import load_dataset
+from openai import AzureOpenAI
+from pydantic import BaseModel, ConfigDict
 
 datasets = ['saurabh5/open-code-reasoning-rlvr', 'saurabh5/tulu-3-personas-code-rlvr', 'saurabh5/rlvr_acecoder_filtered', 'saurabh5/the-algorithm-python', 'saurabh5/llama-nemotron-rlvr', 'saurabh5/open-code-reasoning-rlvr-stdio']
 MODEL = 'o3'
@@ -149,7 +148,7 @@ if __name__ == "__main__":
     for dataset in datasets:
         print(f"processing {dataset}")
         batches[dataset] = grade_difficulty(dataset)
-    
+
     # save batches to json
     with open(f"{WD}/batches_difficulty.json", "w") as f:
         json.dump(batches, f)

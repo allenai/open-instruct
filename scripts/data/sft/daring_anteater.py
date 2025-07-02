@@ -1,11 +1,8 @@
 import argparse
-import os
-from collections import defaultdict
-from typing import List, Optional
+
 from datasets import load_dataset
 
 from scripts.data.sft.utils import convert_sft_dataset
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -67,7 +64,7 @@ if __name__ == "__main__":
             else:
                 raise ValueError(f"Unknown role: {it['from']}")
         return {"messages": messages}
-    
+
     readme_content = (
         "This is a converted version of the Daring-Anteater dataset into Tulu SFT training format.\n\n"
         "The conversion script can be found in our "
@@ -83,11 +80,11 @@ if __name__ == "__main__":
         "Please refer to the [original dataset](https://huggingface.co/datasets/nvidia/Daring-Anteater) "
         "for more information about this dataset and the license."
     )
-    
+
     ds = load_dataset("nvidia/Daring-Anteater")
     if args.remove_subsets:
         ds = ds.filter(lambda x: x["dataset"] not in args.remove_subsets)
-    
+
     convert_sft_dataset(
         ds=ds,
         hf_dataset_id=None,

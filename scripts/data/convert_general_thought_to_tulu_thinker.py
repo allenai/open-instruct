@@ -6,8 +6,9 @@ use:
 python scripts/data/convert_general_thought_to_tulu_thinker.py
 """
 
-from datasets import load_dataset, Dataset
 import random
+
+from datasets import Dataset, load_dataset
 
 random_gen = random.Random(42)
 

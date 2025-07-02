@@ -16,6 +16,7 @@ import datasets
 from huggingface_hub import HfApi
 from transformers import HfArgumentParser
 
+
 @dataclass
 class Args:
     push_to_hub: bool = False
@@ -23,7 +24,7 @@ class Args:
 
 def main(args: Args):
     dataset = datasets.load_dataset("gsm8k", "main")
-    
+
     print(dataset)
     def process(example):
         example["messages"] = [
@@ -36,7 +37,7 @@ def main(args: Args):
         dataset[key] = dataset[key].select_columns(
             ["messages", "question", "answer"]
         )
-    
+
     if args.push_to_hub:
         api = HfApi()
         if not args.hf_entity:

@@ -1,6 +1,7 @@
+import logging
+
 import datasets
 from tqdm import tqdm
-import logging
 
 """
 Converts a RLVR dataset into a SFT dataset.
@@ -53,11 +54,11 @@ def main():
         logger.info(f"Loading dataset: {INPUT_HF_DATASET}")
         input_ds = datasets.load_dataset(INPUT_HF_DATASET, split="train")
         logger.info(f"Loaded {len(input_ds)} rows")
-        
+
         stdin_rows = []
         skipped_count = 0
         error_count = 0
-        
+
         for i, row in enumerate(tqdm(input_ds, desc="Processing rows")):
             # Validate row
             is_valid, error_msg = validate_row(row)
@@ -65,11 +66,11 @@ def main():
                 logger.warning(f"Row {i}: {error_msg}")
                 error_count += 1
                 continue
-                
+
             if not row["good_program"]:
                 skipped_count += 1
                 continue
-                
+
             try:
                 #fn_input = row[FN_INPUT_COLUMN_NAME]
                 stdin_input = get_original_input(row)
@@ -81,7 +82,7 @@ def main():
                 #    {"role": "user", "content": fn_input},
                 #    {"role": "assistant", "content": fn_solution}
                 #]
-                
+
                 stdin_messages = [
                     {"role": "user", "content": stdin_input},
                     {"role": "assistant", "content": stdin_solution}
@@ -98,31 +99,31 @@ def main():
                     "dataset": "code",
                     "good_program": row["good_program"],
                 })
-                
+
             except Exception as e:
                 logger.error(f"Error processing row {i}: {e}")
                 error_count += 1
                 continue
-        
+
         logger.info(f"Processed {len(stdin_rows)} valid rows")
         logger.info(f"Skipped {skipped_count} rows (good_program=False)")
         logger.info(f"Errors: {error_count}")
-        
+
         if len(stdin_rows) == 0:
             logger.error("No valid rows to process!")
             return
-        
+
         logger.info("Creating datasets...")
         stdin_ds = datasets.Dataset.from_list(stdin_rows)
-        
+
         logger.info(f"Pushing stdin dataset to: {OUTPUT_HF_DATASET}")
         stdin_ds.push_to_hub(OUTPUT_HF_DATASET)
-        
+
         logger.info("Processing complete!")
-        
+
     except Exception as e:
         logger.error(f"Script failed: {e}")
         raise
 
 if __name__ == "__main__":
-    main() 
+    main()

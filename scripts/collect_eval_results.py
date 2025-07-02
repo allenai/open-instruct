@@ -9,11 +9,12 @@ python scripts/collect_eval_results.py \
     --table_file metrics.tsv
 """
 
-import beaker
-from pathlib import Path
 import argparse
-from copy import deepcopy
 import json
+from copy import deepcopy
+from pathlib import Path
+
+import beaker
 import pandas as pd
 
 

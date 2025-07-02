@@ -23,9 +23,11 @@ Then you can run this script with the following command:
 import argparse
 import json
 import os
-import vllm
+
 import torch
-from eval.utils import generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model, dynamic_import_function
+import vllm
+
+from eval.utils import dynamic_import_function, generate_completions, load_hf_lm_and_tokenizer, query_openai_chat_model
 
 
 def parse_args():
@@ -45,12 +47,12 @@ def parse_args():
         help="If given, we will use the slow tokenizer."
     )
     parser.add_argument(
-        "--openai_engine", 
+        "--openai_engine",
         type=str,
         help="OpenAI engine name. This should be exclusive with `model_name_or_path`.")
     parser.add_argument(
-        "--input_files", 
-        type=str, 
+        "--input_files",
+        type=str,
         nargs="+",
         help="Input .jsonl files, with each line containing `id` and `prompt` or `messages`.")
     parser.add_argument(
@@ -78,17 +80,17 @@ def parse_args():
         help="If given, we're evaluating a 4-bit quantized GPTQ model.")
     parser.add_argument(
         "--use_vllm",
-        action="store_true", 
+        action="store_true",
         help="If given, we will use the vllm library, which will likely increase the inference throughput.")
     parser.add_argument(
-        "--use_chat_format", 
-        action="store_true", 
+        "--use_chat_format",
+        action="store_true",
         help="If given, we will use the chat format for the prompts."
     )
     parser.add_argument(
-        "--chat_formatting_function", 
-        type=str, 
-        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        "--chat_formatting_function",
+        type=str,
+        default="eval.templates.create_prompt_with_tulu_chat_format",
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
     )
     parser.add_argument(
@@ -158,7 +160,7 @@ if __name__ == "__main__":
                 tensor_parallel_size=torch.cuda.device_count(),
             )
             sampling_params = vllm.SamplingParams(
-                temperature=args.temperature if args.do_sample else 0, 
+                temperature=args.temperature if args.do_sample else 0,
                 top_p=args.top_p,
                 max_tokens=args.max_new_tokens,
             )
@@ -166,9 +168,9 @@ if __name__ == "__main__":
             outputs = [it.outputs[0].text for it in outputs]
         else:
             model, tokenizer = load_hf_lm_and_tokenizer(
-                model_name_or_path=args.model_name_or_path, 
+                model_name_or_path=args.model_name_or_path,
                 tokenizer_name_or_path=args.tokenizer_name_or_path,
-                load_in_8bit=args.load_in_8bit, 
+                load_in_8bit=args.load_in_8bit,
                 device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                 gptq_model=args.gptq,
                 use_fast_tokenizer=not args.use_slow_tokenizer,
@@ -187,7 +189,7 @@ if __name__ == "__main__":
             for instance, output in zip(instances, outputs):
                 instance["output"] = output
                 f.write(json.dumps(instance) + "\n")
-                
+
     elif args.openai_engine is not None:
         query_openai_chat_model(
             engine=args.openai_engine,
