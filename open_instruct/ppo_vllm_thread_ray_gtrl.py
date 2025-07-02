@@ -847,7 +847,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
         # get list of all reward types in dataset, used for logging
         # sorted to make sure the order is consistent
-        reward_types = sorted(list(set(train_dataset.unique("dataset"))))
+        reward_types = sorted(np.unique(np.array(train_dataset["dataset"]).flat))
 
         args = self.args
         self.tokenizer = tokenizer
@@ -1806,6 +1806,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
         args.vllm_enforce_eager,
+        tc.tokenizer_name_or_path,
         model_config.model_name_or_path,
         model_config.model_revision,
         args.seed,

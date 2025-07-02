@@ -75,6 +75,7 @@ WEKA_CLUSTERS = [
     "ai2/allennlp-elara-cirrascale",
     "ai2/ceres-cirrascale",
     "ai2/ganymede-cirrascale",
+    "ai2/rhea-cirrascale",
     "ai2/test-h100",
 ]
 GCP_CLUSTERS = [
@@ -258,6 +259,10 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
         "WANDB_API_KEY",
         "BEAKER_TOKEN",
         "OPENAI_API_KEY",
+        # litellm expects these env vars
+        "AZURE_API_KEY",
+        "AZURE_API_BASE",
+        "ANTHROPIC_API_KEY",
     ]
     for useful_secret in useful_secrets:
         if f"{whoami}_{useful_secret}" in beaker_secrets:

@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import random
+import re
 import shutil
 import socket
 import subprocess
@@ -571,7 +572,7 @@ class ArgumentParserPlus(HfArgumentParser):
                         inputs[arg] = [str(v) for v in val.split(",")]
 
                     # bool of a non-empty string is True, so we manually check for bools
-                    if base_type == bool:
+                    if base_type is bool:
                         if val in ["true", "True"]:
                             inputs[arg] = True
                         else:
@@ -946,7 +947,23 @@ def live_subprocess_output(cmd: List[str]) -> str:
 def download_from_hf(model_name_or_path: str, revision: str) -> None:
     cmd = ["huggingface-cli", "download", model_name_or_path, "--revision", revision]
     print(f"Downloading from HF with command: {cmd}")
-    return live_subprocess_output(cmd)
+    output = live_subprocess_output(cmd)
+    # for some reason, sometimes the output includes the line including some loading message.
+    # so do some minor cleaning.
+    if "\n" in output:
+        output = output.split("\n")[-1].strip()
+    return output
+
+
+[
+    "gsutil",
+    "-o",
+    "GSUtil:parallel_composite_upload_threshold=150M",
+    "cp",
+    "-r",
+    "/root/.cache/huggingface/hub/models--Qwen--Qwen3-8B/snapshots/9c925d64d72725edaf899c6cb9c377fd0709d9c5",
+    "gs://ai2-llm/post-training/deletable_cache_models/Qwen/Qwen3-8B/9c925d64d72725edaf899c6cb9c377fd0709d9c5",
+]
 
 
 def download_from_gs_bucket(src_path: str, dest_path: str) -> None:
@@ -1399,3 +1416,47 @@ class RayProcess:
             return
 
         raise NotImplementedError("Zero stage 2 is not supported yet")
+
+
+def extract_user_query(conversation: str, chat_template_name: str = None) -> str:
+    # Define the regex pattern
+    # if chat_template_name == "tulu_thinker":
+    #     pattern = r"<answer>.*?</answer>\.\n\nUser: (.*?)\nAssistant: <think>"
+    # elif chat_template_name == "tulu_thinker_r1_style":
+    #     pattern = r"<answer>.*?</answer>\.\n\nUser: (.*?)\n<|assistant|>\n<think>"
+    # else:
+    #     # runtime error, the template is not supported
+    #     raise ValueError(f"Can not extract user query for template {chat_template_name}.")
+    pattern = r"\n\n<\|user\|>\n(.*?)\n<\|assistant\|>\n<think>"
+
+    match = re.search(pattern, conversation, re.DOTALL)
+    # Return the captured group if found, else return None
+    return match.group(1).strip() if match else None
+
+
+def extract_final_answer(prediction: str) -> str:
+    """
+    Extract the substring between <answer> and </answer>.
+    If no match is found, extract the substring after </think>.
+    If neither condition matches, clean the prediction by removing the <|assistant|> tag.
+    If none of the above applies, return the original string.
+
+    Args:
+        prediction (str): The input string.
+
+    Returns:
+        str: The extracted substring or the cleaned/original string.
+    """
+    answer_match = re.search(r"<answer>(.*?)</answer>", prediction, re.DOTALL)
+    if answer_match:
+        return answer_match.group(1).strip()
+
+    think_match = re.search(r"</think>(.*)", prediction, re.DOTALL)
+    if think_match:
+        return think_match.group(1).strip()
+
+    cleaned = re.sub(r"<\|assistant\|>", "", prediction)
+    if cleaned != prediction:
+        return cleaned.strip()
+
+    return prediction

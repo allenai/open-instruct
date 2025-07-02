@@ -23,7 +23,14 @@ WORKDIR /stage/
 
 # install google cloud sdk
 RUN apt-get update && apt-get install -y gnupg curl
-RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && apt-get update -y && apt-get install google-cloud-cli -y
+RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
+    | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && \
+    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+    | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && \
+    apt-get update -y && apt-get install google-cloud-cli -y
+
+# Install nginx and create conf.d directory
+RUN apt-get update && apt-get install -y nginx && mkdir -p /etc/nginx/conf.d
 
 # TODO When updating flash-attn or torch in the future, make sure to update the version in the requirements.txt file. 
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
@@ -34,6 +41,7 @@ RUN pip install flash-attn==2.7.2.post1 --no-build-isolation
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 RUN python -m nltk.downloader punkt
+RUN python -m nltk.downloader punkt_tab
 
 COPY open_instruct open_instruct
 COPY oe-eval-internal oe-eval-internal

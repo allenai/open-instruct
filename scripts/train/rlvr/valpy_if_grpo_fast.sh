@@ -1,0 +1,47 @@
+python mason.py \
+    --cluster ai2/augusta-google-1 \
+    --workspace ai2/tulu-thinker \
+    --priority high \
+    --image valpy/open_instruct_dev_multi --pure_docker_mode \
+    --preemptible \
+    --num_nodes 2 \
+    --budget ai2/oe-adapt \
+    --gpus 8 -- source configs/beaker_configs/ray_node_setup.sh \&\& python open_instruct/grpo_fast.py \
+    --exp_name valpy_if_multi_tulu3.1_8b_grpo \
+    --beta 0.01 \
+    --num_unique_prompts_rollout 48 \
+    --num_samples_per_prompt_rollout 16 \
+    --try_launch_beaker_eval_jobs_on_weka \
+    --kl_estimator kl3 \
+    --learning_rate 5e-7 \
+    --dataset_mixer_list allenai/IF_multi_constraints_upto5 1.0 \
+    --dataset_mixer_list_splits train \
+    --dataset_mixer_eval_list allenai/IF_multi_constraints_upto5 16 \
+    --dataset_mixer_eval_list_splits train \
+    --max_token_length 2048 \
+    --max_prompt_token_length 2048 \
+    --response_length 2048 \
+    --pack_length 4096 \
+    --model_name_or_path allenai/Llama-3.1-Tulu-3-8B-DPO \
+    --apply_verifiable_reward True \
+    --non_stop_penalty True \
+    --non_stop_penalty_value 0.0 \
+    --temperature 1.0 \
+    --chat_template_name tulu \
+    --oe_eval_tasks  ifeval::tulu \
+    --oe_eval_max_length 2048 \
+    --total_episodes 2000000 \
+    --deepspeed_stage 2 \
+    --per_device_train_batch_size 1 \
+    --num_mini_batches 2 \
+    --num_learners_per_node 6 \
+    --num_epochs 1 \
+    --vllm_tensor_parallel_size 1 \
+    --vllm_num_engines 10 \
+    --lr_scheduler_type constant \
+    --apply_verifiable_reward true \
+    --seed 1 \
+    --num_evals 100 \
+    --save_freq 10 \
+    --gradient_checkpointing \
+    --with_tracking

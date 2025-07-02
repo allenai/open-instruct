@@ -42,7 +42,9 @@ except Exception:
     pass
 # isort: on
 
+import asyncio
 import json
+import math
 import os
 import shutil
 import socket
@@ -53,7 +55,7 @@ from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
-from typing import Callable, Dict, Iterator, List, Literal, Optional
+from typing import Callable, Dict, Iterator, List, Literal, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -84,7 +86,11 @@ from open_instruct.dataset_transformation import (
     get_cached_dataset_tulu,
     visualize_token,
 )
-from open_instruct.ground_truth_utils import soft_format_reward_func
+from open_instruct.ground_truth_utils import (
+    build_all_verifiers,
+    cleanup_all_llm_judge_clients,
+    soft_format_reward_func,
+)
 from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
@@ -103,6 +109,7 @@ from open_instruct.utils import (
     calibrate_checkpoint_state_dir,
     clean_last_n_checkpoints_deepspeed,
     download_latest_checkpoint_from_gs,
+    extract_user_query,
     get_beaker_whoami,
     get_eval_ds_config,
     get_optimizer_grouped_parameters,
@@ -192,6 +199,8 @@ class Args:
     """RUNTIME VALUE: The frequency of evaluation steps"""
     save_freq: int = -1
     """How many train steps to save the model"""
+    allow_world_padding: bool = False
+    """Whether to allow world padding. This is useful for model sweeps, but wastes compute."""
 
     # Generation
     response_length: int = 256
@@ -217,8 +226,10 @@ class Args:
     """Number of minibatches to split a batch into"""
     beta: float = 0.05
     """the beta value of the RLHF objective (KL coefficient)"""
-    cliprange: float = 0.2
-    """the clip range"""
+    clip_lower: float = 0.2
+    """the lower clip range"""
+    clip_higher: float = 0.2
+    """the higher clip range. Sometimes we want this to be higher, see DAPO (https://arxiv.org/abs/2503.14476)"""
     kl_estimator: Literal["kl1", "kl2", "kl3", "kl4"] = "kl3"
     """the KL estimator to use"""
     pack_length: int = 512
@@ -253,6 +264,22 @@ class Args:
     """whether to apply verifiable reward"""
     verification_reward: float = 10.0
     """the reward value for verifiable responses"""
+
+    # -- llm verifiers
+    llm_judge_model: str = "azure/gpt-4o-mini-standard"
+    """the model to use for the llm judge"""
+    llm_judge_max_tokens: int = 2048
+    """the max tokens to use for the llm judge"""
+    llm_judge_temperature: float = 1.0
+    """the temperature to use for the llm judge"""
+    llm_judge_timeout: int = 60
+    """the timeout to use for the llm judge"""
+
+    # -- code verifier
+    code_api_url: str = os.environ.get("CODE_API_URL", "http://localhost:1234") + "/test_program"
+    """the api url to use for the code verifier"""
+    code_max_execution_time: float = 1.0
+    """the max execution time to use for the code verifier"""
 
     # -- non stop penalty
     non_stop_penalty: bool = False
@@ -500,9 +527,10 @@ class PolicyTrainerRayProcess(RayProcess):
         # next line instructs transformers to partition the model directly over multiple gpus using
         # deepspeed.zero.Init when model's `from_pretrained` method is called.
         if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            HfDeepSpeedConfig(ds_config)
+            dschf = HfDeepSpeedConfig(ds_config)
         else:
-            pass
+            dschf = None
+        print(f"{dschf=}")
 
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
@@ -570,9 +598,11 @@ class PolicyTrainerRayProcess(RayProcess):
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
         if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
-            HfDeepSpeedConfig(ds_config)
+            dschf = HfDeepSpeedConfig(ds_config)
         else:
-            pass
+            dschf = None
+        print(f"{dschf=}")
+
         self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
             revision=model_config.model_revision,
@@ -723,7 +753,15 @@ class PolicyTrainerRayProcess(RayProcess):
         to_device_inplace(collated_position_ids, self.device)
         to_device_inplace(collated_advantages, self.device)
         to_device_inplace(collated_response_masks, self.device)
-        accumulation_steps = len(collated_query_responses) // (num_mini_batches)
+        accumulation_steps = math.ceil(len(collated_query_responses) / num_mini_batches - 0.5)
+        leftover = len(collated_query_responses) % accumulation_steps
+        if leftover > 0:
+            collated_query_responses = collated_query_responses[0:-leftover]
+            collated_tool_masks = collated_tool_masks[0:-leftover]
+            collated_attention_masks = collated_attention_masks[0:-leftover]
+            collated_position_ids = collated_position_ids[0:-leftover]
+            collated_advantages = collated_advantages[0:-leftover]
+            collated_response_masks = collated_response_masks[0:-leftover]
 
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
@@ -797,7 +835,9 @@ class PolicyTrainerRayProcess(RayProcess):
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
                     ratio = torch.exp(logprobs_diff)
                     pg_losses = -mb_advantages[:, 1:] * ratio
-                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(ratio, 1.0 - args.cliprange, 1.0 + args.cliprange)
+                    pg_losses2 = -mb_advantages[:, 1:] * torch.clamp(
+                        ratio, 1.0 - args.clip_lower, 1.0 + args.clip_higher
+                    )
                     pg_loss_max = torch.max(pg_losses, pg_losses2)
 
                     # Here we recalculate kl: we want the KL loss to backpropagate through the model
@@ -1117,11 +1157,15 @@ def data_preparation_thread(
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
             decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
+            decoded_queries = tokenizer.batch_decode(queries, skip_special_tokens=True)
+            decoded_queries = [extract_user_query(query) for query in decoded_queries]
             stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
-            scores, reward_metrics = reward_fn(
-                responses, decoded_responses, ground_truths, datasets, finish_reasons, infos
+            scores, reward_metrics = asyncio.run(
+                reward_fn(
+                    responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries
+                )
             )
             scores = np.array(scores)
             scores_per_prompt = scores.reshape(-1, args.num_samples_per_prompt_rollout)
@@ -1187,6 +1231,31 @@ def data_preparation_thread(
                 for packed_mask in packed_sequences.response_masks
             ]
             packed_sequences.advantages = packed_advantages
+
+        # if we have less batches than world size, we need to pad out so each world is fine
+        # ideally, you should avoid this since its wasting computation.
+        if args.allow_world_padding:
+            with Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
+                shortfall = args.world_size - len(packed_sequences.query_responses)
+                if shortfall > 0:
+                    print(
+                        f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
+                    )
+                    # construct "dummy" sequences for padding out the world size
+                    dummy_qr = torch.tensor([tokenizer.pad_token_id, tokenizer.eos_token_id], dtype=torch.long)
+                    dummy_tool_mask = torch.zeros_like(dummy_qr)
+                    dummy_attention = torch.tensor([1, 1], dtype=torch.long)
+                    dummy_position_ids = torch.arange(len(dummy_qr), dtype=torch.long)
+                    dummy_response_mask = torch.zeros_like(dummy_qr)
+                    dummy_advantage = torch.zeros_like(dummy_qr, dtype=torch.float)
+                    # pad out the world size
+                    for _ in range(shortfall):
+                        packed_sequences.query_responses.append(dummy_qr)
+                        packed_sequences.tool_masks.append(dummy_tool_mask)
+                        packed_sequences.attention_masks.append(dummy_attention)
+                        packed_sequences.position_ids.append(dummy_position_ids)
+                        packed_sequences.response_masks.append(dummy_response_mask)
+                        packed_sequences.advantages.append(dummy_advantage)
 
         with Timer("🔄 [Data Preparation Thread] Prepare collated data for each worker"):
             B = (
@@ -1477,6 +1546,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
         args.vllm_enforce_eager,
+        tc.tokenizer_name_or_path,
         model_config.model_name_or_path,
         model_config.model_revision,
         args.seed,
@@ -1719,13 +1789,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                 )
 
                 # get and log evaluation metrics
-                eval_scores, eval_reward_metrics = reward_fn(
-                    eval_responses,
-                    eval_decoded_responses,
-                    eval_ground_truths,
-                    eval_dataset_names,
-                    eval_finish_reasons,
-                    eval_infos,
+                eval_scores, eval_reward_metrics = asyncio.run(
+                    reward_fn(
+                        eval_responses,
+                        eval_decoded_responses,
+                        eval_ground_truths,
+                        eval_dataset_names,
+                        eval_finish_reasons,
+                        eval_infos,
+                    )
                 )
                 eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
                 eval_metrics = {
@@ -1767,6 +1839,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     except Exception as e:
         print(f"Training error occurred: {str(e)}")
         print(traceback.format_exc())
+        try:
+            asyncio.run(cleanup_all_llm_judge_clients())
+            print("✅ LLM judge clients cleaned up")
+        except Exception as cleanup_error:
+            print(f"Warning: Error during LLM judge cleanup: {cleanup_error}")
+
         ray.shutdown()
         os._exit(1)
         raise  # Re-raise the exception after shutdown
@@ -1776,6 +1854,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     print("======== ✅ vllm generate thread ends =========")
     packing_thread.join()
     print("======== ✅ data preparation thread ends =========")
+
+    try:
+        asyncio.run(cleanup_all_llm_judge_clients())
+        print("✅ LLM judge clients cleaned up")
+    except Exception as cleanup_error:
+        print(f"Warning: Error during LLM judge cleanup: {cleanup_error}")
+
     ray.shutdown()
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
@@ -1808,13 +1893,16 @@ if __name__ == "__main__":
     assert isinstance(tokenizer_config, TokenizerConfig)
     assert isinstance(model_config, ModelConfig)
 
-    def reward_fn(
+    reward_fn_mapping = build_all_verifiers(args)
+
+    async def reward_fn(
         responses: List[torch.Tensor],
         decoded_responses: List[str],
-        ground_truths: List[str],
+        ground_truths: List[Union[str, List[str]]],
         datasets: List[str],
         finish_reasons: List[str],
         infos: List[List[int]],
+        queries: Optional[List[str]] = None,
     ) -> List[float]:
         num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
         good_outputs = [
@@ -1835,12 +1923,14 @@ if __name__ == "__main__":
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
-                verifiable_rewards, per_func_rewards = apply_verifiable_reward(
+                verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
+                    reward_fn_mapping,
                     responses,
                     decoded_responses,
                     ground_truths,
                     datasets,
                     reward_mult=args.verification_reward,
+                    queries=queries,
                 )
                 if len(verifiable_rewards) != len(scores):
                     raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
