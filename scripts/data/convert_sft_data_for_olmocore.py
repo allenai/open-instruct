@@ -147,6 +147,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     token_ids = []
     labels_mask = []
     sample: Mapping[str, Any]
+    num_samples_skipped = 0
     for sample in tqdm(  # type: ignore
         train_dataset,
         desc="Collecting tokens",
@@ -156,6 +157,9 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     ):
         token_ids.extend(sample[INPUT_IDS_KEY])
         labels_mask.extend([1 if label != -100 else 0 for label in sample[LABELS_KEY]])
+
+        if all(label == -100 for label in sample[LABELS_KEY]):
+            num_samples_skipped += 1
 
         # Assert that attention mask is all 1s
         assert all(mask == 1 for mask in sample[ATTENTION_MASK_KEY]), (
@@ -167,6 +171,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     print(f"Maximum token ID: {max(token_ids)}")
     print(f"Labels mask sum (trainable tokens): {sum(labels_mask)}")
     print("Writing data to numpy files...")
+    print(f"Number of samples that should be skipped: {num_samples_skipped}")
 
     # Create output directory with tokenizer name
     output_dir = args.output_dir
