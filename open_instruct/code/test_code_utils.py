@@ -1,75 +1,47 @@
 """Unit-tests for `get_successful_tests_fast`."""
 
-import os
-import sys
 import unittest
-
-# Add the project root to the Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from datasets import load_dataset
 
 from open_instruct.code.code_utils import get_successful_tests_fast
 
+SIMPLE_PROGRAM = "a = 1"
+FAILING_TEST = "assert False"
+PASSING_TEST = "assert True"
+TIMEOUT_TEST = "import time\ntime.sleep(10)"
+
 
 class GetSuccessfulTestsFastTests(unittest.TestCase):
-    """Tests mirroring the interactive checks from the original script."""
-
-    # ---------- helpers & fixtures -------------------------------------------------
-    @classmethod
-    def setUpClass(cls):
-        # shared objects that never mutate
-        cls.program = "a = 1"
-        cls.bad_test = "assert False"
-        cls.good_test = "assert True"
-        cls.time_out_test = (
-            "import time\n"
-            "time.sleep(10)"  # Simple timeout test without print spam
-        )
-
-    # ---------- simple synthetic cases --------------------------------------------
     def test_mixed_pass_and_fail(self):
         """Bad + good + timeout tests: expect [F, T, F, T, T, F, T]."""
         tests = [
-            self.bad_test,
-            self.good_test,
-            self.bad_test,
-            self.good_test,
-            self.good_test,
-            self.time_out_test,
-            self.good_test,
+            FAILING_TEST,
+            PASSING_TEST,
+            FAILING_TEST,
+            PASSING_TEST,
+            PASSING_TEST,
+            TIMEOUT_TEST,
+            PASSING_TEST,
         ]
         expected = [0, 1, 0, 1, 1, 0, 1]
-
-        result = get_successful_tests_fast(program=self.program, tests=tests)
-
-        # The API most commonly returns a list[int] the same length as `tests`.
-        # If your implementation instead returns e.g. indices or a set,
-        # adapt the assertion below.
-        self.assertEqual(
-            result,
-            expected,
-            msg=f"Expected {expected} for mixed pass/fail case, got {result}",
-        )
+        result = get_successful_tests_fast(program=SIMPLE_PROGRAM, tests=tests)
+        self.assertEqual(result, expected)
 
     def test_all_fail_or_timeout(self):
         """All failing or timing-out tests: expect a full-False result."""
         tests = [
-            self.bad_test,
-            self.bad_test,
-            self.time_out_test,
-            self.time_out_test,
-            self.time_out_test,
-            self.time_out_test,
+            FAILING_TEST,
+            FAILING_TEST,
+            TIMEOUT_TEST,
+            TIMEOUT_TEST,
+            TIMEOUT_TEST,
+            TIMEOUT_TEST,
         ]
         expected = [0] * len(tests)
 
-        result = get_successful_tests_fast(program=self.program, tests=tests)
-        self.assertEqual(
-            result,
-            expected,
-            msg="All tests should fail or time-out, but result differed",
-        )
+        result = get_successful_tests_fast(program=SIMPLE_PROGRAM, tests=tests)
+        self.assertEqual(result, expected)
 
     def test_tiger_lab_acecode_sample(self):
         """
@@ -93,11 +65,7 @@ class GetSuccessfulTestsFastTests(unittest.TestCase):
         else:
             actual_passes = len(result)
 
-        self.assertEqual(
-            actual_passes,
-            expected_passes,
-            msg="Pass count does not match `pass_rate` in dataset sample",
-        )
+        self.assertEqual(actual_passes, expected_passes)
 
     def test_add_function_example(self):
         """Small ‘add’ sample from the original script; two pass, one fail."""
@@ -110,7 +78,7 @@ class GetSuccessfulTestsFastTests(unittest.TestCase):
         expected = [1, 1, 0]
 
         result = get_successful_tests_fast(program=program, tests=tests)
-        self.assertEqual(result, expected, "Unexpected outcome for add() example")
+        self.assertEqual(result, expected)
 
 
 class ReliabilityGuardNetworkTests(unittest.TestCase):
@@ -131,7 +99,7 @@ except:
         result = get_successful_tests_fast(
             program=program, tests=["assert socket_created == True"], max_execution_time=0.5
         )
-        self.assertEqual(result, [1], "Socket creation should succeed")
+        self.assertEqual(result, [1])
 
     def test_dangerous_imports_with_networking(self):
         """Test that certain networking-related imports are blocked."""
@@ -143,7 +111,7 @@ except:
 
         for program in programs:
             result = get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
-            self.assertEqual(result, [0], f"Program with dangerous imports should be blocked: {program[:30]}...")
+            self.assertEqual(result, [0])
 
 
 class ReliabilityGuardFileSystemTests(unittest.TestCase):
@@ -184,7 +152,7 @@ except:
                 ),
                 max_execution_time=0.5,
             )
-            self.assertEqual(result, [expected], f"Unexpected result for: {program[:50]}...")
+            self.assertEqual(result, [expected])
 
     def test_file_deletion_blocked(self):
         """Test that file deletion operations are blocked."""
@@ -215,7 +183,7 @@ except:
                 program=program, tests=["assert remove_worked == False"], max_execution_time=0.5
             )
             # Programs with "import os" are blocked entirely
-            self.assertEqual(result, [0], f"Program with 'import os' should be blocked: {program[:50]}...")
+            self.assertEqual(result, [0])
 
 
 class ReliabilityGuardProcessTests(unittest.TestCase):
@@ -234,7 +202,7 @@ except:
         result = get_successful_tests_fast(
             program=program, tests=["assert popen_worked == False"], max_execution_time=0.5
         )
-        self.assertEqual(result, [1], "subprocess.Popen should be disabled")
+        self.assertEqual(result, [1])
 
     def test_os_system_blocked(self):
         """Test that os.system is disabled (but import os is blocked)."""
@@ -244,7 +212,7 @@ import os
 exit_code = os.system('echo hello')
 """
         result = get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
-        self.assertEqual(result, [0], "Programs with 'import os' should be blocked")
+        self.assertEqual(result, [0])
 
     def test_os_operations_without_import(self):
         """Test os operations when already imported."""
@@ -259,7 +227,7 @@ except:
 """
         result = get_successful_tests_fast(program=program, tests=["assert result == True"], max_execution_time=0.5)
         # This will be blocked due to "import os"
-        self.assertEqual(result, [0], "Programs with 'import os' are blocked by should_execute")
+        self.assertEqual(result, [0])
 
 
 class ReliabilityGuardResourceTests(unittest.TestCase):
@@ -279,7 +247,7 @@ except RecursionError:
         result = get_successful_tests_fast(
             program=program, tests=["assert recursion_failed == True"], max_execution_time=0.5
         )
-        self.assertEqual(result, [1], "Infinite recursion should raise RecursionError")
+        self.assertEqual(result, [1])
 
     def test_cpu_intensive_timeout(self):
         """Test that CPU-intensive operations timeout properly."""
@@ -290,9 +258,11 @@ for i in range(10**10):
     result += i
 """
         result = get_successful_tests_fast(
-            program=program, tests=["assert result > 0"], max_execution_time=0.1  # Very short timeout
+            program=program,
+            tests=["assert result > 0"],
+            max_execution_time=0.1,  # Very short timeout
         )
-        self.assertEqual(result, [0], "CPU intensive operation should timeout")
+        self.assertEqual(result, [0])
 
     def test_faulthandler_disabled(self):
         """Test that faulthandler is disabled."""
@@ -306,7 +276,7 @@ except:
         result = get_successful_tests_fast(
             program=program, tests=["assert is_enabled == False"], max_execution_time=0.5
         )
-        self.assertEqual(result, [1], "Faulthandler should be disabled")
+        self.assertEqual(result, [1])
 
 
 class ReliabilityGuardModuleImportTests(unittest.TestCase):
@@ -326,7 +296,7 @@ class ReliabilityGuardModuleImportTests(unittest.TestCase):
 
         for program in dangerous_programs:
             result = get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
-            self.assertEqual(result, [0], f"Dangerous import should be blocked: {program[:30]}...")
+            self.assertEqual(result, [0])
 
     def test_safe_imports_allowed(self):
         """Test that safe imports are allowed."""
@@ -344,7 +314,7 @@ class ReliabilityGuardModuleImportTests(unittest.TestCase):
 
         for program, test in zip(safe_programs, tests):
             result = get_successful_tests_fast(program=program, tests=[test], max_execution_time=0.5)
-            self.assertEqual(result, [1], f"Safe import should work: {program[:30]}...")
+            self.assertEqual(result, [1])
 
 
 class ReliabilityGuardEdgeCaseTests(unittest.TestCase):
@@ -362,7 +332,7 @@ quit_disabled = quit is None
             tests=["assert exit_disabled == True", "assert quit_disabled == True"],
             max_execution_time=0.5,
         )
-        self.assertEqual(result, [1, 1], "exit and quit should be None")
+        self.assertEqual(result, [1, 1])
 
     def test_working_directory_sandboxed(self):
         """Test that working directory is changed to cache."""
@@ -379,7 +349,7 @@ except:
     sandboxed = False
 """
         result = get_successful_tests_fast(program=program, tests=["assert sandboxed == True"], max_execution_time=0.5)
-        self.assertEqual(result, [1], "Should be able to write files in sandbox")
+        self.assertEqual(result, [1])
 
     def test_shutil_operations_blocked(self):
         """Test that shutil operations are blocked."""
@@ -389,7 +359,7 @@ import shutil
 shutil.rmtree('/tmp/test')
 """
         result = get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
-        self.assertEqual(result, [0], "Programs with 'shutil' should be blocked")
+        self.assertEqual(result, [0])
 
 
 if __name__ == "__main__":
