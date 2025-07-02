@@ -246,6 +246,24 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
+    "jacobtest2": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|im_start|>system\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'user' %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '\n' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{% if not loop.last %}"
+        "{{ '<|im_start|>assistant\n'  + message['content'] + '\n' }}"
+        "{% else %}"
+        "{{ '<|im_start|>assistant\n'  + message['content'] + eos_token}}"
+        "{% endif %}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
     "tulu": (
         "{% for message in messages %}"
         "{% if message['role'] == 'system' %}"
