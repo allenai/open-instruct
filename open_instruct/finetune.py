@@ -27,6 +27,7 @@ try:
 except Exception:
     pass
 # isort: on
+import json
 import logging
 import math
 import os
@@ -54,6 +55,7 @@ from transformers import (
     DataCollatorForSeq2Seq,
     get_scheduler,
 )
+from transformers.training_args import _convert_str_dict
 
 from open_instruct.dataset_transformation import (
     INPUT_IDS_KEY,
@@ -83,11 +85,17 @@ class FlatArguments:
     """
     Full arguments class for all fine-tuning jobs.
     """
+    # Sometimes users will pass in a `str` repr of a dict in the CLI
+    # We need to track what fields those can be. Each time a new arg
+    # has a dict type, it must be added to this list.
+    # Important: These should be typed with Optional[Union[dict,str,...]]
+    # Note: the suggested ellipses typing above causes errors on python 3.10, so they are omitted.
+    _VALID_DICT_FIELDS = [
+        "additional_model_arguments",
+    ]
 
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
-    run_name: Optional[str] = None
-    """A unique name of this run"""
     do_not_randomize_output_dir: bool = False
     """By default the output directory will be randomized"""
     model_name_or_path: Optional[str] = field(
@@ -109,6 +117,10 @@ class FlatArguments:
     model_revision: Optional[str] = field(
         default=None,
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+    )
+    additional_model_arguments: Optional[Union[dict, str]] = field(
+        default_factory=dict,
+        metadata={"help": "A dictionary of additional model args used to construct the model."},
     )
     low_cpu_mem_usage: bool = field(
         default=False,
@@ -250,6 +262,13 @@ class FlatArguments:
         default=0.03,
         metadata={"help": "Linear warmup over warmup_ratio fraction of total steps."},
     )
+    final_lr_ratio: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "Set the final lr value at the end of training to be final_lr_ratio * learning_rate."
+            " Only for linear schedulers, currently."
+        },
+    )
     weight_decay: float = field(
         default=0.0,
         metadata={"help": "Weight decay for AdamW if we apply some."},
@@ -327,6 +346,12 @@ class FlatArguments:
         default=0.5,
         metadata={"help": "Weight for load balancing loss if applicable."},
     )
+    clean_checkpoints_at_end: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to clean up all previous checkpoints at the end of the run.",
+        },
+    )
 
     # Experiment tracking
     with_tracking: bool = False
@@ -351,6 +376,8 @@ class FlatArguments:
     """What dataset to upload the metadata to. If unset, don't upload metadata"""
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
+    add_seed_and_date_to_exp_name: bool = True
+    """Append the seed and date to exp_name"""
 
     # Ai2 specific settings
     try_auto_save_to_beaker: bool = True
@@ -375,6 +402,22 @@ class FlatArguments:
             raise ValueError("Cannot provide two dataset selection mechanisms.")
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
+        if self.final_lr_ratio is not None:
+            if self.lr_scheduler_type != "linear":
+                raise NotImplementedError("final_lr_ratio only currently implemented for linear schedulers")
+            if not (1.0 >= self.final_lr_ratio >= 0.0):
+                raise ValueError(f"final_lr_ratio must be between 0 and 1, not {self.final_lr_ratio=}")
+
+        # Parse in args that could be `dict` sent in from the CLI as a string
+        for dict_feld in self._VALID_DICT_FIELDS:
+            passed_value = getattr(self, dict_feld)
+            # We only want to do this if the str starts with a bracket to indicate a `dict`
+            # else its likely a filename if supported
+            if isinstance(passed_value, str) and passed_value.startswith("{"):
+                loaded_dict = json.loads(passed_value)
+                # Convert str values to types if applicable
+                loaded_dict = _convert_str_dict(loaded_dict)
+                setattr(self, dict_feld, loaded_dict)
 
 
 def main(args: FlatArguments, tc: TokenizerConfig):
@@ -413,9 +456,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     # ------------------------------------------------------------
     # Set up runtime variables
-    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+
+    if args.add_seed_and_date_to_exp_name:
+        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    else:
+        args.exp_name = args.exp_name
     if not args.do_not_randomize_output_dir:
-        args.output_dir = os.path.join(args.output_dir, args.run_name)
+        args.output_dir = os.path.join(args.output_dir, args.exp_name)
     logger.info("using the output directory: %s", args.output_dir)
     args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
     if is_beaker_job():
@@ -429,7 +476,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             args.hf_entity = HfApi().whoami()["name"]
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
         if args.hf_repo_revision is None:
-            args.hf_repo_revision = args.run_name
+            args.hf_repo_revision = args.exp_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
         if is_beaker_job():
             beaker_config = maybe_get_beaker_config()
@@ -453,7 +500,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             experiment_config,
             init_kwargs={
                 "wandb": {
-                    "name": args.run_name,
+                    "name": args.exp_name,
                     "entity": args.wandb_entity,
                     "tags": [args.exp_name] + get_wandb_tags(),
                 }
@@ -522,12 +569,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             args.config_name,
             revision=args.model_revision,
             trust_remote_code=tc.trust_remote_code,
+            **args.additional_model_arguments,
         )
     elif args.model_name_or_path:
         config = AutoConfig.from_pretrained(
             args.model_name_or_path,
             revision=args.model_revision,
             trust_remote_code=tc.trust_remote_code,
+            **args.additional_model_arguments,
         )
     else:
         raise ValueError(
@@ -688,11 +737,19 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     num_training_steps_for_scheduler = (
         args.max_train_steps if overrode_max_train_steps else args.max_train_steps * accelerator.num_processes
     )
+
+    num_warmup_steps = int(num_training_steps_for_scheduler * args.warmup_ratio)
+    if args.final_lr_ratio is not None and args.lr_scheduler_type == "linear":
+        # Correct num_training_steps_for_scheduler to respect final_lr_ratio for a linear scheduler
+        num_training_steps_for_scheduler = (
+            num_training_steps_for_scheduler - args.final_lr_ratio * num_warmup_steps
+        ) / (1 - args.final_lr_ratio)
+
     lr_scheduler = get_scheduler(
         name=args.lr_scheduler_type,
         optimizer=optimizer,
         num_training_steps=num_training_steps_for_scheduler,
-        num_warmup_steps=int(num_training_steps_for_scheduler * args.warmup_ratio),
+        num_warmup_steps=num_warmup_steps,
     )
     # Prepare everything with `accelerator`.
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
@@ -905,7 +962,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         )
 
     # remove all checkpoints to save space
-    if accelerator.is_local_main_process:
+    if args.clean_checkpoints_at_end and accelerator.is_local_main_process:
         clean_last_n_checkpoints(args.output_dir, keep_last_n_checkpoints=0)
 
     if (

@@ -149,6 +149,12 @@ if all(c in WEKA_CLUSTERS for c in cluster):
             "weka": "oe-adapt-default"
         }
     })
+    d1['tasks'][0]['datasets'].append({
+        'mountPath': "/weka/oe-training-default",
+        "source": {
+            "weka": "oe-training-default"
+        }
+    })
     weka_available = True
 
 

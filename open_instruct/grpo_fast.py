@@ -270,6 +270,8 @@ class Args:
     """the model to use for the llm judge"""
     llm_judge_max_tokens: int = 2048
     """the max tokens to use for the llm judge"""
+    llm_judge_max_context_length: int = 8192
+    """the max context length to use for the llm judge"""
     llm_judge_temperature: float = 1.0
     """the temperature to use for the llm judge"""
     llm_judge_timeout: int = 60
@@ -784,7 +786,8 @@ class PolicyTrainerRayProcess(RayProcess):
         to_device_inplace(collated_position_ids, self.device)
         to_device_inplace(collated_advantages, self.device)
         to_device_inplace(collated_response_masks, self.device)
-        accumulation_steps = math.ceil(len(collated_query_responses) / num_mini_batches - 0.5)
+        # accumulation steps should always be at least 1
+        accumulation_steps = max(math.ceil(len(collated_query_responses) / num_mini_batches - 0.5), 1)
         leftover = len(collated_query_responses) % accumulation_steps
         if leftover > 0:
             collated_query_responses = collated_query_responses[0:-leftover]
@@ -793,6 +796,7 @@ class PolicyTrainerRayProcess(RayProcess):
             collated_position_ids = collated_position_ids[0:-leftover]
             collated_advantages = collated_advantages[0:-leftover]
             collated_response_masks = collated_response_masks[0:-leftover]
+            print(f"Warning: {leftover} samples are dropped due to batch size {num_mini_batches}")
 
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
@@ -1359,7 +1363,7 @@ def data_preparation_thread(
             "scores": np.array(scores).mean(),
             "real_batch_size_ratio": real_batch_size_ratio,
             "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
-            "packed_ratio": len(packed_sequences.query_responses) / len(responses),
+            "packed_ratio": len(packed_sequences.query_responses) / len(responses) if len(responses) > 0 else 0,
             "val/sequence_lengths": sequence_lengths.mean(),
             "val/sequence_lengths_min": sequence_lengths.min(),
             "val/sequence_lengths_max": sequence_lengths.max(),
@@ -1398,6 +1402,9 @@ def data_preparation_thread(
             with open(f"{args.output_dir}/traces_{args.run_name}.jsonl", "a") as f:
                 json.dump(traces, f)
                 f.write("\n")
+
+        if len(responses) == 0:
+            print(f"Warning: no responses in batch {training_step}.")
 
         # Put the packed sequences and metrics into the output queue
         packed_sequences_Q.put(
