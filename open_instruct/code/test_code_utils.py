@@ -129,9 +129,7 @@ except:
     socket_created = False
 """
         result = get_successful_tests_fast(
-            program=program,
-            tests=["assert socket_created == True"],
-            max_execution_time=0.5
+            program=program, tests=["assert socket_created == True"], max_execution_time=0.5
         )
         self.assertEqual(result, [1], "Socket creation should succeed")
 
@@ -142,13 +140,9 @@ except:
             "import threading\nimport socket\ns = socket.socket()",
             "from multiprocessing import Pool\nimport socket\ns = socket.socket()",
         ]
-        
+
         for program in programs:
-            result = get_successful_tests_fast(
-                program=program,
-                tests=["assert True"],
-                max_execution_time=0.5
-            )
+            result = get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
             self.assertEqual(result, [0], f"Program with dangerous imports should be blocked: {program[:30]}...")
 
 
@@ -179,14 +173,16 @@ except:
     chdir_works = False
 """,
         ]
-        
+
         expected_results = [1, 0]  # First should pass (file ops work), second should fail (chdir disabled)
-        
+
         for program, expected in zip(programs, expected_results):
             result = get_successful_tests_fast(
                 program=program,
-                tests=["assert file_ops_work == True"] if "file_ops_work" in program else ["assert chdir_works == False"],
-                max_execution_time=0.5
+                tests=(
+                    ["assert file_ops_work == True"] if "file_ops_work" in program else ["assert chdir_works == False"]
+                ),
+                max_execution_time=0.5,
             )
             self.assertEqual(result, [expected], f"Unexpected result for: {program[:50]}...")
 
@@ -212,13 +208,11 @@ except:
     unlink_worked = False
 """,
         ]
-        
+
         # These will be blocked by should_execute due to "import os"
         for program in programs:
             result = get_successful_tests_fast(
-                program=program,
-                tests=["assert remove_worked == False"],
-                max_execution_time=0.5
+                program=program, tests=["assert remove_worked == False"], max_execution_time=0.5
             )
             # Programs with "import os" are blocked entirely
             self.assertEqual(result, [0], f"Program with 'import os' should be blocked: {program[:50]}...")
@@ -238,9 +232,7 @@ except:
     popen_worked = False
 """
         result = get_successful_tests_fast(
-            program=program,
-            tests=["assert popen_worked == False"],
-            max_execution_time=0.5
+            program=program, tests=["assert popen_worked == False"], max_execution_time=0.5
         )
         self.assertEqual(result, [1], "subprocess.Popen should be disabled")
 
@@ -251,11 +243,7 @@ except:
 import os
 exit_code = os.system('echo hello')
 """
-        result = get_successful_tests_fast(
-            program=program,
-            tests=["assert True"],
-            max_execution_time=0.5
-        )
+        result = get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
         self.assertEqual(result, [0], "Programs with 'import os' should be blocked")
 
     def test_os_operations_without_import(self):
@@ -269,11 +257,7 @@ try:
 except:
     result = False
 """
-        result = get_successful_tests_fast(
-            program=program,
-            tests=["assert result == True"],
-            max_execution_time=0.5
-        )
+        result = get_successful_tests_fast(program=program, tests=["assert result == True"], max_execution_time=0.5)
         # This will be blocked due to "import os"
         self.assertEqual(result, [0], "Programs with 'import os' are blocked by should_execute")
 
@@ -293,9 +277,7 @@ except RecursionError:
     recursion_failed = True
 """
         result = get_successful_tests_fast(
-            program=program,
-            tests=["assert recursion_failed == True"],
-            max_execution_time=0.5
+            program=program, tests=["assert recursion_failed == True"], max_execution_time=0.5
         )
         self.assertEqual(result, [1], "Infinite recursion should raise RecursionError")
 
@@ -308,9 +290,7 @@ for i in range(10**10):
     result += i
 """
         result = get_successful_tests_fast(
-            program=program,
-            tests=["assert result > 0"],
-            max_execution_time=0.1  # Very short timeout
+            program=program, tests=["assert result > 0"], max_execution_time=0.1  # Very short timeout
         )
         self.assertEqual(result, [0], "CPU intensive operation should timeout")
 
@@ -324,9 +304,7 @@ except:
     is_enabled = None
 """
         result = get_successful_tests_fast(
-            program=program,
-            tests=["assert is_enabled == False"],
-            max_execution_time=0.5
+            program=program, tests=["assert is_enabled == False"], max_execution_time=0.5
         )
         self.assertEqual(result, [1], "Faulthandler should be disabled")
 
@@ -345,13 +323,9 @@ class ReliabilityGuardModuleImportTests(unittest.TestCase):
             "import torch\ntensor = torch.zeros(10)",
             "from sklearn import datasets\ndata = datasets.load_iris()",
         ]
-        
+
         for program in dangerous_programs:
-            result = get_successful_tests_fast(
-                program=program,
-                tests=["assert True"],
-                max_execution_time=0.5
-            )
+            result = get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
             self.assertEqual(result, [0], f"Dangerous import should be blocked: {program[:30]}...")
 
     def test_safe_imports_allowed(self):
@@ -361,19 +335,15 @@ class ReliabilityGuardModuleImportTests(unittest.TestCase):
             "import json\ndata = json.dumps({'a': 1})",
             "import re\npattern = re.compile(r'\\d+')",
         ]
-        
+
         tests = [
             "assert result == 4.0",
             "assert data == '{\"a\": 1}'",
             "assert pattern is not None",
         ]
-        
+
         for program, test in zip(safe_programs, tests):
-            result = get_successful_tests_fast(
-                program=program,
-                tests=[test],
-                max_execution_time=0.5
-            )
+            result = get_successful_tests_fast(program=program, tests=[test], max_execution_time=0.5)
             self.assertEqual(result, [1], f"Safe import should work: {program[:30]}...")
 
 
@@ -390,7 +360,7 @@ quit_disabled = quit is None
         result = get_successful_tests_fast(
             program=program,
             tests=["assert exit_disabled == True", "assert quit_disabled == True"],
-            max_execution_time=0.5
+            max_execution_time=0.5,
         )
         self.assertEqual(result, [1, 1], "exit and quit should be None")
 
@@ -408,11 +378,7 @@ try:
 except:
     sandboxed = False
 """
-        result = get_successful_tests_fast(
-            program=program,
-            tests=["assert sandboxed == True"],
-            max_execution_time=0.5
-        )
+        result = get_successful_tests_fast(program=program, tests=["assert sandboxed == True"], max_execution_time=0.5)
         self.assertEqual(result, [1], "Should be able to write files in sandbox")
 
     def test_shutil_operations_blocked(self):
@@ -422,11 +388,7 @@ except:
 import shutil
 shutil.rmtree('/tmp/test')
 """
-        result = get_successful_tests_fast(
-            program=program,
-            tests=["assert True"],
-            max_execution_time=0.5
-        )
+        result = get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
         self.assertEqual(result, [0], "Programs with 'shutil' should be blocked")
 
 
