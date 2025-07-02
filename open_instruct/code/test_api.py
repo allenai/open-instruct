@@ -108,33 +108,56 @@ class TestAPI(unittest.TestCase):
                 "Returned pass/fail vector does not match expectation",
             )
 
-    def test_apiserver_multiple_calls(self):
-        """Test making multiple calls to /test_program and /test_program_stdio endpoints."""
+    def test_multiple_calls_to_test_program(self):
+        """Test making multiple calls to /test_program endpoint."""
         with APITestServer(port=8889) as server:
-            # Test program that we'll send to the API
-            test_payload = {
-                "program": "def multiply(a, b):\n    return a * b",
-                "tests": [
-                    "assert multiply(2, 3) == 6",
-                    "assert multiply(0, 5) == 0",
-                    "assert multiply(-1, 4) == -4"
-                ],
-                "max_execution_time": 1.0
-            }
+            # Test different programs to ensure the server handles multiple requests properly
+            test_payloads = [
+                {
+                    "program": "def multiply(a, b):\n    return a * b",
+                    "tests": [
+                        "assert multiply(2, 3) == 6",
+                        "assert multiply(0, 5) == 0",
+                        "assert multiply(-1, 4) == -4"
+                    ],
+                    "max_execution_time": 1.0
+                },
+                {
+                    "program": "def add(x, y):\n    return x + y",
+                    "tests": [
+                        "assert add(1, 1) == 2",
+                        "assert add(0, 0) == 0",
+                        "assert add(-5, 5) == 0"
+                    ],
+                    "max_execution_time": 1.0
+                },
+                {
+                    "program": "def is_positive(n):\n    return n > 0",
+                    "tests": [
+                        "assert is_positive(5) == True",
+                        "assert is_positive(-3) == False",
+                        "assert is_positive(0) == False"
+                    ],
+                    "max_execution_time": 1.0
+                }
+            ]
             
-            # Make multiple calls to /test_program
-            for i in range(3):
+            # Make multiple calls with different payloads
+            for i, payload in enumerate(test_payloads):
                 response = requests.post(
                     f"{server.base_url}/test_program", 
-                    json=test_payload,
+                    json=payload,
                     timeout=5
                 )
                 self.assertEqual(response.status_code, 200)
                 data = response.json()
                 self.assertIn("results", data)
                 self.assertEqual(data["results"], [1, 1, 1], f"Call {i+1} to /test_program failed")
-            
-            # Make multiple calls to /test_program_stdio with different test cases
+
+    def test_multiple_calls_to_test_program_stdio(self):
+        """Test making multiple calls to /test_program_stdio endpoint."""
+        with APITestServer(port=8890) as server:
+            # Test different stdio programs
             stdio_payloads = [
                 {
                     "program": "a, b = map(int, input().split())\nprint(a + b)",
@@ -153,9 +176,19 @@ class TestAPI(unittest.TestCase):
                         {"input": "0", "output": "even"}
                     ],
                     "max_execution_time": 1.0
+                },
+                {
+                    "program": "s = input().strip()\nprint(s.upper())",
+                    "tests": [
+                        {"input": "hello", "output": "HELLO"},
+                        {"input": "world", "output": "WORLD"},
+                        {"input": "Test123", "output": "TEST123"}
+                    ],
+                    "max_execution_time": 1.0
                 }
             ]
             
+            # Make multiple calls with different payloads
             for i, payload in enumerate(stdio_payloads):
                 response = requests.post(
                     f"{server.base_url}/test_program_stdio", 
