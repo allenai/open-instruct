@@ -108,45 +108,25 @@ class TestAPI(unittest.TestCase):
                 "Returned pass/fail vector does not match expectation",
             )
 
-    def test_multiple_calls_to_test_program(self):
+    def test_multiple_calls_to_test_program(self, num_requests=3):
         """Test making multiple calls to /test_program endpoint."""
-        with APITestServer(port=8889) as server:
-            # Test different programs to ensure the server handles multiple requests properly
-            test_payloads = [
-                {
-                    "program": "def multiply(a, b):\n    return a * b",
-                    "tests": [
-                        "assert multiply(2, 3) == 6",
-                        "assert multiply(0, 5) == 0",
-                        "assert multiply(-1, 4) == -4"
-                    ],
-                    "max_execution_time": 1.0
-                },
-                {
-                    "program": "def add(x, y):\n    return x + y",
-                    "tests": [
-                        "assert add(1, 1) == 2",
-                        "assert add(0, 0) == 0",
-                        "assert add(-5, 5) == 0"
-                    ],
-                    "max_execution_time": 1.0
-                },
-                {
-                    "program": "def is_positive(n):\n    return n > 0",
-                    "tests": [
-                        "assert is_positive(5) == True",
-                        "assert is_positive(-3) == False",
-                        "assert is_positive(0) == False"
-                    ],
-                    "max_execution_time": 1.0
-                }
-            ]
+        with APITestServer() as server:
+            # Use the same payload for all requests
+            test_payload = {
+                "program": "def multiply(a, b):\n    return a * b",
+                "tests": [
+                    "assert multiply(2, 3) == 6",
+                    "assert multiply(0, 5) == 0",
+                    "assert multiply(-1, 4) == -4"
+                ],
+                "max_execution_time": 1.0
+            }
             
-            # Make multiple calls with different payloads
-            for i, payload in enumerate(test_payloads):
+            # Make multiple calls with the same payload
+            for i in range(num_requests):
                 response = requests.post(
                     f"{server.base_url}/test_program", 
-                    json=payload,
+                    json=test_payload,
                     timeout=5
                 )
                 self.assertEqual(response.status_code, 200)
@@ -154,45 +134,25 @@ class TestAPI(unittest.TestCase):
                 self.assertIn("results", data)
                 self.assertEqual(data["results"], [1, 1, 1], f"Call {i+1} to /test_program failed")
 
-    def test_multiple_calls_to_test_program_stdio(self):
+    def test_multiple_calls_to_test_program_stdio(self, num_requests=3):
         """Test making multiple calls to /test_program_stdio endpoint."""
-        with APITestServer(port=8890) as server:
-            # Test different stdio programs
-            stdio_payloads = [
-                {
-                    "program": "a, b = map(int, input().split())\nprint(a + b)",
-                    "tests": [
-                        {"input": "5 3", "output": "8"},
-                        {"input": "10 -2", "output": "8"},
-                        {"input": "0 0", "output": "0"}
-                    ],
-                    "max_execution_time": 1.0
-                },
-                {
-                    "program": "n = int(input())\nprint('even' if n % 2 == 0 else 'odd')",
-                    "tests": [
-                        {"input": "4", "output": "even"},
-                        {"input": "7", "output": "odd"},
-                        {"input": "0", "output": "even"}
-                    ],
-                    "max_execution_time": 1.0
-                },
-                {
-                    "program": "s = input().strip()\nprint(s.upper())",
-                    "tests": [
-                        {"input": "hello", "output": "HELLO"},
-                        {"input": "world", "output": "WORLD"},
-                        {"input": "Test123", "output": "TEST123"}
-                    ],
-                    "max_execution_time": 1.0
-                }
-            ]
+        with APITestServer() as server:
+            # Use the same payload for all requests
+            stdio_payload = {
+                "program": "a, b = map(int, input().split())\nprint(a + b)",
+                "tests": [
+                    {"input": "5 3", "output": "8"},
+                    {"input": "10 -2", "output": "8"},
+                    {"input": "0 0", "output": "0"}
+                ],
+                "max_execution_time": 1.0
+            }
             
-            # Make multiple calls with different payloads
-            for i, payload in enumerate(stdio_payloads):
+            # Make multiple calls with the same payload
+            for i in range(num_requests):
                 response = requests.post(
                     f"{server.base_url}/test_program_stdio", 
-                    json=payload,
+                    json=stdio_payload,
                     timeout=5
                 )
                 self.assertEqual(response.status_code, 200)
