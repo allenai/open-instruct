@@ -78,7 +78,7 @@ class APITestServer:
         return False
 
 
-class TestAddProgramAPI(unittest.TestCase):
+class TestAPI(unittest.TestCase):
     def test_add_program_results(self):
         """POST to the endpoint and verify JSON response structure & content."""
         with APITestServer() as server:
@@ -107,6 +107,69 @@ class TestAddProgramAPI(unittest.TestCase):
                 expected_results,
                 "Returned pass/fail vector does not match expectation",
             )
+
+    def test_apiserver_multiple_calls(self):
+        """Test making multiple calls to /test_program and /test_program_stdio endpoints."""
+        with APITestServer(port=8889) as server:
+            # Test program that we'll send to the API
+            test_payload = {
+                "program": "def multiply(a, b):\n    return a * b",
+                "tests": [
+                    "assert multiply(2, 3) == 6",
+                    "assert multiply(0, 5) == 0",
+                    "assert multiply(-1, 4) == -4"
+                ],
+                "max_execution_time": 1.0
+            }
+            
+            # Make multiple calls to /test_program
+            for i in range(3):
+                response = requests.post(
+                    f"{server.base_url}/test_program", 
+                    json=test_payload,
+                    timeout=5
+                )
+                self.assertEqual(response.status_code, 200)
+                data = response.json()
+                self.assertIn("results", data)
+                self.assertEqual(data["results"], [1, 1, 1], f"Call {i+1} to /test_program failed")
+            
+            # Make multiple calls to /test_program_stdio with different test cases
+            stdio_payloads = [
+                {
+                    "program": "a, b = map(int, input().split())\nprint(a + b)",
+                    "tests": [
+                        {"input": "5 3", "output": "8"},
+                        {"input": "10 -2", "output": "8"},
+                        {"input": "0 0", "output": "0"}
+                    ],
+                    "max_execution_time": 1.0
+                },
+                {
+                    "program": "n = int(input())\nprint('even' if n % 2 == 0 else 'odd')",
+                    "tests": [
+                        {"input": "4", "output": "even"},
+                        {"input": "7", "output": "odd"},
+                        {"input": "0", "output": "even"}
+                    ],
+                    "max_execution_time": 1.0
+                }
+            ]
+            
+            for i, payload in enumerate(stdio_payloads):
+                response = requests.post(
+                    f"{server.base_url}/test_program_stdio", 
+                    json=payload,
+                    timeout=5
+                )
+                self.assertEqual(response.status_code, 200)
+                data = response.json()
+                self.assertIn("results", data)
+                # Verify we get a list of results with the expected length
+                self.assertEqual(len(data["results"]), 3, f"Call {i+1} to /test_program_stdio returned wrong number of results")
+                # Verify results are integers (0 or 1)
+                for result in data["results"]:
+                    self.assertIn(result, [0, 1], f"Invalid result value: {result}")
 
 
 class TestAPITestServer(unittest.TestCase):
