@@ -7,11 +7,7 @@ import torch.nn.functional as F
 from huggingface_hub import HfApi
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transformers import (
-    AutoModelForSequenceClassification,
-    PreTrainedModel,
-    PreTrainedTokenizer,
-)
+from transformers import AutoModelForSequenceClassification, PreTrainedModel, PreTrainedTokenizer
 
 from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
@@ -111,21 +107,11 @@ if __name__ == "__main__":
         ["test"],
         tc,
         ["preference_tokenize_v1", "preference_filter_v1"],
-        [
-            {},
-            {
-                "max_token_length": 1024,
-                "max_prompt_token_length": 512,
-            },
-        ],
+        [{}, {"max_token_length": 1024, "max_prompt_token_length": 512}],
         target_columns=[CHOSEN_INPUT_IDS_KEY, REJECTED_INPUT_IDS_KEY],
         dataset_skip_cache=False,
     )
-    dataloader = DataLoader(
-        eval_dataset,
-        batch_size=8,
-        collate_fn=SimplePreferenceCollator(tokenizer.pad_token_id),
-    )
+    dataloader = DataLoader(eval_dataset, batch_size=8, collate_fn=SimplePreferenceCollator(tokenizer.pad_token_id))
     metrics, table = evaluate(model, dataloader, tokenizer, max_sampled_texts=5)
     print(metrics)
     print_rich_table(pd.DataFrame(table))

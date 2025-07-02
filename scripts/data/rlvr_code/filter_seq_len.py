@@ -76,16 +76,17 @@ Note:
     on HuggingFace Hub. The script will create private repositories by default.
 """
 
-import datasets
-from transformers import AutoTokenizer
 import argparse
+import json  # For saving streaming data
 import logging
-import sys
 import os
+import sys
+import tempfile  # For streaming upload
+
+import datasets
+from huggingface_hub import HfApi, HfFolder, create_repo  # For Hub upload
 from tqdm import tqdm
-import json # For saving streaming data
-import tempfile # For streaming upload
-from huggingface_hub import HfApi, HfFolder, create_repo # For Hub upload
+from transformers import AutoTokenizer
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 

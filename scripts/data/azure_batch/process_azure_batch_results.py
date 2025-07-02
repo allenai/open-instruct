@@ -137,7 +137,7 @@ def get_batch_results(batch_id: str) -> Tuple[dict[str, str], TokenUsage]:
             print(f"Error decoding JSON from line: {e}")
             continue
         result_id = extract_id_from_custom_id(result["custom_id"])
-        
+
         # Check for content filtering
         choice = result["response"]["body"]["choices"][0]
         if choice.get("finish_reason") == "content_filter":
@@ -149,13 +149,13 @@ def get_batch_results(batch_id: str) -> Tuple[dict[str, str], TokenUsage]:
             continue
 
         content = choice["message"]["content"]
-        
+
         # Extract token usage from the response
         usage = result["response"]["body"]["usage"]
         total_prompt_tokens += usage["prompt_tokens"]
         total_completion_tokens += usage["completion_tokens"]
         total_tokens += usage["total_tokens"]
-        
+
         results[result_id] = BatchResult(
             result_id=result_id,
             content=content,
@@ -166,7 +166,7 @@ def get_batch_results(batch_id: str) -> Tuple[dict[str, str], TokenUsage]:
         completion_tokens=total_completion_tokens,
         total_tokens=total_tokens
     )
-    
+
     return results, token_usage
 
 
@@ -174,14 +174,14 @@ def download_file(file_id: str, dest: pathlib.Path) -> None:
     """Download a file from Azure OpenAI API to the specified destination."""
     endpoint = os.environ["AZURE_OPENAI_ENDPOINT"].rstrip("/")
     url = f"{endpoint}/openai/files/{file_id}/content?api-version=2024-07-01-preview"
-    
+
     response = requests.get(
         url,
         headers={"api-key": os.environ["AZURE_OPENAI_API_KEY"]},
         timeout=120
     )
     response.raise_for_status()
-    
+
     with dest.open("wb") as f:
         f.write(response.content)
 
@@ -223,7 +223,7 @@ def process_single_batch(batch_id: str, id_lookup: dict) -> Tuple[dict[str, Batc
     num_errors = 0
     if job.get("error_file_id"):
         error_file = pathlib.Path(".errors.jsonl")
-        
+
         try:
             # Download error file
             download_file(job["error_file_id"], error_file)
@@ -232,17 +232,17 @@ def process_single_batch(batch_id: str, id_lookup: dict) -> Tuple[dict[str, Batc
 
             print(f"\nBatch {batch_id} Errors: {num_errors}")
             print("-" * 80)
-            
+
             for i, error in enumerate(errors):
                 if i > 3:
                     break
                 request_id = error['custom_id']
                 error_id = extract_id_from_custom_id(request_id)
                 original_row = id_lookup.get(error_id)
-                
+
                 print(f"\nError ID: {request_id}")
                 print(f"Error: {error.get('error', {}).get('message', 'Unknown error')}")
-                
+
                 if original_row:
                     print(f"\nOriginal Prompt: {original_row['prompt']}")
                 else:
@@ -284,7 +284,7 @@ def process_batch_results(
     total_token_usage = TokenUsage(0, 0, 0)
     for batch_id in batch_ids:
         batch_results, token_usage = process_single_batch(batch_id, id_lookup)
-        
+
         # Accumulate results and token usage
         all_batch_results.update(batch_results)
         total_token_usage.prompt_tokens += token_usage.prompt_tokens
@@ -336,22 +336,22 @@ def process_batch_results(
 
     # Create dataset using features from the original dataset
     ds_out = datasets.Dataset.from_list(new_rows, features=original_ds.features)
-    
+
     # Apply row limit if specified
     if max_rows is not None:
         ds_out = ds_out.select(range(min(max_rows, len(ds_out))))
         print(f"Limited output dataset to {len(ds_out)} rows (max_rows={max_rows})")
-    
+
     print(f"Previous dataset had {len(original_ds)} examples.")
     print(f"New dataset has {len(ds_out)} examples.")
-    
+
     # Sanity check that features match
     if ds_out.features != original_ds.features:
         print("Warning: Features of new dataset don't match original dataset!")
         print("Original features:", original_ds.features)
         print("New features:", ds_out.features)
         raise ValueError("Feature mismatch between original and new dataset")
-    
+
     if push:
         token = os.environ.get("HF_TOKEN")
         ds_out.push_to_hub(output_dataset, split=split, token=token)

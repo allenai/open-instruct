@@ -1,14 +1,8 @@
 import argparse
-import os
-import tempfile
-from collections import defaultdict
-from typing import List, Optional
-from urllib.request import urlretrieve
 
-from datasets import load_dataset, concatenate_datasets
+from datasets import concatenate_datasets, load_dataset
+
 from scripts.data.sft.utils import convert_sft_dataset
-
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -51,7 +45,7 @@ if __name__ == "__main__":
         help="Apply empty message filters to the dataset.",
     )
     args = parser.parse_args()
-    
+
     readme_content = (
         "This is a converted version of the Flan dataset into Tulu SFT training format.\n\n"
         "The conversion script can be found in our "
@@ -73,7 +67,7 @@ if __name__ == "__main__":
         "and the [original FLAN v2 repo](https://github.com/google-research/FLAN/tree/main/flan/v2) "
         "for more information about this dataset and the license."
     )
-    
+
     sampling_sizes = {
         "cot_fsopt_data": 20000,
         "cot_zsopt_data": 20000,
@@ -90,9 +84,9 @@ if __name__ == "__main__":
         if len(ds) > sampling_size:
             ds = ds.shuffle(seed=42).select(range(sampling_size))
         subsets.append(ds)
-    
+
     ds = concatenate_datasets(subsets)
-    
+
     conversion_func = lambda example: {
         "messages": [
             {"role": "user", "content": example["inputs"]},
@@ -111,4 +105,4 @@ if __name__ == "__main__":
         local_save_dir=args.local_save_dir,
         readme_content=readme_content,
     )
-    
+

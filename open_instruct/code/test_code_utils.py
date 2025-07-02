@@ -16,29 +16,14 @@ TIMEOUT_TEST = "import time\ntime.sleep(10)"
 class GetSuccessfulTestsFastTests(unittest.TestCase):
     def test_mixed_pass_and_fail(self):
         """Bad + good + timeout tests: expect [F, T, F, T, T, F, T]."""
-        tests = [
-            FAILING_TEST,
-            PASSING_TEST,
-            FAILING_TEST,
-            PASSING_TEST,
-            PASSING_TEST,
-            TIMEOUT_TEST,
-            PASSING_TEST,
-        ]
+        tests = [FAILING_TEST, PASSING_TEST, FAILING_TEST, PASSING_TEST, PASSING_TEST, TIMEOUT_TEST, PASSING_TEST]
         expected = [0, 1, 0, 1, 1, 0, 1]
         result = code_utils.get_successful_tests_fast(program=SIMPLE_PROGRAM, tests=tests)
         self.assertEqual(result, expected)
 
     def test_all_fail_or_timeout(self):
         """All failing or timing-out tests: expect a full-False result."""
-        tests = [
-            FAILING_TEST,
-            FAILING_TEST,
-            TIMEOUT_TEST,
-            TIMEOUT_TEST,
-            TIMEOUT_TEST,
-            TIMEOUT_TEST,
-        ]
+        tests = [FAILING_TEST, FAILING_TEST, TIMEOUT_TEST, TIMEOUT_TEST, TIMEOUT_TEST, TIMEOUT_TEST]
         expected = [0] * len(tests)
 
         result = code_utils.get_successful_tests_fast(program=SIMPLE_PROGRAM, tests=tests)
@@ -141,11 +126,7 @@ except:
     )
     def test_file_operations_sandboxed(self, name, program, tests, expected):
         """Test that file operations are properly sandboxed."""
-        result = code_utils.get_successful_tests_fast(
-            program=program,
-            tests=tests,
-            max_execution_time=0.5,
-        )
+        result = code_utils.get_successful_tests_fast(program=program, tests=tests, max_execution_time=0.5)
         self.assertEqual(result, [expected])
 
     @parameterized.parameterized.expand(
