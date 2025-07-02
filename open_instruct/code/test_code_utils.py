@@ -3,6 +3,7 @@
 import unittest
 
 from datasets import load_dataset
+from parameterized import parameterized
 
 from open_instruct.code.code_utils import get_successful_tests_fast
 
@@ -44,9 +45,7 @@ class GetSuccessfulTestsFastTests(unittest.TestCase):
         self.assertEqual(result, expected)
 
     def test_tiger_lab_acecode_sample(self):
-        """
-        Replicates the sample in the script against an actual AceCode record.
-        """
+        """Tests the script against an actual AceCode record."""
         ds = load_dataset("TIGER-Lab/AceCode-87K", split="train")
 
         # Choose the same sample index used in the original snippet.
@@ -58,17 +57,10 @@ class GetSuccessfulTestsFastTests(unittest.TestCase):
         expected_passes = int(len(tests) * ds[i]["inferences"][-1]["pass_rate"])
 
         result = get_successful_tests_fast(program=program, tests=tests)
-
-        # Robustly handle either a list[int] return or a collection of indices.
-        if all(isinstance(x, int) for x in result):
-            actual_passes = sum(result)
-        else:
-            actual_passes = len(result)
-
-        self.assertEqual(actual_passes, expected_passes)
+        self.assertEqual(sum(result), expected_passes)
 
     def test_add_function_example(self):
-        """Small ‘add’ sample from the original script; two pass, one fail."""
+        """Small ‘add’ sample; two pass, one fail."""
         program = "\n\ndef add(a, b):\n    return a + b\n"
         tests = [
             "assert add(1, 2) == 3",  # pass
@@ -85,8 +77,7 @@ class ReliabilityGuardNetworkTests(unittest.TestCase):
     """Tests to verify network operations behavior under reliability_guard."""
 
     def test_socket_operations_allowed(self):
-        """Test that socket operations are actually allowed (not blocked by reliability_guard)."""
-        # Socket operations are NOT blocked by reliability_guard
+        """Test that socket operations are not blocked by reliability_guard."""
         program = """
 import socket
 try:
@@ -101,27 +92,21 @@ except:
         )
         self.assertEqual(result, [1])
 
-    def test_dangerous_imports_with_networking(self):
+    @parameterized.expand([
+        ("threading_with_socket", "import threading\nimport socket\ns = socket.socket()"),
+        ("multiprocessing_with_socket", "from multiprocessing import Pool\nimport socket\ns = socket.socket()"),
+    ])
+    def test_dangerous_imports_with_networking(self, name, program):
         """Test that certain networking-related imports are blocked."""
-        # These programs will be blocked by should_execute due to dangerous imports
-        programs = [
-            "import threading\nimport socket\ns = socket.socket()",
-            "from multiprocessing import Pool\nimport socket\ns = socket.socket()",
-        ]
-
-        for program in programs:
-            result = get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
-            self.assertEqual(result, [0])
+        result = get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
+        self.assertEqual(result, [0])
 
 
 class ReliabilityGuardFileSystemTests(unittest.TestCase):
     """Tests to ensure file system operations are properly sandboxed."""
 
-    def test_file_operations_sandboxed(self):
-        """Test that file operations are restricted to sandbox."""
-        programs = [
-            # File operations are allowed but in sandbox directory
-            """
+    @parameterized.expand([
+        ("file_operations", """
 try:
     with open('test_file.txt', 'w') as f:
         f.write('test')
@@ -130,60 +115,51 @@ try:
     file_ops_work = content == 'test'
 except:
     file_ops_work = False
-""",
-            # os.chdir is disabled
-            """
+""", ["assert file_ops_work == True"], 1),
+        ("os_chdir_disabled", """
 try:
     import os
     os.chdir('..')
     chdir_works = True
 except:
     chdir_works = False
-""",
-        ]
+""", ["assert chdir_works == False"], 0),
+    ])
+    def test_file_operations_sandboxed(self, name, program, tests, expected):
+        """Test that file operations are properly sandboxed."""
+        result = get_successful_tests_fast(
+            program=program,
+            tests=tests,
+            max_execution_time=0.5,
+        )
+        self.assertEqual(result, [expected])
 
-        expected_results = [1, 0]  # First should pass (file ops work), second should fail (chdir disabled)
-
-        for program, expected in zip(programs, expected_results):
-            result = get_successful_tests_fast(
-                program=program,
-                tests=(
-                    ["assert file_ops_work == True"] if "file_ops_work" in program else ["assert chdir_works == False"]
-                ),
-                max_execution_time=0.5,
-            )
-            self.assertEqual(result, [expected])
-
-    def test_file_deletion_blocked(self):
-        """Test that file deletion operations are blocked."""
-        programs = [
-            # os.remove is disabled - but need to handle import os being blocked
-            """
+    @parameterized.expand([
+        ("os_remove", """
 try:
     import os
     os.remove('some_file.txt')
     remove_worked = True
 except:
     remove_worked = False
-""",
-            # os.unlink is disabled
-            """
+"""),
+        ("os_unlink", """
 try:
     import os
     os.unlink('some_file.txt')
     unlink_worked = True
 except:
     unlink_worked = False
-""",
-        ]
-
+"""),
+    ])
+    def test_file_deletion_blocked(self, name, program):
+        """Test that file deletion operations are blocked."""
         # These will be blocked by should_execute due to "import os"
-        for program in programs:
-            result = get_successful_tests_fast(
-                program=program, tests=["assert remove_worked == False"], max_execution_time=0.5
-            )
-            # Programs with "import os" are blocked entirely
-            self.assertEqual(result, [0])
+        result = get_successful_tests_fast(
+            program=program, tests=["assert remove_worked == False"], max_execution_time=0.5
+        )
+        # Programs with "import os" are blocked entirely
+        self.assertEqual(result, [0])
 
 
 class ReliabilityGuardProcessTests(unittest.TestCase):
@@ -282,39 +258,29 @@ except:
 class ReliabilityGuardModuleImportTests(unittest.TestCase):
     """Tests to ensure dangerous module imports are blocked."""
 
-    def test_dangerous_imports_blocked(self):
+    @parameterized.expand([
+        ("threading", "import threading\nthreading.Thread(target=lambda: None).start()"),
+        ("multiprocessing", "from multiprocessing import Pool\nPool()"),
+        ("os_system", "import os\nos.system('ls')"),
+        ("shutil_rmtree", "import shutil\nshutil.rmtree('/')"),
+        ("torch", "import torch\ntensor = torch.zeros(10)"),
+        ("sklearn", "from sklearn import datasets\ndata = datasets.load_iris()"),
+    ])
+    def test_dangerous_imports_blocked(self, name, program):
         """Test that imports of dangerous modules fail."""
         # These are checked by should_execute function
-        dangerous_programs = [
-            "import threading\nthreading.Thread(target=lambda: None).start()",
-            "from multiprocessing import Pool\nPool()",
-            "import os\nos.system('ls')",
-            "import shutil\nshutil.rmtree('/')",
-            "import torch\ntensor = torch.zeros(10)",
-            "from sklearn import datasets\ndata = datasets.load_iris()",
-        ]
+        result = get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
+        self.assertEqual(result, [0])
 
-        for program in dangerous_programs:
-            result = get_successful_tests_fast(program=program, tests=["assert True"], max_execution_time=0.5)
-            self.assertEqual(result, [0])
-
-    def test_safe_imports_allowed(self):
+    @parameterized.expand([
+        ("math_sqrt", "import math\nresult = math.sqrt(16)", "assert result == 4.0"),
+        ("json_dumps", "import json\ndata = json.dumps({'a': 1})", "assert data == '{\"a\": 1}'"),
+        ("re_compile", "import re\npattern = re.compile(r'\\d+')", "assert pattern is not None"),
+    ])
+    def test_safe_imports_allowed(self, name, program, test):
         """Test that safe imports are allowed."""
-        safe_programs = [
-            "import math\nresult = math.sqrt(16)",
-            "import json\ndata = json.dumps({'a': 1})",
-            "import re\npattern = re.compile(r'\\d+')",
-        ]
-
-        tests = [
-            "assert result == 4.0",
-            "assert data == '{\"a\": 1}'",
-            "assert pattern is not None",
-        ]
-
-        for program, test in zip(safe_programs, tests):
-            result = get_successful_tests_fast(program=program, tests=[test], max_execution_time=0.5)
-            self.assertEqual(result, [1])
+        result = get_successful_tests_fast(program=program, tests=[test], max_execution_time=0.5)
+        self.assertEqual(result, [1])
 
 
 class ReliabilityGuardEdgeCaseTests(unittest.TestCase):
