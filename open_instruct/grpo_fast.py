@@ -777,7 +777,6 @@ class PolicyTrainerRayProcess(RayProcess):
                     attention_mask = collated_attention_masks[i]
                     position_id = collated_position_ids[i]
                     response_mask = collated_response_masks[i]
-<<<<<<< HEAD
                     ref_logprob, _ = self.forward(
                         self.ref_policy,
                         query_response,
@@ -786,10 +785,6 @@ class PolicyTrainerRayProcess(RayProcess):
                         pad_token_id,
                         args.temperature,
                         return_entropy=False,
-=======
-                    ref_logprob = self.forward(
-                        self.ref_policy, query_response, attention_mask, position_id, pad_token_id, args.temperature
->>>>>>> origin/main
                     )
                     if args.mask_tool_use and args.tool_use:
                         # mask logprobs for tool tokens
