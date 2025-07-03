@@ -1043,6 +1043,8 @@ def vllm_generate_thread(
     resume_training_step: int = 1,
     tool_use: bool = False,
 ):
+    # Open file to stream prompts for benchmarking
+    prompts_file = open("prompts_benchmark.jsonl", "a")
     def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
         # Split queries between engines
         queries_per_engine = (len(prompts) + len(vllm_engines) - 1) // len(vllm_engines)
@@ -1095,6 +1097,15 @@ def vllm_generate_thread(
         if items is None:
             break
         _, g_queries_list = items
+        
+        # Save prompts to file for benchmarking
+        prompt_data = {
+            "training_step": training_step,
+            "prompts": g_queries_list,
+            "timestamp": time.time()
+        }
+        prompts_file.write(json.dumps(prompt_data) + "\n")
+        prompts_file.flush()  # Ensure data is written immediately
 
         with Timer("🔥 Generation time"):
             response_ids, finish_reasons, masks, info = generate_with_engines(g_queries_list, generation_config)
@@ -1106,6 +1117,10 @@ def vllm_generate_thread(
                 eval_prompt_token_ids, eval_generation_config
             )
             evaluation_inference_results_Q.put((response_ids, finish_reasons, masks, info))
+    
+    # Close the prompts file when done
+    prompts_file.close()
+    logging.info("Prompts saved to prompts_benchmark.jsonl")
 
 
 def data_preparation_thread(
