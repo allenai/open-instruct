@@ -74,7 +74,7 @@ from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams, VLLMEngine
-
+import pathlib
 from open_instruct.dataset_transformation import (
     DATASET_SOURCE_KEY,
     GROUND_TRUTHS_KEY,
@@ -1046,7 +1046,10 @@ def vllm_generate_thread(
     tool_use: bool = False,
 ):
     # Open file to stream prompts for benchmarking
-    prompts_file = open("/weka/finbarrt/grpo_fast_prompts_benchmark.jsonl", "a")
+    prompts_path = pathlib.Path("/weka/oe-adapt-default/finbarrt/grpo_fast_prompts_benchmark.jsonl")
+    if not prompts_path.exists():
+        prompts_path.parent.mkdir(parents=True, exist_ok=True)
+    prompts_file = prompts_path.open("a")
 
     def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
         # Split queries between engines
