@@ -93,9 +93,9 @@ from open_instruct.ground_truth_utils import (
 )
 from open_instruct.model_utils import (
     ModelConfig,
-    entropy_from_logits,
     apply_verifiable_reward,
     disable_dropout_in_model,
+    entropy_from_logits,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
     print_rich_table,
@@ -669,11 +669,11 @@ class PolicyTrainerRayProcess(RayProcess):
         logits = output.logits
         logits /= temperature + 1e-7
         logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
-        
+
         # For now, entropy is just for monitoring, and we don't pass gradients through it.
         with torch.no_grad():
             entropy = entropy_from_logits(logits)
-        
+
         return logprob, entropy
 
     def setup_model_update_group(self, vllm_engines):
@@ -967,7 +967,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
                         if args.record_entropy:
                             # Calculate entropy statistics
-                            entropy_stats[i] = masked_mean(mb_entropy, mb_response_masks_bool, args.masked_mean_axis).float()
+                            entropy_stats[i] = masked_mean(
+                                mb_entropy, mb_response_masks_bool, args.masked_mean_axis
+                            ).float()
 
             with torch.no_grad():
                 self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
@@ -1421,7 +1423,9 @@ def data_preparation_thread(
                 "val/sequence_lengths_unsolved": (
                     0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
                 ),
-                "val/sequence_lengths_solved": 0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean(),
+                "val/sequence_lengths_solved": (
+                    0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean()
+                ),
                 "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
                 "val/sequence_lengths_solved_hist": sequence_length_solved,
                 "val/stop_rate": stop_rate,
@@ -2038,8 +2042,12 @@ if __name__ == "__main__":
                         else:
                             scores[i] = verifiable_rewards[i]
                 np_verifiable_rewards = np.array(verifiable_rewards)
-                metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean() if len(np_verifiable_rewards) > 0 else 0.0
-                metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean() if len(np_verifiable_rewards) > 0 else 0.0
+                metrics["objective/verifiable_reward"] = (
+                    np_verifiable_rewards.mean() if len(np_verifiable_rewards) > 0 else 0.0
+                )
+                metrics["objective/verifiable_correct_rate"] = (
+                    (np_verifiable_rewards > 0.0).mean() if len(np_verifiable_rewards) > 0 else 0.0
+                )
                 # reshuffle around per_func rewards
                 per_func_lists = defaultdict(list)
                 for reward_dict in per_func_rewards:

@@ -97,10 +97,10 @@ from open_instruct.ground_truth_utils import (
     soft_format_reward_func,
 )
 from open_instruct.model_utils import (
-    entropy_from_logits,
     ModelConfig,
     apply_verifiable_reward,
     disable_dropout_in_model,
+    entropy_from_logits,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
     print_rich_table,
@@ -667,10 +667,10 @@ class PolicyTrainerRayProcess(RayProcess):
         logits /= temperature + 1e-7
         logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
 
-         # fow now, entropy is just for monitoring, and we don't pass gradients through it.
+        # fow now, entropy is just for monitoring, and we don't pass gradients through it.
         with torch.no_grad():
             entropy = entropy_from_logits(logits)
-        
+
         return logprob, entropy
 
     def forward_value(
@@ -835,7 +835,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:].bool(), INVALID_LOGPROB)
                     collated_ref_logprobs.append(ref_logprob)
                     torch.cuda.empty_cache()
-        
+
         old_logprobs = [None for _ in range(len(collated_query_responses))]
         with Timer("Old Logprob Calculation", noop=self.rank != 0):
             with torch.no_grad():
@@ -1082,7 +1082,9 @@ class PolicyTrainerRayProcess(RayProcess):
                         ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
                         if args.record_entropy:
                             # Calculate entropy statistics
-                            entropy_stats[i] = masked_mean(mb_entropy, mb_response_masks_bool, args.masked_mean_axis).float()
+                            entropy_stats[i] = masked_mean(
+                                mb_entropy, mb_response_masks_bool, args.masked_mean_axis
+                            ).float()
 
             with torch.no_grad():
                 self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
@@ -1103,9 +1105,6 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("val/adv_abs_mean", adv_abs_mean)
                 self.local_metrics.add("val/adv_std", adv_std)
                 if args.record_entropy:
-                self.local_metrics.add("policy/entropy_avg", entropy_stats.mean())
-                self.local_metrics.add("policy/entropy_avg", entropy_stats.mean())
-                self.local_metrics.add("policy/entropy_var", entropy_stats.var())
                     self.local_metrics.add("policy/entropy_avg", entropy_stats.mean())
                 self.local_metrics.add("policy/entropy_var", entropy_stats.var())
                 metrics_list = self.local_metrics.get_metrics_list()
