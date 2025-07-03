@@ -2,156 +2,135 @@ import queue
 import threading
 import time
 import unittest
+import os
 
 import numpy as np
+import ray
+from transformers import AutoTokenizer
+from vllm import LLM, SamplingParams
 
-# Import with proper error handling
-try:
-    from open_instruct.grpo_fast import ShufflingIterator
-except ImportError:
-    # If vllm import fails, define ShufflingIterator locally for testing
-    from typing import Iterator, List, Optional
+from open_instruct.grpo_fast import ShufflingIterator, vllm_generate_thread
+
+
+# Define a simple Ray actor to wrap vLLM engine
+@ray.remote(num_gpus=0)  # Use CPU for testing
+class VLLMEngineActor:
+    def __init__(self, model_name: str):
+        self.engine = LLM(
+            model=model_name,
+            max_model_len=512,  # Small context for testing
+            tensor_parallel_size=1,
+            enforce_eager=True,  # Disable CUDA graph
+            device="cpu",
+            dtype="float32",  # Use float32 for CPU
+        )
     
-    class ShufflingIterator:
-        """Local copy of ShufflingIterator for testing when vllm is not available."""
-        def __init__(self, data: np.ndarray, batch_size: int, seed: Optional[int] = None):
-            self.data = data.copy()
-            self.batch_size = batch_size
-            self.index = 0
-            self.rng = np.random.default_rng(seed)
-            self.rng.shuffle(self.data)
-
-            # Ensure the effective dataset size is divisible by batch_size
-            self.effective_size = len(self.data) - (len(self.data) % batch_size)
-
-        def __iter__(self) -> Iterator[List[int]]:
-            return self
-
-        def __next__(self) -> List[int]:
-            if self.index >= self.effective_size:
-                self.index = 0
-                self.rng.shuffle(self.data)
-
-            end_index = self.index + self.batch_size
-            batch = self.data[self.index : end_index].tolist()
-            self.index = end_index
-
-            return batch
+    def generate(self, prompt_token_ids, sampling_params, use_tqdm=False):
+        return self.engine.generate(
+            prompt_token_ids=prompt_token_ids,
+            sampling_params=sampling_params,
+            use_tqdm=use_tqdm
+        )
 
 
 class TestGrpoFast(unittest.TestCase):
-    def test_shuffling_iterator_data_flow(self):
-        """Test that ShufflingIterator can send data to/from the generator."""
-        # Create test data
-        data = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
-        batch_size = 3
-        
-        # Create iterator
-        iterator = ShufflingIterator(data, batch_size, seed=42)
-        
-        # Collect batches
-        collected_batches = []
-        batch_count = 0
-        
-        # Test that we can iterate and receive data
-        for batch in iterator:
-            collected_batches.append(batch)
-            batch_count += 1
-            
-            # Stop after one full epoch
-            if batch_count >= 3:  # 10 items / batch_size 3 = 3 full batches
-                break
-        
-        # Verify we got the expected number of batches
-        self.assertEqual(len(collected_batches), 3)
-        
-        # Verify each batch has the correct size
-        for batch in collected_batches:
-            self.assertEqual(len(batch), batch_size)
-        
-        # Verify all data points were covered (except the last incomplete batch)
-        all_items = []
-        for batch in collected_batches:
-            all_items.extend(batch)
-        
-        # Should have 9 items (3 batches of 3)
-        self.assertEqual(len(all_items), 9)
-        
-        # Verify data is from the original array
-        for item in all_items:
-            self.assertIn(item, data)
-    
+    @unittest.skipIf(os.getenv("SKIP_VLLM_TESTS", "false").lower() == "true", 
+                     "Skipping vLLM tests as requested")
     def test_queue_based_generator_communication(self):
-        """Test queue-based communication pattern similar to grpo_fast."""
-        # Create queues for communication
-        input_queue = queue.Queue(maxsize=2)
-        output_queue = queue.Queue(maxsize=2)
+        """Test vllm_generate_thread with a real vLLM engine using a tiny model.
         
-        # Data to send
-        test_data = [
-            {"prompt": "Hello", "id": 1},
-            {"prompt": "World", "id": 2},
-            {"prompt": "Test", "id": 3},
-        ]
+        This test requires model download from HuggingFace. Make sure you have:
+        1. Internet connection
+        2. HF_TOKEN environment variable set if using gated models
+        3. Or have the model cached locally
         
-        # Generator thread function
-        def generator_thread():
-            while True:
-                try:
-                    item = input_queue.get(timeout=1)
-                    if item is None:  # Sentinel value to stop
-                        break
-                    
-                    # Simulate processing (like vLLM generation)
-                    result = {
-                        "id": item["id"],
-                        "prompt": item["prompt"],
-                        "response": f"Generated: {item['prompt']}"
-                    }
-                    
-                    output_queue.put(result)
-                except queue.Empty:
-                    break
+        NOTE: This test requires a GPU or a CPU-compatible model architecture.
+        Many small models (pythia, gpt2) are not supported by vLLM on CPU.
+        Set SKIP_VLLM_TESTS=true to skip this test if running on CPU.
+        """
+        # Initialize ray if not already initialized
+        if not ray.is_initialized():
+            ray.init(num_cpus=2)
         
-        # Consumer thread function
-        def consumer_thread(results):
-            while True:
-                try:
-                    result = output_queue.get(timeout=2)
-                    results.append(result)
-                except queue.Empty:
-                    break
-        
-        # Start threads
-        results = []
-        gen_thread = threading.Thread(target=generator_thread)
-        cons_thread = threading.Thread(target=lambda: consumer_thread(results))
-        
-        gen_thread.start()
-        cons_thread.start()
-        
-        # Send data through the pipeline
-        for item in test_data:
-            input_queue.put(item)
-        
-        # Wait for processing
-        time.sleep(0.5)
-        
-        # Send sentinel to stop generator
-        input_queue.put(None)
-        
-        # Wait for threads to complete
-        gen_thread.join(timeout=3)
-        cons_thread.join(timeout=3)
-        
-        # Verify results
-        self.assertEqual(len(results), len(test_data))
-        
-        # Verify each result corresponds to input
-        for i, result in enumerate(results):
-            self.assertEqual(result["id"], test_data[i]["id"])
-            self.assertEqual(result["prompt"], test_data[i]["prompt"])
-            self.assertEqual(result["response"], f"Generated: {test_data[i]['prompt']}")
+        try:
+            # Create queues
+            inference_results_Q = queue.Queue(maxsize=2)
+            param_prompt_Q = queue.Queue(maxsize=2)
+            evaluation_inference_results_Q = queue.Queue(maxsize=2)
+            
+            # Create a small vLLM engine actor with TinyLlama (supported by vLLM)
+            model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+            vllm_engine = VLLMEngineActor.remote(model_name)
+            
+            # Get tokenizer to create real token IDs
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+            
+            # Create test prompts
+            test_texts = ["Hello world", "Testing vLLM"]
+            test_prompts = [tokenizer.encode(text) for text in test_texts]
+            
+            # Start the vllm_generate_thread
+            thread = threading.Thread(
+                target=vllm_generate_thread,
+                args=(
+                    [vllm_engine],  # vllm_engines
+                    SamplingParams(temperature=0.0, max_tokens=10),  # generation_config - deterministic, short
+                    SamplingParams(temperature=0.0, max_tokens=10),  # eval_generation_config
+                    inference_results_Q,
+                    param_prompt_Q,
+                    1,  # num_training_steps - just one step for testing
+                    None,  # eval_prompt_token_ids
+                    evaluation_inference_results_Q,
+                    2,  # eval_freq
+                    1,  # resume_training_step
+                    False,  # tool_use
+                )
+            )
+            thread.start()
+            
+            # Send prompts through the queue (expects tuple with (None, prompts))
+            param_prompt_Q.put((None, test_prompts))
+            
+            # Get results
+            try:
+                result = inference_results_Q.get(timeout=30)  # Longer timeout for CPU generation
+                
+                # vllm_generate_thread returns a tuple: (response_ids, finish_reasons, masks, info)
+                self.assertIsInstance(result, tuple)
+                self.assertEqual(len(result), 4)
+                
+                response_ids, finish_reasons, masks, info = result
+                
+                # Verify the structure
+                self.assertEqual(len(response_ids), len(test_prompts))
+                self.assertEqual(len(finish_reasons), len(test_prompts))
+                self.assertEqual(len(masks), len(test_prompts))
+                
+                # Each response should be a list of token IDs
+                for resp in response_ids:
+                    self.assertIsInstance(resp, list)
+                    self.assertTrue(all(isinstance(token_id, int) for token_id in resp))
+                    self.assertGreater(len(resp), 0)  # Should have generated something
+                
+                # Finish reasons should be strings
+                for reason in finish_reasons:
+                    self.assertIn(reason, ["stop", "length"])
+                
+                # Send None to stop the thread
+                param_prompt_Q.put(None)
+                
+            finally:
+                # Wait for thread to complete
+                thread.join(timeout=5)
+            
+            # Clean up the actor
+            ray.kill(vllm_engine)
+            
+        finally:
+            # Cleanup ray
+            ray.shutdown()
     
     def test_multiple_queue_pipeline(self):
         """Test a pipeline with multiple queues like in grpo_fast."""
