@@ -1398,40 +1398,45 @@ def data_preparation_thread(
                 )
 
         # Create a result package with metrics and data
-        sequence_lengths = np.array([len(response) for response in responses])
-        sequence_length_solved = (
-            np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == max_possible_score])
-        )
-        sequence_length_unsolved = (
-            np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
-        )
-        metrics = {
-            "scores": np.array(scores).mean(),
-            "real_batch_size_ratio": real_batch_size_ratio,
-            "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
-            "packed_ratio": len(packed_sequences.query_responses) / len(responses) if len(responses) > 0 else 0,
-            "val/sequence_lengths": sequence_lengths.mean(),
-            "val/sequence_lengths_min": sequence_lengths.min(),
-            "val/sequence_lengths_max": sequence_lengths.max(),
-            "val/sequence_lengths_unsolved": (
-                0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
-            ),
-            "val/sequence_lengths_solved": 0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean(),
-            "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
-            "val/sequence_lengths_solved_hist": sequence_length_solved,
-            "val/stop_rate": stop_rate,
-            "val/advantages_mean": advantages.mean(),
-            "val/advantages_min": advantages.min(),
-            "val/advantages_max": advantages.max(),
-            "val/advantages_hist": advantages,
-            "val/num_calls_rate": np.array(num_calls).mean(),
-            "val/timeouts_rate": np.array(timeouts).mean(),
-            "val/tool_errors_rate": np.array([len(item) > 0 for item in tool_errors]).mean(),
-            "val/good_outputs_rate": np.array(good_outputs).mean(),
-            "val/tool_runtimes_rate": np.array(tool_runtimes).mean(),
-            "val/tool_calleds_rate": np.array(tool_calleds).mean(),
-            **reward_metrics,
-        }
+        if len(responses) == 0:
+            # Handle empty responses case
+            # in this case, we won't log metrics, so it should be fine.
+            metrics = {}
+        else:
+            sequence_lengths = np.array([len(response) for response in responses])
+            sequence_length_solved = (
+                np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == max_possible_score])
+            )
+            sequence_length_unsolved = (
+                np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
+            )
+            metrics = {
+                "scores": np.array(scores).mean(),
+                "real_batch_size_ratio": real_batch_size_ratio,
+                "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
+                "packed_ratio": len(packed_sequences.query_responses) / len(responses) if len(responses) > 0 else 0,
+                "val/sequence_lengths": sequence_lengths.mean(),
+                "val/sequence_lengths_min": sequence_lengths.min(),
+                "val/sequence_lengths_max": sequence_lengths.max(),
+                "val/sequence_lengths_unsolved": (
+                    0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
+                ),
+                "val/sequence_lengths_solved": 0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean(),
+                "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
+                "val/sequence_lengths_solved_hist": sequence_length_solved,
+                "val/stop_rate": stop_rate,
+                "val/advantages_mean": advantages.mean(),
+                "val/advantages_min": advantages.min(),
+                "val/advantages_max": advantages.max(),
+                "val/advantages_hist": advantages,
+                "val/num_calls_rate": np.array(num_calls).mean(),
+                "val/timeouts_rate": np.array(timeouts).mean(),
+                "val/tool_errors_rate": np.array([len(item) > 0 for item in tool_errors]).mean(),
+                "val/good_outputs_rate": np.array(good_outputs).mean(),
+                "val/tool_runtimes_rate": np.array(tool_runtimes).mean(),
+                "val/tool_calleds_rate": np.array(tool_calleds).mean(),
+                **reward_metrics,
+            }
 
         if args.save_traces:
             traces = {
@@ -2008,7 +2013,7 @@ if __name__ == "__main__":
                     raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
                 for i in range(len(format_scores)):
                     scores[i] = format_scores[i] + scores[i]
-                metrics["val/format_scores"] = np.array(format_scores).mean()
+                metrics["val/format_scores"] = np.array(format_scores).mean() if len(format_scores) > 0 else 0.0
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
@@ -2033,8 +2038,8 @@ if __name__ == "__main__":
                         else:
                             scores[i] = verifiable_rewards[i]
                 np_verifiable_rewards = np.array(verifiable_rewards)
-                metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
-                metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
+                metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean() if len(np_verifiable_rewards) > 0 else 0.0
+                metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean() if len(np_verifiable_rewards) > 0 else 0.0
                 # reshuffle around per_func rewards
                 per_func_lists = defaultdict(list)
                 for reward_dict in per_func_rewards:
@@ -2043,8 +2048,8 @@ if __name__ == "__main__":
                 # log per function rewards
                 for key, value in per_func_lists.items():
                     np_value = np.array(value)
-                    metrics[f"objective/{key}_reward"] = np_value.mean()
-                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
+                    metrics[f"objective/{key}_reward"] = np_value.mean() if len(np_value) > 0 else 0.0
+                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean() if len(np_value) > 0 else 0.0
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:
