@@ -8,11 +8,15 @@ from transformers import DefaultDataCollator
 @dataclass
 class TensorDataCollatorWithFlattening(DefaultDataCollator):
     """
-    Data collator used for padding free approach. Does the following:
+    Data collator for padding-free training along the lines of https://huggingface.co/blog/packing-with-FA2
 
-    - concatate the entire mini batch into single long sequence [1, total_tokens]
-    - uses `separator_id` to separate sequences within the concatenated `labels`, default value is -100
-    - no padding will be added, returns `input_ids`, `labels` and `position_ids`
+    Eliminates use of padding which is generically needed for per_gpu_batch_size > 1, thereby
+    reducing memory costs and increasing throughput. Your model class must support padding-free
+    training to use this collator correctly. Examples which support padding free include
+    LlamaForCausalLM and BambaForCausalLM.
+
+    The `input_ids` and `labels` from separate examples are concatenated together into a tensor of
+    batch size 1, with additional information included in the batch to demarcate example boundaries.
     """
 
     def __init__(
@@ -30,8 +34,8 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
         self.return_seq_idx = return_seq_idx
         self.separator_id = separator_id
         warnings.warn(
-            "Using `DataCollatorWithFlattening` will flatten the entire mini batch into single long sequence."
-            "Make sure your attention computation is able to handle it!"
+            "Using `TensorDataCollatorWithFlattening` will flatten the entire mini batch into a "
+            "single long sequence. Make sure your attention computation is able to handle it!"
         )
 
     def __call__(self, features, return_tensors=None, separator_id=None):
@@ -39,9 +43,6 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
             return_tensors = self.return_tensors
         if separator_id is None:
             separator_id = self.separator_id
-        assert self.return_flash_attn_kwargs, (
-            "Only should be used with return_flash_attn_kwargs=True"
-        )
         if self.return_flash_attn_kwargs:
             cu_seq_lens = [0]
             max_length = 0
@@ -52,9 +53,7 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
         is_labels_provided = "labels" in features[0]
         ret = {"input_ids": [], "labels": []}
         separator = torch.tensor(
-            [separator_id],
-            dtype=features[0]["input_ids"].dtype,
-            device=features[0]["input_ids"].device,
+            [separator_id], dtype=features[0]["input_ids"].dtype, device=features[0]["input_ids"].device
         )
         for s_idx, item in enumerate(features):
             input_ids = item["input_ids"]
