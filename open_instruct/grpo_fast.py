@@ -73,7 +73,7 @@ from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
-from vllm import SamplingParams, VLLMEngine
+from vllm import SamplingParams
 
 from open_instruct.dataset_transformation import (
     DATASET_SOURCE_KEY,
@@ -1958,8 +1958,7 @@ def cleanup_judge_clients():
     ray.shutdown()
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable,
-         num_eval_samples: int = 32):
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable, num_eval_samples: int = 32):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
     beaker_config, writer, wandb_url = setup_experiment_tracking(args, tc, model_config)
