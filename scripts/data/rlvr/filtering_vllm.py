@@ -1,25 +1,49 @@
 '''
 python mason.py \
-  --cluster ai2/jupiter-cirrascale-2 --image nathanl/open_instruct_auto \
-  --workspace ai2/tulu-thinker \
+  --cluster ai2/augusta-google-1 \
+  --image nathanl/open_instruct_auto --pure_docker_mode \
+  --description "filtering ace coder full" \
+  --workspace ai2/oe-adapt-code \
   --priority high \
   --preemptible \
   --gpus 1 \
   --num_nodes 1 \
+  --budget ai2/oe-adapt \
   --max_retries 0 \
   -- python scripts/data/rlvr/filtering_vllm.py \
   --model hamishivi/qwen2_5_openthoughts2 \
-  --dataset hamishivi/rlvr_orz_math_57k_collected \
+  --dataset saurabh5/rlvr_acecoder_filtered \
   --split train \
   --offset 0 \
-  --size 100000 \
-  --output-file filtered_datasets/qwen2_5_openthoughts2/orz.jsonl \
+  --size 63033 \
+  --push_to_hub saurabh5/rlvr-acecoder-filtered-offline-results \
+  --number_samples 8
+
+
+python mason.py \
+  --cluster ai2/augusta-google-1 \
+  --image nathanl/open_instruct_auto --pure_docker_mode \
+  --workspace ai2/oe-adapt-code \
+  --description "filtering open code reasoning stdio full" \
+  --priority high \
+  --preemptible \
+  --gpus 1 \
+  --num_nodes 1 \
+  --budget ai2/oe-adapt \
+  --max_retries 0 \
+  -- python scripts/data/rlvr/filtering_vllm.py \
+  --model hamishivi/qwen2_5_openthoughts2 \
+  --dataset saurabh5/open-code-reasoning-rlvr-stdio \
+  --split train \
+  --offset 0 \
+  --size 25376 \
+  --push_to_hub saurabh5/open-code-reasoning-rlvr-stdio-offline-results \
   --number_samples 8
 '''
 import argparse
 import json
 
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
@@ -125,16 +149,31 @@ def main():
 
     # 5. Write out JSONL
     if args.output_file is not None:
+        print(f"Writing {len(outputs)} results to {args.output_file}")
         with open(args.output_file, "w", encoding="utf-8") as out_f:
-            for sample, req_out in zip(subset, outputs):
+            i = 0
+            for i, (sample, req_out) in enumerate(zip(subset, outputs)):
                 gen_texts = [o.text for o in req_out.outputs]
                 enriched = dict(sample)
                 enriched["output"] = gen_texts
                 out_f.write(json.dumps(enriched, ensure_ascii=False) + "\n")
+            print(f"Wrote {i+1} lines to {args.output_file}")
 
     if args.push_to_hub is not None:
-        dataset = load_dataset(args.dataset, split=args.split)
-        dataset.push_to_hub(args.push_to_hub)
+        # Recreate the dataset from the outputs
+        new_data = []
+        for sample, req_out in zip(subset, outputs):
+            gen_texts = [o.text for o in req_out.outputs]
+            enriched = dict(sample)
+            enriched["output"] = gen_texts
+            new_data.append(enriched)
+            
+        new_dataset = Dataset.from_list(new_data)
+        print(f"Pushing {len(new_dataset)} rows to the Hugging Face Hub at {args.push_to_hub}")
+        new_dataset.push_to_hub(args.push_to_hub)
+
+    del llm
+    print("Script finished successfully.")
 
 
 if __name__ == "__main__":

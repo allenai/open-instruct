@@ -883,11 +883,11 @@ def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
             instance = CodeVerifier(stdio_config)
             instance.name = "code_stdio"
             verifiers["code_stdio"] = instance
-
+    """
     for judge_type in JUDGE_PROMPT_MAP.keys():
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args))
         verifiers[instance.name.lower()] = instance
-
+    """
     return verifiers
 
 
