@@ -1,21 +1,23 @@
 import argparse
-import os
 import json
+import os
 import random
+
 import torch
 import vllm
 from datasets import load_dataset
-from eval.utils import (
-    generate_completions, 
-    load_hf_lm, 
-    query_openai_chat_model,
-    dynamic_import_function,
-    load_hf_tokenizer,
-    upload_results_to_hf,
-    check_and_upload_model_metadata,
-)
+
 from eval.codex_humaneval.data import write_jsonl
 from eval.mbpp.evaluation import compute_code_eval
+from eval.utils import (
+    check_and_upload_model_metadata,
+    dynamic_import_function,
+    generate_completions,
+    load_hf_lm,
+    load_hf_tokenizer,
+    query_openai_chat_model,
+    upload_results_to_hf,
+)
 
 
 def main(args):
@@ -34,7 +36,7 @@ def main(args):
         args.max_num_examples = len(dataset) - 100
     test_data = dataset.select(range(100, min(100+args.max_num_examples, len(dataset))))
     print("Number of examples:", len(test_data))
-    
+
     if args.use_chat_format:
         prompts = []
         chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
@@ -45,25 +47,25 @@ def main(args):
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
             prefix = "" if prompt[-1] in ["\n", " "] else " "
             return prompt + prefix + suffix
-        
+
         if args.use_evalplus_prompt:
             instruction = "Please provide a self-contained Python script that solves the following problem in a markdown code block:"
             suffix = "Below is a Python script with a self-contained function that solves the problem and passes corresponding tests:"
             for example in test_data:
                 data_inst = instruction + f"\n```\n{example['prompt'].strip()}\n{random.choice(example['test_list'])}```\n"
                 suffix_inst = f"\n{suffix}\n```python\n" + example['code'].split(":")[0] + ":"
-                prompts.append((data_inst, suffix_inst)) 
+                prompts.append((data_inst, suffix_inst))
         else:
             instruction = "Complete the following python function.\n\n\n"
             for example in test_data:
                 prompts.append((instruction + example["prompt"] + example['code'].split(":")[0], answer))
     else:
         prompts = [example["prompt"] + example['code'].split(":")[0] for example in test_data]
-    
+
     stop_sequences = ['```'] + args.additional_stop_sequence
     if args.use_evalplus_prompt:
         stop_sequences += ['\n"""', "\nassert", "\n#"]
-        
+
     if not args.results_file:
         if args.model_name_or_path:
             tokenizer = load_hf_tokenizer(
@@ -98,9 +100,9 @@ def main(args):
             else:
                 print("Loading model and tokenizer...")
                 model = load_hf_lm(
-                    model_name_or_path=args.model_name_or_path, 
+                    model_name_or_path=args.model_name_or_path,
                     revision=args.hf_revision,
-                    load_in_8bit=args.load_in_8bit, 
+                    load_in_8bit=args.load_in_8bit,
                     # device map is determined by the number of gpus available.
                     device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                     gptq_model=args.gptq,
@@ -109,11 +111,11 @@ def main(args):
                 if isinstance(model, GPTNeoXForCausalLM) or isinstance(model, OPTForCausalLM):
                     tokenizer.model_max_length = model.config.max_position_embeddings
                     print("Set tokenizer.model_max_length to model.config.max_position_embeddings: {}".format(model.config.max_position_embeddings))
-                
+
                 if args.use_chat_format:
                     prompts = [apply_chat_format(tokenizer, inst, suffix) for (inst, suffix) in prompts]
 
-                # Because many tokenizers will treat the word after space differently from the original word alone, 
+                # Because many tokenizers will treat the word after space differently from the original word alone,
                 # to be consistent, we add a space before tokenization and remove it after tokenization.
                 stop_sequences = [tokenizer.encode(" " + x, add_special_tokens=False)[1:] for x in stop_sequences]
                 outputs_per_sampling_iter = []
@@ -138,7 +140,7 @@ def main(args):
                         outputs.append(outputs_per_sampling_iter[j][i])
         else:
             instances = [{
-                "id": examle["task_id"], 
+                "id": examle["task_id"],
                 "prompt": "Complete the following python function. Please only output the code for the completed function.\n\n\n" + prompt,
             } for examle, prompt in zip(test_data, prompts)]
             results = query_openai_chat_model(
@@ -167,10 +169,10 @@ def main(args):
     ]
     # if evalplus setup, we have to re-add the code prefix to the output.
     if args.use_evalplus_prompt:
-        predictions = [{"task_id": example["task_id"], "prompt": prompt, "completion": example['code'].split(":")[0] + ":" + output, "test_cases": example['test']} 
+        predictions = [{"task_id": example["task_id"], "prompt": prompt, "completion": example['code'].split(":")[0] + ":" + output, "test_cases": example['test']}
                     for example, prompt, output in zip(duplicate_test_data, duplicate_prompts, outputs)]
     else:
-        predictions = [{"task_id": example["task_id"], "prompt": prompt, "completion": output, "test_cases": example['test']} 
+        predictions = [{"task_id": example["task_id"], "prompt": prompt, "completion": output, "test_cases": example['test']}
                    for example, prompt, output in zip(duplicate_test_data, duplicate_prompts, outputs)]
     predictions_noresult = [{"task_id":pred["task_id"], "prompt":pred['prompt'], "completion": pred['completion']} for pred in predictions]
     if args.use_chat_format:
@@ -216,9 +218,9 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model_name_or_path", 
-        type=str, 
-        default=None, 
+        "--model_name_or_path",
+        type=str,
+        default=None,
         help="If specified, we will load the model to generate the predictions."
     )
     parser.add_argument(
@@ -228,9 +230,9 @@ if __name__ == "__main__":
         help="if specified, we will load the model from a revision of the model in the hub"
     )
     parser.add_argument(
-        "--tokenizer_name_or_path", 
-        type=str, 
-        default=None, 
+        "--tokenizer_name_or_path",
+        type=str,
+        default=None,
         help="If specified, we will load the tokenizer from here."
     )
     parser.add_argument(
@@ -239,15 +241,15 @@ if __name__ == "__main__":
         help="If given, we will use the slow tokenizer."
     )
     parser.add_argument(
-        "--openai_engine", 
-        type=str, 
-        default=None, 
+        "--openai_engine",
+        type=str,
+        default=None,
         help="If specified, we will use the OpenAI API to generate the predictions."
     )
     parser.add_argument(
-        "--save_dir", 
-        type=str, 
-        default="results/codex_eval", 
+        "--save_dir",
+        type=str,
+        default="results/codex_eval",
         help="Directory to save the results."
     )
     parser.add_argument(
@@ -255,21 +257,21 @@ if __name__ == "__main__":
         type=int,
     )
     parser.add_argument(
-        "--eval_batch_size", 
-        type=int, 
-        default=1, 
+        "--eval_batch_size",
+        type=int,
+        default=1,
         help="Batch size for evaluation."
     )
     parser.add_argument(
-        "--eval_pass_at_ks", 
-        nargs="+", 
-        type=int, 
-        default=[1], 
+        "--eval_pass_at_ks",
+        nargs="+",
+        type=int,
+        default=[1],
         help="Multiple k's that we will report pass@k."
     )
     parser.add_argument(
-        "--unbiased_sampling_size_n", 
-        type=int, 
+        "--unbiased_sampling_size_n",
+        type=int,
         default=20,
         help="Codex HumanEval requires `n` sampled generations per prompt, to estimate the unbiased pass@k. "
     )
@@ -280,29 +282,29 @@ if __name__ == "__main__":
         help="Temperature for sampling. This is should be low for evaluating smaller pass@k, and high for larger pass@k."
     )
     parser.add_argument(
-        "--load_in_8bit", 
-        action="store_true", 
+        "--load_in_8bit",
+        action="store_true",
         help="Load model in 8bit mode, which will reduce memory and speed up inference."
     )
     parser.add_argument(
-        "--gptq", 
-        action="store_true", 
+        "--gptq",
+        action="store_true",
         help="If given, we're evaluating a 4-bit quantized GPTQ model."
     )
     parser.add_argument(
         "--use_vllm",
-        action="store_true", 
+        action="store_true",
         help="If given, we will use the vllm library, which will likely increase the inference throughput."
     )
     parser.add_argument(
-        "--use_chat_format", 
-        action="store_true", 
+        "--use_chat_format",
+        action="store_true",
         help="If given, we will use the chat format for the prompts."
     )
     parser.add_argument(
-        "--chat_formatting_function", 
-        type=str, 
-        default="minimal_multitask.eval.templates.create_prompt_with_tulu_chat_format", 
+        "--chat_formatting_function",
+        type=str,
+        default="minimal_multitask.eval.templates.create_prompt_with_tulu_chat_format",
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
     )
     parser.add_argument(

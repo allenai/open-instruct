@@ -1,6 +1,7 @@
-import pandas as pd
 import json
 from collections import Counter
+
+import pandas as pd
 
 
 def get_acceptance_results(records, target_model_a, target_model_b):
@@ -13,7 +14,7 @@ def get_acceptance_results(records, target_model_a, target_model_b):
         if instance_id not in acceptance_results[record.model_a]:
             acceptance_results[record.model_a][instance_id] = []
         acceptance_results[record.model_a][instance_id].append(record.completion_a_is_acceptable)
-        
+
         if instance_id not in acceptance_results[record.model_b]:
             acceptance_results[record.model_b][instance_id] = []
         acceptance_results[record.model_b][instance_id].append(record.completion_b_is_acceptable)
@@ -84,7 +85,7 @@ def get_comparison_results(records, target_model_a, target_model_b):
         sum([v for k, v in model_wins_rates.items() if target_model_a in k])
     model_wins_rates[f"{target_model_b}_wins"] = \
         sum([v for k, v in model_wins_rates.items() if target_model_b in k])
-    
+
     # count how many instances get multiple annotations
     instances_with_multiple_annotations = [instance_id for instance_id, results in comparison_results.items() if len(results) > 1]
     agreement_results = {
@@ -113,9 +114,9 @@ def get_comparison_results(records, target_model_a, target_model_b):
             else:
                 if "tie" in simplified_comparisons[:2]:
                     relexed_agreed_comparison += 0.5
-        agreement_results["comparison_agreement"] = agreed_comparison / len(instances_with_multiple_annotations) 
-        agreement_results["relexed_comparison_agreement"] = relexed_agreed_comparison / len(instances_with_multiple_annotations)   
-    
+        agreement_results["comparison_agreement"] = agreed_comparison / len(instances_with_multiple_annotations)
+        agreement_results["relexed_comparison_agreement"] = relexed_agreed_comparison / len(instances_with_multiple_annotations)
+
     model_wins_rates["agreement"] = agreement_results
     return model_wins_rates
 
@@ -181,7 +182,7 @@ if __name__ == "__main__":
             if set([target_model_a, target_model_b]) != set([record.model_a, record.model_b]):
                 assert any([set([record.model_a, record.model_b]) == set(pair) for pair in model_pairs])
                 continue
-            
+
             comparison_records.append(record)
 
         acceptance_results = get_acceptance_results(comparison_records, target_model_a, target_model_b)

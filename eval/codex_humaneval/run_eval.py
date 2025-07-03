@@ -1,20 +1,22 @@
 import argparse
-import os
 import json
+import os
 import random
+
 import torch
 import vllm
-from eval.utils import (
-    generate_completions, 
-    load_hf_lm, 
-    query_openai_chat_model,
-    dynamic_import_function,
-    load_hf_tokenizer,
-    upload_results_to_hf,
-    check_and_upload_model_metadata,
-)
-from eval.codex_humaneval.data import write_jsonl, read_problems
+
+from eval.codex_humaneval.data import read_problems, write_jsonl
 from eval.codex_humaneval.evaluation import evaluate_functional_correctness
+from eval.utils import (
+    check_and_upload_model_metadata,
+    dynamic_import_function,
+    generate_completions,
+    load_hf_lm,
+    load_hf_tokenizer,
+    query_openai_chat_model,
+    upload_results_to_hf,
+)
 
 
 def main(args):
@@ -54,17 +56,17 @@ def main(args):
             prompt = chat_formatting_function(messages, tokenizer, add_bos=False)
             prefix = "" if prompt[-1] in ["\n", " "] else " "
             return prompt + prefix + suffix
-            
+
         instruction = "Complete the following python function.\n\n\n"
         for example in test_data:
             if instructions_dict is not None:
                 instruction = instructions_dict[example["task_id"]]
                 prompts.append((instruction, answer + example["prompt"]))
             else:
-                prompts.append((instruction + example["prompt"], answer))   
+                prompts.append((instruction + example["prompt"], answer))
     else:
         prompts = [example["prompt"] for example in test_data]
-        
+
     if args.model_name_or_path:
         tokenizer = load_hf_tokenizer(
             model_name_or_path=args.model_name_or_path,
@@ -101,7 +103,7 @@ def main(args):
             model = load_hf_lm(
                 model_name_or_path=args.model_name_or_path,
                 revision=args.hf_revision,
-                load_in_8bit=args.load_in_8bit, 
+                load_in_8bit=args.load_in_8bit,
                 # device map is determined by the number of gpus available.
                 device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                 gptq_model=args.gptq,
@@ -110,13 +112,13 @@ def main(args):
             if isinstance(model, GPTNeoXForCausalLM) or isinstance(model, OPTForCausalLM):
                 tokenizer.model_max_length = model.config.max_position_embeddings
                 print("Set tokenizer.model_max_length to model.config.max_position_embeddings: {}".format(model.config.max_position_embeddings))
-            
+
             if args.use_chat_format:
                 prompts = [apply_chat_format(tokenizer, inst, suffix) for (inst, suffix) in prompts]
 
             # these stop sequences are those mentioned in the codex paper.
             stop_sequences = ["\nclass", "\ndef", "\n#", "\nif", "\nprint"] + args.additional_stop_sequence
-            # Because many tokenizers will treat the word after space differently from the original word alone, 
+            # Because many tokenizers will treat the word after space differently from the original word alone,
             # to be consistent, we add a space before tokenization and remove it after tokenization.
             stop_sequences = [tokenizer.encode(" " + x, add_special_tokens=False)[1:] for x in stop_sequences]
             outputs_per_sampling_iter = []
@@ -142,7 +144,7 @@ def main(args):
                     outputs.append(outputs_per_sampling_iter[j][i])
     else:
         instances = [{
-            "id": examle["task_id"], 
+            "id": examle["task_id"],
             "prompt": "Complete the following python function. Please only output the code for the completed function.\n\n\n" + prompt,
         } for examle, prompt in zip(test_data, prompts)]
         results = query_openai_chat_model(
@@ -204,27 +206,27 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--data_file", 
-        type=str, 
+        "--data_file",
+        type=str,
         default="data/codex_eval/HumanEval.jsonl.gz",
         help="Path to the HumanEval data file."
     )
     parser.add_argument(
-        "--data_file_hep", 
-        type=str, 
+        "--data_file_hep",
+        type=str,
         default="data/codex_eval/humanevalpack.jsonl",
         help="Path to the HumanEvalPack data file."
-    )    
+    )
     parser.add_argument(
-        "--max_num_examples", 
-        type=int, 
+        "--max_num_examples",
+        type=int,
         default=None,
         help="Maximum number of examples to evaluate."
     )
     parser.add_argument(
-        "--model_name_or_path", 
-        type=str, 
-        default=None, 
+        "--model_name_or_path",
+        type=str,
+        default=None,
         help="If specified, we will load the model to generate the predictions."
     )
     parser.add_argument(
@@ -234,9 +236,9 @@ if __name__ == "__main__":
         help="if specified, we will load the model from a revision of the model in the hub"
     )
     parser.add_argument(
-        "--tokenizer_name_or_path", 
-        type=str, 
-        default=None, 
+        "--tokenizer_name_or_path",
+        type=str,
+        default=None,
         help="If specified, we will load the tokenizer from here."
     )
     parser.add_argument(
@@ -245,33 +247,33 @@ if __name__ == "__main__":
         help="If given, we will use the slow tokenizer."
     )
     parser.add_argument(
-        "--openai_engine", 
-        type=str, 
-        default=None, 
+        "--openai_engine",
+        type=str,
+        default=None,
         help="If specified, we will use the OpenAI API to generate the predictions."
     )
     parser.add_argument(
-        "--save_dir", 
-        type=str, 
-        default="results/codex_eval", 
+        "--save_dir",
+        type=str,
+        default="results/codex_eval",
         help="Directory to save the results."
     )
     parser.add_argument(
-        "--eval_batch_size", 
-        type=int, 
-        default=1, 
+        "--eval_batch_size",
+        type=int,
+        default=1,
         help="Batch size for evaluation."
     )
     parser.add_argument(
-        "--eval_pass_at_ks", 
-        nargs="+", 
-        type=int, 
-        default=[1], 
+        "--eval_pass_at_ks",
+        nargs="+",
+        type=int,
+        default=[1],
         help="Multiple k's that we will report pass@k."
     )
     parser.add_argument(
-        "--unbiased_sampling_size_n", 
-        type=int, 
+        "--unbiased_sampling_size_n",
+        type=int,
         default=20,
         help="Codex HumanEval requires `n` sampled generations per prompt, to estimate the unbiased pass@k. "
     )
@@ -282,29 +284,29 @@ if __name__ == "__main__":
         help="Temperature for sampling. This is should be low for evaluating smaller pass@k, and high for larger pass@k."
     )
     parser.add_argument(
-        "--load_in_8bit", 
-        action="store_true", 
+        "--load_in_8bit",
+        action="store_true",
         help="Load model in 8bit mode, which will reduce memory and speed up inference."
     )
     parser.add_argument(
-        "--gptq", 
-        action="store_true", 
+        "--gptq",
+        action="store_true",
         help="If given, we're evaluating a 4-bit quantized GPTQ model."
     )
     parser.add_argument(
         "--use_vllm",
-        action="store_true", 
+        action="store_true",
         help="If given, we will use the vllm library, which will likely increase the inference throughput."
     )
     parser.add_argument(
-        "--use_chat_format", 
-        action="store_true", 
+        "--use_chat_format",
+        action="store_true",
         help="If given, we will use the chat format for the prompts."
     )
     parser.add_argument(
-        "--chat_formatting_function", 
-        type=str, 
-        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        "--chat_formatting_function",
+        type=str,
+        default="eval.templates.create_prompt_with_tulu_chat_format",
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
     )
     parser.add_argument(

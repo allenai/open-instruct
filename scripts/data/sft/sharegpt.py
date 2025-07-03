@@ -1,14 +1,12 @@
 import argparse
+import json
 import os
 import tempfile
-import json
-from collections import defaultdict
-from typing import List, Optional
 from urllib.request import urlretrieve
-from datasets import load_dataset, Dataset
+
+from datasets import Dataset
 
 from scripts.data.sft.utils import convert_sft_dataset
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -51,7 +49,7 @@ if __name__ == "__main__":
         help="Apply empty message filters to the dataset.",
     )
     args = parser.parse_args()
-    
+
     readme_content = (
         "This is a converted version of the ShareGPT dataset into Tulu SFT training format.\n\n"
         "The conversion script can be found in our "
@@ -66,7 +64,7 @@ if __name__ == "__main__":
         "Please refer to the [original dataset](https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered) "
         "for more information about this dataset and the license."
     )
-    
+
     data = []
     # here we manually download the dataset because hf load_dataset errors out when loading from data files directly.
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -79,14 +77,14 @@ if __name__ == "__main__":
             "https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/HTML_cleaned_raw_dataset/sg_90k_part2_html_cleaned.json",
             os.path.join(temp_dir, "sg_90k_part2_html_cleaned.json")
         )
-        
+
         with open(os.path.join(temp_dir, "sg_90k_part1_html_cleaned.json"), "r") as f:
             data.extend(json.load(f))
         with open(os.path.join(temp_dir, "sg_90k_part2_html_cleaned.json"), "r") as f:
             data.extend(json.load(f))
-    
+
     data = [d for d in data if "conversations" in d and len(d["conversations"]) > 0]
-    
+
     role_map = {
         "user": "user",
         "human": "user",
@@ -100,7 +98,7 @@ if __name__ == "__main__":
         "id": d["id"],
         "messages": [{"role": role_map[c["from"]], "content": c["value"]} for c in d["conversations"]]
     } for d in data]
-    
+
     ds = Dataset.from_list(data)
     convert_sft_dataset(
         ds=ds,
@@ -114,4 +112,4 @@ if __name__ == "__main__":
         local_save_dir=args.local_save_dir,
         readme_content=readme_content,
     )
-    
+

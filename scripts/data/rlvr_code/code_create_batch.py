@@ -92,14 +92,13 @@ Note:
 """
 import json
 import os
-import time
-from openai import AzureOpenAI
-from datasets import load_dataset
-from pydantic import BaseModel
-from typing import List
-from collections import Counter
 import random
-from open_instruct.ground_truth_utils import extract_python_code
+import time
+from typing import List
+
+from datasets import load_dataset
+from openai import AzureOpenAI
+from pydantic import BaseModel
 
 client = AzureOpenAI(
     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
@@ -107,18 +106,71 @@ client = AzureOpenAI(
     api_version="2024-12-01-preview"
 )
 
-MODEL = "gpt4.1"
-SAMPLE_LIMIT = None
+MODEL = "gpt-4.1"
+SAMPLE_LIMIT = 1000000
 WD = os.getcwd()
 TIMESTAMP = int(time.time())
 BATCH_FILE_NAME = f"{WD}/batch_files/{TIMESTAMP}.jsonl"
 os.makedirs(f"{WD}/batch_files", exist_ok=True)
 
-INPUT_HF_DATASET = "nvidia/OpenCodeReasoning"
-SPLIT = "split_0"
+INPUT_HF_DATASET = "nvidia/OpenCodeReasoning-2"
+OUTPUT_HF_DATASET = "saurabh5/open-code-reasoning-rlvr-2"
+SPLIT = "python"
+
+hf_datasets = {
+    "taco": load_dataset("BAAI/TACO", trust_remote_code=True),
+    "apps": load_dataset("codeparrot/apps", trust_remote_code=True),
+    "code_contests": load_dataset("deepmind/code_contests"),
+    "open-r1/codeforces": load_dataset("open-r1/codeforces")
+}
+
+def extract_python_code(model_output: str) -> str:
+    """Extract the last code block between ``` markers from the model output."""
+    # Find content between ``` markers
+    pattern = r"```(?:python)?(.*?)```"
+    matches = re.findall(pattern, model_output, re.DOTALL)
+
+    if not matches:
+        return model_output
+
+    # Return the last match, stripped of whitespace
+    return matches[-1].strip()
+
+
+def get_question(ds_name, split, index):
+    benchmark = hf_datasets[ds_name][split][int(index)]
+    if ds_name == "code_contests":
+        if not benchmark["description"]:
+            return None
+        return benchmark["description"]
+    elif ds_name in ["taco", "apps"]:
+        return benchmark["question"]
+    elif ds_name == "open-r1/codeforces":
+        if not benchmark["description"]:
+            return None
+        question = benchmark["description"]
+        if benchmark["input_format"]:
+            question += "\n\nInput\n\n" + benchmark["input_format"]
+        if benchmark["output_format"]:
+            question += "\n\nOutput\n\n" + benchmark["output_format"]
+        if benchmark["examples"]:
+            question += "\n\nExamples"
+            for example in benchmark["examples"]:
+                if "input" in example:
+                    question += "\n\nInput\n\n" + example["input"]
+                if "output" in example:
+                    question += "\n\nOutput\n\n" + example["output"]
+        if benchmark["note"]:
+            question += "\n\nNote\n\n" + benchmark["note"]
+        return question
+
+    return None
 
 def get_input(row):
-    return row['input']
+    ds_name, ds_split, ds_index = row["dataset"], row["split"], int(row["index"])
+    if ds_name not in hf_datasets:
+        return None
+    return get_question(ds_name, ds_split, ds_index)
 
 def get_solution(row):
     """
@@ -130,7 +182,7 @@ def get_solution(row):
     return row['solution']
 
 def get_id(row):
-    return row['id']
+    return row['question_id']
 
 class OpenAIStructuredOutput(BaseModel):
     rewritten_input: str
@@ -188,9 +240,9 @@ def find_cached_results(id: str):
             if file.endswith(f"openai_response_{id}.json"):
                 full_path = os.path.join(root, file)
                 all_files.append(full_path)
-    
+
     all_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-    
+
     if all_files:
         with open(all_files[0], "r") as f:
             try:
@@ -201,29 +253,29 @@ def find_cached_results(id: str):
                 return response
             except Exception:
                 return None
-    
+
     return None
 
 def main():
     global SAMPLE_LIMIT
-    input_dataset = load_dataset(INPUT_HF_DATASET, SPLIT, split=SPLIT)
-    
+    input_dataset = load_dataset(INPUT_HF_DATASET, "train", split=SPLIT)
+
     # First get all unique IDs
     unique_ids = set()
     unique_rows = []
     for row in input_dataset:
-        if row['id'] not in unique_ids:
-            unique_ids.add(row['id'])
+        if row['question_id'] not in unique_ids:
+            unique_ids.add(row['question_id'])
             unique_rows.append(row)
-    
+
     print(f"Found {len(unique_rows)} unique rows out of {len(input_dataset)} total rows")
-    
+
     # Now sample from unique rows
     random.seed(42)
     if SAMPLE_LIMIT is None:
         SAMPLE_LIMIT = len(unique_rows)
     sampled_rows = random.sample(unique_rows, min(SAMPLE_LIMIT, len(unique_rows)))
-    
+
     print(f"Processing {len(sampled_rows)} unique rows")
 
     master_prompt = r"""
@@ -273,9 +325,15 @@ Output should be a JSON object with this structure:
 
     prompts = []
     for row in sampled_rows:
-        prompts.append((get_id(row), master_prompt.replace("{input}", get_input(row)).replace("{solution}", get_solution(row))))
+        input = get_input(row)
+        if input is None:
+            continue
+        prompts.append((get_id(row), master_prompt.replace("{input}", input).replace("{solution}", get_solution(row))))
+
 
     print(f"Creating batch file with {len(prompts)} prompts...")
+    print(f"First prompt: {prompts[0]}")
+    breakpoint()
     create_batch_file(prompts)
     print(f"Created batch file at {BATCH_FILE_NAME}")
 

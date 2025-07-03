@@ -74,13 +74,14 @@ Note:
 import asyncio
 import json
 import os
+import re  # Added for parsing retry-after
 import time
-import boto3 # Added for S3
-import re # Added for parsing retry-after
-from openai import AsyncAzureOpenAI, RateLimitError # Modified to import RateLimitError
-from tqdm.asyncio import tqdm_asyncio
+
+import boto3  # Added for S3
 import requests
-from datasets import Dataset, load_dataset, concatenate_datasets
+from datasets import Dataset, load_dataset
+from openai import AsyncAzureOpenAI, RateLimitError  # Modified to import RateLimitError
+from tqdm.asyncio import tqdm_asyncio
 
 # Initialize the client with your API key
 client = AsyncAzureOpenAI(
@@ -147,7 +148,7 @@ async def get_completion(prompt, id, semaphore):
 
                 if response_content.startswith("```json"):
                     response_content = response_content.replace("```json", "").replace("```", "")
-                
+
                 if WRITE_TO_CACHE:
                     try:
                         parsed_response = json.loads(response_content)
@@ -187,7 +188,7 @@ async def get_completion(prompt, id, semaphore):
                     wait_time = current_backoff
                     print(f"Retrying after {wait_time} seconds (exponential backoff).")
                     current_backoff *= BACKOFF_FACTOR
-                
+
                 if retries >= MAX_RETRIES:
                     print(f"Max retries reached for {id}. Giving up.")
                     return {
@@ -228,10 +229,10 @@ def initialize_cache_index():
     """Initializes the CACHE_INDEX by listing objects in S3."""
     global CACHE_INDEX
     print(f"Initializing cache index from S3 bucket: {S3_BUCKET}, prefix: {S3_BASE_PREFIX}...")
-    
+
     temp_cache_info = {} # id -> {s3_key, last_modified}
     paginator = s3_client.get_paginator('list_objects_v2')
-    
+
     try:
         for page in paginator.paginate(Bucket=S3_BUCKET, Prefix=S3_BASE_PREFIX):
             for obj in page.get('Contents', []):
@@ -251,7 +252,7 @@ def initialize_cache_index():
                                 temp_cache_info[id_from_key] = {'s3_key': key, 'last_modified': last_modified}
                     except Exception as e:
                         print(f"Could not parse S3 key {key} for ID: {e}")
-        
+
         CACHE_INDEX = {id_val: data['s3_key'] for id_val, data in temp_cache_info.items()}
         print(f"S3 Cache index initialized with {len(CACHE_INDEX)} items.")
     except Exception as e:
@@ -266,7 +267,7 @@ def find_cached_results(id: str):
             response = s3_client.get_object(Bucket=S3_BUCKET, Key=s3_key)
             content = response['Body'].read().decode('utf-8')
             parsed_response = json.loads(content)
-            
+
             # Original check for 'rewritten_input' type from previous local cache logic
             if isinstance(parsed_response.get('rewritten_input'), dict):
                  print(f"Found S3 cached item for {id} ({s3_key}) but 'rewritten_input' is a dict, skipping.")
@@ -363,7 +364,7 @@ Output should be a JSON object with this structure:
             test_cases = openai_response_data['test_cases']
             rewritten_solution = openai_response_data['rewritten_solution']
             rewritten_input = openai_response_data['rewritten_input']
-            
+
             payload = {
                 "program": rewritten_solution,
                 "tests": test_cases,
@@ -386,7 +387,7 @@ Output should be a JSON object with this structure:
                     "id": dataset[i]['id']
                 })
             else:
-                print(f"Not adding. ")
+                print("Not adding. ")
                 print(f"OpenAI response: {openai_response_data}")
                 print(f"Execution results: {response_json}")
         except Exception as e:
@@ -394,7 +395,7 @@ Output should be a JSON object with this structure:
             print(f"Original OpenAI response string: {result.get('openai_response', 'N/A')}")
             import traceback
             print(f"Traceback:\n{traceback.format_exc()}")
-    
+
     print(f"After filtering, {len(new_results)} results out of {len(results)} remain")
     if new_results: # Only proceed if there are results to push
         dataset_to_push = Dataset.from_list(new_results)
@@ -407,7 +408,7 @@ Output should be a JSON object with this structure:
     cost_output = (total_output_tokens / 1_000_000) * GPT4_1_OUTPUT_PRICE_PER_MILLION_TOKENS
     total_cost = cost_input + cost_output
 
-    print(f"\n--- Token Usage and Cost ---")
+    print("\n--- Token Usage and Cost ---")
     print(f"Total Input Tokens: {total_input_tokens}")
     print(f"Total Output Tokens: {total_output_tokens}")
     print(f"Estimated Cost for Input Tokens: ${cost_input:.4f}")
