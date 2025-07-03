@@ -629,31 +629,7 @@ class PolicyTrainerRayProcess(RayProcess):
         position_ids: torch.LongTensor,
         pad_token_id: int,
         temperature: float,
-    ) -> torch.Tensor:
-        # Replace pad tokens with 0s so that we don't run into index out of bounds errors
-        padding_mask = query_response != pad_token_id
-        input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
-        # NOTE: the [:-1] and [1:] are because the logits and generated tokens are off by 1 in index
-        output = model(
-            input_ids=input_ids[:, :-1],
-            # @vwxyzjn: without clamp, we get index out of bounds errors; TODO: investigate
-            attention_mask=attention_mask[:, :-1].clamp(0, 1),
-            position_ids=position_ids[:, :-1],
-            return_dict=True,
-        )
-        logits = output.logits
-        logits /= temperature + 1e-7
-        logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
-        return logprob
-
-    def forward_with_entropy(
-        self,
-        model: PreTrainedModel,
-        query_response: torch.LongTensor,
-        attention_mask: torch.LongTensor,
-        position_ids: torch.LongTensor,
-        pad_token_id: int,
-        temperature: float,
+        return_entropy: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         # Replace pad tokens with 0s so that we don't run into index out of bounds errors
         padding_mask = query_response != pad_token_id
@@ -671,8 +647,10 @@ class PolicyTrainerRayProcess(RayProcess):
         logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
 
         # For now, entropy is just for monitoring, and we don't pass gradients through it.
-        with torch.no_grad():
-            entropy = entropy_from_logits(logits)
+        entropy = None
+        if return_entropy:
+            with torch.no_grad():
+                entropy = entropy_from_logits(logits)
 
         return logprob, entropy
 
@@ -755,7 +733,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
         if torch.distributed.get_rank() == 0:
             ray.get(refss)
-        if args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
+        if self.args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
             ray.get(cache_reset_refs)
 
     def update_ref_policy(self):
@@ -812,13 +790,14 @@ class PolicyTrainerRayProcess(RayProcess):
                     attention_mask = collated_attention_masks[i]
                     position_id = collated_position_ids[i]
                     response_mask = collated_response_masks[i]
-                    ref_logprob = self.forward(
+                    ref_logprob, _ = self.forward(
                         self.ref_policy,
                         query_response,
                         attention_mask,
                         position_id,
                         pad_token_id,
                         args.temperature,
+                        return_entropy=False,
                     )
                     if args.mask_tool_use and args.tool_use:
                         # mask logprobs for tool tokens
@@ -841,13 +820,14 @@ class PolicyTrainerRayProcess(RayProcess):
                         attention_mask = collated_attention_masks[i]
                         position_id = collated_position_ids[i]
                         response_mask = collated_response_masks[i]
-                        old_logprob = self.forward(
+                        old_logprob, _ = self.forward(
                             self.model,
                             query_response,
                             attention_mask,
                             position_id,
                             pad_token_id,
                             args.temperature,
+                            return_entropy=False,
                         )
                         if args.mask_tool_use and args.tool_use:
                             response_mask = response_mask.bool() & tool_mask.bool()
@@ -883,24 +863,15 @@ class PolicyTrainerRayProcess(RayProcess):
                         mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
-                    if args.record_entropy:
-                        mb_new_logprobs, mb_entropy = self.forward_with_entropy(
-                            self.model,
-                            mb_query_responses,
-                            mb_attention_mask,
-                            mb_position_id,
-                            pad_token_id,
-                            args.temperature,
-                        )
-                    else:
-                        mb_new_logprobs = self.forward(
-                            self.model,
-                            mb_query_responses,
-                            mb_attention_mask,
-                            mb_position_id,
-                            pad_token_id,
-                            args.temperature,
-                        )
+                    mb_new_logprobs, mb_entropy = self.forward(
+                        self.model,
+                        mb_query_responses,
+                        mb_attention_mask,
+                        mb_position_id,
+                        pad_token_id,
+                        args.temperature,
+                        return_entropy=args.record_entropy,
+                    )
                     mb_new_logprobs = torch.masked_fill(mb_new_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
 
                     # Cache the old logprobs
@@ -2017,7 +1988,7 @@ if __name__ == "__main__":
                     raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
                 for i in range(len(format_scores)):
                     scores[i] = format_scores[i] + scores[i]
-                metrics["val/format_scores"] = np.array(format_scores).mean() if len(format_scores) > 0 else 0.0
+                metrics["val/format_scores"] = np.array(format_scores).mean()
 
         if args.apply_verifiable_reward:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
