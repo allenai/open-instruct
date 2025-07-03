@@ -41,6 +41,7 @@ import datasets
 import torch
 import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
+from accelerate.accelerator import GradientAccumulationPlugin
 from accelerate.logging import get_logger
 from accelerate.utils import InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
@@ -322,6 +323,9 @@ class FlatArguments:
     oe_eval_max_length: int = 4096
     """the max generation length for evaluation for oe-eval"""
 
+    sync_each_batch: bool = False
+    """Optionaly sync grads every batch when using grad accumulation. Can significantly reduce memory costs."""
+
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
             raise ValueError("reduce_loss must be either 'mean' or 'sum'")
@@ -365,11 +369,15 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # if you get timeouts (e.g. due to long tokenization) increase this.
     timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
     dataloader_config = DataLoaderConfiguration(use_seedable_sampler=True)
+
     accelerator = Accelerator(
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
         dataloader_config=dataloader_config,
         **accelerator_log_kwargs,
         kwargs_handlers=[timeout_kwargs],
+        gradient_accumulation_plugin=GradientAccumulationPlugin(
+            num_steps=args.gradient_accumulation_steps,
+            sync_each_batch=args.sync_each_batch,
+        ),
     )
 
     # ------------------------------------------------------------
