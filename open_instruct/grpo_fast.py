@@ -1931,7 +1931,7 @@ if __name__ == "__main__":
         scores = [0] * len(decoded_responses)
         metrics = {}
 
-        if args.apply_random_reward:
+        if args.apply_random_rewards:
             with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating random reward"):
                 random_rewards = np.random.uniform(0, args.random_reward, size=len(decoded_responses))
                 for i in range(len(random_rewards)):
