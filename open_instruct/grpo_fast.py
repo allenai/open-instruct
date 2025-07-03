@@ -73,7 +73,7 @@ from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
-from vllm import SamplingParams
+from vllm import SamplingParams, VLLMEngine
 
 from open_instruct.dataset_transformation import (
     DATASET_SOURCE_KEY,
@@ -121,6 +121,14 @@ from open_instruct.utils import (
     sync_gs_bucket,
 )
 from open_instruct.vllm_utils3 import LLMRayActor, create_vllm_engines, init_process_group
+
+# Setup logging with filename and line number format
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 # Setup logging with filename and line number format
 logging.basicConfig(
@@ -1668,7 +1676,7 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
         collated_data = packed_data["collated_data"]
         num_total_tokens += packed_data["num_new_tokens"]
         if B == 0:
-            print("[Main Thread] 🤡 After packing, there is not enough data to train")
+            logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
             return None, data_thread_metrics, num_total_tokens
         return collated_data, data_thread_metrics, num_total_tokens
 
@@ -1732,7 +1740,7 @@ def one_training_step(
             with Timer("[Main Thread] 🗡️ Saving model"):
                 checkpoint_dir = f"{args.output_dir}_checkpoints"
                 step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-                print(f"Saving model at step {training_step} to {step_dir}")
+                logger.info(f"Saving model at step {training_step} to {step_dir}")
                 ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
                 if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                     leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
@@ -1753,7 +1761,7 @@ def one_training_step(
                         for i in range(args.world_size)
                     ]
                 )
-                print(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+                logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
     if len(update_ref_policy_future) > 0:
         with Timer("[Main Thread] 🔃 Updating reference policy"):
@@ -1780,7 +1788,7 @@ def maybe_evaluate(
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
         timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else 100
         eval_responses, eval_finish_reasons, masks, eval_infos = evaluation_inference_results_Q.get(timeout=timeout)
-        print("[Main Thread] 📊 Evaluation responses received")
+        logger.info("[Main Thread] 📊 Evaluation responses received")
 
         eval_sequence_lengths = np.array([len(response) for response in eval_responses])
         eval_decoded_responses = tokenizer.batch_decode(eval_responses, skip_special_tokens=True)
@@ -1826,12 +1834,12 @@ def maybe_evaluate(
             print_rich_table(df.iloc[:1])
         del table
     except Empty:
-        print("[Main Thread] 🙈 Evaluation responses not received")
+        logger.warning("[Main Thread] 🙈 Evaluation responses not received")
 
 
 def save_final_model(args: Args, policy_group: ModelGroup, training_step: int, wandb_url: str):
     """Save the final model and launch evaluation jobs if configured."""
-    print(f"Saving final model at step {training_step} to {args.output_dir}")
+    logger.info(f"Saving final model at step {training_step} to {args.output_dir}")
     with Timer("[Main Thread] 🗡️ Saving model"):
         ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
         if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
@@ -1857,7 +1865,7 @@ def make_tokenizer(tc: TokenizerConfig, model_config: ModelConfig):
         warning = f"""Requested tokenizer revision `{tc.tokenizer_revision=}` is different
                    from the model revision `{model_config.model_revision=}` or the tokenizer name `{tc.tokenizer_name_or_path=}`
                    is different from the model name `{model_config.model_name_or_path=}`."""
-        print(warning)
+        logger.warning(warning)
     return tc.tokenizer
 
 
@@ -1941,31 +1949,17 @@ def make_reward_fn(args: Args) -> Callable:
 
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
-    # ------------------------------------------------------------
-    # Setup tokenizer
     tokenizer = make_tokenizer(tc, model_config)
-
-    # ------------------------------------------------------------
-    # Set up runtime variables
     args = setup_runtime_variables(args)
-
-    # ------------------------------------------------------------
-    # Setup experiment tracking and seeds
     beaker_config, writer, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
-    # ------------------------------------------------------------
-    # Set up datasets
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
     if args.cache_dataset_only:
         return
 
-    # ------------------------------------------------------------
-    # Runtime setups and quick logging
     pprint([args, model_config])
 
-    # ------------------------------------------------------------
-    # Create the model and optimizer
-    policy_group, vllm_engines, tool_objects, resume_training_step, episode, pg = create_model_and_optimizer(
+    policy_group, vllm_engines, tool_objects, resume_training_step, episode = create_model_and_optimizer(
         args, tc, model_config, beaker_config, wandb_url, tokenizer
     )
 
