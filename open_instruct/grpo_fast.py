@@ -1764,9 +1764,8 @@ def save_final_model(args: Args, policy_group: ModelGroup, training_step: int, w
                 )
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
-    # ------------------------------------------------------------
-    # Setup tokenizer
+def make_tokenizer(tc: TokenizerConfig, model_config: ModelConfig):
+    """Setup tokenizer with appropriate configuration."""
     tc.tokenizer_revision = model_config.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
     tc.tokenizer_name_or_path = (
         model_config.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
@@ -1781,7 +1780,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                    from the model revision `{model_config.model_revision=}` or the tokenizer name `{tc.tokenizer_name_or_path=}`
                    is different from the model name `{model_config.model_name_or_path=}`."""
         print(warning)
-    tokenizer = tc.tokenizer
+    return tc.tokenizer
+
+
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
+    # ------------------------------------------------------------
+    # Setup tokenizer
+    tokenizer = make_tokenizer(tc, model_config)
 
     # ------------------------------------------------------------
     # Set up runtime variables
