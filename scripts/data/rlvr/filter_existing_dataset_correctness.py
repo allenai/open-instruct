@@ -12,11 +12,13 @@ If you have code data, you might have to launch code server too before running:
 source configs/beaker_configs/code_api_setup.sh
 """
 import argparse
-from functools import partial
 import json
+from functools import partial
 from multiprocessing import Pool, cpu_count, set_start_method
-from tqdm import tqdm
+
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+
 from open_instruct.ground_truth_utils import build_all_verifiers
 
 

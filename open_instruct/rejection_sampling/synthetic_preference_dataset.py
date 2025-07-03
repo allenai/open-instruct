@@ -131,7 +131,6 @@ def main(args: Args):
         all_comparison_pairs.extend(comparison_pairs)
 
     async def get_judgement(model: str, comparison_pair: List[Dict[str, str]], limiter: asyncio.Semaphore):
-
         task = comparison_pair[0]["messages"][:-1]
         # shuffle the order of the responses
         shuffled_index = random.randint(0, 1)
@@ -196,10 +195,7 @@ def main(args: Args):
         api.create_repo(full_repo_id, repo_type="dataset", exist_ok=True)
         for f in [__file__, args.save_filename]:
             api.upload_file(
-                path_or_fileobj=f,
-                path_in_repo=f.split("/")[-1],
-                repo_id=full_repo_id,
-                repo_type="dataset",
+                path_or_fileobj=f, path_in_repo=f.split("/")[-1], repo_id=full_repo_id, repo_type="dataset"
             )
         repo_full_url = f"https://huggingface.co/datasets/{full_repo_id}"
         print(f"Pushed to {repo_full_url}")
@@ -222,10 +218,7 @@ args:
 1. Command used to run `{run_command}`
 """
         )
-        sft_card.push_to_hub(
-            full_repo_id,
-            repo_type="dataset",
-        )
+        sft_card.push_to_hub(full_repo_id, repo_type="dataset")
 
 
 if __name__ == "__main__":

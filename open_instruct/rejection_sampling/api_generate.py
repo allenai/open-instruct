@@ -9,10 +9,7 @@ import numpy as np
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm
 
-from open_instruct.rejection_sampling.prompt_templates import (
-    get_generation_template,
-    get_judgment_template,
-)
+from open_instruct.rejection_sampling.prompt_templates import get_generation_template, get_judgment_template
 
 
 @dataclass

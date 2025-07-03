@@ -84,11 +84,12 @@ Note:
 import json
 import os
 import sys
-from openai import AzureOpenAI
+from typing import List
+
 import requests
 from datasets import Dataset, load_dataset
+from openai import AzureOpenAI
 from pydantic import BaseModel
-from typing import List
 
 client = AzureOpenAI(
     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
@@ -177,10 +178,10 @@ def get_batch_results(batch_id: str) -> list:
         # Download the output file
         output_file = client.files.retrieve(batch.output_file_id)
         output_content = client.files.content(output_file.id)
-        
+
         # Get the text content from the response
         content_str = output_content.text
-        
+
         # Process each line of the output
         results = []
         for line in content_str.split('\n'):
@@ -196,7 +197,7 @@ def get_batch_results(batch_id: str) -> list:
                         results.append(processed_result)
                 except Exception as e:
                     print(f"Error processing result line: {e}")
-        
+
         return results
     except Exception as e:
         print(f"Error retrieving batch results: {e}")
@@ -212,17 +213,17 @@ def process_batch_results(batch_id: str):
     if not batch_results:
         print("No results found in batch")
         return
-    
+
     print(f"Sample result: {batch_results[0]}")
 
     # Filter and validate results
     url = "http://localhost:1234/test_program"
     new_results = []
     original_dataset = load_dataset(INPUT_HF_DATASET, SPLIT, split=SPLIT)
-    
+
     # Create a lookup dictionary for O(1) access
     id_to_row = {row['id']: row for row in original_dataset}
-    
+
     for result in batch_results:
         try:
             # Look up the row directly using the ID
@@ -230,25 +231,25 @@ def process_batch_results(batch_id: str):
                 print(f"No matching row found for ID: {result['id']}")
                 continue
             original_dataset_row = id_to_row[result['id']]
-            
+
             test_cases = result['test_cases']
             rewritten_solution = result['rewritten_solution']
-            
+
             # Test data
             payload = {
                 "program": rewritten_solution,
                 "tests": test_cases,
                 "max_execution_time": 2.0
             }
-            
+
             # Send POST request
             response = requests.post(url, json=payload)
             response_json = response.json()
-            
+
             if response.ok and sum(response_json['results']) >= 0.8 * len(test_cases):
                 # Keep only passed test cases
                 passed_test_cases = [test_cases[j] for j in range(len(test_cases)) if response_json['results'][j] == 1]
-                
+
                 new_results.append({
                     **original_dataset_row,
                     "messages": [{
@@ -269,7 +270,7 @@ def process_batch_results(batch_id: str):
 
     print(f"After filtering, {len(new_results)} results out of {len(batch_results)} remain. Do you want to upload?")
     breakpoint()
-    
+
     # Upload to Hugging Face
     if new_results:
         dataset = Dataset.from_list(new_results)
@@ -282,6 +283,6 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python open_code_reasoning_upload_batch.py <batch_id>")
         sys.exit(1)
-    
+
     batch_id = sys.argv[1]
     process_batch_results(batch_id)

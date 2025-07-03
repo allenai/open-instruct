@@ -6,15 +6,16 @@ python scripts/data/rlvr/open_reasoner.py --push_to_hub
 python scripts/data/rlvr/open_reasoner.py --push_to_hub --hf_entity ai2-adapt-dev
 """
 
+import os
 from collections import defaultdict
 from dataclasses import dataclass
-import os
 from typing import Optional
 
 import datasets
 from huggingface_hub import HfApi
 from huggingface_hub.repocard import RepoCard
 from transformers import HfArgumentParser
+
 
 @dataclass
 class Args:
@@ -23,8 +24,9 @@ class Args:
 
 def main(args: Args):
     # download https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero/raw/refs/heads/main/data/orz_math_57k_collected.json
-    import requests
     import json
+
+    import requests
 
     file_path = "orz_math_57k_collected.json"
     if not os.path.exists(file_path):
@@ -32,10 +34,10 @@ def main(args: Args):
         response = requests.get(url)
         with open(file_path, "w") as f:
             f.write(response.text)
-    
+
     with open(file_path, "r") as f:
         data = json.load(f)
-    
+
     table = defaultdict(list)
     for item in data:
         assert len(item) == 2 # 1 question 2 ground truth
@@ -63,7 +65,7 @@ def main(args: Args):
 
         # Add RepoCard
         repo_card = RepoCard(
-            content=f"""\
+            content="""\
 # Open Reasoner Dataset
 
 This dataset is converted from [Open-Reasoner-Zero](https://github.com/Open-Reasoner-Zero/Open-Reasoner-Zero)'s math dataset.

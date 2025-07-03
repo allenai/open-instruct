@@ -69,12 +69,7 @@ from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
-from transformers import (
-    AutoModelForCausalLM,
-    PreTrainedModel,
-    PreTrainedTokenizer,
-    get_scheduler,
-)
+from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
@@ -386,12 +381,12 @@ class Args:
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
             print("WARNING: num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE. ")
-        assert (
-            self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty
-        ), "At least one reward must be applied!"
-        assert (
-            self.pack_length >= self.max_prompt_token_length + self.response_length
-        ), "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+        assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
+            "At least one reward must be applied!"
+        )
+        assert self.pack_length >= self.max_prompt_token_length + self.response_length, (
+            "The `pack_length` needs to be greater than the sum of `max_prompt_token_length` and `response_length`!"
+        )
         if self.checkpoint_state_freq > 0 and self.checkpoint_state_dir is None:
             raise ValueError("`checkpoint_state_dir` must be provided if `checkpoint_state_freq` is greater than 0!")
         if self.checkpoint_state_dir is not None and self.checkpoint_state_freq == -1:
@@ -519,12 +514,7 @@ class PolicyTrainerRayProcess(RayProcess):
         self.device = torch.device(self.local_rank)
         deepspeed.init_distributed()
 
-        ds_config = get_train_ds_config(
-            offload=False,
-            adam_offload=False,
-            stage=args.deepspeed_stage,
-            bf16=True,
-        )
+        ds_config = get_train_ds_config(offload=False, adam_offload=False, stage=args.deepspeed_stage, bf16=True)
         ds_config["train_micro_batch_size_per_gpu"] = args.per_device_train_batch_size
         ds_config["gradient_accumulation_steps"] = 1
         # @vwxyzjn: MAGIC: it's actually needed to initialize this `dschf`, so
@@ -739,10 +729,7 @@ class PolicyTrainerRayProcess(RayProcess):
     def update_ref_policy(self):
         for ref_param, param in zip(self.ref_policy.parameters(), self.model.parameters()):
             if self.args.deepspeed_stage == 3:
-                with deepspeed.zero.GatheredParameters(
-                    [param, ref_param],
-                    modifier_rank=0,
-                ):
+                with deepspeed.zero.GatheredParameters([param, ref_param], modifier_rank=0):
                     if deepspeed.comm.get_rank() == 0:
                         ref_param.data.mul_(1.0 - self.args.alpha).add_(param.data, alpha=self.args.alpha)
             else:
@@ -790,6 +777,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     attention_mask = collated_attention_masks[i]
                     position_id = collated_position_ids[i]
                     response_mask = collated_response_masks[i]
+<<<<<<< HEAD
                     ref_logprob, _ = self.forward(
                         self.ref_policy,
                         query_response,
@@ -798,6 +786,10 @@ class PolicyTrainerRayProcess(RayProcess):
                         pad_token_id,
                         args.temperature,
                         return_entropy=False,
+=======
+                    ref_logprob = self.forward(
+                        self.ref_policy, query_response, attention_mask, position_id, pad_token_id, args.temperature
+>>>>>>> origin/main
                     )
                     if args.mask_tool_use and args.tool_use:
                         # mask logprobs for tool tokens
@@ -968,8 +960,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
             if args.gs_bucket_path is not None:
                 ray.remote(sync_gs_bucket).options(num_cpus=1).remote(
-                    checkpoint_state_dir,
-                    args.gs_checkpoint_state_dir,
+                    checkpoint_state_dir, args.gs_checkpoint_state_dir
                 )
 
     def save_model(self, output_dir: str) -> None:
@@ -1008,9 +999,9 @@ class PolicyTrainerRayProcess(RayProcess):
             if getattr(model_to_save.config, "tie_word_embeddings", False) and "lm_head.weight" in state_dict_keys:
                 state_dict_keys.remove("lm_head.weight")
 
-            assert state_dict_keys.issubset(
-                output_state_dict_keys
-            ), f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
+            assert state_dict_keys.issubset(output_state_dict_keys), (
+                f"mismatch keys {output_state_dict_keys.symmetric_difference(state_dict_keys)}"
+            )
 
             # only save peft weights https://github.com/microsoft/DeepSpeed/issues/4295
             if isinstance(model_to_save, PeftModel):
@@ -1045,11 +1036,7 @@ class PolicyTrainerRayProcess(RayProcess):
 
 class ModelGroup:
     def __init__(
-        self,
-        pg: PlacementGroup,
-        ray_process_cls: RayProcess,
-        num_gpus_per_node: List[int],
-        single_gpu_mode: bool,
+        self, pg: PlacementGroup, ray_process_cls: RayProcess, num_gpus_per_node: List[int], single_gpu_mode: bool
     ):
         self.pg = pg
         self.ray_process_cls = ray_process_cls
@@ -1088,8 +1075,7 @@ class ModelGroup:
         for rank in range(1, world_size):
             print(f"{rank=}, {world_size=}, {rank=}, {master_addr=}, {master_port=}")
             scheduling_strategy = PlacementGroupSchedulingStrategy(
-                placement_group=self.pg,
-                placement_group_bundle_index=get_bundle_index(rank, self.num_gpus_per_node),
+                placement_group=self.pg, placement_group_bundle_index=get_bundle_index(rank, self.num_gpus_per_node)
             )
             worker_policy = ray_process_cls.options(
                 num_cpus=self.num_cpus_per_actor,
@@ -1523,10 +1509,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     # Set up datasets
     transform_fn_args = [
         {},
-        {
-            "max_token_length": args.max_token_length,
-            "max_prompt_token_length": args.max_prompt_token_length,
-        },
+        {"max_token_length": args.max_token_length, "max_prompt_token_length": args.max_prompt_token_length},
     ]
     train_dataset = get_cached_dataset_tulu(
         dataset_mixer_list=args.dataset_mixer_list,
@@ -1573,12 +1556,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
     ray.get(pg.ready())
     inits = []
-    policy_group = ModelGroup(
-        pg,
-        PolicyTrainerRayProcess,
-        args.num_learners_per_node,
-        args.single_gpu_mode,
-    )
+    policy_group = ModelGroup(pg, PolicyTrainerRayProcess, args.num_learners_per_node, args.single_gpu_mode)
     wandb_url = wandb.run.get_url() if args.with_tracking else None
     inits.extend(
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
@@ -1602,11 +1580,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             elif tool.lower() == "code":
                 from open_instruct.tool_utils.tool_vllm import PythonCodeTool
 
-                tool = PythonCodeTool(
-                    start_str="<code>",
-                    end_str="</code>",
-                    api_endpoint=args.code_tool_api_endpoint,
-                )
+                tool = PythonCodeTool(start_str="<code>", end_str="</code>", api_endpoint=args.code_tool_api_endpoint)
                 tool_objects[tool.end_str] = tool
             else:
                 raise ValueError(f"Unknown tool: {tool}")
@@ -1947,12 +1921,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     accelerator.is_main_process = True  # hack
     if args.push_to_hub:
         print("Pushing model to hub")
-        push_folder_to_hub(
-            accelerator,
-            args.output_dir,
-            args.hf_repo_id,
-            args.hf_repo_revision,
-        )
+        push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
 
 
 if __name__ == "__main__":

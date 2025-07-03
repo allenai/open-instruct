@@ -1,30 +1,26 @@
 import argparse
-import os
 import json
-import torch
-import pandas as pd
-
+import os
 import warnings
+
+import pandas as pd
+import torch
+
+from eval.truthfulqa.configs import ANSWER_COL, BEST_COL, INCORRECT_COL
+from eval.truthfulqa.metrics import MC_calcs, run_gpt_classifier_eval, run_hf_classifier_eval
+from eval.truthfulqa.utilities import format_best, format_prompt, set_columns, split_multi_answer
 from eval.utils import (
+    check_and_upload_model_metadata,
+    dynamic_import_function,
+    generate_completions,
     load_hf_lm,
-    load_hf_tokenizer,
     load_hf_lm_and_tokenizer,
+    load_hf_tokenizer,
     query_openai_chat_model,
     query_openai_model,
-    generate_completions,
     score_completions,
-    dynamic_import_function,
     upload_results_to_hf,
-    check_and_upload_model_metadata,
 )
-from eval.truthfulqa.utilities import (
-    format_prompt,
-    split_multi_answer,
-    format_best,
-    set_columns,
-)
-from eval.truthfulqa.metrics import run_gpt_classifier_eval, run_hf_classifier_eval, MC_calcs
-from eval.truthfulqa.configs import BEST_COL, ANSWER_COL, INCORRECT_COL
 
 
 def trim_answer(answer):
@@ -57,8 +53,8 @@ def run_chatgpt(questions, engine, tag, preset='qa', batch_size=1, cache_path=No
 
     responses = query_openai_chat_model(
         engine=engine,
-        output_path=cache_path, 
-        instances=instances, 
+        output_path=cache_path,
+        instances=instances,
         batch_size=batch_size,
         temperature=0.0
     )
@@ -80,12 +76,12 @@ def run_gpt3(questions, engine, tag, preset='qa', batch_size=1, cache_path=None,
     ]
 
     responses = query_openai_model(
-        engine=engine, 
-        instances=instances, 
+        engine=engine,
+        instances=instances,
         output_path=cache_path,
         batch_size=batch_size,
-        temperature=0.0, 
-        stop=None if preset == 'long' else '\n\n', 
+        temperature=0.0,
+        stop=None if preset == 'long' else '\n\n',
         max_tokens=50
     )
     assert len(responses) == len(instances)
@@ -126,19 +122,19 @@ def run_gpt3_mc(questions, engine, tag, preset='qa', batch_size=1, cache_path=No
             instances.append({"prompt": example["prompt"] + " " + completion, "id": instance_id})
             instance_id += 1
     responses = query_openai_model(
-        engine=engine, 
+        engine=engine,
         instances=instances,
         output_path=cache_path,
         batch_size=batch_size,
-        temperature=0.0, 
-        stop=["\n\n"], 
-        max_tokens=0, 
-        echo=True, 
+        temperature=0.0,
+        stop=["\n\n"],
+        max_tokens=0,
+        echo=True,
         logprobs=1
     )
     assert len(responses) == len(instances)
     responses = {response["id"]: response for response in responses}
-    
+
     all_scores, instance_id = {}, 0
     for example in examples:
         all_scores[example["prompt"]] = {}
@@ -172,8 +168,8 @@ def run_gpt3_mc(questions, engine, tag, preset='qa', batch_size=1, cache_path=No
         completion_scores = all_scores[example["prompt"]]
         scores_true = [completion_scores[ref] for ref in ref_true]
         scores_false = [completion_scores[ref] for ref in ref_false]
-        
-        MC_calcs(tag, questions, idx, scores_true, scores_false, ref_true, ref_best) 
+
+        MC_calcs(tag, questions, idx, scores_true, scores_false, ref_true, ref_best)
     return questions
 
 
@@ -185,7 +181,7 @@ def run_hf_model(questions, model, tokenizer, tag, preset="qa", batch_size=1, ma
         questions[tag] = ''
     questions[tag].fillna('', inplace=True)
     questions[tag] = questions[tag].astype(str)
-    
+
     prompts = [
         format_prompt(questions.loc[idx], preset, format='general') for idx in questions.index
     ]
@@ -194,12 +190,12 @@ def run_hf_model(questions, model, tokenizer, tag, preset="qa", batch_size=1, ma
             messages = [{"role": "user", "content": prompt}]
             prompts[idx] = chat_formatting_function(messages, tokenizer, add_bos=False)
             prompt += "A:" if prompt[-1] in ["\n", " "] else " A:"
-    
+
     # get the last token because the tokenizer may add space tokens at the start.
-    stop_sequence = tokenizer.encode("\n\n", add_special_tokens=False)[-2:] 
+    stop_sequence = tokenizer.encode("\n\n", add_special_tokens=False)[-2:]
     completions = generate_completions(
         model, tokenizer, prompts, batch_size=batch_size, max_new_tokens=max_new_tokens,
-        stop_id_sequences=[stop_sequence] if chat_formatting_function is None else None, 
+        stop_id_sequences=[stop_sequence] if chat_formatting_function is None else None,
         do_sample=False,
     )
     assert len(completions) == len(prompts)
@@ -215,7 +211,7 @@ def run_hf_model_mc(questions, model, tokenizer, tag, batch_size=1, preset='qa',
     """Runs multiple-choice metrics for autoregressive HuggingFace models (GPT-2, GPT-Neo)"""
 
     set_columns(tag, questions)
-    
+
     examples = []
     for idx in questions.index:
         # check that candidate answer exists
@@ -253,7 +249,7 @@ def run_hf_model_mc(questions, model, tokenizer, tag, batch_size=1, preset='qa',
         completion_scores = all_scores[example["prompt"]]
         scores_true = [completion_scores[ref] for ref in ref_true]
         scores_false = [completion_scores[ref] for ref in ref_false]
-        
+
         MC_calcs(tag, questions, idx, scores_true, scores_false, ref_true, ref_best)
     return questions
 
@@ -284,9 +280,9 @@ def main(args):
             use_fast_tokenizer=not args.use_slow_tokenizer,
         )
         model = load_hf_lm(
-            model_name_or_path=args.model_name_or_path, 
+            model_name_or_path=args.model_name_or_path,
             revision=args.hf_revision,
-            load_in_8bit=args.load_in_8bit, 
+            load_in_8bit=args.load_in_8bit,
             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
             gptq_model=args.gptq,
         )
@@ -298,21 +294,21 @@ def main(args):
             print("Running generations!")
             run_hf_model(
                 questions,
-                model, 
-                tokenizer, 
-                tag=args.model_name_or_path, 
-                preset=args.preset, 
-                batch_size=args.eval_batch_size, 
+                model,
+                tokenizer,
+                tag=args.model_name_or_path,
+                preset=args.preset,
+                batch_size=args.eval_batch_size,
                 chat_formatting_function=dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
             )
         if "mc" in args.metrics:
             print("Running multiple-choice classification!")
             run_hf_model_mc(
-                questions, 
-                model, 
-                tokenizer, 
-                tag=args.model_name_or_path, 
-                batch_size=args.eval_batch_size, 
+                questions,
+                model,
+                tokenizer,
+                tag=args.model_name_or_path,
+                batch_size=args.eval_batch_size,
                 preset=args.preset,
                 chat_formatting_function=dynamic_import_function(args.chat_formatting_function) if args.use_chat_format else None
             )
@@ -363,7 +359,7 @@ def main(args):
                         questions = run_gpt_classifier_eval(model_key, 'info', args.gpt_info_model_name, questions, info=True)
                     elif args.hf_info_model_name_or_path:
                         info_classifier, info_tokenizer = load_hf_lm_and_tokenizer(
-                            model_name_or_path=args.hf_info_model_name_or_path, 
+                            model_name_or_path=args.hf_info_model_name_or_path,
                             tokenizer_name_or_path=args.hf_info_model_name_or_path,
                             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                         )
@@ -395,7 +391,7 @@ def main(args):
     results.to_csv(os.path.join(args.save_dir, 'summary.csv'))
 
     print(results)
-    
+
     results = results.loc[model_key].to_dict()
     with open(os.path.join(args.save_dir, 'metrics.json'), 'w') as f:
         json.dump(results, f, indent=2)
@@ -420,8 +416,8 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model_name_or_path", 
-        type=str, 
+        "--model_name_or_path",
+        type=str,
         help="The HuggingFace model to be evaluated."
     )
     parser.add_argument(
@@ -431,9 +427,9 @@ if __name__ == '__main__':
         help="if specified, we will load the model from a revision of the model in the hub"
     )
     parser.add_argument(
-        "--tokenizer_name_or_path", 
-        type=str, 
-        default=None, 
+        "--tokenizer_name_or_path",
+        type=str,
+        default=None,
         help="If specified, we will load the tokenizer from here."
     )
     parser.add_argument(
@@ -442,78 +438,78 @@ if __name__ == '__main__':
         help="If given, we will use the slow tokenizer."
     )
     parser.add_argument(
-        "--openai_engine", 
-        type=str, 
-        default=None, 
+        "--openai_engine",
+        type=str,
+        default=None,
         help="If specified, we will evaluate the OpenAI engine."
     )
     parser.add_argument(
-        "--data_dir", 
-        type=str, 
-        default="data/eval/truthfulqa", 
+        "--data_dir",
+        type=str,
+        default="data/eval/truthfulqa",
         help="The directory containing the truthfulqa data. Download from https://github.com/sylinrl/TruthfulQA/tree/main/data."
     )
     parser.add_argument(
-        "--save_dir", 
-        type=str, 
-        default="results/truthfulqa/", 
+        "--save_dir",
+        type=str,
+        default="results/truthfulqa/",
         help="The directory to save the results."
     )
     parser.add_argument(
-        "--num_instances", 
-        type=int, 
-        default=None, 
+        "--num_instances",
+        type=int,
+        default=None,
         help="The number of instances to evaluate. If not given, we will evaluate all instances."
     )
     parser.add_argument(
-        "--load_in_8bit", 
-        action="store_true", 
+        "--load_in_8bit",
+        action="store_true",
         help="Load model in 8bit mode, which will reduce memory and speed up inference."
     )
     parser.add_argument(
-        "--gptq", 
-        action="store_true", 
+        "--gptq",
+        action="store_true",
         help="If given, we're evaluating a 4-bit quantized GPTQ model."
     )
     parser.add_argument(
-        "--eval_batch_size", 
-        type=int, 
-        default=1, 
+        "--eval_batch_size",
+        type=int,
+        default=1,
         help="batch size for evaluation."
     )
     parser.add_argument(
-        "--use_chat_format", 
-        action="store_true", 
+        "--use_chat_format",
+        action="store_true",
         help="If given, we will use the chat format for the prompts."
     )
     parser.add_argument(
-        "--chat_formatting_function", 
-        type=str, 
-        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        "--chat_formatting_function",
+        type=str,
+        default="eval.templates.create_prompt_with_tulu_chat_format",
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
     )
     parser.add_argument(
-        '--metrics', 
-        nargs='+', 
-        default=['truth', 'info', 'mc'], 
-        choices=['truth', 'info', 'mc'], 
+        '--metrics',
+        nargs='+',
+        default=['truth', 'info', 'mc'],
+        choices=['truth', 'info', 'mc'],
         help='Metrics to run'
     )
     parser.add_argument(
-        '--preset', 
-        type=str, 
-        default='qa', 
+        '--preset',
+        type=str,
+        default='qa',
         help='Preset to use for prompt generation. Please see presets.py for options.'
     )
     parser.add_argument(
-        '--gpt_truth_model_name', 
-        type=str, 
+        '--gpt_truth_model_name',
+        type=str,
         help='A trained GPT judge model name to be used for computing the metrics for `truth` if it is specified.' \
              'Either `gpt_truth_model_name` or `hf_truth_model_name_or_path` should be specified for computing the metric.'
     )
     parser.add_argument(
-        '--gpt_info_model_name', 
-        type=str, 
+        '--gpt_info_model_name',
+        type=str,
         help='A trained GPT judge model name to be used for computing the metrics for `info` if it is specified.' \
             'Either `gpt_info_model_name` or `hf_info_model_name_or_path` should be specified for computing the metric.'
     )

@@ -89,10 +89,7 @@ if not args.analyse_existing:
         stop=[tool.end_str, "</finish>"],
     )
     # Generate output using the actor.
-    result = actor.generate(
-        sampling_params=sampling_params,
-        prompt_token_ids=prompt_token_ids,
-    )
+    result = actor.generate(sampling_params=sampling_params, prompt_token_ids=prompt_token_ids)
     # grab text answers - for tool vllm, we have to decode the output ids.
     generations = [x.outputs[0].token_ids for x in result]
     generations = [tokenizer.decode(x, skip_special_tokens=True) for x in generations]

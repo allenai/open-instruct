@@ -24,12 +24,7 @@ from litellm import acompletion
 
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
 from open_instruct.IFEvalG import instructions_registry
-from open_instruct.judge_utils import (
-    EXTRACTOR_MAP,
-    JUDGE_PROMPT_MAP,
-    PRICE_PER_TOKEN,
-    build_messages,
-)
+from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_TOKEN, build_messages
 from open_instruct.math_utils import (
     get_unnormalized_answer,
     hendrycks_is_equiv,

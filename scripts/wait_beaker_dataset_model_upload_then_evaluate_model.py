@@ -59,8 +59,8 @@ def main(args: Args, beaker_runtime_config: BeakerRuntimeConfig):
             print(f"Beaker evaluation jobs: Stdout:\n{stdout.decode()}")
             print(f"Beaker evaluation jobs: Stderr:\n{stderr.decode()}")
             print(f"Beaker evaluation jobs: process return code: {process.returncode}")
-            
-            
+
+
             return
         time.sleep(args.check_interval_seconds)
     # If we reach here, the experiment failed
