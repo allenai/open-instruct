@@ -1426,27 +1426,8 @@ def data_preparation_thread(
         )
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
-    # ------------------------------------------------------------
-    # Setup tokenizer
-    tc.tokenizer_revision = model_config.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
-    tc.tokenizer_name_or_path = (
-        model_config.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
-    )
-    if (
-        tc.tokenizer_revision != model_config.model_revision
-        and tc.tokenizer_name_or_path != model_config.model_name_or_path
-    ):
-        # Warn user if tokenizer and model use different revisions; this is an unusual
-        # use case.
-        warning = f"""Requested tokenizer revision `{tc.tokenizer_revision=}` is different
-                   from the model revision `{model_config.model_revision=}` or the tokenizer name `{tc.tokenizer_name_or_path=}`
-                   is different from the model name `{model_config.model_name_or_path=}`."""
-        print(warning)
-    tokenizer = tc.tokenizer
-
-    # ------------------------------------------------------------
-    # Set up runtime variables
+def setup_runtime_variables(args: Args) -> Args:
+    """Set up runtime variables for the experiment."""
     args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
     args.output_dir = os.path.join(args.output_dir, args.run_name)
     args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
@@ -1473,15 +1454,19 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         if args.wandb_entity is None:
             args.wandb_entity = maybe_use_ai2_wandb_entity()
     args.tool_use = args.tools is not None and len(args.tools) > 0
+    return args
 
-    # ------------------------------------------------------------
-    # Setup experiment tracking and seeds
+
+def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
+    """Setup experiment tracking and seeds."""
     all_configs = {}
     beaker_config = None
     if is_beaker_job():
         beaker_config = maybe_get_beaker_config()
         all_configs.update(vars(beaker_config))
     all_configs.update(**asdict(args), **asdict(tc), **asdict(model_config))
+
+    wandb_url = None
     if args.with_tracking:
         import wandb
 
@@ -1494,14 +1479,19 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             save_code=True,
             tags=[args.exp_name] + get_wandb_tags(),
         )
+        wandb_url = wandb.run.get_url()
+
     writer = SummaryWriter(f"runs/{args.run_name}")
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    # ------------------------------------------------------------
-    # Set up datasets
+    return beaker_config, writer, wandb_url
+
+
+def setup_datasets(args: Args, tc: TokenizerConfig, tokenizer: PreTrainedTokenizer):
+    """Set up training and evaluation datasets."""
     transform_fn_args = [
         {},
         {"max_token_length": args.max_token_length, "max_prompt_token_length": args.max_prompt_token_length},
@@ -1519,6 +1509,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         dataset_skip_cache=args.dataset_skip_cache,
     )
     train_dataset = train_dataset.shuffle(seed=args.seed)
+
     eval_dataset = None
     if len(args.dataset_mixer_eval_list) > 0:
         eval_dataset = get_cached_dataset_tulu(
@@ -1535,18 +1526,25 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         )
         if args.shuffle_eval_dataset:
             eval_dataset = eval_dataset.shuffle(seed=args.seed)
+
     visualize_token(train_dataset[0][INPUT_IDS_PROMPT_KEY], tokenizer)
-    if args.cache_dataset_only:
-        return
 
-    # ------------------------------------------------------------
-    # Runtime setups and quick logging
-    pprint([args, model_config])
+    return train_dataset, eval_dataset
 
-    # ------------------------------------------------------------
-    # Create the model and optimizer
+
+def create_model_and_optimizer(
+    args: Args,
+    tc: TokenizerConfig,
+    model_config: ModelConfig,
+    beaker_config: BeakerRuntimeConfig,
+    wandb_url: str,
+    tokenizer: PreTrainedTokenizer,
+):
+    """Create the model, optimizer, and vLLM engines."""
+    # Ray initialization
     ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
-    pg = None
+
+    # Create placement group
     bundles = [{"GPU": actor_num_gpus, "CPU": actor_num_gpus * 10} for actor_num_gpus in args.num_learners_per_node]
     pg = placement_group(bundles, strategy="STRICT_SPREAD")
     ray.get(pg.ready())
@@ -1557,8 +1555,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         model.from_pretrained.remote(args, model_config, beaker_config, wandb_url, tokenizer)
         for model in policy_group.models
     )
+
+    # Set up tools
     max_len = args.max_prompt_token_length + args.response_length
-    # make tool list
     tool_objects = {}
     if args.tools:
         for tool in args.tools:
@@ -1580,6 +1579,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
+    # Create vLLM engines
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
@@ -1596,16 +1596,283 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,
     )
+
     resume_training_step = ray.get(inits)[0] + 1
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     print("======== ✅ all models and vLLM engines initialized =========")
 
     ray.get([m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models])
     print("======== ✅ model update group setup successfully =========")
+
     if resume_training_step > 1:
         print(f"Resuming training from step {resume_training_step}... Broadcasting weights to vLLM engines.")
         with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
             ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
+
+    return policy_group, vllm_engines, tool_objects, resume_training_step, episode, pg
+
+
+def sync_weights_and_prepare_prompts(
+    training_step: int,
+    args: Args,
+    train_dataset,
+    iter_dataloader,
+    policy_group: ModelGroup,
+    queries_prompt_Q: Queue,
+    param_prompt_Q: Queue,
+    queries_next=None,
+    ground_truths_next=None,
+    datasets_next=None,
+):
+    """Sync weights and send the next batch of prompts to vLLM."""
+    if training_step != 1:
+        data_next = train_dataset[next(iter_dataloader)]
+        queries_next = data_next[INPUT_IDS_PROMPT_KEY]
+        ground_truths_next = data_next[GROUND_TRUTHS_KEY]
+        datasets_next = data_next[DATASET_SOURCE_KEY]
+        with Timer(
+            "[Main Thread] 🔄 Loading weights using shared memory"
+            if args.async_mode
+            else "🔄 Loading weights using shared memory"
+        ):
+            ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
+
+    if args.async_mode:
+        queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
+        param_prompt_Q.put((None, queries_next))
+    else:
+        if training_step != 1:
+            queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
+            param_prompt_Q.put((None, queries_next))
+
+    return queries_next, ground_truths_next, datasets_next
+
+
+def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
+    """Get the packed sequences with advantages from the packing thread."""
+    with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
+        packed_data = packed_sequences_Q.get()
+        data_thread_metrics = packed_data["metrics"]
+        B = packed_data["B"]
+        collated_data = packed_data["collated_data"]
+        num_total_tokens += packed_data["num_new_tokens"]
+        if B == 0:
+            print("[Main Thread] 🤡 After packing, there is not enough data to train")
+            return None, data_thread_metrics, num_total_tokens
+        return collated_data, data_thread_metrics, num_total_tokens
+
+
+def one_training_step(
+    args: Args,
+    policy_group: ModelGroup,
+    collated_data,
+    tokenizer,
+    data_thread_metrics,
+    average_metrics,
+    episode,
+    training_step,
+    num_total_tokens,
+    start_time,
+    train_dataset,
+    writer,
+    wandb_url,
+):
+    """Train the model for one step."""
+    update_ref_policy_future = []
+    with Timer("[Main Thread] 🗡️ Training"):
+        metrics_list: List[dict[str, float]] = ray.get(
+            [
+                policy_group.models[i].train.remote(
+                    **collated_data[i], pad_token_id=tokenizer.pad_token_id, num_mini_batches=args.num_mini_batches
+                )
+                for i in range(args.world_size)
+            ]
+        )
+        if (
+            args.ref_policy_update_freq is not None
+            and training_step % args.ref_policy_update_freq == 0
+            and args.alpha > 0
+        ):
+            update_ref_policy_future.extend(
+                [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
+            )
+
+        average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
+        metrics = {
+            "episode": episode,
+            "training_step": training_step,
+            "val/num_total_tokens": num_total_tokens,
+            "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
+            "tokens_per_second": num_total_tokens / (time.time() - start_time),
+            **data_thread_metrics,
+            **average_metrics,
+        }
+        scalar_metrics = {}
+        for key, value in metrics.items():
+            if isinstance(value, float) or isinstance(value, int):
+                writer.add_scalar(key, value, episode)
+                scalar_metrics[key] = value
+            if isinstance(value, np.ndarray) or isinstance(value, list):
+                if len(value) > 0:
+                    writer.add_histogram(key, value, episode)
+        print_rich_single_line_metrics(scalar_metrics)
+
+        if args.save_freq > 0 and training_step % args.save_freq == 0:
+            with Timer("[Main Thread] 🗡️ Saving model"):
+                checkpoint_dir = f"{args.output_dir}_checkpoints"
+                step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
+                print(f"Saving model at step {training_step} to {step_dir}")
+                ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
+                if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
+                    leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
+                    for i in range(args.world_size):
+                        policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                            step_dir, leaderboard_name, wandb_url, training_step
+                        )
+        if (
+            args.checkpoint_state_freq > 0
+            and training_step % args.checkpoint_state_freq == 0
+            and args.checkpoint_state_dir is not None
+        ):
+            with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
+                client_state = {"training_step": training_step}
+                ray.get(
+                    [
+                        policy_group.models[i].save_checkpoint_state.remote(args.checkpoint_state_dir, client_state)
+                        for i in range(args.world_size)
+                    ]
+                )
+                print(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+
+    if len(update_ref_policy_future) > 0:
+        with Timer("[Main Thread] 🔃 Updating reference policy"):
+            ray.get(update_ref_policy_future)
+
+    return average_metrics
+
+
+def maybe_evaluate(
+    args: Args,
+    training_step: int,
+    evaluation_inference_results_Q: Queue,
+    tokenizer,
+    eval_prompt_token_ids,
+    eval_ground_truths,
+    eval_dataset_names,
+    reward_fn,
+    episode,
+    writer,
+):
+    """Optionally evaluate the model."""
+    try:
+        # timeout 0.01 if this is the last training step or we're not evaluating
+        # otherwise, wait to get the last evaluation generations (long timeout just in case)
+        timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else 100
+        eval_responses, eval_finish_reasons, masks, eval_infos = evaluation_inference_results_Q.get(timeout=timeout)
+        print("[Main Thread] 📊 Evaluation responses received")
+
+        eval_sequence_lengths = np.array([len(response) for response in eval_responses])
+        eval_decoded_responses = tokenizer.batch_decode(eval_responses, skip_special_tokens=True)
+        eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_finish_reasons) / len(
+            eval_finish_reasons
+        )
+
+        # get and log evaluation metrics
+        eval_scores, eval_reward_metrics = asyncio.run(
+            reward_fn(
+                eval_responses,
+                eval_decoded_responses,
+                eval_ground_truths,
+                eval_dataset_names,
+                eval_finish_reasons,
+                eval_infos,
+            )
+        )
+        eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
+        eval_metrics = {
+            "eval/scores": np.array(eval_scores).mean(),
+            "eval/sequence_lengths": eval_sequence_lengths.mean(),
+            "eval/sequence_lengths_min": eval_sequence_lengths.min(),
+            "eval/sequence_lengths_max": eval_sequence_lengths.max(),
+            "eval/stop_rate": eval_stop_rate,
+            **eval_reward_metrics,
+        }
+        print_rich_single_line_metrics(eval_metrics)
+        for key, value in eval_metrics.items():
+            writer.add_scalar(key, value, episode)
+        table = {}
+        table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
+        table["response"] = eval_decoded_responses
+        table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
+        table["scores"] = eval_scores
+        table["ground_truth"] = eval_ground_truths
+        df = pd.DataFrame(table)
+        if args.with_tracking:
+            import wandb
+
+            wandb.log({"sample_completions": wandb.Table(dataframe=df)})
+        else:
+            print_rich_table(df.iloc[:1])
+        del table
+    except Empty:
+        print("[Main Thread] 🙈 Evaluation responses not received")
+
+
+def save_final_model(args: Args, policy_group: ModelGroup, training_step: int, wandb_url: str):
+    """Save the final model and launch evaluation jobs if configured."""
+    print(f"Saving final model at step {training_step} to {args.output_dir}")
+    with Timer("[Main Thread] 🗡️ Saving model"):
+        ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
+        if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
+            leaderboard_name = args.hf_repo_revision
+            for i in range(args.world_size):
+                policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
+                    args.output_dir, leaderboard_name, wandb_url, training_step
+                )
+
+
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
+    # ------------------------------------------------------------
+    # Setup tokenizer
+    tc.tokenizer_revision = model_config.model_revision if tc.tokenizer_revision is None else tc.tokenizer_revision
+    tc.tokenizer_name_or_path = (
+        model_config.model_name_or_path if tc.tokenizer_name_or_path is None else tc.tokenizer_name_or_path
+    )
+    if (
+        tc.tokenizer_revision != model_config.model_revision
+        and tc.tokenizer_name_or_path != model_config.model_name_or_path
+    ):
+        # Warn user if tokenizer and model use different revisions; this is an unusual
+        # use case.
+        warning = f"""Requested tokenizer revision `{tc.tokenizer_revision=}` is different
+                   from the model revision `{model_config.model_revision=}` or the tokenizer name `{tc.tokenizer_name_or_path=}`
+                   is different from the model name `{model_config.model_name_or_path=}`."""
+        print(warning)
+    tokenizer = tc.tokenizer
+
+    # ------------------------------------------------------------
+    # Set up runtime variables
+    args = setup_runtime_variables(args)
+
+    # ------------------------------------------------------------
+    # Setup experiment tracking and seeds
+    beaker_config, writer, wandb_url = setup_experiment_tracking(args, tc, model_config)
+
+    # ------------------------------------------------------------
+    # Set up datasets
+    train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
+    if args.cache_dataset_only:
+        return
+
+    # ------------------------------------------------------------
+    # Runtime setups and quick logging
+    pprint([args, model_config])
+
+    # ------------------------------------------------------------
+    # Create the model and optimizer
+    policy_group, vllm_engines, tool_objects, resume_training_step, episode, pg = create_model_and_optimizer(
+        args, tc, model_config, beaker_config, wandb_url, tokenizer
+    )
 
     # Setup training
     stop_strings = [] if args.stop_strings is None else args.stop_strings
@@ -1641,6 +1908,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
     eval_prompt_token_ids = None
     eval_ground_truths = None
+    eval_dataset_names = None
     if eval_dataset is not None:
         eval_prompt_token_ids = eval_dataset[:num_eval_samples][INPUT_IDS_PROMPT_KEY]
         eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
@@ -1698,181 +1966,61 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
             # ------------------------------------------------------------------------------------------------
             # Sync weights and send the next batch of prompts to vLLM
-            if args.async_mode:
-                if training_step != 1:
-                    data_next = train_dataset[next(iter_dataloader)]
-                    queries_next = data_next[INPUT_IDS_PROMPT_KEY]
-                    ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-                    datasets_next = data_next[DATASET_SOURCE_KEY]
-                    with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
-                        ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-                queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
-                param_prompt_Q.put((None, queries_next))
-            else:
-                if training_step != 1:
-                    # NOTE: important: the indent here is different for sync mode
-                    # we also set to use `queries = queries_next` immediately
-                    data_next = train_dataset[next(iter_dataloader)]
-                    queries_next = data_next[INPUT_IDS_PROMPT_KEY]
-                    ground_truths_next = data_next[GROUND_TRUTHS_KEY]
-                    datasets_next = data_next[DATASET_SOURCE_KEY]
-                    with Timer("🔄 Loading weights using shared memory"):
-                        ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
-                    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
-                    param_prompt_Q.put((None, queries_next))
+            queries_next, ground_truths_next, datasets_next = sync_weights_and_prepare_prompts(
+                training_step,
+                args,
+                train_dataset,
+                iter_dataloader,
+                policy_group,
+                queries_prompt_Q,
+                param_prompt_Q,
+                queries_next,
+                ground_truths_next,
+                datasets_next,
+            )
 
             # ------------------------------------------------------------------------------------------------
             # Get the packed sequences with advantages from the packing thread
-            with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
-                packed_data = packed_sequences_Q.get()
-                data_thread_metrics = packed_data["metrics"]
-                B = packed_data["B"]
-                collated_data = packed_data["collated_data"]
-                num_total_tokens += packed_data["num_new_tokens"]
-                if B == 0:
-                    print("[Main Thread] 🤡 After packing, there is not enough data to train")
-                    continue
+            collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
+                packed_sequences_Q, num_total_tokens
+            )
+            if collated_data is None:
+                continue
 
             # ------------------------------------------------------------------------------------------------
             # Train the model
-            update_ref_policy_future = []
-            with Timer("[Main Thread] 🗡️ Training"):
-                metrics_list: List[dict[str, float]] = ray.get(
-                    [
-                        policy_group.models[i].train.remote(
-                            **collated_data[i],
-                            pad_token_id=tokenizer.pad_token_id,
-                            num_mini_batches=args.num_mini_batches,
-                        )
-                        for i in range(args.world_size)
-                    ]
-                )
-                if (
-                    args.ref_policy_update_freq is not None
-                    and training_step % args.ref_policy_update_freq == 0
-                    and args.alpha > 0
-                ):
-                    update_ref_policy_future.extend(
-                        [policy_group.models[i].update_ref_policy.remote() for i in range(args.world_size)]
-                    )
-
-                average_metrics = {k: sum(m[k] for m in metrics_list) / len(metrics_list) for k in metrics_list[0]}
-                metrics = {
-                    "episode": episode,
-                    "training_step": training_step,
-                    "val/num_total_tokens": num_total_tokens,
-                    "epoch": episode / args.num_samples_per_prompt_rollout / len(train_dataset),
-                    "tokens_per_second": num_total_tokens / (time.time() - start_time),
-                    **data_thread_metrics,
-                    **average_metrics,
-                }
-                scalar_metrics = {}
-                for key, value in metrics.items():
-                    if isinstance(value, float) or isinstance(value, int):
-                        writer.add_scalar(key, value, episode)
-                        scalar_metrics[key] = value
-                    if isinstance(value, np.ndarray) or isinstance(value, list):
-                        if len(value) > 0:
-                            writer.add_histogram(key, value, episode)
-                print_rich_single_line_metrics(scalar_metrics)
-
-                if args.save_freq > 0 and training_step % args.save_freq == 0:
-                    with Timer("[Main Thread] 🗡️ Saving model"):
-                        checkpoint_dir = f"{args.output_dir}_checkpoints"
-                        step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-                        print(f"Saving model at step {training_step} to {step_dir}")
-                        ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
-                        if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
-                            leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
-                            for i in range(args.world_size):
-                                policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                                    step_dir, leaderboard_name, wandb_url, training_step
-                                )
-                if (
-                    args.checkpoint_state_freq > 0
-                    and training_step % args.checkpoint_state_freq == 0
-                    and args.checkpoint_state_dir is not None
-                ):
-                    with Timer("[Main Thread] 🗡️ Saving checkpoint state"):
-                        client_state = {"training_step": training_step}
-                        ray.get(
-                            [
-                                policy_group.models[i].save_checkpoint_state.remote(
-                                    args.checkpoint_state_dir, client_state
-                                )
-                                for i in range(args.world_size)
-                            ]
-                        )
-                        print(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
-
-            if len(update_ref_policy_future) > 0:
-                with Timer("[Main Thread] 🔃 Updating reference policy"):
-                    ray.get(update_ref_policy_future)
+            average_metrics = one_training_step(
+                args,
+                policy_group,
+                collated_data,
+                tokenizer,
+                data_thread_metrics,
+                {},
+                episode,
+                training_step,
+                num_total_tokens,
+                start_time,
+                train_dataset,
+                writer,
+                wandb_url,
+            )
 
             # ------------------------------------------------------------------------------------------------
             # Optionally evaluate the model
-            try:
-                # timeout 0.01 if this is the last training step or we're not evaluating
-                # otherwise, wait to get the last evaluation generations (long timeout just in case)
-                timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else 100
-                eval_responses, eval_finish_reasons, masks, eval_infos = evaluation_inference_results_Q.get(
-                    timeout=timeout
-                )
-                print("[Main Thread] 📊 Evaluation responses received")
+            maybe_evaluate(
+                args,
+                training_step,
+                evaluation_inference_results_Q,
+                tokenizer,
+                eval_prompt_token_ids,
+                eval_ground_truths,
+                eval_dataset_names,
+                reward_fn,
+                episode,
+                writer,
+            )
 
-                eval_sequence_lengths = np.array([len(response) for response in eval_responses])
-                eval_decoded_responses = tokenizer.batch_decode(eval_responses, skip_special_tokens=True)
-                eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_finish_reasons) / len(
-                    eval_finish_reasons
-                )
-
-                # get and log evaluation metrics
-                eval_scores, eval_reward_metrics = asyncio.run(
-                    reward_fn(
-                        eval_responses,
-                        eval_decoded_responses,
-                        eval_ground_truths,
-                        eval_dataset_names,
-                        eval_finish_reasons,
-                        eval_infos,
-                    )
-                )
-                eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
-                eval_metrics = {
-                    "eval/scores": np.array(eval_scores).mean(),
-                    "eval/sequence_lengths": eval_sequence_lengths.mean(),
-                    "eval/sequence_lengths_min": eval_sequence_lengths.min(),
-                    "eval/sequence_lengths_max": eval_sequence_lengths.max(),
-                    "eval/stop_rate": eval_stop_rate,
-                    **eval_reward_metrics,
-                }
-                print_rich_single_line_metrics(eval_metrics)
-                for key, value in eval_metrics.items():
-                    writer.add_scalar(key, value, episode)
-                table = {}
-                table["prompt"] = tokenizer.batch_decode(eval_prompt_token_ids)
-                table["response"] = eval_decoded_responses
-                table["response"] = [item.replace(tokenizer.pad_token, "") for item in table["response"]]
-                table["scores"] = eval_scores
-                table["ground_truth"] = eval_ground_truths
-                df = pd.DataFrame(table)
-                if args.with_tracking:
-                    wandb.log({"sample_completions": wandb.Table(dataframe=df)})
-                else:
-                    print_rich_table(df.iloc[:1])
-                del table
-            except Empty:
-                print("[Main Thread] 🙈 Evaluation responses not received")
-
-        print(f"Saving final model at step {training_step} to {args.output_dir}")
-        with Timer("[Main Thread] 🗡️ Saving model"):
-            ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
-            if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
-                leaderboard_name = args.hf_repo_revision
-                for i in range(args.world_size):
-                    policy_group.models[i].launch_ai2_evals_on_weka_wrapper.remote(
-                        args.output_dir, leaderboard_name, wandb_url, training_step
-                    )
+        save_final_model(args, policy_group, training_step, wandb_url)
 
     except Exception as e:
         print(f"Training error occurred: {str(e)}")
