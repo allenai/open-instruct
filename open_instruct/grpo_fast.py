@@ -44,6 +44,7 @@ except Exception:
 
 import asyncio
 import json
+import logging
 import math
 import os
 import shutil
@@ -63,6 +64,7 @@ import ray
 import torch
 import torch.utils
 import torch.utils.data
+import wandb
 from huggingface_hub import HfApi
 from peft import PeftModel, get_peft_model_state_dict
 from ray.util.placement_group import PlacementGroup, placement_group
@@ -71,7 +73,7 @@ from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
-from vllm import SamplingParams
+from vllm import SamplingParams, VLLMEngine
 
 from open_instruct.dataset_transformation import (
     DATASET_SOURCE_KEY,
@@ -119,6 +121,14 @@ from open_instruct.utils import (
     sync_gs_bucket,
 )
 from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
+
+# Setup logging with filename and line number format
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
@@ -380,7 +390,7 @@ class Args:
     def __post_init__(self):
         assert self.num_samples_per_prompt_rollout > 0, "Number of samples per prompt must be greater than 0!"
         if self.num_samples_per_prompt_rollout == 1:
-            print("WARNING: num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE. ")
+            logger.warning("num_samples_per_prompt_rollout is 1. This reduces GRPO to REINFORCE.")
         assert self.apply_verifiable_reward or self.apply_r1_style_format_reward or self.non_stop_penalty, (
             "At least one reward must be applied!"
         )
@@ -525,7 +535,7 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = HfDeepSpeedConfig(ds_config)
         else:
             dschf = None
-        print(f"{dschf=}")
+        logger.info(f"Deepspeed config: {dschf=}")
 
         self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
@@ -565,7 +575,7 @@ class PolicyTrainerRayProcess(RayProcess):
         if args.checkpoint_state_dir:
             # check if the dir exists
             if not os.path.exists(args.checkpoint_state_dir):
-                print(f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!")
+                logger.warning(f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!")
             else:
                 path, states = self.model.load_checkpoint(
                     args.checkpoint_state_dir,
@@ -577,7 +587,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 if path is None:
                     raise ValueError(f"Failed to load checkpoint from {args.checkpoint_state_dir}")
                 optimization_steps_done = states["training_step"]
-                print(
+                logger.info(
                     f"{self.rank=}: Loaded checkpoint from {args.checkpoint_state_dir} with {optimization_steps_done=}"
                 )
         self.model.train()
@@ -596,7 +606,7 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = HfDeepSpeedConfig(ds_config)
         else:
             dschf = None
-        print(f"{dschf=}")
+        logger.debug(f"DeepSpeed config: {dschf=}")
 
         self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
@@ -763,10 +773,11 @@ class PolicyTrainerRayProcess(RayProcess):
             collated_position_ids = collated_position_ids[0:-leftover]
             collated_advantages = collated_advantages[0:-leftover]
             collated_response_masks = collated_response_masks[0:-leftover]
-            print(f"Warning: {leftover} samples are dropped due to batch size {num_mini_batches}")
+            logger.warning(f"{leftover} samples are dropped due to batch size {num_mini_batches}")
+
         # recalculate the "real" number of mini-batches
         num_mini_batches = len(collated_query_responses) // accumulation_steps
-
+        
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
         with Timer("Inference Calculation", noop=self.rank != 0):
@@ -1068,7 +1079,7 @@ class ModelGroup:
 
         # Setup worker models
         for rank in range(1, world_size):
-            print(f"{rank=}, {world_size=}, {rank=}, {master_addr=}, {master_port=}")
+            logger.debug(f"{rank=}, {world_size=}, {rank=}, {master_addr=}, {master_port=}")
             scheduling_strategy = PlacementGroupSchedulingStrategy(
                 placement_group=self.pg, placement_group_bundle_index=get_bundle_index(rank, self.num_gpus_per_node)
             )
@@ -1278,7 +1289,7 @@ def data_preparation_thread(
             with Timer("🤺 [Data Preparation Thread] Padding sequences for world size"):
                 shortfall = args.world_size - len(packed_sequences.query_responses)
                 if shortfall > 0:
-                    print(
+                    logger.warning(
                         f"Padding {shortfall} sequences for world size. In future, you should adjust your compute this."
                     )
                     # construct "dummy" sequences for padding out the world size
@@ -1411,7 +1422,7 @@ def data_preparation_thread(
                 f.write("\n")
 
         if len(responses) == 0:
-            print(f"Warning: no responses in batch {training_step}.")
+            logger.warning(f"No responses in batch {training_step}.")
 
         # Put the packed sequences and metrics into the output queue
         packed_sequences_Q.put(
@@ -1539,7 +1550,7 @@ def create_model_and_optimizer(
     beaker_config: BeakerRuntimeConfig,
     wandb_url: str,
     tokenizer: PreTrainedTokenizer,
-):
+) -> tuple[ModelGroup, list[VLLMEngine], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Ray initialization
     ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
@@ -1599,17 +1610,17 @@ def create_model_and_optimizer(
 
     resume_training_step = ray.get(inits)[0] + 1
     episode = (resume_training_step - 1) * args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
-    print("======== ✅ all models and vLLM engines initialized =========")
+    logger.info("======== ✅ all models and vLLM engines initialized =========")
 
     ray.get([m.setup_model_update_group.remote(vllm_engines=vllm_engines) for m in policy_group.models])
-    print("======== ✅ model update group setup successfully =========")
+    logger.info("======== ✅ model update group setup successfully =========")
 
     if resume_training_step > 1:
-        print(f"Resuming training from step {resume_training_step}... Broadcasting weights to vLLM engines.")
+        logger.info(f"Resuming training from step {resume_training_step}... Broadcasting weights to vLLM engines.")
         with Timer("[Main Thread] 🔄 Loading weights using shared memory"):
             ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
-    return policy_group, vllm_engines, tool_objects, resume_training_step, episode, pg
+    return policy_group, vllm_engines, tool_objects, resume_training_step, episode
 
 
 def sync_weights_and_prepare_prompts(
@@ -1657,7 +1668,7 @@ def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: i
         collated_data = packed_data["collated_data"]
         num_total_tokens += packed_data["num_new_tokens"]
         if B == 0:
-            print("[Main Thread] 🤡 After packing, there is not enough data to train")
+            logger.warning("[Main Thread] 🤡 After packing, there is not enough data to train")
             return None, data_thread_metrics, num_total_tokens
         return collated_data, data_thread_metrics, num_total_tokens
 
@@ -1721,7 +1732,7 @@ def one_training_step(
             with Timer("[Main Thread] 🗡️ Saving model"):
                 checkpoint_dir = f"{args.output_dir}_checkpoints"
                 step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
-                print(f"Saving model at step {training_step} to {step_dir}")
+                logger.info(f"Saving model at step {training_step} to {step_dir}")
                 ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
                 if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                     leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
@@ -1742,7 +1753,7 @@ def one_training_step(
                         for i in range(args.world_size)
                     ]
                 )
-                print(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
+                logger.info(f"Saved checkpoint state at step {training_step} to {args.checkpoint_state_dir}")
 
     if len(update_ref_policy_future) > 0:
         with Timer("[Main Thread] 🔃 Updating reference policy"):
@@ -1769,7 +1780,7 @@ def maybe_evaluate(
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
         timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else 100
         eval_responses, eval_finish_reasons, masks, eval_infos = evaluation_inference_results_Q.get(timeout=timeout)
-        print("[Main Thread] 📊 Evaluation responses received")
+        logger.info("[Main Thread] 📊 Evaluation responses received")
 
         eval_sequence_lengths = np.array([len(response) for response in eval_responses])
         eval_decoded_responses = tokenizer.batch_decode(eval_responses, skip_special_tokens=True)
@@ -1815,12 +1826,12 @@ def maybe_evaluate(
             print_rich_table(df.iloc[:1])
         del table
     except Empty:
-        print("[Main Thread] 🙈 Evaluation responses not received")
+        logger.warning("[Main Thread] 🙈 Evaluation responses not received")
 
 
 def save_final_model(args: Args, policy_group: ModelGroup, training_step: int, wandb_url: str):
     """Save the final model and launch evaluation jobs if configured."""
-    print(f"Saving final model at step {training_step} to {args.output_dir}")
+    logger.info(f"Saving final model at step {training_step} to {args.output_dir}")
     with Timer("[Main Thread] 🗡️ Saving model"):
         ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
         if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
@@ -1846,7 +1857,7 @@ def make_tokenizer(tc: TokenizerConfig, model_config: ModelConfig):
         warning = f"""Requested tokenizer revision `{tc.tokenizer_revision=}` is different
                    from the model revision `{model_config.model_revision=}` or the tokenizer name `{tc.tokenizer_name_or_path=}`
                    is different from the model name `{model_config.model_name_or_path=}`."""
-        print(warning)
+        logger.warning(warning)
     return tc.tokenizer
 
 
@@ -1929,32 +1940,24 @@ def make_reward_fn(args: Args) -> Callable:
     return reward_fn
 
 
+<<<<<<< HEAD
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     # ------------------------------------------------------------
     # Setup tokenizer
+=======
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
+>>>>>>> 5b270aad (Switched print statements to use a logger instead.)
     tokenizer = make_tokenizer(tc, model_config)
-
-    # ------------------------------------------------------------
-    # Set up runtime variables
     args = setup_runtime_variables(args)
-
-    # ------------------------------------------------------------
-    # Setup experiment tracking and seeds
     beaker_config, writer, wandb_url = setup_experiment_tracking(args, tc, model_config)
 
-    # ------------------------------------------------------------
-    # Set up datasets
     train_dataset, eval_dataset = setup_datasets(args, tc, tokenizer)
     if args.cache_dataset_only:
         return
 
-    # ------------------------------------------------------------
-    # Runtime setups and quick logging
     pprint([args, model_config])
 
-    # ------------------------------------------------------------
-    # Create the model and optimizer
-    policy_group, vllm_engines, tool_objects, resume_training_step, episode, pg = create_model_and_optimizer(
+    policy_group, vllm_engines, tool_objects, resume_training_step, episode = create_model_and_optimizer(
         args, tc, model_config, beaker_config, wandb_url, tokenizer
     )
 
@@ -2014,8 +2017,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         ),
     )
     thread.start()
-    print("======== ✅ vllm generate thread starts =========")
+    logger.info("======== ✅ vllm generate thread starts =========")
     reward_fn = make_reward_fn(args)
+    
     packing_thread = threading.Thread(
         target=data_preparation_thread,
         args=(
@@ -2029,7 +2033,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         ),
     )
     packing_thread.start()
-    print("======== ✅ data preparation thread starts =========")
+    logger.info("======== ✅ data preparation thread starts =========")
 
     # Send initial data to both threads
     data_next = train_dataset[next(iter_dataloader)]
@@ -2043,13 +2047,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     start_time = time.time()
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
-            print("-" * 100)
+            logger.info("-" * 100)
             episode += (
                 args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
             )  # each sample is an episode
 
-            # ------------------------------------------------------------------------------------------------
-            # Sync weights and send the next batch of prompts to vLLM
             queries_next, ground_truths_next, datasets_next = sync_weights_and_prepare_prompts(
                 training_step,
                 args,
@@ -2062,17 +2064,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
                 ground_truths_next,
                 datasets_next,
             )
-
-            # ------------------------------------------------------------------------------------------------
-            # Get the packed sequences with advantages from the packing thread
             collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
                 packed_sequences_Q, num_total_tokens
             )
             if collated_data is None:
                 continue
 
-            # ------------------------------------------------------------------------------------------------
-            # Train the model
             average_metrics = one_training_step(
                 args,
                 policy_group,
@@ -2089,8 +2086,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
                 wandb_url,
             )
 
-            # ------------------------------------------------------------------------------------------------
-            # Optionally evaluate the model
             maybe_evaluate(
                 args,
                 training_step,
@@ -2107,13 +2102,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         save_final_model(args, policy_group, training_step, wandb_url)
 
     except Exception as e:
-        print(f"Training error occurred: {str(e)}")
-        print(traceback.format_exc())
+        logger.error(f"Training error occurred: {str(e)}\n{traceback.format_exc()}")
         try:
             asyncio.run(cleanup_all_llm_judge_clients())
-            print("✅ LLM judge clients cleaned up")
+            logger.info("✅ LLM judge clients cleaned up")
         except Exception as cleanup_error:
-            print(f"Warning: Error during LLM judge cleanup: {cleanup_error}")
+            logger.warning(f"Error during LLM judge cleanup: {cleanup_error}")
 
         ray.shutdown()
         os._exit(1)
@@ -2121,15 +2115,15 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
 
     # Clean up threads
     thread.join()
-    print("======== ✅ vllm generate thread ends =========")
+    logger.info("======== ✅ vllm generate thread ends =========")
     packing_thread.join()
-    print("======== ✅ data preparation thread ends =========")
+    logger.info("======== ✅ data preparation thread ends =========")
 
     try:
         asyncio.run(cleanup_all_llm_judge_clients())
-        print("✅ LLM judge clients cleaned up")
+        logger.info("✅ LLM judge clients cleaned up")
     except Exception as cleanup_error:
-        print(f"Warning: Error during LLM judge cleanup: {cleanup_error}")
+        logger.warning(f"Error during LLM judge cleanup: {cleanup_error}")
 
     ray.shutdown()
 
@@ -2142,12 +2136,12 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
         and args.output_dir.rstrip("/") != "/output"
     ):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
-    print("finished training")
+    logger.info("finished training")
 
     accelerator = Namespace()
     accelerator.is_main_process = True  # hack
     if args.push_to_hub:
-        print("Pushing model to hub")
+        logger.info("Pushing model to hub")
         push_folder_to_hub(accelerator, args.output_dir, args.hf_repo_id, args.hf_repo_revision)
 
 
