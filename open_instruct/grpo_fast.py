@@ -1861,6 +1861,85 @@ def make_tokenizer(tc: TokenizerConfig, model_config: ModelConfig):
     return tc.tokenizer
 
 
+def make_reward_fn(args: Args) -> Callable:
+    """Create a reward function based on the provided arguments."""
+    reward_fn_mapping = build_all_verifiers(args)
+
+    async def reward_fn(
+        responses: List[torch.Tensor],
+        decoded_responses: List[str],
+        ground_truths: List[Union[str, List[str]]],
+        datasets: List[str],
+        finish_reasons: List[str],
+        infos: List[List[int]],
+        queries: Optional[List[str]] = None,
+    ) -> List[float]:
+        num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
+        good_outputs = [
+            len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
+            for i in range(len(tool_outputs))
+        ]
+        scores = [0] * len(decoded_responses)
+        metrics = {}
+
+        if args.apply_r1_style_format_reward:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🧮 Calculating format reward"):
+                format_scores = soft_format_reward_func(decoded_responses, args.r1_style_format_reward)
+                if len(format_scores) != len(scores):
+                    raise ValueError(f"{len(format_scores)=} != {len(scores)=}")
+                for i in range(len(format_scores)):
+                    scores[i] = format_scores[i] + scores[i]
+                metrics["val/format_scores"] = np.array(format_scores).mean()
+
+        if args.apply_verifiable_reward:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🏆 Applying verifiable reward"):
+                verifiable_rewards, per_func_rewards = await apply_verifiable_reward(
+                    reward_fn_mapping,
+                    responses,
+                    decoded_responses,
+                    ground_truths,
+                    datasets,
+                    reward_mult=args.verification_reward,
+                    queries=queries,
+                )
+                if len(verifiable_rewards) != len(scores):
+                    raise ValueError(f"{len(verifiable_rewards)=} != {len(scores)=}")
+                # slightly complex combo of good outputs and additive format reward
+                for i in range(len(verifiable_rewards)):
+                    if not args.only_reward_good_outputs or (good_outputs[i] and args.only_reward_good_outputs):
+                        if args.apply_r1_style_format_reward and args.additive_format_reward:
+                            scores[i] = verifiable_rewards[i] + scores[i]
+                        elif args.apply_r1_style_format_reward and not args.additive_format_reward:
+                            scores[i] = verifiable_rewards[i] if format_scores[i] == 1 else 0
+                        else:
+                            scores[i] = verifiable_rewards[i]
+                np_verifiable_rewards = np.array(verifiable_rewards)
+                metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
+                metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
+                # reshuffle around per_func rewards
+                per_func_lists = defaultdict(list)
+                for reward_dict in per_func_rewards:
+                    for key, value in reward_dict.items():
+                        per_func_lists[key].append(value)
+                # log per function rewards
+                for key, value in per_func_lists.items():
+                    np_value = np.array(value)
+                    metrics[f"objective/{key}_reward"] = np_value.mean()
+                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
+
+        # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
+        if args.non_stop_penalty:
+            with Timer("[Data Preparation Thread] Calculating rewards -- 🦖 Applying non stop penalty"):
+                assert len(finish_reasons) == len(scores)
+                for i in range(len(finish_reasons)):
+                    if finish_reasons[i] != "stop":
+                        scores[i] = args.non_stop_penalty_value
+
+        return scores, metrics
+
+    return reward_fn
+
+
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
     # ------------------------------------------------------------
     # Setup tokenizer
