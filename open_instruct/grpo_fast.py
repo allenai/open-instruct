@@ -1882,7 +1882,7 @@ def make_reward_fn(args: Args) -> Callable:
         infos: List[List[int]],
         queries: Optional[List[str]] = None,
     ) -> List[float]:
-        num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
+        _, timeouts, tool_errors, tool_outputs, _, tool_calleds = infos
         good_outputs = [
             len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
             for i in range(len(tool_outputs))
@@ -1948,7 +1948,18 @@ def make_reward_fn(args: Args) -> Callable:
     return reward_fn
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
+def cleanup_judge_clients():
+    """Cleans up all LLM judge clients and shutdown Ray."""
+    try:
+        asyncio.run(cleanup_all_llm_judge_clients())
+        logger.info("✅ LLM judge clients cleaned up")
+    except Exception as cleanup_error:
+        logger.warning(f"Error during LLM judge cleanup: {cleanup_error}")
+    ray.shutdown()
+
+
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable,
+         num_eval_samples: int = 32):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
     beaker_config, writer, wandb_url = setup_experiment_tracking(args, tc, model_config)
@@ -1976,15 +1987,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         n=args.num_samples_per_prompt_rollout,
         stop=stop_strings,
     )
-    eval_generation_config = SamplingParams(
-        temperature=0.0,
-        top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
-        max_tokens=args.response_length,
-        include_stop_str_in_output=True,
-        skip_special_tokens=False,
-        n=1,  # since we are doing greedy sampling, don't need to generate more
-        stop=stop_strings,
-    )
+    eval_generation_config = generation_config.copy()
+    eval_generation_config.temperature = 0.0
+    eval_generation_config.n = 1
+
     train_dataset_idxs = np.arange(len(train_dataset))
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
 
