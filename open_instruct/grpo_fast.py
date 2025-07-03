@@ -603,7 +603,7 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = HfDeepSpeedConfig(ds_config)
         else:
             dschf = None
-        logger.debug(f"DeepSpeed config: {dschf=}")
+        logger.info(f"DeepSpeed config: {dschf=}")
 
         self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
             model_config.model_name_or_path,
@@ -1411,8 +1411,6 @@ def setup_experiment_tracking(args: Args, tc: TokenizerConfig, model_config: Mod
 
     wandb_url = None
     if args.with_tracking:
-        import wandb
-
         wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
@@ -1806,7 +1804,7 @@ def make_reward_fn(args: Args) -> Callable:
         infos: List[List[int]],
         queries: Optional[List[str]] = None,
     ) -> List[float]:
-        num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
+        _, timeouts, tool_errors, tool_outputs, _, tool_calleds = infos
         good_outputs = [
             len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
             for i in range(len(tool_outputs))
@@ -1872,7 +1870,18 @@ def make_reward_fn(args: Args) -> Callable:
     return reward_fn
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
+def cleanup_judge_clients():
+    """Cleans up all LLM judge clients and shutdown Ray."""
+    try:
+        asyncio.run(cleanup_all_llm_judge_clients())
+        logger.info("✅ LLM judge clients cleaned up")
+    except Exception as cleanup_error:
+        logger.warning(f"Error during LLM judge cleanup: {cleanup_error}")
+    ray.shutdown()
+
+
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable,
+         num_eval_samples: int = 32):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
     beaker_config, writer, wandb_url = setup_experiment_tracking(args, tc, model_config)
@@ -1900,15 +1909,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         n=args.num_samples_per_prompt_rollout,
         stop=stop_strings,
     )
-    eval_generation_config = SamplingParams(
-        temperature=0.0,
-        top_p=args.vllm_top_p,  # prevent rare out-of-vocab tokens with qwen
-        max_tokens=args.response_length,
-        include_stop_str_in_output=True,
-        skip_special_tokens=False,
-        n=1,  # since we are doing greedy sampling, don't need to generate more
-        stop=stop_strings,
-    )
+    eval_generation_config = generation_config.copy()
+    eval_generation_config.temperature = 0.0
+    eval_generation_config.n = 1
+
     train_dataset_idxs = np.arange(len(train_dataset))
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
 
@@ -1917,7 +1921,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     evaluation_inference_results_Q = Queue(maxsize=1)
     packed_sequences_Q = Queue(maxsize=args.async_steps)
     queries_prompt_Q = Queue(maxsize=args.async_steps)
-    num_eval_samples = 32
 
     eval_prompt_token_ids = None
     eval_ground_truths = None
@@ -1927,7 +1930,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
         eval_dataset_names = eval_dataset[:num_eval_samples][DATASET_SOURCE_KEY]
     reward_fn = make_reward_fn(args)
-    thread = threading.Thread(
+    generate_thread = threading.Thread(
         target=vllm_generate_thread,
         args=(
             vllm_engines,
@@ -1943,7 +1946,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             args.tool_use,
         ),
     )
-    thread.start()
+    generate_thread.start()
     logger.info("======== ✅ vllm generate thread starts =========")
 
     packing_thread = threading.Thread(
@@ -1961,7 +1964,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     packing_thread.start()
     logger.info("======== ✅ data preparation thread starts =========")
 
-    # Send initial data to both threads
+    # Send initial data to both threads.
     data_next = train_dataset[next(iter_dataloader)]
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
@@ -1996,7 +1999,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             if collated_data is None:
                 continue
 
-            average_metrics = one_training_step(
+            one_training_step(
                 args,
                 policy_group,
                 collated_data,
@@ -2029,29 +2032,16 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
 
     except Exception as e:
         logger.error(f"Training error occurred: {str(e)}\n{traceback.format_exc()}")
-        try:
-            asyncio.run(cleanup_all_llm_judge_clients())
-            logger.info("✅ LLM judge clients cleaned up")
-        except Exception as cleanup_error:
-            logger.warning(f"Error during LLM judge cleanup: {cleanup_error}")
-
-        ray.shutdown()
+        cleanup_judge_clients()
         os._exit(1)
-        raise  # Re-raise the exception after shutdown
 
     # Clean up threads
-    thread.join()
+    generate_thread.join()
     logger.info("======== ✅ vllm generate thread ends =========")
     packing_thread.join()
     logger.info("======== ✅ data preparation thread ends =========")
 
-    try:
-        asyncio.run(cleanup_all_llm_judge_clients())
-        logger.info("✅ LLM judge clients cleaned up")
-    except Exception as cleanup_error:
-        logger.warning(f"Error during LLM judge cleanup: {cleanup_error}")
-
-    ray.shutdown()
+    cleanup_judge_clients()
 
     # Ai2 logic: we use /output to store the artifacts of the job, so we
     # make a copy of the model to `/output` in the end.
