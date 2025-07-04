@@ -124,8 +124,8 @@ from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
 # Setup logging with filename and line number format
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
 
@@ -572,7 +572,9 @@ class PolicyTrainerRayProcess(RayProcess):
         if args.checkpoint_state_dir:
             # check if the dir exists
             if not os.path.exists(args.checkpoint_state_dir):
-                logger.warning(f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!")
+                logger.warning(
+                    f"Skipping loading checkpoint state from {args.checkpoint_state_dir} because it does not exist!"
+                )
             else:
                 path, states = self.model.load_checkpoint(
                     args.checkpoint_state_dir,
@@ -1880,8 +1882,7 @@ def cleanup_judge_clients():
     ray.shutdown()
 
 
-def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable,
-         num_eval_samples: int = 32):
+def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable, num_eval_samples: int = 32):
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
     beaker_config, writer, wandb_url = setup_experiment_tracking(args, tc, model_config)

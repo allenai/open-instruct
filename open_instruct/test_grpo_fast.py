@@ -16,6 +16,7 @@ from vllm import LLM, SamplingParams
 
 from open_instruct.grpo_fast import ShufflingIterator, vllm_generate_thread
 from open_instruct.vllm_utils3 import create_vllm_engines
+from ray.util import placement_group
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -118,13 +119,15 @@ class TestGrpoFast(unittest.TestCase):
             evaluation_inference_results_Q = queue.Queue(maxsize=2)
 
             model_name = "allenai/OLMo-1B-hf"
-            
+
             # Get tokenizer to create real token IDs
             tokenizer = AutoTokenizer.from_pretrained(model_name)
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
-            
+
             # Create vLLM engines using the same function as grpo_fast.py
+            bundles = [{"GPU": 1, "CPU": 10}]
+            pg = placement_group.placement_group(bundles, strategy="STRICT_SPREAD")
             vllm_engines = create_vllm_engines(
                 num_engines=1,
                 tensor_parallel_size=1,
@@ -137,9 +140,9 @@ class TestGrpoFast(unittest.TestCase):
                 max_model_len=512,  # Small context for testing
                 vllm_gpu_memory_utilization=0.9,
                 single_gpu_mode=True,
-                pg=None,
-                tools=None,
-                max_tool_calls=0
+                pg=pg,
+                tools={},
+                max_tool_calls=0,
             )
 
             # Create test prompts
