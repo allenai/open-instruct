@@ -15,28 +15,10 @@ from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
 from open_instruct.grpo_fast import ShufflingIterator, vllm_generate_thread
+from open_instruct.vllm_utils3 import create_vllm_engines
 
 # Set up logger
 logger = logging.getLogger(__name__)
-
-
-# Define a simple Ray actor to wrap vLLM engine
-@ray.remote(num_gpus=1 if torch.cuda.is_available() else 0)
-class VLLMEngineActor:
-    def __init__(self, model_name: str):
-        self.engine = LLM(
-            model=model_name,
-            max_model_len=512,  # Small context for testing
-            tensor_parallel_size=1,
-            enforce_eager=True,  # Disable CUDA graph
-            device="cuda" if torch.cuda.is_available() else "cpu",
-            dtype="auto" if torch.cuda.is_available() else "float32",
-        )
-
-    def generate(self, prompt_token_ids, sampling_params, use_tqdm=False):
-        return self.engine.generate(
-            prompt_token_ids=prompt_token_ids, sampling_params=sampling_params, use_tqdm=use_tqdm
-        )
 
 
 @dataclass
@@ -117,20 +99,13 @@ class MockVLLMEngineActor:
 
 
 class TestGrpoFast(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        """Check if CUDA is available and skip real vLLM tests if not."""
-        cls.skip_vllm_tests = not torch.cuda.is_available()
-        if cls.skip_vllm_tests:
-            logger.warning("CUDA not available, will run mocked tests only")
-
     def test_queue_based_generator_communication(self):
         """Test vllm_generate_thread with a real vLLM engine using a tiny model.
-        
+
         This test requires CUDA availability for running real vLLM models.
         If CUDA is not available, this test will be skipped.
         """
-        if self.skip_vllm_tests:
+        if not torch.cuda.is_available():
             self.skipTest("Skipping real vLLM test - CUDA not available")
         # Initialize ray if not already initialized
         if not ray.is_initialized():
@@ -143,12 +118,29 @@ class TestGrpoFast(unittest.TestCase):
             evaluation_inference_results_Q = queue.Queue(maxsize=2)
 
             model_name = "allenai/OLMo-1B-hf"
-            vllm_engine = VLLMEngineActor.remote(model_name)
-
+            
             # Get tokenizer to create real token IDs
             tokenizer = AutoTokenizer.from_pretrained(model_name)
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
+            
+            # Create vLLM engines using the same function as grpo_fast.py
+            vllm_engines = create_vllm_engines(
+                num_engines=1,
+                tensor_parallel_size=1,
+                enforce_eager=True,
+                tokenizer_name_or_path=model_name,
+                pretrain=model_name,
+                revision=None,
+                seed=42,
+                enable_prefix_caching=False,
+                max_model_len=512,  # Small context for testing
+                vllm_gpu_memory_utilization=0.9,
+                single_gpu_mode=True,
+                pg=None,
+                tools=None,
+                max_tool_calls=0
+            )
 
             # Create test prompts
             test_texts = ["Hello world", "Testing vLLM"]
@@ -158,7 +150,7 @@ class TestGrpoFast(unittest.TestCase):
             thread = threading.Thread(
                 target=vllm_generate_thread,
                 args=(
-                    [vllm_engine],  # vllm_engines
+                    vllm_engines,  # vllm_engines list from create_vllm_engines
                     SamplingParams(temperature=0.0, max_tokens=10),  # generation_config - deterministic, short
                     SamplingParams(temperature=0.0, max_tokens=10),  # eval_generation_config
                     inference_results_Q,
@@ -208,8 +200,9 @@ class TestGrpoFast(unittest.TestCase):
                 # Wait for thread to complete
                 thread.join(timeout=5)
 
-            # Clean up the actor
-            ray.kill(vllm_engine)
+            # Clean up the actors
+            for engine in vllm_engines:
+                ray.kill(engine)
 
         finally:
             # Cleanup ray

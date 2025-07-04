@@ -21,19 +21,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional, Tuple, Union
 
-# Workaround for macOS where Triton is not available
-# This must happen before torch is imported
-import sys
-if sys.platform == "darwin":
-    import os
-    os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-    try:
-        import torch
-        import torch._dynamo
-        torch._dynamo.config.suppress_errors = True
-    except ImportError:
-        pass
-
 try:
     import deepspeed
     from deepspeed.runtime.engine import DeepSpeedEngine
@@ -43,7 +30,6 @@ import asyncio
 
 import pandas as pd
 import torch
-
 import transformers
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
@@ -467,9 +453,10 @@ def save_with_accelerate(
     # customize model card (TODO (Costa): this can be prettier)
 
 
-def _log_softmax_and_gather_impl(logits: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
+@torch.compile(dynamic=True)
+def log_softmax_and_gather(logits: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
     """
-    Implementation of the common `log_softmax -> gather` operation.
+    torch compiled version of the common `log_softmax -> gather` operation.
 
     The compiled version of this opration avoids the (significant) memory overhead of
     allocating a new (batch_size, seq_len, vocab_size) tensor to store the logprobs.
@@ -478,17 +465,6 @@ def _log_softmax_and_gather_impl(logits: torch.Tensor, index: torch.Tensor) -> t
     """
     logprobs = logits.log_softmax(dim=-1)
     return torch.gather(logprobs, dim=-1, index=index.unsqueeze(-1)).squeeze(-1)
-
-
-# Apply torch.compile conditionally based on platform and availability
-if sys.platform != "darwin":
-    try:
-        log_softmax_and_gather = torch.compile(dynamic=True)(_log_softmax_and_gather_impl)
-    except Exception:
-        log_softmax_and_gather = _log_softmax_and_gather_impl
-else:
-    # On macOS, skip compilation due to Triton compatibility issues
-    log_softmax_and_gather = _log_softmax_and_gather_impl
 
 
 @retry_on_exception()
