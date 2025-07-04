@@ -130,13 +130,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Setup logging with filename and line number format
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(__name__)
 
 api = HfApi()
 INVALID_LOGPROB = 1.0
