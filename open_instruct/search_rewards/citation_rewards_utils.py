@@ -117,7 +117,7 @@ def score_in_context_citations(question: str, response: str, citations: Dict[str
         avg_f1 += score_citation_f1(question, claim_text, concatenated_citations, response)
     avg_f1 /= len(claims)
 
-    return 0.99 * avg_f1 + 0.01 * citation_format_reward
+    return 0.9 * avg_f1 + 0.1 * citation_format_reward
 
 
 def score_citation_format(claims: Dict[str, List[str]], citations: Dict[str, str]) -> Dict[str, float]:
@@ -129,7 +129,8 @@ def score_citation_format(claims: Dict[str, List[str]], citations: Dict[str, str
         all_citations.extend(claim[1])
     all_citations = list(set(all_citations))
     if len(all_citations) == 0:
-        return 1
+        # If there are no citations, return 0
+        return 0
     valid_citations = [citation for citation in all_citations if citation in citations]
     return len(valid_citations) / len(all_citations)
 
@@ -177,7 +178,8 @@ def score_no_citation_recall(question: str, claim: str, full_response: str) -> f
         frequency_penalty=0.0,
         presence_penalty=0.0,
     )
-    return extract_yes_no_from_response(response)
+    # "yes" means it is a factual claim, but no citation is provided.
+    return 1 - extract_yes_no_from_response(response)
 
 
 def score_citation_precision(question: str, claim: str, concatenated_citations: str) -> float:
@@ -318,7 +320,8 @@ async def score_no_citation_recall_async(question: str, claim: str, full_respons
         frequency_penalty=0.0,
         presence_penalty=0.0,
     )
-    return extract_yes_no_from_response(response)
+    # "yes" means it is a factual claim, but no citation is provided.
+    return 1 - extract_yes_no_from_response(response)
 
 
 async def score_citation_precision_async(question: str, claim: str, concatenated_citations: str) -> float:
@@ -396,7 +399,7 @@ async def score_in_context_citations_async(
     # Calculate average F1 score
     avg_f1 = sum(f1_scores) / len(f1_scores) if f1_scores else 0
 
-    return 0.99 * avg_f1 + 0.01 * citation_format_reward
+    return 0.9 * avg_f1 + 0.1 * citation_format_reward
 
 
 def score_in_context_citations_async_wrapper(
