@@ -244,6 +244,8 @@ class Args:
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
     mask_truncated_completions: bool = False
     """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
+    use_liger_kernel: bool = False
+    """Whether to use LigerKernel for training."""
 
     # Reward
     # -- r1 style format reward
@@ -524,13 +526,27 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         print(f"{dschf=}")
 
-        self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            model_config.model_name_or_path,
-            revision=model_config.model_revision,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-            use_cache=False,
-        )
+        if args.use_liger_kernel:
+            from liger_kernel.transformers import AutoLigerKernelForCausalLM
+
+            # Supported models: https://github.com/linkedin/Liger-Kernel/blob/main/src/liger_kernel/transformers/monkey_patch.py#L948
+            self.policy: PreTrainedModel = AutoLigerKernelForCausalLM.from_pretrained(
+                model_config.model_name_or_path,
+                revision=model_config.model_revision,
+                torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2",
+                use_cache=False,
+                # liger-kernel specific args
+                fused_linear_cross_entropy=False,
+            )
+        else:
+            self.policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+                model_config.model_name_or_path,
+                revision=model_config.model_revision,
+                torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2",
+                use_cache=False,
+            )
         disable_dropout_in_model(self.policy)
         self.policy.gradient_checkpointing_enable()
         # AdamOptimizer = DeepSpeedCPUAdam if self.adam_offload else FusedAdam
@@ -595,13 +611,27 @@ class PolicyTrainerRayProcess(RayProcess):
             dschf = None
         print(f"{dschf=}")
 
-        self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            model_config.model_name_or_path,
-            revision=model_config.model_revision,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-            use_cache=False,
-        )
+        if args.use_liger_kernel:
+            from liger_kernel.transformers import AutoLigerKernelForCausalLM
+
+            # Supported models: https://github.com/linkedin/Liger-Kernel/blob/main/src/liger_kernel/transformers/monkey_patch.py#L948
+            self.ref_policy: PreTrainedModel = AutoLigerKernelForCausalLM.from_pretrained(
+                model_config.model_name_or_path,
+                revision=model_config.model_revision,
+                torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2",
+                use_cache=False,
+                # liger-kernel specific args
+                fused_linear_cross_entropy=False,
+            )
+        else:
+            self.ref_policy: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+                model_config.model_name_or_path,
+                revision=model_config.model_revision,
+                torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2",
+                use_cache=False,
+            )
         disable_dropout_in_model(self.ref_policy)
         self.ref_policy, *_ = deepspeed.initialize(model=self.ref_policy, config=ds_config)
         self.ref_policy.eval()
