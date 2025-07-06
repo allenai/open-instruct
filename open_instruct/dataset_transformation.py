@@ -530,13 +530,13 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
             ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
         elif isinstance(tokenizer, GPTNeoXTokenizerFast):
             # OLMo newer models use this tokenizer
-            if tokenizer.bos_token is None:
-                tokenizer.bos_token = tokenizer.eos_token
-                assert tc.add_bos, (
-                    "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
-                )
-            # else, pythia / other models
-            else:
+            # if tokenizer.bos_token is None:
+            #     tokenizer.bos_token = tokenizer.eos_token
+            #     assert tc.add_bos, (
+            #         "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
+            #     )
+            # # else, pythia / other models
+            # else:
                 num_added_tokens = tokenizer.add_special_tokens(
                     {
                         "pad_token": "<pad>",
@@ -677,7 +677,7 @@ class TokenizerConfig:
     tokenizer_revision: Optional[str] = None
     trust_remote_code: bool = False
     use_fast: bool = True
-    chat_template_name: str = "tulu"  # TODO: should I give an option to force override?
+    chat_template_name: str = "jacobtest2"  # TODO: should I give an option to force override?
     add_bos: bool = False
     get_tokenizer_fn: str = "get_tokenizer_tulu_v2_2"
 
