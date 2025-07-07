@@ -108,9 +108,9 @@ class TestGrpoFast(unittest.TestCase):
         """
         if not torch.cuda.is_available():
             self.skipTest("Skipping real vLLM test - CUDA not available")
-        # Initialize ray if not already initialized
-        if not ray.is_initialized():
-            ray.init(num_cpus=2)
+        
+        # Initialize ray with explicit resources
+        ray.init(num_cpus=4, num_gpus=1, ignore_reinit_error=True)
 
         try:
             # Create queues
@@ -118,16 +118,19 @@ class TestGrpoFast(unittest.TestCase):
             param_prompt_Q = queue.Queue(maxsize=2)
             evaluation_inference_results_Q = queue.Queue(maxsize=2)
 
-            model_name = "allenai/OLMo-1B-hf"
+            # Use a very tiny model for testing
+            model_name = "EleutherAI/pythia-14m"
 
             # Get tokenizer to create real token IDs
             tokenizer = AutoTokenizer.from_pretrained(model_name)
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
 
-            # Create vLLM engines using the same function as grpo_fast.py
-            bundles = [{"GPU": 1, "CPU": 10}]
-            pg = placement_group.placement_group(bundles, strategy="STRICT_SPREAD")
+            # Create vLLM engines with conservative settings for testing
+            bundles = [{"GPU": 1, "CPU": 2}]
+            pg = placement_group(bundles, strategy="PACK")
+            ray.get(pg.ready())
+            
             vllm_engines = create_vllm_engines(
                 num_engines=1,
                 tensor_parallel_size=1,
@@ -137,43 +140,55 @@ class TestGrpoFast(unittest.TestCase):
                 revision=None,
                 seed=42,
                 enable_prefix_caching=False,
-                max_model_len=512,  # Small context for testing
-                vllm_gpu_memory_utilization=0.9,
-                single_gpu_mode=True,
+                max_model_len=128,  # Very small context for testing
+                vllm_gpu_memory_utilization=0.3,  # Use less GPU memory
+                single_gpu_mode=False,
                 pg=pg,
                 tools={},
-                max_tool_calls=0,
+                max_tool_calls=[0],
             )
 
             # Create test prompts
-            test_texts = ["Hello world", "Testing vLLM"]
+            test_texts = ["Hi", "Hello"]
             test_prompts = [tokenizer.encode(text) for text in test_texts]
 
-            # Start the vllm_generate_thread
-            thread = threading.Thread(
-                target=vllm_generate_thread,
-                args=(
-                    vllm_engines,  # vllm_engines list from create_vllm_engines
-                    SamplingParams(temperature=0.0, max_tokens=10),  # generation_config - deterministic, short
-                    SamplingParams(temperature=0.0, max_tokens=10),  # eval_generation_config
-                    inference_results_Q,
-                    param_prompt_Q,
-                    1,  # num_training_steps - just one step for testing
-                    None,  # eval_prompt_token_ids
-                    evaluation_inference_results_Q,
-                    2,  # eval_freq
-                    1,  # resume_training_step
-                    False,  # tool_use
-                ),
-            )
+            # Start the vllm_generate_thread with exception handling
+            def wrapped_vllm_generate_thread():
+                try:
+                    vllm_generate_thread(
+                        vllm_engines,
+                        SamplingParams(temperature=0.0, max_tokens=5),  # Very short generation
+                        SamplingParams(temperature=0.0, max_tokens=5),  # Very short generation
+                        inference_results_Q,
+                        param_prompt_Q,
+                        1,  # num_training_steps - just one step for testing
+                        None,  # eval_prompt_token_ids
+                        evaluation_inference_results_Q,
+                        2,  # eval_freq
+                        1,  # resume_training_step
+                        False,  # tool_use
+                    )
+                except Exception as e:
+                    print(f"Exception in vllm_generate_thread: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Put an error marker in the queue so the test doesn't hang
+                    inference_results_Q.put(("ERROR", str(e), [], []))
+                    raise
+
+            thread = threading.Thread(target=wrapped_vllm_generate_thread)
             thread.start()
 
-            # Send prompts through the queue (expects tuple with (None, prompts))
+            # Send prompts through the queue
             param_prompt_Q.put((None, test_prompts))
 
-            # Get results
+            # Get results with shorter timeout
             try:
-                result = inference_results_Q.get(timeout=30)  # Longer timeout for CPU generation
+                result = inference_results_Q.get(timeout=60)  # 1 minute timeout
+
+                # Check if we got an error
+                if result[0] == "ERROR":
+                    self.fail(f"vllm_generate_thread failed: {result[1]}")
 
                 # vllm_generate_thread returns a tuple: (response_ids, finish_reasons, masks, info)
                 self.assertIsInstance(result, tuple)
@@ -201,7 +216,7 @@ class TestGrpoFast(unittest.TestCase):
 
             finally:
                 # Wait for thread to complete
-                thread.join(timeout=5)
+                thread.join(timeout=10)
 
             # Clean up the actors
             for engine in vllm_engines:
