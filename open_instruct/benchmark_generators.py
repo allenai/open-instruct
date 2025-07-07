@@ -12,16 +12,17 @@ import logging
 import queue
 import threading
 import time
-from dataclasses import dataclass
-from typing import List, Optional
+import dataclasses
+from typing import List, Optional, Dict, Any, Tuple
 
 import numpy as np
 import ray
 import torch
-from transformers import AutoTokenizer, AutoConfig
+import transformers
+import vllm
+import torch.utils.flop_counter
+from ray.util.placement_group import PlacementGroup, placement_group
 from vllm import SamplingParams
-from ray.util import placement_group
-from torch.utils.flop_counter import FlopCounterMode
 
 from open_instruct.dataset_transformation import (
     INPUT_IDS_PROMPT_KEY,
@@ -33,12 +34,12 @@ from open_instruct.dataset_transformation import (
 from open_instruct.grpo_fast import ShufflingIterator, vllm_generate_thread
 from open_instruct.vllm_utils3 import create_vllm_engines
 
-# Set up logger
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def get_flops_forward(model, inp):
+def get_flops_forward(model: torch.nn.Module, inp: torch.Tensor) -> int:
     """
     Calculates FLOPs for the forward pass of a PyTorch model.
 
@@ -57,7 +58,7 @@ def get_flops_forward(model, inp):
         # Assuming input is a shape tuple if not a tensor
         inp = torch.randn(inp) 
 
-    flop_counter = FlopCounterMode(mods=model, display=False, depth=None)
+    flop_counter = torch.utils.flop_counter.FlopCounterMode(mods=model, display=False, depth=None)
     with flop_counter:
         model(inp)
     
@@ -68,7 +69,7 @@ def get_flops_forward(model, inp):
     return total_flops
 
 
-def calculate_model_flops_per_token(model_config, model_path):
+def calculate_model_flops_per_token(model_config: Any, model_path: str) -> float:
     """
     Calculate actual FLOPs per token for a transformer model using torch FlopCounterMode.
     
@@ -79,9 +80,7 @@ def calculate_model_flops_per_token(model_config, model_path):
     Returns:
         float: FLOPs per token
     """
-    from transformers import AutoModelForCausalLM
-    
-    model = AutoModelForCausalLM.from_pretrained(
+    model = transformers.AutoModelForCausalLM.from_pretrained(
         model_path, 
         torch_dtype=torch.bfloat16, 
         device_map="auto",
@@ -100,7 +99,7 @@ def calculate_model_flops_per_token(model_config, model_path):
     return flops
 
 
-def get_gpu_peak_flops():
+def get_gpu_peak_flops() -> float:
     """
     Get theoretical peak FLOPs for the current GPU.
     
@@ -154,7 +153,7 @@ def calculate_mfu(tokens_per_second: float, model_flops_per_token: float, gpu_pe
     return mfu_percentage
 
 
-@dataclass
+@dataclasses.dataclass
 class BenchmarkConfig:
     """Configuration for the benchmark."""
     
@@ -187,7 +186,7 @@ class BenchmarkConfig:
     chat_template_name: str = "tulu_thinker"  # matches production
     add_bos: bool = False  # matches qwen2_5 config
     
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.dataset_mixer_list is None:
             # Use production dataset from long_repro_script.sh
             self.dataset_mixer_list = ["hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2", "1.0"]
@@ -198,7 +197,7 @@ class BenchmarkConfig:
 class GeneratorBenchmark:
     """Benchmark class for testing vLLM generator performance."""
     
-    def __init__(self, config: BenchmarkConfig):
+    def __init__(self, config: BenchmarkConfig) -> None:
         self.config = config
         self.tokenizer = None
         self.dataset = None
@@ -208,22 +207,22 @@ class GeneratorBenchmark:
         self.model_flops_per_token = 0
         self.gpu_peak_flops = 0
         
-    def setup_tokenizer(self):
+    def setup_tokenizer(self) -> None:
         """Set up the tokenizer and model config."""
         logger.info(f"Loading tokenizer and config: {self.config.model_name}")
-        self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_name)
+        self.tokenizer = transformers.AutoTokenizer.from_pretrained(self.config.model_name)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
             
         # Load model config for FLOPs calculation
-        self.model_config = AutoConfig.from_pretrained(self.config.model_name)
+        self.model_config = transformers.AutoConfig.from_pretrained(self.config.model_name)
         self.model_flops_per_token = calculate_model_flops_per_token(self.model_config, self.config.model_name)
         self.gpu_peak_flops = get_gpu_peak_flops()
         
         logger.info(f"Model FLOPs per token: {self.model_flops_per_token/1e9:.2f} GFLOPs")
         logger.info(f"GPU peak FLOPs: {self.gpu_peak_flops/1e12:.0f} TFLOPs")
             
-    def setup_dataset(self):
+    def setup_dataset(self) -> None:
         """Set up the dataset using the same pipeline as grpo_fast.py."""
         logger.info("Loading and processing dataset...")
         
@@ -260,7 +259,7 @@ class GeneratorBenchmark:
         self.dataset = self.dataset.shuffle(seed=42)
         logger.info(f"Dataset loaded with {len(self.dataset)} samples")
         
-    def setup_vllm_engines(self):
+    def setup_vllm_engines(self) -> None:
         """Set up vLLM engines."""
         logger.info("Setting up vLLM engines...")
         
@@ -271,7 +270,7 @@ class GeneratorBenchmark:
         
         # Create placement group for multiple engines
         bundles = [{"GPU": 1.0 / self.config.num_engines, "CPU": 2} for _ in range(self.config.num_engines)]
-        pg = placement_group(bundles, strategy="PACK")
+        pg = ray.util.placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
         
         # Create vLLM engines
@@ -294,7 +293,7 @@ class GeneratorBenchmark:
         
         logger.info("vLLM engines ready")
         
-    def get_batch_data(self, batch_idx: int) -> tuple:
+    def get_batch_data(self, batch_idx: int) -> Tuple[List[List[int]], List[str], List[str]]:
         """Get a batch of data from the dataset."""
         start_idx = batch_idx * self.config.batch_size
         end_idx = min(start_idx + self.config.batch_size, len(self.dataset))
@@ -314,7 +313,7 @@ class GeneratorBenchmark:
             
         return prompts, ground_truths, datasets
         
-    def run_generation_batch(self, prompts: List[List[int]], batch_idx: int) -> dict:
+    def run_generation_batch(self, prompts: List[List[int]], batch_idx: int) -> Dict[str, Any]:
         """Run generation for a batch of prompts and measure performance."""
         
         # Create queues
@@ -323,19 +322,19 @@ class GeneratorBenchmark:
         evaluation_inference_results_Q = queue.Queue(maxsize=10)
         
         # Create sampling parameters
-        generation_config = SamplingParams(
+        generation_config = vllm.SamplingParams(
             temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,
             top_p=self.config.top_p,
         )
         
-        eval_generation_config = SamplingParams(
+        eval_generation_config = vllm.SamplingParams(
             temperature=0.0,
             max_tokens=self.config.max_tokens,
         )
         
         # Start vLLM generation thread
-        def wrapped_vllm_generate_thread():
+        def wrapped_vllm_generate_thread() -> None:
             try:
                 vllm_generate_thread(
                     self.vllm_engines,
@@ -409,7 +408,7 @@ class GeneratorBenchmark:
             "response_lengths": [len(response) for response in response_ids],
         }
         
-    def run_benchmark(self):
+    def run_benchmark(self) -> List[Dict[str, Any]]:
         """Run the full benchmark."""
         logger.info(f"Starting benchmark with {self.config.num_batches} batches of size {self.config.batch_size}")
         
@@ -448,7 +447,7 @@ class GeneratorBenchmark:
             
         return all_results
         
-    def print_summary(self, results: List[dict], total_time: float):
+    def print_summary(self, results: List[Dict[str, Any]], total_time: float) -> None:
         """Print benchmark summary statistics."""
         
         # Calculate metrics for all batches
@@ -549,7 +548,7 @@ class GeneratorBenchmark:
                   f"MFU: {r['mfu_percentage']:.2f}%, {r['generation_time']:.2f}s, "
                   f"{r['total_new_tokens']} new tokens")
                   
-    def cleanup(self):
+    def cleanup(self) -> None:
         """Clean up resources."""
         if self.vllm_engines:
             for engine in self.vllm_engines:
@@ -558,7 +557,7 @@ class GeneratorBenchmark:
             ray.shutdown()
 
 
-def main():
+def main() -> None:
     """Main benchmark function."""
     parser = argparse.ArgumentParser(description="Benchmark vLLM generator performance")
     
