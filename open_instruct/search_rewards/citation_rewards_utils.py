@@ -138,6 +138,9 @@ def score_citation_format(claims: Dict[str, List[str]], citations: Dict[str, str
 def score_citation_f1(question: str, claim: str, concatenated_citations: str, full_response: str) -> float:
     recall = score_citation_recall(question, claim, concatenated_citations, full_response)
     precision = score_citation_precision(question, claim, concatenated_citations)
+    # avoid division by zero
+    if recall + precision == 0:
+        return 0
     f1 = 2 * (recall * precision) / (recall + precision)
     return f1
 
