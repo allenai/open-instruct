@@ -21,18 +21,10 @@ import torch
 import transformers
 import vllm
 import torch.utils.flop_counter
-from ray.util.placement_group import PlacementGroup, placement_group
-from vllm import SamplingParams
 
-from open_instruct.dataset_transformation import (
-    INPUT_IDS_PROMPT_KEY,
-    GROUND_TRUTHS_KEY,
-    DATASET_SOURCE_KEY,
-    TokenizerConfig,
-    get_cached_dataset_tulu,
-)
-from open_instruct.grpo_fast import ShufflingIterator, vllm_generate_thread
-from open_instruct.vllm_utils3 import create_vllm_engines
+from open_instruct import dataset_transformation
+from open_instruct import grpo_fast
+from open_instruct import vllm_utils3
 
 
 logging.basicConfig(level=logging.INFO)
@@ -227,7 +219,7 @@ class GeneratorBenchmark:
         logger.info("Loading and processing dataset...")
         
         # Create tokenizer config (matching long_repro_script.sh)
-        tc = TokenizerConfig(
+        tc = dataset_transformation.TokenizerConfig(
             tokenizer_name_or_path=self.config.model_name,
             trust_remote_code=True,
             chat_template_name=self.config.chat_template_name,
@@ -244,7 +236,7 @@ class GeneratorBenchmark:
         ]
         
         # Load dataset
-        self.dataset = get_cached_dataset_tulu(
+        self.dataset = dataset_transformation.get_cached_dataset_tulu(
             dataset_mixer_list=self.config.dataset_mixer_list,
             dataset_mixer_list_splits=self.config.dataset_mixer_list_splits,
             tc=tc,
@@ -274,7 +266,7 @@ class GeneratorBenchmark:
         ray.get(pg.ready())
         
         # Create vLLM engines
-        self.vllm_engines = create_vllm_engines(
+        self.vllm_engines = vllm_utils3.create_vllm_engines(
             num_engines=self.config.num_engines,
             tensor_parallel_size=self.config.tensor_parallel_size,
             enforce_eager=True,
@@ -301,9 +293,9 @@ class GeneratorBenchmark:
         batch_data = self.dataset[start_idx:end_idx]
         
         # Extract prompts and ground truths
-        prompts = batch_data[INPUT_IDS_PROMPT_KEY]
-        ground_truths = batch_data[GROUND_TRUTHS_KEY]
-        datasets = batch_data[DATASET_SOURCE_KEY]
+        prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+        ground_truths = batch_data[dataset_transformation.GROUND_TRUTHS_KEY]
+        datasets = batch_data[dataset_transformation.DATASET_SOURCE_KEY]
         
         # Expand if multiple samples per prompt
         if self.config.num_samples_per_prompt > 1:
@@ -336,7 +328,7 @@ class GeneratorBenchmark:
         # Start vLLM generation thread
         def wrapped_vllm_generate_thread() -> None:
             try:
-                vllm_generate_thread(
+                grpo_fast.vllm_generate_thread(
                     self.vllm_engines,
                     generation_config,
                     eval_generation_config,
