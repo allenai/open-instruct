@@ -23,11 +23,23 @@ from open_instruct.dataset_processor import CHAT_TEMPLATES
 from open_instruct.dataset_transformation import sft_tulu_tokenize_and_truncate_v1
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
 
+try:
+    import mamba_ssm  # noqa
+    import causal_conv1d  # noqa
+
+    mamba_and_causal_conv_available = True
+except ImportError:
+    mamba_and_causal_conv_available = False
+
+try:
+    import flash_attn  # noqa
+
+    flash_attn_available = True
+except ImportError:
+    flash_attn_available = False
+
 MODEL_CLASSES = {"bamba": BambaForCausalLM, "llama": LlamaForCausalLM}
-MODEL_CFGS = {
-    "bamba": BambaConfig,
-    "llama": LlamaConfig,
-}
+MODEL_CFGS = {"bamba": BambaConfig, "llama": LlamaConfig}
 MODEL_KWARGS = {
     "bamba": dict(
         attention_dropout=0.0,
@@ -83,9 +95,13 @@ class TestPaddingFree:
         model = model_cls(cfg).to("cuda", dtype=self.dtype)
         return model, cfg
 
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="Padding free tests require CUDA")
+    @pytest.mark.skipif(not flash_attn_available, reason="Padding free requires flash_attn")
     @pytest.mark.parametrize("model_name", ["bamba", "llama"])
     @pytest.mark.parametrize("loss_type", ["mean", "sum"])
     def test_padding_free(self, model_name: str, loss_type: str) -> None:
+        if model_name == "bamba" and not mamba_and_causal_conv_available:
+            pytest.skip("bamba padding-free tests require mamba_ssm and causal_conv1d")
         torch.manual_seed(42)
 
         tokenizer = AutoTokenizer.from_pretrained("ibm-ai-platform/Bamba-9B-v2")
@@ -119,20 +135,10 @@ class TestPaddingFree:
             del v["messages"]
 
         collate_fn = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding="longest")
-        dataloader = DataLoader(
-            tok_data,
-            shuffle=False,
-            collate_fn=collate_fn,
-            batch_size=self.batch_size,
-        )
+        dataloader = DataLoader(tok_data, shuffle=False, collate_fn=collate_fn, batch_size=self.batch_size)
 
         pf_collate_fn = TensorDataCollatorWithFlattening()
-        pf_dataloader = DataLoader(
-            tok_data,
-            shuffle=False,
-            collate_fn=pf_collate_fn,
-            batch_size=self.batch_size,
-        )
+        pf_dataloader = DataLoader(tok_data, shuffle=False, collate_fn=pf_collate_fn, batch_size=self.batch_size)
 
         batch = next(iter(dataloader))
         pf_batch = next(iter(pf_dataloader))
