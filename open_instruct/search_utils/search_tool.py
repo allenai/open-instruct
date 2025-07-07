@@ -64,6 +64,6 @@ class SearchTool(Tool):
             error=error,
             timeout=timeout,
             runtime=time.time() - start_time,
-            start_str="<snippet id=" + generate_snippet_id() + ">\n",
-            end_str="\n</snippet>",
+            start_str="<snippets id=" + generate_snippet_id() + ">\n",
+            end_str="\n</snippets>",
         )

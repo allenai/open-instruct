@@ -193,10 +193,13 @@ If a claim is missing citations or a citation is not accompanied by excerpts, so
             "The level of expertise required to understand the answer should be roughly aligned with the estimated expertise of a typical person who would ask the question.",
         )
         if citations:
-            score_components.update(self._score_in_context_citations_excerpts(response, citations))
+            score_components['citations'] = self._score_in_context_citations_excerpts(response, citations)
+            score_components['excerpts'] = self._score_in_context_citations_excerpts(response, citations)
         else:
-            # TODO: only when ground-truth evidence is provided, use this.
-            score_components.update(self._score_citations_excerpts(response))
+            score_components['citations'] = 0.0
+            score_components['excerpts'] = 0.0
+            # # TODO: only when ground-truth evidence is provided, use this.
+            # score_components.update(self._score_citations_excerpts(response))
 
         for x in self.config.other_properties:
             if x.criterion:

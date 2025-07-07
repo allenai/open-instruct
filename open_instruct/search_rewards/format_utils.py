@@ -48,11 +48,9 @@ def extract_answer_context_citations(response: str, result: Dict[str, Any]) -> s
     match = re.search(pattern, response, re.DOTALL)
 
     if not match:
-        error_message = "Failed to extract answer from response - no <answer></answer> tags found"
+        # error_message = "Failed to extract answer from response - no <answer></answer> tags found"
         LOGGER.warning("No <answer></answer> tags found in response")
-        return None, None, None, error_message
-    else:
-        error_message = None
+        return None, None, None
 
     extracted_answer = match.group(1).strip()
     return extracted_context, extracted_answer, extracted_citations
