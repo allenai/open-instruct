@@ -186,367 +186,367 @@ class BenchmarkConfig:
             self.dataset_mixer_list_splits = ["train"]
 
 
-class GeneratorBenchmark:
-    """Benchmark class for testing vLLM generator performance."""
+def setup_tokenizer(config: BenchmarkConfig) -> Tuple[Any, Any, float, float]:
+    """Set up the tokenizer and model config."""
+    logger.info(f"Loading tokenizer and config: {config.model_name}")
+    tokenizer = transformers.AutoTokenizer.from_pretrained(config.model_name)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        
+    # Load model config for FLOPs calculation
+    model_config = transformers.AutoConfig.from_pretrained(config.model_name)
+    model_flops_per_token = calculate_model_flops_per_token(model_config, config.model_name)
+    gpu_peak_flops = get_gpu_peak_flops()
     
-    def __init__(self, config: BenchmarkConfig) -> None:
-        self.config = config
-        self.tokenizer = None
-        self.dataset = None
-        self.vllm_engines = None
-        self.results = []
-        self.model_config = None
-        self.model_flops_per_token = 0
-        self.gpu_peak_flops = 0
+    logger.info(f"Model FLOPs per token: {model_flops_per_token/1e9:.2f} GFLOPs")
+    logger.info(f"GPU peak FLOPs: {gpu_peak_flops/1e12:.0f} TFLOPs")
+    
+    return tokenizer, model_config, model_flops_per_token, gpu_peak_flops
+
+
+def setup_dataset(config: BenchmarkConfig) -> Any:
+    """Set up the dataset using the same pipeline as grpo_fast.py."""
+    logger.info("Loading and processing dataset...")
+    
+    # Create tokenizer config (matching long_repro_script.sh)
+    tc = dataset_transformation.TokenizerConfig(
+        tokenizer_name_or_path=config.model_name,
+        trust_remote_code=True,
+        chat_template_name=config.chat_template_name,
+        add_bos=config.add_bos,
+    )
+    
+    # Transform function arguments
+    transform_fn_args = [
+        {},  # For rlvr_tokenize_v1
+        {
+            "max_token_length": config.max_token_length,
+            "max_prompt_token_length": config.max_prompt_token_length,
+        },  # For rlvr_filter_v1
+    ]
+    
+    # Load dataset
+    dataset = dataset_transformation.get_cached_dataset_tulu(
+        dataset_mixer_list=config.dataset_mixer_list,
+        dataset_mixer_list_splits=config.dataset_mixer_list_splits,
+        tc=tc,
+        dataset_transform_fn=["rlvr_tokenize_v1", "rlvr_filter_v1"],
+        transform_fn_args=transform_fn_args,
+        dataset_cache_mode="local",
+        dataset_local_cache_dir="benchmark_cache",
+        dataset_skip_cache=False,
+    )
+    
+    # Shuffle dataset
+    dataset = dataset.shuffle(seed=42)
+    logger.info(f"Dataset loaded with {len(dataset)} samples")
+    
+    return dataset
+
+
+def setup_vllm_engines(config: BenchmarkConfig) -> List[Any]:
+    """Set up vLLM engines."""
+    logger.info("Setting up vLLM engines...")
+    
+    # Initialize Ray
+    if ray.is_initialized():
+        ray.shutdown()
+    ray.init(num_cpus=4, num_gpus=1, ignore_reinit_error=True)
+    
+    # Create placement group for multiple engines
+    bundles = [{"GPU": 1.0 / config.num_engines, "CPU": 2} for _ in range(config.num_engines)]
+    pg = ray.util.placement_group(bundles, strategy="PACK")
+    ray.get(pg.ready())
+    
+    # Create vLLM engines
+    vllm_engines = vllm_utils3.create_vllm_engines(
+        num_engines=config.num_engines,
+        tensor_parallel_size=config.tensor_parallel_size,
+        enforce_eager=True,
+        tokenizer_name_or_path=config.model_name,
+        pretrain=config.model_name,
+        revision=None,
+        seed=42,
+        enable_prefix_caching=False,
+        max_model_len=config.max_model_len,
+        vllm_gpu_memory_utilization=config.vllm_gpu_memory_utilization,
+        single_gpu_mode=False,
+        pg=pg,
+        tools={},
+        max_tool_calls=[0],
+    )
+    
+    logger.info("vLLM engines ready")
+    
+    return vllm_engines
+
+
+def get_batch_data(dataset: Any, config: BenchmarkConfig, batch_idx: int) -> Tuple[List[List[int]], List[str], List[str]]:
+    """Get a batch of data from the dataset."""
+    start_idx = batch_idx * config.batch_size
+    end_idx = min(start_idx + config.batch_size, len(dataset))
+    
+    batch_data = dataset[start_idx:end_idx]
+    
+    # Extract prompts and ground truths
+    prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
+    ground_truths = batch_data[dataset_transformation.GROUND_TRUTHS_KEY]
+    datasets_list = batch_data[dataset_transformation.DATASET_SOURCE_KEY]
+    
+    # Expand if multiple samples per prompt
+    if config.num_samples_per_prompt > 1:
+        prompts = [prompt for prompt in prompts for _ in range(config.num_samples_per_prompt)]
+        ground_truths = [gt for gt in ground_truths for _ in range(config.num_samples_per_prompt)]
+        datasets_list = [ds for ds in datasets_list for _ in range(config.num_samples_per_prompt)]
         
-    def setup_tokenizer(self) -> None:
-        """Set up the tokenizer and model config."""
-        logger.info(f"Loading tokenizer and config: {self.config.model_name}")
-        self.tokenizer = transformers.AutoTokenizer.from_pretrained(self.config.model_name)
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-            
-        # Load model config for FLOPs calculation
-        self.model_config = transformers.AutoConfig.from_pretrained(self.config.model_name)
-        self.model_flops_per_token = calculate_model_flops_per_token(self.model_config, self.config.model_name)
-        self.gpu_peak_flops = get_gpu_peak_flops()
-        
-        logger.info(f"Model FLOPs per token: {self.model_flops_per_token/1e9:.2f} GFLOPs")
-        logger.info(f"GPU peak FLOPs: {self.gpu_peak_flops/1e12:.0f} TFLOPs")
-            
-    def setup_dataset(self) -> None:
-        """Set up the dataset using the same pipeline as grpo_fast.py."""
-        logger.info("Loading and processing dataset...")
-        
-        # Create tokenizer config (matching long_repro_script.sh)
-        tc = dataset_transformation.TokenizerConfig(
-            tokenizer_name_or_path=self.config.model_name,
-            trust_remote_code=True,
-            chat_template_name=self.config.chat_template_name,
-            add_bos=self.config.add_bos,
-        )
-        
-        # Transform function arguments
-        transform_fn_args = [
-            {},  # For rlvr_tokenize_v1
-            {
-                "max_token_length": self.config.max_token_length,
-                "max_prompt_token_length": self.config.max_prompt_token_length,
-            },  # For rlvr_filter_v1
-        ]
-        
-        # Load dataset
-        self.dataset = dataset_transformation.get_cached_dataset_tulu(
-            dataset_mixer_list=self.config.dataset_mixer_list,
-            dataset_mixer_list_splits=self.config.dataset_mixer_list_splits,
-            tc=tc,
-            dataset_transform_fn=["rlvr_tokenize_v1", "rlvr_filter_v1"],
-            transform_fn_args=transform_fn_args,
-            dataset_cache_mode="local",
-            dataset_local_cache_dir="benchmark_cache",
-            dataset_skip_cache=False,
-        )
-        
-        # Shuffle dataset
-        self.dataset = self.dataset.shuffle(seed=42)
-        logger.info(f"Dataset loaded with {len(self.dataset)} samples")
-        
-    def setup_vllm_engines(self) -> None:
-        """Set up vLLM engines."""
-        logger.info("Setting up vLLM engines...")
-        
-        # Initialize Ray
-        if ray.is_initialized():
-            ray.shutdown()
-        ray.init(num_cpus=4, num_gpus=1, ignore_reinit_error=True)
-        
-        # Create placement group for multiple engines
-        bundles = [{"GPU": 1.0 / self.config.num_engines, "CPU": 2} for _ in range(self.config.num_engines)]
-        pg = ray.util.placement_group(bundles, strategy="PACK")
-        ray.get(pg.ready())
-        
-        # Create vLLM engines
-        self.vllm_engines = vllm_utils3.create_vllm_engines(
-            num_engines=self.config.num_engines,
-            tensor_parallel_size=self.config.tensor_parallel_size,
-            enforce_eager=True,
-            tokenizer_name_or_path=self.config.model_name,
-            pretrain=self.config.model_name,
-            revision=None,
-            seed=42,
-            enable_prefix_caching=False,
-            max_model_len=self.config.max_model_len,
-            vllm_gpu_memory_utilization=self.config.vllm_gpu_memory_utilization,
-            single_gpu_mode=False,
-            pg=pg,
-            tools={},
-            max_tool_calls=[0],
-        )
-        
-        logger.info("vLLM engines ready")
-        
-    def get_batch_data(self, batch_idx: int) -> Tuple[List[List[int]], List[str], List[str]]:
-        """Get a batch of data from the dataset."""
-        start_idx = batch_idx * self.config.batch_size
-        end_idx = min(start_idx + self.config.batch_size, len(self.dataset))
-        
-        batch_data = self.dataset[start_idx:end_idx]
-        
-        # Extract prompts and ground truths
-        prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
-        ground_truths = batch_data[dataset_transformation.GROUND_TRUTHS_KEY]
-        datasets = batch_data[dataset_transformation.DATASET_SOURCE_KEY]
-        
-        # Expand if multiple samples per prompt
-        if self.config.num_samples_per_prompt > 1:
-            prompts = [prompt for prompt in prompts for _ in range(self.config.num_samples_per_prompt)]
-            ground_truths = [gt for gt in ground_truths for _ in range(self.config.num_samples_per_prompt)]
-            datasets = [ds for ds in datasets for _ in range(self.config.num_samples_per_prompt)]
-            
-        return prompts, ground_truths, datasets
-        
-    def run_generation_batch(self, prompts: List[List[int]], batch_idx: int) -> Dict[str, Any]:
-        """Run generation for a batch of prompts and measure performance."""
-        
-        # Create queues
-        inference_results_Q = queue.Queue(maxsize=10)
-        param_prompt_Q = queue.Queue(maxsize=10)
-        evaluation_inference_results_Q = queue.Queue(maxsize=10)
-        
-        # Create sampling parameters
-        generation_config = vllm.SamplingParams(
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-            top_p=self.config.top_p,
-        )
-        
-        eval_generation_config = vllm.SamplingParams(
-            temperature=0.0,
-            max_tokens=self.config.max_tokens,
-        )
-        
-        # Start vLLM generation thread
-        def wrapped_vllm_generate_thread() -> None:
-            try:
-                grpo_fast.vllm_generate_thread(
-                    self.vllm_engines,
-                    generation_config,
-                    eval_generation_config,
-                    inference_results_Q,
-                    param_prompt_Q,
-                    1,  # num_training_steps
-                    None,  # eval_prompt_token_ids
-                    evaluation_inference_results_Q,
-                    2,  # eval_freq
-                    1,  # resume_training_step
-                    False,  # tool_use
-                )
-            except Exception as e:
-                logger.error(f"Error in vllm_generate_thread: {e}")
-                inference_results_Q.put(("ERROR", str(e), [], []))
-                raise
-        
-        thread = threading.Thread(target=wrapped_vllm_generate_thread)
-        
-        # Measure timing
-        start_time = time.time()
-        
-        # Start thread and send prompts
-        thread.start()
-        param_prompt_Q.put((None, prompts))
-        
-        # Get results
+    return prompts, ground_truths, datasets_list
+
+
+def run_generation_batch(vllm_engines: List[Any], config: BenchmarkConfig, model_flops_per_token: float, gpu_peak_flops: float, prompts: List[List[int]], batch_idx: int) -> Dict[str, Any]:
+    """Run generation for a batch of prompts and measure performance."""
+    
+    # Create queues
+    inference_results_Q = queue.Queue(maxsize=10)
+    param_prompt_Q = queue.Queue(maxsize=10)
+    evaluation_inference_results_Q = queue.Queue(maxsize=10)
+    
+    # Create sampling parameters
+    generation_config = vllm.SamplingParams(
+        temperature=config.temperature,
+        max_tokens=config.max_tokens,
+        top_p=config.top_p,
+    )
+    
+    eval_generation_config = vllm.SamplingParams(
+        temperature=0.0,
+        max_tokens=config.max_tokens,
+    )
+    
+    # Start vLLM generation thread
+    def wrapped_vllm_generate_thread() -> None:
         try:
-            result = inference_results_Q.get(timeout=120)
-            
-            if result[0] == "ERROR":
-                logger.error(f"Generation failed: {result[1]}")
-                return {"error": result[1]}
-                
-            response_ids, finish_reasons, masks, info = result
-            
-            # Calculate timing and throughput
-            end_time = time.time()
-            generation_time = end_time - start_time
-            
-            # Calculate tokens generated (response_ids only contains newly generated tokens)
-            total_new_tokens = sum(len(response) for response in response_ids)
-            total_prompt_tokens = sum(len(prompt) for prompt in prompts)
-            total_tokens_generated = total_new_tokens + total_prompt_tokens
-            
-            tokens_per_second = total_new_tokens / generation_time if generation_time > 0 else 0
-            total_tokens_per_second = total_tokens_generated / generation_time if generation_time > 0 else 0
-            
-            # Calculate MFU
-            mfu_percentage = calculate_mfu(tokens_per_second, self.model_flops_per_token, self.gpu_peak_flops)
-            
-            # Send stop signal
-            param_prompt_Q.put(None)
-            
-        finally:
-            thread.join(timeout=10)
-            
-        return {
-            "batch_idx": batch_idx,
-            "batch_size": len(prompts),
-            "generation_time": generation_time,
-            "total_tokens_generated": total_tokens_generated,
-            "total_new_tokens": total_new_tokens,
-            "tokens_per_second": tokens_per_second,
-            "total_tokens_per_second": total_tokens_per_second,
-            "mfu_percentage": mfu_percentage,
-            "avg_new_tokens_per_sample": total_new_tokens / len(prompts) if prompts else 0,
-            "finish_reasons": finish_reasons,
-            "response_lengths": [len(response) for response in response_ids],
-        }
+            grpo_fast.vllm_generate_thread(
+                vllm_engines,
+                generation_config,
+                eval_generation_config,
+                inference_results_Q,
+                param_prompt_Q,
+                1,  # num_training_steps
+                None,  # eval_prompt_token_ids
+                evaluation_inference_results_Q,
+                2,  # eval_freq
+                1,  # resume_training_step
+                False,  # tool_use
+            )
+        except Exception as e:
+            logger.error(f"Error in vllm_generate_thread: {e}")
+            inference_results_Q.put(("ERROR", str(e), [], []))
+            raise
+    
+    thread = threading.Thread(target=wrapped_vllm_generate_thread)
+    
+    # Measure timing
+    start_time = time.time()
+    
+    # Start thread and send prompts
+    thread.start()
+    param_prompt_Q.put((None, prompts))
+    
+    # Get results
+    try:
+        result = inference_results_Q.get(timeout=120)
         
-    def run_benchmark(self) -> List[Dict[str, Any]]:
-        """Run the full benchmark."""
-        logger.info(f"Starting benchmark with {self.config.num_batches} batches of size {self.config.batch_size}")
-        
-        all_results = []
-        total_start_time = time.time()
-        
-        for batch_idx in range(self.config.num_batches):
-            logger.info(f"Processing batch {batch_idx + 1}/{self.config.num_batches}")
+        if result[0] == "ERROR":
+            logger.error(f"Generation failed: {result[1]}")
+            return {"error": result[1]}
             
-            # Get batch data
-            prompts, ground_truths, datasets = self.get_batch_data(batch_idx)
-            
-            if not prompts:
-                logger.warning(f"No prompts in batch {batch_idx}, skipping")
-                continue
-                
-            # Run generation
-            batch_result = self.run_generation_batch(prompts, batch_idx)
-            
-            if "error" not in batch_result:
-                all_results.append(batch_result)
-                logger.info(f"Batch {batch_idx + 1} completed: "
-                          f"{batch_result['tokens_per_second']:.2f} new tokens/sec, "
-                          f"MFU: {batch_result['mfu_percentage']:.2f}%, "
-                          f"{batch_result['generation_time']:.2f}s")
-            else:
-                logger.error(f"Batch {batch_idx + 1} failed: {batch_result['error']}")
-                
-        total_time = time.time() - total_start_time
+        response_ids, finish_reasons, masks, info = result
         
-        # Calculate summary statistics
-        if all_results:
-            self.print_summary(all_results, total_time)
+        # Calculate timing and throughput
+        end_time = time.time()
+        generation_time = end_time - start_time
+        
+        # Calculate tokens generated (response_ids only contains newly generated tokens)
+        total_new_tokens = sum(len(response) for response in response_ids)
+        total_prompt_tokens = sum(len(prompt) for prompt in prompts)
+        total_tokens_generated = total_new_tokens + total_prompt_tokens
+        
+        tokens_per_second = total_new_tokens / generation_time if generation_time > 0 else 0
+        total_tokens_per_second = total_tokens_generated / generation_time if generation_time > 0 else 0
+        
+        # Calculate MFU
+        mfu_percentage = calculate_mfu(tokens_per_second, model_flops_per_token, gpu_peak_flops)
+        
+        # Send stop signal
+        param_prompt_Q.put(None)
+        
+    finally:
+        thread.join(timeout=10)
+        
+    return {
+        "batch_idx": batch_idx,
+        "batch_size": len(prompts),
+        "generation_time": generation_time,
+        "total_tokens_generated": total_tokens_generated,
+        "total_new_tokens": total_new_tokens,
+        "tokens_per_second": tokens_per_second,
+        "total_tokens_per_second": total_tokens_per_second,
+        "mfu_percentage": mfu_percentage,
+        "avg_new_tokens_per_sample": total_new_tokens / len(prompts) if prompts else 0,
+        "finish_reasons": finish_reasons,
+        "response_lengths": [len(response) for response in response_ids],
+    }
+
+
+def run_benchmark(dataset: Any, vllm_engines: List[Any], config: BenchmarkConfig, model_flops_per_token: float, gpu_peak_flops: float) -> List[Dict[str, Any]]:
+    """Run the full benchmark."""
+    logger.info(f"Starting benchmark with {config.num_batches} batches of size {config.batch_size}")
+    
+    all_results = []
+    total_start_time = time.time()
+    
+    for batch_idx in range(config.num_batches):
+        logger.info(f"Processing batch {batch_idx + 1}/{config.num_batches}")
+        
+        # Get batch data
+        prompts, ground_truths, datasets_list = get_batch_data(dataset, config, batch_idx)
+        
+        if not prompts:
+            logger.warning(f"No prompts in batch {batch_idx}, skipping")
+            continue
+            
+        # Run generation
+        batch_result = run_generation_batch(vllm_engines, config, model_flops_per_token, gpu_peak_flops, prompts, batch_idx)
+        
+        if "error" not in batch_result:
+            all_results.append(batch_result)
+            logger.info(f"Batch {batch_idx + 1} completed: "
+                      f"{batch_result['tokens_per_second']:.2f} new tokens/sec, "
+                      f"MFU: {batch_result['mfu_percentage']:.2f}%, "
+                      f"{batch_result['generation_time']:.2f}s")
         else:
-            logger.error("No successful batches completed")
+            logger.error(f"Batch {batch_idx + 1} failed: {batch_result['error']}")
             
-        return all_results
+    total_time = time.time() - total_start_time
+    
+    # Calculate summary statistics
+    if all_results:
+        print_summary(all_results, total_time, config, model_flops_per_token, gpu_peak_flops)
+    else:
+        logger.error("No successful batches completed")
         
-    def print_summary(self, results: List[Dict[str, Any]], total_time: float) -> None:
-        """Print benchmark summary statistics."""
+    return all_results
+
+
+def print_summary(results: List[Dict[str, Any]], total_time: float, config: BenchmarkConfig, model_flops_per_token: float, gpu_peak_flops: float) -> None:
+    """Print benchmark summary statistics."""
+    
+    # Calculate metrics for all batches
+    total_samples = sum(r["batch_size"] for r in results)
+    total_new_tokens = sum(r["total_new_tokens"] for r in results)
+    total_tokens = sum(r["total_tokens_generated"] for r in results)
+    total_generation_time = sum(r["generation_time"] for r in results)
+    
+    avg_new_tokens_per_second = total_new_tokens / total_generation_time if total_generation_time > 0 else 0
+    avg_total_tokens_per_second = total_tokens / total_generation_time if total_generation_time > 0 else 0
+    avg_generation_time = total_generation_time / len(results)
+    
+    # Calculate average MFU
+    avg_mfu = sum(r["mfu_percentage"] for r in results) / len(results) if results else 0
+    
+    throughput_samples_per_second = total_samples / total_time
+    
+    # Calculate metrics excluding the first batch (N-1 batches)
+    if len(results) > 1:
+        last_n_minus_1_results = results[1:]  # Skip first batch
+        last_n_minus_1_samples = sum(r["batch_size"] for r in last_n_minus_1_results)
+        last_n_minus_1_new_tokens = sum(r["total_new_tokens"] for r in last_n_minus_1_results)
+        last_n_minus_1_tokens = sum(r["total_tokens_generated"] for r in last_n_minus_1_results)
+        last_n_minus_1_generation_time = sum(r["generation_time"] for r in last_n_minus_1_results)
         
-        # Calculate metrics for all batches
-        total_samples = sum(r["batch_size"] for r in results)
-        total_new_tokens = sum(r["total_new_tokens"] for r in results)
-        total_tokens = sum(r["total_tokens_generated"] for r in results)
-        total_generation_time = sum(r["generation_time"] for r in results)
+        avg_new_tokens_per_second_last_n_minus_1 = last_n_minus_1_new_tokens / last_n_minus_1_generation_time if last_n_minus_1_generation_time > 0 else 0
+        avg_total_tokens_per_second_last_n_minus_1 = last_n_minus_1_tokens / last_n_minus_1_generation_time if last_n_minus_1_generation_time > 0 else 0
+        avg_generation_time_last_n_minus_1 = last_n_minus_1_generation_time / len(last_n_minus_1_results)
+        avg_mfu_last_n_minus_1 = sum(r["mfu_percentage"] for r in last_n_minus_1_results) / len(last_n_minus_1_results)
         
-        avg_new_tokens_per_second = total_new_tokens / total_generation_time if total_generation_time > 0 else 0
-        avg_total_tokens_per_second = total_tokens / total_generation_time if total_generation_time > 0 else 0
-        avg_generation_time = total_generation_time / len(results)
+        # Calculate % wasted time due to variable generation lengths
+        # This is the difference between time spent on longest vs shortest generations
+        response_lengths_last_n_minus_1 = []
+        for r in last_n_minus_1_results:
+            response_lengths_last_n_minus_1.extend(r["response_lengths"])
         
-        # Calculate average MFU
-        avg_mfu = sum(r["mfu_percentage"] for r in results) / len(results) if results else 0
-        
-        throughput_samples_per_second = total_samples / total_time
-        
-        # Calculate metrics excluding the first batch (N-1 batches)
-        if len(results) > 1:
-            last_n_minus_1_results = results[1:]  # Skip first batch
-            last_n_minus_1_samples = sum(r["batch_size"] for r in last_n_minus_1_results)
-            last_n_minus_1_new_tokens = sum(r["total_new_tokens"] for r in last_n_minus_1_results)
-            last_n_minus_1_tokens = sum(r["total_tokens_generated"] for r in last_n_minus_1_results)
-            last_n_minus_1_generation_time = sum(r["generation_time"] for r in last_n_minus_1_results)
+        if response_lengths_last_n_minus_1:
+            max_response_length = max(response_lengths_last_n_minus_1)
+            min_response_length = min(response_lengths_last_n_minus_1)
+            avg_response_length = sum(response_lengths_last_n_minus_1) / len(response_lengths_last_n_minus_1)
             
-            avg_new_tokens_per_second_last_n_minus_1 = last_n_minus_1_new_tokens / last_n_minus_1_generation_time if last_n_minus_1_generation_time > 0 else 0
-            avg_total_tokens_per_second_last_n_minus_1 = last_n_minus_1_tokens / last_n_minus_1_generation_time if last_n_minus_1_generation_time > 0 else 0
-            avg_generation_time_last_n_minus_1 = last_n_minus_1_generation_time / len(last_n_minus_1_results)
-            avg_mfu_last_n_minus_1 = sum(r["mfu_percentage"] for r in last_n_minus_1_results) / len(last_n_minus_1_results)
-            
-            # Calculate % wasted time due to variable generation lengths
-            # This is the difference between time spent on longest vs shortest generations
-            response_lengths_last_n_minus_1 = []
-            for r in last_n_minus_1_results:
-                response_lengths_last_n_minus_1.extend(r["response_lengths"])
-            
-            if response_lengths_last_n_minus_1:
-                max_response_length = max(response_lengths_last_n_minus_1)
-                min_response_length = min(response_lengths_last_n_minus_1)
-                avg_response_length = sum(response_lengths_last_n_minus_1) / len(response_lengths_last_n_minus_1)
-                
-                # Estimate wasted time as the percentage of time spent on padding to max length
-                # This is a rough estimate: (max_length - avg_length) / max_length
-                wasted_time_percentage = ((max_response_length - avg_response_length) / max_response_length * 100) if max_response_length > 0 else 0
-            else:
-                wasted_time_percentage = 0
+            # Estimate wasted time as the percentage of time spent on padding to max length
+            # This is a rough estimate: (max_length - avg_length) / max_length
+            wasted_time_percentage = ((max_response_length - avg_response_length) / max_response_length * 100) if max_response_length > 0 else 0
         else:
-            # If only one batch, use the same metrics
-            avg_new_tokens_per_second_last_n_minus_1 = avg_new_tokens_per_second
-            avg_total_tokens_per_second_last_n_minus_1 = avg_total_tokens_per_second
-            avg_generation_time_last_n_minus_1 = avg_generation_time
-            avg_mfu_last_n_minus_1 = avg_mfu
             wasted_time_percentage = 0
-        
-        print("\n" + "="*60)
-        print("BENCHMARK SUMMARY")
-        print("="*60)
-        print(f"Model: {self.config.model_name}")
-        print(f"Total batches: {len(results)}")
-        print(f"Total samples: {total_samples}")
-        print(f"Batch size: {self.config.batch_size}")
-        print(f"Max tokens: {self.config.max_tokens}")
-        print(f"Temperature: {self.config.temperature}")
+    else:
+        # If only one batch, use the same metrics
+        avg_new_tokens_per_second_last_n_minus_1 = avg_new_tokens_per_second
+        avg_total_tokens_per_second_last_n_minus_1 = avg_total_tokens_per_second
+        avg_generation_time_last_n_minus_1 = avg_generation_time
+        avg_mfu_last_n_minus_1 = avg_mfu
+        wasted_time_percentage = 0
+    
+    print("\n" + "="*60)
+    print("BENCHMARK SUMMARY")
+    print("="*60)
+    print(f"Model: {config.model_name}")
+    print(f"Total batches: {len(results)}")
+    print(f"Total samples: {total_samples}")
+    print(f"Batch size: {config.batch_size}")
+    print(f"Max tokens: {config.max_tokens}")
+    print(f"Temperature: {config.temperature}")
+    print("-"*60)
+    print(f"Total time: {total_time:.2f}s")
+    print(f"Total generation time: {total_generation_time:.2f}s")
+    print(f"Total new tokens generated: {total_new_tokens}")
+    print(f"Total tokens processed: {total_tokens}")
+    print("-"*60)
+    print("ALL BATCHES:")
+    print(f"Average new tokens/second: {avg_new_tokens_per_second:.2f}")
+    print(f"Average total tokens/second: {avg_total_tokens_per_second:.2f}")
+    print(f"Average MFU: {avg_mfu:.2f}%")
+    print(f"Average generation time per batch: {avg_generation_time:.2f}s")
+    print(f"Throughput (samples/second): {throughput_samples_per_second:.2f}")
+    print(f"Average new tokens per sample: {total_new_tokens / total_samples:.2f}")
+    
+    if len(results) > 1:
         print("-"*60)
-        print(f"Total time: {total_time:.2f}s")
-        print(f"Total generation time: {total_generation_time:.2f}s")
-        print(f"Total new tokens generated: {total_new_tokens}")
-        print(f"Total tokens processed: {total_tokens}")
-        print("-"*60)
-        print("ALL BATCHES:")
-        print(f"Average new tokens/second: {avg_new_tokens_per_second:.2f}")
-        print(f"Average total tokens/second: {avg_total_tokens_per_second:.2f}")
-        print(f"Average MFU: {avg_mfu:.2f}%")
-        print(f"Average generation time per batch: {avg_generation_time:.2f}s")
-        print(f"Throughput (samples/second): {throughput_samples_per_second:.2f}")
-        print(f"Average new tokens per sample: {total_new_tokens / total_samples:.2f}")
-        
-        if len(results) > 1:
-            print("-"*60)
-            print("LAST N-1 BATCHES (excluding first batch):")
-            print(f"Average new tokens/second: {avg_new_tokens_per_second_last_n_minus_1:.2f}")
-            print(f"Average total tokens/second: {avg_total_tokens_per_second_last_n_minus_1:.2f}")
-            print(f"Average MFU: {avg_mfu_last_n_minus_1:.2f}%")
-            print(f"Average generation time per batch: {avg_generation_time_last_n_minus_1:.2f}s")
-            print(f"Wasted time (variable lengths): {wasted_time_percentage:.2f}%")
-            print(f"Average new tokens per sample: {last_n_minus_1_new_tokens / last_n_minus_1_samples:.2f}")
-        
-        print("-"*60)
-        print(f"Model FLOPs per token: {self.model_flops_per_token/1e9:.2f} GFLOPs")
-        print(f"GPU peak FLOPs: {self.gpu_peak_flops/1e12:.0f} TFLOPs")
-        print("="*60)
-        
-        # Per-batch details
-        print("\nPER-BATCH RESULTS:")
-        print("-"*60)
-        for r in results:
-            print(f"Batch {r['batch_idx'] + 1}: {r['tokens_per_second']:.2f} new tok/s, "
-                  f"MFU: {r['mfu_percentage']:.2f}%, {r['generation_time']:.2f}s, "
-                  f"{r['total_new_tokens']} new tokens")
-                  
-    def cleanup(self) -> None:
-        """Clean up resources."""
-        if self.vllm_engines:
-            for engine in self.vllm_engines:
-                ray.kill(engine)
-        if ray.is_initialized():
-            ray.shutdown()
+        print("LAST N-1 BATCHES (excluding first batch):")
+        print(f"Average new tokens/second: {avg_new_tokens_per_second_last_n_minus_1:.2f}")
+        print(f"Average total tokens/second: {avg_total_tokens_per_second_last_n_minus_1:.2f}")
+        print(f"Average MFU: {avg_mfu_last_n_minus_1:.2f}%")
+        print(f"Average generation time per batch: {avg_generation_time_last_n_minus_1:.2f}s")
+        print(f"Wasted time (variable lengths): {wasted_time_percentage:.2f}%")
+        print(f"Average new tokens per sample: {last_n_minus_1_new_tokens / last_n_minus_1_samples:.2f}")
+    
+    print("-"*60)
+    print(f"Model FLOPs per token: {model_flops_per_token/1e9:.2f} GFLOPs")
+    print(f"GPU peak FLOPs: {gpu_peak_flops/1e12:.0f} TFLOPs")
+    print("="*60)
+    
+    # Per-batch details
+    print("\nPER-BATCH RESULTS:")
+    print("-"*60)
+    for r in results:
+        print(f"Batch {r['batch_idx'] + 1}: {r['tokens_per_second']:.2f} new tok/s, "
+              f"MFU: {r['mfu_percentage']:.2f}%, {r['generation_time']:.2f}s, "
+              f"{r['total_new_tokens']} new tokens")
+
+
+def cleanup(vllm_engines: Optional[List[Any]]) -> None:
+    """Clean up resources."""
+    if vllm_engines:
+        for engine in vllm_engines:
+            ray.kill(engine)
+    if ray.is_initialized():
+        ray.shutdown()
 
 
 def main() -> None:
@@ -625,15 +625,15 @@ def main() -> None:
     )
     
     # Run benchmark
-    benchmark = GeneratorBenchmark(config)
+    vllm_engines = None
     
     try:
-        benchmark.setup_tokenizer()
-        benchmark.setup_dataset()
-        benchmark.setup_vllm_engines()
-        benchmark.run_benchmark()
+        tokenizer, model_config, model_flops_per_token, gpu_peak_flops = setup_tokenizer(config)
+        dataset = setup_dataset(config)
+        vllm_engines = setup_vllm_engines(config)
+        run_benchmark(dataset, vllm_engines, config, model_flops_per_token, gpu_peak_flops)
     finally:
-        benchmark.cleanup()
+        cleanup(vllm_engines)
 
 
 if __name__ == "__main__":
