@@ -21,6 +21,7 @@ import torch
 from transformers import AutoTokenizer, AutoConfig
 from vllm import SamplingParams
 from ray.util import placement_group
+from torch.utils.flop_counter import FlopCounterMode
 
 from open_instruct.dataset_transformation import (
     INPUT_IDS_PROMPT_KEY,
@@ -37,39 +38,66 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def calculate_model_flops_per_token(model_config):
+def get_flops_forward(model, inp):
     """
-    Calculate theoretical FLOPs per token for a transformer model.
+    Calculates FLOPs for the forward pass of a PyTorch model.
+
+    Args:
+        model (torch.nn.Module): The PyTorch model.
+        inp (torch.Tensor or Tuple): The input tensor or a tuple of input tensors
+                                     for the model.
+    Returns:
+        int: Total FLOPs for the forward pass.
+    """
+    istrain = model.training
+    model.eval()  # Set model to evaluation mode for consistent FLOPs counting
+    
+    # Ensure input is a tensor
+    if not isinstance(inp, torch.Tensor):
+        # Assuming input is a shape tuple if not a tensor
+        inp = torch.randn(inp) 
+
+    flop_counter = FlopCounterMode(mods=model, display=False, depth=None)
+    with flop_counter:
+        model(inp)
+    
+    total_flops = flop_counter.get_total_flops()
+
+    if istrain:
+        model.train() # Restore original training state
+    return total_flops
+
+
+def calculate_model_flops_per_token(model_config, model_path):
+    """
+    Calculate actual FLOPs per token for a transformer model using torch FlopCounterMode.
     
     Args:
         model_config: HuggingFace model config
+        model_path: Path to the actual model for precise measurement
         
     Returns:
         float: FLOPs per token
     """
-    # Get model parameters
-    hidden_size = model_config.hidden_size
-    intermediate_size = getattr(model_config, 'intermediate_size', hidden_size * 4)
-    num_layers = model_config.num_hidden_layers
-    vocab_size = model_config.vocab_size
-    num_attention_heads = model_config.num_attention_heads
+    from transformers import AutoModelForCausalLM
     
-    # Calculate FLOPs per token
-    # Reference: https://arxiv.org/abs/2001.08361 (Scaling Laws for Neural Language Models)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_path, 
+        torch_dtype=torch.bfloat16, 
+        device_map="auto",
+        trust_remote_code=True
+    )
     
-    # Attention: 2 * seq_len * hidden_size^2 * num_heads (for Q, K, V projections and output)
-    # For autoregressive generation, effective seq_len ≈ 1 for new tokens
-    attention_flops = 4 * hidden_size * hidden_size * num_layers
+    # Create a single token input
+    input_ids = torch.tensor([[1]], device=model.device)  # Single token
     
-    # Feed forward: 2 * hidden_size * intermediate_size * 2 (up and down projections)
-    ff_flops = 4 * hidden_size * intermediate_size * num_layers
+    flops = get_flops_forward(model, input_ids)
     
-    # Embedding and output projection
-    embedding_flops = 2 * hidden_size * vocab_size
+    # Clean up
+    del model
+    torch.cuda.empty_cache()
     
-    total_flops_per_token = attention_flops + ff_flops + embedding_flops
-    
-    return total_flops_per_token
+    return flops
 
 
 def get_gpu_peak_flops():
@@ -189,7 +217,7 @@ class GeneratorBenchmark:
             
         # Load model config for FLOPs calculation
         self.model_config = AutoConfig.from_pretrained(self.config.model_name)
-        self.model_flops_per_token = calculate_model_flops_per_token(self.model_config)
+        self.model_flops_per_token = calculate_model_flops_per_token(self.model_config, self.config.model_name)
         self.gpu_peak_flops = get_gpu_peak_flops()
         
         logger.info(f"Model FLOPs per token: {self.model_flops_per_token/1e9:.2f} GFLOPs")
