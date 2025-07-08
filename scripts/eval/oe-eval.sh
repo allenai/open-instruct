@@ -266,7 +266,7 @@ GPU_COUNT_OTHER=$((NUM_GPUS * 2))
 MODEL_TYPE_OTHER=""
 
 # Build model args JSON with optional process_output
-MODEL_ARGS="{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}"
+MODEL_ARGS="{\"model_path\":\"${MODEL_LOCATION}\", \"max_length\": ${MAX_LENGTH}, \"trust_remote_code\": \"true\""
 if [[ -n "$PROCESS_OUTPUT" ]]; then
     MODEL_ARGS+=", \"process_output\": \"${PROCESS_OUTPUT}\""
 fi
