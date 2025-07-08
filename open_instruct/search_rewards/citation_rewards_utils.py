@@ -105,7 +105,7 @@ def score_in_context_citations(question: str, response: str, citations: Dict[str
     def concatenate_citations(citation_ids: List[str], citations: Dict[str, str]) -> str:
         if len(citation_ids) == 0:
             return ""
-        return "\n\n".join([citations[citation_id] for citation_id in citation_ids])
+        return "\n\n".join([citations[citation_id] for citation_id in citation_ids if citation_id in citations])
 
     claims = extract_claims_and_corresponding_citation_ids(response)
 
@@ -115,7 +115,8 @@ def score_in_context_citations(question: str, response: str, citations: Dict[str
     for claim_text, citation_ids in claims.items():
         concatenated_citations = concatenate_citations(citation_ids, citations)
         avg_f1 += score_citation_f1(question, claim_text, concatenated_citations, response)
-    avg_f1 /= len(claims)
+    if len(claims) > 0:
+        avg_f1 /= len(claims)
 
     return 0.9 * avg_f1 + 0.1 * citation_format_reward
 
@@ -138,6 +139,9 @@ def score_citation_format(claims: Dict[str, List[str]], citations: Dict[str, str
 def score_citation_f1(question: str, claim: str, concatenated_citations: str, full_response: str) -> float:
     recall = score_citation_recall(question, claim, concatenated_citations, full_response)
     precision = score_citation_precision(question, claim, concatenated_citations)
+    # avoid division by zero
+    if recall + precision == 0:
+        return 0
     f1 = 2 * (recall * precision) / (recall + precision)
     return f1
 
