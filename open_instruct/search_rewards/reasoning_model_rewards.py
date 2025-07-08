@@ -19,7 +19,7 @@ async def hle_judge_reward_async(question: str, response: str, correct_answer: s
     else:
         judge_prompt = HLE_JUDGE_PROMPT.format(question=question, response=response, correct_answer=correct_answer)
     judge_response = await run_litellm_async(
-        model_name="gpt-4.1", 
+        model_name="gpt-4o-mini", 
         system_prompt=None, 
         user_prompt=judge_prompt,
     )
@@ -64,7 +64,7 @@ async def compute_hle_reward_async(response: str, correct_answer: str, question:
         },
     }
     
-    # Step 1: Extract answer and citations from the response
+    # Step 1: Extract answer and citations from the responsez
     extracted_context, extracted_answer, extracted_citations = extract_answer_context_citations(response, result)
     if extracted_context is None:
         result["error"] = "Failed to extract answer from response - no <answer></answer> tags found"
