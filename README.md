@@ -79,7 +79,7 @@ beaker image create open_instruct_dev -n open_instruct_dev -w ai2/$beaker_user
 Optionally you can build the base image with the following command:
 
 ```bash
-docker build --build-arg CUDA=12.1.0 --build-arg TARGET=cudnn8-devel --build-arg DIST=ubuntu20.04 -f  Dockerfile.base . -t cuda-no-conda:12.1-cudnn8-dev-ubuntu20.04
+docker build -f Dockerfile.base --build-arg CUDA="12.8.0" --build-arg VARIANT=base --build-arg DIST=ubuntu22.04 --build-arg TORCH_VER="2.7.0" --build-arg BEAKER_VERSION=v1.5.208 --build-arg VULKAN_SDK_VERSION="1.3.275" --target default-cuda -t cuda:12.8-ubuntu22.04-torch2.6.0-v1.2.170 .
 ```
 
 * **Docker with uv**: You can also use the Dockerfile to build a Docker image with uv. You can build the image with the following command:

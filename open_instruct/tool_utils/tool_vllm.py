@@ -11,7 +11,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor  # add import for async execution
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Optional, Union, Callable, Any, List
 
 import requests
 from rich.console import Console
@@ -199,15 +199,18 @@ class ToolUseLLM(LLM):
         self.single_n_sampling_params.n = 1
 
         for i, prompt in enumerate(it):
-            self._add_request(
-                prompt,
-                params[i] if isinstance(params, Sequence) else params,
-                tokenization_kwargs=tokenization_kwargs,
-                lora_request=lora_request[i] if isinstance(
-                    lora_request, Sequence) else lora_request,
-                prompt_adapter_request=prompt_adapter_request,
-                priority=priority[i] if priority else 0,
-            )
+            for j in range(params.n):
+                request_id = f"{i}-{j}"
+                self.llm_engine.add_request(
+                    request_id,
+                    prompt,
+                    self.single_n_sampling_params,
+                    tokenization_kwargs=tokenization_kwargs,
+                    lora_request=lora_request[i] if isinstance(
+                        lora_request, Sequence) else lora_request,
+                    prompt_adapter_request=prompt_adapter_request,
+                    priority=priority[i] if priority else 0,
+                )
 
     def _run_engine(self, *, use_tqdm: bool) -> list[Union[RequestOutput, PoolingRequestOutput]]:
         # Initialize tqdm.
