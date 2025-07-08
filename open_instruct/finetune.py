@@ -346,6 +346,10 @@ class FlatArguments:
     )
     sync_each_batch: bool = False
     """Optionaly sync grads every batch when using grad accumulation. Can significantly reduce memory costs."""
+    packing: bool = field(
+        default=False,
+        metadata={"help": "Whether to use packing/padding-free collation via TensorDataCollatorWithFlattening"},
+    )
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -628,7 +632,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         model.gradient_checkpointing_enable()
 
     # DataLoaders creation:
-    if args.padding_free:
+    if args.packing:
         collate_fn = TensorDataCollatorWithFlattening()
     else:
         collate_fn = DataCollatorForSeq2Seq(
