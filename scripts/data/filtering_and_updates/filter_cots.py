@@ -10,6 +10,7 @@ def is_think_answer(elem):
     <think>...</think><answer>...</answer>, False otherwise.
     Also returns false if 'messages' or last message's 'content' is None
     """
+    pattern = re.compile(r'^<think>[\s\S]*?</think><answer>[\s\S]*?</answer>$')
     try:
         return bool(pattern.fullmatch(elem["messages"][-1]["content"]))
     except Exception:
