@@ -73,7 +73,7 @@ from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
-from vllm import SamplingParams, VLLMEngine
+from vllm import SamplingParams
 
 from open_instruct.dataset_transformation import (
     DATASET_SOURCE_KEY,
@@ -1550,7 +1550,7 @@ def create_model_and_optimizer(
     beaker_config: BeakerRuntimeConfig,
     wandb_url: str,
     tokenizer: PreTrainedTokenizer,
-) -> tuple[ModelGroup, list[VLLMEngine], dict, int, int]:
+) -> tuple[ModelGroup, list["VLLMEngine"], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Ray initialization
     ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
@@ -1978,7 +1978,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         n=args.num_samples_per_prompt_rollout,
         stop=stop_strings,
     )
-    eval_generation_config = generation_config.copy()
+    eval_generation_config = generation_config.clone()
     eval_generation_config.temperature = 0.0
     eval_generation_config.n = 1
 
