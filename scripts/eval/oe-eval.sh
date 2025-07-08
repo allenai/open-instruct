@@ -47,7 +47,7 @@ set -ex
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--unseen-evals] [--task-suite TASK_SUITE] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>]"
+    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--task-suite TASK_SUITE] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>]"
     echo "TASK_SUITE should be one of: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN (default: NEXT_MODEL_DEV)"
     echo "TASKS should be a comma-separated list of task specifications (e.g., 'gsm8k::tulu,bbh:cot::tulu')"
     echo "STOP_SEQUENCES should be a comma-separated list of strings to stop generation at (e.g., '</answer>,\\n\\n')"
@@ -64,7 +64,6 @@ while [[ "$#" -gt 0 ]]; do
         --upload_to_hf) UPLOAD_TO_HF="$2"; shift ;;
         --revision) REVISION="$2"; shift ;;
         --max-length) MAX_LENGTH="$2"; shift ;;
-        --unseen-evals) UNSEEN_EVALS="true" ;;
         --task-suite) TASK_SUITE="$2"; shift ;;
         --priority) PRIORITY="$2"; shift ;;
         --tasks) CUSTOM_TASKS="$2"; shift ;;
@@ -95,7 +94,6 @@ MODEL_NAME_SAFE=${MODEL_NAME//\//_}
 
 # Set defaults for optional arguments
 MAX_LENGTH="${MAX_LENGTH:-4096}"
-UNSEEN_EVALS="${UNSEEN_EVALS:-false}"
 TASK_SUITE="${TASK_SUITE:-NEXT_MODEL_DEV}"
 PRIORITY="${PRIORITY:normal}"
 EVALUATE_ON_WEKA="${EVALUATE_ON_WEKA:-false}"
@@ -127,11 +125,7 @@ fi
 
 # Set HF_UPLOAD_ARG only if UPLOAD_TO_HF is specified
 if [[ -n "$UPLOAD_TO_HF" ]]; then
-    if [ "$UNSEEN_EVALS" == "true" ]; then
-        HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}-unseen//results/${MODEL_NAME_SAFE}"
-    else
-        HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}//results/${MODEL_NAME_SAFE}"
-    fi
+    HF_UPLOAD_ARG="--hf-save-dir ${UPLOAD_TO_HF}//results/${MODEL_NAME_SAFE}"
 else
     HF_UPLOAD_ARG=""
 fi
@@ -221,20 +215,6 @@ NEXT_MODEL_UNSEEN=(
 # If custom tasks provided, convert comma-separated string to array
 if [[ -n "$CUSTOM_TASKS" ]]; then
     IFS=',' read -ra TASKS <<< "$CUSTOM_TASKS"
-elif [ "$UNSEEN_EVALS" == "true" ]; then
-    # For backward compatibility, if --unseen-evals is used, determine which unseen suite to use
-    case "$TASK_SUITE" in
-        NEXT_MODEL_DEV|NEXT_MODEL_UNSEEN)
-            TASKS=("${NEXT_MODEL_UNSEEN[@]}")
-            ;;
-        TULU_3_DEV|TULU_3_UNSEEN)
-            TASKS=("${TULU_3_UNSEEN[@]}")
-            ;;
-        *)
-            echo "Error: Unknown task suite '$TASK_SUITE'"
-            usage
-            ;;
-    esac
 else
     # Use the specified task suite or default
     case "$TASK_SUITE" in
