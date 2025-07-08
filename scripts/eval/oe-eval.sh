@@ -173,7 +173,7 @@ NEXT_MODEL_DEV=(
     "simpleqa::tulu-thinker"
     
     # Reasoning
-    "bbh:cot-v1::hamish_zs_reasoning"
+    "bbh:cot::hamish_zs_reasoning"
     "gpqa:0shot_cot::hamish_zs_reasoning"
     "zebralogic::hamish_zs_reasoning"
     "agi_eval_english:0shot_cot::hamish_zs_reasoning"
