@@ -380,8 +380,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         **accelerator_log_kwargs,
         kwargs_handlers=[timeout_kwargs],
         gradient_accumulation_plugin=GradientAccumulationPlugin(
-            num_steps=args.gradient_accumulation_steps,
-            sync_each_batch=args.sync_each_batch,
+            num_steps=args.gradient_accumulation_steps, sync_each_batch=args.sync_each_batch
         ),
     )
 
