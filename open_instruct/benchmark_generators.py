@@ -35,6 +35,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+# Peak FLOPs for common GPUs (bfloat16/float16)
+GPU_PEAK_FLOPS = {
+    'a100':   312e12,  # 312 TFLOPs for bf16
+    'b200':  2250e12,  # 2250 TFLOPS for bf16. 
+    'h100':   990e12,  # 990 TFLOPs for bf16
+    'a6000':  155e12,  # 155 TFLOPS for bf16
+}
+    
+
+
 def get_flops_forward(model: torch.nn.Module, inp: torch.Tensor) -> int:
     """
     Calculates FLOPs for the forward pass of a PyTorch model.
@@ -94,6 +104,9 @@ def calculate_model_flops_per_token(model_config: Any, model_path: str) -> float
     
     return flops
 
+def get_device_name(device_name: str) -> str:
+    return device_name.lower().split(' ')[-1].replace(' ', '').replace('-', '')
+
 
 def get_gpu_peak_flops() -> float:
     """
@@ -107,20 +120,8 @@ def get_gpu_peak_flops() -> float:
         
     device_name = torch.cuda.get_device_name(0).lower().replace(' ', '').replace('-', '')
     
-    # Peak FLOPs for common GPUs (bfloat16/float16)
-    gpu_peak_flops = {
-        'a100':  312e12,  # 312 TFLOPs for bf16
-        'b200': 2250e12,  # 2250 TFLOPS for bf16. 
-        'h100':  990e12,  # 990 TFLOPs for bf16
-        'nvidiartxa6000': 150e12,
-    }
-    
-    # Try to match GPU name
-    for gpu_key, flops in gpu_peak_flops.items():
-        if gpu_key.replace(' ', '').replace('-', '') in device_name:
-            logger.info(f"Detected GPU: {device_name}, Peak FLOPs: {flops/1e12:.0f} TFLOPs")
-            return flops
-    raise ValueError(f"Unknown device: {device_name}.")
+    device_name = get_device_name(torch.cuda.get_device_name(0))
+    return GPU_PEAK_FLOPS[device_name]
 
 
 def calculate_mfu(tokens_per_second: float, model_flops_per_token: float, gpu_peak_flops: float) -> float:
@@ -197,84 +198,44 @@ class BenchmarkArgs:
     """Seed of the experiment"""
 
 
-@dataclasses.dataclass
-class BenchmarkConfig:
-    """Configuration for the benchmark - created from parsed arguments."""
-    
-    # Model configuration
-    model_name: str
-    max_model_len: int
-    vllm_gpu_memory_utilization: float
-    
-    # Dataset configuration
-    dataset_mixer_list: List[str]
-    dataset_mixer_list_splits: List[str]
-    max_token_length: int
-    max_prompt_token_length: int
-    
-    # Generation configuration
-    temperature: float
-    max_tokens: int
-    top_p: float
-    
-    # Benchmark configuration
-    num_batches: int
-    batch_size: int
-    num_samples_per_prompt: int
-    
-    # vLLM configuration 
-    num_engines: int
-    tensor_parallel_size: int
-    
-    # Chat template configuration
-    chat_template_name: str
-    add_bos: bool
 
 
-def setup_tokenizer(config: BenchmarkConfig) -> Tuple[Any, Any, float, float]:
+def setup_tokenizer(model_config: ModelConfig) -> Tuple[Any, Any, float, float]:
     """Set up the tokenizer and model config."""
-    logger.info(f"Loading tokenizer and config: {config.model_name}")
-    tokenizer = transformers.AutoTokenizer.from_pretrained(config.model_name)
+    logger.info(f"Loading tokenizer and config: {model_config.model_name_or_path}")
+    tokenizer = transformers.AutoTokenizer.from_pretrained(model_config.model_name_or_path)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
         
     # Load model config for FLOPs calculation
-    model_config = transformers.AutoConfig.from_pretrained(config.model_name)
-    model_flops_per_token = calculate_model_flops_per_token(model_config, config.model_name)
+    hf_model_config = transformers.AutoConfig.from_pretrained(model_config.model_name_or_path)
+    model_flops_per_token = calculate_model_flops_per_token(hf_model_config, model_config.model_name_or_path)
     gpu_peak_flops = get_gpu_peak_flops()
     
     logger.info(f"Model FLOPs per token: {model_flops_per_token/1e9:.2f} GFLOPs")
     logger.info(f"GPU peak FLOPs: {gpu_peak_flops/1e12:.0f} TFLOPs")
     
-    return tokenizer, model_config, model_flops_per_token, gpu_peak_flops
+    return tokenizer, hf_model_config, model_flops_per_token, gpu_peak_flops
 
 
-def setup_dataset(config: BenchmarkConfig, benchmark_args: BenchmarkArgs) -> Any:
+def setup_dataset(benchmark_args: BenchmarkArgs, tokenizer_config: TokenizerConfig) -> Any:
     """Set up the dataset using the same pipeline as grpo_fast.py."""
     logger.info("Loading and processing dataset...")
-    
-    # Create tokenizer config (matching long_repro_script.sh)
-    tc = dataset_transformation.TokenizerConfig(
-        tokenizer_name_or_path=config.model_name,
-        trust_remote_code=True,
-        chat_template_name=config.chat_template_name,
-        add_bos=config.add_bos,
-    )
     
     # Transform function arguments
     transform_fn_args = [
         {},  # For rlvr_tokenize_v1
         {
-            "max_token_length": config.max_token_length,
-            "max_prompt_token_length": config.max_prompt_token_length,
+            "max_token_length": benchmark_args.max_token_length,
+            "max_prompt_token_length": benchmark_args.max_prompt_token_length,
         },  # For rlvr_filter_v1
     ]
     
     # Load dataset
     dataset = dataset_transformation.get_cached_dataset_tulu(
-        dataset_mixer_list=config.dataset_mixer_list,
-        dataset_mixer_list_splits=config.dataset_mixer_list_splits,
-        tc=tc,
+        dataset_mixer_list=benchmark_args.dataset_mixer_list,
+        dataset_mixer_list_splits=benchmark_args.dataset_mixer_list_splits,
+        tc=tokenizer_config,
         dataset_transform_fn=benchmark_args.dataset_transform_fn,
         transform_fn_args=transform_fn_args,
         dataset_cache_mode=benchmark_args.dataset_cache_mode,
@@ -289,7 +250,7 @@ def setup_dataset(config: BenchmarkConfig, benchmark_args: BenchmarkArgs) -> Any
     return dataset
 
 
-def setup_vllm_engines(config: BenchmarkConfig) -> List[Any]:
+def setup_vllm_engines(benchmark_args: BenchmarkArgs, model_config: ModelConfig) -> List[Any]:
     """Set up vLLM engines."""
     logger.info("Setting up vLLM engines...")
     
@@ -299,22 +260,22 @@ def setup_vllm_engines(config: BenchmarkConfig) -> List[Any]:
     ray.init(num_cpus=4, num_gpus=1, ignore_reinit_error=True)
     
     # Create placement group for multiple engines
-    bundles = [{"GPU": 1, "CPU": 1} for _ in range(config.num_engines)]
+    bundles = [{"GPU": 1, "CPU": 1} for _ in range(benchmark_args.num_engines)]
     pg = ray.util.placement_group(bundles, strategy="PACK")
     ray.get(pg.ready())
     
     # Create vLLM engines
     vllm_engines = vllm_utils3.create_vllm_engines(
-        num_engines=config.num_engines,
-        tensor_parallel_size=config.tensor_parallel_size,
+        num_engines=benchmark_args.num_engines,
+        tensor_parallel_size=benchmark_args.tensor_parallel_size,
         enforce_eager=True,
-        tokenizer_name_or_path=config.model_name,
-        pretrain=config.model_name,
-        revision=None,
-        seed=42,
+        tokenizer_name_or_path=model_config.model_name_or_path,
+        pretrain=model_config.model_name_or_path,
+        revision=model_config.model_revision,
+        seed=benchmark_args.seed,
         enable_prefix_caching=False,
-        max_model_len=config.max_model_len,
-        vllm_gpu_memory_utilization=config.vllm_gpu_memory_utilization,
+        max_model_len=benchmark_args.max_model_len,
+        vllm_gpu_memory_utilization=benchmark_args.vllm_gpu_memory_utilization,
         single_gpu_mode=False,
         pg=pg,
         tools={},
@@ -326,10 +287,10 @@ def setup_vllm_engines(config: BenchmarkConfig) -> List[Any]:
     return vllm_engines
 
 
-def get_batch_data(dataset: Any, config: BenchmarkConfig, batch_idx: int) -> Tuple[List[List[int]], List[str], List[str]]:
+def get_batch_data(dataset: Any, benchmark_args: BenchmarkArgs, batch_idx: int) -> Tuple[List[List[int]], List[str], List[str]]:
     """Get a batch of data from the dataset."""
-    start_idx = batch_idx * config.batch_size
-    end_idx = min(start_idx + config.batch_size, len(dataset))
+    start_idx = batch_idx * benchmark_args.batch_size
+    end_idx = min(start_idx + benchmark_args.batch_size, len(dataset))
     
     batch_data = dataset[start_idx:end_idx]
     
@@ -339,15 +300,15 @@ def get_batch_data(dataset: Any, config: BenchmarkConfig, batch_idx: int) -> Tup
     datasets_list = batch_data[dataset_transformation.DATASET_SOURCE_KEY]
     
     # Expand if multiple samples per prompt
-    if config.num_samples_per_prompt > 1:
-        prompts = [prompt for prompt in prompts for _ in range(config.num_samples_per_prompt)]
-        ground_truths = [gt for gt in ground_truths for _ in range(config.num_samples_per_prompt)]
-        datasets_list = [ds for ds in datasets_list for _ in range(config.num_samples_per_prompt)]
+    if benchmark_args.num_samples_per_prompt > 1:
+        prompts = [prompt for prompt in prompts for _ in range(benchmark_args.num_samples_per_prompt)]
+        ground_truths = [gt for gt in ground_truths for _ in range(benchmark_args.num_samples_per_prompt)]
+        datasets_list = [ds for ds in datasets_list for _ in range(benchmark_args.num_samples_per_prompt)]
         
     return prompts, ground_truths, datasets_list
 
 
-def run_generation_batch(vllm_engines: List[Any], config: BenchmarkConfig, model_flops_per_token: float, gpu_peak_flops: float, prompts: List[List[int]], batch_idx: int) -> Dict[str, Any]:
+def run_generation_batch(vllm_engines: List[Any], benchmark_args: BenchmarkArgs, model_flops_per_token: float, gpu_peak_flops: float, prompts: List[List[int]], batch_idx: int) -> Dict[str, Any]:
     """Run generation for a batch of prompts and measure performance."""
     
     # Create queues
@@ -357,14 +318,14 @@ def run_generation_batch(vllm_engines: List[Any], config: BenchmarkConfig, model
     
     # Create sampling parameters
     generation_config = vllm.SamplingParams(
-        temperature=config.temperature,
-        max_tokens=config.max_tokens,
-        top_p=config.top_p,
+        temperature=benchmark_args.temperature,
+        max_tokens=benchmark_args.max_tokens,
+        top_p=benchmark_args.top_p,
     )
     
     eval_generation_config = vllm.SamplingParams(
         temperature=0.0,
-        max_tokens=config.max_tokens,
+        max_tokens=benchmark_args.max_tokens,
     )
     
     # Start vLLM generation thread
@@ -443,25 +404,25 @@ def run_generation_batch(vllm_engines: List[Any], config: BenchmarkConfig, model
     }
 
 
-def run_benchmark(dataset: Any, vllm_engines: List[Any], config: BenchmarkConfig, model_flops_per_token: float, gpu_peak_flops: float) -> List[Dict[str, Any]]:
+def run_benchmark(dataset: Any, vllm_engines: List[Any], benchmark_args: BenchmarkArgs, model_flops_per_token: float, gpu_peak_flops: float) -> List[Dict[str, Any]]:
     """Run the full benchmark."""
-    logger.info(f"Starting benchmark with {config.num_batches} batches of size {config.batch_size}")
+    logger.info(f"Starting benchmark with {benchmark_args.num_batches} batches of size {benchmark_args.batch_size}")
     
     all_results = []
     total_start_time = time.time()
     
-    for batch_idx in range(config.num_batches):
-        logger.info(f"Processing batch {batch_idx + 1}/{config.num_batches}")
+    for batch_idx in range(benchmark_args.num_batches):
+        logger.info(f"Processing batch {batch_idx + 1}/{benchmark_args.num_batches}")
         
         # Get batch data
-        prompts, ground_truths, datasets_list = get_batch_data(dataset, config, batch_idx)
+        prompts, ground_truths, datasets_list = get_batch_data(dataset, benchmark_args, batch_idx)
         
         if not prompts:
             logger.warning(f"No prompts in batch {batch_idx}, skipping")
             continue
             
         # Run generation
-        batch_result = run_generation_batch(vllm_engines, config, model_flops_per_token, gpu_peak_flops, prompts, batch_idx)
+        batch_result = run_generation_batch(vllm_engines, benchmark_args, model_flops_per_token, gpu_peak_flops, prompts, batch_idx)
         
         if "error" not in batch_result:
             all_results.append(batch_result)
@@ -476,14 +437,14 @@ def run_benchmark(dataset: Any, vllm_engines: List[Any], config: BenchmarkConfig
     
     # Calculate summary statistics
     if all_results:
-        print_summary(all_results, total_time, config, model_flops_per_token, gpu_peak_flops)
+        print_summary(all_results, total_time, benchmark_args, model_flops_per_token, gpu_peak_flops)
     else:
         logger.error("No successful batches completed")
         
     return all_results
 
 
-def print_summary(results: List[Dict[str, Any]], total_time: float, config: BenchmarkConfig, model_flops_per_token: float, gpu_peak_flops: float) -> None:
+def print_summary(results: List[Dict[str, Any]], total_time: float, benchmark_args: BenchmarkArgs, model_flops_per_token: float, gpu_peak_flops: float) -> None:
     """Print benchmark summary statistics."""
     
     # Calculate metrics for all batches
@@ -541,12 +502,12 @@ def print_summary(results: List[Dict[str, Any]], total_time: float, config: Benc
     print("\n" + "="*60)
     print("BENCHMARK SUMMARY")
     print("="*60)
-    print(f"Model: {config.model_name}")
+    print(f"Model: {benchmark_args.dataset_mixer_list[0] if benchmark_args.dataset_mixer_list else 'Unknown'}")
     print(f"Total batches: {len(results)}")
     print(f"Total samples: {total_samples}")
-    print(f"Batch size: {config.batch_size}")
-    print(f"Max tokens: {config.max_tokens}")
-    print(f"Temperature: {config.temperature}")
+    print(f"Batch size: {benchmark_args.batch_size}")
+    print(f"Max tokens: {benchmark_args.max_tokens}")
+    print(f"Temperature: {benchmark_args.temperature}")
     print("-"*60)
     print(f"Total time: {total_time:.2f}s")
     print(f"Total generation time: {total_generation_time:.2f}s")
@@ -602,58 +563,37 @@ def main() -> None:
     if tokenizer_config.chat_template_name == "tulu":  # default value
         tokenizer_config.chat_template_name = "tulu_thinker"
     
-    # Create configuration from parsed arguments
-    config = BenchmarkConfig(
-        model_name=model_config.model_name_or_path,
-        max_model_len=benchmark_args.max_model_len,
-        vllm_gpu_memory_utilization=benchmark_args.vllm_gpu_memory_utilization,
-        temperature=benchmark_args.temperature,
-        max_tokens=benchmark_args.max_tokens,
-        top_p=benchmark_args.top_p,
-        num_batches=benchmark_args.num_batches,
-        batch_size=benchmark_args.batch_size,
-        num_samples_per_prompt=benchmark_args.num_samples_per_prompt,
-        dataset_mixer_list=benchmark_args.dataset_mixer_list,
-        dataset_mixer_list_splits=benchmark_args.dataset_mixer_list_splits,
-        max_token_length=benchmark_args.max_token_length,
-        max_prompt_token_length=benchmark_args.max_prompt_token_length,
-        chat_template_name=tokenizer_config.chat_template_name,
-        add_bos=tokenizer_config.add_bos,
-        num_engines=benchmark_args.num_engines,
-        tensor_parallel_size=benchmark_args.tensor_parallel_size,
-    )
-    
     # Print configuration values for verification
     print("\n" + "="*60)
     print("BENCHMARK CONFIGURATION VALUES")
     print("="*60)
-    print(f"Model name: {config.model_name}")
-    print(f"Max model len: {config.max_model_len}")
-    print(f"vLLM GPU memory utilization: {config.vllm_gpu_memory_utilization}")
-    print(f"Temperature: {config.temperature}")
-    print(f"Max tokens: {config.max_tokens}")
-    print(f"Top-p: {config.top_p}")
-    print(f"Num batches: {config.num_batches}")
-    print(f"Batch size: {config.batch_size}")
-    print(f"Num samples per prompt: {config.num_samples_per_prompt}")
-    print(f"Dataset mixer list: {config.dataset_mixer_list}")
-    print(f"Dataset mixer list splits: {config.dataset_mixer_list_splits}")
-    print(f"Max token length: {config.max_token_length}")
-    print(f"Max prompt token length: {config.max_prompt_token_length}")
-    print(f"Chat template name: {config.chat_template_name}")
-    print(f"Add BOS: {config.add_bos}")
-    print(f"Num engines: {config.num_engines}")
-    print(f"Tensor parallel size: {config.tensor_parallel_size}")
+    print(f"Model name: {model_config.model_name_or_path}")
+    print(f"Max model len: {benchmark_args.max_model_len}")
+    print(f"vLLM GPU memory utilization: {benchmark_args.vllm_gpu_memory_utilization}")
+    print(f"Temperature: {benchmark_args.temperature}")
+    print(f"Max tokens: {benchmark_args.max_tokens}")
+    print(f"Top-p: {benchmark_args.top_p}")
+    print(f"Num batches: {benchmark_args.num_batches}")
+    print(f"Batch size: {benchmark_args.batch_size}")
+    print(f"Num samples per prompt: {benchmark_args.num_samples_per_prompt}")
+    print(f"Dataset mixer list: {benchmark_args.dataset_mixer_list}")
+    print(f"Dataset mixer list splits: {benchmark_args.dataset_mixer_list_splits}")
+    print(f"Max token length: {benchmark_args.max_token_length}")
+    print(f"Max prompt token length: {benchmark_args.max_prompt_token_length}")
+    print(f"Chat template name: {tokenizer_config.chat_template_name}")
+    print(f"Add BOS: {tokenizer_config.add_bos}")
+    print(f"Num engines: {benchmark_args.num_engines}")
+    print(f"Tensor parallel size: {benchmark_args.tensor_parallel_size}")
     print("="*60 + "\n")
     
     # Run benchmark
     vllm_engines = None
     
     try:
-        tokenizer, model_config_obj, model_flops_per_token, gpu_peak_flops = setup_tokenizer(config)
-        dataset = setup_dataset(config, benchmark_args)
-        vllm_engines = setup_vllm_engines(config)
-        run_benchmark(dataset, vllm_engines, config, model_flops_per_token, gpu_peak_flops)
+        tokenizer, hf_model_config, model_flops_per_token, gpu_peak_flops = setup_tokenizer(model_config)
+        dataset = setup_dataset(benchmark_args, tokenizer_config)
+        vllm_engines = setup_vllm_engines(benchmark_args, model_config)
+        run_benchmark(dataset, vllm_engines, benchmark_args, model_flops_per_token, gpu_peak_flops)
     finally:
         cleanup(vllm_engines)
 
