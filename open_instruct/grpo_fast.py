@@ -367,6 +367,8 @@ class Args:
     """Whether to mask the tool output. By default on."""
     only_reward_good_outputs: bool = False
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
+    use_mcp_tools: bool = False
+    """Whether to use MCP tools. For now if you use the MCP tools, you need to run an MCP server on the background."""
 
     # rl-rag specific settngs
     number_documents_to_search: int = 3
@@ -406,7 +408,6 @@ class Args:
                 if tool not in ["search", "code"]:
                     raise ValueError(f"Tool {tool} is not supported. Supported tools are: search, code")
             assert len(self.tools) == len(set(self.tools)), "Duplicate tools are not allowed"
-
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = None) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
@@ -1521,15 +1522,24 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     if args.tools:
         for tool in args.tools:
             if tool.lower() == "search":
-                from open_instruct.search_utils.search_tool import SearchTool
-
-                tool = SearchTool(
+                if args.use_mcp_tools:
+                    from open_instruct.tool_utils.tool_mcp import (
+                        SemanticScholarSnippetSearchTool,
+                    )
+                    tool = SemanticScholarSnippetSearchTool(
                     start_str="<search>",
                     end_str="</search>",
-                    api_endpoint=args.search_api_endpoint,
-                    number_documents_to_search=args.number_documents_to_search,
                 )
-                tool_objects[tool.end_str] = tool
+                else:
+                    from open_instruct.search_utils.search_tool import SearchTool
+
+                    tool = SearchTool(
+                        start_str="<search>",
+                        end_str="</search>",
+                        api_endpoint=args.search_api_endpoint,
+                        number_documents_to_search=args.number_documents_to_search,
+                    )
+                    tool_objects[tool.end_str] = tool
             elif tool.lower() == "code":
                 from open_instruct.tool_utils.tool_vllm import PythonCodeTool
 
