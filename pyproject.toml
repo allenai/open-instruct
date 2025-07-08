@@ -40,12 +40,12 @@ py-modules = ["open_instruct"]
 # pytorch related setups
 [tool.uv.sources]
 torch = [
-  { index = "pytorch-cu128", marker = "platform_system != 'Darwin'"},
+  { index = "pytorch-cu124", marker = "platform_system != 'Darwin'"},
 ]
 
 [[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
 explicit = true
 
 [[tool.uv.index]]

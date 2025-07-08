@@ -111,7 +111,8 @@ def get_gpu_peak_flops() -> float:
     gpu_peak_flops = {
         'a100':  312e12,  # 312 TFLOPs for bf16
         'b200': 2250e12,  # 2250 TFLOPS for bf16. 
-        'h100':  990e12,  # 990 TFLOPs for bf16  
+        'h100':  990e12,  # 990 TFLOPs for bf16
+        'nvidiartxa6000': 150e12,
     }
     
     # Try to match GPU name
