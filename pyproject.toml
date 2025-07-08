@@ -3,7 +3,7 @@ name = "open-instruct"
 version = "0.1.0"
 description = "Train open, instruction-following language models"
 readme = "README.md"
-requires-python = ">=3.10,<3.12"
+requires-python = ">=3.10,<3.13"
 dependencies = [
     "accelerate>=1.1.1",
     "antlr4-python3-runtime==4.11",
@@ -20,7 +20,7 @@ dependencies = [
     "packaging>=24.2",
     "peft>=0.13.2",
     "ray[default]>=2.44.1",
-    "setuptools>=75.6.0",
+    "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
     "torch>=2.7.0",
     "transformers>=4.52.4",
