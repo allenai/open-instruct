@@ -10,34 +10,26 @@ from fastmcp import Client
 from mcp.types import CallToolResult
 
 from open_instruct.search_rewards.format_utils import generate_snippet_id
-
-# For the current development, we want to create a separate file for MCP tools
-# To avoid circular imports, we duplicate the base ToolOutput and Tool classes in this file
+from open_instruct.tool_utils.tool_vllm import Tool, ToolOutput
 
 
-@dataclass
-class ToolOutput:
-    output: str
-    called: bool
-    error: str
-    timeout: bool
-    runtime: float
-    start_str: str = "<output>\n"
-    end_str: str = "\n</output>"
-
-
-class MCPTool:
+class MCPTool(Tool):
     def __init__(self, start_str: str, end_str: str):
         self.start_str = start_str
         self.end_str = end_str
-        self.mcp_client = self.init_mcp_client()
 
     def init_mcp_client(self):
         if os.environ.get("MCP_TRANSPORT") == "StreamableHttpTransport":
             port = os.environ.get("MCP_TRANSPORT_PORT", 8000)
+            print(
+                f"Using MCP transport: {os.environ.get('MCP_TRANSPORT')}, port: {port}"
+            )
             return Client(f"http://localhost:{port}/mcp")
         elif os.environ.get("MCP_TRANSPORT") == "FastMCPTransport":
             mcp_executable = os.environ.get("MCP_EXECUTABLE")
+            print(
+                f"Using MCP transport: {os.environ.get('MCP_TRANSPORT')}, executable: {mcp_executable}"
+            )
             return Client(mcp_executable)
         else:
             raise ValueError(
@@ -65,6 +57,8 @@ class SemanticScholarSnippetSearchTool(MCPTool):
         super().__init__(start_str, end_str, *args, **kwargs)
 
     def __call__(self, prompt: str) -> ToolOutput:
+        print(f"SemanticScholarSnippetSearchTool called with prompt: {prompt}")
+        mcp_client = self.init_mcp_client()
         query_blocks = self._find_query_blocks(prompt)
 
         if len(query_blocks) == 0:
@@ -93,10 +87,10 @@ class SemanticScholarSnippetSearchTool(MCPTool):
 
         async def async_search(query: str, tool_name: str, limit: int):
             try:
-                async with self.mcp_client:
-                    await self.mcp_client.ping()
+                async with mcp_client:
+                    await mcp_client.ping()
                     # Call the MCP tool with the query
-                    result = await self.mcp_client.call_tool(
+                    result = await mcp_client.call_tool(
                         tool_name,
                         {"query": query, "limit": limit},
                     )
@@ -113,7 +107,14 @@ class SemanticScholarSnippetSearchTool(MCPTool):
             )
         )
 
-        if not output or (error := output.get("error")) or len(output["data"]) == 0:
+        if (
+            not output
+            or (error := output.get("error"))
+            or not output.get("data")
+            or len(output["data"]) == 0
+        ):
+            print(f"Query failed for unknown reason: {error}")
+            print(f"Output: {output}")
             return ToolOutput(
                 output="",
                 error=f"Query failed for unknown reason: {error}",
@@ -124,6 +125,7 @@ class SemanticScholarSnippetSearchTool(MCPTool):
 
         snippets = [ele["snippet"]["text"].strip() for ele in output["data"]]
         all_snippets = "\n".join(snippets).strip()
+        print(f"All snippets: {all_snippets}")
 
         return ToolOutput(
             output=all_snippets,
@@ -144,6 +146,7 @@ class SerperSearchTool(MCPTool):
         super().__init__(start_str, end_str, *args, **kwargs)
 
     def __call__(self, prompt: str) -> ToolOutput:
+        mcp_client = self.init_mcp_client()
         query_blocks = self._find_query_blocks(prompt)
 
         if len(query_blocks) == 0:
@@ -172,10 +175,10 @@ class SerperSearchTool(MCPTool):
 
         async def async_search(query: str, tool_name: str, limit: int):
             try:
-                async with self.mcp_client:
-                    await self.mcp_client.ping()
+                async with mcp_client:
+                    await mcp_client.ping()
                     # Call the MCP tool with the query
-                    result = await self.mcp_client.call_tool(
+                    result = await mcp_client.call_tool(
                         tool_name,
                         {"query": query, "num_results": limit},
                     )
@@ -192,7 +195,14 @@ class SerperSearchTool(MCPTool):
             )
         )
 
-        if not output or (error := output.get("error")) or len(output["organic"]) == 0:
+        if (
+            not output
+            or (error := output.get("error"))
+            or not output.get("organic")
+            or len(output["organic"]) == 0
+        ):
+            print(f"Query failed for unknown reason: {error}")
+            print(f"Output: {output}")
             return ToolOutput(
                 output="",
                 error=f"Query failed for unknown reason: {error}",
