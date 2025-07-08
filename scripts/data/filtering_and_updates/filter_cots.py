@@ -93,10 +93,10 @@ def main() -> None:
 
     # Keep rows that satisfy the predicate
     kept_ds = ds.filter(filter_fn)
-    # if args.output_format == "answer":
-    #     kept_ds = kept_ds.map(add_answer)
-    # else:
-    #     kept_ds = kept_ds.map(remove_answer)
+    if args.output_format == "answer":
+        kept_ds = kept_ds.map(add_answer)
+    else:
+        kept_ds = kept_ds.map(remove_answer)
 
     # Keep rows that FAIL the predicate (invert the bool)
     filtered_out_ds = ds.filter(lambda elem: not filter_fn(elem))
