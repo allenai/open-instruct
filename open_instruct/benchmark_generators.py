@@ -50,7 +50,7 @@ def get_flops_forward(model: torch.nn.Module, inp: torch.Tensor) -> int:
         # Assuming input is a shape tuple if not a tensor
         inp = torch.randn(inp) 
 
-    flop_counter = torch.utils.flop_counter.FlopCounterMode(mods=model, display=False, depth=None)
+    flop_counter = torch.utils.flop_counter.FlopCounterMode(display=False, depth=None)
     with flop_counter:
         model(inp)
     
@@ -101,34 +101,28 @@ def get_gpu_peak_flops() -> float:
     if not torch.cuda.is_available():
         return 0.0
         
-    device_name = torch.cuda.get_device_name(0).lower()
+    device_name = torch.cuda.get_device_name(0).lower().replace(' ', '').replace('-', '')
     
     # Peak FLOPs for common GPUs (bfloat16/float16)
     gpu_peak_flops = {
-        'a100': 312e12,  # 312 TFLOPs for bf16
-        'h100': 990e12,  # 990 TFLOPs for bf16  
-        'v100': 125e12,  # 125 TFLOPs for fp16
-        'a40': 150e12,   # 150 TFLOPs for bf16
-        'rtx 4090': 83e12,  # 83 TFLOPs for fp16
-        'rtx 3090': 35e12,  # 35 TFLOPs for fp16
+        'a100':  312e12,  # 312 TFLOPs for bf16
+        'b200': 2250e12,  # 2250 TFLOPS for bf16. 
+        'h100':  990e12,  # 990 TFLOPs for bf16  
     }
     
     # Try to match GPU name
     for gpu_key, flops in gpu_peak_flops.items():
-        if gpu_key.replace(' ', '').replace('-', '') in device_name.replace(' ', '').replace('-', ''):
+        if gpu_key.replace(' ', '').replace('-', '') in device_name:
             logger.info(f"Detected GPU: {device_name}, Peak FLOPs: {flops/1e12:.0f} TFLOPs")
             return flops
-    
-    # Default conservative estimate for unknown GPUs
-    logger.warning(f"Unknown GPU: {device_name}, using conservative estimate")
-    return 50e12  # 50 TFLOPs default
+    raise ValueError(f"Unknown device: {device_name}.")
 
 
 def calculate_mfu(tokens_per_second: float, model_flops_per_token: float, gpu_peak_flops: float) -> float:
     """
     Calculate Model FLOPs Utilization (MFU).
     
-    Args:
+    Args:s
         tokens_per_second: Actual token generation rate
         model_flops_per_token: Theoretical FLOPs per token for the model
         gpu_peak_flops: Peak FLOPs of the GPU
@@ -170,9 +164,9 @@ class BenchmarkConfig:
     batch_size: int = 256  # matches --num_unique_prompts_rollout 256  
     num_samples_per_prompt: int = 16  # matches --num_samples_per_prompt_rollout 16
     
-    # vLLM configuration (matching production as much as possible)
-    num_engines: int = 8  # production uses --vllm_num_engines 32, using 8 for single GPU
-    tensor_parallel_size: int = 1  # matches --vllm_tensor_parallel_size 1
+    # vLLM configuration 
+    num_engines: int = 1 
+    tensor_parallel_size: int = 1  
     
     # Chat template configuration
     chat_template_name: str = "tulu_thinker"  # matches production
@@ -254,7 +248,7 @@ def setup_vllm_engines(config: BenchmarkConfig) -> List[Any]:
     ray.init(num_cpus=4, num_gpus=1, ignore_reinit_error=True)
     
     # Create placement group for multiple engines
-    bundles = [{"GPU": 1.0 / config.num_engines, "CPU": 2} for _ in range(config.num_engines)]
+    bundles = [{"GPU": 1, "CPU": 1} for _ in range(config.num_engines)]
     pg = ray.util.placement_group(bundles, strategy="PACK")
     ray.get(pg.ready())
     
