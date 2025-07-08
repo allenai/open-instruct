@@ -92,7 +92,9 @@ colorama==0.4.6
     #   uvicorn
 colorful==0.5.6
     # via ray
-compressed-tensors==0.9.3
+compressed-tensors==0.9.3 ; sys_platform == 'darwin'
+    # via vllm
+compressed-tensors==0.10.1 ; sys_platform != 'darwin'
     # via vllm
 contourpy==1.3.2
     # via matplotlib
@@ -229,6 +231,7 @@ idna==3.10
     #   requests
     #   yarl
 immutabledict==1.2.0
+    # via open-instruct
 importlib-metadata==8.0.0
     # via
     #   litellm
@@ -266,6 +269,7 @@ jsonschema-specifications==2025.4.1
 kiwisolver==1.4.8
     # via matplotlib
 langdetect==1.0.9
+    # via open-instruct
 lark==1.2.2
     # via
     #   outlines
@@ -368,42 +372,44 @@ numpy==1.26.4
     #   transformers
     #   vllm
     #   xformers
-nvidia-cublas-cu12==12.4.5.8 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cublas-cu12==12.8.3.14 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via
     #   nvidia-cudnn-cu12
     #   nvidia-cusolver-cu12
     #   torch
-nvidia-cuda-cupti-cu12==12.4.127 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cuda-cupti-cu12==12.8.57 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
-nvidia-cuda-nvrtc-cu12==12.4.127 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cuda-nvrtc-cu12==12.8.61 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
-nvidia-cuda-runtime-cu12==12.4.127 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cuda-runtime-cu12==12.8.57 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
-nvidia-cudnn-cu12==9.1.0.70 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cudnn-cu12==9.7.1.26 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
-nvidia-cufft-cu12==11.2.1.3 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cufft-cu12==11.3.3.41 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
-nvidia-curand-cu12==10.3.5.147 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cufile-cu12==1.13.0.11 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
-nvidia-cusolver-cu12==11.6.1.9 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-curand-cu12==10.3.9.55 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
-nvidia-cusparse-cu12==12.3.1.170 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cusolver-cu12==11.7.2.55 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via torch
+nvidia-cusparse-cu12==12.5.7.53 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via
     #   nvidia-cusolver-cu12
     #   torch
-nvidia-cusparselt-cu12==0.6.2 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-cusparselt-cu12==0.6.3 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
 nvidia-ml-py==12.575.51
     # via nvitop
-nvidia-nccl-cu12==2.21.5 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-nccl-cu12==2.26.2 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
-nvidia-nvjitlink-cu12==12.4.127 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-nvjitlink-cu12==12.8.61 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via
     #   nvidia-cufft-cu12
     #   nvidia-cusolver-cu12
     #   nvidia-cusparse-cu12
     #   torch
-nvidia-nvtx-cu12==12.4.127 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+nvidia-nvtx-cu12==12.8.55 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via torch
 nvitop==1.5.1
     # via open-instruct
@@ -475,6 +481,7 @@ paginate==0.5.7
     # via mkdocs-material
 pandas==2.2.3
     # via datasets
+parameterized==0.9.0
 partial-json-parser==0.2.1.1.post5
     # via vllm
 pathspec==0.12.1
@@ -632,6 +639,7 @@ regex==2024.11.6
     #   nltk
     #   tiktoken
     #   transformers
+    #   vllm
 requests==2.32.3
     # via
     #   beaker-py
@@ -662,6 +670,7 @@ rpds-py==0.25.1
     #   referencing
 rsa==4.9.1
     # via google-auth
+ruff==0.12.0
 safetensors==0.5.3
     # via
     #   accelerate
@@ -683,12 +692,14 @@ setuptools==80.9.0
     # via
     #   open-instruct
     #   tensorboard
+    #   triton
     #   wandb
 shellingham==1.5.4
     # via typer
 six==1.17.0
     # via
     #   docker-pycreds
+    #   langdetect
     #   opencensus
     #   python-dateutil
     #   tensorboard
@@ -704,7 +715,9 @@ starlette==0.46.2
     # via
     #   fastapi
     #   prometheus-fastapi-instrumentator
-sympy==1.13.1
+sympy==1.13.1 ; sys_platform == 'darwin'
+    # via torch
+sympy==1.14.0 ; sys_platform != 'darwin'
     # via torch
 tensorboard==2.19.0
     # via open-instruct
@@ -740,7 +753,7 @@ torch==2.6.0 ; sys_platform == 'darwin'
     #   torchvision
     #   vllm
     #   xgrammar
-torch==2.6.0+cu124 ; sys_platform != 'darwin'
+torch==2.7.0+cu128 ; sys_platform != 'darwin'
     # via
     #   accelerate
     #   bitsandbytes
@@ -756,9 +769,13 @@ torch==2.6.0+cu124 ; sys_platform != 'darwin'
     #   vllm
     #   xformers
     #   xgrammar
-torchaudio==2.6.0
+torchaudio==2.6.0 ; sys_platform == 'darwin'
     # via vllm
-torchvision==0.21.0
+torchaudio==2.7.0 ; sys_platform != 'darwin'
+    # via vllm
+torchvision==0.21.0 ; sys_platform == 'darwin'
+    # via vllm
+torchvision==0.22.0 ; sys_platform != 'darwin'
     # via vllm
 tqdm==4.67.1
     # via
@@ -779,7 +796,9 @@ transformers==4.52.4
     #   peft
     #   vllm
     #   xgrammar
-triton==3.2.0
+triton==3.2.0 ; sys_platform != 'linux'
+    # via liger-kernel
+triton==3.3.0 ; sys_platform == 'linux'
     # via
     #   liger-kernel
     #   torch
@@ -826,7 +845,9 @@ uvloop==0.21.0 ; platform_python_implementation != 'PyPy' and sys_platform != 'c
     # via uvicorn
 virtualenv==20.31.2
     # via ray
-vllm==0.8.5.post1
+vllm==0.8.5.post1 ; sys_platform == 'darwin'
+    # via open-instruct
+vllm==0.9.1 ; sys_platform != 'darwin'
     # via open-instruct
 wandb==0.18.1
     # via open-instruct
@@ -846,9 +867,11 @@ wrapt==1.17.2
     # via
     #   deprecated
     #   smart-open
-xformers==0.0.29.post2 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+xformers==0.0.30 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     # via vllm
-xgrammar==0.1.18 ; platform_machine == 'aarch64' or platform_machine == 'x86_64'
+xgrammar==0.1.18 ; (platform_machine == 'aarch64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'darwin')
+    # via vllm
+xgrammar==0.1.19 ; (platform_machine == 'aarch64' and sys_platform != 'darwin') or (platform_machine == 'x86_64' and sys_platform != 'darwin')
     # via vllm
 xxhash==3.5.0
     # via datasets

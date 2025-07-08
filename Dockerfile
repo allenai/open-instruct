@@ -2,15 +2,6 @@ FROM ghcr.io/allenai/cuda:12.8-dev-ubuntu22.04-torch2.6.0-v1.2.170
 
 WORKDIR /stage/
 
-# install google cloud sdk
-RUN apt-get update && apt-get install -y gnupg curl
-RUN curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg \
-    | gpg --batch --yes --dearmor -o /usr/share/keyrings/cloud.google.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
-    > /etc/apt/sources.list.d/google-cloud-sdk.list && \
-    apt-get update -y && \
-    apt-get install -y google-cloud-cli
-
 # Install nginx and create conf.d directory
 RUN apt-get update && apt-get install -y nginx && mkdir -p /etc/nginx/conf.d
 
