@@ -47,7 +47,8 @@ set -ex
 
 # Function to print usage
 usage() {
-    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--unseen-evals] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>]"
+    echo "Usage: $0 --model-name MODEL_NAME --model-location MODEL_LOCATION [--num_gpus GPUS] [--upload_to_hf] [--revision REVISION] [--max-length <max_length>] [--unseen-evals] [--task-suite TASK_SUITE] [--priority priority] [--tasks TASKS] [--evaluate_on_weka] [--stop-sequences <comma_separated_stops>] [--beaker-image <beaker_image>] [--cluster <clusters>] [--process-output <process_output>]"
+    echo "TASK_SUITE should be one of: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN (default: NEXT_MODEL_DEV)"
     echo "TASKS should be a comma-separated list of task specifications (e.g., 'gsm8k::tulu,bbh:cot::tulu')"
     echo "STOP_SEQUENCES should be a comma-separated list of strings to stop generation at (e.g., '</answer>,\\n\\n')"
     echo "PROCESS_OUTPUT should be a string specifying how to process the model output (e.g., 'r1_style')"
@@ -64,6 +65,7 @@ while [[ "$#" -gt 0 ]]; do
         --revision) REVISION="$2"; shift ;;
         --max-length) MAX_LENGTH="$2"; shift ;;
         --unseen-evals) UNSEEN_EVALS="true" ;;
+        --task-suite) TASK_SUITE="$2"; shift ;;
         --priority) PRIORITY="$2"; shift ;;
         --tasks) CUSTOM_TASKS="$2"; shift ;;
         --evaluate_on_weka) EVALUATE_ON_WEKA="true" ;;
@@ -94,6 +96,7 @@ MODEL_NAME_SAFE=${MODEL_NAME//\//_}
 # Set defaults for optional arguments
 MAX_LENGTH="${MAX_LENGTH:-4096}"
 UNSEEN_EVALS="${UNSEEN_EVALS:-false}"
+TASK_SUITE="${TASK_SUITE:-NEXT_MODEL_DEV}"
 PRIORITY="${PRIORITY:normal}"
 EVALUATE_ON_WEKA="${EVALUATE_ON_WEKA:-false}"
 RUN_ID="${RUN_ID:-}"
@@ -142,7 +145,7 @@ fi
 
 # Define default tasks if no custom tasks provided
 #    "alpaca_eval_v2::tulu" # Removed for high cost of judge
-DEFAULT_TASKS=(
+TULU_3_DEV=(
     "gsm8k::tulu"
     "bbh:cot-v1::tulu"
     "drop::llama3"
@@ -157,7 +160,7 @@ DEFAULT_TASKS=(
     # "alpaca_eval_v4::tulu" # GPT 4.1, judge on Azure 
     "truthfulqa::tulu"
 )
-UNSEEN_TASKS=(
+TULU_3_UNSEEN=(
     "agi_eval_english:0shot_cot::tulu3"
     "gpqa:0shot_cot::tulu3"
     "mmlu_pro:0shot_cot::tulu3"
@@ -168,13 +171,90 @@ UNSEEN_TASKS=(
     "bigcodebench::tulu"
 )
 
+# New default task suites
+NEXT_MODEL_DEV=(
+    # Knowledge
+    "mmlu:cot::hamish_zs_reasoning"
+    "popqa::hamish_zs_reasoning"
+    "simpleqa::tulu-thinker"
+    
+    # Reasoning
+    "bbh:cot-v1::hamish_zs_reasoning"
+    "gpqa:0shot_cot::hamish_zs_reasoning"
+    "zebralogic::hamish_zs_reasoning"
+    "agi_eval_english:0shot_cot::hamish_zs_reasoning"
+    
+    # Math
+    # [faster] minerva_math_500::hamish_zs_reasoning
+    "minerva_math::hamish_zs_reasoning"
+    "gsm8k::zs_cot_latex"
+    "omega:0-shot-chat"
+    "aime::hamish_zs_reasoning"
+    # [maybe unseen] aime::hamish_zs_reasoning_2025
+    
+    # Coding
+    "codex_humanevalplus:0-shot-chat::tulu-thinker"
+    "mbppplus:0-shot-chat::tulu-thinker"
+    "livecodebench_codegeneration::tulu-thinker"
+    # [TODO not merged] codeeditorbench
+    # [TODO, maybe] cruxeval
+    
+    # Chat / IF / Vibes
+    "alpaca_eval_v3::hamish_zs_reasoning"
+    "ifeval::hamish_zs_reasoning"
+    # [expensive, multi-turn all versions] multiturn_alpacaeval::tulu
+    # [expensive, typos vibes] styled_evals::tulu
+    # [optional, typos compare] styled_math500::tulu
+    # [optional, typos compare] styled_popqa::tulu
+    # [optional, typos compare] styled_truthfulqa::tulu
+)
+
+NEXT_MODEL_UNSEEN=(
+    "mmlu_pro:0shot_cot::tulu3"
+    # [TODO, not implemented] Humanity's Last Exam
+    # [TODO, not implemented] SuperGPQA
+    # [TODO, not implemented] BigBenchExtraHard
+    "livecodebench_codegeneration::tulu-thinker-hidden"
+    "ifbench::tulu"
+)
+
 # If custom tasks provided, convert comma-separated string to array
-if [ "$UNSEEN_EVALS" == "true" ]; then
-    TASKS=("${UNSEEN_TASKS[@]}")
-elif [[ -n "$CUSTOM_TASKS" ]]; then
+if [[ -n "$CUSTOM_TASKS" ]]; then
     IFS=',' read -ra TASKS <<< "$CUSTOM_TASKS"
+elif [ "$UNSEEN_EVALS" == "true" ]; then
+    # For backward compatibility, if --unseen-evals is used, determine which unseen suite to use
+    case "$TASK_SUITE" in
+        NEXT_MODEL_DEV|NEXT_MODEL_UNSEEN)
+            TASKS=("${NEXT_MODEL_UNSEEN[@]}")
+            ;;
+        TULU_3_DEV|TULU_3_UNSEEN)
+            TASKS=("${TULU_3_UNSEEN[@]}")
+            ;;
+        *)
+            echo "Error: Unknown task suite '$TASK_SUITE'"
+            usage
+            ;;
+    esac
 else
-    TASKS=("${DEFAULT_TASKS[@]}")
+    # Use the specified task suite or default
+    case "$TASK_SUITE" in
+        NEXT_MODEL_DEV)
+            TASKS=("${NEXT_MODEL_DEV[@]}")
+            ;;
+        NEXT_MODEL_UNSEEN)
+            TASKS=("${NEXT_MODEL_UNSEEN[@]}")
+            ;;
+        TULU_3_DEV)
+            TASKS=("${TULU_3_DEV[@]}")
+            ;;
+        TULU_3_UNSEEN)
+            TASKS=("${TULU_3_UNSEEN[@]}")
+            ;;
+        *)
+            echo "Error: Unknown task suite '$TASK_SUITE'"
+            usage
+            ;;
+    esac
 fi
 
 MODEL_TYPE="--model-type vllm"
