@@ -147,16 +147,21 @@ class ToolUseLLM(LLM):
     def _validate_and_add_requests(
         self,
         prompts: Union[PromptType, Sequence[PromptType]],
-        params: Union[SamplingParams, Sequence[SamplingParams], PoolingParams, Sequence[PoolingParams]],
+        params: Union[SamplingParams, Sequence[SamplingParams], PoolingParams,
+                      Sequence[PoolingParams]],
+        *,
+        use_tqdm: Union[bool, Callable[..., tqdm]] = True,
         lora_request: Optional[Union[Sequence[LoRARequest], LoRARequest]],
         prompt_adapter_request: Optional[PromptAdapterRequest],
+        tokenization_kwargs: Optional[dict[str, Any]] = None,
         guided_options: Optional[GuidedDecodingRequest] = None,
         priority: Optional[list[int]] = None,
     ) -> None:
         """@vwxyzjn: we keep everything the same except override the sampling params to have n=1 for `ToolUseLLM`"""
         if guided_options is not None:
             warnings.warn(
-                "guided_options_request is deprecated, use SamplingParams.guided_decoding instead",
+                "guided_options_request is deprecated, use "
+                "SamplingParams.guided_decoding instead",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -166,34 +171,43 @@ class ToolUseLLM(LLM):
             prompts = [prompts]
 
         num_requests = len(prompts)
-        if isinstance(params, list) and len(params) != num_requests:
-            raise ValueError("The lengths of prompts and params must be the same.")
-        if isinstance(lora_request, list) and len(lora_request) != num_requests:
-            raise ValueError("The lengths of prompts and lora_request must be the same.")
+        if isinstance(params, Sequence) and len(params) != num_requests:
+            raise ValueError("The lengths of prompts and params "
+                             "must be the same.")
+        if isinstance(lora_request,
+                      Sequence) and len(lora_request) != num_requests:
+            raise ValueError("The lengths of prompts and lora_request "
+                             "must be the same.")
 
-        for sp in params if isinstance(params, list) else (params,):
+        for sp in params if isinstance(params, Sequence) else (params, ):
             if isinstance(sp, SamplingParams):
                 self._add_guided_params(sp, guided_options)
 
                 # We only care about the final output
                 sp.output_kind = RequestOutputKind.FINAL_ONLY
 
+        # Add requests to the engine.
+        it = prompts
+        if use_tqdm:
+            tqdm_func = use_tqdm if callable(use_tqdm) else tqdm
+            it = tqdm_func(it, desc="Adding requests")
+
         # @vwxyzjn: ToolUseLLM change 1: override the sampling params to have n=1
+        # for now, don't allow list of params
         assert not isinstance(params, list)
         self.single_n_sampling_params = copy.deepcopy(params)
         self.single_n_sampling_params.n = 1
-        # Add requests to the engine.
-        for i, prompt in enumerate(prompts):
-            for j in range(params.n):
-                request_id = f"{i}-{j}"
-                self.llm_engine.add_request(
-                    request_id,
-                    prompt,
-                    self.single_n_sampling_params,
-                    lora_request=lora_request[i] if isinstance(lora_request, Sequence) else lora_request,
-                    prompt_adapter_request=prompt_adapter_request,
-                    priority=priority[i] if priority else 0,
-                )
+
+        for i, prompt in enumerate(it):
+            self._add_request(
+                prompt,
+                params[i] if isinstance(params, Sequence) else params,
+                tokenization_kwargs=tokenization_kwargs,
+                lora_request=lora_request[i] if isinstance(
+                    lora_request, Sequence) else lora_request,
+                prompt_adapter_request=prompt_adapter_request,
+                priority=priority[i] if priority else 0,
+            )
 
     def _run_engine(self, *, use_tqdm: bool) -> list[Union[RequestOutput, PoolingRequestOutput]]:
         # Initialize tqdm.
