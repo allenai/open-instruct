@@ -502,16 +502,7 @@ def print_summary(results: List[Dict[str, Any]], total_time: float, config: Benc
     print(f"Total new tokens generated: {total_new_tokens}")
     print(f"Total tokens processed: {total_tokens}")
     print("-"*60)
-    print("ALL BATCHES:")
-    print(f"Average new tokens/second: {avg_new_tokens_per_second:.2f}")
-    print(f"Average total tokens/second: {avg_total_tokens_per_second:.2f}")
-    print(f"Average MFU: {avg_mfu:.2f}%")
-    print(f"Average generation time per batch: {avg_generation_time:.2f}s")
-    print(f"Throughput (samples/second): {throughput_samples_per_second:.2f}")
-    print(f"Average new tokens per sample: {total_new_tokens / total_samples:.2f}")
-    
     if len(results) > 1:
-        print("-"*60)
         print("LAST N-1 BATCHES (excluding first batch):")
         print(f"Average new tokens/second: {avg_new_tokens_per_second_last_n_minus_1:.2f}")
         print(f"Average total tokens/second: {avg_total_tokens_per_second_last_n_minus_1:.2f}")
@@ -519,19 +510,19 @@ def print_summary(results: List[Dict[str, Any]], total_time: float, config: Benc
         print(f"Average generation time per batch: {avg_generation_time_last_n_minus_1:.2f}s")
         print(f"Wasted time (variable lengths): {wasted_time_percentage:.2f}%")
         print(f"Average new tokens per sample: {last_n_minus_1_new_tokens / last_n_minus_1_samples:.2f}")
+    else:
+        print("RESULTS:")
+        print(f"Average new tokens/second: {avg_new_tokens_per_second:.2f}")
+        print(f"Average total tokens/second: {avg_total_tokens_per_second:.2f}")
+        print(f"Average MFU: {avg_mfu:.2f}%")
+        print(f"Average generation time per batch: {avg_generation_time:.2f}s")
+        print(f"Throughput (samples/second): {throughput_samples_per_second:.2f}")
+        print(f"Average new tokens per sample: {total_new_tokens / total_samples:.2f}")
     
     print("-"*60)
     print(f"Model FLOPs per token: {model_flops_per_token/1e9:.2f} GFLOPs")
     print(f"GPU peak FLOPs: {gpu_peak_flops/1e12:.0f} TFLOPs")
     print("="*60)
-    
-    # Per-batch details
-    print("\nPER-BATCH RESULTS:")
-    print("-"*60)
-    for r in results:
-        print(f"Batch {r['batch_idx'] + 1}: {r['tokens_per_second']:.2f} new tok/s, "
-              f"MFU: {r['mfu_percentage']:.2f}%, {r['generation_time']:.2f}s, "
-              f"{r['total_new_tokens']} new tokens")
 
 
 def cleanup(vllm_engines: Optional[List[Any]]) -> None:
