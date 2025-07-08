@@ -10,7 +10,7 @@ ENV HF_HUB_ENABLE_HF_TRANSFER=1
 RUN pip install --upgrade pip "setuptools<70.0.0" wheel 
 RUN pip install torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
 RUN pip install packaging
-RUN pip install flash-attn==2.7.4.post1 --no-build-isolation
+RUN pip install flash-attn==2.8.0.post2 --no-build-isolation
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 RUN python -m nltk.downloader punkt

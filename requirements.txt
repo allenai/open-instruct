@@ -159,7 +159,7 @@ filelock==3.18.0
     #   virtualenv
     #   vllm
 flake8==7.2.0
-flash-attn==2.7.4.post1
+flash-attn==2.8.0.post2
     # via open-instruct
 fonttools==4.58.1
     # via matplotlib
