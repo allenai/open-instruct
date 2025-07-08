@@ -13,6 +13,7 @@ import queue
 import threading
 import time
 import dataclasses
+from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Tuple
 
 import numpy as np
@@ -25,6 +26,9 @@ import torch.utils.flop_counter
 from open_instruct import dataset_transformation
 from open_instruct import grpo_fast
 from open_instruct import vllm_utils3
+from open_instruct.utils import ArgumentParserPlus
+from open_instruct.model_utils import ModelConfig
+from open_instruct.dataset_transformation import TokenizerConfig
 
 
 logging.basicConfig(level=logging.INFO)
@@ -139,45 +143,91 @@ def calculate_mfu(tokens_per_second: float, model_flops_per_token: float, gpu_pe
     return mfu_percentage
 
 
+@dataclass
+class BenchmarkArgs:
+    """Benchmark-specific arguments."""
+    
+    # Dataset configuration
+    dataset_mixer_list: List[str] = field(default_factory=lambda: ["hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2", "1.0"])
+    """A list of datasets (local or HF) to sample from."""
+    dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
+    """The dataset splits to use for training"""
+    max_token_length: int = 10240
+    """The maximum token length to use for the dataset"""
+    max_prompt_token_length: int = 2048
+    """The maximum prompt token length to use for the dataset"""
+    
+    # Generation configuration
+    temperature: float = 1.0
+    """the sampling temperature"""
+    max_tokens: int = 16384
+    """Maximum tokens to generate (response_length)"""
+    top_p: float = 0.9
+    """Top-p for nucleus sampling"""
+    
+    # Benchmark configuration
+    num_batches: int = 5
+    """Number of batches to process"""
+    batch_size: int = 256
+    """Batch size for generation (num_unique_prompts_rollout)"""
+    num_samples_per_prompt: int = 16
+    """Number of samples per prompt (num_samples_per_prompt_rollout)"""
+    
+    # vLLM configuration
+    num_engines: int = 8
+    """Number of vLLM engines to use"""
+    tensor_parallel_size: int = 1
+    """Tensor parallel size for vLLM"""
+    max_model_len: int = 20480
+    """Maximum model sequence length"""
+    vllm_gpu_memory_utilization: float = 0.9
+    """GPU memory utilization for vLLM"""
+    
+    # Other configurations
+    dataset_cache_mode: str = "local"
+    """The mode to use for caching the dataset."""
+    dataset_local_cache_dir: str = "benchmark_cache"
+    """The directory to save the local dataset cache to."""
+    dataset_skip_cache: bool = False
+    """Whether to skip the cache."""
+    dataset_transform_fn: List[str] = field(default_factory=lambda: ["rlvr_tokenize_v1", "rlvr_filter_v1"])
+    """The list of transform functions to apply to the dataset."""
+    seed: int = 42
+    """Seed of the experiment"""
+
+
 @dataclasses.dataclass
 class BenchmarkConfig:
-    """Configuration for the benchmark."""
+    """Configuration for the benchmark - created from parsed arguments."""
     
-    # Model configuration (matching long_repro_script.sh production)
-    model_name: str = "hamishivi/qwen2_5_openthoughts2"  # matches qwen2_5 model from script
-    max_model_len: int = 20480  # matches --pack_length 20480
-    vllm_gpu_memory_utilization: float = 0.9  # higher for production model
+    # Model configuration
+    model_name: str
+    max_model_len: int
+    vllm_gpu_memory_utilization: float
     
-    # Dataset configuration (matching long_repro_script.sh)
-    dataset_mixer_list: List[str] = None
-    dataset_mixer_list_splits: List[str] = None
-    max_token_length: int = 10240  # matches --max_token_length 10240
-    max_prompt_token_length: int = 2048  # matches --max_prompt_token_length 2048
+    # Dataset configuration
+    dataset_mixer_list: List[str]
+    dataset_mixer_list_splits: List[str]
+    max_token_length: int
+    max_prompt_token_length: int
     
-    # Generation configuration (matching long_repro_script.sh)
-    temperature: float = 1.0  # matches --temperature 1.0
-    max_tokens: int = 16384  # matches --response_length 16384
-    top_p: float = 0.9  # not specified in script, keeping default
+    # Generation configuration
+    temperature: float
+    max_tokens: int
+    top_p: float
     
-    # Benchmark configuration (matching production scale)
-    num_batches: int = 5  # fewer batches due to large response length
-    batch_size: int = 256  # matches --num_unique_prompts_rollout 256  
-    num_samples_per_prompt: int = 16  # matches --num_samples_per_prompt_rollout 16
+    # Benchmark configuration
+    num_batches: int
+    batch_size: int
+    num_samples_per_prompt: int
     
     # vLLM configuration 
-    num_engines: int = 1 
-    tensor_parallel_size: int = 1  
+    num_engines: int
+    tensor_parallel_size: int
     
     # Chat template configuration
-    chat_template_name: str = "tulu_thinker"  # matches production
-    add_bos: bool = False  # matches qwen2_5 config
-    
-    def __post_init__(self) -> None:
-        if self.dataset_mixer_list is None:
-            # Use production dataset from long_repro_script.sh
-            self.dataset_mixer_list = ["hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2", "1.0"]
-        if self.dataset_mixer_list_splits is None:
-            self.dataset_mixer_list_splits = ["train"]
+    chat_template_name: str
+    add_bos: bool
 
 
 def setup_tokenizer(config: BenchmarkConfig) -> Tuple[Any, Any, float, float]:
@@ -198,7 +248,7 @@ def setup_tokenizer(config: BenchmarkConfig) -> Tuple[Any, Any, float, float]:
     return tokenizer, model_config, model_flops_per_token, gpu_peak_flops
 
 
-def setup_dataset(config: BenchmarkConfig) -> Any:
+def setup_dataset(config: BenchmarkConfig, benchmark_args: BenchmarkArgs) -> Any:
     """Set up the dataset using the same pipeline as grpo_fast.py."""
     logger.info("Loading and processing dataset...")
     
@@ -224,15 +274,15 @@ def setup_dataset(config: BenchmarkConfig) -> Any:
         dataset_mixer_list=config.dataset_mixer_list,
         dataset_mixer_list_splits=config.dataset_mixer_list_splits,
         tc=tc,
-        dataset_transform_fn=["rlvr_tokenize_v1", "rlvr_filter_v1"],
+        dataset_transform_fn=benchmark_args.dataset_transform_fn,
         transform_fn_args=transform_fn_args,
-        dataset_cache_mode="local",
-        dataset_local_cache_dir="benchmark_cache",
-        dataset_skip_cache=False,
+        dataset_cache_mode=benchmark_args.dataset_cache_mode,
+        dataset_local_cache_dir=benchmark_args.dataset_local_cache_dir,
+        dataset_skip_cache=benchmark_args.dataset_skip_cache,
     )
     
     # Shuffle dataset
-    dataset = dataset.shuffle(seed=42)
+    dataset = dataset.shuffle(seed=benchmark_args.seed)
     logger.info(f"Dataset loaded with {len(dataset)} samples")
     
     return dataset
@@ -536,85 +586,71 @@ def cleanup(vllm_engines: Optional[List[Any]]) -> None:
 
 def main() -> None:
     """Main benchmark function."""
-    parser = argparse.ArgumentParser(description="Benchmark vLLM generator performance")
+    # Parse arguments using ArgumentParserPlus
+    parser = ArgumentParserPlus((BenchmarkArgs, TokenizerConfig, ModelConfig))
+    benchmark_args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
     
-    # Model configuration
-    parser.add_argument("--model_name", type=str, default="hamishivi/qwen2_5_openthoughts2",
-                       help="Model name to use for generation")
-    parser.add_argument("--max_model_len", type=int, default=20480,
-                       help="Maximum model sequence length")
-    parser.add_argument("--vllm_gpu_memory_utilization", type=float, default=0.9,
-                       help="GPU memory utilization for vLLM")
+    # Override model defaults for benchmark
+    if model_config.model_name_or_path is None:
+        model_config.model_name_or_path = "hamishivi/qwen2_5_openthoughts2"
     
-    # Generation configuration
-    parser.add_argument("--temperature", type=float, default=1.0,
-                       help="Generation temperature")
-    parser.add_argument("--max_tokens", type=int, default=16384,
-                       help="Maximum tokens to generate")
-    parser.add_argument("--top_p", type=float, default=0.9,
-                       help="Top-p for nucleus sampling")
+    # Override tokenizer defaults for benchmark
+    if tokenizer_config.tokenizer_name_or_path is None:
+        tokenizer_config.tokenizer_name_or_path = model_config.model_name_or_path
+    # Always use tulu_thinker for benchmark if not specified via args
+    if tokenizer_config.chat_template_name == "tulu":  # default value
+        tokenizer_config.chat_template_name = "tulu_thinker"
     
-    # Benchmark configuration
-    parser.add_argument("--num_batches", type=int, default=5,
-                       help="Number of batches to process")
-    parser.add_argument("--batch_size", type=int, default=256,
-                       help="Batch size for generation")
-    parser.add_argument("--num_samples_per_prompt", type=int, default=16,
-                       help="Number of samples per prompt")
-    
-    # Dataset configuration
-    parser.add_argument("--dataset_mixer_list", type=str, nargs="+",
-                       default=["hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2", "1.0"],
-                       help="Dataset mixer list")
-    parser.add_argument("--dataset_mixer_list_splits", type=str, nargs="+",
-                       default=["train"],
-                       help="Dataset splits to use")
-    parser.add_argument("--max_token_length", type=int, default=10240,
-                       help="Maximum token length for filtering")
-    parser.add_argument("--max_prompt_token_length", type=int, default=2048,
-                       help="Maximum prompt token length for filtering")
-    
-    # Chat template configuration
-    parser.add_argument("--chat_template_name", type=str, default="tulu_thinker",
-                       help="Chat template name to use")
-    parser.add_argument("--add_bos", type=bool, default=False,
-                       help="Whether to add BOS token")
-    
-    # vLLM configuration
-    parser.add_argument("--num_engines", type=int, default=8,
-                       help="Number of vLLM engines to use")
-    parser.add_argument("--tensor_parallel_size", type=int, default=1,
-                       help="Tensor parallel size for vLLM")
-    
-    args = parser.parse_args()
-    
-    # Create configuration
+    # Create configuration from parsed arguments
     config = BenchmarkConfig(
-        model_name=args.model_name,
-        max_model_len=args.max_model_len,
-        vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
-        temperature=args.temperature,
-        max_tokens=args.max_tokens,
-        top_p=args.top_p,
-        num_batches=args.num_batches,
-        batch_size=args.batch_size,
-        num_samples_per_prompt=args.num_samples_per_prompt,
-        dataset_mixer_list=args.dataset_mixer_list,
-        dataset_mixer_list_splits=args.dataset_mixer_list_splits,
-        max_token_length=args.max_token_length,
-        max_prompt_token_length=args.max_prompt_token_length,
-        chat_template_name=args.chat_template_name,
-        add_bos=args.add_bos,
-        num_engines=args.num_engines,
-        tensor_parallel_size=args.tensor_parallel_size,
+        model_name=model_config.model_name_or_path,
+        max_model_len=benchmark_args.max_model_len,
+        vllm_gpu_memory_utilization=benchmark_args.vllm_gpu_memory_utilization,
+        temperature=benchmark_args.temperature,
+        max_tokens=benchmark_args.max_tokens,
+        top_p=benchmark_args.top_p,
+        num_batches=benchmark_args.num_batches,
+        batch_size=benchmark_args.batch_size,
+        num_samples_per_prompt=benchmark_args.num_samples_per_prompt,
+        dataset_mixer_list=benchmark_args.dataset_mixer_list,
+        dataset_mixer_list_splits=benchmark_args.dataset_mixer_list_splits,
+        max_token_length=benchmark_args.max_token_length,
+        max_prompt_token_length=benchmark_args.max_prompt_token_length,
+        chat_template_name=tokenizer_config.chat_template_name,
+        add_bos=tokenizer_config.add_bos,
+        num_engines=benchmark_args.num_engines,
+        tensor_parallel_size=benchmark_args.tensor_parallel_size,
     )
+    
+    # Print configuration values for verification
+    print("\n" + "="*60)
+    print("BENCHMARK CONFIGURATION VALUES")
+    print("="*60)
+    print(f"Model name: {config.model_name}")
+    print(f"Max model len: {config.max_model_len}")
+    print(f"vLLM GPU memory utilization: {config.vllm_gpu_memory_utilization}")
+    print(f"Temperature: {config.temperature}")
+    print(f"Max tokens: {config.max_tokens}")
+    print(f"Top-p: {config.top_p}")
+    print(f"Num batches: {config.num_batches}")
+    print(f"Batch size: {config.batch_size}")
+    print(f"Num samples per prompt: {config.num_samples_per_prompt}")
+    print(f"Dataset mixer list: {config.dataset_mixer_list}")
+    print(f"Dataset mixer list splits: {config.dataset_mixer_list_splits}")
+    print(f"Max token length: {config.max_token_length}")
+    print(f"Max prompt token length: {config.max_prompt_token_length}")
+    print(f"Chat template name: {config.chat_template_name}")
+    print(f"Add BOS: {config.add_bos}")
+    print(f"Num engines: {config.num_engines}")
+    print(f"Tensor parallel size: {config.tensor_parallel_size}")
+    print("="*60 + "\n")
     
     # Run benchmark
     vllm_engines = None
     
     try:
-        tokenizer, model_config, model_flops_per_token, gpu_peak_flops = setup_tokenizer(config)
-        dataset = setup_dataset(config)
+        tokenizer, model_config_obj, model_flops_per_token, gpu_peak_flops = setup_tokenizer(config)
+        dataset = setup_dataset(config, benchmark_args)
         vllm_engines = setup_vllm_engines(config)
         run_benchmark(dataset, vllm_engines, config, model_flops_per_token, gpu_peak_flops)
     finally:
