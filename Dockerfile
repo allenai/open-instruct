@@ -7,21 +7,21 @@ RUN apt-get update && apt-get install -y nginx && mkdir -p /etc/nginx/conf.d
 
 # TODO When updating flash-attn or torch in the future, make sure to update the version in the requirements.txt file. 
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
-RUN pip install --upgrade pip "setuptools<70.0.0" wheel 
-RUN pip install torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
-RUN pip install packaging
-RUN pip install flash-attn==2.8.0.post2 --no-build-isolation
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-RUN python -m nltk.downloader punkt
-RUN python -m nltk.downloader punkt_tab
+RUN uv pip install --upgrade pip "setuptools<70.0.0" wheel 
+RUN uv pip install torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
+RUN uv pip install packaging
+RUN uv pip install flash-attn==2.8.0.post2 --no-build-isolation
+COPY pyproject.toml .
+RUN uv sync
+RUN uv python -m nltk.downloader punkt
+RUN uv python -m nltk.downloader punkt_tab
 
 COPY open_instruct open_instruct
 COPY oe-eval-internal oe-eval-internal
 
 # install the package in editable mode
 COPY pyproject.toml .
-RUN pip install -e .
+RUN uv pip install -e .
 COPY .git/ ./.git/
 COPY eval eval
 COPY configs configs
