@@ -8,7 +8,7 @@ uv run python open_instruct/grpo_fast.py \
     --response_length 512 \
     --pack_length 1024 \
     --per_device_train_batch_size 1 \
-    --num_unique_prompts_rollout 16 \
+    --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 4 \
     --model_name_or_path Qwen/Qwen3-1.7B \
     --stop_strings "</answer>" \
