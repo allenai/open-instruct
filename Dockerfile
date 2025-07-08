@@ -1,4 +1,4 @@
-FROM ghcr.io/allenai/oi-cuda-no-conda:12.1-cudnn8-dev-ubuntu20.04
+FROM ghcr.io/allenai/cuda:12.8-dev-ubuntu22.04-torch2.6.0-v1.2.170
 
 # Install conda. We give anyone in the users group the ability to run
 # conda commands and install packages in the base (default) environment.
@@ -35,7 +35,7 @@ RUN apt-get update && apt-get install -y nginx && mkdir -p /etc/nginx/conf.d
 # TODO When updating flash-attn or torch in the future, make sure to update the version in the requirements.txt file. 
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 RUN pip install --upgrade pip "setuptools<70.0.0" wheel 
-RUN pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+RUN pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu128
 RUN pip install packaging
 RUN pip install flash-attn==2.7.2.post1 --no-build-isolation
 COPY requirements.txt .
