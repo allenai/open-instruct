@@ -43,11 +43,15 @@ except Exception:
 # isort: on
 
 import asyncio
+import atexit
 import json
 import math
 import os
 import shutil
+import signal
 import socket
+import subprocess
+import sys
 import threading
 import time
 import traceback
@@ -369,6 +373,9 @@ class Args:
     """Whether to only reward good outputs. By default off. Useful to force the model to use the tool(s)."""
     use_mcp_tools: bool = False
     """Whether to use MCP tools. For now if you use the MCP tools, you need to run an MCP server on the background."""
+    mcp_server_command: Optional[str] = None
+    """Command to run MCP server subprocess when use_mcp_tools is enabled. Example: 'fastmcp run rag_mcp/main.py:mcp --transport streamable-http --port 8000'"""
+
 
     # rl-rag specific settngs
     number_documents_to_search: int = 3
@@ -1377,6 +1384,76 @@ def data_preparation_thread(
         )
 
 
+def launch_mcp_subprocess(use_mcp_tools: bool, run_mcp_command: str) -> Optional[subprocess.Popen]:
+    """
+    Launch MCP server subprocess if use_mcp_tools is enabled.
+    
+    Args:
+        use_mcp_tools: Whether to launch MCP server
+        run_mcp_command: Command to run MCP server
+        
+    Returns:
+        Popen object if launched, None otherwise
+    """
+    if not use_mcp_tools:
+        return None
+        
+    print(f"🚀 Launching MCP server subprocess: {run_mcp_command}")
+    
+    # Create log files for MCP server output
+    os.makedirs("mcp_logs", exist_ok=True)
+    mcp_stdout = open("mcp_logs/mcp_server_stdout.log", "w")
+    mcp_stderr = open("mcp_logs/mcp_server_stderr.log", "w")
+    
+    mcp_process = subprocess.Popen(
+        [run_mcp_command],
+        shell=True,
+        stdout=mcp_stdout,
+        stderr=mcp_stderr,
+        preexec_fn=os.setsid if hasattr(os, 'setsid') else None,
+    )
+    try:
+        # Launch subprocess in new process group to avoid signal interference
+        
+        # Give the server time to start
+        time.sleep(3)
+        
+        # Check if process is still running
+        if mcp_process.poll() is None:
+            print(f"✅ MCP server started successfully (PID: {mcp_process.pid})")
+            print(f"📋 MCP server logs: mcp_logs/mcp_server_stdout.log, mcp_logs/mcp_server_stderr.log")
+            
+            # Register cleanup function
+            def cleanup_mcp():
+                if mcp_process.poll() is None:
+                    print("🧹 Cleaning up MCP server...")
+                    try:
+                        # Kill the entire process group
+                        os.killpg(os.getpgid(mcp_process.pid), signal.SIGTERM)
+                        time.sleep(2)
+                        if mcp_process.poll() is None:
+                            os.killpg(os.getpgid(mcp_process.pid), signal.SIGKILL)
+                    except (OSError, ProcessLookupError):
+                        pass
+                mcp_stdout.close()
+                mcp_stderr.close()
+            
+            atexit.register(cleanup_mcp)
+            return mcp_process
+            
+        else:
+            print(f"❌ MCP server failed to start (exit code: {mcp_process.returncode})")
+            mcp_stdout.close()
+            mcp_stderr.close()
+            return None
+            
+    except Exception as e:
+        print(f"❌ Error launching MCP server: {e}")
+        mcp_stdout.close()
+        mcp_stderr.close()
+        return None
+
+
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: Callable):
     # ------------------------------------------------------------
     # Setup tokenizer
@@ -1498,6 +1575,17 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     pprint([args, model_config])
 
     # ------------------------------------------------------------
+    # Launch MCP subprocess if needed
+    mcp_process = None
+    if args.use_mcp_tools:
+        if args.mcp_server_command is None:
+            print("mcp_server_command is not provided when use_mcp_tools is True; please make sure to launch the MCP server manually.")
+        else:
+            mcp_process = launch_mcp_subprocess(args.use_mcp_tools, args.mcp_server_command)
+            if mcp_process is None:
+                raise RuntimeError("Failed to launch MCP server subprocess")
+
+    # ------------------------------------------------------------
     # Create the model and optimizer
     ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
     pg = None
@@ -1526,10 +1614,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                     from open_instruct.tool_utils.tool_mcp import (
                         SemanticScholarSnippetSearchTool,
                     )
+
                     tool = SemanticScholarSnippetSearchTool(
-                    start_str="<search>",
-                    end_str="</search>",
-                )
+                        start_str="<search>",
+                        end_str="</search>",
+                    )
                 else:
                     from open_instruct.search_utils.search_tool import SearchTool
 
@@ -1539,7 +1628,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
                         api_endpoint=args.search_api_endpoint,
                         number_documents_to_search=args.number_documents_to_search,
                     )
-                    tool_objects[tool.end_str] = tool
+                
+                tool_objects[tool.end_str] = tool
+                
             elif tool.lower() == "code":
                 from open_instruct.tool_utils.tool_vllm import PythonCodeTool
 
@@ -1855,6 +1946,19 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
         except Exception as cleanup_error:
             print(f"Warning: Error during LLM judge cleanup: {cleanup_error}")
 
+        # Clean up MCP subprocess
+        if mcp_process is not None:
+            try:
+                print("🧹 Cleaning up MCP server subprocess...")
+                if mcp_process.poll() is None:
+                    os.killpg(os.getpgid(mcp_process.pid), signal.SIGTERM)
+                    time.sleep(2)
+                    if mcp_process.poll() is None:
+                        os.killpg(os.getpgid(mcp_process.pid), signal.SIGKILL)
+                print("✅ MCP server subprocess cleaned up")
+            except (OSError, ProcessLookupError) as cleanup_error:
+                print(f"Warning: Error during MCP cleanup: {cleanup_error}")
+
         ray.shutdown()
         os._exit(1)
         raise  # Re-raise the exception after shutdown
@@ -1883,6 +1987,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     ):
         shutil.copytree(args.output_dir, "/output", dirs_exist_ok=True)
     print("finished training")
+
+    # Note: MCP subprocess cleanup is handled by atexit handler registered in launch_mcp_subprocess
+    if mcp_process is not None:
+        print("🧹 MCP server subprocess will be cleaned up by atexit handler")
 
     accelerator = Namespace()
     accelerator.is_main_process = True  # hack
