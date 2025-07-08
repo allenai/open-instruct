@@ -51,7 +51,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 import torch
 import transformers
-from datasets import Dataset, concatenate_datasets, load_dataset
+from datasets import Dataset, concatenate_datasets
 from huggingface_hub import ModelCard, revision_exists
 from rich.console import Console
 from rich.text import Text
@@ -67,6 +67,37 @@ from transformers.utils.hub import _CACHED_NO_EXIST, TRANSFORMERS_CACHE, extract
 
 from open_instruct.utils import hf_whoami
 
+# MOVE THIS SOMEWHERE
+def load_dataset(
+    *args, **kwargs
+):
+    from datasets import load_dataset as lds
+    from datasets import DatasetDict
+    import pandas as pd
+
+    try:
+        return lds(*args, **kwargs)
+    except:
+        # - load_dataset sometimes has strict schema
+        # checks and may fail on tools / documents
+        train_files = kwargs['data_files']
+        if isinstance(train_files, str):
+            train_files = [train_files]
+
+        file_type = train_files[0].split('.')[-1]
+        assert file_type in {'json', 'jsonl', 'parquet'}
+
+        dfs = []
+        reader = (
+            partial(pd.read_json , lines=True)
+            if file_type in {'json', 'jsonl'}
+            else partial(pd.read_parquet, engine='auto')
+        )
+        for file in train_files:
+            dfs.append(reader(file, orient='records'))
+
+        raw_datasets = Dataset.from_pandas(pd.concat(dfs))
+        return raw_datasets
 
 # ----------------------------------------------------------------------------
 # Utilities

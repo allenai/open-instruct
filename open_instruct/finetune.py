@@ -235,7 +235,7 @@ class FlatArguments:
             " Only for linear schedulers, currently."
         },
     )
-    weight_decay: float = field(default=0.0, metadata={"help": "Weight decay for AdamW if we apply some."})
+    
     weight_decay: float = field(default=0.0, metadata={"help": "Weight decay for AdamW if we apply some."})
     timeout: int = field(
         default=1800,
@@ -291,10 +291,7 @@ class FlatArguments:
     load_balancing_weight: float = field(
         default=0.5, metadata={"help": "Weight for load balancing loss if applicable."}
     )
-    clean_checkpoints_at_end: bool = field(
-        default=True, metadata={"help": "Whether to clean up all previous checkpoints at the end of the run."}
-    )
-
+    
     # Experiment tracking
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
@@ -341,13 +338,7 @@ class FlatArguments:
             "help": "Whether to clean up all previous checkpoints at the end of the run.",
         },
     )
-    final_lr_ratio: Optional[float] = field(
-        default=None,
-        metadata={
-            "help": "Set the final lr value at the end of training to be final_lr_ratio * learning_rate."
-            " Only for linear schedulers, currently."
-        },
-    )
+    
     add_seed_and_date_to_exp_name: bool = True
     additional_model_arguments: Optional[Union[dict, str]] = field(
         default_factory=dict,

@@ -394,6 +394,7 @@ def save_with_accelerate(
     output_dir: str,
     use_lora: bool = False,
     model_attribute_to_save: Optional[str] = None,
+    safe_serialization: bool = True,
 ) -> None:
     """`model_attribute_to_save` is for used to save PPO's policy instead of the full model"""
     # set the generation config to an empty setting to be safe.
@@ -429,13 +430,12 @@ def save_with_accelerate(
         if accelerator.is_main_process:
             unwrapped_model.save_pretrained(output_dir, state_dict=state_dict)
     else:
-        # don't use safetensors for saving for now
         unwrapped_model.save_pretrained(
             output_dir,
             is_main_process=accelerator.is_main_process,
             save_function=accelerator.save,
             state_dict=state_dict,
-            safe_serialization=False,
+            safe_serialization=safe_serialization,
         )
 
     if accelerator.is_main_process:
