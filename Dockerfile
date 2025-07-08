@@ -1,4 +1,4 @@
-FROM ghcr.io/allenai/cuda:12.8-dev-ubuntu22.04-torch2.6.0-v1.2.170
+FROM ghcr.io/allenai/cuda:12.8-dev-ubuntu22.04-torch2.7.0-v1.2.170
 
 WORKDIR /stage/
 
@@ -8,9 +8,9 @@ RUN apt-get update && apt-get install -y nginx && mkdir -p /etc/nginx/conf.d
 # TODO When updating flash-attn or torch in the future, make sure to update the version in the requirements.txt file. 
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 RUN pip install --upgrade pip "setuptools<70.0.0" wheel 
-RUN pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu128
+RUN pip install torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
 RUN pip install packaging
-RUN pip install flash-attn==2.7.2.post1 --no-build-isolation
+RUN pip install flash-attn==2.7.4.post1 --no-build-isolation
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 RUN python -m nltk.downloader punkt

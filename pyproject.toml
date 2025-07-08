@@ -22,7 +22,7 @@ dependencies = [
     "ray[default]>=2.44.1",
     "setuptools>=75.6.0",
     "tensorboard>=2.18.0",
-    "torch>=2.6.0",
+    "torch>=2.7.0",
     "transformers>=4.52.4",
     "vllm>=0.8.5.post1",    
     "wandb==0.18.1",
