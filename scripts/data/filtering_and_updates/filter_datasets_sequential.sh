@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Script to run keyword filtering followed by cutoff date filtering sequentially
-# Usage: ./filter_datasets_sequential.sh --input-dataset <dataset_name> [--filter-user-turns] [--num-proc <num>] [--split <split>] [--column <column>]
+# Usage: ./scripts/data/filtering_and_updates/filter_datasets_sequential.sh --input-dataset <dataset_name> [--filter-user-turns] [--num-proc <num>] [--split <split>] [--column <column>] [--output-entity <entity>]
 
 set -e  # Exit on any error
 
@@ -10,6 +10,7 @@ NUM_PROC=16
 SPLIT="train"
 COLUMN="messages"
 FILTER_USER_TURNS=""
+OUTPUT_ENTITY=""
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -34,6 +35,10 @@ while [[ $# -gt 0 ]]; do
       COLUMN="$2"
       shift 2
       ;;
+    --output-entity)
+      OUTPUT_ENTITY="$2"
+      shift 2
+      ;;
     -h|--help)
       echo "Usage: $0 --input-dataset <dataset_name> [options]"
       echo ""
@@ -43,6 +48,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --num-proc <number>       Optional: Number of processes for parallel processing (default: 16)"
       echo "  --split <name>            Optional: Dataset split to process (default: train)"
       echo "  --column <name>           Optional: Column name containing messages (default: messages)"
+      echo "  --output-entity <name>    Optional: Output entity (org/user) for filtered datasets (default: same as input)"
       echo "  -h, --help                Show this help message"
       echo ""
       echo "This script runs two filtering steps sequentially:"
@@ -50,8 +56,8 @@ while [[ $# -gt 0 ]]; do
       echo "2. filter_cutoff_date.py: Removes examples mentioning knowledge cutoff dates"
       echo ""
       echo "Output datasets:"
-      echo "  Step 1: <input-dataset>-keyword-filtered"
-      echo "  Step 2: <input-dataset>-keyword-filtered-filter-datecutoff"
+      echo "  Step 1: <output-entity>/<dataset-name>-keyword-filtered (or <input-dataset>-keyword-filtered if no output entity)"
+      echo "  Step 2: <output-entity>/<dataset-name>-keyword-filtered-filter-datecutoff (or <input-dataset>-keyword-filtered-filter-datecutoff)"
       exit 0
       ;;
     *)
@@ -80,14 +86,19 @@ echo "Filter user turns: $(if [[ -n "$FILTER_USER_TURNS" ]]; then echo "Yes"; el
 echo "Number of processes: $NUM_PROC"
 echo "Split: $SPLIT"
 echo "Column: $COLUMN"
+echo "Output entity: $(if [[ -n "$OUTPUT_ENTITY" ]]; then echo "$OUTPUT_ENTITY"; else echo "Same as input"; fi)"
 echo ""
 
 # Step 1: Keyword filtering
 echo "Step 1: Running keyword filtering..."
-echo "Command: python $SCRIPT_DIR/filter_dataset_by_keywords.py --input-dataset $INPUT_DATASET $FILTER_USER_TURNS"
+OUTPUT_ENTITY_ARG=""
+if [[ -n "$OUTPUT_ENTITY" ]]; then
+  OUTPUT_ENTITY_ARG="--output-entity $OUTPUT_ENTITY"
+fi
+echo "Command: uv run python $SCRIPT_DIR/filter_dataset_by_keywords.py --input-dataset $INPUT_DATASET $FILTER_USER_TURNS $OUTPUT_ENTITY_ARG"
 echo ""
 
-python "$SCRIPT_DIR/filter_dataset_by_keywords.py" --input-dataset "$INPUT_DATASET" $FILTER_USER_TURNS
+uv run python "$SCRIPT_DIR/filter_dataset_by_keywords.py" --input-dataset "$INPUT_DATASET" $FILTER_USER_TURNS $OUTPUT_ENTITY_ARG
 
 if [[ $? -ne 0 ]]; then
   echo "Error: Keyword filtering failed"
@@ -95,12 +106,21 @@ if [[ $? -ne 0 ]]; then
 fi
 
 # Determine intermediate dataset name (output from step 1)
-if [[ "$INPUT_DATASET" == *"/"* ]]; then
-  # Dataset has organization prefix
-  INTERMEDIATE_DATASET="${INPUT_DATASET}-keyword-filtered"
+if [[ -n "$OUTPUT_ENTITY" ]]; then
+  # Use custom output entity
+  if [[ "$INPUT_DATASET" == *"/"* ]]; then
+    DATASET_NAME="${INPUT_DATASET#*/}"  # Remove entity prefix
+  else
+    DATASET_NAME="$INPUT_DATASET"
+  fi
+  INTERMEDIATE_DATASET="${OUTPUT_ENTITY}/${DATASET_NAME}-keyword-filtered"
 else
-  # No organization prefix
-  INTERMEDIATE_DATASET="${INPUT_DATASET}-keyword-filtered"
+  # Use same entity as input dataset
+  if [[ "$INPUT_DATASET" == *"/"* ]]; then
+    INTERMEDIATE_DATASET="${INPUT_DATASET}-keyword-filtered"
+  else
+    INTERMEDIATE_DATASET="${INPUT_DATASET}-keyword-filtered"
+  fi
 fi
 
 echo ""
@@ -109,10 +129,10 @@ echo ""
 
 # Step 2: Cutoff date filtering
 echo "Step 2: Running cutoff date filtering..."
-echo "Command: python $SCRIPT_DIR/filter_cutoff_date.py --dataset $INTERMEDIATE_DATASET --column $COLUMN --num_proc $NUM_PROC --split $SPLIT --push_to_hf"
+echo "Command: uv run python $SCRIPT_DIR/filter_cutoff_date.py --dataset $INTERMEDIATE_DATASET --column $COLUMN --num_proc $NUM_PROC --split $SPLIT --push_to_hf $OUTPUT_ENTITY_ARG"
 echo ""
 
-python "$SCRIPT_DIR/filter_cutoff_date.py" --dataset "$INTERMEDIATE_DATASET" --column "$COLUMN" --num_proc "$NUM_PROC" --split "$SPLIT" --push_to_hf
+uv run python "$SCRIPT_DIR/filter_cutoff_date.py" --dataset "$INTERMEDIATE_DATASET" --column "$COLUMN" --num_proc "$NUM_PROC" --split "$SPLIT" --push_to_hf $OUTPUT_ENTITY_ARG
 
 if [[ $? -ne 0 ]]; then
   echo "Error: Cutoff date filtering failed"
@@ -120,7 +140,18 @@ if [[ $? -ne 0 ]]; then
 fi
 
 # Determine final dataset name
-FINAL_DATASET="${INTERMEDIATE_DATASET}-filter-datecutoff"
+if [[ -n "$OUTPUT_ENTITY" ]]; then
+  # Use custom output entity
+  if [[ "$INPUT_DATASET" == *"/"* ]]; then
+    DATASET_NAME="${INPUT_DATASET#*/}"  # Remove entity prefix
+  else
+    DATASET_NAME="$INPUT_DATASET"
+  fi
+  FINAL_DATASET="${OUTPUT_ENTITY}/${DATASET_NAME}-keyword-filtered-filter-datecutoff"
+else
+  # Use same entity as input dataset
+  FINAL_DATASET="${INTERMEDIATE_DATASET}-filter-datecutoff"
+fi
 
 echo ""
 echo "=========================================="

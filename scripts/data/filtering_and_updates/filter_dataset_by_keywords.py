@@ -114,17 +114,28 @@ def main():
     parser.add_argument("--input-dataset", required=True, help="Input dataset name")
     parser.add_argument("--filter-user-turns", action="store_true", 
                        help="Also filter based on user messages (default: only filter assistant messages)")
+    parser.add_argument("--output-entity", type=str, help="Output entity (org/user) for the filtered dataset. If not provided, uses the same entity as the input dataset.")
     
     args = parser.parse_args()
     
     input_dataset = args.input_dataset
     filter_user_turns = args.filter_user_turns
-    # Automatically generate output name by adding -keyword-filtered
-    if "/" in input_dataset:
-        org, name = input_dataset.split("/", 1)
-        output_dataset = f"{org}/{name}-keyword-filtered"
+    
+    # Generate output dataset name
+    if args.output_entity:
+        # Use custom output entity
+        if "/" in input_dataset:
+            _, dataset_name = input_dataset.split("/", 1)
+        else:
+            dataset_name = input_dataset
+        output_dataset = f"{args.output_entity}/{dataset_name}-keyword-filtered"
     else:
-        output_dataset = f"{input_dataset}-keyword-filtered"
+        # Use same entity as input dataset
+        if "/" in input_dataset:
+            org, name = input_dataset.split("/", 1)
+            output_dataset = f"{org}/{name}-keyword-filtered"
+        else:
+            output_dataset = f"{input_dataset}-keyword-filtered"
     
     print(f"Loading dataset: {input_dataset}")
     
