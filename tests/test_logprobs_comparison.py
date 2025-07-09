@@ -1,5 +1,4 @@
 import unittest
-import logging
 import torch
 import numpy as np
 import transformers
@@ -9,10 +8,6 @@ from typing import Dict, List, Union, Any
 from transformers import PreTrainedModel
 from open_instruct import model_utils
 from open_instruct import rl_utils2
-
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 
 MAX_TOKENS = 20
@@ -56,20 +51,8 @@ class TestLogprobsComparison(unittest.TestCase):
                                        tokenizer.pad_token_id)
         vllm_logprobs = vllm_output["logprobs"]
         
-        # Debug logging
-        logger.info(f"Query length: {len(query)}")
-        logger.info(f"Response length: {len(vllm_output['response'])}")
-        logger.info(f"vLLM logprobs length: {len(vllm_logprobs)}")
-        logger.info(f"HF logprobs length: {len(hf_logprobs)}")
-        logger.info(f"First 5 vLLM logprobs: {vllm_logprobs[:5]}")
-        logger.info(f"First 5 HF logprobs: {hf_logprobs[:5]}")
-        logger.info(f"Response tokens: {vllm_output['response'][:10]}")
-        logger.info(f"Query-response packed shape: {packed_sequences.query_responses[0].shape}")
-        
         # Check that the tokens being scored match
         packed_response_tokens = packed_sequences.query_responses[0][len(query):len(query)+len(vllm_output['response'])].tolist()
-        logger.info(f"vLLM response tokens: {vllm_output['response'][:10]}")
-        logger.info(f"Packed response tokens: {packed_response_tokens[:10]}")
         
         self.assertEqual(len(vllm_logprobs), len(vllm_output["response"]))
         self.assertEqual(len(vllm_logprobs), len(hf_logprobs), f'{vllm_logprobs=}\n{hf_logprobs=}')
@@ -87,9 +70,6 @@ def _get_hf_logprobs(model_name: str, query: List[int],
     padding_mask = query_response != pad_token_id
     input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
     
-    logger.info(f"HF: Query length: {len(query)}, Response length: {len(response)}")
-    logger.info(f"HF: query_response shape: {query_response.shape}")
-    logger.info(f"HF: input_ids shape after masking: {input_ids.shape}")
     model: PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
@@ -110,14 +90,8 @@ def _get_hf_logprobs(model_name: str, query: List[int],
             return_dict=True,
         )
         logits = output.logits
-        # Don't apply temperature scaling when temperature is 0
-        if TEMPERATURE > 0:
-            logits /= TEMPERATURE
         logprobs = model_utils.log_softmax_and_gather(logits, input_ids[:, 1:])
-        logger.info(f"HF: logprobs shape before slicing: {logprobs.shape}")
-        logger.info(f"HF: Slicing from {len(query) - 1} to end")
         logprobs = logprobs[:, len(query) - 1:]
-        logger.info(f"HF: logprobs shape after slicing: {logprobs.shape}")
     return logprobs.flatten().tolist()
 
 
