@@ -1,3 +1,5 @@
 - remove try/catch clauses
 - copy dataset structure from grpo_fast.py
 - cleanup type annotations
+- switch to use the args class
+- remove the duplication from get_batch_data and instead set the n parameter in vllm.SamplingParams.
