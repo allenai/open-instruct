@@ -159,6 +159,8 @@ class FlatArguments:
     additional_model_arguments: Optional[Union[dict, str]] = field(
         default_factory=dict, metadata={"help": "A dictionary of additional model args used to construct the model."}
     )
+    sync_each_batch: bool = False
+    """Optionaly sync grads every batch when using grad accumulation. Can significantly reduce memory costs."""
     low_cpu_mem_usage: bool = field(
         default=False,
         metadata={
