@@ -100,6 +100,7 @@ from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
     disable_dropout_in_model,
+    entropy_from_logits,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
     print_rich_table,
@@ -255,6 +256,8 @@ class Args:
     """the name or path to the value model"""
     value_model_revision: Optional[str] = None
     """the revision of the value model"""
+    record_entropy: bool = False
+    """whether to record the entropy of the policy during training. Uses extra memory."""
 
     # Reward
     # -- r1 style format reward
@@ -619,14 +622,14 @@ class PolicyTrainerRayProcess(RayProcess):
         position_ids: torch.LongTensor,
         pad_token_id: int,
         temperature: float,
-    ) -> torch.Tensor:
+        return_entropy: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         # Replace pad tokens with 0s so that we don't run into index out of bounds errors
         padding_mask = query_response != pad_token_id
         input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
         # NOTE: the [:-1] and [1:] are because the logits and generated tokens are off by 1 in index
         output = model(
             input_ids=input_ids[:, :-1],
-            # @vwxyzjn: without clamp, we get index out of bounds errors; TODO: investigate
             attention_mask=attention_mask[:, :-1].clamp(0, 1),
             position_ids=position_ids[:, :-1],
             return_dict=True,
@@ -634,7 +637,14 @@ class PolicyTrainerRayProcess(RayProcess):
         logits = output.logits
         logits /= temperature + 1e-7
         logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
-        return logprob
+
+        # fow now, entropy is just for monitoring, and we don't pass gradients through it.
+        entropy = None
+        if return_entropy:
+            with torch.no_grad():
+                entropy = entropy_from_logits(logits)
+
+        return logprob, entropy
 
     def forward_value(
         self,
@@ -784,11 +794,38 @@ class PolicyTrainerRayProcess(RayProcess):
                     attention_mask = collated_attention_masks[i]
                     position_id = collated_position_ids[i]
                     response_mask = collated_response_masks[i]
-                    ref_logprob = self.forward(
-                        self.ref_policy, query_response, attention_mask, position_id, pad_token_id, args.temperature
+                    ref_logprob, _ = self.forward(
+                        self.ref_policy,
+                        query_response,
+                        attention_mask,
+                        position_id,
+                        pad_token_id,
+                        args.temperature,
+                        return_entropy=False,
                     )
                     ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:].bool(), INVALID_LOGPROB)
                     collated_ref_logprobs.append(ref_logprob)
+                    torch.cuda.empty_cache()
+
+        old_logprobs = [None for _ in range(len(collated_query_responses))]
+        with Timer("Old Logprob Calculation", noop=self.rank != 0):
+            with torch.no_grad():
+                for i in range(len(collated_query_responses)):
+                    query_response = collated_query_responses[i]
+                    attention_mask = collated_attention_masks[i]
+                    position_id = collated_position_ids[i]
+                    response_mask = collated_response_masks[i]
+                    old_logprob, _ = self.forward(
+                        self.model,
+                        query_response,
+                        attention_mask,
+                        position_id,
+                        pad_token_id,
+                        args.temperature,
+                        return_entropy=False,
+                    )
+                    old_logprob = torch.masked_fill(old_logprob, ~response_mask[:, 1:].bool(), INVALID_LOGPROB)
+                    old_logprobs[i] = old_logprob
                     torch.cuda.empty_cache()
         with Timer("Backload Value Model", noop=self.rank != 0):
             self.backload_to_gpu(self.value_model)
@@ -904,7 +941,6 @@ class PolicyTrainerRayProcess(RayProcess):
         with Timer("[Training Processes] Policy Loss calculation", noop=self.rank != 0):
             local_step = 0
             policy_optimizer_step = 0
-            old_logprobs = [None for _ in range(len(collated_query_responses))]
             kl1_stats = torch.zeros(len(collated_query_responses))
             kl2_stats = torch.zeros(len(collated_query_responses))
             kl3_stats = torch.zeros(len(collated_query_responses))
@@ -914,6 +950,7 @@ class PolicyTrainerRayProcess(RayProcess):
             pg_loss_stats = torch.zeros(len(collated_query_responses))
             loss_stats = torch.zeros(len(collated_query_responses))
             ratio_stats = torch.zeros(len(collated_query_responses))
+            entropy_stats = torch.zeros(len(collated_query_responses))
             for epoch_idx in range(args.num_epochs):
                 for i in range(len(collated_query_responses)):
                     mb_ref_logprob = collated_ref_logprobs[i]
@@ -923,20 +960,25 @@ class PolicyTrainerRayProcess(RayProcess):
                     mb_response_masks_bool = mb_response_masks[:, 1:].bool()
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
-                    mb_new_logprobs = self.forward(
+                    mb_new_logprobs, mb_entropy = self.forward(
                         self.model,
                         mb_query_responses,
                         mb_attention_mask,
                         mb_position_id,
                         pad_token_id,
                         args.temperature,
+                        return_entropy=args.record_entropy,
                     )
                     mb_new_logprobs = torch.masked_fill(mb_new_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
 
-                    # Cache the old logprobs
-                    with torch.no_grad():
-                        if epoch_idx == 0:
-                            old_logprobs[i] = mb_new_logprobs
+                    # If we have one minibatch, we can just re-use the initial logprobs.
+                    # otherwise, we use the logprobs we already calculated.
+                    if num_mini_batches > 1:
+                        mb_old_logprobs = old_logprobs[i]
+                    else:
+                        with torch.no_grad():
+                            if epoch_idx == 0:
+                                old_logprobs[i] = mb_new_logprobs
                         mb_old_logprobs = old_logprobs[i].detach()
 
                     # Calculate the policy's loss
@@ -991,6 +1033,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
                         loss_stats[i] = loss
                         ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
+                        if args.record_entropy:
+                            # Calculate entropy statistics
+                            entropy_stats[i] = masked_mean(
+                                mb_entropy, mb_response_masks_bool, args.masked_mean_axis
+                            ).float()
 
             with torch.no_grad():
                 self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
@@ -1010,6 +1057,9 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("val/adv_mean", adv_mean)
                 self.local_metrics.add("val/adv_abs_mean", adv_abs_mean)
                 self.local_metrics.add("val/adv_std", adv_std)
+                if args.record_entropy:
+                    self.local_metrics.add("policy/entropy_avg", entropy_stats.mean())
+                self.local_metrics.add("policy/entropy_var", entropy_stats.var())
                 metrics_list = self.local_metrics.get_metrics_list()
                 # metrics_list["val/advantages_mean"] = adv.mean()
                 # metrics_list["val/advantages_min"] = adv.min()

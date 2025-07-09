@@ -90,6 +90,7 @@ from open_instruct.model_utils import (
     ModelConfig,
     apply_verifiable_reward,
     disable_dropout_in_model,
+    entropy_from_logits,
     log_softmax_and_gather,
     print_rich_single_line_metrics,
     print_rich_table,
@@ -244,6 +245,8 @@ class Args:
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
     mask_truncated_completions: bool = False
     """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
+    record_entropy: bool = False
+    """whether to record the entropy of the policy during training. Uses extra memory."""
 
     # Reward
     # -- r1 style format reward
@@ -616,7 +619,8 @@ class PolicyTrainerRayProcess(RayProcess):
         position_ids: torch.LongTensor,
         pad_token_id: int,
         temperature: float,
-    ) -> torch.Tensor:
+        return_entropy: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         # Replace pad tokens with 0s so that we don't run into index out of bounds errors
         padding_mask = query_response != pad_token_id
         input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
@@ -631,7 +635,14 @@ class PolicyTrainerRayProcess(RayProcess):
         logits = output.logits
         logits /= temperature + 1e-7
         logprob = log_softmax_and_gather(logits, input_ids[:, 1:])
-        return logprob
+
+        # For now, entropy is just for monitoring, and we don't pass gradients through it.
+        entropy = None
+        if return_entropy:
+            with torch.no_grad():
+                entropy = entropy_from_logits(logits)
+
+        return logprob, entropy
 
     def setup_model_update_group(self, vllm_engines):
         self.vllm_engines = vllm_engines
@@ -712,7 +723,7 @@ class PolicyTrainerRayProcess(RayProcess):
                         torch.distributed.broadcast(param.data, 0, group=self.model_update_group)
         if torch.distributed.get_rank() == 0:
             ray.get(refss)
-        if args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
+        if self.args.vllm_enable_prefix_caching and torch.distributed.get_rank() == 0:
             ray.get(cache_reset_refs)
 
     def update_ref_policy(self):
@@ -753,6 +764,8 @@ class PolicyTrainerRayProcess(RayProcess):
             collated_advantages = collated_advantages[0:-leftover]
             collated_response_masks = collated_response_masks[0:-leftover]
             print(f"Warning: {leftover} samples are dropped due to batch size {num_mini_batches}")
+        # recalculate the "real" number of mini-batches
+        num_mini_batches = len(collated_query_responses) // accumulation_steps
 
         # Calculate the logprob of the reference policy
         collated_ref_logprobs = []
@@ -764,8 +777,14 @@ class PolicyTrainerRayProcess(RayProcess):
                     attention_mask = collated_attention_masks[i]
                     position_id = collated_position_ids[i]
                     response_mask = collated_response_masks[i]
-                    ref_logprob = self.forward(
-                        self.ref_policy, query_response, attention_mask, position_id, pad_token_id, args.temperature
+                    ref_logprob, _ = self.forward(
+                        self.ref_policy,
+                        query_response,
+                        attention_mask,
+                        position_id,
+                        pad_token_id,
+                        args.temperature,
+                        return_entropy=False,
                     )
                     if args.mask_tool_use and args.tool_use:
                         # mask logprobs for tool tokens
@@ -775,10 +794,39 @@ class PolicyTrainerRayProcess(RayProcess):
                     ref_logprob = torch.masked_fill(ref_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
                     collated_ref_logprobs.append(ref_logprob)
                     torch.cuda.empty_cache()
+        # if we have multiple minibatches, we need to calculate the old logprobs for each minibatch
+        # following gtrl scripts in just doing this on the current active policy, rather than use the logprobs
+        # from the generator (note that async mode means these are a bit diff!)
+        old_logprobs = [None for _ in range(len(collated_query_responses))]
+        if num_mini_batches > 1:
+            with Timer("Old logprobs Calculation", noop=self.rank != 0):
+                with torch.no_grad():
+                    for i in range(len(collated_query_responses)):
+                        query_response = collated_query_responses[i]
+                        tool_mask = collated_tool_masks[i]
+                        attention_mask = collated_attention_masks[i]
+                        position_id = collated_position_ids[i]
+                        response_mask = collated_response_masks[i]
+                        old_logprob, _ = self.forward(
+                            self.model,
+                            query_response,
+                            attention_mask,
+                            position_id,
+                            pad_token_id,
+                            args.temperature,
+                            return_entropy=False,
+                        )
+                        if args.mask_tool_use and args.tool_use:
+                            response_mask = response_mask.bool() & tool_mask.bool()
+                        else:
+                            response_mask = response_mask.bool()
+                        old_logprob = torch.masked_fill(old_logprob, ~response_mask[:, 1:], INVALID_LOGPROB)
+                        old_logprobs[i] = old_logprob
+                        torch.cuda.empty_cache()
+
         local_step = 0
         # Do multiple epochs of training on on-policy data (PPO-style), with a fresh random shuffle in each epoch
         with Timer("[Training Processes] Loss calculation", noop=self.rank != 0):
-            old_logprobs = [None for _ in range(len(collated_query_responses))]
             kl1_stats = torch.zeros(len(collated_query_responses))
             kl2_stats = torch.zeros(len(collated_query_responses))
             kl3_stats = torch.zeros(len(collated_query_responses))
@@ -788,6 +836,7 @@ class PolicyTrainerRayProcess(RayProcess):
             pg_loss_stats = torch.zeros(len(collated_query_responses))
             loss_stats = torch.zeros(len(collated_query_responses))
             ratio_stats = torch.zeros(len(collated_query_responses))
+            entropy_stats = torch.zeros(len(collated_query_responses))
             for epoch_idx in range(args.num_epochs):
                 for i in range(len(collated_query_responses)):
                     mb_ref_logprob = collated_ref_logprobs[i]
@@ -801,21 +850,25 @@ class PolicyTrainerRayProcess(RayProcess):
                         mb_response_masks_bool = mb_response_masks[:, 1:].bool() & mb_tool_mask[:, 1:].bool()
                     mb_attention_mask = collated_attention_masks[i]
                     mb_position_id = collated_position_ids[i]
-                    mb_new_logprobs = self.forward(
+                    mb_new_logprobs, mb_entropy = self.forward(
                         self.model,
                         mb_query_responses,
                         mb_attention_mask,
                         mb_position_id,
                         pad_token_id,
                         args.temperature,
+                        return_entropy=args.record_entropy,
                     )
                     mb_new_logprobs = torch.masked_fill(mb_new_logprobs, ~mb_response_masks_bool, INVALID_LOGPROB)
 
                     # Cache the old logprobs
-                    with torch.no_grad():
-                        if epoch_idx == 0:
-                            old_logprobs[i] = mb_new_logprobs
-                        mb_old_logprobs = old_logprobs[i].detach()
+                    if num_mini_batches > 1:
+                        mb_old_logprobs = old_logprobs[i]
+                    else:
+                        with torch.no_grad():
+                            if epoch_idx == 0:
+                                old_logprobs[i] = mb_new_logprobs
+                            mb_old_logprobs = old_logprobs[i].detach()
 
                     # Calculate the policy's loss
                     logprobs_diff = mb_new_logprobs - mb_old_logprobs
@@ -870,6 +923,11 @@ class PolicyTrainerRayProcess(RayProcess):
                         pg_loss_stats[i] = masked_mean(pg_loss_max, mb_response_masks_bool, args.masked_mean_axis)
                         loss_stats[i] = loss
                         ratio_stats[i] = masked_mean(ratio, mb_response_masks_bool, args.masked_mean_axis)
+                        if args.record_entropy:
+                            # Calculate entropy statistics
+                            entropy_stats[i] = masked_mean(
+                                mb_entropy, mb_response_masks_bool, args.masked_mean_axis
+                            ).float()
 
             with torch.no_grad():
                 self.local_metrics.add("objective/kl_avg", kl1_stats.mean())
@@ -882,6 +940,8 @@ class PolicyTrainerRayProcess(RayProcess):
                 self.local_metrics.add("policy/clipfrac_avg", pg_clipfrac_stats.mean())
                 self.local_metrics.add("val/ratio", ratio_stats.mean())
                 self.local_metrics.add("val/ratio_var", ratio_stats.var())
+                if args.record_entropy:
+                    self.local_metrics.add("policy/entropy_avg", entropy_stats.mean())
                 self.local_metrics.add("lr", self.scheduler.get_last_lr()[0])
                 return self.local_metrics.get_metrics_list()
 
@@ -1292,40 +1352,47 @@ def data_preparation_thread(
                 )
 
         # Create a result package with metrics and data
-        sequence_lengths = np.array([len(response) for response in responses])
-        sequence_length_solved = (
-            np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == max_possible_score])
-        )
-        sequence_length_unsolved = (
-            np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
-        )
-        metrics = {
-            "scores": np.array(scores).mean(),
-            "real_batch_size_ratio": real_batch_size_ratio,
-            "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
-            "packed_ratio": len(packed_sequences.query_responses) / len(responses) if len(responses) > 0 else 0,
-            "val/sequence_lengths": sequence_lengths.mean(),
-            "val/sequence_lengths_min": sequence_lengths.min(),
-            "val/sequence_lengths_max": sequence_lengths.max(),
-            "val/sequence_lengths_unsolved": (
-                0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
-            ),
-            "val/sequence_lengths_solved": 0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean(),
-            "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
-            "val/sequence_lengths_solved_hist": sequence_length_solved,
-            "val/stop_rate": stop_rate,
-            "val/advantages_mean": advantages.mean(),
-            "val/advantages_min": advantages.min(),
-            "val/advantages_max": advantages.max(),
-            "val/advantages_hist": advantages,
-            "val/num_calls_rate": np.array(num_calls).mean(),
-            "val/timeouts_rate": np.array(timeouts).mean(),
-            "val/tool_errors_rate": np.array([len(item) > 0 for item in tool_errors]).mean(),
-            "val/good_outputs_rate": np.array(good_outputs).mean(),
-            "val/tool_runtimes_rate": np.array(tool_runtimes).mean(),
-            "val/tool_calleds_rate": np.array(tool_calleds).mean(),
-            **reward_metrics,
-        }
+        if len(responses) == 0:
+            # Handle empty responses case
+            # in this case, we won't log metrics, so it should be fine.
+            metrics = {}
+        else:
+            sequence_lengths = np.array([len(response) for response in responses])
+            sequence_length_solved = (
+                np.array([]) if np.all(scores == 0) else np.array(sequence_lengths[scores == max_possible_score])
+            )
+            sequence_length_unsolved = (
+                np.array([]) if np.all(scores == max_possible_score) else np.array(sequence_lengths[scores == 0])
+            )
+            metrics = {
+                "scores": np.array(scores).mean(),
+                "real_batch_size_ratio": real_batch_size_ratio,
+                "unsolved_batch_size_ratio": unsolved_batch_size_ratio,
+                "packed_ratio": len(packed_sequences.query_responses) / len(responses) if len(responses) > 0 else 0,
+                "val/sequence_lengths": sequence_lengths.mean(),
+                "val/sequence_lengths_min": sequence_lengths.min(),
+                "val/sequence_lengths_max": sequence_lengths.max(),
+                "val/sequence_lengths_unsolved": (
+                    0 if len(sequence_length_unsolved) == 0 else sequence_length_unsolved.mean()
+                ),
+                "val/sequence_lengths_solved": (
+                    0 if len(sequence_length_solved) == 0 else sequence_length_solved.mean()
+                ),
+                "val/sequence_lengths_unsolved_hist": sequence_length_unsolved,
+                "val/sequence_lengths_solved_hist": sequence_length_solved,
+                "val/stop_rate": stop_rate,
+                "val/advantages_mean": advantages.mean(),
+                "val/advantages_min": advantages.min(),
+                "val/advantages_max": advantages.max(),
+                "val/advantages_hist": advantages,
+                "val/num_calls_rate": np.array(num_calls).mean(),
+                "val/timeouts_rate": np.array(timeouts).mean(),
+                "val/tool_errors_rate": np.array([len(item) > 0 for item in tool_errors]).mean(),
+                "val/good_outputs_rate": np.array(good_outputs).mean(),
+                "val/tool_runtimes_rate": np.array(tool_runtimes).mean(),
+                "val/tool_calleds_rate": np.array(tool_calleds).mean(),
+                **reward_metrics,
+            }
 
         if args.save_traces:
             traces = {
@@ -1910,8 +1977,12 @@ if __name__ == "__main__":
                         else:
                             scores[i] = verifiable_rewards[i]
                 np_verifiable_rewards = np.array(verifiable_rewards)
-                metrics["objective/verifiable_reward"] = np_verifiable_rewards.mean()
-                metrics["objective/verifiable_correct_rate"] = (np_verifiable_rewards > 0.0).mean()
+                metrics["objective/verifiable_reward"] = (
+                    np_verifiable_rewards.mean() if len(np_verifiable_rewards) > 0 else 0.0
+                )
+                metrics["objective/verifiable_correct_rate"] = (
+                    (np_verifiable_rewards > 0.0).mean() if len(np_verifiable_rewards) > 0 else 0.0
+                )
                 # reshuffle around per_func rewards
                 per_func_lists = defaultdict(list)
                 for reward_dict in per_func_rewards:
@@ -1920,8 +1991,8 @@ if __name__ == "__main__":
                 # log per function rewards
                 for key, value in per_func_lists.items():
                     np_value = np.array(value)
-                    metrics[f"objective/{key}_reward"] = np_value.mean()
-                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean()
+                    metrics[f"objective/{key}_reward"] = np_value.mean() if len(np_value) > 0 else 0.0
+                    metrics[f"objective/{key}_correct_rate"] = (np_value > 0.0).mean() if len(np_value) > 0 else 0.0
 
         # this gets applied at the very end since it replaces (rather than adds to) the existing reward.
         if args.non_stop_penalty:
