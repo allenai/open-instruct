@@ -3,13 +3,8 @@ import logging
 import torch
 import numpy as np
 import transformers
+import vllm
 import parameterized
-
-try:
-    import vllm
-    VLLM_AVAILABLE = True
-except ImportError:
-    VLLM_AVAILABLE = False
 
 
 class TestLogprobsComparison(unittest.TestCase):
@@ -20,72 +15,6 @@ class TestLogprobsComparison(unittest.TestCase):
         self.logger = logging.getLogger(__name__)
         self.cuda_available = torch.cuda.is_available()
         
-    @parameterized.parameterized.expand([
-        ("gpt2", "The capital of France is", 0.0),
-        ("gpt2", "The weather today is", 0.0),
-        ("gpt2", "Machine learning is", 0.0),
-    ])
-    def test_hf_logprobs_calculation(self, model_name, prompt, temperature):
-        """Test HuggingFace logprobs calculation and output format."""
-        max_tokens = 10
-        seed = 42
-        
-        tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-            
-        model = transformers.AutoModelForCausalLM.from_pretrained(
-            model_name,
-            torch_dtype=torch.float32  # Use float32 for CPU
-        )
-        
-        # Tokenize input
-        inputs = tokenizer(prompt, return_tensors="pt")
-        input_ids = inputs.input_ids
-        
-        self.logger.info(f"\nPrompt: '{prompt}'")
-        self.logger.info(f"Input tokens: {tokenizer.convert_ids_to_tokens(input_ids[0])}")
-        
-        # Generate with logprobs
-        torch.manual_seed(seed)
-        with torch.no_grad():
-            outputs = model.generate(
-                input_ids,
-                max_new_tokens=max_tokens,
-                temperature=temperature,
-                do_sample=False,
-                output_scores=True,
-                return_dict_in_generate=True
-            )
-        
-        # Extract logprobs
-        generated_ids = outputs.sequences[0, input_ids.shape[1]:]
-        # outputs.scores is a tuple of tensors, each of shape [batch_size, vocab_size]
-        scores = outputs.scores  # tuple of tensors
-        
-        # Get the log probs for the generated tokens
-        self.logger.info("\nGenerated tokens with logprobs:")
-        self.logger.info(f"{'Token':<20} {'Token ID':<10} {'Logprob':<15} {'Prob':<15}")
-        self.logger.info("-" * 60)
-        
-        for i, token_id in enumerate(generated_ids):
-            token = tokenizer.decode([token_id.item()])
-            # Get log probs for this step
-            log_probs = torch.nn.functional.log_softmax(scores[i], dim=-1)
-            logprob = log_probs[0, token_id.item()].item()  # batch_size=1, so index 0
-            prob = np.exp(logprob)
-            self.logger.info(f"{repr(token):<20} {token_id.item():<10} {logprob:<15.6f} {prob:<15.6f}")
-            
-        # Also show top-5 alternatives for first generated token
-        self.logger.info("\nTop-5 alternatives for first generated token:")
-        first_token_logprobs = torch.nn.functional.log_softmax(scores[0], dim=-1)[0]  # Get first token, first batch
-        top5_values, top5_indices = torch.topk(first_token_logprobs, 5)
-        
-        for value, idx in zip(top5_values, top5_indices):
-            token = tokenizer.decode([idx.item()])
-            self.logger.info(f"  {repr(token):<20} logprob: {value.item():.6f}")
-    
-    @unittest.skipIf(not VLLM_AVAILABLE, "vLLM not available")
     @parameterized.parameterized.expand([
         ("gpt2", "The capital of France is", 0.0),
         ("gpt2", "The weather today is", 0.0),
@@ -105,8 +34,7 @@ class TestLogprobsComparison(unittest.TestCase):
         # Compare the logprobs
         self._compare_logprobs(hf_logprobs, vllm_logprobs, prompt)
     
-    @unittest.skipIf(not VLLM_AVAILABLE or not torch.cuda.is_available(), 
-                     "vLLM not available or no GPU")
+    @unittest.skipIf(not torch.cuda.is_available(), "No GPU available")
     @parameterized.parameterized.expand([
         ("meta-llama/Llama-2-7b-hf", "The capital of France is", 0.0),
         ("meta-llama/Llama-2-7b-hf", "The weather today is", 0.0),
@@ -126,43 +54,6 @@ class TestLogprobsComparison(unittest.TestCase):
         # Compare the logprobs
         self._compare_logprobs(hf_logprobs, vllm_logprobs, prompt)
         
-    def test_hf_logprobs_with_temperature(self):
-        """Test how temperature affects logprobs."""
-        model_name = "gpt2"
-        prompt = "The capital of France is"
-        max_tokens = 5
-        seed = 42
-        
-        tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-            
-        model = transformers.AutoModelForCausalLM.from_pretrained(
-            model_name,
-            torch_dtype=torch.float32
-        )
-        
-        inputs = tokenizer(prompt, return_tensors="pt")
-        input_ids = inputs.input_ids
-        
-        for temp in [0.0, 0.5, 1.0]:
-            self.logger.info(f"\n=== Temperature: {temp} ===")
-            
-            torch.manual_seed(seed)
-            with torch.no_grad():
-                outputs = model.generate(
-                    input_ids,
-                    max_new_tokens=max_tokens,
-                    temperature=temp if temp > 0 else 1.0,  # Avoid division by zero
-                    do_sample=(temp > 0),
-                    output_scores=True,
-                    return_dict_in_generate=True
-                )
-            
-            generated_ids = outputs.sequences[0, input_ids.shape[1]:]
-            generated_text = tokenizer.decode(generated_ids)
-            self.logger.info(f"Generated: {repr(generated_text)}")
-    
     def _get_hf_logprobs(self, model_name, prompt, max_tokens, temperature, seed):
         """Get logprobs using HuggingFace transformers."""
         tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
