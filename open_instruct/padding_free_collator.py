@@ -20,24 +20,10 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
     batch size 1, with additional information included in the batch to demarcate example boundaries.
     """
 
-    def __init__(
-        self,
-        *args,
-        return_flash_attn_kwargs=True,
-        return_position_ids=True,
-        return_seq_idx=True,
-        separator_id=-100,
-        **kwargs,
-    ):
-        super().__init__(*args, **kwargs)
-        self.return_flash_attn_kwargs = return_flash_attn_kwargs
-        self.return_position_ids = return_position_ids
-        self.return_seq_idx = return_seq_idx
-        self.separator_id = separator_id
-        warnings.warn(
-            "Using `TensorDataCollatorWithFlattening` will flatten the entire mini batch into a "
-            "single long sequence. Make sure your attention computation is able to handle it!"
-        )
+    return_flash_attn_kwargs: bool = True
+    return_position_ids: bool = True
+    return_seq_idx: bool = True
+    separator_id: int = -100
 
     def __call__(self, features, return_tensors=None, separator_id=None):
         if return_tensors is None:
