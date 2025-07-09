@@ -272,7 +272,8 @@ def get_batch_data(
 
 
 def run_generation_batch(
-    vllm_engines: List[ray.actor.ActorHandle],
+    inference_results_Q: queue.Queue,
+    param_prompt_Q: queue.Queue,
     args: Args,
     model_flops_per_token: float,
     gpu_peak_flops: float,
@@ -281,58 +282,23 @@ def run_generation_batch(
 ) -> Dict[str, Union[float, int, List[str], List[int]]]:
     """Run generation for a batch of prompts and measure performance."""
 
-    # Create queues
-    inference_results_Q = queue.Queue(maxsize=10)
-    param_prompt_Q = queue.Queue(maxsize=10)
-    evaluation_inference_results_Q = queue.Queue(maxsize=10)
-
-    # Create sampling parameters with 'n' for multiple samples per prompt
-    generation_config = vllm.SamplingParams(
-        temperature=args.temperature,
-        max_tokens=args.response_length,
-        top_p=args.vllm_top_p,
-        n=args.num_samples_per_prompt_rollout,
-    )
-
-    eval_generation_config = vllm.SamplingParams(temperature=0.0, max_tokens=args.response_length, n=1)
-
-    # Start vLLM generation thread
-    def wrapped_vllm_generate_thread() -> None:
-        grpo_fast.vllm_generate_thread(
-            vllm_engines,
-            generation_config,
-            eval_generation_config,
-            inference_results_Q,
-            param_prompt_Q,
-            1,  # num_training_steps
-            None,  # eval_prompt_token_ids
-            evaluation_inference_results_Q,
-            2,  # eval_freq
-            1,  # resume_training_step
-            False,  # tool_use
-        )
-
-    thread = threading.Thread(target=wrapped_vllm_generate_thread)
-
-    # Measure timing
+    # Measure timing from prompt submission to result retrieval
     start_time = time.time()
 
-    # Start thread and send prompts
-    thread.start()
+    # Send prompts
     param_prompt_Q.put((None, prompts))
 
     # Get results
     result = inference_results_Q.get(timeout=120)
+
+    end_time = time.time()
+    generation_time = end_time - start_time
 
     if result[0] == "ERROR":
         logger.error(f"Generation failed: {result[1]}")
         return {"error": result[1]}
 
     response_ids, finish_reasons, masks, info = result
-
-    # Calculate timing and throughput
-    end_time = time.time()
-    generation_time = end_time - start_time
 
     # Calculate tokens generated (response_ids only contains newly generated tokens)
     # When using n parameter, vLLM returns flattened responses as if prompts were duplicated
@@ -345,11 +311,6 @@ def run_generation_batch(
 
     # Calculate MFU
     mfu_percentage = calculate_mfu(tokens_per_second, model_flops_per_token, gpu_peak_flops)
-
-    # Send stop signal
-    param_prompt_Q.put(None)
-
-    thread.join(timeout=10)
 
     return {
         "batch_idx": batch_idx,
@@ -378,6 +339,43 @@ def run_benchmark(
     """Run the full benchmark."""
     logger.info(f"Starting benchmark with {num_batches} batches of size {args.num_unique_prompts_rollout}")
 
+    # Create persistent queues
+    inference_results_Q = queue.Queue(maxsize=10)
+    param_prompt_Q = queue.Queue(maxsize=10)
+    evaluation_inference_results_Q = queue.Queue(maxsize=10)
+
+    # Create sampling parameters with 'n' for multiple samples per prompt
+    generation_config = vllm.SamplingParams(
+        temperature=args.temperature,
+        max_tokens=args.response_length,
+        top_p=args.vllm_top_p,
+        n=args.num_samples_per_prompt_rollout,
+    )
+
+    eval_generation_config = vllm.SamplingParams(temperature=0.0, max_tokens=args.response_length, n=1)
+
+    # Start persistent vLLM generation thread
+    def wrapped_vllm_generate_thread() -> None:
+        grpo_fast.vllm_generate_thread(
+            vllm_engines,
+            generation_config,
+            eval_generation_config,
+            inference_results_Q,
+            param_prompt_Q,
+            num_batches,  # num_training_steps
+            None,  # eval_prompt_token_ids
+            evaluation_inference_results_Q,
+            num_batches + 1,  # eval_freq (avoid evaluation)
+            1,  # resume_training_step
+            False,  # tool_use
+        )
+
+    thread = threading.Thread(target=wrapped_vllm_generate_thread)
+    thread.start()
+
+    # Wait for thread to be ready
+    time.sleep(0.1)
+
     all_results = []
     total_start_time = time.time()
 
@@ -393,7 +391,7 @@ def run_benchmark(
 
         # Run generation
         batch_result = run_generation_batch(
-            vllm_engines, args, model_flops_per_token, gpu_peak_flops, prompts, batch_idx
+            inference_results_Q, param_prompt_Q, args, model_flops_per_token, gpu_peak_flops, prompts, batch_idx
         )
 
         if "error" not in batch_result:
@@ -408,6 +406,15 @@ def run_benchmark(
             logger.error(f"Batch {batch_idx + 1} failed: {batch_result['error']}")
 
     total_time = time.time() - total_start_time
+
+    # Send stop signal
+    param_prompt_Q.put(None)
+    
+    # Wait for thread to finish
+    thread.join(timeout=10)
+    
+    if thread.is_alive():
+        logger.warning("Thread did not shutdown gracefully")
 
     # Calculate summary statistics
     if all_results:
