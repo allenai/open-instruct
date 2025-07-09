@@ -179,14 +179,11 @@ def main():
         with open(f"{args.output_dir}/astabench_formatted_predictions.json", "w") as f:
             json.dump(predictions, f)
 
-
 def test_format_citation_data_into_sqa_format():
-    from open_instruct.search_rewards.tests.formatted_test_answer import example_answer2
+    from open_instruct.search_rewards.tests.formatted_test_answer import example_answer
     import pprint
-    pprint.pprint(format_citation_data_into_sqa_format(example_answer2))
-
+    pprint.pprint(format_citation_data_into_sqa_format(example_answer))
 
 
 if __name__ == "__main__":
-    # main()
-    test_format_citation_data_into_sqa_format()
+    main()
