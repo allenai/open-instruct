@@ -2,7 +2,7 @@
 #    uv export --format requirements-txt --no-hashes --all-extras --no-emit-project
 absl-py==2.3.0
     # via tensorboard
-accelerate==1.7.0
+accelerate==1.8.1
     # via
     #   open-instruct
     #   peft
@@ -790,9 +790,9 @@ transformers==4.52.4
     #   peft
     #   vllm
     #   xgrammar
-triton==3.2.0 ; python_full_version < '3.12' and sys_platform != 'linux'
+triton==3.2.0 ; sys_platform == 'darwin'
     # via liger-kernel
-triton==3.3.0 ; python_full_version >= '3.12' or sys_platform == 'linux'
+triton==3.3.0 ; sys_platform != 'darwin'
     # via
     #   liger-kernel
     #   torch
