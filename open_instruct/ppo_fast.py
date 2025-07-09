@@ -256,8 +256,8 @@ class Args:
     """the name or path to the value model"""
     value_model_revision: Optional[str] = None
     """the revision of the value model"""
-    record_entropy: bool = True
-    """whether to record the entropy of the policy during training. Turn off to save memory."""
+    record_entropy: bool = False
+    """whether to record the entropy of the policy during training. Uses extra memory."""
 
     # Reward
     # -- r1 style format reward

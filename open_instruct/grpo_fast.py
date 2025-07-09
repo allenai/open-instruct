@@ -245,8 +245,8 @@ class Args:
     DR.GRPO https://arxiv.org/pdf/2503.20783)."""
     mask_truncated_completions: bool = False
     """Whether to mask out truncated completions. Also called overlong filtering, from DAPO (https://arxiv.org/abs/2503.14476)."""
-    record_entropy: bool = True
-    """whether to record the entropy of the policy during training. Turn off to save memory."""
+    record_entropy: bool = False
+    """whether to record the entropy of the policy during training. Uses extra memory."""
 
     # Reward
     # -- r1 style format reward
