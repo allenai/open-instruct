@@ -5,200 +5,159 @@ import numpy as np
 import transformers
 import vllm
 import parameterized
+from typing import Dict, List, Union, Any
+from transformers import PreTrainedModel
+from open_instruct import model_utils
+from open_instruct import rl_utils2
+
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+MAX_TOKENS = 20
+SEED = 42
+PACK_LENGTH = 64
+TEMPERATURE = 0.
 
 
 class TestLogprobsComparison(unittest.TestCase):
     """Test logprobs calculation and comparison between HuggingFace and vLLM."""
     
-    def setUp(self):
-        logging.basicConfig(level=logging.INFO)
-        self.logger = logging.getLogger(__name__)
-        self.cuda_available = torch.cuda.is_available()
-        
-    @parameterized.parameterized.expand([
-        ("gpt2", "The capital of France is", 0.0),
-        ("gpt2", "The weather today is", 0.0),
-        ("gpt2", "Machine learning is", 0.0),
-    ])
-    def test_vllm_hf_logprobs_match_small(self, model_name, prompt, temperature):
-        """Test that vLLM and HuggingFace produce matching logprobs for small models."""
-        max_tokens = 20
-        seed = 42
-        
-        # Get HuggingFace logprobs
-        hf_logprobs = self._get_hf_logprobs(model_name, prompt, max_tokens, temperature, seed)
-        
-        # Get vLLM logprobs
-        vllm_logprobs = self._get_vllm_logprobs(model_name, prompt, max_tokens, temperature, seed)
-        
-        # Compare the logprobs
-        self._compare_logprobs(hf_logprobs, vllm_logprobs, prompt)
-    
     @unittest.skipIf(not torch.cuda.is_available(), "No GPU available")
     @parameterized.parameterized.expand([
-        ("meta-llama/Llama-2-7b-hf", "The capital of France is", 0.0),
-        ("meta-llama/Llama-2-7b-hf", "The weather today is", 0.0),
-        ("meta-llama/Llama-2-7b-hf", "Machine learning is", 0.0),
+        ("hamishivi/qwen3_openthoughts2", "The capital of France is"),
+        ("hamishivi/qwen3_openthoughts2", "The weather today is"),
+        ("hamishivi/qwen3_openthoughts2", "Machine learning is"),
     ])
-    def test_vllm_hf_logprobs_match_large(self, model_name, prompt, temperature):
+    def test_vllm_hf_logprobs_match_large(self, model_name, prompt):
         """Test that vLLM and HuggingFace produce matching logprobs for large models (GPU only)."""
-        max_tokens = 20
-        seed = 42
-        
-        # Get HuggingFace logprobs
-        hf_logprobs = self._get_hf_logprobs(model_name, prompt, max_tokens, temperature, seed)
+
+        tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
+        query = tokenizer(prompt)['input_ids']
         
         # Get vLLM logprobs
-        vllm_logprobs = self._get_vllm_logprobs(model_name, prompt, max_tokens, temperature, seed)
-        
-        # Compare the logprobs
-        self._compare_logprobs(hf_logprobs, vllm_logprobs, prompt)
-        
-    def _get_hf_logprobs(self, model_name, prompt, max_tokens, temperature, seed):
-        """Get logprobs using HuggingFace transformers."""
-        tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-            
-        # Determine dtype based on model and hardware
-        if "llama" in model_name.lower() and self.cuda_available:
-            dtype = torch.float16
-        else:
-            dtype = torch.float32
-            
-        model = transformers.AutoModelForCausalLM.from_pretrained(
-            model_name,
-            torch_dtype=dtype,
-            device_map="auto" if self.cuda_available else None
+        vllm_output = _get_vllm_logprobs(model_name, query, MAX_TOKENS, TEMPERATURE, SEED)
+        packed_sequences = rl_utils2.pack_sequences(
+            queries=[query],
+            responses=[vllm_output["response"]],
+            # This mask is the tool use mask, which we mock to be all ones, as done in grpo_fast.py
+            # when tooluse is disabled.
+            masks=[[1] * len(vllm_output["response"])],
+            pack_length=PACK_LENGTH,
+            pad_token_id=tokenizer.pad_token_id,
         )
+
+        hf_logprobs = _get_hf_logprobs(model_name, query,
+                                       vllm_output["response"],
+                                       packed_sequences.query_responses[0],
+                                       packed_sequences.attention_masks[0],
+                                       packed_sequences.position_ids[0],
+                                       tokenizer.pad_token_id)
+        vllm_logprobs = vllm_output["logprobs"]
         
-        # Tokenize input
-        inputs = tokenizer(prompt, return_tensors="pt")
-        if self.cuda_available:
-            inputs = {k: v.cuda() for k, v in inputs.items()}
-        input_ids = inputs["input_ids"]
+        # Debug logging
+        logger.info(f"Query length: {len(query)}")
+        logger.info(f"Response length: {len(vllm_output['response'])}")
+        logger.info(f"vLLM logprobs length: {len(vllm_logprobs)}")
+        logger.info(f"HF logprobs length: {len(hf_logprobs)}")
+        logger.info(f"First 5 vLLM logprobs: {vllm_logprobs[:5]}")
+        logger.info(f"First 5 HF logprobs: {hf_logprobs[:5]}")
+        logger.info(f"Response tokens: {vllm_output['response'][:10]}")
+        logger.info(f"Query-response packed shape: {packed_sequences.query_responses[0].shape}")
         
-        # Generate with logprobs
-        torch.manual_seed(seed)
-        with torch.no_grad():
-            outputs = model.generate(
-                input_ids,
-                max_new_tokens=max_tokens,
-                temperature=temperature,
-                do_sample=False,
-                output_scores=True,
-                return_dict_in_generate=True
-            )
+        # Check that the tokens being scored match
+        packed_response_tokens = packed_sequences.query_responses[0][len(query):len(query)+len(vllm_output['response'])].tolist()
+        logger.info(f"vLLM response tokens: {vllm_output['response'][:10]}")
+        logger.info(f"Packed response tokens: {packed_response_tokens[:10]}")
         
-        # Extract logprobs
-        generated_ids = outputs.sequences[0, input_ids.shape[1]:]
-        scores = outputs.scores  # tuple of tensors
+        self.assertEqual(len(vllm_logprobs), len(vllm_output["response"]))
+        self.assertEqual(len(vllm_logprobs), len(hf_logprobs), f'{vllm_logprobs=}\n{hf_logprobs=}')
         
-        # Get the log probs for the generated tokens
-        token_logprobs = []
-        for i, token_id in enumerate(generated_ids):
-            log_probs = torch.nn.functional.log_softmax(scores[i], dim=-1)
-            token_logprobs.append(log_probs[0, token_id.item()].item())
-            
-        # Get tokens for debugging
-        generated_tokens = tokenizer.convert_ids_to_tokens(generated_ids)
+        # Verify tokens match before comparing logprobs
+        self.assertEqual(vllm_output['response'], packed_response_tokens, "Response tokens don't match between vLLM and packed sequences")
         
-        return {
-            "tokens": generated_tokens,
-            "token_ids": generated_ids.tolist(),
-            "logprobs": token_logprobs
-        }
+        np.testing.assert_array_almost_equal(vllm_logprobs, hf_logprobs)
         
-    def _get_vllm_logprobs(self, model_name, prompt, max_tokens, temperature, seed):
-        """Get logprobs using vLLM."""
-        # Determine dtype based on model
-        if "llama" in model_name.lower():
-            dtype = "float16"
-        else:
-            dtype = "float32"
-            
-        llm = vllm.LLM(
-            model=model_name,
-            seed=seed,
-            enforce_eager=True,  # Disable CUDA graph for consistency
-            dtype=dtype
+         
+def _get_hf_logprobs(model_name: str, query: List[int],
+                     response: List[int],
+                     query_response, attention_mask, position_ids, pad_token_id) -> List[float]:
+    """Get logprobs using HuggingFace transformers."""
+    padding_mask = query_response != pad_token_id
+    input_ids = torch.masked_fill(query_response, ~padding_mask, 0)
+    
+    logger.info(f"HF: Query length: {len(query)}, Response length: {len(response)}")
+    logger.info(f"HF: query_response shape: {query_response.shape}")
+    logger.info(f"HF: input_ids shape after masking: {input_ids.shape}")
+    model: PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype=torch.bfloat16,
+        device_map='cuda',
+        attn_implementation="flash_attention_2",
+        use_cache=False,
+    )
+    
+    with torch.no_grad():
+        input_ids = input_ids[None, :].to('cuda')
+        attention_mask = attention_mask[None, :].to('cuda')
+        position_ids = position_ids[None, :].to('cuda')
+        output = model(
+            input_ids=input_ids[:, :-1],
+            # @vwxyzjn: without clamp, we get index out of bounds errors; TODO: investigate
+            attention_mask=attention_mask[:, :-1].clamp(0, 1),
+            position_ids=position_ids[:, :-1],
+            return_dict=True,
         )
+        logits = output.logits
+        # Don't apply temperature scaling when temperature is 0
+        if TEMPERATURE > 0:
+            logits /= TEMPERATURE
+        logprobs = model_utils.log_softmax_and_gather(logits, input_ids[:, 1:])
+        logger.info(f"HF: logprobs shape before slicing: {logprobs.shape}")
+        logger.info(f"HF: Slicing from {len(query) - 1} to end")
+        logprobs = logprobs[:, len(query) - 1:]
+        logger.info(f"HF: logprobs shape after slicing: {logprobs.shape}")
+    return logprobs.flatten().tolist()
+
+
+def _get_vllm_logprobs(model_name: str, prompt: str, max_tokens: int, temperature: float, seed: int) -> Dict[str, Union[List[str], List[int], List[float]]]:
+    """Get logprobs using vLLM."""
+    # Determine dtype based on model
+    llm = vllm.LLM(
+        model=model_name,
+        seed=seed,
+        enforce_eager=True,  # Disable CUDA graph for consistency
+        dtype="bfloat16",
+    )
+    
+    sampling_params = vllm.SamplingParams(
+        temperature=temperature,
+        max_tokens=max_tokens,
+        logprobs=0,  # Return top-1 logprob
+        seed=seed
+    )
+    
+    # Generate
+    outputs = llm.generate(prompt_token_ids=[prompt], sampling_params=sampling_params)
+    output = outputs[0]
+    
+    # Extract logprobs
+    response = []
+    logprobs = []
+    
+    for token_info in output.outputs[0].logprobs:
+        # Get the token and its logprob
+        token_id = list(token_info.keys())[0]
+        logprob_info = token_info[token_id]
         
-        sampling_params = vllm.SamplingParams(
-            temperature=temperature,
-            max_tokens=max_tokens,
-            logprobs=1,  # Return top-1 logprob
-            seed=seed
-        )
+        response.append(token_id)
+        logprobs.append(logprob_info.logprob)
         
-        # Generate
-        outputs = llm.generate([prompt], sampling_params)
-        output = outputs[0]
-        
-        # Extract logprobs
-        tokens = []
-        token_ids = []
-        logprobs = []
-        
-        for token_info in output.outputs[0].logprobs:
-            # Get the token and its logprob
-            token_id = list(token_info.keys())[0]
-            logprob_info = token_info[token_id]
-            
-            tokens.append(logprob_info.decoded_token)
-            token_ids.append(token_id)
-            logprobs.append(logprob_info.logprob)
-            
-        return {
-            "tokens": tokens,
-            "token_ids": token_ids,
-            "logprobs": logprobs
-        }
-        
-    def _compare_logprobs(self, hf_result, vllm_result, prompt):
-        """Compare logprobs between HuggingFace and vLLM."""
-        self.logger.info("\n=== Comparison Results ===")
-        self.logger.info(f"Prompt: '{prompt}'")
-        self.logger.info(f"\nGenerated text (HF): {''.join(hf_result['tokens'])}")
-        self.logger.info(f"Generated text (vLLM): {''.join(vllm_result['tokens'])}")
-        
-        # Check if the same tokens were generated
-        hf_ids = hf_result['token_ids']
-        vllm_ids = vllm_result['token_ids']
-        
-        if hf_ids != vllm_ids:
-            self.logger.warning("Different tokens generated!")
-            self.logger.warning(f"HF token IDs: {hf_ids}")
-            self.logger.warning(f"vLLM token IDs: {vllm_ids}")
-            
-        # Compare logprobs
-        self.logger.info("\nLogprob comparison:")
-        self.logger.info(f"{'Token':<15} {'HF logprob':<15} {'vLLM logprob':<15} {'Difference':<15} {'Rel. Error':<15}")
-        self.logger.info("-" * 75)
-        
-        max_abs_diff = 0
-        max_rel_error = 0
-        
-        for i in range(min(len(hf_result['logprobs']), len(vllm_result['logprobs']))):
-            hf_logprob = hf_result['logprobs'][i]
-            vllm_logprob = vllm_result['logprobs'][i]
-            
-            abs_diff = abs(hf_logprob - vllm_logprob)
-            rel_error = abs_diff / abs(hf_logprob) if hf_logprob != 0 else float('inf')
-            
-            max_abs_diff = max(max_abs_diff, abs_diff)
-            max_rel_error = max(max_rel_error, rel_error)
-            
-            token = hf_result['tokens'][i] if i < len(hf_result['tokens']) else vllm_result['tokens'][i]
-            self.logger.info(f"{token:<15} {hf_logprob:<15.6f} {vllm_logprob:<15.6f} {abs_diff:<15.6e} {rel_error:<15.6e}")
-            
-        self.logger.info(f"\nMax absolute difference: {max_abs_diff:.6e}")
-        self.logger.info(f"Max relative error: {max_rel_error:.6e}")
-        
-        # Assert that differences are small
-        tolerance = 1e-3  # Adjust based on expected precision
-        self.assertLess(max_abs_diff, tolerance, 
-                       f"Maximum absolute difference {max_abs_diff} exceeds tolerance {tolerance}")
+    return {
+        "response": response,
+        "logprobs": logprobs
+    }
 
 
 if __name__ == "__main__":
