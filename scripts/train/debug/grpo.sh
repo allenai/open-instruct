@@ -32,6 +32,6 @@ python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --gradient_checkpointing \
     --single_gpu_mode \
     --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.5 \
+    --vllm_gpu_memory_utilization 0.3 \
     --vllm_enforce_eager \
     # --with_tracking
