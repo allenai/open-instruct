@@ -156,6 +156,9 @@ class FlatArguments:
         default=None,
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
+    additional_model_arguments: Optional[Union[dict, str]] = field(
+        default_factory=dict, metadata={"help": "A dictionary of additional model args used to construct the model."}
+    )
     low_cpu_mem_usage: bool = field(
         default=False,
         metadata={
