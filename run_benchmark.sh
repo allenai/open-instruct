@@ -8,10 +8,10 @@ uv run python -m open_instruct.benchmark_generators \
     --max_token_length 10240 \
     --max_prompt_token_length 2048 \
     --temperature 1.0 \
-    --response_length 64 \
+    --response_length 512 \
     --vllm_top_p 0.9 \
-    --num_unique_prompts_rollout 64 \
-    --num_samples_per_prompt_rollout 4 \
+    --num_unique_prompts_rollout 2 \
+    --num_samples_per_prompt_rollout 1 \
     --vllm_num_engines 1 \
     --vllm_tensor_parallel_size 1 \
     --vllm_gpu_memory_utilization 0.9 \
