@@ -1,2 +1,0 @@
-- cleanup type annotations
-- remove the duplication from get_batch_data and instead set the n parameter in vllm.SamplingParams.
