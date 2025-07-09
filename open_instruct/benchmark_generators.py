@@ -271,12 +271,7 @@ def get_batch_data(dataset: Any, args: Args, batch_idx: int) -> Tuple[List[List[
     ground_truths = batch_data[dataset_transformation.GROUND_TRUTHS_KEY]
     datasets_list = batch_data[dataset_transformation.DATASET_SOURCE_KEY]
     
-    # Expand if multiple samples per prompt
-    if args.num_samples_per_prompt_rollout > 1:
-        prompts = [prompt for prompt in prompts for _ in range(args.num_samples_per_prompt_rollout)]
-        ground_truths = [gt for gt in ground_truths for _ in range(args.num_samples_per_prompt_rollout)]
-        datasets_list = [ds for ds in datasets_list for _ in range(args.num_samples_per_prompt_rollout)]
-        
+    # Don't duplicate prompts here - we'll use the 'n' parameter in SamplingParams
     return prompts, ground_truths, datasets_list
 
 
@@ -288,16 +283,18 @@ def run_generation_batch(vllm_engines: List[Any], args: Args, model_flops_per_to
     param_prompt_Q = queue.Queue(maxsize=10)
     evaluation_inference_results_Q = queue.Queue(maxsize=10)
     
-    # Create sampling parameters
+    # Create sampling parameters with 'n' for multiple samples per prompt
     generation_config = vllm.SamplingParams(
         temperature=args.temperature,
         max_tokens=args.response_length,
         top_p=args.vllm_top_p,
+        n=args.num_samples_per_prompt_rollout,
     )
     
     eval_generation_config = vllm.SamplingParams(
         temperature=0.0,
         max_tokens=args.response_length,
+        n=1,
     )
     
     # Start vLLM generation thread
@@ -339,8 +336,9 @@ def run_generation_batch(vllm_engines: List[Any], args: Args, model_flops_per_to
     generation_time = end_time - start_time
     
     # Calculate tokens generated (response_ids only contains newly generated tokens)
+    # When using n parameter, vLLM returns flattened responses as if prompts were duplicated
     total_new_tokens = sum(len(response) for response in response_ids)
-    total_prompt_tokens = sum(len(prompt) for prompt in prompts)
+    total_prompt_tokens = sum(len(prompt) for prompt in prompts) * args.num_samples_per_prompt_rollout
     total_tokens_generated = total_new_tokens + total_prompt_tokens
     
     tokens_per_second = total_new_tokens / generation_time if generation_time > 0 else 0
@@ -356,17 +354,17 @@ def run_generation_batch(vllm_engines: List[Any], args: Args, model_flops_per_to
         
     return {
         "batch_idx": batch_idx,
-        "batch_size": len(prompts),
+        "batch_size": len(response_ids),  # Total number of responses generated
         "generation_time": generation_time,
         "total_tokens_generated": total_tokens_generated,
         "total_new_tokens": total_new_tokens,
         "tokens_per_second": tokens_per_second,
         "total_tokens_per_second": total_tokens_per_second,
         "mfu_percentage": mfu_percentage,
-        "avg_new_tokens_per_sample": total_new_tokens / len(prompts) if prompts else 0,
+        "avg_new_tokens_per_sample": total_new_tokens / len(response_ids) if response_ids else 0,
         "finish_reasons": finish_reasons,
         "response_lengths": [len(response) for response in response_ids],
-        "prompt_lengths": [len(prompt) for prompt in prompts],
+        "prompt_lengths": [len(prompt) for prompt in prompts],  # Original unique prompts
     }
 
 
