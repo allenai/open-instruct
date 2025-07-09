@@ -362,7 +362,7 @@ CHAT_TEMPLATES = {
         "The assistant first thinks and reasons about the question "
         "and after thinking provides the user with the answer. "
         "The reasoning process is enclosed in <think> </think> tags "
-        "and the answer are enclosed in <answer> </answer> tags "
+        "and the answer is enclosed in <answer> </answer> tags "
         "so the full response is <think> reasoning process here </think> "
         "<answer> answer here </answer>."
         "\n\n"
