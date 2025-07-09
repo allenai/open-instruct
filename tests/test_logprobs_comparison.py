@@ -1,5 +1,6 @@
 import unittest
 import torch
+import gc
 import numpy as np
 import transformers
 import vllm
@@ -13,6 +14,7 @@ from open_instruct import rl_utils2
 MAX_TOKENS = 20
 SEED = 42
 PACK_LENGTH = 64
+DTYPE = "bfloat16"
 
 
 class TestLogprobsComparison(unittest.TestCase):
@@ -32,6 +34,8 @@ class TestLogprobsComparison(unittest.TestCase):
         
         # Get vLLM logprobs
         vllm_output = _get_vllm_logprobs(model_name, query)
+        gc.collect()
+        torch.cuda.empty_cache()
         packed_sequences = rl_utils2.pack_sequences(
             queries=[query],
             responses=[vllm_output["response"]],
@@ -57,7 +61,7 @@ class TestLogprobsComparison(unittest.TestCase):
         self.assertEqual(len(vllm_logprobs), len(hf_logprobs), f'{vllm_logprobs=}\n{hf_logprobs=}')
         
         # Verify tokens match before comparing logprobs
-        self.assertEqual(vllm_output['response'], packed_response_tokens, "Response tokens don't match between vLLM and packed sequences")
+        self.assertEqual(vllm_output['response'], packed_response_tokens)
         
         np.testing.assert_array_almost_equal(vllm_logprobs, hf_logprobs)
         
@@ -71,7 +75,7 @@ def _get_hf_logprobs(model_name: str, query: List[int],
     
     model: PreTrainedModel = transformers.AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=torch.bfloat16,
+        torch_dtype=getattr(torch, DTYPE),
         device_map='cuda',
         attn_implementation="flash_attention_2",
         use_cache=False,
@@ -88,7 +92,7 @@ def _get_hf_logprobs(model_name: str, query: List[int],
             position_ids=position_ids[:, :-1],
             return_dict=True,
         )
-        logits = output.logits
+        logits = output.logits.to(torch.float32)
         logprobs = model_utils.log_softmax_and_gather(logits, input_ids[:, 1:])
         logprobs = logprobs[:, len(query) - 1:]
     return logprobs.flatten().tolist()
@@ -101,7 +105,8 @@ def _get_vllm_logprobs(model_name: str, prompt: str) -> Dict[str, Union[List[str
         model=model_name,
         seed=SEED,
         enforce_eager=True,  # Disable CUDA graph for consistency
-        dtype="bfloat16",
+        max_model_len=1024,
+        dtype=DTYPE,
     )
     
     sampling_params = vllm.SamplingParams(
