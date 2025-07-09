@@ -14,7 +14,7 @@ import threading
 import time
 import dataclasses
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Tuple, Union
 
 import numpy as np
 import ray
@@ -22,6 +22,7 @@ import torch
 import transformers
 import vllm
 import torch.utils.flop_counter
+import datasets
 
 from open_instruct import dataset_transformation
 from open_instruct import grpo_fast
@@ -46,7 +47,7 @@ GPU_PEAK_FLOPS = {
     
 
 
-def calculate_model_flops_per_token(model_config: Any, model_path: str) -> float:
+def calculate_model_flops_per_token(model_config: transformers.PretrainedConfig, model_path: str) -> float:
     """
     Calculate actual FLOPs per token for a transformer model using torch FlopCounterMode.
     
@@ -172,7 +173,7 @@ def calculate_wasted_time_percentage(prompt_lengths_by_batch: List[List[int]]) -
 
 
 
-def setup_tokenizer(model_config: ModelConfig) -> Tuple[Any, Any, float, float]:
+def setup_tokenizer(model_config: ModelConfig) -> Tuple[transformers.PreTrainedTokenizer, transformers.PretrainedConfig, float, float]:
     """Set up the tokenizer and model config."""
     logger.info(f"Loading tokenizer and config: {model_config.model_name_or_path}")
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_config.model_name_or_path)
@@ -190,7 +191,7 @@ def setup_tokenizer(model_config: ModelConfig) -> Tuple[Any, Any, float, float]:
     return tokenizer, hf_model_config, model_flops_per_token, gpu_peak_flops
 
 
-def setup_dataset(args: Args, tokenizer_config: TokenizerConfig) -> Any:
+def setup_dataset(args: Args, tokenizer_config: TokenizerConfig) -> datasets.Dataset:
     """Set up the dataset using the same pipeline as grpo_fast.py."""
     logger.info("Loading and processing dataset...")
     
@@ -222,7 +223,7 @@ def setup_dataset(args: Args, tokenizer_config: TokenizerConfig) -> Any:
     return dataset
 
 
-def setup_vllm_engines(args: Args, model_config: ModelConfig, max_model_len: int) -> List[Any]:
+def setup_vllm_engines(args: Args, model_config: ModelConfig, max_model_len: int) -> List[ray.actor.ActorHandle]:
     """Set up vLLM engines."""
     logger.info("Setting up vLLM engines...")
     
@@ -259,7 +260,7 @@ def setup_vllm_engines(args: Args, model_config: ModelConfig, max_model_len: int
     return vllm_engines
 
 
-def get_batch_data(dataset: Any, args: Args, batch_idx: int) -> Tuple[List[List[int]], List[str], List[str]]:
+def get_batch_data(dataset: datasets.Dataset, args: Args, batch_idx: int) -> Tuple[List[List[int]], List[str], List[str]]:
     """Get a batch of data from the dataset."""
     start_idx = batch_idx * args.num_unique_prompts_rollout
     end_idx = min(start_idx + args.num_unique_prompts_rollout, len(dataset))
@@ -275,7 +276,7 @@ def get_batch_data(dataset: Any, args: Args, batch_idx: int) -> Tuple[List[List[
     return prompts, ground_truths, datasets_list
 
 
-def run_generation_batch(vllm_engines: List[Any], args: Args, model_flops_per_token: float, gpu_peak_flops: float, prompts: List[List[int]], batch_idx: int) -> Dict[str, Any]:
+def run_generation_batch(vllm_engines: List[ray.actor.ActorHandle], args: Args, model_flops_per_token: float, gpu_peak_flops: float, prompts: List[List[int]], batch_idx: int) -> Dict[str, Union[float, int, List[str], List[int]]]:
     """Run generation for a batch of prompts and measure performance."""
     
     # Create queues
@@ -368,7 +369,7 @@ def run_generation_batch(vllm_engines: List[Any], args: Args, model_flops_per_to
     }
 
 
-def run_benchmark(dataset: Any, vllm_engines: List[Any], args: Args, model_flops_per_token: float, gpu_peak_flops: float, num_batches: int) -> List[Dict[str, Any]]:
+def run_benchmark(dataset: datasets.Dataset, vllm_engines: List[ray.actor.ActorHandle], args: Args, model_flops_per_token: float, gpu_peak_flops: float, num_batches: int) -> List[Dict[str, Union[float, int, List[str], List[int]]]]:
     """Run the full benchmark."""
     logger.info(f"Starting benchmark with {num_batches} batches of size {args.num_unique_prompts_rollout}")
     
@@ -408,7 +409,7 @@ def run_benchmark(dataset: Any, vllm_engines: List[Any], args: Args, model_flops
     return all_results
 
 
-def print_summary(results: List[Dict[str, Any]], total_time: float, args: Args, model_flops_per_token: float, gpu_peak_flops: float) -> None:
+def print_summary(results: List[Dict[str, Union[float, int, List[str], List[int]]]], total_time: float, args: Args, model_flops_per_token: float, gpu_peak_flops: float) -> None:
     """Print benchmark summary statistics."""
     
     # Calculate metrics for all batches
@@ -522,7 +523,7 @@ def print_summary(results: List[Dict[str, Any]], total_time: float, args: Args, 
     print("="*60)
 
 
-def cleanup(vllm_engines: Optional[List[Any]]) -> None:
+def cleanup(vllm_engines: Optional[List[ray.actor.ActorHandle]]) -> None:
     """Clean up resources."""
     if vllm_engines:
         for engine in vllm_engines:
