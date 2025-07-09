@@ -191,7 +191,9 @@ def create_vllm_engines(
 ):
     import vllm
 
-    assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
+    # if we installed from source, don't worry about it
+    if "dev" not in vllm.__version__:
+        assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
 
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
     assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
