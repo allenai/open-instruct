@@ -13,7 +13,6 @@ from open_instruct import rl_utils2
 MAX_TOKENS = 20
 SEED = 42
 PACK_LENGTH = 64
-TEMPERATURE = 0.
 
 
 class TestLogprobsComparison(unittest.TestCase):
