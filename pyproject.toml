@@ -5,12 +5,12 @@ description = "Train open, instruction-following language models"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
-    "accelerate>=1.1.1",
+    "accelerate @ git+https://github.com/huggingface/accelerate.git",
     "antlr4-python3-runtime==4.11",
     "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
     "datasets>=3.1.0",
     "debugpy>=1.8.13",
-    "deepspeed==0.15.4", # 0.16.0 bugs out https://github.com/microsoft/DeepSpeed/issues/6793
+    "deepspeed>=0.17.2",
     "hf-transfer>=0.1.8",
     "litellm",
     "matplotlib>=3.9.3",
