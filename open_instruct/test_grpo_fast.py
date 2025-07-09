@@ -522,6 +522,118 @@ class TestGrpoFast(unittest.TestCase):
         finally:
             thread.join(timeout=5)
 
+    def test_vllm_generate_known_good_completion(self):
+        """Test that vLLM generation produces a known good completion.
+        
+        This test verifies that the generation behavior remains consistent
+        across code changes. It uses a specific prompt and expects a specific
+        completion pattern.
+        
+        This test requires CUDA availability for running real vLLM models.
+        """
+        if not torch.cuda.is_available():
+            self.skipTest("Skipping known good completion test - CUDA not available")
+        
+        # Initialize ray
+        ray.init(num_cpus=4, num_gpus=1, ignore_reinit_error=True)
+        
+        # Create queues
+        inference_results_Q = queue.Queue(maxsize=2)
+        param_prompt_Q = queue.Queue(maxsize=2)
+        evaluation_inference_results_Q = queue.Queue(maxsize=2)
+        
+        # Use a small but real model for consistency
+        model_name = "EleutherAI/pythia-14m"  # Small model for testing
+        
+        # Get tokenizer
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        
+        # Create a specific test prompt
+        test_prompt = "The capital of France is"
+        expected_completion_pattern = "Paris"  # Dummy value - will be updated with actual
+        
+        # Tokenize the prompt
+        prompt_tokens = tokenizer.encode(test_prompt, add_special_tokens=False)
+        
+        # Create vLLM engines
+        bundles = [{"GPU": 1, "CPU": 2}]
+        pg = placement_group(bundles, strategy="PACK")
+        ray.get(pg.ready())
+        
+        vllm_engine = create_vllm_engines(
+            num_engines=1,
+            tensor_parallel_size=1,
+            enforce_eager=True,
+            tokenizer_name_or_path=model_name,
+            pretrain=model_name,
+            revision=None,
+            seed=42,  # Fixed seed for determinism
+            enable_prefix_caching=False,
+            max_model_len=512,
+            vllm_gpu_memory_utilization=0.3,
+            single_gpu_mode=False,
+            pg=pg,
+            tools={},
+            max_tool_calls=[0],
+        )[0]
+        
+        # Generation parameters for deterministic output
+        generation_params = SamplingParams(
+            temperature=0., max_tokens=20, top_p=1.0, seed=42)
+        
+        # Start generation thread
+        thread = threading.Thread(
+            target=vllm_generate_thread,
+            args=(
+                [vllm_engine],
+                generation_params,
+                generation_params,
+                inference_results_Q,
+                param_prompt_Q,
+                1,
+                None,
+                evaluation_inference_results_Q,
+                2,
+                1,
+                False,
+            )
+        )
+        thread.start()
+        
+        # Send prompt
+        param_prompt_Q.put((None, test_prompts))
+        
+        # Get results
+        result = inference_results_Q.get(timeout=60)
+        
+        response_ids, finish_reasons, masks, info = result
+        
+        # Get the generated text
+        generated_tokens = response_ids[0]
+        generated_text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+        
+        # Print for manual verification (will be replaced with actual assertion)
+        print(f"\nGenerated text: '{generated_text}'")
+        print(f"Generated tokens: {generated_tokens}")
+        print(f"Finish reason: {finish_reasons[0]}")
+        
+        # TODO: Update these assertions with actual expected values
+        # For now, just verify the structure
+        self.assertIsInstance(generated_text, str)
+        self.assertGreater(len(generated_tokens), len(prompt_tokens))
+        
+        # Placeholder assertion - replace with actual expected completion
+         self.assertIn(expected_completion_pattern, generated_text)
+         self.assertEqual(generated_tokens, [expected_token_ids])
+        
+        # Send stop signal
+        param_prompt_Q.put(None)
+        thread.join(timeout=10)
+        
+        # Clean up
+        ray.kill(vllm_engine)            
+        ray.shutdown()
+
 
 if __name__ == "__main__":
     unittest.main()

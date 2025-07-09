@@ -45,36 +45,6 @@ GPU_PEAK_FLOPS = {
     
 
 
-def get_flops_forward(model: torch.nn.Module, inp: torch.Tensor) -> int:
-    """
-    Calculates FLOPs for the forward pass of a PyTorch model.
-
-    Args:
-        model (torch.nn.Module): The PyTorch model.
-        inp (torch.Tensor or Tuple): The input tensor or a tuple of input tensors
-                                     for the model.
-    Returns:
-        int: Total FLOPs for the forward pass.
-    """
-    istrain = model.training
-    model.eval()  # Set model to evaluation mode for consistent FLOPs counting
-    
-    # Ensure input is a tensor
-    if not isinstance(inp, torch.Tensor):
-        # Assuming input is a shape tuple if not a tensor
-        inp = torch.randn(inp) 
-
-    flop_counter = torch.utils.flop_counter.FlopCounterMode(display=False, depth=None)
-    with flop_counter:
-        model(inp)
-    
-    total_flops = flop_counter.get_total_flops()
-
-    if istrain:
-        model.train() # Restore original training state
-    return total_flops
-
-
 def calculate_model_flops_per_token(model_config: Any, model_path: str) -> float:
     """
     Calculate actual FLOPs per token for a transformer model using torch FlopCounterMode.
@@ -96,7 +66,12 @@ def calculate_model_flops_per_token(model_config: Any, model_path: str) -> float
     # Create a single token input
     input_ids = torch.tensor([[1]], device=model.device)  # Single token
     
-    flops = get_flops_forward(model, input_ids)
+    model.eval()  # Set model to evaluation mode for consistent FLOPs counting
+    flop_counter = torch.utils.flop_counter.FlopCounterMode(display=False, depth=None)
+    with flop_counter:
+        model(input_ids)
+    
+    flops = flop_counter.get_total_flops()
     
     # Clean up
     del model
@@ -128,7 +103,7 @@ def calculate_mfu(tokens_per_second: float, model_flops_per_token: float, gpu_pe
     """
     Calculate Model FLOPs Utilization (MFU).
     
-    Args:s
+    Args:
         tokens_per_second: Actual token generation rate
         model_flops_per_token: Theoretical FLOPs per token for the model
         gpu_peak_flops: Peak FLOPs of the GPU
@@ -136,13 +111,48 @@ def calculate_mfu(tokens_per_second: float, model_flops_per_token: float, gpu_pe
     Returns:
         float: MFU as a percentage (0-100)
     """
-    if gpu_peak_flops == 0:
-        return 0.0
-        
     actual_flops_per_second = tokens_per_second * model_flops_per_token
     mfu_percentage = (actual_flops_per_second / gpu_peak_flops) * 100
     
     return mfu_percentage
+
+
+def calculate_wasted_time_percentage(prompt_lengths_by_batch: List[List[int]]) -> float:
+    """
+    Calculate the average wasted computation time due to variable prompt lengths.
+    
+    In vLLM, each batch processes tokens up to the max prompt length in that batch.
+    Shorter prompts effectively waste compute by padding.
+    
+    Args:
+        prompt_lengths_by_batch: List of lists, where each inner list contains 
+                                prompt lengths for a single batch
+    
+    Returns:
+        float: Average wasted time percentage across all batches (0-100)
+    """
+    if not prompt_lengths_by_batch:
+        return 0.0
+    
+    wasted_percentages = []
+    
+    for batch_prompt_lengths in prompt_lengths_by_batch:
+        if not batch_prompt_lengths:
+            continue
+            
+        max_prompt_length = max(batch_prompt_lengths)
+        
+        # Calculate wasted compute for this batch
+        # Each prompt wastes (max_length - its_length) tokens worth of compute
+        total_wasted_tokens = sum(max_prompt_length - length for length in batch_prompt_lengths)
+        total_possible_tokens = max_prompt_length * len(batch_prompt_lengths)
+        
+        if total_possible_tokens > 0:
+            batch_waste_percentage = (total_wasted_tokens / total_possible_tokens) * 100
+            wasted_percentages.append(batch_waste_percentage)
+    
+    # Return average waste across all batches
+    return sum(wasted_percentages) / len(wasted_percentages) if wasted_percentages else 0.0
 
 
 @dataclass
@@ -401,6 +411,7 @@ def run_generation_batch(vllm_engines: List[Any], benchmark_args: BenchmarkArgs,
         "avg_new_tokens_per_sample": total_new_tokens / len(prompts) if prompts else 0,
         "finish_reasons": finish_reasons,
         "response_lengths": [len(response) for response in response_ids],
+        "prompt_lengths": [len(prompt) for prompt in prompts],
     }
 
 
@@ -453,6 +464,11 @@ def print_summary(results: List[Dict[str, Any]], total_time: float, benchmark_ar
     total_tokens = sum(r["total_tokens_generated"] for r in results)
     total_generation_time = sum(r["generation_time"] for r in results)
     
+    # Collect all prompt lengths for statistics
+    all_prompt_lengths = []
+    for r in results:
+        all_prompt_lengths.extend(r["prompt_lengths"])
+    
     avg_new_tokens_per_second = total_new_tokens / total_generation_time if total_generation_time > 0 else 0
     avg_total_tokens_per_second = total_tokens / total_generation_time if total_generation_time > 0 else 0
     avg_generation_time = total_generation_time / len(results)
@@ -475,22 +491,13 @@ def print_summary(results: List[Dict[str, Any]], total_time: float, benchmark_ar
         avg_generation_time_last_n_minus_1 = last_n_minus_1_generation_time / len(last_n_minus_1_results)
         avg_mfu_last_n_minus_1 = sum(r["mfu_percentage"] for r in last_n_minus_1_results) / len(last_n_minus_1_results)
         
-        # Calculate % wasted time due to variable generation lengths
-        # This is the difference between time spent on longest vs shortest generations
-        response_lengths_last_n_minus_1 = []
+        # Calculate % wasted time due to variable prompt lengths
+        # Collect prompt lengths by batch for the last N-1 batches
+        prompt_lengths_by_batch = []
         for r in last_n_minus_1_results:
-            response_lengths_last_n_minus_1.extend(r["response_lengths"])
+            prompt_lengths_by_batch.append(r["prompt_lengths"])
         
-        if response_lengths_last_n_minus_1:
-            max_response_length = max(response_lengths_last_n_minus_1)
-            min_response_length = min(response_lengths_last_n_minus_1)
-            avg_response_length = sum(response_lengths_last_n_minus_1) / len(response_lengths_last_n_minus_1)
-            
-            # Estimate wasted time as the percentage of time spent on padding to max length
-            # This is a rough estimate: (max_length - avg_length) / max_length
-            wasted_time_percentage = ((max_response_length - avg_response_length) / max_response_length * 100) if max_response_length > 0 else 0
-        else:
-            wasted_time_percentage = 0
+        wasted_time_percentage = calculate_wasted_time_percentage(prompt_lengths_by_batch)
     else:
         # If only one batch, use the same metrics
         avg_new_tokens_per_second_last_n_minus_1 = avg_new_tokens_per_second
@@ -534,6 +541,31 @@ def print_summary(results: List[Dict[str, Any]], total_time: float, benchmark_ar
     print("-"*60)
     print(f"Model FLOPs per token: {model_flops_per_token/1e9:.2f} GFLOPs")
     print(f"GPU peak FLOPs: {gpu_peak_flops/1e12:.0f} TFLOPs")
+    
+    # Print prompt length statistics
+    if all_prompt_lengths:
+        print("-"*60)
+        print("PROMPT LENGTH STATISTICS:")
+        print(f"Total prompts: {len(all_prompt_lengths)}")
+        print(f"Min prompt length: {min(all_prompt_lengths)} tokens")
+        print(f"Max prompt length: {max(all_prompt_lengths)} tokens")
+        print(f"Mean prompt length: {np.mean(all_prompt_lengths):.2f} tokens")
+        print(f"Median prompt length: {np.median(all_prompt_lengths):.2f} tokens")
+        print(f"Std dev prompt length: {np.std(all_prompt_lengths):.2f} tokens")
+        
+        # Calculate percentiles
+        p25 = np.percentile(all_prompt_lengths, 25)
+        p75 = np.percentile(all_prompt_lengths, 75)
+        p90 = np.percentile(all_prompt_lengths, 90)
+        p95 = np.percentile(all_prompt_lengths, 95)
+        p99 = np.percentile(all_prompt_lengths, 99)
+        
+        print(f"25th percentile: {p25:.2f} tokens")
+        print(f"75th percentile: {p75:.2f} tokens")
+        print(f"90th percentile: {p90:.2f} tokens")
+        print(f"95th percentile: {p95:.2f} tokens")
+        print(f"99th percentile: {p99:.2f} tokens")
+    
     print("="*60)
 
 
@@ -563,39 +595,11 @@ def main() -> None:
     if tokenizer_config.chat_template_name == "tulu":  # default value
         tokenizer_config.chat_template_name = "tulu_thinker"
     
-    # Print configuration values for verification
-    print("\n" + "="*60)
-    print("BENCHMARK CONFIGURATION VALUES")
-    print("="*60)
-    print(f"Model name: {model_config.model_name_or_path}")
-    print(f"Max model len: {benchmark_args.max_model_len}")
-    print(f"vLLM GPU memory utilization: {benchmark_args.vllm_gpu_memory_utilization}")
-    print(f"Temperature: {benchmark_args.temperature}")
-    print(f"Max tokens: {benchmark_args.max_tokens}")
-    print(f"Top-p: {benchmark_args.top_p}")
-    print(f"Num batches: {benchmark_args.num_batches}")
-    print(f"Batch size: {benchmark_args.batch_size}")
-    print(f"Num samples per prompt: {benchmark_args.num_samples_per_prompt}")
-    print(f"Dataset mixer list: {benchmark_args.dataset_mixer_list}")
-    print(f"Dataset mixer list splits: {benchmark_args.dataset_mixer_list_splits}")
-    print(f"Max token length: {benchmark_args.max_token_length}")
-    print(f"Max prompt token length: {benchmark_args.max_prompt_token_length}")
-    print(f"Chat template name: {tokenizer_config.chat_template_name}")
-    print(f"Add BOS: {tokenizer_config.add_bos}")
-    print(f"Num engines: {benchmark_args.num_engines}")
-    print(f"Tensor parallel size: {benchmark_args.tensor_parallel_size}")
-    print("="*60 + "\n")
-    
-    # Run benchmark
-    vllm_engines = None
-    
-    try:
-        tokenizer, hf_model_config, model_flops_per_token, gpu_peak_flops = setup_tokenizer(model_config)
-        dataset = setup_dataset(benchmark_args, tokenizer_config)
-        vllm_engines = setup_vllm_engines(benchmark_args, model_config)
-        run_benchmark(dataset, vllm_engines, benchmark_args, model_flops_per_token, gpu_peak_flops)
-    finally:
-        cleanup(vllm_engines)
+    tokenizer, hf_model_config, model_flops_per_token, gpu_peak_flops = setup_tokenizer(model_config)
+    dataset = setup_dataset(benchmark_args, tokenizer_config)
+    vllm_engines = setup_vllm_engines(benchmark_args, model_config)
+    run_benchmark(dataset, vllm_engines, benchmark_args, model_flops_per_token, gpu_peak_flops)
+    cleanup(vllm_engines)
 
 
 if __name__ == "__main__":
