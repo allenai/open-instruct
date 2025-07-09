@@ -229,13 +229,13 @@ def concatenated_forward(
     batch: Dict[str, Union[List, torch.LongTensor]],
     average_log_prob: bool = False,
     output_router_logits: bool = False,
-    padding_free: bool = False,
+    packing: bool = False,
 ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
     """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
     We do this to avoid doing two forward passes, because it's faster for FSDP.
     """
-    if not padding_free: 
+    if not packing: 
         concatenated_batch = concatenated_inputs(batch)
     else:
         concatenated_batch, bs = pf_concatenated_inputs(batch)
@@ -258,7 +258,7 @@ def concatenated_forward(
         ).logits.to(torch.float32)
         aux_loss = None
 
-    if not padding_free:
+    if not packing:
         all_logps = _get_batch_logps(logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob)
         bs = batch["chosen_input_ids"].shape[0]
     else:

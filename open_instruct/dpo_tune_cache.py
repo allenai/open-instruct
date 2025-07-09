@@ -107,13 +107,6 @@ class FlatArguments:
         "additional_model_arguments",
     ]
 
-    # Sometimes users will pass in a `str` repr of a dict in the CLI
-    # We need to track what fields those can be. Each time a new arg
-    # has a dict type, it must be added to this list.
-    # Important: These should be typed with Optional[Union[dict,str,...]]
-    # Note: the suggested ellipses typing above causes errors on python 3.10, so they are omitted.
-    _VALID_DICT_FIELDS = ["additional_model_arguments"]
-
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
     run_name: Optional[str] = None
@@ -356,7 +349,7 @@ class FlatArguments:
     packing: bool = field(
         default=False,
         metadata={
-            "help": "Whether to use padding-free collation via DataCollatorWithFlatteningDPO"
+            "help": "Whether to use packing/padding-free collation via DataCollatorWithFlatteningDPO"
         },
     )
 
@@ -699,7 +692,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     # DataLoaders creation:
     if args.packing:
-        accelerator.print("Using padding-free collation")
+        accelerator.print("Using packing/padding-free collation")
         collate_fn = TensorDataCollatorWithFlatteningDPO(
             return_position_ids=True, return_flash_attn_kwargs=True
         )
@@ -831,9 +824,9 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.packing:
         if not args.concatenated_forward: 
             raise NotImplementedError(
-                "seperate forward not implemented for padding-free"
+                "seperate forward not implemented for packing/padding-free"
             )
-        forward_fn = partial(forward_fn, padding_free=True)
+        forward_fn = partial(forward_fn, packing=True)
     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
         epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = get_cache_ref_logprobs(
             model,
