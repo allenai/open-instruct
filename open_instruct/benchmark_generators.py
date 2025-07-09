@@ -302,24 +302,19 @@ def run_generation_batch(vllm_engines: List[Any], args: Args, model_flops_per_to
     
     # Start vLLM generation thread
     def wrapped_vllm_generate_thread() -> None:
-        try:
-            grpo_fast.vllm_generate_thread(
-                vllm_engines,
-                generation_config,
-                eval_generation_config,
-                inference_results_Q,
-                param_prompt_Q,
-                1,  # num_training_steps
-                None,  # eval_prompt_token_ids
-                evaluation_inference_results_Q,
-                2,  # eval_freq
-                1,  # resume_training_step
-                False,  # tool_use
-            )
-        except Exception as e:
-            logger.error(f"Error in vllm_generate_thread: {e}")
-            inference_results_Q.put(("ERROR", str(e), [], []))
-            raise
+        grpo_fast.vllm_generate_thread(
+            vllm_engines,
+            generation_config,
+            eval_generation_config,
+            inference_results_Q,
+            param_prompt_Q,
+            1,  # num_training_steps
+            None,  # eval_prompt_token_ids
+            evaluation_inference_results_Q,
+            2,  # eval_freq
+            1,  # resume_training_step
+            False,  # tool_use
+        )
     
     thread = threading.Thread(target=wrapped_vllm_generate_thread)
     
@@ -331,35 +326,33 @@ def run_generation_batch(vllm_engines: List[Any], args: Args, model_flops_per_to
     param_prompt_Q.put((None, prompts))
     
     # Get results
-    try:
-        result = inference_results_Q.get(timeout=120)
+    result = inference_results_Q.get(timeout=120)
+    
+    if result[0] == "ERROR":
+        logger.error(f"Generation failed: {result[1]}")
+        return {"error": result[1]}
         
-        if result[0] == "ERROR":
-            logger.error(f"Generation failed: {result[1]}")
-            return {"error": result[1]}
-            
-        response_ids, finish_reasons, masks, info = result
-        
-        # Calculate timing and throughput
-        end_time = time.time()
-        generation_time = end_time - start_time
-        
-        # Calculate tokens generated (response_ids only contains newly generated tokens)
-        total_new_tokens = sum(len(response) for response in response_ids)
-        total_prompt_tokens = sum(len(prompt) for prompt in prompts)
-        total_tokens_generated = total_new_tokens + total_prompt_tokens
-        
-        tokens_per_second = total_new_tokens / generation_time if generation_time > 0 else 0
-        total_tokens_per_second = total_tokens_generated / generation_time if generation_time > 0 else 0
-        
-        # Calculate MFU
-        mfu_percentage = calculate_mfu(tokens_per_second, model_flops_per_token, gpu_peak_flops)
-        
-        # Send stop signal
-        param_prompt_Q.put(None)
-        
-    finally:
-        thread.join(timeout=10)
+    response_ids, finish_reasons, masks, info = result
+    
+    # Calculate timing and throughput
+    end_time = time.time()
+    generation_time = end_time - start_time
+    
+    # Calculate tokens generated (response_ids only contains newly generated tokens)
+    total_new_tokens = sum(len(response) for response in response_ids)
+    total_prompt_tokens = sum(len(prompt) for prompt in prompts)
+    total_tokens_generated = total_new_tokens + total_prompt_tokens
+    
+    tokens_per_second = total_new_tokens / generation_time if generation_time > 0 else 0
+    total_tokens_per_second = total_tokens_generated / generation_time if generation_time > 0 else 0
+    
+    # Calculate MFU
+    mfu_percentage = calculate_mfu(tokens_per_second, model_flops_per_token, gpu_peak_flops)
+    
+    # Send stop signal
+    param_prompt_Q.put(None)
+    
+    thread.join(timeout=10)
         
     return {
         "batch_idx": batch_idx,
@@ -619,15 +612,11 @@ def main() -> None:
     print("="*60 + "\n")
     
     # Run benchmark
-    vllm_engines = None
-    
-    try:
-        tokenizer, hf_model_config, model_flops_per_token, gpu_peak_flops = setup_tokenizer(model_config)
-        dataset = setup_dataset(args, tokenizer_config)
-        vllm_engines = setup_vllm_engines(args, model_config, max_model_len)
-        run_benchmark(dataset, vllm_engines, args, model_flops_per_token, gpu_peak_flops, num_batches)
-    finally:
-        cleanup(vllm_engines)
+    tokenizer, hf_model_config, model_flops_per_token, gpu_peak_flops = setup_tokenizer(model_config)
+    dataset = setup_dataset(args, tokenizer_config)
+    vllm_engines = setup_vllm_engines(args, model_config, max_model_len)
+    run_benchmark(dataset, vllm_engines, args, model_flops_per_token, gpu_peak_flops, num_batches)
+    cleanup(vllm_engines)
 
 
 if __name__ == "__main__":
