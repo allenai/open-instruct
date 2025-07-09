@@ -1,11 +1,8 @@
 import argparse
-import os
-from collections import defaultdict
-from typing import List, Optional
+
 from datasets import load_dataset
 
 from scripts.data.sft.utils import convert_sft_dataset
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -48,19 +45,19 @@ if __name__ == "__main__":
         help="Apply empty message filters to the dataset.",
     )
     args = parser.parse_args()
-    
+
     conversion_func = lambda example: {
         "messages": [
             {"role": "user", "content": example["problem"]},
             {"role": "assistant", "content": example["generated_solution"]}
         ]
     }
-    
+
     ds = load_dataset("nvidia/OpenMathInstruct-2")["train"]
-    
+
     gsm_subset = ds.filter(lambda x: "gsm8k" in x["problem_source"])
     math_subset = ds.filter(lambda x: "math" in x["problem_source"])
-    
+
     gsm_readme_content = (
         "This is a converted version of the OpenMathInstruct-2 dataset (GSM8K subset) into Tulu SFT training format.\n\n"
         "The conversion script can be found in our "
@@ -89,7 +86,7 @@ if __name__ == "__main__":
         local_save_dir=args.local_save_dir,
         readme_content=gsm_readme_content,
     )
-    
+
     math_readme_content = (
         "This is a converted version of the OpenMathInstruct-2 dataset (Math subset) into Tulu SFT training format.\n\n"
         "The conversion script can be found in our "

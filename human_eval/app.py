@@ -1,15 +1,14 @@
-import random
-import json
-import re
 import argparse
-import time
+import json
 import os
+import random
+import time
 from collections import Counter
-from flask import Flask, render_template, redirect, url_for, request, jsonify
-from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user, login_required
-from werkzeug.security import generate_password_hash, check_password_hash
 
+from flask import Flask, jsonify, redirect, render_template, request, url_for
+from flask_login import LoginManager, UserMixin, current_user, login_required, login_user, logout_user
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import check_password_hash, generate_password_hash
 
 random.seed(42)
 
@@ -89,7 +88,7 @@ def signup():
 def logout():
     logout_user()
     return redirect(url_for('login'))
-    
+
 
 @app.route('/')
 def index():
@@ -157,7 +156,7 @@ def get_acceptance_results(records, target_model_a, target_model_b):
         if instance_id not in acceptance_results[record.model_a]:
             acceptance_results[record.model_a][instance_id] = []
         acceptance_results[record.model_a][instance_id].append(record.completion_a_is_acceptable)
-        
+
         if instance_id not in acceptance_results[record.model_b]:
             acceptance_results[record.model_b][instance_id] = []
         acceptance_results[record.model_b][instance_id].append(record.completion_b_is_acceptable)
@@ -226,7 +225,7 @@ def get_comparison_results(records, target_model_a, target_model_b):
         sum([v for k, v in model_wins_rates.items() if target_model_a in k])
     model_wins_rates[f"{target_model_b}_wins"] = \
         sum([v for k, v in model_wins_rates.items() if target_model_b in k])
-    
+
     # count how many instances get multiple annotations
     instances_with_multiple_annotations = [instance_id for instance_id, results in comparison_results.items() if len(results) > 1]
     agreement_results = {
@@ -255,9 +254,9 @@ def get_comparison_results(records, target_model_a, target_model_b):
             else:
                 if "tie" in simplified_comparisons[-2:]:
                     relexed_agreed_comparison += 0.5
-        agreement_results["comparison_agreement"] = agreed_comparison / len(instances_with_multiple_annotations) 
-        agreement_results["relexed_comparison_agreement"] = relexed_agreed_comparison / len(instances_with_multiple_annotations)   
-    
+        agreement_results["comparison_agreement"] = agreed_comparison / len(instances_with_multiple_annotations)
+        agreement_results["relexed_comparison_agreement"] = relexed_agreed_comparison / len(instances_with_multiple_annotations)
+
     model_wins_rates["agreement"] = agreement_results
     return model_wins_rates
 
@@ -272,11 +271,11 @@ def summarize_results():
 
     # get the missing instances
     results["progress"] = get_progress(records)
-    
+
     # get the comparison model pairs
     model_pairs = set([tuple(sorted([record.model_a, record.model_b])) for record in records])
     results["model_pairs"] = list(model_pairs)
-    
+
     results["results"] = {}
     for target_model_a, target_model_b in model_pairs:
         feedback_records = {}
@@ -290,7 +289,7 @@ def summarize_results():
             if set([target_model_a, target_model_b]) != set([record.model_a, record.model_b]):
                 assert any([set([record.model_a, record.model_b]) == set(pair) for pair in model_pairs])
                 continue
-            
+
             # skip if the record is a feedback
             if record.instance_quality:
                 if record.instance_quality not in feedback_records:
@@ -306,9 +305,9 @@ def summarize_results():
             "acceptance_results": acceptance_results,
             "comparison_results": comparison_results,
             "feedback_records": feedback_records,
-        }        
+        }
     return results
-    
+
 
 @app.route("/api/submit-evaluation", methods=["POST"])
 @login_required

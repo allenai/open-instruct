@@ -7,7 +7,7 @@ requires-python = ">=3.10,<3.12"
 dependencies = [
     "accelerate>=1.1.1",
     "antlr4-python3-runtime==4.11",
-    "bitsandbytes>=0.44.1",
+    "bitsandbytes>=0.44.1; platform_system != 'Darwin'",
     "datasets>=3.1.0",
     "debugpy>=1.8.13",
     "deepspeed==0.15.4", # 0.16.0 bugs out https://github.com/microsoft/DeepSpeed/issues/6793
@@ -84,7 +84,52 @@ dev = [
     "mkdocs-material>=9.6.8",
     "markdown-include>=0.8.1",
     "pytest>=8.3.4",
+    "ruff>=0.11.13",
+	"parameterized>=0.9.0",
 ]
+
+[tool.black]
+line-length = 119
+target-version = ['py310']
 
 [tool.isort]
 known_first_party = ["open_instruct"]
+profile = "black"
+src_paths = ["open_instruct"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 119
+# do both . and open_instruct to make sure known-first-party below works
+src = [".", "open_instruct"]
+exclude = ["wandb"]
+
+[tool.ruff.format]
+# Use black-compatible formatting
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+# Preserve original parentheses style to minimize changes
+skip-magic-trailing-comma = true
+# Enable black-compatible string normalization
+docstring-code-format = false
+
+[tool.ruff.lint]
+# Enable rules equivalent to your autoflake and flake8:
+# F = Pyflakes (covers autoflake functionality)
+# E = pycodestyle errors (flake8)
+# W = pycodestyle warnings (flake8)
+# I = isort
+select = ["F", "E", "W", "I"]
+ignore = [
+    "C408", # dict() calls (stylistic)
+    "C901", # function complexity
+    "E501", # Line too long (handled by line-length setting)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["open-instruct"]
+# case insensitive to match isort --profile black
+case-sensitive = false
+# Disable split-on-trailing-comma to work with skip-magic-trailing-comma
+split-on-trailing-comma = false      

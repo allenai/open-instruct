@@ -1,13 +1,22 @@
 import argparse
+import json
 import os
-import torch
+
 import numpy as np
 import pandas as pd
-import json
+import torch
 from tqdm import tqdm
-from eval.mmlu.categories import subcategories, categories
-from eval.utils import get_next_word_predictions, load_hf_tokenizer, load_hf_lm, query_openai_chat_model, dynamic_import_function, upload_results_to_hf, check_and_upload_model_metadata
 
+from eval.mmlu.categories import categories, subcategories
+from eval.utils import (
+    check_and_upload_model_metadata,
+    dynamic_import_function,
+    get_next_word_predictions,
+    load_hf_lm,
+    load_hf_tokenizer,
+    query_openai_chat_model,
+    upload_results_to_hf,
+)
 
 choices = ["A", "B", "C", "D"]
 
@@ -74,7 +83,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
                     prompt += "The answer is:"
                 else:
                     prompt += " The answer is:"
-                    
+
             tokenized_prompt = tokenizer(prompt, truncation=False, add_special_tokens=False).input_ids
         prompts.append(prompt)
 
@@ -93,7 +102,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
         prediction = choices[pred_indices[i]]
         ground_truth = groud_truths[i]
         cors.append(prediction == ground_truth)
-        
+
     acc = np.mean(cors)
     cors = np.array(cors)
 
@@ -103,7 +112,7 @@ def eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, batch_size=1
 
 
 def eval_openai_chat_engine(args, subject, engine, dev_df, test_df, batch_size=1):
-    
+
     import tiktoken
     gpt_tokenizer = tiktoken.get_encoding("cl100k_base")
     answer_choice_ids = [gpt_tokenizer.encode(" " + x)[0] for x in choices]  # be careful, the tokenizer will tokenize " A" and "A" differently.
@@ -113,7 +122,7 @@ def eval_openai_chat_engine(args, subject, engine, dev_df, test_df, batch_size=1
         k = args.ntrain
         prompt_end = format_example(test_df, i, include_answer=False)
         train_prompt = gen_prompt(dev_df, subject, k)
-        prompt = train_prompt + prompt_end        
+        prompt = train_prompt + prompt_end
         prompts.append(prompt)
 
     instances = [{"id": prompt, "prompt": prompt} for _, prompt in enumerate(prompts)]
@@ -125,7 +134,7 @@ def eval_openai_chat_engine(args, subject, engine, dev_df, test_df, batch_size=1
         logit_bias={token_id: 100 for token_id in answer_choice_ids},
         max_tokens=1,
     )
-    
+
     # get the metrics
     cors = []
     groud_truths = test_df.iloc[:, -1].values
@@ -133,7 +142,7 @@ def eval_openai_chat_engine(args, subject, engine, dev_df, test_df, batch_size=1
         prediction = results[i]["output"].strip()
         ground_truth = groud_truths[i]
         cors.append(prediction == ground_truth)
-        
+
     acc = np.mean(cors)
     cors = np.array(cors)
 
@@ -153,9 +162,9 @@ def main(args):
             use_fast_tokenizer=not args.use_slow_tokenizer,
         )
         model = load_hf_lm(
-            model_name_or_path=args.model_name_or_path, 
+            model_name_or_path=args.model_name_or_path,
             revision=args.hf_revision,
-            load_in_8bit=args.load_in_8bit, 
+            load_in_8bit=args.load_in_8bit,
             device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
             gptq_model=args.gptq,
         )
@@ -163,7 +172,7 @@ def main(args):
         if isinstance(model, GPTNeoXForCausalLM) or isinstance(model, OPTForCausalLM):
             tokenizer.model_max_length = model.config.max_position_embeddings
             print("Set tokenizer.model_max_length to model.config.max_position_embeddings: {}".format(model.config.max_position_embeddings))
-    
+
     subjects = sorted(
         [
             f.split("_test.csv")[0]
@@ -185,8 +194,8 @@ def main(args):
     }
     cat_cors = {cat: [] for cat in categories}
 
-    for subject in tqdm(subjects, desc=f"Evaluating subjects: "):
-        
+    for subject in tqdm(subjects, desc="Evaluating subjects: "):
+
         dev_df = pd.read_csv(
             os.path.join(args.data_dir, "dev", subject + "_dev.csv"), header=None
         )[: args.ntrain]
@@ -200,7 +209,7 @@ def main(args):
             cors, acc, probs = eval_hf_model(args, subject, model, tokenizer, dev_df, test_df, args.eval_batch_size)
         else:
             cors, acc, probs = eval_openai_chat_engine(args, subject, args.openai_engine, dev_df, test_df, args.eval_batch_size)
-            
+
         subcats = subcategories[subject]
         for subcat in subcats:
             subcat_cors[subcat].append(cors)
@@ -348,14 +357,14 @@ if __name__ == "__main__":
         help="If given, we're evaluating a 4-bit quantized GPTQ model."
     )
     parser.add_argument(
-        "--use_chat_format", 
-        action="store_true", 
+        "--use_chat_format",
+        action="store_true",
         help="If given, we will use the chat format for the prompts."
     )
     parser.add_argument(
-        "--chat_formatting_function", 
-        type=str, 
-        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        "--chat_formatting_function",
+        type=str,
+        default="eval.templates.create_prompt_with_tulu_chat_format",
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
     )
     parser.add_argument(

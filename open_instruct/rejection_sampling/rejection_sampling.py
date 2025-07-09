@@ -38,11 +38,7 @@ from transformers import (
 )
 
 from open_instruct.model_utils import get_reward
-from open_instruct.rejection_sampling.generation import (
-    GenerationArgs,
-    format_conversation,
-    generate_with_openai,
-)
+from open_instruct.rejection_sampling.generation import GenerationArgs, format_conversation, generate_with_openai
 
 api = HfApi()
 # we don't use `multiprocessing.cpu_count()` because typically we only have 12 CPUs
@@ -114,9 +110,7 @@ def process_shard(
     )
     # So this code handles only classification, I should also handle other models judges like Llama3
     model = AutoModelForSequenceClassification.from_pretrained(
-        model_name_or_path,
-        torch_dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
+        model_name_or_path, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2"
     )
     model = model.to(device)
     model.eval()
@@ -150,10 +144,7 @@ def process_shard_api(model_name_or_path: str, args: Args, shard: List[str]) -> 
     # for judgement mode, we need to only generate `num_completions=1`
     gen_args = GenerationArgs(num_completions=1)
 
-    ds = raw_ds.map(
-        lambda x: {"prompt": format_conversation(x["messages"][:-1])},
-        num_proc=NUM_CPUS_FOR_DATASET_MAP,
-    )
+    ds = raw_ds.map(lambda x: {"prompt": format_conversation(x["messages"][:-1])}, num_proc=NUM_CPUS_FOR_DATASET_MAP)
     prompts = ds["prompt"]
     model_responses = ds["model_completion"]
 
@@ -357,10 +348,7 @@ def main(args: Args):
         api.create_repo(full_repo_id, repo_type="dataset", exist_ok=True)
         for f in [__file__, args.save_filename]:
             api.upload_file(
-                path_or_fileobj=f,
-                path_in_repo=f.split("/")[-1],
-                repo_id=full_repo_id,
-                repo_type="dataset",
+                path_or_fileobj=f, path_in_repo=f.split("/")[-1], repo_id=full_repo_id, repo_type="dataset"
             )
         repo_full_url = f"https://huggingface.co/datasets/{full_repo_id}"
         print(f"Pushed to {repo_full_url}")
@@ -383,10 +371,7 @@ args:
 1. Command used to run `{run_command}`
 """
         )
-        sft_card.push_to_hub(
-            full_repo_id,
-            repo_type="dataset",
-        )
+        sft_card.push_to_hub(full_repo_id, repo_type="dataset")
 
         full_repo_id_scores = f"{args.hf_entity}/{args.hf_repo_id_scores}"
         if args.add_timestamp:
@@ -394,17 +379,11 @@ args:
         api.create_repo(full_repo_id_scores, repo_type="dataset", exist_ok=True)
         for f in [__file__, args.save_filename_scores]:
             api.upload_file(
-                path_or_fileobj=f,
-                path_in_repo=f.split("/")[-1],
-                repo_id=full_repo_id_scores,
-                repo_type="dataset",
+                path_or_fileobj=f, path_in_repo=f.split("/")[-1], repo_id=full_repo_id_scores, repo_type="dataset"
             )
         repo_full_url_scores = f"https://huggingface.co/datasets/{full_repo_id_scores}"
         print(f"Pushed to {repo_full_url_scores}")
-        sft_card.push_to_hub(
-            full_repo_id_scores,
-            repo_type="dataset",
-        )
+        sft_card.push_to_hub(full_repo_id_scores, repo_type="dataset")
 
 
 if __name__ == "__main__":

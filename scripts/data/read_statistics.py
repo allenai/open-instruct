@@ -1,7 +1,8 @@
+import argparse
 import json
 import os
-import argparse
-from typing import List, Dict
+from typing import Dict, List
+
 """
 Usage:
 python scripts/data/read_statistics.py --latex data/processed/
@@ -17,7 +18,7 @@ def load_dataset_statistics(output_dir: str) -> List[Dict]:
                 with open(file_path, 'r') as f:
                     data = json.load(f)
                     dataset_name = os.path.basename(root) + "/" + filename.split("_statistics")[0]
-                    
+
                     stat = {
                         'Dataset': dataset_name,
                         'Num Instances': data['num_instances'],
@@ -84,7 +85,7 @@ def print_latex_table(statistics: List[Dict], columns: List[str], roundings: Dic
     print("\\bottomrule")
     print("\\end{tabular}")
     print("}")
-    print("\\caption{}");
+    print("\\caption{}")
     print("\\label{}")
     print("\\end{table}")
 

@@ -106,7 +106,7 @@ def create_prompt_with_zephyr_chat_format(messages, tokenizer, bos="<s>", eos="<
                 "Zephyr chat template only supports 'system', 'user' and 'assistant' roles. Invalid role: {}.".format(message["role"])
                 )
     formatted_text += "<|assistant|>\n"
-    return formatted_text    
+    return formatted_text
 
 # helper for just using the huggingface tokenizer
 def create_prompt_with_huggingface_tokenizer_template(messages, tokenizer, add_bos=False):

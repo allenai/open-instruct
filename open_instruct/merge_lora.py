@@ -26,6 +26,7 @@ from huggingface_hub import HfApi
 from peft import PeftConfig, PeftModel
 from peft.utils import _get_submodules
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
 from utils import maybe_use_ai2_hf_entity, retry_on_exception
 
 
@@ -64,10 +65,7 @@ def dequantize_model(model, dtype=torch.bfloat16, device="cuda"):
 
 @retry_on_exception()
 def push_folder_to_hub(
-    output_dir: str,
-    hf_repo_id: Optional[str] = None,
-    hf_repo_revision: Optional[str] = None,
-    private: bool = True,
+    output_dir: str, hf_repo_id: Optional[str] = None, hf_repo_revision: Optional[str] = None, private: bool = True
 ):
     hf_repo_url = f"https://huggingface.co/{hf_repo_id}/tree/{hf_repo_revision}"
     api = HfApi()
@@ -193,8 +191,4 @@ if __name__ == "__main__":
             configs["hf_repo_revision"] = (
                 f"{configs['exp_name']}__{args.base_model_name_or_path.replace('/', '_')}__{args.seed}__{int(time.time())}"
             )
-        push_folder_to_hub(
-            output_dir,
-            configs["hf_repo_id"],
-            configs["hf_repo_revision"],
-        )
+        push_folder_to_hub(output_dir, configs["hf_repo_id"], configs["hf_repo_revision"])

@@ -116,10 +116,7 @@ def convert_codefeedback_single_turn_to_messages(example):
     """
     Convert a query-answer pair to a list of messages.
     e.g. m-a-p/CodeFeedback-Filtered-Instruction"""
-    messages = [
-        {"role": "user", "content": example["query"]},
-        {"role": "assistant", "content": example["answer"]},
-    ]
+    messages = [{"role": "user", "content": example["query"]}, {"role": "assistant", "content": example["answer"]}]
     example["messages"] = messages
     return example
 
@@ -128,10 +125,7 @@ def convert_metamath_qa_to_messages(example):
     """
     Convert a query-response pair to a list of messages.
     e.g. meta-math/MetaMathQA"""
-    messages = [
-        {"role": "user", "content": example["query"]},
-        {"role": "assistant", "content": example["response"]},
-    ]
+    messages = [{"role": "user", "content": example["query"]}, {"role": "assistant", "content": example["response"]}]
     example["messages"] = messages
     return example
 
@@ -572,7 +566,7 @@ class ArgumentParserPlus(HfArgumentParser):
                         inputs[arg] = [str(v) for v in val.split(",")]
 
                     # bool of a non-empty string is True, so we manually check for bools
-                    if base_type == bool:
+                    if base_type is bool:
                         if val in ["true", "True"]:
                             inputs[arg] = True
                         else:
@@ -1169,12 +1163,7 @@ def maybe_use_ai2_hf_entity() -> Optional[str]:
 
 
 @retry_on_exception()
-def upload_metadata_to_hf(
-    metadata_dict,
-    filename,
-    hf_dataset_name,
-    hf_dataset_save_dir,
-):
+def upload_metadata_to_hf(metadata_dict, filename, hf_dataset_name, hf_dataset_save_dir):
     # upload a random dict to HF. Originally for uploading metadata to HF
     # about a model for leaderboard displays.
     with open("tmp.json", "w") as f:
@@ -1206,10 +1195,7 @@ def get_train_ds_config(
     zero_opt_dict = {
         "stage": stage,
         "offload_param": {"device": device},
-        "offload_optimizer": {
-            "device": "cpu" if adam_offload else "none",
-            "pin_memory": True,
-        },
+        "offload_optimizer": {"device": "cpu" if adam_offload else "none", "pin_memory": True},
         "sub_group_size": "auto",
         "stage3_max_live_parameters": "auto",
         "stage3_max_reuse_distance": "auto",
@@ -1229,9 +1215,7 @@ def get_train_ds_config(
     return {
         "steps_per_print": 100,
         "zero_optimization": zero_opt_dict,
-        "bf16": {
-            "enabled": bf16,
-        },
+        "bf16": {"enabled": bf16},
         "gradient_clipping": max_norm,
         "prescale_gradients": False,
         "wall_clock_breakdown": False,
@@ -1239,25 +1223,16 @@ def get_train_ds_config(
     }
 
 
-def get_eval_ds_config(
-    offload,
-    stage=0,
-    bf16=True,
-):
+def get_eval_ds_config(offload, stage=0, bf16=True):
     zero_opt_dict = {
         "stage": stage,
         "stage3_param_persistence_threshold": "auto",
-        "offload_param": {
-            "device": "cpu" if offload else "none",
-            "pin_memory": True,
-        },
+        "offload_param": {"device": "cpu" if offload else "none", "pin_memory": True},
     }
     return {
         "steps_per_print": 100,
         "zero_optimization": zero_opt_dict,
-        "bf16": {
-            "enabled": bf16,
-        },
+        "bf16": {"enabled": bf16},
         "prescale_gradients": False,
         "wall_clock_breakdown": False,
     }
@@ -1304,9 +1279,7 @@ _SET_AFFINITY = False
 class RayProcess:
     def __init__(self, world_size, rank, local_rank, master_addr, master_port):
         logging.basicConfig(
-            format="%(asctime)s %(levelname)-8s %(message)s",
-            level=logging.INFO,
-            datefmt="%Y-%m-%d %H:%M:%S",
+            format="%(asctime)s %(levelname)-8s %(message)s", level=logging.INFO, datefmt="%Y-%m-%d %H:%M:%S"
         )
         self.world_size = world_size
         self.rank = rank
@@ -1359,10 +1332,7 @@ class RayProcess:
         from ctypes.util import find_library
 
         class bitmask_t(Structure):
-            _fields_ = [
-                ("size", c_ulong),
-                ("maskp", POINTER(c_ulong)),
-            ]
+            _fields_ = [("size", c_ulong), ("maskp", POINTER(c_ulong))]
 
         LIBNUMA = CDLL(find_library("numa"))
         LIBNUMA.numa_parse_nodestring.argtypes = [c_char_p]

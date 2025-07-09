@@ -1,9 +1,12 @@
 import logging
+import math
 import multiprocessing
 import os
 import shutil
 from ctypes import c_int
 from typing import Any, Dict, List, Optional
+
+from .testing_util import grade_stdio
 
 # taken from https://github.com/TIGER-AI-Lab/AceCoder/blob/62bb7fc25d694fed04a5270c89bf2cdc282804f7/data/inference/EvaluateInferencedCode.py#L372
 # we save the current working directory and restore them later
@@ -14,6 +17,7 @@ tmp_chmod = os.chmod
 tmp_fchmod = os.fchmod
 tmp_chdir = os.chdir
 tmp_rmdir = os.rmdir
+tmp_getcwd = os.getcwd
 # tmp_open = open
 tmp_print = print
 tmp_rm_tree = shutil.rmtree
@@ -31,16 +35,23 @@ return_var = multiprocessing.Value(c_int, 0)
 
 def run_single_test_against_program_helper(func: str, test: str) -> int:
     """Return 1 if func finish running, 0 otherwise"""
-    execution_context = {}
-    execution_context.update({"__builtins__": __builtins__})
+    # Apply reliability guard in the child process
+    reliability_guard()
+
     try:
-        exec(func, execution_context)
-        exec(test, execution_context)
-        return_var.value = 1
-        return 1
-    except Exception:
-        return_var.value = 0
-        return 0
+        execution_context = {}
+        execution_context.update({"__builtins__": __builtins__})
+        try:
+            exec(func, execution_context)
+            exec(test, execution_context)
+            return_var.value = 1
+            return 1
+        except Exception:
+            return_var.value = 0
+            return 0
+    finally:
+        # Restore in child process (though it will terminate anyway)
+        partial_undo_reliability_guard()
 
 
 # very unstable, seems to work, seeing there are no uses will be deprecated for now.
@@ -63,7 +74,6 @@ def get_successful_tests_slow(program: str, tests: List[str], max_execution_time
     if not should_execute(program=program, tests=tests):
         return [0] * len(tests)
 
-    reliability_guard()
     result = []
     for test in tests:
         return_var.value = 0
@@ -74,7 +84,6 @@ def get_successful_tests_slow(program: str, tests: List[str], max_execution_time
             p.kill()
         result.append(return_var.value)
 
-    partial_undo_reliability_guard()
     return result
 
 
@@ -84,24 +93,50 @@ def get_successful_tests_slow(program: str, tests: List[str], max_execution_time
 test_results = multiprocessing.Array("i", 1000)  # Support up to 1000 tests
 
 
-def run_tests_against_program_helper_2(func: str, tests: List[str]) -> None:
+def run_tests_against_program_helper_2(func: str, tests: List[str], shared_results) -> None:
     """Run all tests against the program and store results in shared array"""
-    execution_context: Dict[str, Any] = {}
-    execution_context.update({"__builtins__": __builtins__})
+    # Apply reliability guard in the child process
+    reliability_guard()
 
     try:
-        exec(func, execution_context)
-    except Exception:
-        for i in range(len(tests)):
-            test_results[i] = 0
-        return
+        execution_context: Dict[str, Any] = {}
+        execution_context.update({"__builtins__": __builtins__})
 
-    for idx, test in enumerate(tests):
         try:
-            exec(test, execution_context)
-            test_results[idx] = 1
+            exec(func, execution_context)
         except Exception:
-            test_results[idx] = 0
+            for i in range(len(tests)):
+                shared_results[i] = 0
+            return
+
+        for idx, test in enumerate(tests):
+            try:
+                exec(test, execution_context)
+                shared_results[idx] = 1
+            except Exception:
+                shared_results[idx] = 0
+    finally:
+        # Restore in child process (though it will terminate anyway)
+        partial_undo_reliability_guard()
+
+
+def run_individual_test_helper(func: str, test: str, result_array, index: int) -> None:
+    """Run a single test and store result in shared array at given index"""
+    # Apply reliability guard in the child process
+    reliability_guard()
+
+    try:
+        execution_context = {}
+        execution_context.update({"__builtins__": __builtins__})
+        try:
+            exec(func, execution_context)
+            exec(test, execution_context)
+            result_array[index] = 1
+        except Exception:
+            result_array[index] = 0
+    finally:
+        # Restore in child process (though it will terminate anyway)
+        partial_undo_reliability_guard()
 
 
 def get_successful_tests_fast(program: str, tests: List[str], max_execution_time: float = 1.0) -> List[int]:
@@ -124,21 +159,82 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
         logger.info("Not executing program %s", program)
         return [0] * len(tests)
 
-    reliability_guard()
+    # Run each test individually to handle timeouts properly
+    shared_test_results = multiprocessing.Array("i", len(tests))
 
-    # Reset test results
+    # Initialize results
     for i in range(len(tests)):
-        test_results[i] = 0
+        shared_test_results[i] = 0
 
-    p = multiprocessing.Process(target=run_tests_against_program_helper_2, args=(program, tests))
+    # Run each test in its own process
+    for idx, test in enumerate(tests):
+        p = multiprocessing.Process(target=run_individual_test_helper, args=(program, test, shared_test_results, idx))
+        p.start()
+        p.join(timeout=max_execution_time)
+        if p.is_alive():
+            p.kill()
+
+    return [shared_test_results[i] for i in range(len(tests))]
+
+
+# -------------------------------------------------------------
+# Stdio format - mostly copied from livecodebench
+# -------------------------------------------------------------
+stdio_test_results = multiprocessing.Array("i", 1000)  # Support up to 1000 tests for stdio
+
+
+def run_tests_stdio_helper(program: str, tests: List[Any], max_execution_time: float):
+    """Helper to run stdio tests in a separate process."""
+    reliability_guard()
+    try:
+        all_inputs = [test["input"] for test in tests]
+        all_outputs = [test["output"] for test in tests]
+        timeout = math.ceil(max_execution_time)
+        results, _ = grade_stdio(program, all_inputs, all_outputs, timeout)
+
+        if results is not None:
+            processed_results = [1 if r is True else int(r) for r in results]
+            for i, res in enumerate(processed_results):
+                if i < len(stdio_test_results):
+                    stdio_test_results[i] = res
+    except Exception:
+        # On any failure, results in the shared array will remain as they were initialized (0), indicating failure.
+        pass
+    finally:
+        partial_undo_reliability_guard()
+
+
+def get_successful_tests_stdio(program: str, tests: List[Any], max_execution_time: float = 1.0) -> List[int]:
+    """Same as above but for stdio format.
+    Parameter:
+        program: a string representation of the python program you want to run
+        tests: a list of (input, output) pairs
+        max_execution_time: the number of second each individual test can run before
+            it is considered failed and terminated
+    Return:
+        a list of 0/1 indicating passed or not
+    """
+    test_ct = len(tests)
+    if test_ct == 0:
+        return []
+    if not should_execute(program=program, tests=tests):
+        logger.info("Not executing program %s", program)
+        return [0] * len(tests)
+
+    for i in range(test_ct):
+        stdio_test_results[i] = 0  # Initialize results to 0 (failure)
+
+    # Total timeout needs to account for all tests running sequentially.
+    total_timeout = max_execution_time * test_ct + 5.0
+
+    p = multiprocessing.Process(target=run_tests_stdio_helper, args=(program, tests, max_execution_time))
     p.start()
-    p.join(timeout=max_execution_time)
+    p.join(timeout=total_timeout)
+
     if p.is_alive():
         p.kill()
 
-    partial_undo_reliability_guard()
-
-    return [test_results[i] for i in range(len(tests))]
+    return [1 if stdio_test_results[i] == 1 else 0 for i in range(test_ct)]
 
 
 # -------------------------------------------------------------
@@ -146,7 +242,7 @@ def get_successful_tests_fast(program: str, tests: List[str], max_execution_time
 # -------------------------------------------------------------
 
 
-def should_execute(program: str, tests: List[str]) -> bool:
+def should_execute(program: str, tests: List[Any]) -> bool:
     """Determine if we should try to execute this program at all for safety
     reasons."""
     dangerous_commands = [
@@ -181,6 +277,7 @@ def partial_undo_reliability_guard():
     os.chdir = tmp_chdir
     os.unlink = tmp_unlink
     os.rmdir = tmp_rmdir
+    os.getcwd = tmp_getcwd
     # shutil.rmtree = tmp_rmtree
     # builtins.open = tmp_open
     builtins.print = tmp_print
@@ -222,7 +319,7 @@ def reliability_guard(maximum_memory_bytes: Optional[int] = None):
     builtins.exit = None
     builtins.quit = None
     # builtins.open = None
-    builtins.print = lambda *args, **kwargs: None
+    # builtins.print = lambda *args, **kwargs: None
 
     import os
 
@@ -278,63 +375,3 @@ def reliability_guard(maximum_memory_bytes: Optional[int] = None):
     sys.modules["resource"] = None
     sys.modules["psutil"] = None
     sys.modules["tkinter"] = None
-
-
-if __name__ == "__main__":
-    from datasets import load_dataset
-
-    # for testing purpose
-    program = "a = 1"
-    bad_test = "assert False"
-    good_test = "assert True"
-    time_out_test = """
-for i in range(9999999999999999999):
-    for k in range(99999999999999999999):
-        print("hello world")
-"""
-    test_case_status = get_successful_tests_fast(
-        program=program,
-        tests=[
-            bad_test,
-            good_test,
-            bad_test,
-            good_test,
-            good_test,
-            time_out_test,
-            good_test,
-        ],
-    )
-    print(test_case_status)
-    test_case_status = get_successful_tests_fast(
-        program=program,
-        tests=[
-            bad_test,
-            bad_test,
-            time_out_test,
-            time_out_test,
-            time_out_test,
-            time_out_test,
-        ],
-    )
-    print(test_case_status)
-
-    ds = load_dataset("TIGER-Lab/AceCode-87K", split="train")
-    i = 1
-    print(ds[i]["question"])
-    print(ds[i]["inferences"][-1]["completion"])
-    print(ds[i]["inferences"][-1]["model_name"], ds[i]["inferences"][-1]["pass_rate"])
-    print("=" * 100)
-    for item in ds[i]["test_cases"]:
-        print(item)
-    print("=" * 100)
-    test_case_status = get_successful_tests_fast(
-        program=ds[i]["inferences"][-1]["completion"],
-        tests=ds[i]["test_cases"],
-    )
-    print(test_case_status)
-
-    test_case_status = get_successful_tests_fast(
-        program="\ndef add(a, b):\n    return a + b\n",
-        tests=["assert add(1, 2) == 3", "assert add(-1, 1) == 0", "assert add(0, 0) == 1"],
-    )
-    print(test_case_status)

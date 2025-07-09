@@ -190,9 +190,9 @@ def get_reward(
     # Calculate the length of each sequence by finding the first occurrence of a padding token after the context
     # sequence_lengths shape: (batch_size,)
     sequence_lengths = first_true_indices(query_responses[:, context_length:] == pad_token_id) - 1 + context_length
-    assert (
-        reward_logits.shape[-1] == 1
-    ), "Reward model should output a single scalar per token. Check if you added `num_labels=1` when doing `AutoModelForSequenceClassification.from_pretrained(...)`."
+    assert reward_logits.shape[-1] == 1, (
+        "Reward model should output a single scalar per token. Check if you added `num_labels=1` when doing `AutoModelForSequenceClassification.from_pretrained(...)`."
+    )
     # https://github.com/huggingface/transformers/blob/dc68a39c8111217683bf49a4912d0c9018bab33d/src/transformers/models/gpt2/modeling_gpt2.py#L1454
 
     # Return the reward logits for all tokens, the final reward scores for each sequence, and the sequence lengths
@@ -200,10 +200,7 @@ def get_reward(
         # reward_logits shape: (batch_size, sequence_length)
         reward_logits,
         # final_scores shape: (batch_size,)
-        reward_logits[
-            torch.arange(reward_logits.size(0), device=reward_logits.device),
-            sequence_lengths,
-        ].squeeze(
+        reward_logits[torch.arange(reward_logits.size(0), device=reward_logits.device), sequence_lengths].squeeze(
             -1
         ),  # Shape: (batch_size,)
         sequence_lengths,
@@ -251,10 +248,7 @@ async def apply_verifiable_reward(
 
             # Create async task
             task = reward_func.async_call(
-                tokenized_prediction=tok_prediction,
-                prediction=prediction,
-                label=gt,
-                query=query,
+                tokenized_prediction=tok_prediction, prediction=prediction, label=gt, query=query
             )
             async_tasks.append(task)
             task_metadata.append(
@@ -291,11 +285,7 @@ async def apply_verifiable_reward(
     return response_rewards, response_per_func_rewards
 
 
-def forward(
-    model: torch.nn.Module,
-    query_responses: torch.Tensor,
-    pad_token_id: int,
-) -> torch.nn.Module:
+def forward(model: torch.nn.Module, query_responses: torch.Tensor, pad_token_id: int) -> torch.nn.Module:
     """
     Performs a forward pass through the model with the given query responses and pad token ID.
     Args:
@@ -391,12 +381,7 @@ def batch_generation(
     logitss = []
     for i in range(0, queries.shape[0], local_rollout_forward_batch_size):
         query = queries[i : i + local_rollout_forward_batch_size]
-        query_response, logits = generate(
-            model,
-            query,
-            pad_token_id,
-            generation_config,
-        )
+        query_response, logits = generate(model, query, pad_token_id, generation_config)
         query_responses.append(query_response)
         logitss.append(logits)
     return torch.cat(query_responses, 0), torch.cat(logitss, 0)
@@ -650,12 +635,7 @@ def print_rich_single_line_metrics(metrics):
         table.add_row(category, values_str)
 
     # Create a panel with the table
-    panel = Panel(
-        table,
-        title="Metrics",
-        expand=False,
-        border_style="bold green",
-    )
+    panel = Panel(table, title="Metrics", expand=False, border_style="bold green")
 
     # Print the panel
     rprint(panel)
