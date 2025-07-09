@@ -48,11 +48,14 @@ PATTERNS = [
 ]
 
 
-def should_be_filtered_by_advanced_patterns(example, verbose=False):
+def should_be_filtered_by_advanced_patterns(example, verbose=False, filter_user_turns=False):
     """Filter by more sophisticated patterns like 'as a ... OpenAI' or 'trained by ... Google'"""
     
     for message in example["messages"]:
-        if message["role"] != "assistant":
+        # Skip user messages unless explicitly enabled
+        if message["role"] == "user" and not filter_user_turns:
+            continue
+        if message["role"] != "assistant" and message["role"] != "user":
             continue
         
         content = message["content"]  # Keep original case
@@ -69,9 +72,9 @@ def should_be_filtered_by_advanced_patterns(example, verbose=False):
     return False
 
 
-def should_be_filtered_combined(example, verbose=False):
+def should_be_filtered_combined(example, verbose=False, filter_user_turns=False):
     """Combined filtering function"""
-    return should_be_filtered_by_advanced_patterns(example, verbose)
+    return should_be_filtered_by_advanced_patterns(example, verbose, filter_user_turns)
 
 def load_dataset_from_parquet(dataset_name):
     """Load dataset directly from parquet files."""
@@ -103,10 +106,13 @@ def load_dataset_from_parquet(dataset_name):
 def main():
     parser = argparse.ArgumentParser(description="Filter a dataset by keywords and upload to Hugging Face")
     parser.add_argument("--input-dataset", required=True, help="Input dataset name")
+    parser.add_argument("--filter-user-turns", action="store_true", 
+                       help="Also filter based on user messages (default: only filter assistant messages)")
     
     args = parser.parse_args()
     
     input_dataset = args.input_dataset
+    filter_user_turns = args.filter_user_turns
     # Automatically generate output name by adding -keyword-filtered
     if "/" in input_dataset:
         org, name = input_dataset.split("/", 1)
@@ -135,11 +141,14 @@ def main():
     
     # Filter function
     def filter_fn(example):
-        should_filter = should_be_filtered_combined(example, verbose=True)
+        should_filter = should_be_filtered_combined(example, verbose=True, filter_user_turns=filter_user_turns)
         if should_filter and len(filtered_examples) < 3:
             # Find which pattern matched and extract the matching text
             for message in example["messages"]:
-                if message["role"] != "assistant":
+                # Apply same filtering logic for finding matched text
+                if message["role"] == "user" and not filter_user_turns:
+                    continue
+                if message["role"] != "assistant" and message["role"] != "user":
                     continue
                 
                 content = message["content"]  # Keep original case
@@ -148,6 +157,7 @@ def main():
                     match = re.search(pattern, content)
                     if match:
                         example["_matched_text"] = match.group(0)
+                        example["_matched_role"] = message["role"]
                         break
                 if "_matched_text" in example:
                     break
@@ -167,7 +177,8 @@ def main():
             print("---------------------------------")
             print(f"\nExample {i+1}:")
             if "_matched_text" in example:
-                print(f"  Matched text: '{example['_matched_text']}'")
+                role = example.get("_matched_role", "unknown")
+                print(f"  Matched text ({role}): '{example['_matched_text']}'")
             messages = example.get("messages", [])
             for msg in messages:
                 if msg.get("role") == "user":
