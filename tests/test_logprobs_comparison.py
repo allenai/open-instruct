@@ -31,7 +31,7 @@ class TestLogprobsComparison(unittest.TestCase):
         query = tokenizer(prompt)['input_ids']
         
         # Get vLLM logprobs
-        vllm_output = _get_vllm_logprobs(model_name, query, MAX_TOKENS, TEMPERATURE, SEED)
+        vllm_output = _get_vllm_logprobs(model_name, query)
         packed_sequences = rl_utils2.pack_sequences(
             queries=[query],
             responses=[vllm_output["response"]],
@@ -94,21 +94,20 @@ def _get_hf_logprobs(model_name: str, query: List[int],
     return logprobs.flatten().tolist()
 
 
-def _get_vllm_logprobs(model_name: str, prompt: str, max_tokens: int, temperature: float, seed: int) -> Dict[str, Union[List[str], List[int], List[float]]]:
+def _get_vllm_logprobs(model_name: str, prompt: str) -> Dict[str, Union[List[str], List[int], List[float]]]:
     """Get logprobs using vLLM."""
     # Determine dtype based on model
     llm = vllm.LLM(
         model=model_name,
-        seed=seed,
+        seed=SEED,
         enforce_eager=True,  # Disable CUDA graph for consistency
         dtype="bfloat16",
     )
     
     sampling_params = vllm.SamplingParams(
-        temperature=temperature,
-        max_tokens=max_tokens,
+        max_tokens=MAX_TOKENS,
         logprobs=0,  # Return top-1 logprob
-        seed=seed
+        seed=SEED
     )
     
     # Generate
