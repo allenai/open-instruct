@@ -8,9 +8,9 @@ OLMoCore accepts data in numpy mmap format. One file is for the input tokens, on
 Usage:
     python scripts/data/convert_sft_data_for_olmocore.py \
         --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
-        --add_bos \
         --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture-0225 1.0 \
-        --output_dir ./data/tulu-3-sft-olmo-2-mixture-0225-olmocore
+        --output_dir ./data/tulu-3-sft-olmo-2-mixture-0225-olmocore \
+        --chat_template_name olmo
 
 Ai2 Internal Usage:
     gantry run --cluster ai2/phobos-cirrascale --timeout -1 -y --budget ai2/oe-training \
@@ -19,8 +19,8 @@ Ai2 Internal Usage:
         -- \
         /root/.local/bin/uv run python scripts/data/convert_sft_data_for_olmocore.py \
         --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
-        --add_bos \
-        --output_dir /weka/oe-training-default/ai2-llm/tylerr/data/sft/tulu-3-sft-olmo-2-mixture-0225-olmocore
+        --output_dir /weka/oe-training-default/ai2-llm/tylerr/data/sft/tulu-3-sft-olmo-2-mixture-0225-olmocore \
+        --chat_template_name olmo
 
 NOTE: allenai/OLMo-2-1124-7B tokenizer is the same as allenai/dolma2-tokenizer, but allenai/OLMo-2-1124-7B
 has additional metadata required for this script.
