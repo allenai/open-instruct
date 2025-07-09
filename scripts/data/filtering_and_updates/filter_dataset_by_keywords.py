@@ -13,12 +13,18 @@ import pandas as pd
 
 # Popular model providers
 PROVIDERS = [
-    "OpenAI", "Open AI", "Qwen", "DeepSeek", "Anthropic", "Meta AI", "Meta's", 
+    "OpenAI", "Open AI", "Claude", "Gemini", "Qwen", "DeepSeek", "Anthropic", "Meta AI", "Meta's", 
     "Cohere", "Mistral AI", "Mistral's", "xAI", "Perplexity" # "Google AI", "Google's",  "Microsoft", "HuggingFace", "Hugging Face"
 ]
 
 # Regex patterns for filtering (case-insensitive for common words, case-sensitive for company names)
 PATTERNS = [
+    # Pattern: "I'm [model name], an AI assistant made by {provider}" 
+    r"(?i)i'?m\s+(" + "|".join(PROVIDERS) + r"),?\s+an?\s+ai\s+(?:assistant|model)[^.!?]*?(?:made|developed|created|trained)\s+by\s+(" + "|".join(PROVIDERS) + r")\b[^.!?]*?[.!?]",
+    
+    # Pattern: "[Model name] is an AI assistant developed by {provider}"
+    r"(?i)(" + "|".join(PROVIDERS) + r")\s+is\s+an?\s+ai\s+(?:assistant|model)[^.!?]*?(?:developed|created|made|trained)\s+by\s+(" + "|".join(PROVIDERS) + r")\b[^.!?]*?[.!?]",
+    
     # Pattern: "as a [AI model/assistant/chatbot] ... {provider}" 
     r"(?i)as\s+a\s+(?:language\s+model|ai\s+model|assistant|chatbot|model)[^.!?]*?\b(" + "|".join(PROVIDERS) + r")\b[^.!?]*?[.!?]",
     
