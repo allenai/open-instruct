@@ -43,6 +43,7 @@ from datetime import timedelta
 from typing import Callable, List, Literal, Optional, Union
 
 import datasets
+from functools import partial
 import torch
 import torch.utils
 import torch.utils.data
@@ -352,7 +353,7 @@ class FlatArguments:
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
 
-    padding_free: bool = field(
+    packing: bool = field(
         default=False,
         metadata={
             "help": "Whether to use padding-free collation via DataCollatorWithFlatteningDPO"
@@ -415,7 +416,10 @@ def get_cache_ref_logprobs(
         cached_reference_chosen_logps = []
         cached_reference_rejected_logps = []
         with torch.no_grad():
-            for step, batch in tqdm(enumerate(active_dataloader), disable=not accelerator.is_local_main_process):
+            for batch in tqdm(
+                active_dataloader, disable=not accelerator.is_local_main_process,
+                desc=f'Generating reference cache (epoch {epoch})'
+            ):
                 if args.use_lora:
                     with accelerator.unwrap_model(model).disable_adapter():
                         reference_chosen_logps, reference_rejected_logps, _ = forward_fn(
@@ -694,7 +698,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
 
     # DataLoaders creation:
-    if args.padding_free:
+    if args.packing:
         accelerator.print("Using padding-free collation")
         collate_fn = TensorDataCollatorWithFlatteningDPO(
             return_position_ids=True, return_flash_attn_kwargs=True
@@ -824,6 +828,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     average_log_prob_loss_types = ["simpo", "dpo_norm"]
     average_log_prob = args.dpo_loss_type in average_log_prob_loss_types
     forward_fn = concatenated_forward if args.concatenated_forward else separate_forward
+    if args.packing:
+        if not args.concatenated_forward: 
+            raise NotImplementedError(
+                "seperate forward not implemented for padding-free"
+            )
+        forward_fn = partial(forward_fn, padding_free=True)
     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
         epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = get_cache_ref_logprobs(
             model,

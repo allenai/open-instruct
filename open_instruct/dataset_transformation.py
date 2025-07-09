@@ -1167,6 +1167,9 @@ class DatasetConfig:
         if os.path.exists(self.dataset_name) and self.dataset_name.endswith(".jsonl"):
             assert self.dataset_split == "train", "Only train split is supported for local jsonl files."
             self.dataset = load_dataset("json", data_files=self.dataset_name, split=self.dataset_split)
+        elif os.path.exists(self.dataset_name) and self.dataset_name.endswith(".parquet"):
+            assert self.dataset_split == "train", "Only train split is supported for local parquet files."
+            self.dataset = load_dataset("parquet", data_files=self.dataset_name, split=self.dataset_split)
         else:
             # commit hash only works for hf datasets
             self.dataset_commit_hash = get_commit_hash(
