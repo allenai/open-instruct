@@ -14,13 +14,16 @@ import pandas as pd
 # Popular model providers
 PROVIDERS = [
     "OpenAI", "Open AI", "Qwen", "DeepSeek", "Anthropic", "Meta AI", "Meta's", 
-    "Cohere", "HuggingFace", "Hugging Face", "Mistral AI", "Mistral's", "xAI", "Perplexity" # "Google AI", "Google's",  "Microsoft",
+    "Cohere", "Mistral AI", "Mistral's", "xAI", "Perplexity" # "Google AI", "Google's",  "Microsoft", "HuggingFace", "Hugging Face"
 ]
 
 # Regex patterns for filtering (case-insensitive for common words, case-sensitive for company names)
 PATTERNS = [
     # Pattern: "as a [AI model/assistant/chatbot] ... {provider}" 
     r"(?i)as\s+a\s+(?:language\s+model|ai\s+model|assistant|chatbot|model)[^.!?]*?\b(" + "|".join(PROVIDERS) + r")\b[^.!?]*?[.!?]",
+    
+    # Pattern: "as an AI developed by {provider}"
+    r"(?i)as\s+an\s+ai\s+(?:developed|created|made|trained)\s+by\s+(" + "|".join(PROVIDERS) + r")\b[^.!?]*?[.!?]",
     
     # Pattern: "I am [model type] ... {provider}"
     r"(?i)i\s+am\s+(?:a\s+)?(?:language\s+model|ai\s+model|assistant|chatbot|model)[^.!?]*?\b(" + "|".join(PROVIDERS) + r")\b[^.!?]*?[.!?]",
@@ -36,6 +39,12 @@ PATTERNS = [
     
     # Pattern: "made by ... {provider}" within one sentence
     r"(?i)made\s+by\s+[^.!?]*?\b(" + "|".join(PROVIDERS) + r")\b[^.!?]*?[.!?]",
+    
+    # Pattern: "against {provider}'s use-case policy" or similar policy references
+    r"(?i)against\s+(" + "|".join(PROVIDERS) + r")(?:'s|'s)?\s+(?:use-case\s+)?(?:policy|policies|guidelines|terms)[^.!?]*?[.!?]",
+    
+    # Pattern: "{provider}'s policy" or "{provider}'s guidelines"
+    r"(?i)\b(" + "|".join(PROVIDERS) + r")(?:'s|'s)\s+(?:policy|policies|guidelines|terms|use-case)[^.!?]*?[.!?]",
 ]
 
 
