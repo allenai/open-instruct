@@ -148,6 +148,44 @@ def calculate_wasted_time_percentage(prompt_lengths_by_batch: List[List[int]]) -
     return sum(wasted_percentages) / len(wasted_percentages) if wasted_percentages else 0.0
 
 
+def calculate_response_wasted_computation(
+    masks_by_batch: List[List[List[int]]], max_tokens: int
+) -> float:
+    """
+    Calculate the average wasted computation due to responses finishing early.
+
+    When responses finish before max_tokens (due to EOS token), the remaining
+    token positions up to max_tokens represent wasted computation.
+
+    Args:
+        masks_by_batch: List of batches, where each batch contains a list of masks
+                       (each mask is a list of 1s and 0s indicating valid tokens)
+        max_tokens: The max_tokens parameter used during generation
+
+    Returns:
+        float: Average wasted computation percentage across all responses (0-100)
+    """
+    if not masks_by_batch or max_tokens <= 0:
+        return 0.0
+
+    total_wasted_tokens = 0
+    total_possible_tokens = 0
+
+    for batch_masks in masks_by_batch:
+        for mask in batch_masks:
+            # Count actual valid tokens (1s in mask)
+            valid_tokens = sum(mask)
+            # Wasted tokens = max_tokens - actual valid tokens
+            wasted_tokens = max(0, max_tokens - valid_tokens)
+            
+            total_wasted_tokens += wasted_tokens
+            total_possible_tokens += max_tokens
+
+    if total_possible_tokens > 0:
+        return (total_wasted_tokens / total_possible_tokens) * 100
+    return 0.0
+
+
 # BenchmarkArgs has been removed - using Args from grpo_fast.py instead
 # The following attributes are used from Args:
 # - dataset_mixer_list, dataset_mixer_list_splits
@@ -299,6 +337,7 @@ def run_generation_batch(
         return {"error": result[1]}
 
     response_ids, finish_reasons, masks, info = result
+    print(f'{finish_reasons=}')
 
     # Calculate tokens generated (response_ids only contains newly generated tokens)
     # When using n parameter, vLLM returns flattened responses as if prompts were duplicated
@@ -325,6 +364,8 @@ def run_generation_batch(
         "finish_reasons": finish_reasons,
         "response_lengths": [len(response) for response in response_ids],
         "prompt_lengths": [len(prompt) for prompt in prompts],  # Original unique prompts
+        "masks": masks,  # Include masks for wasted computation calculation
+        "max_tokens": args.response_length,  # Include max_tokens setting
     }
 
 
@@ -442,8 +483,14 @@ def print_summary(
 
     # Collect all prompt lengths for statistics
     all_prompt_lengths = []
+    all_response_lengths = []
+    all_valid_token_counts = []  # Based on masks
     for r in results:
         all_prompt_lengths.extend(r["prompt_lengths"])
+        all_response_lengths.extend(r["response_lengths"])
+        # Calculate valid token counts from masks
+        for mask in r["masks"]:
+            all_valid_token_counts.append(sum(mask))
 
     avg_new_tokens_per_second = total_new_tokens / total_generation_time if total_generation_time > 0 else 0
     avg_total_tokens_per_second = total_tokens / total_generation_time if total_generation_time > 0 else 0
@@ -473,18 +520,22 @@ def print_summary(
 
         # Calculate % wasted time due to variable prompt lengths
         # Collect prompt lengths by batch for the last N-1 batches
-        prompt_lengths_by_batch = []
-        for r in last_n_minus_1_results:
-            prompt_lengths_by_batch.append(r["prompt_lengths"])
-
-        wasted_time_percentage = calculate_wasted_time_percentage(prompt_lengths_by_batch)
+        prompt_lengths_by_batch = [r["prompt_lengths"] for r in last_n_minus_1_results]
+        prompt_wasted_time_percentage = calculate_wasted_time_percentage(prompt_lengths_by_batch)
+        
+        # Calculate % wasted computation due to responses finishing early
+        # Collect masks by batch for the last N-1 batches
+        masks_by_batch = [r["masks"] for r in last_n_minus_1_results]
+        max_tokens = last_n_minus_1_results[0]["max_tokens"] if last_n_minus_1_results else args.response_length
+        response_wasted_computation_percentage = calculate_response_wasted_computation(masks_by_batch, max_tokens)
     else:
         # If only one batch, use the same metrics
         avg_new_tokens_per_second_last_n_minus_1 = avg_new_tokens_per_second
         avg_total_tokens_per_second_last_n_minus_1 = avg_total_tokens_per_second
         avg_generation_time_last_n_minus_1 = avg_generation_time
         avg_mfu_last_n_minus_1 = avg_mfu
-        wasted_time_percentage = 0
+        prompt_wasted_time_percentage = 0
+        response_wasted_computation_percentage = 0
 
     print("\n" + "=" * 60)
     print("BENCHMARK SUMMARY")
@@ -507,7 +558,8 @@ def print_summary(
         print(f"Average total tokens/second: {avg_total_tokens_per_second_last_n_minus_1:.2f}")
         print(f"Average MFU: {avg_mfu_last_n_minus_1:.2f}%")
         print(f"Average generation time per batch: {avg_generation_time_last_n_minus_1:.2f}s")
-        print(f"Wasted time (variable lengths): {wasted_time_percentage:.2f}%")
+        print(f"Wasted time (variable prompt lengths): {prompt_wasted_time_percentage:.2f}%")
+        print(f"Wasted computation (early response termination): {response_wasted_computation_percentage:.2f}%")
         print(f"Average new tokens per sample: {last_n_minus_1_new_tokens / last_n_minus_1_samples:.2f}")
     else:
         print("RESULTS:")
@@ -522,29 +574,42 @@ def print_summary(
     print(f"Model FLOPs per token: {model_flops_per_token / 1e9:.2f} GFLOPs")
     print(f"GPU peak FLOPs: {gpu_peak_flops / 1e12:.0f} TFLOPs")
 
-    # Print prompt length statistics
-    if all_prompt_lengths:
+    # Print completion length statistics
+    if all_response_lengths:
         print("-" * 60)
-        print("PROMPT LENGTH STATISTICS:")
-        print(f"Total prompts: {len(all_prompt_lengths)}")
-        print(f"Min prompt length: {min(all_prompt_lengths)} tokens")
-        print(f"Max prompt length: {max(all_prompt_lengths)} tokens")
-        print(f"Mean prompt length: {np.mean(all_prompt_lengths):.2f} tokens")
-        print(f"Median prompt length: {np.median(all_prompt_lengths):.2f} tokens")
-        print(f"Std dev prompt length: {np.std(all_prompt_lengths):.2f} tokens")
+        print("COMPLETION LENGTH STATISTICS:")
+        print(f"Total completions: {len(all_response_lengths)}")
+        
+        # Raw response lengths (including padding)
+        print("\nRaw response lengths (including any padding):")
+        print(f"Min: {min(all_response_lengths)} tokens")
+        print(f"Max: {max(all_response_lengths)} tokens")
+        print(f"Mean: {np.mean(all_response_lengths):.2f} tokens")
+        print(f"Median: {np.median(all_response_lengths):.2f} tokens")
+        print(f"Std dev: {np.std(all_response_lengths):.2f} tokens")
+        
+        # Valid token counts (based on masks)
+        if all_valid_token_counts:
+            print("\nValid token counts (based on masks):")
+            print(f"Min: {min(all_valid_token_counts)} tokens")
+            print(f"Max: {max(all_valid_token_counts)} tokens")
+            print(f"Mean: {np.mean(all_valid_token_counts):.2f} tokens")
+            print(f"Median: {np.median(all_valid_token_counts):.2f} tokens")
+            print(f"Std dev: {np.std(all_valid_token_counts):.2f} tokens")
 
-        # Calculate percentiles
-        p25 = np.percentile(all_prompt_lengths, 25)
-        p75 = np.percentile(all_prompt_lengths, 75)
-        p90 = np.percentile(all_prompt_lengths, 90)
-        p95 = np.percentile(all_prompt_lengths, 95)
-        p99 = np.percentile(all_prompt_lengths, 99)
+            # Calculate percentiles for valid tokens
+            print("\nValid token percentiles:")
+            p25 = np.percentile(all_valid_token_counts, 25)
+            p75 = np.percentile(all_valid_token_counts, 75)
+            p90 = np.percentile(all_valid_token_counts, 90)
+            p95 = np.percentile(all_valid_token_counts, 95)
+            p99 = np.percentile(all_valid_token_counts, 99)
 
-        print(f"25th percentile: {p25:.2f} tokens")
-        print(f"75th percentile: {p75:.2f} tokens")
-        print(f"90th percentile: {p90:.2f} tokens")
-        print(f"95th percentile: {p95:.2f} tokens")
-        print(f"99th percentile: {p99:.2f} tokens")
+            print(f"25th percentile: {p25:.2f} tokens")
+            print(f"75th percentile: {p75:.2f} tokens")
+            print(f"90th percentile: {p90:.2f} tokens")
+            print(f"95th percentile: {p95:.2f} tokens")
+            print(f"99th percentile: {p99:.2f} tokens")
 
     print("=" * 60)
 
