@@ -31,6 +31,7 @@ try:
 except Exception:
     pass
 # isort: on
+import json
 import logging
 import math
 import os
@@ -47,6 +48,7 @@ import torch.utils
 import torch.utils.data
 import transformers
 from accelerate import Accelerator, DataLoaderConfiguration
+from accelerate.accelerator import GradientAccumulationPlugin
 from accelerate.logging import get_logger
 from accelerate.utils import InitProcessGroupKwargs, set_seed
 from huggingface_hub import HfApi
@@ -55,6 +57,7 @@ from rich.pretty import pprint
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, BitsAndBytesConfig, get_scheduler
+from transformers.training_args import _convert_str_dict
 
 from open_instruct.dataset_transformation import (
     CHOSEN_INPUT_IDS_KEY,
@@ -70,6 +73,9 @@ from open_instruct.dpo_utils import (
     separate_forward,
     simpo_loss,
     wpo_loss,
+)
+from open_instruct.padding_free_collator import (
+    TensorDataCollatorWithFlatteningDPO
 )
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
 from open_instruct.utils import (
@@ -92,11 +98,29 @@ class FlatArguments:
     """
     Full arguments class for all fine-tuning jobs.
     """
+    # Sometimes users will pass in a `str` repr of a dict in the CLI
+    # We need to track what fields those can be. Each time a new arg
+    # has a dict type, it must be added to this list.
+    # Important: These should be typed with Optional[Union[dict,str,...]]
+    _VALID_DICT_FIELDS = [
+        "additional_model_arguments",
+    ]
+
+    # Sometimes users will pass in a `str` repr of a dict in the CLI
+    # We need to track what fields those can be. Each time a new arg
+    # has a dict type, it must be added to this list.
+    # Important: These should be typed with Optional[Union[dict,str,...]]
+    # Note: the suggested ellipses typing above causes errors on python 3.10, so they are omitted.
+    _VALID_DICT_FIELDS = ["additional_model_arguments"]
 
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
     run_name: Optional[str] = None
     """A unique name of this run"""
+    add_seed_and_date_to_exp_name: bool = True
+    """Append the seed and date to exp_name"""
+    do_not_randomize_output_dir: bool = False
+    """By default the output directory will be randomized"""
     model_name_or_path: Optional[str] = field(
         default=None,
         metadata={
@@ -323,6 +347,13 @@ class FlatArguments:
     cache_dataset_only: bool = False
     """Immediately exit after caching the dataset"""
 
+    padding_free: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to use padding-free collation via DataCollatorWithFlatteningDPO"
+        },
+    )
+
     # Ai2 specific settings
     try_auto_save_to_beaker: bool = True
     """Whether to try to save the model to Beaker dataset `/output` after training"""
@@ -346,6 +377,17 @@ class FlatArguments:
             raise ValueError("Cannot provide two dataset selection mechanisms.")
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
+        
+        # Parse in args that could be `dict` sent in from the CLI as a string
+        for dict_feld in self._VALID_DICT_FIELDS:
+            passed_value = getattr(self, dict_feld)
+            # We only want to do this if the str starts with a bracket to indicate a `dict`
+            # else its likely a filename if supported
+            if isinstance(passed_value, str) and passed_value.startswith("{"):
+                loaded_dict = json.loads(passed_value)
+                # Convert str values to types if applicable
+                loaded_dict = _convert_str_dict(loaded_dict)
+                setattr(self, dict_feld, loaded_dict)
 
 
 def get_cache_ref_logprobs(
@@ -398,10 +440,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
     dataloader_config = DataLoaderConfiguration(use_seedable_sampler=True)
     accelerator = Accelerator(
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
         dataloader_config=dataloader_config,
         **accelerator_log_kwargs,
         kwargs_handlers=[timeout_kwargs],
+        gradient_accumulation_plugin=GradientAccumulationPlugin(
+            num_steps=args.gradient_accumulation_steps,
+            sync_each_batch=args.sync_each_batch,
+        ),
     )
 
     # ------------------------------------------------------------
@@ -421,8 +466,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     # ------------------------------------------------------------
     # Set up runtime variables
-    args.run_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
-    args.output_dir = os.path.join(args.output_dir, args.run_name)
+    if args.add_seed_and_date_to_exp_name:
+        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+    else:
+        args.exp_name = args.exp_name
+    if not args.do_not_randomize_output_dir:
+        args.output_dir = os.path.join(args.output_dir, args.exp_name)
+    logger.info("using the output directory: %s", args.output_dir)
     args.dataset_local_cache_dir = os.path.abspath(args.dataset_local_cache_dir)
     if is_beaker_job():
         args.dataset_local_cache_dir = "/weka/oe-adapt-default/allennlp/deletable_open_instruct_dataset_cache"
@@ -435,7 +485,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             args.hf_entity = HfApi().whoami()["name"]
         args.hf_repo_id = f"{args.hf_entity}/{args.hf_repo_id}"
         if args.hf_repo_revision is None:
-            args.hf_repo_revision = args.run_name
+            args.hf_repo_revision = args.exp_name
         args.hf_repo_url = f"https://huggingface.co/{args.hf_repo_id}/tree/{args.hf_repo_revision}"
         if is_beaker_job():
             beaker_config = maybe_get_beaker_config()
@@ -459,7 +509,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
             experiment_config,
             init_kwargs={
                 "wandb": {
-                    "name": args.run_name,
+                    "name": args.exp_name,
                     "entity": args.wandb_entity,
                     "tags": [args.exp_name] + get_wandb_tags(),
                 }
@@ -524,11 +574,17 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # Load pretrained model and tokenizer
     if args.config_name:
         config = AutoConfig.from_pretrained(
-            args.config_name, revision=args.model_revision, trust_remote_code=tc.trust_remote_code
+            args.config_name,
+            revision=args.model_revision,
+            trust_remote_code=tc.trust_remote_code,
+            **args.additional_model_arguments,
         )
     elif args.model_name_or_path:
         config = AutoConfig.from_pretrained(
-            args.model_name_or_path, revision=args.model_revision, trust_remote_code=tc.trust_remote_code
+            args.model_name_or_path, 
+            revision=args.model_revision, 
+            trust_remote_code=tc.trust_remote_code,
+            **args.additional_model_arguments,
         )
     else:
         raise ValueError(
@@ -555,7 +611,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     quantization_config=bnb_config,
                     device_map=device_map,
                     torch_dtype=torch.bfloat16,
-                    use_flash_attention_2=True if args.use_flash_attn else False,
+                    attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
                 )
             elif args.use_liger_kernel:
                 from liger_kernel.transformers import AutoLigerKernelForCausalLM
@@ -582,7 +638,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     config=config,
                     trust_remote_code=tc.trust_remote_code,
                     low_cpu_mem_usage=args.low_cpu_mem_usage,
-                    use_flash_attention_2=True if args.use_flash_attn else False,
+                    torch_dtype=torch.bfloat16,
+                    attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
                 )
         else:
             logger.info("Training new model from scratch")
@@ -598,8 +655,10 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # gather deepspeed to get "real" embedding size
     embeddings = model.get_input_embeddings()
     with deepspeed.zero.GatheredParameters(embeddings.weight, modifier_rank=None):
-        if len(tokenizer) > embeddings.weight.shape[0]:
-            model.resize_token_embeddings(len(tokenizer))
+        embedding_size = embeddings.weight.shape[0]
+
+    if len(tokenizer) > embedding_size:
+        model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
 
     if args.use_lora:
         if args.use_qlora:
@@ -630,10 +689,20 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
 
     # DataLoaders creation:
+    if args.padding_free:
+        accelerator.print("Using padding-free collation")
+        collate_fn = TensorDataCollatorWithFlatteningDPO(
+            return_position_ids=True, return_flash_attn_kwargs=True
+        )
+    else:
+        collate_fn = DataCollatorForSeq2SeqDPO(
+            tokenizer=tokenizer, model=model, padding="longest"
+        )
+
     train_dataloader = DataLoader(
         train_dataset,
         shuffle=True,
-        collate_fn=DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest"),
+        collate_fn=collate_fn,
         batch_size=args.per_device_train_batch_size,
     )
 
