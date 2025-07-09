@@ -7,7 +7,6 @@ python mason.py \
     --workspace ai2/tulu-thinker \
     --priority high \
     --image ai2/cuda12.8-dev-ubuntu22.04-torch2.6.0 \
-    --pure_docker_mode \
     --preemptible \
     --num_nodes 1 \
     --env VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
@@ -25,7 +24,7 @@ python open_instruct/grpo_fast.py \
     --num_epochs 1 \
     --learning_rate 5e-7 \
     --per_device_train_batch_size 1 \
-    --output_dir /output \
+    --output_dir overridenbymason \
     --kl_estimator kl3 \
     --dataset_mixer_list ${dataset_mix} \
     --dataset_mixer_list_splits train \
