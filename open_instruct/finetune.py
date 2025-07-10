@@ -614,16 +614,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     if args.packing:
         collate_fn = TensorDataCollatorWithFlattening()
     else:
-        collate_fn = DataCollatorForSeq2Seq(
-            tokenizer=tokenizer, model=model, padding="longest"
-        )
+        collate_fn = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding="longest")
 
     accelerator.print("Creating dataloader")
     train_dataloader = DataLoader(
-        train_dataset,
-        shuffle=True,
-        collate_fn=collate_fn,
-        batch_size=args.per_device_train_batch_size,
+        train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
     )
 
     # Optimizer
@@ -767,9 +762,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 local_total_tokens += tokens_in_batch
                 total_token_including_padding += tokens_in_batch
             else:
-                raise ValueError(
-                    f"Expected attention_mask or position_ids or cu_seq_lens_q in batch, found {batch=}"
-                )
+                raise ValueError(f"Expected attention_mask or position_ids or cu_seq_lens_q in batch, found {batch=}")
             with accelerator.accumulate(model):
                 if args.load_balancing_loss:
                     outputs = model(**batch, use_cache=False, output_router_logits=True)

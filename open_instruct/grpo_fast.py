@@ -120,7 +120,7 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     sync_gs_bucket,
 )
-from open_instruct.vllm_utils3 import create_vllm_engines, init_process_group
+from open_instruct.vllm_utils3 import LLMRayActor, create_vllm_engines, init_process_group
 
 # Setup logging with filename and line number format
 logging.basicConfig(
@@ -1550,7 +1550,7 @@ def create_model_and_optimizer(
     beaker_config: BeakerRuntimeConfig,
     wandb_url: str,
     tokenizer: PreTrainedTokenizer,
-) -> tuple[ModelGroup, list["VLLMEngine"], dict, int, int]:
+) -> tuple[ModelGroup, list[LLMRayActor], dict, int, int]:
     """Create the model, optimizer, and vLLM engines."""
     # Ray initialization
     ray.init(dashboard_host="0.0.0.0")  # enable debugging from a different machine (e.g., phobos)
