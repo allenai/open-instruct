@@ -473,6 +473,14 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
             ),
         ])
 
+    # by default, we turn off vllm compile cache
+    env_vars.extend([
+        beaker.EnvVar(
+            name="VLLM_DISABLE_COMPILE_CACHE",
+            value="1",
+        ),
+    ])
+
     return env_vars
 
 
