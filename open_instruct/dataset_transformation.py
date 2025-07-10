@@ -253,7 +253,6 @@ CHAT_TEMPLATES = {
         "{% endfor %}"
     ),
     "olmo_thinker": (
-        "{% for message in messages %}"
         "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
         "{% if not has_system %}"
             "{{ '<|im_start|>system\nYou are OLMo 2, a helpful function-calling AI assistant built by Ai2. Your date cutoff is November 2024, and your model weights are available at https://huggingface.co/allenai. You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
