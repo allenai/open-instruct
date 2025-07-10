@@ -170,7 +170,7 @@ NEXT_MODEL_DEV=(
     # Knowledge
     "mmlu:cot::hamish_zs_reasoning"
     "popqa::hamish_zs_reasoning"
-    "simpleqa::tulu-thinker"
+    # "simpleqa::tulu-thinker"
     
     # Reasoning
     "bbh:cot::hamish_zs_reasoning"
@@ -194,7 +194,7 @@ NEXT_MODEL_DEV=(
     # [TODO, maybe] cruxeval
     
     # Chat / IF / Vibes
-    "alpaca_eval_v3::hamish_zs_reasoning"
+    # "alpaca_eval_v3::hamish_zs_reasoning"
     "ifeval::hamish_zs_reasoning"
     # [expensive, multi-turn all versions] multiturn_alpacaeval::tulu
     # [expensive, typos vibes] styled_evals::tulu
