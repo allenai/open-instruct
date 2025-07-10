@@ -81,16 +81,16 @@ Notes:
 - Besides comparing to the referennce answer, your evaluation should consider factors such as the helpfulness, relevance, accuracy, depth, creativity, and appropriate level of detail of the response.
 - Note that sometimes the reference answer is not the only answer. So any valid variation of the reference answer is also acceptable and can get a full score.
 - Begin your evaluation by providing a short explanation.
-- Be as objective as possible. After providing your explanation, please output a score on a scale of 1 to 10.
+- Be as objective as possible. After providing your short explanation, please output a score on a scale of 1 to 10.
 - Please adhere to the following format.
 
 [Query]
 {input}
 
-[Answer]
+[AI Answer]
 {output}
 
-[Reference Answer]
+[Reference Gold Answer]
 {label}
 
 [Your judgement]
@@ -191,7 +191,7 @@ def extract_score_from_string(score_str: str) -> float:
         return 0.0
 
 
-def extract_score_web_instruct(score_str: str) -> float:
+def extract_score_web_instruct(score_str: str) -> "tuple[str, float]":
     """Extractor based on web instruct format"""
     if "final decision: yes" in score_str.lower():
         return score_str, 1.0
@@ -201,17 +201,30 @@ def extract_score_web_instruct(score_str: str) -> float:
     return score_str, 0.0
 
 
-def extract_json_score_with_fallback(score_str: str) -> float:
+def extract_json_score_with_fallback(score_str: str) -> "tuple[str, float]":
     """Extractor based on json score with fallback"""
     try:
-        data = json.loads(score_str)
+        # Strip markdown code blocks if present
+        cleaned_str = score_str.strip()
+        if cleaned_str.startswith("```json"):
+            cleaned_str = cleaned_str[7:]  # Remove ```json
+        elif cleaned_str.startswith("```"):
+            cleaned_str = cleaned_str[3:]  # Remove ```
+
+        if cleaned_str.endswith("```"):
+            cleaned_str = cleaned_str[:-3]  # Remove trailing ```
+
+        cleaned_str = cleaned_str.strip()
+
+        data = json.loads(cleaned_str)
         reasoning = data.get("REASONING", "")
         return reasoning, float(data.get("SCORE", 0.0))
     except (json.JSONDecodeError, TypeError, ValueError):
-        return score_str, extract_score_from_string(score_str)
+        logger.warning(f"Could not parse score from due to invalid json: {score_str}, defaulting to 0.0")
+        return score_str, 0.0
 
 
-def extract_score_with_fallback_max_10(score_str: str) -> float:
+def extract_score_with_fallback_max_10(score_str: str) -> "tuple[str, float]":
     """Extractor based on score with fallback"""
     reasoning, score = extract_json_score_with_fallback(score_str)
     return reasoning, score / 10.0

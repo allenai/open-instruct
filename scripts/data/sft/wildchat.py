@@ -1,11 +1,8 @@
 import argparse
-import os
-from collections import defaultdict
-from typing import List, Optional
+
 from datasets import load_dataset
 
 from scripts.data.sft.utils import convert_sft_dataset
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -48,17 +45,17 @@ if __name__ == "__main__":
         help="Apply empty message filters to the dataset.",
     )
     args = parser.parse_args()
-    
+
     ds = load_dataset("allenai/WildChat-1M-Full")
     gpt4_subset = ds.filter(lambda example: "gpt-4" in example["model"], num_proc=16)
     gpt35_subset = ds.filter(lambda example: "gpt-3.5" in example["model"], num_proc=16)
     assert len(gpt4_subset["train"]) + len(gpt35_subset["train"]) == len(ds["train"]), \
         "There are some examples not using either gpt-4 or gpt-3.5"
-        
+
     conversion_func = lambda example: {
         "messages": [{"role": it["role"], "content": it["content"]} for it in example["conversation"]]
     }
-        
+
     gpt4_subset_readme_content = (
         "This is a converted version of the gpt-4 subset of the WildChat dataset into Tulu SFT training format.\n\n"
         "The conversion script can be found in our "
@@ -73,7 +70,7 @@ if __name__ == "__main__":
         "Please refer to the [original dataset](https://huggingface.co/datasets/allenai/WildChat-1M-Full) "
         "for more information about this dataset and the license."
     )
-    
+
     gpt35_subset_readme_content = (
         "This is a converted version of the gpt-3.5 subset of the WildChat dataset into Tulu SFT training format.\n\n"
         "The conversion script can be found in our "
@@ -88,7 +85,7 @@ if __name__ == "__main__":
         "Please refer to the [original dataset](https://huggingface.co/datasets/allenai/WildChat-1M-Full) "
         "for more information about this dataset and the license."
     )
-    
+
     convert_sft_dataset(
         ds=gpt4_subset,
         hf_dataset_id=None,
@@ -102,7 +99,7 @@ if __name__ == "__main__":
         local_save_dir=args.local_save_dir,
         readme_content=gpt4_subset_readme_content,
     )
-    
+
     convert_sft_dataset(
         ds=gpt35_subset,
         hf_dataset_id=None,

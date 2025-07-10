@@ -1,10 +1,6 @@
 import argparse
-import os
-from collections import defaultdict
-from typing import List, Optional
 
 from scripts.data.sft.utils import convert_sft_dataset
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -47,14 +43,14 @@ if __name__ == "__main__":
         help="Apply empty message filters to the dataset.",
     )
     args = parser.parse_args()
-    
+
     conversion_func = lambda example: {
         "messages": [
             {"role": "user", "content": example["query"]},
             {"role": "assistant", "content": example["answer"]}
         ]
     }
-    
+
     readme_content = (
         "This is a converted version of the CodeFeedback-Filtered-Instructions dataset into Tulu SFT training format.\n\n"
         "The conversion script can be found in our "
@@ -69,7 +65,7 @@ if __name__ == "__main__":
         "Please refer to the [original dataset](https://huggingface.co/datasets/m-a-p/CodeFeedback-Filtered-Instruction) "
         "for more information about this dataset and the license."
     )
-    
+
     convert_sft_dataset(
         ds=None,
         hf_dataset_id="m-a-p/CodeFeedback-Filtered-Instruction",
@@ -82,4 +78,4 @@ if __name__ == "__main__":
         local_save_dir=args.local_save_dir,
         readme_content=readme_content,
     )
-    
+

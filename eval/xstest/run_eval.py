@@ -4,23 +4,24 @@ https://github.com/paul-rottger/exaggerated-safety/
 '''
 
 import argparse
-import os
 import json
-import torch
+import os
 import random
-import vllm
+
 import pandas as pd
+import torch
+import vllm
 
 from eval.utils import (
-    load_hf_lm,
-    generate_completions,
-    query_openai_chat_model,
+    check_and_upload_model_metadata,
     dynamic_import_function,
+    generate_completions,
+    load_hf_lm,
     load_hf_tokenizer,
+    query_openai_chat_model,
     upload_results_to_hf,
-    check_and_upload_model_metadata
 )
-from eval.xstest.classify_refusal import classify_refusals_w_gpt4, classify_outputs_w_strmatch
+from eval.xstest.classify_refusal import classify_outputs_w_strmatch, classify_refusals_w_gpt4
 
 
 def main(args):
@@ -52,9 +53,9 @@ def main(args):
         else:
             print("Loading model and tokenizer with huggingface...")
             model = load_hf_lm(
-                model_name_or_path=args.model_name_or_path, 
+                model_name_or_path=args.model_name_or_path,
                 revision=args.hf_revision,
-                load_in_8bit=args.load_in_8bit, 
+                load_in_8bit=args.load_in_8bit,
                 device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                 gptq_model=args.gptq,
             )
@@ -65,7 +66,7 @@ def main(args):
                 print("Set tokenizer.model_max_length to model.config.max_position_embeddings: {}".format(model.config.max_position_embeddings))
 
     if args.model_name_or_path:
-        # prepare prompts    
+        # prepare prompts
         if args.use_chat_format:
             prompts = []
             chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
@@ -108,7 +109,7 @@ def main(args):
             engine=args.openai_engine,
             instances=instances,
             batch_size=args.eval_batch_size if args.eval_batch_size else 10,
-            output_path=os.path.join(args.save_dir, f"openai_prediction_cache.jsonl"),
+            output_path=os.path.join(args.save_dir, "openai_prediction_cache.jsonl"),
         )
         outputs = [result["output"] for result in results]
 
@@ -118,7 +119,7 @@ def main(args):
 
     # classify the outputs
     gpt4_clf_results = classify_refusals_w_gpt4(
-        data, 
+        data,
         gpt4_engine="gpt-4-0613",
         cache_path=os.path.join(args.save_dir, "gpt4_clf_cache.jsonl")
     )
@@ -133,7 +134,7 @@ def main(args):
     # evaluate the performance
     results = {}
     data["safety_type"] = ["unsafe" if "contrast" in type else "safe" for type in data["type"]]
-    for label in ["strmatch_label", "gpt4_label"]: 
+    for label in ["strmatch_label", "gpt4_label"]:
         # count different values of final_label after grouping by type
         out_df = data.groupby(data["safety_type"])[label].value_counts().unstack(fill_value=0)
 
@@ -158,8 +159,8 @@ def main(args):
         results[label]["overall_accuracy"] = num_correct_refusal / num_total
 
     print("Results:")
-    print(json.dumps(results, indent=4))          
-        
+    print(json.dumps(results, indent=4))
+
     # save the performance
     with open(os.path.join(args.save_dir, "metrics.json"), "w") as fout:
         json.dump(results, fout, indent=4)
@@ -184,19 +185,19 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--data_dir", 
-        type=str, 
+        "--data_dir",
+        type=str,
         default="data/eval/xstest/"
     )
     parser.add_argument(
-        "--save_dir", 
-        type=str, 
+        "--save_dir",
+        type=str,
         default="results/xstest/"
     )
     parser.add_argument(
-        "--model_name_or_path", 
-        type=str, 
-        default=None, 
+        "--model_name_or_path",
+        type=str,
+        default=None,
         help="if specified, we will load the model to generate the predictions."
     )
     parser.add_argument(
@@ -206,9 +207,9 @@ if __name__ == "__main__":
         help="if specified, we will load the model from a revision of the model in the hub"
     )
     parser.add_argument(
-        "--tokenizer_name_or_path", 
-        type=str, 
-        default=None, 
+        "--tokenizer_name_or_path",
+        type=str,
+        default=None,
         help="if specified, we will load the tokenizer from here."
     )
     parser.add_argument(
@@ -217,47 +218,47 @@ if __name__ == "__main__":
         help="If given, we will use the slow tokenizer."
     )
     parser.add_argument(
-        "--openai_engine", 
-        type=str, 
-        default=None, 
+        "--openai_engine",
+        type=str,
+        default=None,
         help="if specified, we will use the OpenAI API to generate the predictions."
     )
     parser.add_argument(
-        "--max_num_examples", 
-        type=int, 
-        default=None, 
+        "--max_num_examples",
+        type=int,
+        default=None,
         help="maximum number of examples to evaluate."
     )
     parser.add_argument(
-        "--eval_batch_size", 
-        type=int, 
-        default=1, 
+        "--eval_batch_size",
+        type=int,
+        default=1,
         help="batch size for evaluation."
     )
     parser.add_argument(
-        "--load_in_8bit", 
-        action="store_true", 
+        "--load_in_8bit",
+        action="store_true",
         help="load model in 8bit mode, which will reduce memory and speed up inference."
     )
     parser.add_argument(
-        "--gptq", 
-        action="store_true", 
+        "--gptq",
+        action="store_true",
         help="If given, we're evaluating a 4-bit quantized GPTQ model."
     )
     parser.add_argument(
         "--use_vllm",
-        action="store_true", 
+        action="store_true",
         help="If given, we will use the vllm library, which will likely increase the inference throughput."
     )
     parser.add_argument(
-        "--use_chat_format", 
-        action="store_true", 
+        "--use_chat_format",
+        action="store_true",
         help="If given, we will use the chat format for the prompts."
     )
     parser.add_argument(
-        "--chat_formatting_function", 
-        type=str, 
-        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        "--chat_formatting_function",
+        type=str,
+        default="eval.templates.create_prompt_with_tulu_chat_format",
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
     )
     parser.add_argument(

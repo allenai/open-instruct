@@ -1,16 +1,17 @@
 import argparse
-import re
-import sys
-from typing import List, Dict
-import beaker
 import os
+import random
+import re
 import secrets
+import select
 import string
+import sys
+import time
+from typing import Dict, List
+
+import beaker
 from rich.console import Console
 from rich.text import Text
-import select
-import time
-import random
 
 console = Console()
 
@@ -71,11 +72,11 @@ NFS_CLUSTERS = [
 WEKA_CLUSTERS = [
     "ai2/jupiter-cirrascale-2",
     "ai2/saturn-cirrascale",
+    "ai2/titan-cirrascale",
     "ai2/neptune-cirrascale",
-    "ai2/allennlp-elara-cirrascale",
     "ai2/ceres-cirrascale",
-    "ai2/ganymede-cirrascale",
-    "ai2/test-h100",
+    "ai2/triton-cirrascale",
+    "ai2/rhea-cirrascale",
 ]
 GCP_CLUSTERS = [
     "ai2/augusta-google-1"
@@ -84,6 +85,7 @@ GCP_CLUSTERS = [
 INTERCONNECT_CLUSTERS = [
     "ai2/jupiter-cirrascale-2",
     "ai2/ceres-cirrascale",
+    "ai2/titan-cirrascale",
     "ai2/augusta-google-1",
 ]
 
@@ -217,7 +219,7 @@ def parse_commands(command_args: List[str]) -> List[List[str]]:
             "`mason [mason-args] -- python [python-args]`."
         )
         raise Exception(msg)
-    
+
     commands = []
     command = []
     for item in command_args:
@@ -232,7 +234,7 @@ def parse_commands(command_args: List[str]) -> List[List[str]]:
     return commands
 
 
-def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: List[str], 
+def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: List[str],
                 whoami: str, resumable: bool, num_nodes: int, additional_env_vars: List[Dict[str, str]],
                 additional_secrets: List[Dict[str, str]]):
     env_vars = []
@@ -471,6 +473,14 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
             ),
         ])
 
+    # by default, we turn off vllm compile cache
+    env_vars.extend([
+        beaker.EnvVar(
+            name="VLLM_DISABLE_COMPILE_CACHE",
+            value="1",
+        ),
+    ])
+
     return env_vars
 
 
@@ -522,7 +532,7 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
         command = [f"WANDB_PROJECT={os.environ['WANDB_PROJECT']}"] + command
     if "WANDB_TAGS" in os.environ:
         command = [f"WANDB_TAGS={os.environ['WANDB_TAGS']}"] + command
-    
+
     # escape the command (e.g., --stop_strings "</answer>")
     for i in range(len(command)):
         if "</" in command[i]:
@@ -558,7 +568,7 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
         if not any("wandb_entity" in c for c in command):
             command.append("--wandb_entity")
             command.append("ai2-llm")
-        
+
         dataset_cache_paths = []
         dataset_config_hashes = []
         if not args.no_auto_dataset_cache:
@@ -566,33 +576,33 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                 # add cache_dataset_only to the command
                 idx = find_list_idx(command, file)
                 if idx != -1:
-                    # then try executing the same command with 
+                    # then try executing the same command with
                     caching_command = command.copy()
                     remove_arg_from_list(caching_command, "--with_tracking", False)
                     remove_arg_from_list(caching_command, "--checkpoint_state_freq", True)
                     remove_arg_from_list(caching_command, "--checkpoint_state_dir", True)
                     remove_arg_from_list(caching_command, "--gs_checkpoint_state_dir", True)
                     caching_command = "python " + " ".join(caching_command[idx:]) + " --cache_dataset_only"
-                    console.log(f"📦📦📦 Running the caching command with `--cache_dataset_only`")
+                    console.log("📦📦📦 Running the caching command with `--cache_dataset_only`")
                     import subprocess
                     # Use Popen to get real-time output while also capturing it
                     process = subprocess.Popen(
-                        caching_command, 
-                        shell=True, 
-                        stdout=subprocess.PIPE, 
+                        caching_command,
+                        shell=True,
+                        stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         text=True,
                         bufsize=1
                     )
-                    
+
                     stdout_data, stderr_data = [], []
-                    
+
                     # Set up select to monitor both stdout and stderr
                     streams = [process.stdout, process.stderr]
                     while True:
                         # Wait for output on either stream
                         reads = select.select(streams, [], [])[0]
-                        
+
                         done = True
                         for stream in reads:
                             line = stream.readline()
@@ -604,10 +614,10 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                                     stdout_data.append(line)
                                 else:
                                     stderr_data.append(line)
-                        
+
                         if done and process.poll() is not None:
                             break
-                            
+
                     result = type('SubprocessResult', (), {
                         'returncode': process.returncode,
                         'stdout': ''.join(stdout_data),
@@ -638,7 +648,7 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                         if cmd == "--checkpoint_state_freq":
                             if idx + 1 < len(command):
                                 default_checkpoint_state_freq = command[idx + 1]
-                                        
+
                     if need_to_override_checkpoint_state_dir and is_open_instruct_training and not is_external_user:
                         new_checkpoint_state_dir = f"{args.auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
                         console.log(f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`")
@@ -694,7 +704,7 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                 if cmd == "--model_revision":
                     model_revision = command[idx + 1]
                     break
-            
+
             commit_hash = get_commit_hash(model_name_or_path, model_revision, "config.json", "model")
             download_from_hf(model_name_or_path, model_revision) # first download the model
             path = download_from_hf(model_name_or_path, model_revision) # then get the path
@@ -709,8 +719,8 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                 "mkdir", "-p", download_path,
                 "&&",
                 "gsutil",
-                "-o", f"GSUtil:parallel_thread_count=1",
-                "-o", f"GSUtil:sliced_object_download_threshold=150",
+                "-o", "GSUtil:parallel_thread_count=1",
+                "-o", "GSUtil:sliced_object_download_threshold=150",
                 "-m",
                 "cp", "-r", gs_saved_path, download_path_without_last_folder,
                 "&&", "ls", download_path_without_last_folder,
@@ -719,7 +729,7 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
             ]
 
             command.append("--gs_bucket_path")
-            command.append(f"gs://ai2-llm/post-training/")
+            command.append("gs://ai2-llm/post-training/")
 
             # Replace the model_name_or_path with the downloaded path
             for idx, cmd in enumerate(command):
@@ -784,7 +794,7 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
             join_full_command
         )
     full_command = setup_commands + join_full_command
-    console.log(f"🔍🔍🔍 Full command")
+    console.log("🔍🔍🔍 Full command")
     print(full_command)
     return full_command
 
@@ -793,7 +803,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
     if args.num_nodes > 1 and not all(c in INTERCONNECT_CLUSTERS for c in args.cluster):
         confirmation = False
         while not confirmation:
-            confirmation = input(f"Interconnect clusters are required for multi-node jobs. Are you sure you want to continue? (y/n)")
+            confirmation = input("Interconnect clusters are required for multi-node jobs. Are you sure you want to continue? (y/n)")
             if confirmation == "y":
                 confirmation = True
             elif confirmation == "n":
@@ -817,7 +827,7 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
         context=beaker.TaskContext(priority=beaker.Priority(args.priority),
                                    preemptible=args.preemptible),
         constraints=constraints,
-        env_vars=get_env_vars(args.pure_docker_mode, args.cluster, beaker_secrets, 
+        env_vars=get_env_vars(args.pure_docker_mode, args.cluster, beaker_secrets,
                             whoami, resumable, args.num_nodes, args.env, args.secret),
         resources=beaker.TaskResources(gpu_count=args.gpus),
         replicas=args.num_nodes,

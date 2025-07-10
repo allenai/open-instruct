@@ -1,14 +1,12 @@
 '''
 My dumb script to create ground truth data for GTRL training.
 '''
-import os
-import re
 import random
+
+from datasets import Dataset, load_dataset
 from tqdm import tqdm
 
-from datasets import load_dataset, Dataset, DatasetDict
-
-from open_instruct.math_utils import remove_boxed, last_boxed_only_string
+from open_instruct.math_utils import last_boxed_only_string, remove_boxed
 
 # exemplars we will use to prompt the model
 GSM8K_EXEMPLARS = [

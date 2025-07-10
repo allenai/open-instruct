@@ -1,10 +1,10 @@
-import re
 import os
+import re
 import tempfile
-from typing import Optional, Callable
+from typing import Callable, Optional
 
 import datasets
-from datasets import load_dataset, Dataset, DatasetDict
+from datasets import Dataset, load_dataset
 from huggingface_hub import HfApi
 
 
@@ -90,7 +90,7 @@ def convert_sft_dataset(
 
     assert ds is not None or hf_dataset_id is not None, \
         "Either ds or hf_dataset_id must be provided."
-    
+
     if ds is None:
         ds = load_dataset(hf_dataset_id)
 
@@ -98,8 +98,8 @@ def convert_sft_dataset(
         print("Converting dataset to messages format...")
         ds = ds.map(convert_fn, num_proc=num_proc)
     else:
-        print("No convert_fn provided, skipping the conversion step.")        
-    
+        print("No convert_fn provided, skipping the conversion step.")
+
     if apply_keyword_filters:
         print("Filtering dataset by keywords...")
         ds = ds.filter(lambda example: not should_be_filtered_by_keyword(example), num_proc=num_proc)
@@ -107,7 +107,7 @@ def convert_sft_dataset(
     if apply_empty_message_filters:
         print("Filtering dataset by empty messages...")
         ds = ds.filter(lambda example: not should_be_filtered_by_empty_message(example), num_proc=num_proc)
-        
+
     print(f"Dataset size after conversion: {ds.num_rows}")
 
     if push_to_hub:
@@ -117,7 +117,7 @@ def convert_sft_dataset(
             full_name = converted_dataset_name
         print(f"Pushing dataset to Hub: {full_name}")
         ds.push_to_hub(full_name, private=True)
-        
+
         if readme_content:
             create_hf_readme(full_name, readme_content)
 
@@ -127,7 +127,7 @@ def convert_sft_dataset(
         if readme_content:
             with open(os.path.join(local_save_dir, "README.md"), "w") as f:
                 f.write(readme_content)
-    
+
     return ds
 
 

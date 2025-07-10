@@ -22,12 +22,13 @@ curl -X POST http://localhost:1234/test_program -H "Content-Type: application/js
 """
 
 import logging
-from typing import List
+import traceback
+from typing import Any, List
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from .code_utils import get_successful_tests_fast
+from open_instruct.code.code_utils import get_successful_tests_fast, get_successful_tests_stdio
 
 app = FastAPI()
 
@@ -37,8 +38,13 @@ logger = logging.getLogger(__name__)
 
 class TestRequest(BaseModel):
     program: str
-    tests: List[str]
+    tests: List[Any]
     max_execution_time: float = 1.0
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 
 
 @app.post("/test_program")
@@ -50,36 +56,18 @@ async def test_program(request: TestRequest):
         )
         return {"results": results}
     except Exception as e:
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
-
-
-if __name__ == "__main__":
-    import requests
-
-    # API endpoint
-    url = "http://localhost:1234/test_program"
-
-    # Test data
-    payload = {
-        "program": """
-def add(a, b):
-    return a + b
-""",
-        "tests": ["assert add(1, 2) == 3", "assert add(-1, 1) == 0", "assert add(0, 0) == 1"],  # This test will fail
-        "max_execution_time": 1.0,
-    }
-
-    # Send POST request
-    response = requests.post(url, json=payload)
-
-    response_json = response.json()
-    # Print results
-    print("Status Code:", response.status_code)
-    print("Response:", response_json)
-
-    assert response_json["results"] == [1, 1, 0]
+@app.post("/test_program_stdio")
+async def test_program_stdio(request: TestRequest):
+    # run tests with the stdio format
+    try:
+        results = get_successful_tests_stdio(
+            program=request.program, tests=request.tests, max_execution_time=request.max_execution_time
+        )
+        return {"results": results}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

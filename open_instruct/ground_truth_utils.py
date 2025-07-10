@@ -7,6 +7,7 @@ They are then automatically added to the REWARD_FN_MAPPING.
 
 import ast
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -21,14 +22,9 @@ from typing import Any, Dict, List, Optional, Union
 import requests
 from litellm import acompletion
 
-from IFEvalG import instructions_registry
 from open_instruct.if_functions import IF_FUNCTIONS_MAP
-from open_instruct.judge_utils import (
-    EXTRACTOR_MAP,
-    JUDGE_PROMPT_MAP,
-    PRICE_PER_TOKEN,
-    build_messages,
-)
+from open_instruct.IFEvalG import instructions_registry
+from open_instruct.judge_utils import EXTRACTOR_MAP, JUDGE_PROMPT_MAP, PRICE_PER_TOKEN, build_messages
 from open_instruct.math_utils import (
     get_unnormalized_answer,
     hendrycks_is_equiv,
@@ -71,6 +67,7 @@ class LMJudgeVerifierConfig(VerifierConfig):
     # judge args
     llm_judge_model: str
     llm_judge_max_tokens: int
+    llm_judge_max_context_length: int
     llm_judge_temperature: float
     llm_judge_timeout: int
     seed: int
@@ -600,7 +597,10 @@ class LMJudgeVerifier(VerifierFunction):
             return reasoning, score
 
         try:
-            content = completion.choices[0].message.content
+            # remove anything between <think> and </think> including the tags using regex
+            pattern = r"<think>\s*.*?\s*</think>\s*"
+            content = re.sub(pattern, "", completion.choices[0].message.content, flags=re.DOTALL)
+            content = content.replace("<answer>", "").replace("</answer>", "")
             reasoning, score = self.extractor(content)
 
         except Exception as e:
@@ -635,14 +635,60 @@ class LMJudgeVerifier(VerifierFunction):
         retry_delay = 1.0
 
         for attempt in range(max_retries):
+            # judges the quality of a response
             try:
-                messages = build_messages(prompt)
+                system_prompt = "Do not generate text between the <think> and </think> tags."  # "You are a concise assistant who gives very short explanations before giving a quality score."
+                messages = build_messages(prompt, system_prompt)
+
+                # Faeze: check if the request would exceed context window
+                # Import the context window checker
+                try:
+                    from open_instruct.context_window_checker import (
+                        check_context_window_limit,
+                        truncate_messages_to_fit_context,
+                    )
+
+                    context_check_available = True
+                except ImportError:
+                    logger.warning("Context window checker not available. Proceeding without context checking.")
+                    context_check_available = False
+
+                # Check if the request would exceed context window
+                if context_check_available:
+                    if not check_context_window_limit(
+                        messages=messages,
+                        max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
+                        model_name=self.verifier_config.llm_judge_model,
+                        max_context_length=self.verifier_config.llm_judge_max_context_length,  # Adjust based on your model
+                        safety_margin=100,
+                    ):
+                        # Try to truncate messages to fit
+                        messages = truncate_messages_to_fit_context(
+                            messages=messages,
+                            max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
+                            model_name=self.verifier_config.llm_judge_model,
+                            max_context_length=self.verifier_config.llm_judge_max_context_length,
+                            safety_margin=100,
+                        )
+
+                        # Check again after truncation
+                        if not check_context_window_limit(
+                            messages=messages,
+                            max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
+                            model_name=self.verifier_config.llm_judge_model,
+                            max_context_length=self.verifier_config.llm_judge_max_context_length,
+                            safety_margin=10,
+                        ):
+                            logger.error("Cannot fit request within context window even after truncation.")
+                            return VerificationResult(score=0.0, cost=0.0, reasoning="Error: Context window exceeded")
+                # end of Faeze's context window check
                 response = await acompletion(
                     model=self.verifier_config.llm_judge_model,
                     messages=messages,
                     temperature=self.verifier_config.llm_judge_temperature,
                     max_completion_tokens=self.verifier_config.llm_judge_max_tokens,
                     seed=self.verifier_config.seed,
+                    timeout=self.verifier_config.llm_judge_timeout,
                 )
                 reasoning, score = self.parse_completion(response)
                 cost = self.get_cost(response, self.verifier_config.llm_judge_model)
@@ -656,6 +702,7 @@ class LMJudgeVerifier(VerifierFunction):
                     return VerificationResult(score=0.0, cost=0.0, reasoning=f"Error: {str(e)}")
                 else:
                     await asyncio.sleep(retry_delay * (2**attempt))  # Exponential backoff
+        return VerificationResult(score=0.0, cost=0.0, reasoning="Unknown error after all retries.")
 
     def __call__(self, tokenized_prediction: List[int], prediction: str, label: str, query: str) -> VerificationResult:
         """
@@ -825,8 +872,17 @@ def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
         if subclass == LMJudgeVerifier:
             continue
 
-        instance = subclass(subclass.get_config_class().from_args(args))
+        verifier_config = subclass.get_config_class().from_args(args)
+        instance = subclass(verifier_config)
         verifiers[instance.name.lower()] = instance
+
+        # add the code_stdio verifier
+        if subclass == CodeVerifier:
+            stdio_config = copy.deepcopy(verifier_config)
+            stdio_config.code_api_url = stdio_config.code_api_url.replace("/test_program", "/test_program_stdio")
+            instance = CodeVerifier(stdio_config)
+            instance.name = "code_stdio"
+            verifiers["code_stdio"] = instance
 
     for judge_type in JUDGE_PROMPT_MAP.keys():
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args))

@@ -1,6 +1,5 @@
-import re
 import json
-import langdetect
+import re
 from typing import List
 
 """
@@ -403,7 +402,7 @@ def validate_sections(text: str, N: int, section_splitter: str) -> bool:
 def validate_json_format(text: str) -> bool:
 	try:
 		json_object = json.loads(text)
-	except ValueError as e:
+	except ValueError:
 		return False
 	return True
 

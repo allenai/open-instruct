@@ -15,7 +15,6 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
-
 import os
 from datetime import timedelta
 from typing import Any, List, Optional, Union
@@ -117,7 +116,6 @@ def init_process_group(
 
 @ray.remote
 class LLMRayActor:
-
     def __init__(self, *args, bundle_indices: list = None, tool_use: bool = False, **kwargs):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
@@ -190,15 +188,15 @@ def create_vllm_engines(
     vllm_enable_sleep=False,
     tools: Optional[List[Any]] = None,
     max_tool_calls: List[int] = [5],
-):
+) -> list[LLMRayActor]:
     import vllm
 
     assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
 
     # Convert max_tool_calls to a dict mapping tool end strings to their limits
-    assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(
-        tools
-    ), "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
+    assert len(max_tool_calls) == 1 or len(max_tool_calls) == len(tools), (
+        "max_tool_calls must have length 1 (applies to all tools) or same length as tools (per-tool limit)"
+    )
     # tool key is the end_str
     if len(max_tool_calls) == 1:
         max_tool_calls_dict = {tool: max_tool_calls[0] for tool in tools.keys()} if tools else {}
@@ -325,12 +323,7 @@ if __name__ == "__main__":
 
     refs = [
         engine.init_process_group.remote(
-            master_address,
-            master_port,
-            i * tensor_parallel_size + 1,
-            world_size,
-            "openrlhf",
-            backend=backend,
+            master_address, master_port, i * tensor_parallel_size + 1, world_size, "openrlhf", backend=backend
         )
         for i, engine in enumerate(vllm_engines)
     ]
