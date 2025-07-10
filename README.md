@@ -69,6 +69,8 @@ uv sync --extra compile --extra liger # to install flash attention and liger-ker
 * **Docker installation**: You can also use the Dockerfile to build a Docker image. You can build the image with the following command:
 
 ```bash
+# if you are internal at Ai2, you can skip this step. Internal ai2 machines already have this base image.
+docker build -f Dockerfile.base --build-arg CUDA="12.8.0" --build-arg VARIANT=devel --build-arg DIST=ubuntu22.04 --build-arg TORCH_VER="2.7.0" --build-arg BEAKER_VERSION=v1.5.208 --build-arg VULKAN_SDK_VERSION="1.3.275" --target default-cuda -t open_instruct_dev:latest .
 docker build . -t open_instruct_dev
 # if you are interally at AI2, you can create an image like this:
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
@@ -79,7 +81,7 @@ beaker image create open_instruct_dev -n open_instruct_dev -w ai2/$beaker_user
 Optionally you can build the base image with the following command:
 
 ```bash
-docker build -f Dockerfile.base --build-arg CUDA="12.8.0" --build-arg VARIANT=base --build-arg DIST=ubuntu22.04 --build-arg TORCH_VER="2.7.0" --build-arg BEAKER_VERSION=v1.5.208 --build-arg VULKAN_SDK_VERSION="1.3.275" --target default-cuda -t cuda:12.8-ubuntu22.04-torch2.6.0-v1.2.170 .
+docker build -f Dockerfile.base --build-arg CUDA="12.8.0" --build-arg VARIANT=devel --build-arg DIST=ubuntu22.04 --build-arg TORCH_VER="2.7.0" --build-arg BEAKER_VERSION=v1.5.208 --build-arg VULKAN_SDK_VERSION="1.3.275" --target default-cuda -t cuda:12.8-dev-ubuntu22.04-torch2.6.0-v1.2.170 .
 ```
 
 * **Docker with uv**: You can also use the Dockerfile to build a Docker image with uv. You can build the image with the following command:

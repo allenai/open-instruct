@@ -1,4 +1,4 @@
-FROM ghcr.io/allenai/oi-cuda-no-conda:12.1-cudnn8-dev-ubuntu20.04
+FROM ghcr.io/allenai/cuda:12.8-dev-ubuntu22.04-torch2.7.0-v1.2.170
 
 # Set default cache directory but allow override from environment
 ARG CACHE_DIR=/root/.cache/uv
