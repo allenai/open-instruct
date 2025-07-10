@@ -638,6 +638,15 @@ GROUND_TRUTHS_KEY = "ground_truth"
 DATASET_SOURCE_KEY = "dataset"
 
 
+def add_special_chat_tokens(tokenizer, add_special_tokens: List):
+    existing_special_tokens = tokenizer.special_tokens_map.get("additional_special_tokens", [])
+    new_special_tokens = [t for t in add_special_tokens if t not in existing_special_tokens]
+    if new_special_tokens:  
+        all_special_tokens = existing_special_tokens + new_special_tokens
+        tokenizer.add_special_tokens({"additional_special_tokens": all_special_tokens})
+            
+    return tokenizer
+
 @dataclass
 class TokenizerConfig:
     tokenizer_name_or_path: Optional[str] = None
@@ -659,6 +668,12 @@ class TokenizerConfig:
     sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
     """columns name for the sft messages"""
 
+    # List of special tokens to be added to tokenizer, eg:
+    add_special_tokens: Optional[List[str]] = field(
+        default=None,
+        metadata={"help": "List of additional special tokens to add to the tokenizer"},
+    )
+
     @cached_property
     def tokenizer(self):
         files_hash = get_files_hash_if_exists(
@@ -674,8 +689,12 @@ class TokenizerConfig:
                     " you should use only `--tokenizer_name_or_path` in the future as `tokenizer_name` is deprecated."
                 )
             self.tokenizer_name_or_path = self.tokenizer_name
-        return GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
+        tokenizer = GET_TOKENIZER_FN[self.get_tokenizer_fn](self)
 
+        if self.add_special_tokens is not None:
+            tokenizer = add_special_chat_tokens(tokenizer, self.add_special_tokens)
+
+        return tokenizer
 
 # TODO: for testing, we should load the tokenizer from the sft / dpo / rl and make sure they are all the same.
 
