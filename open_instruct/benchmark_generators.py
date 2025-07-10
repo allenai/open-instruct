@@ -539,7 +539,7 @@ def run_generation_batch(
     param_prompt_Q.put((None, prompts))
 
     # Get results
-    result = inference_results_Q.get(timeout=2400)
+    result = inference_results_Q.get(timeout=24000)
 
     end_time = time.time()
     generation_time = end_time - start_time
@@ -896,6 +896,146 @@ def cleanup(vllm_engines: Optional[List[ray.actor.ActorHandle]]) -> None:
             ray.kill(engine)
     if ray.is_initialized():
         ray.shutdown()
+
+
+def compute_summary_stats(results: List[Dict[str, Union[float, int, List[str], List[int]]]]) -> Dict[str, float]:
+    """
+    Compute summary statistics from benchmark results.
+    
+    Returns a dictionary with:
+    - mfu: Average MFU percentage (from last N-1 batches if available)
+    - tokens_per_second: Average new tokens per second (from last N-1 batches if available)
+    - wall_clock_time: Average generation time per batch (from last N-1 batches if available)
+    - mbu: Average MBU percentage (from last N-1 batches if available)
+    """
+    if not results:
+        return {"mfu": 0.0, "tokens_per_second": 0.0, "wall_clock_time": 0.0, "mbu": 0.0}
+    
+    # If we have more than one batch, use last N-1 batches (excluding first batch)
+    if len(results) > 1:
+        last_n_minus_1_results = results[1:]  # Skip first batch
+        
+        # Calculate averages from last N-1 batches
+        total_new_tokens = sum(r["total_new_tokens"] for r in last_n_minus_1_results)
+        total_generation_time = sum(r["generation_time"] for r in last_n_minus_1_results)
+        
+        avg_new_tokens_per_second = total_new_tokens / total_generation_time if total_generation_time > 0 else 0
+        avg_generation_time = total_generation_time / len(last_n_minus_1_results)
+        avg_mfu = sum(r["mfu_percentage"] for r in last_n_minus_1_results) / len(last_n_minus_1_results)
+        avg_mbu = sum(r["mbu_percentage"] for r in last_n_minus_1_results) / len(last_n_minus_1_results)
+    else:
+        # Use the single batch results
+        total_new_tokens = sum(r["total_new_tokens"] for r in results)
+        total_generation_time = sum(r["generation_time"] for r in results)
+        
+        avg_new_tokens_per_second = total_new_tokens / total_generation_time if total_generation_time > 0 else 0
+        avg_generation_time = total_generation_time / len(results)
+        avg_mfu = sum(r["mfu_percentage"] for r in results) / len(results)
+        avg_mbu = sum(r["mbu_percentage"] for r in results) / len(results)
+    
+    return {
+        "mfu": avg_mfu,
+        "tokens_per_second": avg_new_tokens_per_second,
+        "wall_clock_time": avg_generation_time,
+        "mbu": avg_mbu
+    }
+
+
+def run_benchmark_programmatic(
+    model_name_or_path: str,
+    num_unique_prompts_rollout: int,
+    num_samples_per_prompt_rollout: int,
+    vllm_num_engines: int,
+    response_length: int,
+    **kwargs
+) -> Dict[str, float]:
+    """
+    Run benchmark programmatically and return summary statistics.
+    
+    This is a wrapper function for use by other scripts like benchmark_loop.py.
+    
+    Args:
+        model_name_or_path: Model to benchmark
+        num_unique_prompts_rollout: Number of unique prompts per batch
+        num_samples_per_prompt_rollout: Number of samples per prompt
+        vllm_num_engines: Number of vLLM engines
+        response_length: Maximum response length
+        **kwargs: Additional arguments to override defaults
+    
+    Returns:
+        Dictionary with mfu, tokens_per_second, wall_clock_time, mbu
+    """
+    # Set up default arguments
+    default_args = {
+        "tokenizer_name_or_path": model_name_or_path,
+        "dataset_mixer_list": ["hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2", "1.0"],
+        "dataset_mixer_list_splits": ["train"],
+        "max_token_length": 10240,
+        "max_prompt_token_length": 2048,
+        "temperature": 1.0,
+        "vllm_top_p": 0.9,
+        "vllm_tensor_parallel_size": 1,
+        "vllm_gpu_memory_utilization": 0.9,
+        "pack_length": 20480,
+        "chat_template_name": "tulu_thinker",
+        "trust_remote_code": True,
+        "seed": 42,
+        "dataset_local_cache_dir": "benchmark_cache",
+        "dataset_cache_mode": "local",
+        "dataset_transform_fn": ["rlvr_tokenize_v1", "rlvr_filter_v1"],
+    }
+    
+    # Update with provided kwargs
+    default_args.update(kwargs)
+    
+    # Create dataclass instances
+    args = Args(
+        model_name_or_path=model_name_or_path,
+        tokenizer_name_or_path=default_args["tokenizer_name_or_path"],
+        dataset_mixer_list=default_args["dataset_mixer_list"],
+        dataset_mixer_list_splits=default_args["dataset_mixer_list_splits"],
+        max_token_length=default_args["max_token_length"],
+        max_prompt_token_length=default_args["max_prompt_token_length"],
+        temperature=default_args["temperature"],
+        response_length=response_length,
+        vllm_top_p=default_args["vllm_top_p"],
+        num_unique_prompts_rollout=num_unique_prompts_rollout,
+        num_samples_per_prompt_rollout=num_samples_per_prompt_rollout,
+        vllm_num_engines=vllm_num_engines,
+        vllm_tensor_parallel_size=default_args["vllm_tensor_parallel_size"],
+        vllm_gpu_memory_utilization=default_args["vllm_gpu_memory_utilization"],
+        pack_length=default_args["pack_length"],
+        chat_template_name=default_args["chat_template_name"],
+        trust_remote_code=default_args["trust_remote_code"],
+        seed=default_args["seed"],
+        dataset_local_cache_dir=default_args["dataset_local_cache_dir"],
+        dataset_cache_mode=default_args["dataset_cache_mode"],
+        dataset_skip_cache=False,
+        dataset_transform_fn=default_args["dataset_transform_fn"],
+    )
+    
+    tokenizer_config = TokenizerConfig()
+    model_config = ModelConfig(
+        model_name_or_path=model_name_or_path,
+        model_revision=None,
+        trust_remote_code=default_args["trust_remote_code"]
+    )
+    
+    # Run the benchmark
+    tokenizer, hf_model_config, model_flops_per_token, gpu_peak_flops, gpu_memory_bandwidth, gpu_memory_size = setup_tokenizer(model_config)
+    dataset = setup_dataset(args, tokenizer_config)
+    vllm_engines = setup_vllm_engines(args, model_config)
+    
+    try:
+        results = run_benchmark(dataset, vllm_engines, args, hf_model_config, model_flops_per_token, 
+                               gpu_peak_flops, gpu_memory_bandwidth, gpu_memory_size)
+        
+        # Compute summary statistics
+        summary_stats = compute_summary_stats(results)
+        
+        return summary_stats
+    finally:
+        cleanup(vllm_engines)
 
 
 def main() -> None:

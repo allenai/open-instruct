@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
 Script to run benchmarks in a loop with different batch sizes and response lengths.
-Tracks results in a CSV file with columns: git_commit_hash, batch_size, mfu, response_length, tokens_per_second, wall_clock_time
+Tracks results in a CSV file with columns: git_commit_hash, batch_size, mfu, response_length, tokens_per_second, wall_clock_time, mbu
 """
 
 import subprocess
 import csv
-import re
 import os
 import sys
 from datetime import datetime
 from typing import List, Tuple, Dict, Optional
+
+# Import the benchmark generator functions
+from benchmark_generators import run_benchmark_programmatic
 
 
 def get_git_commit_hash() -> str:
@@ -31,22 +33,15 @@ def run_benchmark(
     num_unique_prompts: int,
     num_samples_per_prompt: int,
     num_engines: int,
-    response_length: int
+    response_length: int,
+    model_name_or_path: str = "hamishivi/qwen2_5_openthoughts2"
 ) -> Optional[Dict[str, float]]:
     """
-    Run the benchmark with specified parameters and return parsed results.
+    Run the benchmark with specified parameters and return results.
     
     Returns:
-        Dictionary with mfu, tokens_per_second, and wall_clock_time, or None if failed
+        Dictionary with mfu, tokens_per_second, wall_clock_time, and mbu, or None if failed
     """
-    cmd = [
-        "./run_benchmark.sh",
-        "--num_unique_prompts_rollout", str(num_unique_prompts),
-        "--num_samples_per_prompt_rollout", str(num_samples_per_prompt),
-        "--vllm_num_engines", str(num_engines),
-        "--response_length", str(response_length)
-    ]
-    
     print(f"\nRunning benchmark with:")
     print(f"  num_unique_prompts_rollout: {num_unique_prompts}")
     print(f"  num_samples_per_prompt_rollout: {num_samples_per_prompt}")
@@ -55,95 +50,19 @@ def run_benchmark(
     print(f"  Effective batch size: {num_unique_prompts * num_samples_per_prompt / num_engines}")
     
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=3600  # 1 hour timeout
+        # Call the programmatic interface
+        results = run_benchmark_programmatic(
+            model_name_or_path=model_name_or_path,
+            num_unique_prompts_rollout=num_unique_prompts,
+            num_samples_per_prompt_rollout=num_samples_per_prompt,
+            vllm_num_engines=num_engines,
+            response_length=response_length
         )
         
-        if result.returncode != 0:
-            print(f"Benchmark failed with return code {result.returncode}")
-            print(f"STDERR: {result.stderr}")
-            return None
-            
-        return parse_benchmark_output(result.stdout)
+        return results
         
-    except subprocess.TimeoutExpired:
-        print("Benchmark timed out after 1 hour")
-        return None
     except Exception as e:
         print(f"Error running benchmark: {e}")
-        return None
-
-
-def parse_benchmark_output(output: str) -> Optional[Dict[str, float]]:
-    """
-    Parse the benchmark output to extract MFU, tokens/second, and wall clock time.
-    
-    Returns:
-        Dictionary with mfu, tokens_per_second, and wall_clock_time
-    """
-    # Look for LAST N-1 BATCHES section
-    last_n_minus_1_section = False
-    lines = output.split('\n')
-    
-    mfu = None
-    tokens_per_second = None
-    wall_clock_time = None
-    
-    for i, line in enumerate(lines):
-        if "LAST N-1 BATCHES" in line:
-            last_n_minus_1_section = True
-            continue
-            
-        if last_n_minus_1_section:
-            # Extract MFU
-            mfu_match = re.search(r"Average MFU:\s*([\d.]+)%", line)
-            if mfu_match:
-                mfu = float(mfu_match.group(1))
-                
-            # Extract tokens per second
-            tokens_match = re.search(r"Average new tokens/second:\s*([\d.]+)", line)
-            if tokens_match:
-                tokens_per_second = float(tokens_match.group(1))
-                
-            # Extract wall clock time
-            time_match = re.search(r"Average generation time per batch:\s*([\d.]+)s", line)
-            if time_match:
-                wall_clock_time = float(time_match.group(1))
-    
-    # If LAST N-1 BATCHES section not found, look in regular results
-    if not last_n_minus_1_section:
-        for line in lines:
-            if "RESULTS:" in line:
-                last_n_minus_1_section = True  # Use as flag to parse following lines
-                continue
-                
-            if last_n_minus_1_section:
-                # Extract MFU
-                mfu_match = re.search(r"Average MFU:\s*([\d.]+)%", line)
-                if mfu_match:
-                    mfu = float(mfu_match.group(1))
-                    
-                # Extract tokens per second
-                tokens_match = re.search(r"Average new tokens/second:\s*([\d.]+)", line)
-                if tokens_match:
-                    tokens_per_second = float(tokens_match.group(1))
-                    
-                # Extract wall clock time
-                time_match = re.search(r"Average generation time per batch:\s*([\d.]+)s", line)
-                if time_match:
-                    wall_clock_time = float(time_match.group(1))
-    
-    if mfu is not None and tokens_per_second is not None and wall_clock_time is not None:
-        return {
-            "mfu": mfu,
-            "tokens_per_second": tokens_per_second,
-            "wall_clock_time": wall_clock_time
-        }
-    else:
-        print("Failed to parse all required metrics from output")
         return None
 
 
@@ -160,7 +79,7 @@ def write_to_csv(
     with open(filename, 'a', newline='') as csvfile:
         fieldnames = [
             'timestamp', 'git_commit_hash', 'batch_size', 'response_length',
-            'mfu', 'tokens_per_second', 'wall_clock_time'
+            'mfu', 'mbu', 'tokens_per_second', 'wall_clock_time'
         ]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         
@@ -173,6 +92,7 @@ def write_to_csv(
             'batch_size': batch_size,
             'response_length': response_length,
             'mfu': results['mfu'],
+            'mbu': results['mbu'],
             'tokens_per_second': results['tokens_per_second'],
             'wall_clock_time': results['wall_clock_time']
         }
@@ -182,6 +102,15 @@ def write_to_csv(
 
 def main():
     """Main function to run benchmark loop."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Run benchmarks in a loop with different configurations")
+    parser.add_argument("--model", type=str, default="hamishivi/qwen2_5_openthoughts2",
+                        help="Model name or path to benchmark")
+    parser.add_argument("--output", type=str, default="benchmark_results.csv",
+                        help="Output CSV filename")
+    args = parser.parse_args()
+    
     # Configuration ranges
     # Format: (num_unique_prompts, num_samples_per_prompt, num_engines)
     batch_size_configs = [
@@ -194,12 +123,10 @@ def main():
     
     response_lengths = [1024, 2048, 4096, 8192, 16384]
     
-    # Output CSV filename
-    csv_filename = "benchmark_results.csv"
-    
     # Get git commit hash once
     git_commit = get_git_commit_hash()
     print(f"Git commit hash: {git_commit}")
+    print(f"Model: {args.model}")
     
     # Run benchmarks
     total_runs = len(batch_size_configs) * len(response_lengths)
@@ -214,15 +141,15 @@ def main():
             print(f"Run {current_run}/{total_runs}")
             print(f"{'='*60}")
             
-            results = run_benchmark(num_unique, num_samples, num_engines, response_length)
+            results = run_benchmark(num_unique, num_samples, num_engines, response_length, args.model)
             
             if results:
-                write_to_csv(csv_filename, git_commit, batch_size, response_length, results)
+                write_to_csv(args.output, git_commit, batch_size, response_length, results)
             else:
                 print(f"Skipping CSV write due to benchmark failure")
     
     print(f"\n{'='*60}")
-    print(f"Benchmark loop completed. Results saved to {csv_filename}")
+    print(f"Benchmark loop completed. Results saved to {args.output}")
     print(f"{'='*60}")
 
 
