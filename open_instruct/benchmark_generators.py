@@ -7,10 +7,15 @@ like in test_grpo_fast.py, and streams results to/from the generator to measure
 performance.
 """
 import collections
+import csv
+import dataclasses
+import json
 import logging
+import os
 import queue
 import threading
 import time
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import datasets
@@ -27,8 +32,77 @@ from open_instruct.grpo_fast import Args
 from open_instruct.model_utils import ModelConfig
 from open_instruct.utils import ArgumentParserPlus
 
-logging.basicConfig(level=logging.INFO)
+# Set logging level based on DEBUG environment variable
+log_level = logging.DEBUG if os.environ.get("BENCHMARK_DEBUG") else logging.INFO
+logging.basicConfig(level=log_level)
 logger = logging.getLogger(__name__)
+
+
+# Determine data directory
+if Path("/weka").exists():
+    DATA_DIR = Path("/weka") / "finbarrt"
+else:
+    DATA_DIR = Path("/tmp")
+
+
+def save_completion_lengths(batch_results: List[Dict], timestamp: int):
+    """
+    Save completion lengths to CSV file.
+    
+    Args:
+        batch_results: List of batch result dictionaries
+        timestamp: Unix timestamp
+    """
+    csv_path = DATA_DIR / f"completion_lengths_{timestamp}.csv"
+    
+    with open(csv_path, 'w', newline='') as csvfile:
+        fieldnames = ['batch_num', 'prompt_num', 'completion_length']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        
+        for batch_result in batch_results:
+            if 'error' in batch_result:
+                continue
+                
+            batch_idx = batch_result['batch_idx']
+            response_lengths = batch_result['response_lengths']
+            
+            # response_lengths contains all responses (flattened from n samples per prompt)
+            # We need to map them back to prompt indices
+            for i, length in enumerate(response_lengths):
+                writer.writerow({
+                    'batch_num': batch_idx,
+                    'prompt_num': i,
+                    'completion_length': length
+                })
+    
+    logger.info(f"Saved completion lengths to {csv_path}")
+
+
+def save_config(args, tokenizer_config, model_config, timestamp: int):
+    """
+    Save configuration to JSON file.
+    
+    Args:
+        args: Args dataclass
+        tokenizer_config: TokenizerConfig dataclass
+        model_config: ModelConfig dataclass
+        timestamp: Unix timestamp
+    """
+    config_path = DATA_DIR / f"config_{timestamp}.json"
+    
+    # Convert dataclasses to dicts
+    config_dict = {
+        'args': dataclasses.asdict(args),
+        'tokenizer_config': dataclasses.asdict(tokenizer_config),
+        'model_config': dataclasses.asdict(model_config),
+        'timestamp': timestamp
+    }
+    
+    with open(config_path, 'w') as f:
+        json.dump(config_dict, f, indent=2, default=str)
+    
+    logger.info(f"Saved config to {config_path}")
 
 
 # Peak FLOPs for common GPUs (bfloat16/float16)
@@ -212,14 +286,17 @@ def calculate_memory_bandwidth_usage(
         float: Memory bandwidth usage in bytes per second
     """
     # KV cache reads/writes per token generated
-    kv_bandwidth = tokens_per_second * kv_cache_per_token
+    # For each token: read K,V for all layers, write new K,V
+    kv_bandwidth = tokens_per_second * kv_cache_per_token * 2  # read + write
     
-    # Model weights are read once per forward pass
-    # Amortized over the sequence length for each sample in the batch
-    weight_bandwidth = (model_size_bytes * batch_size * tokens_per_second) / (avg_sequence_length * batch_size)
+    # Model weights are read for each forward pass
+    # Each token generation requires a full forward pass
+    weight_bandwidth = model_size_bytes * tokens_per_second / batch_size
     
-    # Additional memory access patterns (activations, etc.) - rough estimate as 2x KV
-    activation_bandwidth = kv_bandwidth * 2
+    # Additional memory access patterns
+    # Including: attention scores, intermediate activations, layer norms, etc.
+    # Estimated as 4x the KV cache size (more realistic for transformer models)
+    activation_bandwidth = kv_bandwidth * 4
     
     total_bandwidth = kv_bandwidth + weight_bandwidth + activation_bandwidth
     
@@ -392,20 +469,6 @@ def calculate_response_wasted_computation(
     return 0.0
 
 
-# BenchmarkArgs has been removed - using Args from grpo_fast.py instead
-# The following attributes are used from Args:
-# - dataset_mixer_list, dataset_mixer_list_splits
-# - max_token_length, max_prompt_token_length
-# - temperature, response_length (for max_tokens), vllm_top_p (for top_p)
-# - num_unique_prompts_rollout (for batch_size), num_samples_per_prompt_rollout
-# - vllm_num_engines, vllm_tensor_parallel_size, vllm_gpu_memory_utilization
-# - dataset_cache_mode, dataset_local_cache_dir, dataset_skip_cache
-# - dataset_transform_fn, seed
-# Additional benchmark-specific attributes:
-# - num_batches (number of batches to process)
-# - max_model_len (vLLM max model length)
-
-
 def setup_tokenizer(
     model_config: ModelConfig,
 ) -> Tuple[transformers.PreTrainedTokenizer, transformers.PretrainedConfig, float, float, float, float]:
@@ -568,13 +631,32 @@ def run_generation_batch(
     # Calculate memory bandwidth utilization
     kv_cache_per_token = estimate_kv_cache_memory_per_token(hf_model_config)
     model_size_bytes = estimate_model_size_bytes(hf_model_config)
-    avg_sequence_length = sum(len(prompt) for prompt in prompts) / len(prompts) + args.response_length / 2
-    batch_size = len(response_ids)
+    
+    # Fix: Use actual batch size (unique prompts) not total responses
+    actual_batch_size = len(prompts)  # Number of unique prompts
+    
+    # Fix: Calculate average sequence length more accurately
+    # Each prompt generates multiple responses, but they all share the same prompt length
+    avg_prompt_length = sum(len(prompt) for prompt in prompts) / len(prompts)
+    avg_response_length = total_new_tokens / len(response_ids) if response_ids else 0
+    avg_sequence_length = avg_prompt_length + avg_response_length
+    
+    # Log intermediate values for debugging
+    logger.info(f"MBU Calculation Details:")
+    logger.info(f"  - Tokens per second: {tokens_per_second:.2f}")
+    logger.info(f"  - KV cache per token: {kv_cache_per_token / 1024:.2f} KB")
+    logger.info(f"  - Model size: {model_size_bytes / 1e9:.2f} GB")
+    logger.info(f"  - Actual batch size: {actual_batch_size}")
+    logger.info(f"  - Avg sequence length: {avg_sequence_length:.0f} (prompt: {avg_prompt_length:.0f}, response: {avg_response_length:.0f})")
     
     memory_bandwidth_usage = calculate_memory_bandwidth_usage(
-        tokens_per_second, kv_cache_per_token, model_size_bytes, avg_sequence_length, batch_size
+        tokens_per_second, kv_cache_per_token, model_size_bytes, avg_sequence_length, actual_batch_size
     )
     mbu_percentage = calculate_mbu(memory_bandwidth_usage, gpu_memory_bandwidth)
+    
+    logger.info(f"  - Memory bandwidth usage: {memory_bandwidth_usage / 1e9:.2f} GB/s")
+    logger.info(f"  - GPU memory bandwidth: {gpu_memory_bandwidth / 1e12:.2f} TB/s")
+    logger.info(f"  - MBU: {mbu_percentage:.2f}%")
 
     return {
         "batch_idx": batch_idx,
@@ -1045,11 +1127,27 @@ def main() -> None:
 
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
 
+    # Generate timestamp for this run
+    timestamp = int(time.time())
+    
+    # Ensure data directory exists
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # Save config first
+    save_config(args, tokenizer_config, model_config, timestamp)
+
     tokenizer, hf_model_config, model_flops_per_token, gpu_peak_flops, gpu_memory_bandwidth, gpu_memory_size = setup_tokenizer(model_config)
     dataset = setup_dataset(args, tokenizer_config)
     vllm_engines = setup_vllm_engines(args, model_config)
-    run_benchmark(dataset, vllm_engines, args, hf_model_config, model_flops_per_token, 
-                 gpu_peak_flops, gpu_memory_bandwidth, gpu_memory_size)
+    
+    # Run benchmark and get results
+    results = run_benchmark(dataset, vllm_engines, args, hf_model_config, model_flops_per_token, 
+                           gpu_peak_flops, gpu_memory_bandwidth, gpu_memory_size)
+    
+    # Save completion lengths
+    if results:
+        save_completion_lengths(results, timestamp)
+    
     cleanup(vllm_engines)
 
 
