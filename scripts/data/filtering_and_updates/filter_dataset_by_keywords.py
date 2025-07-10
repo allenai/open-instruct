@@ -10,6 +10,14 @@ from huggingface_hub import hf_hub_download, list_repo_files
 import pyarrow.parquet as pq
 import pandas as pd
 
+"""
+Script to remove phrases identifying the model as a certain entity in our datasets.
+Motivated by: realizing the SFT mix has lots of "I am DeepSeek" snippets. 
+
+Run with:
+python scripts/data/sft/filter_dataset_by_keywords.py --input-dataset allenai/tulu-3-sft-mixture --column messages
+"""
+
 
 # Popular model providers
 PROVIDERS = [
