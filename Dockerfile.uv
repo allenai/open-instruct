@@ -1,4 +1,4 @@
-FROM ghcr.io/allenai/oi-cuda-no-conda:12.1-cudnn8-dev-ubuntu20.04
+FROM ghcr.io/allenai/cuda:12.8-dev-ubuntu22.04-torch2.7.0-v1.2.170
 
 # Set default cache directory but allow override from environment
 ARG CACHE_DIR=/root/.cache/uv
@@ -21,8 +21,12 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-install-project --link-mode=copy
 
-# rerun with extras
-RUN uv sync --extra compile --extra liger
+# Install custom vllm for olmo3
+RUN git clone https://github.com/2015aroras/vllm.git@shanea/olmo3 vllm_olmo3
+RUN VLLM_USE_PRECOMPILED=1 uv pip install -e vllm_olmo3
+
+# Install liger, flash-attn, and don't remove vllm
+RUN uv sync --extra compile --extra liger --extra vllm
 
 WORKDIR /stage/
 
