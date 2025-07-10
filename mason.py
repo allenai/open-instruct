@@ -24,6 +24,7 @@ OPEN_INSTRUCT_COMMANDS = [
     "open_instruct/grpo_fast.py",
     "open_instruct/ppo_fast.py",
     "open_instruct/grpo_vllm_thread_ray_gtrl.py",
+    "open_instruct/ppo_vllm_thread_ray_gtrl.py",
     "open_instruct/ppo2.py",
     "open_instruct/ppo_vllm_thread_ray_gtrl.py",
     "open_instruct/reward_modeling.py",
@@ -32,6 +33,72 @@ OPEN_INSTRUCT_COMMANDS = [
 OPEN_INSTRUCT_RESUMABLES = [
     "open_instruct/grpo_fast.py",
 ]
+
+# ----------------------------------------------------------------------
+# Expensive eval patterns
+EXPENSIVE_EVAL_PATTERNS = [
+    r"alpaca_eval",  # AlpacaEval uses OpenAI API
+    r"alpaca_farm",  # AlpacaFarm evaluation
+    r"anthropic",    # Any Anthropic API usage
+    r"claude",       # Claude models
+    r"gpt-4",        # GPT-4 models
+    r"gpt-3\.5",     # GPT-3.5 models
+    r"azure",        # Azure OpenAI
+    r"text-davinci", # Davinci models
+    r"openai",       # Any OpenAI API usage (check this last to avoid duplicates)
+]
+
+def check_for_expensive_evals(command: List[str]) -> List[str]:
+    """
+    Check if the command contains any expensive evals that require external API calls.
+    Returns a list of detected expensive eval patterns.
+    """
+    command_str = " ".join(command).lower()
+    detected_evals = []
+    
+    for pattern in EXPENSIVE_EVAL_PATTERNS:
+        if re.search(pattern, command_str):
+            detected_evals.append(pattern)
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_evals = []
+    for eval_pattern in detected_evals:
+        if eval_pattern not in seen:
+            seen.add(eval_pattern)
+            unique_evals.append(eval_pattern)
+    
+    return unique_evals
+
+def prompt_for_expensive_eval_confirmation(detected_evals: List[str]) -> bool:
+    """
+    Prompt the user for confirmation when expensive evals are detected.
+    Returns True if user confirms, False otherwise.
+    """
+    console.rule("[bold red]⚠️  EXPENSIVE EVALS DETECTED ⚠️[/bold red]")
+    console.print(Text(
+        "The following expensive evaluation patterns were detected in your command:",
+        style="bold yellow"
+    ))
+    
+    for eval_pattern in detected_evals:
+        console.print(f"  • {eval_pattern}")
+    
+    console.print(Text(
+        "\nThese evaluations require external API calls and may incur significant costs.",
+        style="bold red"
+    ))
+    
+    while True:
+        response = input("\nDo you want to continue? (y/n): ").lower().strip()
+        if response in ['y', 'yes']:
+            console.print(Text("✅ Proceeding with expensive evals...", style="bold green"))
+            return True
+        elif response in ['n', 'no']:
+            console.print(Text("❌ Aborting due to expensive evals.", style="bold red"))
+            return False
+        else:
+            console.print("Please enter 'y' or 'n'.")
 
 # ----------------------------------------------------------------------
 # Mason logic
@@ -525,6 +592,12 @@ def get_datasets(beaker_datasets, cluster: List[str]):
 
 
 def make_internal_command(command: List[str], args: argparse.Namespace, whoami: str, is_external_user: bool) -> str:
+    # Check for expensive evals and prompt for confirmation
+    detected_evals = check_for_expensive_evals(command)
+    if detected_evals and not is_external_user:
+        if not prompt_for_expensive_eval_confirmation(detected_evals):
+            sys.exit(1)
+    
     # pass through WANDB_ENTITY and WANDB_PROJECT
     if "WANDB_ENTITY" in os.environ:
         command = [f"WANDB_ENTITY={os.environ['WANDB_ENTITY']}"] + command
