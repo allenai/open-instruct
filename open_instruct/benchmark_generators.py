@@ -6,7 +6,7 @@ This script loads datasets in the same way as grpo_fast.py, sets up a generator
 like in test_grpo_fast.py, and streams results to/from the generator to measure
 performance.
 """
-
+import collections
 import logging
 import queue
 import threading
@@ -37,6 +37,25 @@ GPU_PEAK_FLOPS = {
     "b200": 2250e12,  # 2250 TFLOPS for bf16.
     "h100": 990e12,  # 990 TFLOPs for bf16
     "a6000": 155e12,  # 155 TFLOPS for bf16
+    "l40s": 362e12, 
+}
+
+# Memory bandwidth for common GPUs (bytes/second)
+GPU_MEMORY_BANDWIDTH = {
+    "a100": 1.6e12,   # 1.6 TB/s for A100 40GB/80GB
+    "b200": 8.0e12,   # 8.0 TB/s for B200
+    "h100": 3.35e12,  # 3.35 TB/s for H100
+    "a6000": 768e9,   # 768 GB/s for A6000
+    "l40s": 864e9,    # 864 GB/s for L40S
+}
+
+# GPU memory sizes (bytes)
+GPU_MEMORY_SIZE = {
+    "a100": 80e9,     # 80GB variant (also 40GB variant exists)
+    "b200": 192e9,    # 192GB for B200
+    "h100": 80e9,     # 80GB for H100
+    "a6000": 48e9,    # 48GB for A6000
+    "l40s": 48e9,     # 48GB for L40S
 }
 
 
@@ -92,6 +111,34 @@ def get_gpu_peak_flops() -> float:
     return GPU_PEAK_FLOPS[device_name]
 
 
+def get_gpu_memory_bandwidth() -> float:
+    """
+    Get theoretical memory bandwidth for the current GPU.
+
+    Returns:
+        float: Memory bandwidth in bytes per second
+    """
+    if not torch.cuda.is_available():
+        return 0.0
+    
+    device_name = get_device_name(torch.cuda.get_device_name(0))
+    return GPU_MEMORY_BANDWIDTH[device_name]
+
+
+def get_gpu_memory_size() -> float:
+    """
+    Get memory size for the current GPU.
+
+    Returns:
+        float: GPU memory in bytes
+    """
+    if not torch.cuda.is_available():
+        return 0.0
+    
+    device_name = get_device_name(torch.cuda.get_device_name(0))
+    return GPU_MEMORY_SIZE[device_name]
+
+
 def calculate_mfu(tokens_per_second: float, model_flops_per_token: float, gpu_peak_flops: float) -> float:
     """
     Calculate Model FLOPs Utilization (MFU).
@@ -108,6 +155,165 @@ def calculate_mfu(tokens_per_second: float, model_flops_per_token: float, gpu_pe
     mfu_percentage = (actual_flops_per_second / gpu_peak_flops) * 100
 
     return mfu_percentage
+
+
+def estimate_kv_cache_memory_per_token(
+    model_config: transformers.PretrainedConfig,
+    dtype_bytes: int = 2  # 2 bytes for bf16/fp16
+) -> float:
+    """
+    Estimate KV cache memory requirement per token.
+    
+    Args:
+        model_config: Model configuration with architecture details
+        dtype_bytes: Bytes per element (2 for bf16/fp16, 4 for fp32)
+    
+    Returns:
+        float: KV cache memory in bytes per token
+    """
+    # Get model dimensions
+    hidden_size = model_config.hidden_size
+    num_layers = model_config.num_hidden_layers
+    
+    # Handle different attention head configurations
+    if hasattr(model_config, 'num_key_value_heads'):
+        # For models with multi-query or grouped-query attention
+        num_kv_heads = model_config.num_key_value_heads
+    else:
+        # Standard multi-head attention
+        num_kv_heads = model_config.num_attention_heads
+    
+    # KV cache per token = 2 (K and V) * num_layers * hidden_size * (kv_heads/total_heads) * dtype_bytes
+    # Note: hidden_size is already the full model dimension, we need per-head dimension
+    head_dim = hidden_size // model_config.num_attention_heads
+    kv_cache_per_token = 2 * num_layers * num_kv_heads * head_dim * dtype_bytes
+    
+    return kv_cache_per_token
+
+
+def calculate_memory_bandwidth_usage(
+    tokens_per_second: float,
+    kv_cache_per_token: float,
+    model_size_bytes: float,
+    avg_sequence_length: float,
+    batch_size: int
+) -> float:
+    """
+    Calculate actual memory bandwidth usage.
+    
+    Args:
+        tokens_per_second: Token generation rate
+        kv_cache_per_token: KV cache memory per token in bytes
+        model_size_bytes: Total model size in bytes
+        avg_sequence_length: Average sequence length being processed
+        batch_size: Batch size
+    
+    Returns:
+        float: Memory bandwidth usage in bytes per second
+    """
+    # KV cache reads/writes per token generated
+    kv_bandwidth = tokens_per_second * kv_cache_per_token
+    
+    # Model weights are read once per forward pass
+    # Amortized over the sequence length for each sample in the batch
+    weight_bandwidth = (model_size_bytes * batch_size * tokens_per_second) / (avg_sequence_length * batch_size)
+    
+    # Additional memory access patterns (activations, etc.) - rough estimate as 2x KV
+    activation_bandwidth = kv_bandwidth * 2
+    
+    total_bandwidth = kv_bandwidth + weight_bandwidth + activation_bandwidth
+    
+    return total_bandwidth
+
+
+def calculate_mbu(memory_bandwidth_usage: float, gpu_memory_bandwidth: float) -> float:
+    """
+    Calculate Memory Bandwidth Utilization (MBU).
+    
+    Args:
+        memory_bandwidth_usage: Actual memory bandwidth usage in bytes/second
+        gpu_memory_bandwidth: Theoretical peak memory bandwidth in bytes/second
+    
+    Returns:
+        float: MBU as a percentage (0-100)
+    """
+    mbu_percentage = (memory_bandwidth_usage / gpu_memory_bandwidth) * 100
+    return mbu_percentage
+
+
+def estimate_model_size_bytes(model_config: transformers.PretrainedConfig, dtype_bytes: int = 2) -> float:
+    """
+    Estimate model size in bytes based on config.
+    
+    Args:
+        model_config: Model configuration
+        dtype_bytes: Bytes per parameter (2 for bf16/fp16)
+    
+    Returns:
+        float: Estimated model size in bytes
+    """
+    # Rough estimation based on model architecture
+    hidden_size = model_config.hidden_size
+    num_layers = model_config.num_hidden_layers
+    vocab_size = model_config.vocab_size
+    
+    # Embedding layers
+    embedding_params = vocab_size * hidden_size * 2  # input and output embeddings
+    
+    # Attention layers (Q, K, V, O projections)
+    attention_params = num_layers * 4 * hidden_size * hidden_size
+    
+    # MLP layers (typically 4x hidden size for intermediate)
+    intermediate_size = getattr(model_config, 'intermediate_size', 4 * hidden_size)
+    mlp_params = num_layers * 2 * hidden_size * intermediate_size
+    
+    # Layer norms and other small components (rough estimate)
+    other_params = num_layers * 2 * hidden_size * 2
+    
+    total_params = embedding_params + attention_params + mlp_params + other_params
+    total_bytes = total_params * dtype_bytes
+    
+    return total_bytes
+
+
+def estimate_max_batch_size(
+    model_config: transformers.PretrainedConfig,
+    max_sequence_length: int,
+    gpu_memory_size: float,
+    gpu_memory_utilization: float = 0.9,
+    dtype_bytes: int = 2
+) -> int:
+    """
+    Estimate maximum batch size that can fit in GPU memory.
+    
+    Args:
+        model_config: Model configuration
+        max_sequence_length: Maximum sequence length
+        gpu_memory_size: Total GPU memory in bytes
+        gpu_memory_utilization: Fraction of GPU memory to use (0-1)
+        dtype_bytes: Bytes per element
+    
+    Returns:
+        int: Estimated maximum batch size
+    """
+    # Calculate model size
+    model_size = estimate_model_size_bytes(model_config, dtype_bytes)
+    
+    # Calculate KV cache per token
+    kv_per_token = estimate_kv_cache_memory_per_token(model_config, dtype_bytes)
+    
+    # Available memory after loading model
+    available_memory = gpu_memory_size * gpu_memory_utilization - model_size
+    
+    # Memory per sequence (KV cache for full sequence + activation memory)
+    # Activation memory is roughly 20% of KV cache (empirical estimate)
+    memory_per_sequence = kv_per_token * max_sequence_length * 1.2
+    
+    # Maximum batch size
+    max_batch_size = int(available_memory / memory_per_sequence)
+    
+    # Ensure at least 1
+    return max(1, max_batch_size)
 
 
 def calculate_wasted_time_percentage(prompt_lengths_by_batch: List[List[int]]) -> float:
@@ -202,7 +408,7 @@ def calculate_response_wasted_computation(
 
 def setup_tokenizer(
     model_config: ModelConfig,
-) -> Tuple[transformers.PreTrainedTokenizer, transformers.PretrainedConfig, float, float]:
+) -> Tuple[transformers.PreTrainedTokenizer, transformers.PretrainedConfig, float, float, float, float]:
     """Set up the tokenizer and model config."""
     logger.info(f"Loading tokenizer and config: {model_config.model_name_or_path}")
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_config.model_name_or_path)
@@ -213,11 +419,15 @@ def setup_tokenizer(
     hf_model_config = transformers.AutoConfig.from_pretrained(model_config.model_name_or_path)
     model_flops_per_token = calculate_model_flops_per_token(hf_model_config, model_config.model_name_or_path)
     gpu_peak_flops = get_gpu_peak_flops()
+    gpu_memory_bandwidth = get_gpu_memory_bandwidth()
+    gpu_memory_size = get_gpu_memory_size()
 
     logger.info(f"Model FLOPs per token: {model_flops_per_token / 1e9:.2f} GFLOPs")
     logger.info(f"GPU peak FLOPs: {gpu_peak_flops / 1e12:.0f} TFLOPs")
+    logger.info(f"GPU memory bandwidth: {gpu_memory_bandwidth / 1e12:.2f} TB/s")
+    logger.info(f"GPU memory size: {gpu_memory_size / 1e9:.0f} GB")
 
-    return tokenizer, hf_model_config, model_flops_per_token, gpu_peak_flops
+    return tokenizer, hf_model_config, model_flops_per_token, gpu_peak_flops, gpu_memory_bandwidth, gpu_memory_size
 
 
 def setup_dataset(args: Args, tokenizer_config: TokenizerConfig) -> datasets.Dataset:
@@ -315,6 +525,8 @@ def run_generation_batch(
     args: Args,
     model_flops_per_token: float,
     gpu_peak_flops: float,
+    gpu_memory_bandwidth: float,
+    hf_model_config: transformers.PretrainedConfig,
     prompts: List[List[int]],
     batch_idx: int,
 ) -> Dict[str, Union[float, int, List[str], List[int]]]:
@@ -327,7 +539,7 @@ def run_generation_batch(
     param_prompt_Q.put((None, prompts))
 
     # Get results
-    result = inference_results_Q.get(timeout=120)
+    result = inference_results_Q.get(timeout=2400)
 
     end_time = time.time()
     generation_time = end_time - start_time
@@ -337,7 +549,9 @@ def run_generation_batch(
         return {"error": result[1]}
 
     response_ids, finish_reasons, masks, info = result
-    print(f'{finish_reasons=}')
+    collated_finish_reasons = collections.Counter(finish_reasons)
+    logger.info('finish reasons: ' + ', '.join(f'{k}: {v}' for
+                                               k, v in collated_finish_reasons.items()))
 
     # Calculate tokens generated (response_ids only contains newly generated tokens)
     # When using n parameter, vLLM returns flattened responses as if prompts were duplicated
@@ -350,6 +564,17 @@ def run_generation_batch(
 
     # Calculate MFU
     mfu_percentage = calculate_mfu(tokens_per_second, model_flops_per_token, gpu_peak_flops)
+    
+    # Calculate memory bandwidth utilization
+    kv_cache_per_token = estimate_kv_cache_memory_per_token(hf_model_config)
+    model_size_bytes = estimate_model_size_bytes(hf_model_config)
+    avg_sequence_length = sum(len(prompt) for prompt in prompts) / len(prompts) + args.response_length / 2
+    batch_size = len(response_ids)
+    
+    memory_bandwidth_usage = calculate_memory_bandwidth_usage(
+        tokens_per_second, kv_cache_per_token, model_size_bytes, avg_sequence_length, batch_size
+    )
+    mbu_percentage = calculate_mbu(memory_bandwidth_usage, gpu_memory_bandwidth)
 
     return {
         "batch_idx": batch_idx,
@@ -360,6 +585,9 @@ def run_generation_batch(
         "tokens_per_second": tokens_per_second,
         "total_tokens_per_second": total_tokens_per_second,
         "mfu_percentage": mfu_percentage,
+        "mbu_percentage": mbu_percentage,
+        "memory_bandwidth_usage_gb_s": memory_bandwidth_usage / 1e9,
+        "kv_cache_per_token_bytes": kv_cache_per_token,
         "avg_new_tokens_per_sample": total_new_tokens / len(response_ids) if response_ids else 0,
         "finish_reasons": finish_reasons,
         "response_lengths": [len(response) for response in response_ids],
@@ -373,8 +601,11 @@ def run_benchmark(
     dataset: datasets.Dataset,
     vllm_engines: List[ray.actor.ActorHandle],
     args: Args,
+    hf_model_config: transformers.PretrainedConfig,
     model_flops_per_token: float,
     gpu_peak_flops: float,
+    gpu_memory_bandwidth: float,
+    gpu_memory_size: float,
     num_batches: int = 5,
 ) -> List[Dict[str, Union[float, int, List[str], List[int]]]]:
     """Run the full benchmark."""
@@ -432,7 +663,8 @@ def run_benchmark(
 
         # Run generation
         batch_result = run_generation_batch(
-            inference_results_Q, param_prompt_Q, args, model_flops_per_token, gpu_peak_flops, prompts, batch_idx
+            inference_results_Q, param_prompt_Q, args, model_flops_per_token, gpu_peak_flops, 
+            gpu_memory_bandwidth, hf_model_config, prompts, batch_idx
         )
 
         if "error" not in batch_result:
@@ -441,6 +673,7 @@ def run_benchmark(
                 f"Batch {batch_idx + 1} completed: "
                 f"{batch_result['tokens_per_second']:.2f} new tokens/sec, "
                 f"MFU: {batch_result['mfu_percentage']:.2f}%, "
+                f"MBU: {batch_result['mbu_percentage']:.2f}%, "
                 f"{batch_result['generation_time']:.2f}s"
             )
         else:
@@ -459,7 +692,8 @@ def run_benchmark(
 
     # Calculate summary statistics
     if all_results:
-        print_summary(all_results, total_time, args, model_flops_per_token, gpu_peak_flops)
+        print_summary(all_results, total_time, args, hf_model_config, model_flops_per_token, 
+                     gpu_peak_flops, gpu_memory_bandwidth, gpu_memory_size)
     else:
         logger.error("No successful batches completed")
 
@@ -470,8 +704,11 @@ def print_summary(
     results: List[Dict[str, Union[float, int, List[str], List[int]]]],
     total_time: float,
     args: Args,
+    hf_model_config: transformers.PretrainedConfig,
     model_flops_per_token: float,
     gpu_peak_flops: float,
+    gpu_memory_bandwidth: float,
+    gpu_memory_size: float,
 ) -> None:
     """Print benchmark summary statistics."""
 
@@ -496,8 +733,9 @@ def print_summary(
     avg_total_tokens_per_second = total_tokens / total_generation_time if total_generation_time > 0 else 0
     avg_generation_time = total_generation_time / len(results)
 
-    # Calculate average MFU
+    # Calculate average MFU and MBU
     avg_mfu = sum(r["mfu_percentage"] for r in results) / len(results) if results else 0
+    avg_mbu = sum(r["mbu_percentage"] for r in results) / len(results) if results else 0
 
     throughput_samples_per_second = total_samples / total_time
 
@@ -517,6 +755,7 @@ def print_summary(
         )
         avg_generation_time_last_n_minus_1 = last_n_minus_1_generation_time / len(last_n_minus_1_results)
         avg_mfu_last_n_minus_1 = sum(r["mfu_percentage"] for r in last_n_minus_1_results) / len(last_n_minus_1_results)
+        avg_mbu_last_n_minus_1 = sum(r["mbu_percentage"] for r in last_n_minus_1_results) / len(last_n_minus_1_results)
 
         # Calculate % wasted time due to variable prompt lengths
         # Collect prompt lengths by batch for the last N-1 batches
@@ -534,6 +773,7 @@ def print_summary(
         avg_total_tokens_per_second_last_n_minus_1 = avg_total_tokens_per_second
         avg_generation_time_last_n_minus_1 = avg_generation_time
         avg_mfu_last_n_minus_1 = avg_mfu
+        avg_mbu_last_n_minus_1 = avg_mbu
         prompt_wasted_time_percentage = 0
         response_wasted_computation_percentage = 0
 
@@ -557,6 +797,7 @@ def print_summary(
         print(f"Average new tokens/second: {avg_new_tokens_per_second_last_n_minus_1:.2f}")
         print(f"Average total tokens/second: {avg_total_tokens_per_second_last_n_minus_1:.2f}")
         print(f"Average MFU: {avg_mfu_last_n_minus_1:.2f}%")
+        print(f"Average MBU: {avg_mbu_last_n_minus_1:.2f}%")
         print(f"Average generation time per batch: {avg_generation_time_last_n_minus_1:.2f}s")
         print(f"Wasted time (variable prompt lengths): {prompt_wasted_time_percentage:.2f}%")
         print(f"Wasted computation (early response termination): {response_wasted_computation_percentage:.2f}%")
@@ -566,13 +807,47 @@ def print_summary(
         print(f"Average new tokens/second: {avg_new_tokens_per_second:.2f}")
         print(f"Average total tokens/second: {avg_total_tokens_per_second:.2f}")
         print(f"Average MFU: {avg_mfu:.2f}%")
+        print(f"Average MBU: {avg_mbu:.2f}%")
         print(f"Average generation time per batch: {avg_generation_time:.2f}s")
         print(f"Throughput (samples/second): {throughput_samples_per_second:.2f}")
         print(f"Average new tokens per sample: {total_new_tokens / total_samples:.2f}")
 
     print("-" * 60)
-    print(f"Model FLOPs per token: {model_flops_per_token / 1e9:.2f} GFLOPs")
+    print("HARDWARE SPECIFICATIONS:")
     print(f"GPU peak FLOPs: {gpu_peak_flops / 1e12:.0f} TFLOPs")
+    print(f"GPU memory bandwidth: {gpu_memory_bandwidth / 1e12:.2f} TB/s")
+    print(f"GPU memory size: {gpu_memory_size / 1e9:.0f} GB")
+    print("-" * 60)
+    print("MODEL SPECIFICATIONS:")
+    print(f"Model FLOPs per token: {model_flops_per_token / 1e9:.2f} GFLOPs")
+    print(f"KV cache per token: {estimate_kv_cache_memory_per_token(hf_model_config) / 1024:.2f} KB")
+    print(f"Estimated model size: {estimate_model_size_bytes(hf_model_config) / 1e9:.2f} GB")
+    
+    # Calculate and display maximum batch size estimation
+    max_batch_size_est = estimate_max_batch_size(
+        hf_model_config, args.response_length, gpu_memory_size, args.vllm_gpu_memory_utilization
+    )
+    print(f"Estimated max batch size (@ {args.response_length} tokens): {max_batch_size_est}")
+    
+    # Bottleneck analysis
+    print("-" * 60)
+    print("BOTTLENECK ANALYSIS:")
+    bottleneck_mfu = avg_mfu_last_n_minus_1 if len(results) > 1 else avg_mfu
+    bottleneck_mbu = avg_mbu_last_n_minus_1 if len(results) > 1 else avg_mbu
+    
+    if bottleneck_mfu > bottleneck_mbu:
+        print(f"System is COMPUTE BOUND (MFU: {bottleneck_mfu:.1f}% > MBU: {bottleneck_mbu:.1f}%)")
+        print("Suggestions:")
+        print("  - Consider using a GPU with higher FLOPs")
+        print("  - Optimize model architecture or use smaller model")
+        print("  - Enable tensor parallelism if not already used")
+    else:
+        print(f"System is MEMORY BANDWIDTH BOUND (MBU: {bottleneck_mbu:.1f}% > MFU: {bottleneck_mfu:.1f}%)")
+        print("Suggestions:")
+        print("  - Consider using a GPU with higher memory bandwidth")
+        print("  - Reduce batch size to fit more in cache")
+        print("  - Use Flash Attention or other memory-efficient attention mechanisms")
+        print("  - Consider quantization to reduce memory bandwidth requirements")
 
     # Print completion length statistics
     if all_response_lengths:
@@ -630,10 +905,11 @@ def main() -> None:
 
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
 
-    tokenizer, hf_model_config, model_flops_per_token, gpu_peak_flops = setup_tokenizer(model_config)
+    tokenizer, hf_model_config, model_flops_per_token, gpu_peak_flops, gpu_memory_bandwidth, gpu_memory_size = setup_tokenizer(model_config)
     dataset = setup_dataset(args, tokenizer_config)
     vllm_engines = setup_vllm_engines(args, model_config)
-    run_benchmark(dataset, vllm_engines, args, model_flops_per_token, gpu_peak_flops)
+    run_benchmark(dataset, vllm_engines, args, hf_model_config, model_flops_per_token, 
+                 gpu_peak_flops, gpu_memory_bandwidth, gpu_memory_size)
     cleanup(vllm_engines)
 
 
