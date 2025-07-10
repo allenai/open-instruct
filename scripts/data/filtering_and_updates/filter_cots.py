@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+"""Quick script to filter a dataset of reasoner model generations for proper thinking
+token format and answer token format.
+
+Example usage for Olmo 3 dataset filtering:
+python filter_cots.py --input_dataset_name allenai/oasst1-r1 --output_dataset_name allenai/oasst1-r1-format-filtered --filter think --output_format no_answer
+"""
 import argparse
 import re
 from datasets import load_dataset, Features, Sequence, Value
