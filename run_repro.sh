@@ -31,7 +31,7 @@ python mason.py \
 	   --max_prompt_token_length 2048 \
 	   --response_length 8192 \
 	   --pack_length 16384 \
-	   --model_name_or_path /Qwen/Qwen2.5-7B \
+	   --model_name_or_path Qwen/Qwen2.5-7B \
 	   --model_revision main \
 	   --tokenizer_name_or_path hamishivi/Qwen-2.5-7b-tokenizer \
 	   --chat_template_name tulu_thinker_r1_style \
