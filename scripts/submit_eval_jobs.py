@@ -110,7 +110,7 @@ parser.add_argument("--run_oe_eval_experiments", action="store_true", help="Run 
 parser.add_argument("--run_safety_evaluations", action="store_true", help="Run the OE safety evaluations too.")
 parser.add_argument("--skip_oi_evals", action="store_true", help="Don't run open instruct evals.")
 parser.add_argument("--oe_eval_max_length", type=int, default=4096, help="Max length for OE eval.")
-parser.add_argument("--oe_eval_unseen_evals", action="store_true", help="Run unseen task evals instead of dev task evals on OE Eval.")
+parser.add_argument("--oe_eval_task_suite", type=str, default="NEXT_MODEL_DEV", help="Task suite for OE eval: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN (default: NEXT_MODEL_DEV)")
 parser.add_argument("--use_alternate_safety_image", type=str, default=None, help="Use a different image for safety eval.")
 parser.add_argument("--evaluate_on_weka", action="store_true", help="Evaluate OE eval on Beaker.")
 # NOTE: evaluate on weka is expected to be on by default. If not, the evals will run on the google augusta cluster.
@@ -606,7 +606,7 @@ if not args.skip_oi_evals:
     cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
     subprocess.Popen(cmd, shell=True)
 
-if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
+if args.run_oe_eval_experiments:
     # if so, run oe-eval. We assume it is cloned in the top-level repo directory.
     oe_eval_cmd = f"scripts/eval/oe-eval.sh --model-name {model_name}"
     if args.upload_to_hf:
@@ -641,8 +641,9 @@ if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
     oe_eval_cmd += f" --num_gpus {num_gpus}"
     if args.oe_eval_max_length:
         oe_eval_cmd += f" --max-length {args.oe_eval_max_length}"
-    if args.oe_eval_unseen_evals:
-        oe_eval_cmd += " --unseen-evals"
+    # Add task suite parameter
+    if args.oe_eval_task_suite:
+        oe_eval_cmd += f" --task-suite {args.oe_eval_task_suite}"
     # add priority
     oe_eval_cmd += f" --priority {args.priority}"
 

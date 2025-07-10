@@ -72,12 +72,11 @@ NFS_CLUSTERS = [
 WEKA_CLUSTERS = [
     "ai2/jupiter-cirrascale-2",
     "ai2/saturn-cirrascale",
+    "ai2/titan-cirrascale",
     "ai2/neptune-cirrascale",
-    "ai2/allennlp-elara-cirrascale",
     "ai2/ceres-cirrascale",
-    "ai2/ganymede-cirrascale",
+    "ai2/triton-cirrascale",
     "ai2/rhea-cirrascale",
-    "ai2/test-h100",
 ]
 GCP_CLUSTERS = [
     "ai2/augusta-google-1"
@@ -86,6 +85,7 @@ GCP_CLUSTERS = [
 INTERCONNECT_CLUSTERS = [
     "ai2/jupiter-cirrascale-2",
     "ai2/ceres-cirrascale",
+    "ai2/titan-cirrascale",
     "ai2/augusta-google-1",
 ]
 

@@ -60,6 +60,7 @@ from open_instruct.dataset_transformation import (
     visualize_token,
 )
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
+from open_instruct.padding_free_collator import TensorDataCollatorWithFlattening
 from open_instruct.utils import (
     ArgumentParserPlus,
     clean_last_n_checkpoints,
@@ -325,6 +326,10 @@ class FlatArguments:
 
     sync_each_batch: bool = False
     """Optionaly sync grads every batch when using grad accumulation. Can significantly reduce memory costs."""
+    packing: bool = field(
+        default=False,
+        metadata={"help": "Whether to use packing/padding-free collation via TensorDataCollatorWithFlattening"},
+    )
 
     def __post_init__(self):
         if self.reduce_loss not in ["mean", "sum"]:
@@ -375,8 +380,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         **accelerator_log_kwargs,
         kwargs_handlers=[timeout_kwargs],
         gradient_accumulation_plugin=GradientAccumulationPlugin(
-            num_steps=args.gradient_accumulation_steps,
-            sync_each_batch=args.sync_each_batch,
+            num_steps=args.gradient_accumulation_steps, sync_each_batch=args.sync_each_batch
         ),
     )
 
@@ -607,11 +611,14 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         model.gradient_checkpointing_enable()
 
     # DataLoaders creation:
+    if args.packing:
+        collate_fn = TensorDataCollatorWithFlattening()
+    else:
+        collate_fn = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding="longest")
+
+    accelerator.print("Creating dataloader")
     train_dataloader = DataLoader(
-        train_dataset,
-        shuffle=True,
-        collate_fn=DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding="longest"),
-        batch_size=args.per_device_train_batch_size,
+        train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
     )
 
     # Optimizer
@@ -743,8 +750,19 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         else:
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
-            local_total_tokens += batch["attention_mask"].sum()
-            total_token_including_padding += batch["attention_mask"].numel()
+            if "attention_mask" in batch:
+                local_total_tokens += batch["attention_mask"].sum()
+                total_token_including_padding += batch["attention_mask"].numel()
+            elif "position_ids" in batch:
+                tokens_in_batch = batch["position_ids"].numel()
+                local_total_tokens += tokens_in_batch
+                total_token_including_padding += tokens_in_batch
+            elif "cu_seq_lens_q" in batch:
+                tokens_in_batch = batch["cu_seq_lens_q"][-1]
+                local_total_tokens += tokens_in_batch
+                total_token_including_padding += tokens_in_batch
+            else:
+                raise ValueError(f"Expected attention_mask or position_ids or cu_seq_lens_q in batch, found {batch=}")
             with accelerator.accumulate(model):
                 if args.load_balancing_loss:
                     outputs = model(**batch, use_cache=False, output_router_logits=True)

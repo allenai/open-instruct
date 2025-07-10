@@ -1,4 +1,6 @@
-FROM ghcr.io/allenai/cuda:12.8-dev-ubuntu22.04-torch2.7.0-v1.2.170
+ARG BASE_IMAGE=ghcr.io/allenai/cuda:12.8-dev-ubuntu22.04-torch2.7.0-v1.2.170
+
+FROM ${BASE_IMAGE}
 
 WORKDIR /stage/
 

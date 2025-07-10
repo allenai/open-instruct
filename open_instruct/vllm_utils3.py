@@ -188,7 +188,7 @@ def create_vllm_engines(
     vllm_enable_sleep=False,
     tools: Optional[List[Any]] = None,
     max_tool_calls: List[int] = [5],
-):
+) -> list[LLMRayActor]:
     import vllm
 
     # if we installed from source, don't worry about it
