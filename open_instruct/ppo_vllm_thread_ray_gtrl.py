@@ -269,6 +269,8 @@ class Args:
     """whether to add the R1 style format reward"""
     r1_style_format_reward: float = 1.0
     """the reward value for R1 style format reward"""
+    remap_verifer: str = None
+    """Remap verifier like string_f1=general-quality_ref. Currently can only remap once."""
 
     # async setting
     async_mode: bool = True

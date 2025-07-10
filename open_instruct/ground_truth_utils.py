@@ -887,6 +887,15 @@ def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     for judge_type in JUDGE_PROMPT_MAP.keys():
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args))
         verifiers[instance.name.lower()] = instance
+    
+    # if we have remap arg, remap!
+    if args.remap_verifier:
+        remap = args.remap_verifiers.split("=")
+        assert len(remap) == 2, "Remap must be in the format old_name=new_name"
+        old_name, new_name = remap
+        assert old_name.lower() in verifiers, f"{old_name} not found in verifiers during remapping"
+        assert new_name.lower() not in verifiers, f"{new_name} already exists in verifiers during remapping"
+        verifiers[new_name.lower()] = verifiers[old_name.lower()]
 
     return verifiers
 
