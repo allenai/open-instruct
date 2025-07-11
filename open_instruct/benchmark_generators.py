@@ -34,9 +34,17 @@ from open_instruct.grpo_fast import Args
 from open_instruct.model_utils import ModelConfig
 from open_instruct.utils import ArgumentParserPlus
 
-# Set logging level based on DEBUG environment variable
-log_level = logging.DEBUG
-logging.basicConfig(level=log_level)
+
+# For FLOPS, we assume bf16 and ignore sparsity.
+GPU_SPECS = {
+    "a100": {"flops": 312e12, "memory_size": 80e9},
+    "b200": {"flops": 2250e12, "memory_size": 192e9},
+    "h100": {"flops": 990e12, "memory_size": 80e9},
+    "a6000": {"flops": 155e12, "memory_size": 48e9},
+    "l40s": {"flops": 362e12, "memory_size": 48e9},
+}
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,9 +71,6 @@ def save_completion_lengths(batch_results: List[Dict], timestamp: int):
         writer.writeheader()
 
         for batch_result in batch_results:
-            if "error" in batch_result:
-                continue
-
             batch_idx = batch_result["batch_idx"]
             response_lengths = batch_result["response_lengths"]
 
@@ -74,7 +79,7 @@ def save_completion_lengths(batch_results: List[Dict], timestamp: int):
             for i, length in enumerate(response_lengths):
                 writer.writerow({"batch_num": batch_idx, "prompt_num": i, "completion_length": length})
 
-    logger.info(f"Saved completion lengths to {csv_path}")
+    logger.info(f"Saved completion lengths to {csv_path}.")
 
 
 def save_config(args, tokenizer_config, model_config, timestamp: int):
@@ -101,26 +106,6 @@ def save_config(args, tokenizer_config, model_config, timestamp: int):
         json.dump(config_dict, f, indent=2, default=str)
 
     logger.info(f"Saved config to {config_path}")
-
-
-# For FLOPS, we assume bf16 and ignore sparsity.
-GPU_SPECS = {
-    "a100": {"flops": 312e12, "memory_size": 80e9},
-    "b200": {"flops": 2250e12, "memory_size": 192e9},
-    "h100": {"flops": 990e12, "memory_size": 80e9},
-    "a6000": {"flops": 155e12, "memory_size": 48e9},
-    "l40s": {"flops": 362e12, "memory_size": 48e9},
-}
-
-
-@dataclasses.dataclass
-class ModelUsage:
-    flops_per_token: int
-
-    def __str__(self):
-        return (
-            f"ModelUsage(flops_per_token={self.flops_per_token // 1e9} GFLOPs)"
-        )
 
 
 def free_all_gpu_memory(device: int | str = 0) -> None:
@@ -162,7 +147,7 @@ def free_all_gpu_memory(device: int | str = 0) -> None:
     logger.info(f"[GPU {dev.index}] {free / gib:.2f} GiB free of {total / gib:.2f} GiB after cleanup")
 
 
-def calculate_model_usage_per_token(model_path: str, sequence_length: int) -> ModelUsage:
+def calculate_model_usage_per_token(model_path: str, sequence_length: int) -> int:
     """
     Calculate actual FLOPs per token for a transformer model using torch FlopCounterMode.
 
@@ -170,7 +155,7 @@ def calculate_model_usage_per_token(model_path: str, sequence_length: int) -> Mo
         model_path: Path to the actual model for precise measurement
 
     Returns:
-        ModelUsage object.
+        FLOPs per token as integer.
     """
     model = transformers.AutoModelForCausalLM.from_pretrained(
         model_path, torch_dtype=torch.bfloat16, device_map="cuda", trust_remote_code=True
@@ -184,39 +169,16 @@ def calculate_model_usage_per_token(model_path: str, sequence_length: int) -> Mo
     with flop_counter:
         model(input_ids)
 
-    flops = flop_counter.get_total_flops()
-
-    # Clean up
-    del model, input_ids, flop_counter
-
-    return ModelUsage(flops_per_token=flops)
+    return flop_counter.get_total_flops()
 
 
 def get_device_name(device_name: str) -> str:
-    logging.info(f"Original device name: {device_name}")
     processed_device_name = [
         val for val in device_name.lower().split(" ") if val not in ["nvidia", "80gb", "hbm3", "rtx"]
     ]
     if len(processed_device_name) != 1 or processed_device_name[0] not in GPU_SPECS:
         raise ValueError(f"Unsupported device name: {device_name}.")
     return processed_device_name[0]
-
-
-def get_gpu_specs() -> float:
-    """
-    Get theoretical peak FLOPs for the current GPU.
-
-    Returns:
-        float: Peak FLOPs per second
-    """
-    device_name = get_device_name(torch.cuda.get_device_name(0))
-    return GPU_SPECS[device_name]
-
-
-
-
-
-
 
 
 def setup_tokenizer(
@@ -324,7 +286,7 @@ def run_generation_batch(
     inference_results_Q: queue.Queue,
     param_prompt_Q: queue.Queue,
     args: Args,
-    model_usage: ModelUsage,
+    flops_per_token: int,
     gpu_specs: dict[str, float],
     prompts: List[List[int]],
     batch_idx: int,
@@ -361,8 +323,7 @@ def run_generation_batch(
     total_tokens_per_second = total_tokens_generated / generation_time if generation_time > 0 else 0
 
     # Calculate MFU
-    mfu_percentage = 100 * tokens_per_second * model_usage.flops_per_token / gpu_specs["flops"]
-
+    mfu_percentage = 100 * tokens_per_second * flops_per_token / gpu_specs["flops"]
 
     return {
         "batch_idx": batch_idx,
@@ -386,7 +347,7 @@ def run_benchmark(
     dataset: datasets.Dataset,
     vllm_engines: List[ray.actor.ActorHandle],
     args: Args,
-    model_usage: ModelUsage,
+    flops_per_token: int,
     gpu_specs: dict[str, float],
     num_batches: int = 5,
 ) -> List[Dict[str, Union[float, int, List[str], List[int]]]]:
@@ -439,25 +400,18 @@ def run_benchmark(
         # Get batch data
         prompts, ground_truths, datasets_list = get_batch_data(dataset, args, batch_idx)
 
-        if not prompts:
-            logger.warning(f"No prompts in batch {batch_idx}, skipping")
-            continue
-
         # Run generation
         batch_result = run_generation_batch(
-            inference_results_Q, param_prompt_Q, args, model_usage, gpu_specs, prompts, batch_idx
+            inference_results_Q, param_prompt_Q, args, flops_per_token, gpu_specs, prompts, batch_idx
         )
 
-        if "error" not in batch_result:
-            all_results.append(batch_result)
-            logger.info(
-                f"Batch {batch_idx + 1} completed: "
-                f"{batch_result['tokens_per_second']:.2f} new tokens/sec, "
-                f"MFU: {batch_result['mfu_percentage']:.2f}%, "
-                f"{batch_result['generation_time']:.2f}s"
-            )
-        else:
-            logger.error(f"Batch {batch_idx + 1} failed: {batch_result['error']}")
+        all_results.append(batch_result)
+        logger.info(
+            f"Batch {batch_idx + 1} completed: "
+            f"{batch_result['tokens_per_second']:.2f} new tokens/sec, "
+            f"MFU: {batch_result['mfu_percentage']:.2f}%, "
+            f"{batch_result['generation_time']:.2f}s"
+        )
 
     total_time = time.time() - total_start_time
 
@@ -470,16 +424,16 @@ def run_benchmark(
     if thread.is_alive():
         logger.warning("Thread did not shutdown gracefully")
 
-    print_summary(all_results, total_time, args, model_usage, gpu_specs)
-    
-    return all_results
+    print_summary(all_results, total_time, args, flops_per_token, gpu_specs)
+    save_config(args, tokenizer_config, model_config, timestamp)
+    save_completion_lengths(results, timestamp)
 
 
 def print_summary(
     results: List[Dict[str, Union[float, int, List[str], List[int]]]],
     total_time: float,
     args: Args,
-    model_usage: ModelUsage,
+    flops_per_token: int,
     gpu_specs: dict[str, float],
 ) -> None:
     """Print benchmark summary statistics."""
@@ -573,8 +527,7 @@ def print_summary(
     print(f"GPU memory size: {gpu_specs['memory_size'] / 1e9:.0f} GB")
     print("-" * 60)
     print("MODEL SPECIFICATIONS:")
-    print(f"Model FLOPs per token: {model_usage.flops_per_token / 1e9:.2f} GFLOPs")
-
+    print(f"Model FLOPs per token: {flops_per_token / 1e9:.2f} GFLOPs")
 
     # Print completion length statistics
     if all_response_lengths:
@@ -657,11 +610,7 @@ def compute_summary_stats(results: List[Dict[str, Union[float, int, List[str], L
         avg_generation_time = total_generation_time / len(results)
         avg_mfu = sum(r["mfu_percentage"] for r in results) / len(results)
 
-    return {
-        "mfu": avg_mfu,
-        "tokens_per_second": avg_new_tokens_per_second,
-        "wall_clock_time": avg_generation_time,
-    }
+    return {"mfu": avg_mfu, "tokens_per_second": avg_new_tokens_per_second, "wall_clock_time": avg_generation_time}
 
 
 def main() -> None:
@@ -680,20 +629,15 @@ def main() -> None:
     dataset = setup_dataset(args, tokenizer_config)
     vllm_engines = setup_vllm_engines(args, model_config)
 
-    model_usage = calculate_model_usage_per_token(
+    flops_per_token = calculate_model_usage_per_token(
         model_config.model_name_or_path, sequence_length=args.response_length
     )
     free_all_gpu_memory()
-    
-    gpu_specs = get_gpu_specs()
+
+    gpu_specs = GPU_SPECS[get_device_name(torch.cuda.get_device_name(0))]
 
     # Run benchmark and get results
-    results = run_benchmark(dataset, vllm_engines, args, model_usage, gpu_specs)
-
-    # Save completion lengths
-    if results:
-        save_config(args, tokenizer_config, model_config, timestamp)
-        save_completion_lengths(results, timestamp)
+    run_benchmark(dataset, vllm_engines, args, flops_per_token, gpu_specs)
 
     cleanup(vllm_engines)
 
