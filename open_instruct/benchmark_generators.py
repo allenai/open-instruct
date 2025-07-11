@@ -123,9 +123,7 @@ class ModelUsage:
         )
 
 
-def calculate_model_usage_per_token(
-    model_path: str, sequence_length: int
-) -> ModelUsage:
+def calculate_model_usage_per_token(model_path: str, sequence_length: int) -> ModelUsage:
     """
     Calculate actual FLOPs per token for a transformer model using torch FlopCounterMode.
 
@@ -138,8 +136,7 @@ def calculate_model_usage_per_token(
     model = transformers.AutoModelForCausalLM.from_pretrained(
         model_path, torch_dtype=torch.bfloat16, device_map="auto", trust_remote_code=True
     )
-    bytes_per_token = calculate_memory_bandwidth_bytes_per_token(
-        model, sequence_length)
+    bytes_per_token = calculate_memory_bandwidth_bytes_per_token(model, sequence_length)
 
     # Create a single token input
     input_ids = torch.tensor([[1]], device=model.device)  # Single token
@@ -179,9 +176,7 @@ def get_gpu_specs() -> float:
     return GPU_SPECS[device_name]
 
 
-def calculate_memory_bandwidth_bytes_per_token(
-    model: torch.nn.Module, seq_len: int = 0
-) -> float:
+def calculate_memory_bandwidth_bytes_per_token(model: torch.nn.Module, seq_len: int = 0) -> float:
     """
     Estimate memory‑bandwidth utilisation (MBU) **per GPU** for autoregressive
     decoding, including KV‑cache traffic.
@@ -219,7 +214,7 @@ def calculate_memory_bandwidth_bytes_per_token(
 
     # --- bytes that must cross HBM per *generated* token --------------------
     # 1. stream weights once
-    params_per_gpu = sum(p.numel() for p in model.parameters()) 
+    params_per_gpu = sum(p.numel() for p in model.parameters())
     weight_bytes = params_per_gpu * bytes_per_param
 
     # 2. KV‑cache: write new k,v and read existing ones
@@ -305,7 +300,7 @@ def calculate_response_wasted_computation(masks_by_batch: List[List[List[int]]],
 
 
 def setup_tokenizer(
-    model_config: ModelConfig, 
+    model_config: ModelConfig,
 ) -> Tuple[transformers.PreTrainedTokenizer, transformers.PretrainedConfig, float, dict[str, float]]:
     """Set up the tokenizer and model config."""
     logger.info(f"Loading tokenizer and config: {model_config.model_name_or_path}")
@@ -409,7 +404,7 @@ def run_generation_batch(
     inference_results_Q: queue.Queue,
     param_prompt_Q: queue.Queue,
     args: Args,
-        model_usage: ModelUsage,
+    model_usage: ModelUsage,
     gpu_specs: dict[str, float],
     prompts: List[List[int]],
     batch_idx: int,
@@ -450,15 +445,6 @@ def run_generation_batch(
     memory_bandwidth_usage = tokens_per_second * model_usage.bytes_per_token
     mbu_percentage = 100 * memory_bandwidth_usage / gpu_specs["memory_bandwidth"]
 
-    # Fix: Use actual batch size (unique prompts) not total responses
-    actual_batch_size = len(prompts)  # Number of unique prompts
-
-    # Fix: Calculate average sequence length more accurately
-    # Each prompt generates multiple responses, but they all share the same prompt length
-    avg_prompt_length = sum(len(prompt) for prompt in prompts) / len(prompts)
-    avg_response_length = total_new_tokens / len(response_ids) if response_ids else 0
-    avg_sequence_length = avg_prompt_length + avg_response_length
-
     logger.info(f"  - Memory bandwidth usage: {memory_bandwidth_usage / 1e9:.2f} GB/s")
     logger.info(f"  - GPU memory bandwidth: {gpu_specs['memory_bandwidth'] / 1e12:.2f} TB/s")
     logger.info(f"  - MBU: {mbu_percentage:.2f}%")
@@ -487,7 +473,7 @@ def run_benchmark(
     dataset: datasets.Dataset,
     vllm_engines: List[ray.actor.ActorHandle],
     args: Args,
-        model_usage: ModelUsage,
+    model_usage: ModelUsage,
     gpu_specs: dict[str, float],
     num_batches: int = 5,
 ) -> List[Dict[str, Union[float, int, List[str], List[int]]]]:
@@ -546,13 +532,7 @@ def run_benchmark(
 
         # Run generation
         batch_result = run_generation_batch(
-            inference_results_Q,
-            param_prompt_Q,
-            args,
-            model_usage,
-            gpu_specs,
-            prompts,
-            batch_idx,
+            inference_results_Q, param_prompt_Q, args, model_usage, gpu_specs, prompts, batch_idx
         )
 
         if "error" not in batch_result:
@@ -588,11 +568,11 @@ def run_benchmark(
 
 
 def print_summary(
-        results: List[Dict[str, Union[float, int, List[str], List[int]]]],
-        total_time: float,
-        args: Args,
-        model_usage: ModelUsage,
-        gpu_specs: dict[str, float],
+    results: List[Dict[str, Union[float, int, List[str], List[int]]]],
+    total_time: float,
+    args: Args,
+    model_usage: ModelUsage,
+    gpu_specs: dict[str, float],
 ) -> None:
     """Print benchmark summary statistics."""
 
@@ -827,12 +807,12 @@ def main() -> None:
     # Save config first
     save_config(args, tokenizer_config, model_config, timestamp)
 
-    tokenizer = setup_tokenizer(model_config)
     dataset = setup_dataset(args, tokenizer_config)
     vllm_engines = setup_vllm_engines(args, model_config)
 
-    model_usage = calculate_model_usage_per_token(model_config.model_name_or_path,
-                                                  sequence_length=args.response_length)
+    model_usage = calculate_model_usage_per_token(
+        model_config.model_name_or_path, sequence_length=args.response_length
+    )
     gpu_specs = get_gpu_specs()
 
     # Run benchmark and get results

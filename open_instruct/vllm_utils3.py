@@ -188,7 +188,7 @@ def create_vllm_engines(
     vllm_enable_sleep=False,
     tools: Optional[List[Any]] = None,
     max_tool_calls: List[int] = [5],
-):
+) -> list[LLMRayActor]:
     import vllm
 
     assert vllm.__version__ >= "0.8.1", "OpenRLHF only supports vllm >= 0.8.1"
