@@ -890,7 +890,7 @@ def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     
     # if we have remap arg, remap!
     if args.remap_verifier:
-        remap = args.remap_verifiers.split("=")
+        remap = args.remap_verifier.split("=")
         assert len(remap) == 2, "Remap must be in the format old_name=new_name"
         old_name, new_name = remap
         assert old_name.lower() in verifiers, f"{old_name} not found in verifiers during remapping"
