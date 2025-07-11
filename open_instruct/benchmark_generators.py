@@ -112,7 +112,21 @@ GPU_SPECS = {
 }
 
 
-def calculate_model_flops_per_token(model_config: transformers.PretrainedConfig, model_path: str) -> float:
+@dataclasses.dataclass
+class ModelUsage:
+    flops_per_token: int
+    bytes_per_token: int
+
+    def __str__(self):
+        return (
+            f"ModelUsage(flops_per_token={self.flops_per_token // 1e9} GFLOPs, "
+            f"bytes_per_token={self.bytes_per_token // 1e12} TB/s)"
+        )
+
+
+def calculate_model_usage_per_token(
+    model_config: transformers.PretrainedConfig, model_path: str, sequence_length: int
+) -> ModelUsage:
     """
     Calculate actual FLOPs per token for a transformer model using torch FlopCounterMode.
 
@@ -125,6 +139,9 @@ def calculate_model_flops_per_token(model_config: transformers.PretrainedConfig,
     """
     model = transformers.AutoModelForCausalLM.from_pretrained(
         model_path, torch_dtype=torch.bfloat16, device_map="auto", trust_remote_code=True
+    )
+    bytes_per_token = calculate_memory_bandwidth_bytes_per_token(
+        model, device_memory_get_gpu_specs()["memory_bandwidth"], sequence_length
     )
 
     # Create a single token input
@@ -215,42 +232,68 @@ def estimate_kv_cache_memory_per_token(
     return kv_cache_per_token
 
 
-def calculate_memory_bandwidth_usage(
-    tokens_per_second: float,
-    kv_cache_per_token: float,
-    model_size_bytes: float,
-    avg_sequence_length: float,
-    batch_size: int,
+import torch
+from typing import Union
+
+
+def calculate_memory_bandwidth_bytes_per_token(
+    model: torch.nn.Module, device_memory_bandwidth: float, seq_len: int = 0
 ) -> float:
     """
-    Calculate actual memory bandwidth usage.
+    Estimate memory‑bandwidth utilisation (MBU) **per GPU** for autoregressive
+    decoding, including KV‑cache traffic.
 
-    Args:
-        tokens_per_second: Token generation rate
-        kv_cache_per_token: KV cache memory per token in bytes
-        model_size_bytes: Total model size in bytes
-        avg_sequence_length: Average sequence length being processed
-        batch_size: Batch size
+    Parameters
+    ----------
+    model : torch.nn.Module
+        The shard that lives on this GPU.
+    tokens_per_second : int | float
+        Observed or target throughput on *this* GPU.
+    device_memory_bandwidth : int | float
+        Sustained HBM bandwidth in **bytes s‑¹** (A100‑40 GB → 1.5e12).
+    seq_len : int, default 0
+        Context length that the new token attends to (after the prompt).
+    bytes_per_param : int | None
+        If None, inferred from the first parameter’s dtype (fp16/bf16 → 2, fp32 → 4).
+    shard_factor : int, default 1
+        Tensor‑parallel degree (how many identical weight shards exist).
 
-    Returns:
-        float: Memory bandwidth usage in bytes per second
+    Returns
+    -------
+    utilisation : float   #  >1  ⇒ memory‑bandwidth bound
     """
-    # KV cache reads/writes per token generated
-    # For each token: read K,V for all layers, write new K,V
-    kv_bandwidth = tokens_per_second * kv_cache_per_token * 2  # read + write
+    # --- infer dtype size ----------------------------------------------------
+    if bytes_per_param is None:
+        dtype = next(model.parameters()).dtype
+        if dtype in (torch.float16, torch.bfloat16):
+            bytes_per_param = 2
+        elif dtype == torch.float32:
+            bytes_per_param = 4
+        else:
+            bytes_per_param = torch.finfo(dtype).bits // 8
 
-    # Model weights are read for each forward pass
-    # Each token generation requires a full forward pass
-    weight_bandwidth = model_size_bytes * tokens_per_second / batch_size
+    # --- cheap model introspection ------------------------------------------
+    cfg = getattr(model, "config", None)
+    d_model = getattr(cfg, "hidden_size", None) or getattr(cfg, "n_embd", None) or getattr(cfg, "d_model", None)
+    n_layers = (
+        getattr(cfg, "num_hidden_layers", None) or getattr(cfg, "n_layer", None) or getattr(cfg, "num_layers", None)
+    )
+    if d_model is None or n_layers is None:
+        raise ValueError(
+            "Cannot infer d_model / n_layers – pass a HuggingFace transformers model or supply these numbers manually."
+        )
 
-    # Additional memory access patterns
-    # Including: attention scores, intermediate activations, layer norms, etc.
-    # Estimated as 4x the KV cache size (more realistic for transformer models)
-    activation_bandwidth = kv_bandwidth * 4
+    # --- bytes that must cross HBM per *generated* token --------------------
+    # 1. stream weights once
+    params_per_gpu = sum(p.numel() for p in model.parameters()) // shard_factor
+    weight_bytes = params_per_gpu * bytes_per_param
 
-    total_bandwidth = kv_bandwidth + weight_bandwidth + activation_bandwidth
+    # 2. KV‑cache: write new k,v and read existing ones
+    kv_write = 2 * n_layers * d_model * bytes_per_param
+    kv_read = kv_write * seq_len
+    bytes_per_token = weight_bytes + kv_write + kv_read
 
-    return total_bandwidth
+    return bytes_per_token
 
 
 def estimate_model_size_bytes(model_config: transformers.PretrainedConfig, dtype_bytes: int = 2) -> float:
@@ -413,15 +456,15 @@ def setup_tokenizer(
 
     # Load model config for FLOPs calculation
     hf_model_config = transformers.AutoConfig.from_pretrained(model_config.model_name_or_path)
-    model_flops_per_token = calculate_model_flops_per_token(hf_model_config, model_config.model_name_or_path)
+    model_usage = calculate_model_flops_per_token(hf_model_config, model_config.model_name_or_path)
     gpu_specs = get_gpu_specs["flops"]()
 
-    logger.info(f"Model FLOPs per token: {model_flops_per_token / 1e9:.2f} GFLOPs")
+    logger.info(f"Model usage (per token): {model_usage}")
     logger.info(f"GPU peak FLOPs: {gpu_specs['flops'] / 1e12:.0f} TFLOPs")
     logger.info(f"GPU memory bandwidth: {gpu_specs['memory_bandwidth'] / 1e12:.2f} TB/s")
     logger.info(f"GPU memory size: {gpu_specs['memory_size'] / 1e9:.0f} GB")
 
-    return tokenizer, hf_model_config, model_flops_per_token, gpu_specs
+    return tokenizer, hf_model_config, model_usage, gpu_specs
 
 
 def setup_dataset(args: Args, tokenizer_config: TokenizerConfig) -> datasets.Dataset:
@@ -569,16 +612,6 @@ def run_generation_batch(
     avg_prompt_length = sum(len(prompt) for prompt in prompts) / len(prompts)
     avg_response_length = total_new_tokens / len(response_ids) if response_ids else 0
     avg_sequence_length = avg_prompt_length + avg_response_length
-
-    # Log intermediate values for debugging
-    logger.info(f"MBU Calculation Details:")
-    logger.info(f"  - Tokens per second: {tokens_per_second:.2f}")
-    logger.info(f"  - KV cache per token: {kv_cache_per_token / 1024:.2f} KB")
-    logger.info(f"  - Model size: {model_size_bytes / 1e9:.2f} GB")
-    logger.info(f"  - Actual batch size: {actual_batch_size}")
-    logger.info(
-        f"  - Avg sequence length: {avg_sequence_length:.0f} (prompt: {avg_prompt_length:.0f}, response: {avg_response_length:.0f})"
-    )
 
     memory_bandwidth_usage = calculate_memory_bandwidth_usage(
         tokens_per_second, kv_cache_per_token, model_size_bytes, avg_sequence_length, actual_batch_size
@@ -851,19 +884,10 @@ def print_summary(
     bottleneck_mfu = avg_mfu_last_n_minus_1 if len(results) > 1 else avg_mfu
     bottleneck_mbu = avg_mbu_last_n_minus_1 if len(results) > 1 else avg_mbu
 
-    if bottleneck_mfu > bottleneck_mbu:
-        print(f"System is COMPUTE BOUND (MFU: {bottleneck_mfu:.1f}% > MBU: {bottleneck_mbu:.1f}%)")
-        print("Suggestions:")
-        print("  - Consider using a GPU with higher FLOPs")
-        print("  - Optimize model architecture or use smaller model")
-        print("  - Enable tensor parallelism if not already used")
+    if bottleneck_mfu < bottleneck_mbu:
+        print(f"System is COMPUTE BOUND (MFU: {bottleneck_mfu:.1f}% < MBU: {bottleneck_mbu:.1f}%)")
     else:
-        print(f"System is MEMORY BANDWIDTH BOUND (MBU: {bottleneck_mbu:.1f}% > MFU: {bottleneck_mfu:.1f}%)")
-        print("Suggestions:")
-        print("  - Consider using a GPU with higher memory bandwidth")
-        print("  - Reduce batch size to fit more in cache")
-        print("  - Use Flash Attention or other memory-efficient attention mechanisms")
-        print("  - Consider quantization to reduce memory bandwidth requirements")
+        print(f"System is MEMORY BANDWIDTH BOUND (MBU: {bottleneck_mbu:.1f}% < MFU: {bottleneck_mfu:.1f}%)")
 
     # Print completion length statistics
     if all_response_lengths:
