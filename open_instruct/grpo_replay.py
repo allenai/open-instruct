@@ -71,6 +71,7 @@ from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
+from torchrl.data import ReplayBuffer
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
@@ -1157,42 +1158,39 @@ def vllm_generate_thread(
         items = param_prompt_Q.get()
         if items is None:
             break
-        _, g_queries_list = items
+        queries_list, ground_truths_list, datasets_list = items
 
         with Timer("🔥 Generation time"):
-            response_ids, finish_reasons, masks, info = generate_with_engines(g_queries_list, generation_config)
-        inference_results_Q.put((response_ids, finish_reasons, masks, info))
+            response_ids, finish_reasons, masks, infos = generate_with_engines(queries_list, generation_config)
+
+        # duplicate for n samples per prompt
+        queries = [item for item in queries_list for _ in range(generation_config.n)]
+        ground_truths = [item for item in ground_truths_list for _ in range(generation_config.n)]
+        datasets = [item for item in datasets_list for _ in range(generation_config.n)]
+
+        inference_results_Q.put((queries, ground_truths, datasets, response_ids, finish_reasons, masks, infos))
 
         # Evaluate the model
         if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-            response_ids, finish_reasons, masks, info = generate_with_engines(
+            response_ids, finish_reasons, masks, infos = generate_with_engines(
                 eval_prompt_token_ids, eval_generation_config
             )
-            evaluation_inference_results_Q.put((response_ids, finish_reasons, masks, info))
+            evaluation_inference_results_Q.put((response_ids, finish_reasons, masks, infos))
 
 
 def data_preparation_thread(
     reward_fn: Callable,
     inference_results_Q: Queue,
     packed_sequences_Q: Queue,
-    queries_prompt_Q: Queue,
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
 ):
     for training_step in range(1, num_training_steps + 1):
-        # Get next batch of prompts and responses
-        items = queries_prompt_Q.get()
-        queries, ground_truths, datasets = items
-
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
-        if args.num_samples_per_prompt_rollout > 1:
-            queries = [item for item in queries for _ in range(args.num_samples_per_prompt_rollout)]
-            ground_truths = [item for item in ground_truths for _ in range(args.num_samples_per_prompt_rollout)]
-            datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            responses, finish_reasons, masks, infos = inference_results_Q.get()
+            (queries, ground_truths, datasets, responses, finish_reasons, masks, infos) = inference_results_Q.get()
             num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
             good_outputs = [
                 len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
@@ -1629,7 +1627,6 @@ def sync_weights_and_prepare_prompts(
     train_dataset,
     iter_dataloader,
     policy_group: ModelGroup,
-    queries_prompt_Q: Queue,
     param_prompt_Q: Queue,
     queries_next=None,
     ground_truths_next=None,
@@ -1649,12 +1646,10 @@ def sync_weights_and_prepare_prompts(
             ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
     if args.async_mode:
-        queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
-        param_prompt_Q.put((None, queries_next))
+        param_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
     else:
         if training_step != 1:
-            queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
-            param_prompt_Q.put((None, queries_next))
+            param_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
 
     return queries_next, ground_truths_next, datasets_next
 
@@ -1989,7 +1984,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     param_prompt_Q = Queue(maxsize=args.async_steps)
     evaluation_inference_results_Q = Queue(maxsize=1)
     packed_sequences_Q = Queue(maxsize=args.async_steps)
-    queries_prompt_Q = Queue(maxsize=args.async_steps)
+    replay_buffer = ReplayBuffer(batch_size=128)
 
     eval_prompt_token_ids = None
     eval_ground_truths = None
@@ -2021,15 +2016,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     packing_thread = threading.Thread(
         target=data_preparation_thread,
-        args=(
-            reward_fn,
-            inference_results_Q,
-            packed_sequences_Q,
-            queries_prompt_Q,
-            args,
-            tokenizer,
-            args.num_training_steps,
-        ),
+        args=(reward_fn, inference_results_Q, packed_sequences_Q, args, tokenizer, args.num_training_steps),
     )
     packing_thread.start()
     logger.info("======== ✅ data preparation thread starts =========")
@@ -2039,8 +2026,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
     datasets_next = data_next[DATASET_SOURCE_KEY]
-    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
-    param_prompt_Q.put((None, queries_next))
+    param_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
 
     num_total_tokens = 0
     start_time = time.time()
@@ -2057,7 +2043,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 train_dataset,
                 iter_dataloader,
                 policy_group,
-                queries_prompt_Q,
                 param_prompt_Q,
                 queries_next,
                 ground_truths_next,
