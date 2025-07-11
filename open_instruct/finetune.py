@@ -235,7 +235,7 @@ class FlatArguments:
             " Only for linear schedulers, currently."
         },
     )
-    
+
     weight_decay: float = field(default=0.0, metadata={"help": "Weight decay for AdamW if we apply some."})
     timeout: int = field(
         default=1800,
@@ -291,7 +291,7 @@ class FlatArguments:
     load_balancing_weight: float = field(
         default=0.5, metadata={"help": "Weight for load balancing loss if applicable."}
     )
-    
+
     # Experiment tracking
     with_tracking: bool = False
     """If toggled, this experiment will be tracked with Weights and Biases"""
@@ -338,7 +338,7 @@ class FlatArguments:
             "help": "Whether to clean up all previous checkpoints at the end of the run.",
         },
     )
-    
+
     add_seed_and_date_to_exp_name: bool = True
     additional_model_arguments: Optional[Union[dict, str]] = field(
         default_factory=dict,
@@ -812,6 +812,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     # Shift so that tokens < n predict n
                     shift_logits = logits[..., :-1, :].contiguous()
                     shift_labels = labels[..., 1:].contiguous()
+                    # Release logits to avoid memory leak
+                    del logits
 
                     # Flatten the tokens
                     loss_fct = torch.nn.CrossEntropyLoss(reduction="sum")
@@ -820,9 +822,13 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                     # Enable model parallelism
                     shift_labels = shift_labels.to(shift_logits.device)
                     loss = loss_fct(shift_logits, shift_labels)
+                    # Release shift_logits to avoid memory leak
+                    del shift_logits
                     if args.load_balancing_loss:
                         aux_loss = args.load_balancing_weight * outputs.aux_loss
                         loss += aux_loss
+                del outputs
+
                 # We keep track of the loss at each logged step
                 total_loss += loss.detach().float()
                 accelerator.backward(loss)
