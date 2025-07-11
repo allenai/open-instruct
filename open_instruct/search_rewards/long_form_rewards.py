@@ -82,6 +82,7 @@ def compute_paper_reward(response: str, test_case: Dict[str, Any]) -> Dict[str, 
 
         result["scoring_results"] = scoring_results
         result["reward"] = scoring_results["score"]  # Use the overall score as reward
+        result["reward"] = scoring_results["ann_score"]  # TODO: remove this.
         # add the breakdowns to the log values.
         result["log_values"].update(scoring_results)
 
