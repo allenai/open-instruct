@@ -706,6 +706,7 @@ def print_summary(
     print("-" * 60)
     print("MODEL SPECIFICATIONS:")
     print(f"Model FLOPs per token: {model_usage.flops_per_token / 1e9:.2f} GFLOPs")
+    print(f"Model bytes per token: {model_usage.bytes_per_token / 1e9:.2f} TB/s")
 
     # Bottleneck analysis
     print("-" * 60)
