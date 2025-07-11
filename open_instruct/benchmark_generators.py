@@ -11,7 +11,6 @@ import collections
 import csv
 import dataclasses
 import gc
-import inspect
 import json
 import logging
 import queue
@@ -147,7 +146,7 @@ def free_all_gpu_memory(device: int | str = 0) -> None:
     logger.info(f"[GPU {dev.index}] {free / gib:.2f} GiB free of {total / gib:.2f} GiB after cleanup")
 
 
-def calculate_model_usage_per_token(model_path: str, sequence_length: int) -> int:
+def calculate_model_usage_per_token(model_path: str) -> int:
     """
     Calculate actual FLOPs per token for a transformer model using torch FlopCounterMode.
 
@@ -179,18 +178,6 @@ def get_device_name(device_name: str) -> str:
     if len(processed_device_name) != 1 or processed_device_name[0] not in GPU_SPECS:
         raise ValueError(f"Unsupported device name: {device_name}.")
     return processed_device_name[0]
-
-
-def setup_tokenizer(
-    model_config: ModelConfig,
-) -> Tuple[transformers.PreTrainedTokenizer, transformers.PretrainedConfig, float, dict[str, float]]:
-    """Set up the tokenizer and model config."""
-    logger.info(f"Loading tokenizer and config: {model_config.model_name_or_path}")
-    tokenizer = transformers.AutoTokenizer.from_pretrained(model_config.model_name_or_path)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    return tokenizer
 
 
 def setup_dataset(args: Args, tokenizer_config: TokenizerConfig) -> datasets.Dataset:
@@ -578,41 +565,6 @@ def cleanup(vllm_engines: Optional[List[ray.actor.ActorHandle]]) -> None:
         ray.shutdown()
 
 
-def compute_summary_stats(results: List[Dict[str, Union[float, int, List[str], List[int]]]]) -> Dict[str, float]:
-    """
-    Compute summary statistics from benchmark results.
-
-    Returns a dictionary with:
-    - mfu: Average MFU percentage (from last N-1 batches if available)
-    - tokens_per_second: Average new tokens per second (from last N-1 batches if available)
-    - wall_clock_time: Average generation time per batch (from last N-1 batches if available)
-    """
-    if not results:
-        return {"mfu": 0.0, "tokens_per_second": 0.0, "wall_clock_time": 0.0}
-
-    # If we have more than one batch, use last N-1 batches (excluding first batch)
-    if len(results) > 1:
-        last_n_minus_1_results = results[1:]  # Skip first batch
-
-        # Calculate averages from last N-1 batches
-        total_new_tokens = sum(r["total_new_tokens"] for r in last_n_minus_1_results)
-        total_generation_time = sum(r["generation_time"] for r in last_n_minus_1_results)
-
-        avg_new_tokens_per_second = total_new_tokens / total_generation_time if total_generation_time > 0 else 0
-        avg_generation_time = total_generation_time / len(last_n_minus_1_results)
-        avg_mfu = sum(r["mfu_percentage"] for r in last_n_minus_1_results) / len(last_n_minus_1_results)
-    else:
-        # Use the single batch results
-        total_new_tokens = sum(r["total_new_tokens"] for r in results)
-        total_generation_time = sum(r["generation_time"] for r in results)
-
-        avg_new_tokens_per_second = total_new_tokens / total_generation_time if total_generation_time > 0 else 0
-        avg_generation_time = total_generation_time / len(results)
-        avg_mfu = sum(r["mfu_percentage"] for r in results) / len(results)
-
-    return {"mfu": avg_mfu, "tokens_per_second": avg_new_tokens_per_second, "wall_clock_time": avg_generation_time}
-
-
 def main() -> None:
     """Main benchmark function."""
     # Parse arguments using ArgumentParserPlus
@@ -629,9 +581,7 @@ def main() -> None:
     dataset = setup_dataset(args, tokenizer_config)
     vllm_engines = setup_vllm_engines(args, model_config)
 
-    flops_per_token = calculate_model_usage_per_token(
-        model_config.model_name_or_path, sequence_length=args.response_length
-    )
+    flops_per_token = calculate_model_usage_per_token(model_config.model_name_or_path)
     free_all_gpu_memory()
 
     gpu_specs = GPU_SPECS[get_device_name(torch.cuda.get_device_name(0))]
