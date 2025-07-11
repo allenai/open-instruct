@@ -28,7 +28,7 @@ python -m nltk.downloader punkt' \
     --max_token_length 10240 \
     --max_prompt_token_length 2048 \
     --temperature 1.0 \
-    --response_length 64 \
+    --response_length 65536 \
     --vllm_top_p 0.9 \
     --num_unique_prompts_rollout 8 \
     --num_samples_per_prompt_rollout 16 \
