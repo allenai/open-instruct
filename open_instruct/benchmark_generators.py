@@ -352,7 +352,8 @@ def setup_vllm_engines(
     # Initialize Ray
     if ray.is_initialized():
         ray.shutdown()
-    ray.init(num_cpus=4, num_gpus=1, ignore_reinit_error=True)
+    ray.init(num_cpus=4, num_gpus=1, ignore_reinit_error=True,
+             runtime_env={'excludes': ['/benchmark_cache/']})
 
     # Create placement group for multiple engines
     bundles = [{"GPU": 1, "CPU": 1} for _ in range(args.vllm_num_engines)]
@@ -418,7 +419,7 @@ def run_generation_batch(
     param_prompt_Q.put((None, prompts))
 
     # Get results
-    result = inference_results_Q.get(timeout=24000)
+    result = inference_results_Q.get()
 
     end_time = time.time()
     generation_time = end_time - start_time
