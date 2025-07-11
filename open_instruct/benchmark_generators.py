@@ -105,23 +105,21 @@ def save_config(args, tokenizer_config, model_config, timestamp: int):
 
 # For FLOPS, we assume bf16 and ignore sparsity.
 GPU_SPECS = {
-    "a100": {"flops": 312e12, "memory_bandwidth": 1.6e12, "memory_size": 80e9},
-    "b200": {"flops": 2250e12, "memory_bandwidth": 8.0e12, "memory_size": 192e9},
-    "h100": {"flops": 990e12, "memory_bandwidth": 3.35e12, "memory_size": 80e9},
-    "a6000": {"flops": 155e12, "memory_bandwidth": 768e9, "memory_size": 48e9},
-    "l40s": {"flops": 362e12, "memory_bandwidth": 864e9, "memory_size": 48e9},
+    "a100": {"flops": 312e12, "memory_size": 80e9},
+    "b200": {"flops": 2250e12, "memory_size": 192e9},
+    "h100": {"flops": 990e12, "memory_size": 80e9},
+    "a6000": {"flops": 155e12, "memory_size": 48e9},
+    "l40s": {"flops": 362e12, "memory_size": 48e9},
 }
 
 
 @dataclasses.dataclass
 class ModelUsage:
     flops_per_token: int
-    bytes_per_token: int
 
     def __str__(self):
         return (
-            f"ModelUsage(flops_per_token={self.flops_per_token // 1e9} GFLOPs, "
-            f"bytes_per_token={self.bytes_per_token // 1e12} TB/s)"
+            f"ModelUsage(flops_per_token={self.flops_per_token // 1e9} GFLOPs)"
         )
 
 
@@ -177,7 +175,6 @@ def calculate_model_usage_per_token(model_path: str, sequence_length: int) -> Mo
     model = transformers.AutoModelForCausalLM.from_pretrained(
         model_path, torch_dtype=torch.bfloat16, device_map="cuda", trust_remote_code=True
     )
-    bytes_per_token = calculate_memory_bandwidth_bytes_per_token(model, sequence_length)
 
     # Create a single token input
     input_ids = torch.tensor([[1]], device=model.device)  # Single token
@@ -192,7 +189,7 @@ def calculate_model_usage_per_token(model_path: str, sequence_length: int) -> Mo
     # Clean up
     del model, input_ids, flop_counter
 
-    return ModelUsage(flops_per_token=flops, bytes_per_token=bytes_per_token)
+    return ModelUsage(flops_per_token=flops)
 
 
 def get_device_name(device_name: str) -> str:
@@ -216,127 +213,10 @@ def get_gpu_specs() -> float:
     return GPU_SPECS[device_name]
 
 
-def calculate_memory_bandwidth_bytes_per_token(model: torch.nn.Module, seq_len: int = 0) -> float:
-    """
-    Estimate memory‑bandwidth utilisation (MBU) **per GPU** for autoregressive
-    decoding, including KV‑cache traffic.
-
-    Parameters
-    ----------
-    model : torch.nn.Module
-        The shard that lives on this GPU.
-    seq_len : int, default 0
-        Context length that the new token attends to (after the prompt).
-
-    Returns
-    -------
-    ModelUsage object.
-    """
-    # --- infer dtype size ----------------------------------------------------
-    dtype = next(model.parameters()).dtype
-    if dtype in (torch.float16, torch.bfloat16):
-        bytes_per_param = 2
-    elif dtype == torch.float32:
-        bytes_per_param = 4
-    else:
-        bytes_per_param = torch.finfo(dtype).bits // 8
-
-    # --- cheap model introspection ------------------------------------------
-    cfg = getattr(model, "config", None)
-    d_model = getattr(cfg, "hidden_size", None) or getattr(cfg, "n_embd", None) or getattr(cfg, "d_model", None)
-    n_layers = (
-        getattr(cfg, "num_hidden_layers", None) or getattr(cfg, "n_layer", None) or getattr(cfg, "num_layers", None)
-    )
-    if d_model is None or n_layers is None:
-        raise ValueError(
-            "Cannot infer d_model / n_layers – pass a HuggingFace transformers model or supply these numbers manually."
-        )
-
-    # --- bytes that must cross HBM per *generated* token --------------------
-    # 1. stream weights once
-    params_per_gpu = sum(p.numel() for p in model.parameters())
-    weight_bytes = params_per_gpu * bytes_per_param
-
-    # 2. KV‑cache: write new k,v and read existing ones
-    kv_write = 2 * n_layers * d_model * bytes_per_param
-    kv_read = kv_write * seq_len
-    bytes_per_token = weight_bytes + kv_write + kv_read
-
-    return bytes_per_token
 
 
-def calculate_wasted_time_percentage(prompt_lengths_by_batch: List[List[int]]) -> float:
-    """
-    Calculate the average wasted computation time due to variable prompt lengths.
-
-    In vLLM, each batch processes tokens up to the max prompt length in that batch.
-    Shorter prompts effectively waste compute by padding.
-
-    Args:
-        prompt_lengths_by_batch: List of lists, where each inner list contains
-                                prompt lengths for a single batch
-
-    Returns:
-        float: Average wasted time percentage across all batches (0-100)
-    """
-    if not prompt_lengths_by_batch:
-        return 0.0
-
-    wasted_percentages = []
-
-    for batch_prompt_lengths in prompt_lengths_by_batch:
-        if not batch_prompt_lengths:
-            continue
-
-        max_prompt_length = max(batch_prompt_lengths)
-
-        # Calculate wasted compute for this batch
-        # Each prompt wastes (max_length - its_length) tokens worth of compute
-        total_wasted_tokens = sum(max_prompt_length - length for length in batch_prompt_lengths)
-        total_possible_tokens = max_prompt_length * len(batch_prompt_lengths)
-
-        if total_possible_tokens > 0:
-            batch_waste_percentage = (total_wasted_tokens / total_possible_tokens) * 100
-            wasted_percentages.append(batch_waste_percentage)
-
-    # Return average waste across all batches
-    return sum(wasted_percentages) / len(wasted_percentages) if wasted_percentages else 0.0
 
 
-def calculate_response_wasted_computation(masks_by_batch: List[List[List[int]]], max_tokens: int) -> float:
-    """
-    Calculate the average wasted computation due to responses finishing early.
-
-    When responses finish before max_tokens (due to EOS token), the remaining
-    token positions up to max_tokens represent wasted computation.
-
-    Args:
-        masks_by_batch: List of batches, where each batch contains a list of masks
-                       (each mask is a list of 1s and 0s indicating valid tokens)
-        max_tokens: The max_tokens parameter used during generation
-
-    Returns:
-        float: Average wasted computation percentage across all responses (0-100)
-    """
-    if not masks_by_batch or max_tokens <= 0:
-        return 0.0
-
-    total_wasted_tokens = 0
-    total_possible_tokens = 0
-
-    for batch_masks in masks_by_batch:
-        for mask in batch_masks:
-            # Count actual valid tokens (1s in mask)
-            valid_tokens = sum(mask)
-            # Wasted tokens = max_tokens - actual valid tokens
-            wasted_tokens = max(0, max_tokens - valid_tokens)
-
-            total_wasted_tokens += wasted_tokens
-            total_possible_tokens += max_tokens
-
-    if total_possible_tokens > 0:
-        return (total_wasted_tokens / total_possible_tokens) * 100
-    return 0.0
 
 
 def setup_tokenizer(
@@ -482,12 +362,7 @@ def run_generation_batch(
 
     # Calculate MFU
     mfu_percentage = 100 * tokens_per_second * model_usage.flops_per_token / gpu_specs["flops"]
-    memory_bandwidth_usage = tokens_per_second * model_usage.bytes_per_token
-    mbu_percentage = 100 * memory_bandwidth_usage / gpu_specs["memory_bandwidth"]
 
-    logger.info(f"  - Memory bandwidth usage: {memory_bandwidth_usage / 1e9:.2f} GB/s")
-    logger.info(f"  - GPU memory bandwidth: {gpu_specs['memory_bandwidth'] / 1e12:.2f} TB/s")
-    logger.info(f"  - MBU: {mbu_percentage:.2f}%")
 
     return {
         "batch_idx": batch_idx,
@@ -498,8 +373,6 @@ def run_generation_batch(
         "tokens_per_second": tokens_per_second,
         "total_tokens_per_second": total_tokens_per_second,
         "mfu_percentage": mfu_percentage,
-        "mbu_percentage": mbu_percentage,
-        "memory_bandwidth_usage_gb_s": memory_bandwidth_usage / 1e9,
         "avg_new_tokens_per_sample": total_new_tokens / len(response_ids) if response_ids else 0,
         "finish_reasons": finish_reasons,
         "response_lengths": [len(response) for response in response_ids],
@@ -507,30 +380,6 @@ def run_generation_batch(
         "masks": masks,  # Include masks for wasted computation calculation
         "max_tokens": args.response_length,  # Include max_tokens setting
     }
-
-
-def print_free_gpu_memory(device: int | str = 0, index: str = "") -> None:
-    """
-    Show the amount of free and total memory on a CUDA device.
-
-    Parameters
-    ----------
-    device : int | str, default 0
-        GPU index (0, 1, …) or explicit name like "cuda:2".
-    """
-    dev = torch.device(device if isinstance(device, str) else f"cuda:{device}")
-
-    # Make sure all queued kernels finish so the numbers are up-to-date
-    torch.cuda.synchronize(dev)
-
-    free_bytes, total_bytes = torch.cuda.mem_get_info(dev)  # PyTorch ≥ 1.9
-    gib = 1024**3  # bytes → GiB
-
-    logger.warning(
-        f"{index} [GPU {dev.index}] "
-        f"{free_bytes / gib:.2f} GiB free / {total_bytes / gib:.2f} GiB total "
-        f"({(free_bytes / total_bytes) * 100:.1f}% free)"
-    )
 
 
 def run_benchmark(
@@ -558,7 +407,6 @@ def run_benchmark(
     )
 
     eval_generation_config = vllm.SamplingParams(temperature=0.0, max_tokens=args.response_length, n=1)
-    print_free_gpu_memory(index="before thread start")
 
     # Start persistent vLLM generation thread
     def wrapped_vllm_generate_thread() -> None:
@@ -606,7 +454,6 @@ def run_benchmark(
                 f"Batch {batch_idx + 1} completed: "
                 f"{batch_result['tokens_per_second']:.2f} new tokens/sec, "
                 f"MFU: {batch_result['mfu_percentage']:.2f}%, "
-                f"MBU: {batch_result['mbu_percentage']:.2f}%, "
                 f"{batch_result['generation_time']:.2f}s"
             )
         else:
@@ -623,12 +470,8 @@ def run_benchmark(
     if thread.is_alive():
         logger.warning("Thread did not shutdown gracefully")
 
-    # Calculate summary statistics
-    if all_results:
-        print_summary(all_results, total_time, args, model_usage, gpu_specs)
-    else:
-        logger.error("No successful batches completed")
-
+    print_summary(all_results, total_time, args, model_usage, gpu_specs)
+    
     return all_results
 
 
@@ -662,9 +505,8 @@ def print_summary(
     avg_total_tokens_per_second = total_tokens / total_generation_time if total_generation_time > 0 else 0
     avg_generation_time = total_generation_time / len(results)
 
-    # Calculate average MFU and MBU
+    # Calculate average MFU
     avg_mfu = sum(r["mfu_percentage"] for r in results) / len(results) if results else 0
-    avg_mbu = sum(r["mbu_percentage"] for r in results) / len(results) if results else 0
 
     throughput_samples_per_second = total_samples / total_time
 
@@ -684,27 +526,13 @@ def print_summary(
         )
         avg_generation_time_last_n_minus_1 = last_n_minus_1_generation_time / len(last_n_minus_1_results)
         avg_mfu_last_n_minus_1 = sum(r["mfu_percentage"] for r in last_n_minus_1_results) / len(last_n_minus_1_results)
-        avg_mbu_last_n_minus_1 = sum(r["mbu_percentage"] for r in last_n_minus_1_results) / len(last_n_minus_1_results)
 
-        # Calculate % wasted time due to variable prompt lengths
-        # Collect prompt lengths by batch for the last N-1 batches
-        prompt_lengths_by_batch = [r["prompt_lengths"] for r in last_n_minus_1_results]
-        prompt_wasted_time_percentage = calculate_wasted_time_percentage(prompt_lengths_by_batch)
-
-        # Calculate % wasted computation due to responses finishing early
-        # Collect masks by batch for the last N-1 batches
-        masks_by_batch = [r["masks"] for r in last_n_minus_1_results]
-        max_tokens = last_n_minus_1_results[0]["max_tokens"] if last_n_minus_1_results else args.response_length
-        response_wasted_computation_percentage = calculate_response_wasted_computation(masks_by_batch, max_tokens)
     else:
         # If only one batch, use the same metrics
         avg_new_tokens_per_second_last_n_minus_1 = avg_new_tokens_per_second
         avg_total_tokens_per_second_last_n_minus_1 = avg_total_tokens_per_second
         avg_generation_time_last_n_minus_1 = avg_generation_time
         avg_mfu_last_n_minus_1 = avg_mfu
-        avg_mbu_last_n_minus_1 = avg_mbu
-        prompt_wasted_time_percentage = 0
-        response_wasted_computation_percentage = 0
 
     print("\n" + "=" * 60)
     print("BENCHMARK SUMMARY")
@@ -728,17 +556,13 @@ def print_summary(
         print(f"Average new tokens/second: {avg_new_tokens_per_second_last_n_minus_1:.2f}")
         print(f"Average total tokens/second: {avg_total_tokens_per_second_last_n_minus_1:.2f}")
         print(f"Average MFU: {avg_mfu_last_n_minus_1:.2f}%")
-        print(f"Average MBU: {avg_mbu_last_n_minus_1:.2f}%")
         print(f"Average generation time per batch: {avg_generation_time_last_n_minus_1:.2f}s")
-        print(f"Wasted time (variable prompt lengths): {prompt_wasted_time_percentage:.2f}%")
-        print(f"Wasted computation (early response termination): {response_wasted_computation_percentage:.2f}%")
         print(f"Average new tokens per sample: {last_n_minus_1_new_tokens / last_n_minus_1_samples:.2f}")
     else:
         print("RESULTS:")
         print(f"Average new tokens/second: {avg_new_tokens_per_second:.2f}")
         print(f"Average total tokens/second: {avg_total_tokens_per_second:.2f}")
         print(f"Average MFU: {avg_mfu:.2f}%")
-        print(f"Average MBU: {avg_mbu:.2f}%")
         print(f"Average generation time per batch: {avg_generation_time:.2f}s")
         print(f"Throughput (samples/second): {throughput_samples_per_second:.2f}")
         print(f"Average new tokens per sample: {total_new_tokens / total_samples:.2f}")
@@ -746,23 +570,11 @@ def print_summary(
     print("-" * 60)
     print("HARDWARE SPECIFICATIONS:")
     print(f"GPU peak FLOPs: {gpu_specs['flops'] / 1e12:.0f} TFLOPs")
-    print(f"GPU memory bandwidth: {gpu_specs['memory_bandwidth'] / 1e12:.2f} TB/s")
     print(f"GPU memory size: {gpu_specs['memory_size'] / 1e9:.0f} GB")
     print("-" * 60)
     print("MODEL SPECIFICATIONS:")
     print(f"Model FLOPs per token: {model_usage.flops_per_token / 1e9:.2f} GFLOPs")
-    print(f"Model bytes per token: {model_usage.bytes_per_token / 1e9:.2f} TB/s")
 
-    # Bottleneck analysis
-    print("-" * 60)
-    print("BOTTLENECK ANALYSIS:")
-    bottleneck_mfu = avg_mfu_last_n_minus_1 if len(results) > 1 else avg_mfu
-    bottleneck_mbu = avg_mbu_last_n_minus_1 if len(results) > 1 else avg_mbu
-
-    if bottleneck_mfu < bottleneck_mbu:
-        print(f"System is COMPUTE BOUND (MFU: {bottleneck_mfu:.1f}% < MBU: {bottleneck_mbu:.1f}%)")
-    else:
-        print(f"System is MEMORY BANDWIDTH BOUND (MBU: {bottleneck_mbu:.1f}% < MFU: {bottleneck_mfu:.1f}%)")
 
     # Print completion length statistics
     if all_response_lengths:
@@ -821,10 +633,9 @@ def compute_summary_stats(results: List[Dict[str, Union[float, int, List[str], L
     - mfu: Average MFU percentage (from last N-1 batches if available)
     - tokens_per_second: Average new tokens per second (from last N-1 batches if available)
     - wall_clock_time: Average generation time per batch (from last N-1 batches if available)
-    - mbu: Average MBU percentage (from last N-1 batches if available)
     """
     if not results:
-        return {"mfu": 0.0, "tokens_per_second": 0.0, "wall_clock_time": 0.0, "mbu": 0.0}
+        return {"mfu": 0.0, "tokens_per_second": 0.0, "wall_clock_time": 0.0}
 
     # If we have more than one batch, use last N-1 batches (excluding first batch)
     if len(results) > 1:
@@ -837,7 +648,6 @@ def compute_summary_stats(results: List[Dict[str, Union[float, int, List[str], L
         avg_new_tokens_per_second = total_new_tokens / total_generation_time if total_generation_time > 0 else 0
         avg_generation_time = total_generation_time / len(last_n_minus_1_results)
         avg_mfu = sum(r["mfu_percentage"] for r in last_n_minus_1_results) / len(last_n_minus_1_results)
-        avg_mbu = sum(r["mbu_percentage"] for r in last_n_minus_1_results) / len(last_n_minus_1_results)
     else:
         # Use the single batch results
         total_new_tokens = sum(r["total_new_tokens"] for r in results)
@@ -846,13 +656,11 @@ def compute_summary_stats(results: List[Dict[str, Union[float, int, List[str], L
         avg_new_tokens_per_second = total_new_tokens / total_generation_time if total_generation_time > 0 else 0
         avg_generation_time = total_generation_time / len(results)
         avg_mfu = sum(r["mfu_percentage"] for r in results) / len(results)
-        avg_mbu = sum(r["mbu_percentage"] for r in results) / len(results)
 
     return {
         "mfu": avg_mfu,
         "tokens_per_second": avg_new_tokens_per_second,
         "wall_clock_time": avg_generation_time,
-        "mbu": avg_mbu,
     }
 
 
@@ -869,20 +677,15 @@ def main() -> None:
     # Ensure data directory exists
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    print_free_gpu_memory(index="before dataset")
-
     dataset = setup_dataset(args, tokenizer_config)
     vllm_engines = setup_vllm_engines(args, model_config)
 
-    print_free_gpu_memory(index="before model usage")
     model_usage = calculate_model_usage_per_token(
         model_config.model_name_or_path, sequence_length=args.response_length
     )
     free_all_gpu_memory()
     
-    print_free_gpu_memory(index="after model usage")
     gpu_specs = get_gpu_specs()
-    print_free_gpu_memory(index="before run benchmark")
 
     # Run benchmark and get results
     results = run_benchmark(dataset, vllm_engines, args, model_usage, gpu_specs)
