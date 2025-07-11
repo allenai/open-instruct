@@ -107,6 +107,7 @@ def _get_vllm_logprobs(model_name: str, prompt: str) -> Dict[str, Union[List[str
         enforce_eager=True,  # Disable CUDA graph for consistency
         max_model_len=1024,
         dtype=DTYPE,
+        disable_cascade_attn=True,
     )
     
     sampling_params = vllm.SamplingParams(
