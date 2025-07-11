@@ -273,6 +273,8 @@ class Args:
     """whether to apply verifiable reward"""
     verification_reward: float = 10.0
     """the reward value for verifiable responses"""
+    remap_verifier: str = None
+    """Remap verifier like string_f1=general-quality_ref. Currently can only remap once."""
 
     # -- llm verifiers reward
     llm_judge_model: str = "azure/gpt-4o-mini-standard"
