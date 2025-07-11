@@ -301,21 +301,6 @@ def calculate_memory_bandwidth_usage(
     return total_bandwidth
 
 
-def calculate_mbu(memory_bandwidth_usage: float, gpu_memory_bandwidth: float) -> float:
-    """
-    Calculate Memory Bandwidth Utilization (MBU).
-
-    Args:
-        memory_bandwidth_usage: Actual memory bandwidth usage in bytes/second
-        gpu_memory_bandwidth: Theoretical peak memory bandwidth in bytes/second
-
-    Returns:
-        float: MBU as a percentage (0-100)
-    """
-    mbu_percentage = (memory_bandwidth_usage / gpu_memory_bandwidth) * 100
-    return mbu_percentage
-
-
 def estimate_model_size_bytes(model_config: transformers.PretrainedConfig, dtype_bytes: int = 2) -> float:
     """
     Estimate model size in bytes based on config.
@@ -649,7 +634,7 @@ def run_generation_batch(
     memory_bandwidth_usage = calculate_memory_bandwidth_usage(
         tokens_per_second, kv_cache_per_token, model_size_bytes, avg_sequence_length, actual_batch_size
     )
-    mbu_percentage = calculate_mbu(memory_bandwidth_usage, gpu_memory_bandwidth)
+    mbu_percentage = memory_bandwidth_usage / gpu_memory_bandwidth * 100
 
     logger.info(f"  - Memory bandwidth usage: {memory_bandwidth_usage / 1e9:.2f} GB/s")
     logger.info(f"  - GPU memory bandwidth: {gpu_memory_bandwidth / 1e12:.2f} TB/s")
