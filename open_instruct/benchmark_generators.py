@@ -41,9 +41,9 @@ logger = logging.getLogger(__name__)
 
 # Determine data directory
 if Path("/weka").exists():
-    DATA_DIR = Path("/weka") / "finbarrt"
+    DATA_DIR = Path("/weka") / "finbarrt" / "open_instruct_generators_benchmark"
 else:
-    DATA_DIR = Path("/tmp")
+    DATA_DIR = Path("/tmp") / "open_instruct_generators_benchmark"
 
 
 def save_completion_lengths(batch_results: List[Dict], timestamp: int):
@@ -877,7 +877,9 @@ def print_summary(
     print(f"Model: {args.dataset_mixer_list[0] if args.dataset_mixer_list else 'Unknown'}")
     print(f"Total batches: {len(results)}")
     print(f"Total samples: {total_samples}")
-    print(f"Batch size: {args.num_unique_prompts_rollout}")
+    print(f"Batch size: {args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout}")
+    print(f"Unique prompts per batch: {args.num_unique_prompts_rollout}")
+    print(f"Num rollouts: {args.num_unique_prompts_rollout}")
     print(f"Max tokens: {args.response_length}")
     print(f"Temperature: {args.temperature}")
     print("-" * 60)
