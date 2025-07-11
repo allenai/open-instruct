@@ -10,6 +10,8 @@ performance.
 import collections
 import csv
 import dataclasses
+import gc
+import inspect
 import json
 import logging
 import queue
@@ -123,6 +125,45 @@ class ModelUsage:
         )
 
 
+def free_all_gpu_memory(device: int | str = 0) -> None:
+    """
+    Aggressively free GPU memory used by PyTorch.
+
+    What it does
+    ------------
+    1. Runs Python's garbage collector to drop un-referenced tensors.
+    2. Calls torch.cuda.empty_cache() to let CUDA release cached blocks
+       back to the driver.
+    3. Calls torch.cuda.ipc_collect() to close any shared-memory handles
+       created by multiprocessing.
+    4. (Optional) Resets PyTorch's memory-stats counters so you start
+       with a clean slate for new measurements.
+
+    Parameters
+    ----------
+    device : int | str, default 0
+        GPU index or explicit device string like "cuda:1".
+    """
+    dev = torch.device(device if isinstance(device, str) else f"cuda:{device}")
+
+    # 1. Clear Python references & collect garbage
+    gc.collect()
+
+    # 2. Synchronize to make sure all kernels are done
+    torch.cuda.synchronize(dev)
+
+    # 3. Release cached blocks held by the CUDA caching allocator
+    torch.cuda.empty_cache()
+
+    # 4. Destroy any lingering CUDA IPC shared-memory handles
+    torch.cuda.ipc_collect()
+
+    # Optional: print the end result
+    free, total = torch.cuda.mem_get_info(dev)
+    gib = 1024**3
+    logger.info(f"[GPU {dev.index}] {free / gib:.2f} GiB free of {total / gib:.2f} GiB after cleanup")
+
+
 def calculate_model_usage_per_token(model_path: str, sequence_length: int) -> ModelUsage:
     """
     Calculate actual FLOPs per token for a transformer model using torch FlopCounterMode.
@@ -134,7 +175,7 @@ def calculate_model_usage_per_token(model_path: str, sequence_length: int) -> Mo
         ModelUsage object.
     """
     model = transformers.AutoModelForCausalLM.from_pretrained(
-        model_path, torch_dtype=torch.bfloat16, device_map="auto", trust_remote_code=True
+        model_path, torch_dtype=torch.bfloat16, device_map="cuda", trust_remote_code=True
     )
     bytes_per_token = calculate_memory_bandwidth_bytes_per_token(model, sequence_length)
 
@@ -149,8 +190,7 @@ def calculate_model_usage_per_token(model_path: str, sequence_length: int) -> Mo
     flops = flop_counter.get_total_flops()
 
     # Clean up
-    del model
-    torch.cuda.empty_cache()
+    del model, input_ids, flop_counter
 
     return ModelUsage(flops_per_token=flops, bytes_per_token=bytes_per_token)
 
@@ -352,8 +392,7 @@ def setup_vllm_engines(
     # Initialize Ray
     if ray.is_initialized():
         ray.shutdown()
-    ray.init(num_cpus=4, num_gpus=1, ignore_reinit_error=True,
-             runtime_env={'excludes': ['/benchmark_cache/']})
+    ray.init(num_cpus=4, num_gpus=1, ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"]})
 
     # Create placement group for multiple engines
     bundles = [{"GPU": 1, "CPU": 1} for _ in range(args.vllm_num_engines)]
@@ -470,6 +509,30 @@ def run_generation_batch(
     }
 
 
+def print_free_gpu_memory(device: int | str = 0, index: str = "") -> None:
+    """
+    Show the amount of free and total memory on a CUDA device.
+
+    Parameters
+    ----------
+    device : int | str, default 0
+        GPU index (0, 1, …) or explicit name like "cuda:2".
+    """
+    dev = torch.device(device if isinstance(device, str) else f"cuda:{device}")
+
+    # Make sure all queued kernels finish so the numbers are up-to-date
+    torch.cuda.synchronize(dev)
+
+    free_bytes, total_bytes = torch.cuda.mem_get_info(dev)  # PyTorch ≥ 1.9
+    gib = 1024**3  # bytes → GiB
+
+    logger.warning(
+        f"{index} [GPU {dev.index}] "
+        f"{free_bytes / gib:.2f} GiB free / {total_bytes / gib:.2f} GiB total "
+        f"({(free_bytes / total_bytes) * 100:.1f}% free)"
+    )
+
+
 def run_benchmark(
     dataset: datasets.Dataset,
     vllm_engines: List[ray.actor.ActorHandle],
@@ -495,6 +558,7 @@ def run_benchmark(
     )
 
     eval_generation_config = vllm.SamplingParams(temperature=0.0, max_tokens=args.response_length, n=1)
+    print_free_gpu_memory(index="before thread start")
 
     # Start persistent vLLM generation thread
     def wrapped_vllm_generate_thread() -> None:
@@ -805,22 +869,27 @@ def main() -> None:
     # Ensure data directory exists
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Save config first
-    save_config(args, tokenizer_config, model_config, timestamp)
+    print_free_gpu_memory(index="before dataset")
 
     dataset = setup_dataset(args, tokenizer_config)
     vllm_engines = setup_vllm_engines(args, model_config)
 
+    print_free_gpu_memory(index="before model usage")
     model_usage = calculate_model_usage_per_token(
         model_config.model_name_or_path, sequence_length=args.response_length
     )
+    free_all_gpu_memory()
+    
+    print_free_gpu_memory(index="after model usage")
     gpu_specs = get_gpu_specs()
+    print_free_gpu_memory(index="before run benchmark")
 
     # Run benchmark and get results
     results = run_benchmark(dataset, vllm_engines, args, model_usage, gpu_specs)
 
     # Save completion lengths
     if results:
+        save_config(args, tokenizer_config, model_config, timestamp)
         save_completion_lengths(results, timestamp)
 
     cleanup(vllm_engines)
