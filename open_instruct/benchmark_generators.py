@@ -33,7 +33,6 @@ from open_instruct.grpo_fast import Args
 from open_instruct.model_utils import ModelConfig
 from open_instruct.utils import ArgumentParserPlus
 
-
 # For FLOPS, we assume bf16 and ignore sparsity.
 GPU_SPECS = {
     "a100": {"flops": 312e12, "memory_size": 80e9},
@@ -335,7 +334,6 @@ def run_benchmark(
     vllm_engines: List[ray.actor.ActorHandle],
     args: Args,
     flops_per_token: int,
-    gpu_specs: dict[str, float],
     num_batches: int = 5,
 ) -> List[Dict[str, Union[float, int, List[str], List[int]]]]:
     """Run the full benchmark."""
@@ -380,7 +378,7 @@ def run_benchmark(
 
     all_results = []
     total_start_time = time.time()
-
+    gpu_specs = GPU_SPECS[get_device_name(torch.cuda.get_device_name(0))]
     for batch_idx in range(num_batches):
         logger.info(f"Processing batch {batch_idx + 1}/{num_batches}")
 
@@ -412,8 +410,7 @@ def run_benchmark(
         logger.warning("Thread did not shutdown gracefully")
 
     print_summary(all_results, total_time, args, flops_per_token, gpu_specs)
-    save_config(args, tokenizer_config, model_config, timestamp)
-    save_completion_lengths(results, timestamp)
+    return all_results
 
 
 def print_summary(
@@ -572,9 +569,6 @@ def main() -> None:
 
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
 
-    # Generate timestamp for this run
-    timestamp = int(time.time())
-
     # Ensure data directory exists
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -584,10 +578,12 @@ def main() -> None:
     flops_per_token = calculate_model_usage_per_token(model_config.model_name_or_path)
     free_all_gpu_memory()
 
-    gpu_specs = GPU_SPECS[get_device_name(torch.cuda.get_device_name(0))]
+    results = run_benchmark(dataset, vllm_engines, args, flops_per_token)
 
-    # Run benchmark and get results
-    run_benchmark(dataset, vllm_engines, args, flops_per_token, gpu_specs)
+    # Create the timestamp here so we use it for both filenames.
+    timestamp = int(time.time())
+    save_config(args, tokenizer_config, model_config, timestamp)
+    save_completion_lengths(results, timestamp)
 
     cleanup(vllm_engines)
 
