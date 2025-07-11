@@ -163,7 +163,7 @@ def calculate_model_flops_per_token(model_config: transformers.PretrainedConfig,
 
 
 def get_device_name(device_name: str) -> str:
-    logging.debug(f"Original device name: {device_name}")
+    logging.info(f"Original device name: {device_name}")
     return device_name.lower().split(" ")[-1].replace(" ", "").replace("-", "")
 
 
