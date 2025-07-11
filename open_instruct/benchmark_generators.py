@@ -12,7 +12,6 @@ import csv
 import dataclasses
 import json
 import logging
-import os
 import queue
 import threading
 import time
@@ -622,7 +621,7 @@ def run_generation_batch(
     avg_sequence_length = avg_prompt_length + avg_response_length
 
     # Log intermediate values for debugging
-    logger.info(f"MBU Calculation Details:")
+    logger.info("MBU Calculation Details:")
     logger.info(f"  - Tokens per second: {tokens_per_second:.2f}")
     logger.info(f"  - KV cache per token: {kv_cache_per_token / 1024:.2f} KB")
     logger.info(f"  - Model size: {model_size_bytes / 1e9:.2f} GB")
