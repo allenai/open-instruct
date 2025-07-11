@@ -163,8 +163,10 @@ def calculate_model_usage_per_token(
 
 def get_device_name(device_name: str) -> str:
     logging.info(f"Original device name: {device_name}")
-    processed_device_name = [val for val in device_name.lower().split(" ") if val not in ["nvidia", "80gb", "hbm3"]]
-    if len(processed_device_name) != 1:
+    processed_device_name = [
+        val for val in device_name.lower().split(" ") if val not in ["nvidia", "80gb", "hbm3", "rtx"]
+    ]
+    if len(processed_device_name) != 1 or processed_device_name[0] not in GPU_SPECS:
         raise ValueError(f"Unsupported device name: {device_name}.")
     return processed_device_name[0]
 

@@ -4,7 +4,9 @@ from open_instruct import benchmark_generators
 
 
 class TestBenchmark(unittest.TestCase):
-    @parameterized.parameterized.expand([("NVIDIA H100 80GB HBM3", "h100"), ("NVIDIA L40S", "l40s")])
+    @parameterized.parameterized.expand(
+        [("NVIDIA H100 80GB HBM3", "h100"), ("NVIDIA L40S", "l40s"), ("NVIDIA RTX A6000", "a6000")]
+    )
     def test_get_device_name(self, device_name, expected):
         result = benchmark_generators.get_device_name(device_name)
         self.assertEqual(result, expected)
