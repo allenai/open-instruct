@@ -101,48 +101,42 @@ def save_config(args, tokenizer_config, model_config, timestamp: int):
     logger.info(f"Saved config to {config_path}")
 
 
-# Peak FLOPs for common GPUs (bfloat16/float16)
-GPU_PEAK_FLOPS = {
-    "a100": 312e12,  # 312 TFLOPs for bf16
-    "b200": 2250e12,  # 2250 TFLOPS for bf16.
-    "h100": 990e12,  # 990 TFLOPs for bf16
-    "a6000": 155e12,  # 155 TFLOPS for bf16
-    "l40s": 362e12,
-}
-
-# Memory bandwidth for common GPUs (bytes/second)
-GPU_MEMORY_BANDWIDTH = {
-    "a100": 1.6e12,  # 1.6 TB/s for A100 40GB/80GB
-    "b200": 8.0e12,  # 8.0 TB/s for B200
-    "h100": 3.35e12,  # 3.35 TB/s for H100
-    "a6000": 768e9,  # 768 GB/s for A6000
-    "l40s": 864e9,  # 864 GB/s for L40S
-}
-
-# GPU memory sizes (bytes)
-GPU_MEMORY_SIZE = {
-    "a100": 80e9,  # 80GB variant (also 40GB variant exists)
-    "b200": 192e9,  # 192GB for B200
-    "h100": 80e9,  # 80GB for H100
-    "a6000": 48e9,  # 48GB for A6000
-    "l40s": 48e9,  # 48GB for L40S
+# For FLOPS, we assume bf16 and ignore sparsity.
+GPU_SPECS = {
+    "a100": {"flops": 312e12, "memory_bandwidth": 1.6e12, "memory_size": 80e9},
+    "b200": {"flops": 2250e12, "memory_bandwidth": 8.0e12, "memory_size": 192e9},
+    "h100": {"flops": 990e12, "memory_bandwidth": 3.35e12, "memory_size": 80e9},
+    "a6000": {"flops": 155e12, "memory_bandwidth": 768e9, "memory_size": 48e9},
+    "l40s": {"flops": 362e12, "memory_bandwidth": 864e9, "memory_size": 48e9},
 }
 
 
-def calculate_model_flops_per_token(model_config: transformers.PretrainedConfig, model_path: str) -> float:
+@dataclasses.dataclass
+class ModelUsage:
+    flops_per_token: int
+    bytes_per_token: int
+
+    def __str__(self):
+        return (
+            f"ModelUsage(flops_per_token={self.flops_per_token // 1e9} GFLOPs, "
+            f"bytes_per_token={self.bytes_per_token // 1e12} TB/s)"
+        )
+
+
+def calculate_model_usage_per_token(model_path: str, sequence_length: int) -> ModelUsage:
     """
     Calculate actual FLOPs per token for a transformer model using torch FlopCounterMode.
 
     Args:
-        model_config: HuggingFace model config
         model_path: Path to the actual model for precise measurement
 
     Returns:
-        float: FLOPs per token
+        ModelUsage object.
     """
     model = transformers.AutoModelForCausalLM.from_pretrained(
         model_path, torch_dtype=torch.bfloat16, device_map="auto", trust_remote_code=True
     )
+    bytes_per_token = calculate_memory_bandwidth_bytes_per_token(model, sequence_length)
 
     # Create a single token input
     input_ids = torch.tensor([[1]], device=model.device)  # Single token
@@ -158,221 +152,77 @@ def calculate_model_flops_per_token(model_config: transformers.PretrainedConfig,
     del model
     torch.cuda.empty_cache()
 
-    return flops
+    return ModelUsage(flops_per_token=flops, bytes_per_token=bytes_per_token)
 
 
 def get_device_name(device_name: str) -> str:
-    logging.debug(f"Original device name: {device_name}")
-    return device_name.lower().split(" ")[-1].replace(" ", "").replace("-", "")
+    logging.info(f"Original device name: {device_name}")
+    processed_device_name = [
+        val for val in device_name.lower().split(" ") if val not in ["nvidia", "80gb", "hbm3", "rtx"]
+    ]
+    if len(processed_device_name) != 1 or processed_device_name[0] not in GPU_SPECS:
+        raise ValueError(f"Unsupported device name: {device_name}.")
+    return processed_device_name[0]
 
 
-def get_gpu_peak_flops() -> float:
+def get_gpu_specs() -> float:
     """
     Get theoretical peak FLOPs for the current GPU.
 
     Returns:
         float: Peak FLOPs per second
     """
-    if not torch.cuda.is_available():
-        return 0.0
-
-    device_name = torch.cuda.get_device_name(0).lower().replace(" ", "").replace("-", "")
-
     device_name = get_device_name(torch.cuda.get_device_name(0))
-    return GPU_PEAK_FLOPS[device_name]
+    return GPU_SPECS[device_name]
 
 
-def get_gpu_memory_bandwidth() -> float:
+def calculate_memory_bandwidth_bytes_per_token(model: torch.nn.Module, seq_len: int = 0) -> float:
     """
-    Get theoretical memory bandwidth for the current GPU.
+    Estimate memory‑bandwidth utilisation (MBU) **per GPU** for autoregressive
+    decoding, including KV‑cache traffic.
 
-    Returns:
-        float: Memory bandwidth in bytes per second
+    Parameters
+    ----------
+    model : torch.nn.Module
+        The shard that lives on this GPU.
+    seq_len : int, default 0
+        Context length that the new token attends to (after the prompt).
+
+    Returns
+    -------
+    ModelUsage object.
     """
-    if not torch.cuda.is_available():
-        return 0.0
-
-    device_name = get_device_name(torch.cuda.get_device_name(0))
-    return GPU_MEMORY_BANDWIDTH[device_name]
-
-
-def get_gpu_memory_size() -> float:
-    """
-    Get memory size for the current GPU.
-
-    Returns:
-        float: GPU memory in bytes
-    """
-    if not torch.cuda.is_available():
-        return 0.0
-
-    device_name = get_device_name(torch.cuda.get_device_name(0))
-    return GPU_MEMORY_SIZE[device_name]
-
-
-def calculate_mfu(tokens_per_second: float, model_flops_per_token: float, gpu_peak_flops: float) -> float:
-    """
-    Calculate Model FLOPs Utilization (MFU).
-
-    Args:
-        tokens_per_second: Actual token generation rate
-        model_flops_per_token: Theoretical FLOPs per token for the model
-        gpu_peak_flops: Peak FLOPs of the GPU
-
-    Returns:
-        float: MFU as a percentage (0-100)
-    """
-    actual_flops_per_second = tokens_per_second * model_flops_per_token
-    mfu_percentage = (actual_flops_per_second / gpu_peak_flops) * 100
-
-    return mfu_percentage
-
-
-def estimate_kv_cache_memory_per_token(
-    model_config: transformers.PretrainedConfig,
-    dtype_bytes: int = 2,  # 2 bytes for bf16/fp16
-) -> float:
-    """
-    Estimate KV cache memory requirement per token.
-
-    Args:
-        model_config: Model configuration with architecture details
-        dtype_bytes: Bytes per element (2 for bf16/fp16, 4 for fp32)
-
-    Returns:
-        float: KV cache memory in bytes per token
-    """
-    # Get model dimensions
-    hidden_size = model_config.hidden_size
-    num_layers = model_config.num_hidden_layers
-
-    # Handle different attention head configurations
-    if hasattr(model_config, "num_key_value_heads"):
-        # For models with multi-query or grouped-query attention
-        num_kv_heads = model_config.num_key_value_heads
+    # --- infer dtype size ----------------------------------------------------
+    dtype = next(model.parameters()).dtype
+    if dtype in (torch.float16, torch.bfloat16):
+        bytes_per_param = 2
+    elif dtype == torch.float32:
+        bytes_per_param = 4
     else:
-        # Standard multi-head attention
-        num_kv_heads = model_config.num_attention_heads
+        bytes_per_param = torch.finfo(dtype).bits // 8
 
-    # KV cache per token = 2 (K and V) * num_layers * hidden_size * (kv_heads/total_heads) * dtype_bytes
-    # Note: hidden_size is already the full model dimension, we need per-head dimension
-    head_dim = hidden_size // model_config.num_attention_heads
-    kv_cache_per_token = 2 * num_layers * num_kv_heads * head_dim * dtype_bytes
+    # --- cheap model introspection ------------------------------------------
+    cfg = getattr(model, "config", None)
+    d_model = getattr(cfg, "hidden_size", None) or getattr(cfg, "n_embd", None) or getattr(cfg, "d_model", None)
+    n_layers = (
+        getattr(cfg, "num_hidden_layers", None) or getattr(cfg, "n_layer", None) or getattr(cfg, "num_layers", None)
+    )
+    if d_model is None or n_layers is None:
+        raise ValueError(
+            "Cannot infer d_model / n_layers – pass a HuggingFace transformers model or supply these numbers manually."
+        )
 
-    return kv_cache_per_token
+    # --- bytes that must cross HBM per *generated* token --------------------
+    # 1. stream weights once
+    params_per_gpu = sum(p.numel() for p in model.parameters())
+    weight_bytes = params_per_gpu * bytes_per_param
 
+    # 2. KV‑cache: write new k,v and read existing ones
+    kv_write = 2 * n_layers * d_model * bytes_per_param
+    kv_read = kv_write * seq_len
+    bytes_per_token = weight_bytes + kv_write + kv_read
 
-def calculate_memory_bandwidth_usage(
-    tokens_per_second: float,
-    kv_cache_per_token: float,
-    model_size_bytes: float,
-    avg_sequence_length: float,
-    batch_size: int,
-) -> float:
-    """
-    Calculate actual memory bandwidth usage.
-
-    Args:
-        tokens_per_second: Token generation rate
-        kv_cache_per_token: KV cache memory per token in bytes
-        model_size_bytes: Total model size in bytes
-        avg_sequence_length: Average sequence length being processed
-        batch_size: Batch size
-
-    Returns:
-        float: Memory bandwidth usage in bytes per second
-    """
-    # KV cache reads/writes per token generated
-    # For each token: read K,V for all layers, write new K,V
-    kv_bandwidth = tokens_per_second * kv_cache_per_token * 2  # read + write
-
-    # Model weights are read for each forward pass
-    # Each token generation requires a full forward pass
-    weight_bandwidth = model_size_bytes * tokens_per_second / batch_size
-
-    # Additional memory access patterns
-    # Including: attention scores, intermediate activations, layer norms, etc.
-    # Estimated as 4x the KV cache size (more realistic for transformer models)
-    activation_bandwidth = kv_bandwidth * 4
-
-    total_bandwidth = kv_bandwidth + weight_bandwidth + activation_bandwidth
-
-    return total_bandwidth
-
-
-def estimate_model_size_bytes(model_config: transformers.PretrainedConfig, dtype_bytes: int = 2) -> float:
-    """
-    Estimate model size in bytes based on config.
-
-    Args:
-        model_config: Model configuration
-        dtype_bytes: Bytes per parameter (2 for bf16/fp16)
-
-    Returns:
-        float: Estimated model size in bytes
-    """
-    # Rough estimation based on model architecture
-    hidden_size = model_config.hidden_size
-    num_layers = model_config.num_hidden_layers
-    vocab_size = model_config.vocab_size
-
-    # Embedding layers
-    embedding_params = vocab_size * hidden_size * 2  # input and output embeddings
-
-    # Attention layers (Q, K, V, O projections)
-    attention_params = num_layers * 4 * hidden_size * hidden_size
-
-    # MLP layers (typically 4x hidden size for intermediate)
-    intermediate_size = getattr(model_config, "intermediate_size", 4 * hidden_size)
-    mlp_params = num_layers * 2 * hidden_size * intermediate_size
-
-    # Layer norms and other small components (rough estimate)
-    other_params = num_layers * 2 * hidden_size * 2
-
-    total_params = embedding_params + attention_params + mlp_params + other_params
-    total_bytes = total_params * dtype_bytes
-
-    return total_bytes
-
-
-def estimate_max_batch_size(
-    model_config: transformers.PretrainedConfig,
-    max_sequence_length: int,
-    gpu_memory_size: float,
-    gpu_memory_utilization: float = 0.9,
-    dtype_bytes: int = 2,
-) -> int:
-    """
-    Estimate maximum batch size that can fit in GPU memory.
-
-    Args:
-        model_config: Model configuration
-        max_sequence_length: Maximum sequence length
-        gpu_memory_size: Total GPU memory in bytes
-        gpu_memory_utilization: Fraction of GPU memory to use (0-1)
-        dtype_bytes: Bytes per element
-
-    Returns:
-        int: Estimated maximum batch size
-    """
-    # Calculate model size
-    model_size = estimate_model_size_bytes(model_config, dtype_bytes)
-
-    # Calculate KV cache per token
-    kv_per_token = estimate_kv_cache_memory_per_token(model_config, dtype_bytes)
-
-    # Available memory after loading model
-    available_memory = gpu_memory_size * gpu_memory_utilization - model_size
-
-    # Memory per sequence (KV cache for full sequence + activation memory)
-    # Activation memory is roughly 20% of KV cache (empirical estimate)
-    memory_per_sequence = kv_per_token * max_sequence_length * 1.2
-
-    # Maximum batch size
-    max_batch_size = int(available_memory / memory_per_sequence)
-
-    # Ensure at least 1
-    return max(1, max_batch_size)
+    return bytes_per_token
 
 
 def calculate_wasted_time_percentage(prompt_lengths_by_batch: List[List[int]]) -> float:
@@ -451,26 +301,14 @@ def calculate_response_wasted_computation(masks_by_batch: List[List[List[int]]],
 
 def setup_tokenizer(
     model_config: ModelConfig,
-) -> Tuple[transformers.PreTrainedTokenizer, transformers.PretrainedConfig, float, float, float, float]:
+) -> Tuple[transformers.PreTrainedTokenizer, transformers.PretrainedConfig, float, dict[str, float]]:
     """Set up the tokenizer and model config."""
     logger.info(f"Loading tokenizer and config: {model_config.model_name_or_path}")
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_config.model_name_or_path)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Load model config for FLOPs calculation
-    hf_model_config = transformers.AutoConfig.from_pretrained(model_config.model_name_or_path)
-    model_flops_per_token = calculate_model_flops_per_token(hf_model_config, model_config.model_name_or_path)
-    gpu_peak_flops = get_gpu_peak_flops()
-    gpu_memory_bandwidth = get_gpu_memory_bandwidth()
-    gpu_memory_size = get_gpu_memory_size()
-
-    logger.info(f"Model FLOPs per token: {model_flops_per_token / 1e9:.2f} GFLOPs")
-    logger.info(f"GPU peak FLOPs: {gpu_peak_flops / 1e12:.0f} TFLOPs")
-    logger.info(f"GPU memory bandwidth: {gpu_memory_bandwidth / 1e12:.2f} TB/s")
-    logger.info(f"GPU memory size: {gpu_memory_size / 1e9:.0f} GB")
-
-    return tokenizer, hf_model_config, model_flops_per_token, gpu_peak_flops, gpu_memory_bandwidth, gpu_memory_size
+    return tokenizer
 
 
 def setup_dataset(args: Args, tokenizer_config: TokenizerConfig) -> datasets.Dataset:
@@ -566,10 +404,8 @@ def run_generation_batch(
     inference_results_Q: queue.Queue,
     param_prompt_Q: queue.Queue,
     args: Args,
-    model_flops_per_token: float,
-    gpu_peak_flops: float,
-    gpu_memory_bandwidth: float,
-    hf_model_config: transformers.PretrainedConfig,
+    model_usage: ModelUsage,
+    gpu_specs: dict[str, float],
     prompts: List[List[int]],
     batch_idx: int,
 ) -> Dict[str, Union[float, int, List[str], List[int]]]:
@@ -605,38 +441,12 @@ def run_generation_batch(
     total_tokens_per_second = total_tokens_generated / generation_time if generation_time > 0 else 0
 
     # Calculate MFU
-    mfu_percentage = calculate_mfu(tokens_per_second, model_flops_per_token, gpu_peak_flops)
-
-    # Calculate memory bandwidth utilization
-    kv_cache_per_token = estimate_kv_cache_memory_per_token(hf_model_config)
-    model_size_bytes = estimate_model_size_bytes(hf_model_config)
-
-    # Fix: Use actual batch size (unique prompts) not total responses
-    actual_batch_size = len(prompts)  # Number of unique prompts
-
-    # Fix: Calculate average sequence length more accurately
-    # Each prompt generates multiple responses, but they all share the same prompt length
-    avg_prompt_length = sum(len(prompt) for prompt in prompts) / len(prompts)
-    avg_response_length = total_new_tokens / len(response_ids) if response_ids else 0
-    avg_sequence_length = avg_prompt_length + avg_response_length
-
-    # Log intermediate values for debugging
-    logger.info("MBU Calculation Details:")
-    logger.info(f"  - Tokens per second: {tokens_per_second:.2f}")
-    logger.info(f"  - KV cache per token: {kv_cache_per_token / 1024:.2f} KB")
-    logger.info(f"  - Model size: {model_size_bytes / 1e9:.2f} GB")
-    logger.info(f"  - Actual batch size: {actual_batch_size}")
-    logger.info(
-        f"  - Avg sequence length: {avg_sequence_length:.0f} (prompt: {avg_prompt_length:.0f}, response: {avg_response_length:.0f})"
-    )
-
-    memory_bandwidth_usage = calculate_memory_bandwidth_usage(
-        tokens_per_second, kv_cache_per_token, model_size_bytes, avg_sequence_length, actual_batch_size
-    )
-    mbu_percentage = memory_bandwidth_usage / gpu_memory_bandwidth * 100
+    mfu_percentage = 100 * tokens_per_second * model_usage.flops_per_token / gpu_specs["flops"]
+    memory_bandwidth_usage = tokens_per_second * model_usage.bytes_per_token
+    mbu_percentage = 100 * memory_bandwidth_usage / gpu_specs["memory_bandwidth"]
 
     logger.info(f"  - Memory bandwidth usage: {memory_bandwidth_usage / 1e9:.2f} GB/s")
-    logger.info(f"  - GPU memory bandwidth: {gpu_memory_bandwidth / 1e12:.2f} TB/s")
+    logger.info(f"  - GPU memory bandwidth: {gpu_specs['memory_bandwidth'] / 1e12:.2f} TB/s")
     logger.info(f"  - MBU: {mbu_percentage:.2f}%")
 
     return {
@@ -650,7 +460,6 @@ def run_generation_batch(
         "mfu_percentage": mfu_percentage,
         "mbu_percentage": mbu_percentage,
         "memory_bandwidth_usage_gb_s": memory_bandwidth_usage / 1e9,
-        "kv_cache_per_token_bytes": kv_cache_per_token,
         "avg_new_tokens_per_sample": total_new_tokens / len(response_ids) if response_ids else 0,
         "finish_reasons": finish_reasons,
         "response_lengths": [len(response) for response in response_ids],
@@ -664,11 +473,8 @@ def run_benchmark(
     dataset: datasets.Dataset,
     vllm_engines: List[ray.actor.ActorHandle],
     args: Args,
-    hf_model_config: transformers.PretrainedConfig,
-    model_flops_per_token: float,
-    gpu_peak_flops: float,
-    gpu_memory_bandwidth: float,
-    gpu_memory_size: float,
+    model_usage: ModelUsage,
+    gpu_specs: dict[str, float],
     num_batches: int = 5,
 ) -> List[Dict[str, Union[float, int, List[str], List[int]]]]:
     """Run the full benchmark."""
@@ -726,15 +532,7 @@ def run_benchmark(
 
         # Run generation
         batch_result = run_generation_batch(
-            inference_results_Q,
-            param_prompt_Q,
-            args,
-            model_flops_per_token,
-            gpu_peak_flops,
-            gpu_memory_bandwidth,
-            hf_model_config,
-            prompts,
-            batch_idx,
+            inference_results_Q, param_prompt_Q, args, model_usage, gpu_specs, prompts, batch_idx
         )
 
         if "error" not in batch_result:
@@ -762,16 +560,7 @@ def run_benchmark(
 
     # Calculate summary statistics
     if all_results:
-        print_summary(
-            all_results,
-            total_time,
-            args,
-            hf_model_config,
-            model_flops_per_token,
-            gpu_peak_flops,
-            gpu_memory_bandwidth,
-            gpu_memory_size,
-        )
+        print_summary(all_results, total_time, args, model_usage, gpu_specs)
     else:
         logger.error("No successful batches completed")
 
@@ -782,11 +571,8 @@ def print_summary(
     results: List[Dict[str, Union[float, int, List[str], List[int]]]],
     total_time: float,
     args: Args,
-    hf_model_config: transformers.PretrainedConfig,
-    model_flops_per_token: float,
-    gpu_peak_flops: float,
-    gpu_memory_bandwidth: float,
-    gpu_memory_size: float,
+    model_usage: ModelUsage,
+    gpu_specs: dict[str, float],
 ) -> None:
     """Print benchmark summary statistics."""
 
@@ -894,20 +680,13 @@ def print_summary(
 
     print("-" * 60)
     print("HARDWARE SPECIFICATIONS:")
-    print(f"GPU peak FLOPs: {gpu_peak_flops / 1e12:.0f} TFLOPs")
-    print(f"GPU memory bandwidth: {gpu_memory_bandwidth / 1e12:.2f} TB/s")
-    print(f"GPU memory size: {gpu_memory_size / 1e9:.0f} GB")
+    print(f"GPU peak FLOPs: {gpu_specs['flops'] / 1e12:.0f} TFLOPs")
+    print(f"GPU memory bandwidth: {gpu_specs['memory_bandwidth'] / 1e12:.2f} TB/s")
+    print(f"GPU memory size: {gpu_specs['memory_size'] / 1e9:.0f} GB")
     print("-" * 60)
     print("MODEL SPECIFICATIONS:")
-    print(f"Model FLOPs per token: {model_flops_per_token / 1e9:.2f} GFLOPs")
-    print(f"KV cache per token: {estimate_kv_cache_memory_per_token(hf_model_config) / 1024:.2f} KB")
-    print(f"Estimated model size: {estimate_model_size_bytes(hf_model_config) / 1e9:.2f} GB")
-
-    # Calculate and display maximum batch size estimation
-    max_batch_size_est = estimate_max_batch_size(
-        hf_model_config, args.response_length, gpu_memory_size, args.vllm_gpu_memory_utilization
-    )
-    print(f"Estimated max batch size (@ {args.response_length} tokens): {max_batch_size_est}")
+    print(f"Model FLOPs per token: {model_usage.flops_per_token / 1e9:.2f} GFLOPs")
+    print(f"Model bytes per token: {model_usage.bytes_per_token / 1e9:.2f} TB/s")
 
     # Bottleneck analysis
     print("-" * 60)
@@ -915,19 +694,10 @@ def print_summary(
     bottleneck_mfu = avg_mfu_last_n_minus_1 if len(results) > 1 else avg_mfu
     bottleneck_mbu = avg_mbu_last_n_minus_1 if len(results) > 1 else avg_mbu
 
-    if bottleneck_mfu > bottleneck_mbu:
-        print(f"System is COMPUTE BOUND (MFU: {bottleneck_mfu:.1f}% > MBU: {bottleneck_mbu:.1f}%)")
-        print("Suggestions:")
-        print("  - Consider using a GPU with higher FLOPs")
-        print("  - Optimize model architecture or use smaller model")
-        print("  - Enable tensor parallelism if not already used")
+    if bottleneck_mfu < bottleneck_mbu:
+        print(f"System is COMPUTE BOUND (MFU: {bottleneck_mfu:.1f}% < MBU: {bottleneck_mbu:.1f}%)")
     else:
-        print(f"System is MEMORY BANDWIDTH BOUND (MBU: {bottleneck_mbu:.1f}% > MFU: {bottleneck_mfu:.1f}%)")
-        print("Suggestions:")
-        print("  - Consider using a GPU with higher memory bandwidth")
-        print("  - Reduce batch size to fit more in cache")
-        print("  - Use Flash Attention or other memory-efficient attention mechanisms")
-        print("  - Consider quantization to reduce memory bandwidth requirements")
+        print(f"System is MEMORY BANDWIDTH BOUND (MBU: {bottleneck_mbu:.1f}% < MFU: {bottleneck_mfu:.1f}%)")
 
     # Print completion length statistics
     if all_response_lengths:
@@ -1021,114 +791,6 @@ def compute_summary_stats(results: List[Dict[str, Union[float, int, List[str], L
     }
 
 
-def run_benchmark_programmatic(
-    model_name_or_path: str,
-    num_unique_prompts_rollout: int,
-    num_samples_per_prompt_rollout: int,
-    vllm_num_engines: int,
-    response_length: int,
-    **kwargs,
-) -> Dict[str, float]:
-    """
-    Run benchmark programmatically and return summary statistics.
-
-    This is a wrapper function for use by other scripts like benchmark_loop.py.
-
-    Args:
-        model_name_or_path: Model to benchmark
-        num_unique_prompts_rollout: Number of unique prompts per batch
-        num_samples_per_prompt_rollout: Number of samples per prompt
-        vllm_num_engines: Number of vLLM engines
-        response_length: Maximum response length
-        **kwargs: Additional arguments to override defaults
-
-    Returns:
-        Dictionary with mfu, tokens_per_second, wall_clock_time, mbu
-    """
-    # Set up default arguments
-    default_args = {
-        "tokenizer_name_or_path": model_name_or_path,
-        "dataset_mixer_list": [
-            "hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2",
-            "1.0",
-        ],
-        "dataset_mixer_list_splits": ["train"],
-        "max_token_length": 10240,
-        "max_prompt_token_length": 2048,
-        "temperature": 1.0,
-        "vllm_top_p": 0.9,
-        "vllm_tensor_parallel_size": 1,
-        "vllm_gpu_memory_utilization": 0.9,
-        "pack_length": 20480,
-        "chat_template_name": "tulu_thinker",
-        "trust_remote_code": True,
-        "seed": 42,
-        "dataset_local_cache_dir": "benchmark_cache",
-        "dataset_cache_mode": "local",
-        "dataset_transform_fn": ["rlvr_tokenize_v1", "rlvr_filter_v1"],
-    }
-
-    # Update with provided kwargs
-    default_args.update(kwargs)
-
-    # Create dataclass instances
-    args = Args(
-        model_name_or_path=model_name_or_path,
-        tokenizer_name_or_path=default_args["tokenizer_name_or_path"],
-        dataset_mixer_list=default_args["dataset_mixer_list"],
-        dataset_mixer_list_splits=default_args["dataset_mixer_list_splits"],
-        max_token_length=default_args["max_token_length"],
-        max_prompt_token_length=default_args["max_prompt_token_length"],
-        temperature=default_args["temperature"],
-        response_length=response_length,
-        vllm_top_p=default_args["vllm_top_p"],
-        num_unique_prompts_rollout=num_unique_prompts_rollout,
-        num_samples_per_prompt_rollout=num_samples_per_prompt_rollout,
-        vllm_num_engines=vllm_num_engines,
-        vllm_tensor_parallel_size=default_args["vllm_tensor_parallel_size"],
-        vllm_gpu_memory_utilization=default_args["vllm_gpu_memory_utilization"],
-        pack_length=default_args["pack_length"],
-        chat_template_name=default_args["chat_template_name"],
-        trust_remote_code=default_args["trust_remote_code"],
-        seed=default_args["seed"],
-        dataset_local_cache_dir=default_args["dataset_local_cache_dir"],
-        dataset_cache_mode=default_args["dataset_cache_mode"],
-        dataset_skip_cache=False,
-        dataset_transform_fn=default_args["dataset_transform_fn"],
-    )
-
-    tokenizer_config = TokenizerConfig()
-    model_config = ModelConfig(
-        model_name_or_path=model_name_or_path, model_revision=None, trust_remote_code=default_args["trust_remote_code"]
-    )
-
-    # Run the benchmark
-    tokenizer, hf_model_config, model_flops_per_token, gpu_peak_flops, gpu_memory_bandwidth, gpu_memory_size = (
-        setup_tokenizer(model_config)
-    )
-    dataset = setup_dataset(args, tokenizer_config)
-    vllm_engines = setup_vllm_engines(args, model_config)
-
-    try:
-        results = run_benchmark(
-            dataset,
-            vllm_engines,
-            args,
-            hf_model_config,
-            model_flops_per_token,
-            gpu_peak_flops,
-            gpu_memory_bandwidth,
-            gpu_memory_size,
-        )
-
-        # Compute summary statistics
-        summary_stats = compute_summary_stats(results)
-
-        return summary_stats
-    finally:
-        cleanup(vllm_engines)
-
-
 def main() -> None:
     """Main benchmark function."""
     # Parse arguments using ArgumentParserPlus
@@ -1145,23 +807,16 @@ def main() -> None:
     # Save config first
     save_config(args, tokenizer_config, model_config, timestamp)
 
-    tokenizer, hf_model_config, model_flops_per_token, gpu_peak_flops, gpu_memory_bandwidth, gpu_memory_size = (
-        setup_tokenizer(model_config)
-    )
     dataset = setup_dataset(args, tokenizer_config)
     vllm_engines = setup_vllm_engines(args, model_config)
 
-    # Run benchmark and get results
-    results = run_benchmark(
-        dataset,
-        vllm_engines,
-        args,
-        hf_model_config,
-        model_flops_per_token,
-        gpu_peak_flops,
-        gpu_memory_bandwidth,
-        gpu_memory_size,
+    model_usage = calculate_model_usage_per_token(
+        model_config.model_name_or_path, sequence_length=args.response_length
     )
+    gpu_specs = get_gpu_specs()
+
+    # Run benchmark and get results
+    results = run_benchmark(dataset, vllm_engines, args, model_usage, gpu_specs)
 
     # Save completion lengths
     if results:
