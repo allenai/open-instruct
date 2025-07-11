@@ -7,8 +7,9 @@ evals="minerva_math::hamish_zs_reasoning,gsm8k::zs_cot_latex,gsm8k::hamish_zs_re
 # midtraining no reasoning
 # model_name_or_path="/weka/oe-adapt-default/michaeln/olmo3/anneal-round1-100B-olmo3_7b_no-reasoning-anneal-3c193128_step47684"
 # midtraining with reasoning
-model_name_or_path="weka/oe-adapt-default/michaeln/olmo3/anneal-round1-100B-olmo3_7b_with-reasoning-anneal-9d6f76b0_step47684"
+model_name_or_path="/weka/oe-adapt-default/michaeln/olmo3/anneal-round1-100B-olmo3_7b_with-reasoning-anneal-9d6f76b0_step47684"
 python mason.py \
+    --task_name ${exp_name} \
     --cluster ai2/jupiter-cirrascale-2 \
     --workspace ai2/tulu-thinker \
     --priority high \
@@ -46,8 +47,8 @@ python open_instruct/grpo_fast.py \
     --stop_strings "</answer>" \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 131072 \
-    --deepspeed_stage 2 \
+    --total_episodes 51200 \
+    --deepspeed_stage 3 \
     --num_learners_per_node 6 \
     --vllm_num_engines 1 \
     --vllm_tensor_parallel_size 2 \
@@ -55,12 +56,13 @@ python open_instruct/grpo_fast.py \
     --apply_verifiable_reward true \
     --seed 1 \
     --num_evals 1 \
-    --save_freq 32 \
+    --save_freq 50 \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \
-    --clip_higher 0.28 \
+    --clip_higher 0.272 \
     --mask_truncated_completions True \
     --oe_eval_max_length 8192 \
     --try_launch_beaker_eval_jobs_on_weka True \
-    --oe_eval_tasks ${evals}
+    --oe_eval_tasks ${evals} \
+    --oe_eval_beaker_image oe-eval-beaker/oe_eval_olmo3_auto
