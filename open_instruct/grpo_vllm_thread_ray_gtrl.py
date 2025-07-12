@@ -336,6 +336,8 @@ class Args:
     """the model to use for the llm judge"""
     llm_judge_max_tokens: int = 2048
     """the max tokens to use for the llm judge"""
+    llm_judge_max_context_length: int = 8192
+    """the max context length to use for the llm judge"""
     llm_judge_temperature: float = 1.0
     """the temperature to use for the llm judge"""
     llm_judge_timeout: int = 60
@@ -1765,7 +1767,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
                 "model_type": "sft",
                 "datasets": dataset_list,
                 "base_model": model_config.model_name_or_path,
-                "wandb_path": wandb.run.get_url(),
+                "wandb_path": wandb.run.get_url() if args.with_tracking else None,
                 "beaker_experiment": beaker_config.beaker_experiment_url,
                 "beaker_datasets": beaker_config.beaker_dataset_id_urls,
             }

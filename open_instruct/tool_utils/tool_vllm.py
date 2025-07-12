@@ -11,7 +11,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor  # add import for async execution
 from dataclasses import dataclass
-from typing import Optional, Union, Callable, Any, List
+from typing import Any, Callable, Optional, Union
 
 import requests
 from rich.console import Console
@@ -147,8 +147,7 @@ class ToolUseLLM(LLM):
     def _validate_and_add_requests(
         self,
         prompts: Union[PromptType, Sequence[PromptType]],
-        params: Union[SamplingParams, Sequence[SamplingParams], PoolingParams,
-                      Sequence[PoolingParams]],
+        params: Union[SamplingParams, Sequence[SamplingParams], PoolingParams, Sequence[PoolingParams]],
         *,
         use_tqdm: Union[bool, Callable[..., tqdm]] = True,
         lora_request: Optional[Union[Sequence[LoRARequest], LoRARequest]],
@@ -172,14 +171,11 @@ class ToolUseLLM(LLM):
 
         num_requests = len(prompts)
         if isinstance(params, Sequence) and len(params) != num_requests:
-            raise ValueError("The lengths of prompts and params "
-                             "must be the same.")
-        if isinstance(lora_request,
-                      Sequence) and len(lora_request) != num_requests:
-            raise ValueError("The lengths of prompts and lora_request "
-                             "must be the same.")
+            raise ValueError("The lengths of prompts and params must be the same.")
+        if isinstance(lora_request, Sequence) and len(lora_request) != num_requests:
+            raise ValueError("The lengths of prompts and lora_request must be the same.")
 
-        for sp in params if isinstance(params, Sequence) else (params, ):
+        for sp in params if isinstance(params, Sequence) else (params,):
             if isinstance(sp, SamplingParams):
                 self._add_guided_params(sp, guided_options)
 
@@ -206,8 +202,7 @@ class ToolUseLLM(LLM):
                     prompt,
                     self.single_n_sampling_params,
                     tokenization_kwargs=tokenization_kwargs,
-                    lora_request=lora_request[i] if isinstance(
-                        lora_request, Sequence) else lora_request,
+                    lora_request=lora_request[i] if isinstance(lora_request, Sequence) else lora_request,
                     prompt_adapter_request=prompt_adapter_request,
                     priority=priority[i] if priority else 0,
                 )
