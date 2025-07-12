@@ -63,7 +63,7 @@ def save_completion_lengths(batch_results: List[Dict], timestamp: int):
     """
     csv_path = DATA_DIR / f"completion_lengths_{timestamp}.csv"
 
-    with open(csv_path, "w", newline="") as csvfile:
+    with open(csv_path, "a", newline="") as csvfile:
         fieldnames = ["batch_num", "prompt_num", "completion_length"]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
@@ -334,6 +334,7 @@ def run_benchmark(
     vllm_engines: List[ray.actor.ActorHandle],
     args: Args,
     flops_per_token: int,
+    timestamp: int,
     num_batches: int = 5,
 ) -> List[Dict[str, Union[float, int, List[str], List[int]]]]:
     """Run the full benchmark."""
@@ -389,7 +390,8 @@ def run_benchmark(
         batch_result = run_generation_batch(
             inference_results_Q, param_prompt_Q, args, flops_per_token, gpu_specs, prompts, batch_idx
         )
-
+        # We incrementally save completion lengths so even if the job dies, we still have data.
+        save_completion_lengths([batch_result], timestamp)
         all_results.append(batch_result)
         logger.info(
             f"Batch {batch_idx + 1} completed: "
@@ -576,14 +578,14 @@ def main() -> None:
     vllm_engines = setup_vllm_engines(args, model_config)
 
     flops_per_token = calculate_model_usage_per_token(model_config.model_name_or_path)
-    free_all_gpu_memory()
 
-    results = run_benchmark(dataset, vllm_engines, args, flops_per_token)
+    # Unclear why we need this. We didn't need it before torch 2.7.0.
+    free_all_gpu_memory()
 
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
     save_config(args, tokenizer_config, model_config, timestamp)
-    save_completion_lengths(results, timestamp)
+    results = run_benchmark(dataset, vllm_engines, args, flops_per_token, timestamp)
 
     cleanup(vllm_engines)
 
