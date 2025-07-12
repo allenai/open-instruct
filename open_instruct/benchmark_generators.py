@@ -412,7 +412,6 @@ def run_benchmark(
         logger.warning("Thread did not shutdown gracefully")
 
     print_summary(all_results, total_time, args, flops_per_token, gpu_specs)
-    return all_results
 
 
 def print_summary(
@@ -585,7 +584,7 @@ def main() -> None:
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
     save_config(args, tokenizer_config, model_config, timestamp)
-    results = run_benchmark(dataset, vllm_engines, args, flops_per_token, timestamp)
+    run_benchmark(dataset, vllm_engines, args, flops_per_token, timestamp)
 
     cleanup(vllm_engines)
 
