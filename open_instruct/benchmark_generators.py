@@ -11,11 +11,13 @@ import collections
 import csv
 import dataclasses
 import gc
+import gzip
 import json
 import logging
 import queue
 import threading
 import time
+import zlib
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -26,6 +28,14 @@ import torch
 import torch.utils.flop_counter
 import transformers
 import vllm
+
+# Try to import brotli, but make it optional
+try:
+    import brotli
+    BROTLI_AVAILABLE = True
+except ImportError:
+    BROTLI_AVAILABLE = False
+    brotli = None
 
 from open_instruct import dataset_transformation, grpo_fast, vllm_utils3
 from open_instruct.dataset_transformation import TokenizerConfig
@@ -41,6 +51,118 @@ GPU_SPECS = {
     "a6000": {"flops": 155e12, "memory_size": 48e9},
     "l40s": {"flops": 362e12, "memory_size": 48e9},
 }
+
+
+def compress_and_measure(data: bytes, algorithm: str) -> Dict[str, Union[float, int, str, None]]:
+    """
+    Compress data using the specified algorithm and measure performance.
+    
+    Args:
+        data: Bytes to compress
+        algorithm: Compression algorithm name ('gzip', 'zlib', 'brotli')
+        
+    Returns:
+        Dictionary with compression metrics
+    """
+    original_size = len(data)
+    start_time = time.time()
+    
+    try:
+        if algorithm == 'gzip':
+            compressed_data = gzip.compress(data, compresslevel=6)
+        elif algorithm == 'zlib':
+            compressed_data = zlib.compress(data, level=6)
+        elif algorithm == 'brotli':
+            if not BROTLI_AVAILABLE or brotli is None:
+                return {
+                    'algorithm': algorithm,
+                    'original_size': original_size,
+                    'compressed_size': original_size,
+                    'compression_ratio': 1.0,
+                    'compression_time': 0.0,
+                    'error': 'brotli not available'
+                }
+            compressed_data = brotli.compress(data, quality=6)
+        else:
+            return {
+                'algorithm': algorithm,
+                'original_size': original_size,
+                'compressed_size': original_size,
+                'compression_ratio': 1.0,
+                'compression_time': 0.0,
+                'error': f'Unknown algorithm: {algorithm}'
+            }
+        
+        compression_time = time.time() - start_time
+        compressed_size = len(compressed_data)
+        compression_ratio = compressed_size / original_size if original_size > 0 else 1.0
+        
+        return {
+            'algorithm': algorithm,
+            'original_size': original_size,
+            'compressed_size': compressed_size,
+            'compression_ratio': compression_ratio,
+            'compression_time': compression_time,
+            'error': None
+        }
+        
+    except Exception as e:
+        return {
+            'algorithm': algorithm,
+            'original_size': original_size,
+            'compressed_size': original_size,
+            'compression_ratio': 1.0,
+            'compression_time': time.time() - start_time,
+            'error': str(e)
+        }
+
+
+def benchmark_compression_for_responses(
+    response_ids: List[List[int]], 
+    tokenizer
+) -> Dict[str, List[Dict[str, Union[float, int]]]]:
+    """
+    Benchmark compression for a list of response token sequences.
+    
+    Args:
+        response_ids: List of token ID sequences
+        tokenizer: Tokenizer to decode tokens to text
+        
+    Returns:
+        Dictionary with compression results for each response
+    """
+    compression_algorithms = ['gzip', 'zlib']
+    if BROTLI_AVAILABLE:
+        compression_algorithms.append('brotli')
+    
+    results = {
+        'responses': [],
+        'algorithms': compression_algorithms
+    }
+    
+    for i, token_sequence in enumerate(response_ids):
+        # Decode tokens to text
+        try:
+            text = tokenizer.decode(token_sequence, skip_special_tokens=True)
+            text_bytes = text.encode('utf-8')
+        except Exception as e:
+            logger.warning(f"Failed to decode response {i}: {e}")
+            text_bytes = b''
+        
+        # Benchmark each compression algorithm
+        response_results = []
+        for algorithm in compression_algorithms:
+            result = compress_and_measure(text_bytes, algorithm)
+            response_results.append(result)
+        
+        results['responses'].append({
+            'response_index': i,
+            'token_count': len(token_sequence),
+            'text_length': len(text_bytes),
+            'compression_results': response_results
+        })
+    
+    return results
 
 
 logger = logging.getLogger(__name__)
@@ -78,6 +200,35 @@ def save_completion_lengths(batch_results: List[Dict], timestamp: int):
                 writer.writerow({"batch_num": batch_idx, "prompt_num": i, "completion_length": length})
 
     logger.info(f"Saved completion lengths to {csv_path}.")
+
+
+def save_compression_results(batch_results: List[Dict], timestamp: int):
+    """
+    Save compression benchmarking results to JSON file.
+
+    Args:
+        batch_results: List of batch result dictionaries
+        timestamp: Unix timestamp
+    """
+    compression_path = DATA_DIR / f"compression_results_{timestamp}.json"
+    
+    compression_data = []
+    
+    for batch_result in batch_results:
+        if "compression_results" in batch_result and batch_result["compression_results"] is not None:
+            batch_data = {
+                "batch_idx": batch_result["batch_idx"],
+                "responses": batch_result["compression_results"]["responses"],
+                "algorithms": batch_result["compression_results"]["algorithms"]
+            }
+            compression_data.append(batch_data)
+    
+    if compression_data:
+        with open(compression_path, "w") as f:
+            json.dump(compression_data, f, indent=2, default=str)
+        logger.info(f"Saved compression results to {compression_path}.")
+    else:
+        logger.info("No compression results to save.")
 
 
 def save_config(args, tokenizer_config, model_config, timestamp: int):
@@ -276,6 +427,7 @@ def run_generation_batch(
     gpu_specs: dict[str, float],
     prompts: List[List[int]],
     batch_idx: int,
+    tokenizer=None,
 ) -> Dict[str, Union[float, int, List[str], List[int]]]:
     """Run generation for a batch of prompts and measure performance."""
 
@@ -311,6 +463,11 @@ def run_generation_batch(
     # Calculate MFU
     mfu_percentage = 100 * tokens_per_second * flops_per_token / gpu_specs["flops"]
 
+    # Run compression benchmarking if tokenizer is provided
+    compression_results = None
+    if tokenizer is not None:
+        compression_results = benchmark_compression_for_responses(response_ids, tokenizer)
+    
     return {
         "batch_idx": batch_idx,
         "batch_size": len(response_ids),  # Total number of responses generated
@@ -326,6 +483,7 @@ def run_generation_batch(
         "prompt_lengths": [len(prompt) for prompt in prompts],  # Original unique prompts
         "masks": masks,  # Include masks for wasted computation calculation
         "max_tokens": args.response_length,  # Include max_tokens setting
+        "compression_results": compression_results,
     }
 
 
@@ -336,6 +494,7 @@ def run_benchmark(
     flops_per_token: int,
     timestamp: int,
     num_batches: int = 5,
+    tokenizer=None,
 ) -> List[Dict[str, Union[float, int, List[str], List[int]]]]:
     """Run the full benchmark."""
     logger.info(f"Starting benchmark with {num_batches} batches of size {args.num_unique_prompts_rollout}")
@@ -388,10 +547,13 @@ def run_benchmark(
 
         # Run generation
         batch_result = run_generation_batch(
-            inference_results_Q, param_prompt_Q, args, flops_per_token, gpu_specs, prompts, batch_idx
+            inference_results_Q, param_prompt_Q, args, flops_per_token, gpu_specs, prompts, batch_idx, tokenizer
         )
         # We incrementally save completion lengths so even if the job dies, we still have data.
         save_completion_lengths([batch_result], timestamp)
+        # Save compression results if available
+        if batch_result.get("compression_results") is not None:
+            save_compression_results([batch_result], timestamp)
         all_results.append(batch_result)
         logger.info(
             f"Batch {batch_idx + 1} completed: "
@@ -551,6 +713,43 @@ def print_summary(
             print(f"95th percentile: {p95:.2f} tokens")
             print(f"99th percentile: {p99:.2f} tokens")
 
+    # Print compression statistics
+    compression_results = [r for r in results if r.get("compression_results") is not None]
+    if compression_results:
+        print("-" * 60)
+        print("COMPRESSION STATISTICS:")
+        
+        # Collect all compression data
+        all_compression_data = []
+        for batch_result in compression_results:
+            for response in batch_result["compression_results"]["responses"]:
+                for comp_result in response["compression_results"]:
+                    if comp_result.get("error") is None:
+                        all_compression_data.append({
+                            "algorithm": comp_result["algorithm"],
+                            "compression_ratio": comp_result["compression_ratio"],
+                            "compression_time": comp_result["compression_time"],
+                            "original_size": comp_result["original_size"],
+                            "compressed_size": comp_result["compressed_size"]
+                        })
+        
+        if all_compression_data:
+            # Group by algorithm
+            algorithms = set(item["algorithm"] for item in all_compression_data)
+            
+            for algorithm in sorted(algorithms):
+                alg_data = [item for item in all_compression_data if item["algorithm"] == algorithm]
+                ratios = [item["compression_ratio"] for item in alg_data]
+                times = [item["compression_time"] for item in alg_data]
+                
+                print(f"\n{algorithm.upper()} COMPRESSION:")
+                print(f"  Average compression ratio: {np.mean(ratios):.4f} ({np.mean(ratios) * 100:.2f}%)")
+                print(f"  Median compression ratio: {np.median(ratios):.4f} ({np.median(ratios) * 100:.2f}%)")
+                print(f"  Min compression ratio: {min(ratios):.4f} ({min(ratios) * 100:.2f}%)")
+                print(f"  Max compression ratio: {max(ratios):.4f} ({max(ratios) * 100:.2f}%)")
+                print(f"  Average compression time: {np.mean(times) * 1000:.3f} ms")
+                print(f"  Total samples: {len(alg_data)}")
+
     print("=" * 60)
 
 
@@ -578,13 +777,19 @@ def main() -> None:
 
     flops_per_token = calculate_model_usage_per_token(model_config.model_name_or_path)
 
+    # Load tokenizer for compression benchmarking
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
+        model_config.model_name_or_path,
+        trust_remote_code=True
+    )
+
     # Unclear why we need this. We didn't need it before torch 2.7.0.
     free_all_gpu_memory()
 
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
     save_config(args, tokenizer_config, model_config, timestamp)
-    run_benchmark(dataset, vllm_engines, args, flops_per_token, timestamp)
+    run_benchmark(dataset, vllm_engines, args, flops_per_token, timestamp, tokenizer=tokenizer)
 
     cleanup(vllm_engines)
 
