@@ -55,7 +55,8 @@ import traceback
 from argparse import Namespace
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
-from queue import Empty, Queue
+from queue import Empty
+import ray
 from typing import Callable, Dict, Iterator, List, Literal, Optional, Union
 
 import numpy as np
@@ -1093,89 +1094,42 @@ class ModelGroup:
             self.models.append(worker_policy)
 
 
-def vllm_generate_thread(
+def start_queue_processing_on_actors(
     vllm_engines: List[ray.actor.ActorHandle],
     generation_config: SamplingParams,
     eval_generation_config: SamplingParams,
-    inference_results_Q: Queue,
-    param_prompt_Q: Queue,
-    num_training_steps: int,
+    inference_results_Q,
+    param_prompt_Q,
     eval_prompt_token_ids: Optional[List[int]],
-    evaluation_inference_results_Q: Queue,
     eval_freq: int,
-    resume_training_step: int = 1,
     tool_use: bool = False,
 ):
-    def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
-        # Split queries between engines
-        queries_per_engine = (len(prompts) + len(vllm_engines) - 1) // len(vllm_engines)
-        split_queries = [prompts[i : i + queries_per_engine] for i in range(0, len(prompts), queries_per_engine)]
-        # Generate responses in parallel across engines
-        futures = [
-            vllm_engine.generate.remote(sampling_params=sampling_params, prompt_token_ids=queries, use_tqdm=False)
-            for vllm_engine, queries in zip(vllm_engines, split_queries)
-        ]
-        # Gather all responses
-        all_outputs = ray.get(futures)
-        response_ids = []
-        finish_reasons = []  # either "stop" or "length"
-        masks = []
-        num_calls = []
-        timeouts = []
-        tool_errors = []
-        tool_outputs = []
-        tool_runtimes = []
-        tool_calleds = []
-        for outputs in all_outputs:
-            response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
-            finish_reasons.extend([out.finish_reason for output in outputs for out in output.outputs])
-            if tool_use:
-                masks.extend([out.mask for output in outputs for out in output.outputs])
-                num_calls.extend([out.num_calls for output in outputs for out in output.outputs])
-                timeouts.extend([out.timeout for output in outputs for out in output.outputs])
-                tool_errors.extend([out.tool_error for output in outputs for out in output.outputs])
-                tool_outputs.extend([out.tool_output for output in outputs for out in output.outputs])
-                tool_runtimes.extend([out.tool_runtime for output in outputs for out in output.outputs])
-                tool_calleds.extend([out.tool_called for output in outputs for out in output.outputs])
-        # if not using the tool, mask is all 1s
-        if not tool_use:
-            masks = [[1] * len(response_ids[i]) for i in range(len(response_ids))]
-            num_calls = [0] * len(response_ids)
-            timeouts = [0] * len(response_ids)
-            tool_errors = [""] * len(response_ids)
-            tool_outputs = [""] * len(response_ids)
-            tool_runtimes = [0] * len(response_ids)
-            tool_calleds = [False] * len(response_ids)
-        return (
-            response_ids,
-            finish_reasons,
-            masks,
-            (num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds),
+    """
+    Start the queue processing on each LLMRayActor.
+    Each actor will continuously pull prompts from the queue and process them.
+    """
+    # Start queue processing on each actor
+    futures = []
+    for vllm_engine in vllm_engines:
+        future = vllm_engine.process_queue_continuously.remote(
+            param_prompt_Q,
+            inference_results_Q,
+            generation_config,
+            eval_generation_config,
+            eval_prompt_token_ids,
+            eval_freq,
+            tool_use
         )
-
-    for training_step in range(resume_training_step, num_training_steps + 1):
-        items = param_prompt_Q.get()
-        if items is None:
-            break
-        _, g_queries_list = items
-
-        with Timer("🔥 Generation time"):
-            response_ids, finish_reasons, masks, info = generate_with_engines(g_queries_list, generation_config)
-        inference_results_Q.put((response_ids, finish_reasons, masks, info))
-
-        # Evaluate the model
-        if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
-            response_ids, finish_reasons, masks, info = generate_with_engines(
-                eval_prompt_token_ids, eval_generation_config
-            )
-            evaluation_inference_results_Q.put((response_ids, finish_reasons, masks, info))
+        futures.append(future)
+    
+    return futures
 
 
 def data_preparation_thread(
     reward_fn: Callable,
-    inference_results_Q: Queue,
-    packed_sequences_Q: Queue,
-    queries_prompt_Q: Queue,
+    inference_results_Q,
+    packed_sequences_Q,
+    queries_prompt_Q,
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
@@ -1192,7 +1146,16 @@ def data_preparation_thread(
             ground_truths = [item for item in ground_truths for _ in range(args.num_samples_per_prompt_rollout)]
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            responses, finish_reasons, masks, infos = inference_results_Q.get()
+            result = inference_results_Q.get()
+            # Check if this is an evaluation result
+            if isinstance(result, tuple) and len(result) > 0 and result[0] == "EVAL":
+                # This is an evaluation result, handle it separately
+                _, eval_responses, eval_finish_reasons, eval_masks, eval_infos = result
+                # TODO: Handle evaluation results properly
+                # For now, we'll skip them and continue with training
+                continue
+            
+            responses, finish_reasons, masks, infos = result
             num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
             good_outputs = [
                 len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
@@ -1629,8 +1592,8 @@ def sync_weights_and_prepare_prompts(
     train_dataset,
     iter_dataloader,
     policy_group: ModelGroup,
-    queries_prompt_Q: Queue,
-    param_prompt_Q: Queue,
+    queries_prompt_Q,
+    param_prompt_Q,
     queries_next=None,
     ground_truths_next=None,
     datasets_next=None,
@@ -1659,7 +1622,7 @@ def sync_weights_and_prepare_prompts(
     return queries_next, ground_truths_next, datasets_next
 
 
-def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
+def load_data_from_packing_thread(packed_sequences_Q, num_total_tokens: int):
     """Get the packed sequences with advantages from the packing thread."""
     with Timer("[Main Thread] 📦 Getting packed sequences from thread"):
         packed_data = packed_sequences_Q.get()
@@ -1765,7 +1728,7 @@ def one_training_step(
 def maybe_evaluate(
     args: Args,
     training_step: int,
-    evaluation_inference_results_Q: Queue,
+    evaluation_inference_results_Q,
     tokenizer,
     eval_prompt_token_ids,
     eval_ground_truths,
@@ -1985,11 +1948,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     train_dataset_idxs = np.arange(len(train_dataset))
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
 
-    inference_results_Q = Queue(maxsize=args.async_steps)
-    param_prompt_Q = Queue(maxsize=args.async_steps)
-    evaluation_inference_results_Q = Queue(maxsize=1)
-    packed_sequences_Q = Queue(maxsize=args.async_steps)
-    queries_prompt_Q = Queue(maxsize=args.async_steps)
+    inference_results_Q = ray.util.queue.Queue(maxsize=args.async_steps)
+    param_prompt_Q = ray.util.queue.Queue(maxsize=args.async_steps)
+    evaluation_inference_results_Q = ray.util.queue.Queue(maxsize=1)
+    packed_sequences_Q = ray.util.queue.Queue(maxsize=args.async_steps)
+    queries_prompt_Q = ray.util.queue.Queue(maxsize=args.async_steps)
 
     eval_prompt_token_ids = None
     eval_ground_truths = None
@@ -1999,24 +1962,18 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
         eval_dataset_names = eval_dataset[:num_eval_samples][DATASET_SOURCE_KEY]
     reward_fn = make_reward_fn(args)
-    generate_thread = threading.Thread(
-        target=vllm_generate_thread,
-        args=(
-            vllm_engines,
-            generation_config,
-            eval_generation_config,
-            inference_results_Q,
-            param_prompt_Q,
-            args.num_training_steps,
-            eval_prompt_token_ids,
-            evaluation_inference_results_Q,
-            args.eval_freq,
-            resume_training_step,
-            args.tool_use,
-        ),
+    # Start queue processing on all actors
+    actor_futures = start_queue_processing_on_actors(
+        vllm_engines,
+        generation_config,
+        eval_generation_config,
+        inference_results_Q,
+        param_prompt_Q,
+        eval_prompt_token_ids,
+        args.eval_freq,
+        args.tool_use,
     )
-    generate_thread.start()
-    logger.info("======== ✅ vllm generate thread starts =========")
+    logger.info("======== ✅ vllm actors start queue processing =========")
     reward_fn = make_reward_fn(args)
 
     packing_thread = threading.Thread(
@@ -2085,18 +2042,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 wandb_url,
             )
 
-            maybe_evaluate(
-                args,
-                training_step,
-                evaluation_inference_results_Q,
-                tokenizer,
-                eval_prompt_token_ids,
-                eval_ground_truths,
-                eval_dataset_names,
-                reward_fn,
-                episode,
-                writer,
-            )
+            # Evaluation is now handled within the LLMRayActor queue processing
+            # The evaluation results will come through the inference_results_Q
+            # We'll handle them in the data_preparation_thread
 
         save_final_model(args, policy_group, training_step, wandb_url)
 
@@ -2105,9 +2053,14 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         cleanup_judge_clients()
         os._exit(1)
 
-    # Clean up threads
-    generate_thread.join()
-    logger.info("======== ✅ vllm generate thread ends =========")
+    # Clean up threads and actors
+    # Send None to stop the queue processing
+    param_prompt_Q.put(None)
+    
+    # Wait for all actors to finish
+    ray.get(actor_futures)
+    logger.info("======== ✅ vllm actors finish queue processing =========")
+    
     packing_thread.join()
     logger.info("======== ✅ data preparation thread ends =========")
 

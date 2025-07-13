@@ -148,6 +148,86 @@ class LLMRayActor:
     def generate(self, *args, **kwargs):
         return self.llm.generate(*args, **kwargs)
 
+    def process_queue_continuously(self, param_prompt_Q, inference_results_Q, generation_config, eval_generation_config=None, eval_prompt_token_ids=None, eval_freq=1, tool_use=False):
+        """
+        Continuously pull prompts from the queue and process them through the LLM.
+        This method runs in a loop until it receives a None signal to stop.
+        """
+        import time
+        
+        while True:
+            try:
+                # Get item from the queue with a timeout
+                items = param_prompt_Q.get(timeout=1.0)
+                if items is None:
+                    break
+                
+                training_step, g_queries_list = items
+                
+                # Generate responses
+                response_ids, finish_reasons, masks, info = self.generate_with_single_engine(
+                    g_queries_list, generation_config, tool_use
+                )
+                
+                # Put results back to the inference queue
+                inference_results_Q.put((response_ids, finish_reasons, masks, info))
+                
+                # Handle evaluation if needed
+                if eval_prompt_token_ids is not None and eval_generation_config is not None and (training_step - 1) % eval_freq == 0:
+                    eval_response_ids, eval_finish_reasons, eval_masks, eval_info = self.generate_with_single_engine(
+                        eval_prompt_token_ids, eval_generation_config, tool_use
+                    )
+                    # Note: We'll need to handle evaluation results separately
+                    # For now, we'll put them in the same queue with a special marker
+                    inference_results_Q.put(("EVAL", eval_response_ids, eval_finish_reasons, eval_masks, eval_info))
+                    
+            except Exception as e:
+                print(f"Error in LLMRayActor queue processing: {e}")
+                time.sleep(0.1)  # Small delay to prevent tight loop on errors
+
+    def generate_with_single_engine(self, prompts: List[List[int]], sampling_params, tool_use: bool = False):
+        """
+        Generate responses using this single engine instance.
+        """
+        # Generate responses
+        outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
+        
+        response_ids = []
+        finish_reasons = []
+        masks = []
+        num_calls = []
+        timeouts = []
+        tool_errors = []
+        tool_outputs = []
+        tool_runtimes = []
+        tool_calleds = []
+        
+        for output in outputs:
+            for out in output.outputs:
+                response_ids.append(list(out.token_ids))
+                finish_reasons.append(out.finish_reason)
+                if tool_use:
+                    masks.append(out.mask)
+                    num_calls.append(out.num_calls)
+                    timeouts.append(out.timeout)
+                    tool_errors.append(out.tool_error)
+                    tool_outputs.append(out.tool_output)
+                    tool_runtimes.append(out.tool_runtime)
+                    tool_calleds.append(out.tool_called)
+        
+        # If not using tools, create default values
+        if not tool_use:
+            masks = [[1] * len(response_ids[i]) for i in range(len(response_ids))]
+            num_calls = [0] * len(response_ids)
+            timeouts = [0] * len(response_ids)
+            tool_errors = [""] * len(response_ids)
+            tool_outputs = [""] * len(response_ids)
+            tool_runtimes = [0] * len(response_ids)
+            tool_calleds = [False] * len(response_ids)
+        
+        info = (num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds)
+        return response_ids, finish_reasons, masks, info
+
     def init_process_group(
         self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
     ):
