@@ -133,6 +133,10 @@ logger = logging.getLogger(__name__)
 api = HfApi()
 INVALID_LOGPROB = 1.0
 
+# Global variable to track the last eval finish time
+# This is used to measure the time between when one eval job finishes and the next one is queued
+last_eval_finish_time = None
+
 
 @dataclass
 class Args:
@@ -1165,6 +1169,17 @@ def vllm_generate_thread(
 
         # Evaluate the model
         if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
+            # Record the time when eval job is queued and measure wait time since last eval finished
+            global last_eval_finish_time
+            current_time = time.time()
+            if last_eval_finish_time is not None:
+                eval_wait_time = current_time - last_eval_finish_time
+                # Log the eval wait time to wandb if tracking is enabled
+                # This metric measures how much time the eval job was waiting between runs
+                if args.with_tracking and hasattr(wandb, 'run') and wandb.run is not None:
+                    wandb.log({"eval/wait_time_between_evals": eval_wait_time}, step=training_step)
+                    logger.info(f"[vLLM Thread] 📊 Eval wait time: {eval_wait_time:.2f}s")
+            
             response_ids, finish_reasons, masks, info = generate_with_engines(
                 eval_prompt_token_ids, eval_generation_config
             )
@@ -1825,6 +1840,13 @@ def maybe_evaluate(
         else:
             print_rich_table(df.iloc[:1])
         del table
+        
+        # Record the time when eval job finishes
+        # This timestamp is used to calculate the wait time for the next eval job
+        global last_eval_finish_time
+        last_eval_finish_time = time.time()
+        logger.info("[Main Thread] 📊 Evaluation job finished")
+        
     except Empty:
         logger.warning("[Main Thread] 🙈 Evaluation responses not received")
 
@@ -1951,6 +1973,10 @@ def cleanup_judge_clients():
 
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_samples: int = 32):
+    # Initialize global eval tracking variable
+    global last_eval_finish_time
+    last_eval_finish_time = None
+    
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
     beaker_config, writer, wandb_url = setup_experiment_tracking(args, tc, model_config)
