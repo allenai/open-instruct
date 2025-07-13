@@ -8,11 +8,41 @@ The compression benchmarking feature measures how compressible the generated tok
 
 ## Features
 
-- **Multiple Compression Algorithms**: Supports gzip, zlib, and brotli (if available)
+- **Multiple Compression Algorithms**: Supports gzip, zlib, lzma, lz4, zstd, and brotli (if available)
 - **Per-Response Analysis**: Each generated response is individually analyzed
 - **Performance Metrics**: Measures both compression ratio and compression time
 - **Detailed Statistics**: Provides min, max, mean, and median compression ratios
 - **Data Persistence**: Saves compression results to JSON files for further analysis
+- **Shared Interface**: All compression algorithms use a unified `Compressor` interface
+
+## Architecture
+
+### Compressor Interface
+All compression algorithms implement a shared `Compressor` interface:
+
+```python
+class Compressor(abc.ABC):
+    @abc.abstractmethod
+    def compress(self, data: bytes) -> bytes:
+        """Compress the given data."""
+        pass
+    
+    @abc.abstractmethod
+    def get_name(self) -> str:
+        """Get the name of the compression algorithm."""
+        pass
+    
+    def compress_and_measure(self, data: bytes) -> Dict[str, Union[float, int, str]]:
+        """Compress data and measure performance."""
+```
+
+### Available Compressors
+- `GzipCompressor`: Gzip compression (built-in)
+- `ZlibCompressor`: Zlib compression (built-in)
+- `LZMACompressor`: LZMA compression (built-in)
+- `LZ4Compressor`: LZ4 compression (optional)
+- `ZstdCompressor`: Zstandard compression (optional)
+- `BrotliCompressor`: Brotli compression (optional)
 
 ## How It Works
 
@@ -79,18 +109,45 @@ ZLIB COMPRESSION:
   Max compression ratio: 1.1333 (113.33%)
   Average compression time: 0.089 ms
   Total samples: 100
+
+LZMA COMPRESSION:
+  Average compression ratio: 0.1567 (15.67%)
+  Median compression ratio: 0.1450 (14.50%)
+  Min compression ratio: 0.0120 (1.20%)
+  Max compression ratio: 1.2500 (125.00%)
+  Average compression time: 2.456 ms
+  Total samples: 100
+
+LZ4 COMPRESSION:
+  Average compression ratio: 0.3456 (34.56%)
+  Median compression ratio: 0.3200 (32.00%)
+  Min compression ratio: 0.0450 (4.50%)
+  Max compression ratio: 1.4500 (145.00%)
+  Average compression time: 0.045 ms
+  Total samples: 100
+
+ZSTD COMPRESSION:
+  Average compression ratio: 0.1789 (17.89%)
+  Median compression ratio: 0.1650 (16.50%)
+  Min compression ratio: 0.0150 (1.50%)
+  Max compression ratio: 1.2000 (120.00%)
+  Average compression time: 0.067 ms
+  Total samples: 100
 ```
 
 ## Dependencies
 
-### Required
+### Required (Built-in)
 - `gzip` (built-in Python module)
 - `zlib` (built-in Python module)
+- `lzma` (built-in Python module)
 
 ### Optional
+- `lz4` (install with `pip install lz4`)
+- `zstandard` (install with `pip install zstandard`)
 - `brotli` (install with `pip install brotli`)
 
-If brotli is not available, the system will automatically skip it and only use gzip and zlib.
+The system will automatically detect available compression libraries and only use those that are installed.
 
 ## Usage
 
@@ -117,6 +174,14 @@ python benchmark_generators.py \
 - **Natural language**: Moderate ratios (20-40%)
 - **Random/encrypted data**: High ratios (80-120%)
 
+### Algorithm Performance
+- **zlib**: Generally best compression ratio for text
+- **gzip**: Good balance of speed and compression
+- **lzma**: Best compression ratio but slower
+- **lz4**: Fastest compression, moderate ratios
+- **zstd**: Good balance of speed and compression
+- **brotli**: Optimized for web content
+
 ### Performance Considerations
 - **Compression time** is typically very fast (< 1ms per response)
 - **Memory usage** is minimal as compression is done on individual responses
@@ -124,10 +189,20 @@ python benchmark_generators.py \
 
 ## Troubleshooting
 
-### Brotli Not Available
-If you see warnings about brotli not being available, install it with:
+### Missing Compression Libraries
+If you want to use additional compression algorithms, install them with:
 ```bash
-pip install brotli
+pip install lz4 zstandard brotli
+```
+
+### System Package Installation
+On some systems, you may need to install system packages:
+```bash
+# Ubuntu/Debian
+sudo apt install python3-lz4 python3-zstandard python3-brotli
+
+# CentOS/RHEL
+sudo yum install python3-lz4 python3-zstandard python3-brotli
 ```
 
 ### Large Output Files

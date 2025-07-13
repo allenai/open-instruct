@@ -11,13 +11,11 @@ import collections
 import csv
 import dataclasses
 import gc
-import gzip
 import json
 import logging
 import queue
 import threading
 import time
-import zlib
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -29,19 +27,12 @@ import torch.utils.flop_counter
 import transformers
 import vllm
 
-# Try to import brotli, but make it optional
-try:
-    import brotli
-    BROTLI_AVAILABLE = True
-except ImportError:
-    BROTLI_AVAILABLE = False
-    brotli = None
-
 from open_instruct import dataset_transformation, grpo_fast, vllm_utils3
 from open_instruct.dataset_transformation import TokenizerConfig
 from open_instruct.grpo_fast import Args
 from open_instruct.model_utils import ModelConfig
 from open_instruct.utils import ArgumentParserPlus
+from open_instruct.compression_utils import benchmark_compression_for_responses, get_available_compressors
 
 # For FLOPS, we assume bf16 and ignore sparsity.
 GPU_SPECS = {
@@ -53,116 +44,7 @@ GPU_SPECS = {
 }
 
 
-def compress_and_measure(data: bytes, algorithm: str) -> Dict[str, Union[float, int, str, None]]:
-    """
-    Compress data using the specified algorithm and measure performance.
-    
-    Args:
-        data: Bytes to compress
-        algorithm: Compression algorithm name ('gzip', 'zlib', 'brotli')
-        
-    Returns:
-        Dictionary with compression metrics
-    """
-    original_size = len(data)
-    start_time = time.time()
-    
-    try:
-        if algorithm == 'gzip':
-            compressed_data = gzip.compress(data, compresslevel=6)
-        elif algorithm == 'zlib':
-            compressed_data = zlib.compress(data, level=6)
-        elif algorithm == 'brotli':
-            if not BROTLI_AVAILABLE or brotli is None:
-                return {
-                    'algorithm': algorithm,
-                    'original_size': original_size,
-                    'compressed_size': original_size,
-                    'compression_ratio': 1.0,
-                    'compression_time': 0.0,
-                    'error': 'brotli not available'
-                }
-            compressed_data = brotli.compress(data, quality=6)
-        else:
-            return {
-                'algorithm': algorithm,
-                'original_size': original_size,
-                'compressed_size': original_size,
-                'compression_ratio': 1.0,
-                'compression_time': 0.0,
-                'error': f'Unknown algorithm: {algorithm}'
-            }
-        
-        compression_time = time.time() - start_time
-        compressed_size = len(compressed_data)
-        compression_ratio = compressed_size / original_size if original_size > 0 else 1.0
-        
-        return {
-            'algorithm': algorithm,
-            'original_size': original_size,
-            'compressed_size': compressed_size,
-            'compression_ratio': compression_ratio,
-            'compression_time': compression_time,
-            'error': None
-        }
-        
-    except Exception as e:
-        return {
-            'algorithm': algorithm,
-            'original_size': original_size,
-            'compressed_size': original_size,
-            'compression_ratio': 1.0,
-            'compression_time': time.time() - start_time,
-            'error': str(e)
-        }
 
-
-def benchmark_compression_for_responses(
-    response_ids: List[List[int]], 
-    tokenizer
-) -> Dict[str, List[Dict[str, Union[float, int]]]]:
-    """
-    Benchmark compression for a list of response token sequences.
-    
-    Args:
-        response_ids: List of token ID sequences
-        tokenizer: Tokenizer to decode tokens to text
-        
-    Returns:
-        Dictionary with compression results for each response
-    """
-    compression_algorithms = ['gzip', 'zlib']
-    if BROTLI_AVAILABLE:
-        compression_algorithms.append('brotli')
-    
-    results = {
-        'responses': [],
-        'algorithms': compression_algorithms
-    }
-    
-    for i, token_sequence in enumerate(response_ids):
-        # Decode tokens to text
-        try:
-            text = tokenizer.decode(token_sequence, skip_special_tokens=True)
-            text_bytes = text.encode('utf-8')
-        except Exception as e:
-            logger.warning(f"Failed to decode response {i}: {e}")
-            text_bytes = b''
-        
-        # Benchmark each compression algorithm
-        response_results = []
-        for algorithm in compression_algorithms:
-            result = compress_and_measure(text_bytes, algorithm)
-            response_results.append(result)
-        
-        results['responses'].append({
-            'response_index': i,
-            'token_count': len(token_sequence),
-            'text_length': len(text_bytes),
-            'compression_results': response_results
-        })
-    
-    return results
 
 
 logger = logging.getLogger(__name__)
