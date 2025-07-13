@@ -69,23 +69,22 @@ class TestEvalWaitTime:
                 ([0], [0], [""], [""], [0], [False])  # infos
             ))
             
-            # Call maybe_evaluate again to process the data
-            maybe_evaluate(
-                args=args,
-                training_step=2,
-                evaluation_inference_results_Q=evaluation_inference_results_Q,
-                tokenizer=tokenizer,
-                eval_prompt_token_ids=eval_prompt_token_ids,
-                eval_ground_truths=eval_ground_truths,
-                eval_dataset_names=eval_dataset_names,
-                reward_fn=reward_fn,
-                episode=1,
-                writer=writer,
-            )
-            
-            # Verify that the eval finish time was recorded
-            from open_instruct.grpo_fast import last_eval_finish_time
-            assert last_eval_finish_time is not None
+                    # Call maybe_evaluate again to process the data
+        eval_finish_time = maybe_evaluate(
+            args=args,
+            training_step=2,
+            evaluation_inference_results_Q=evaluation_inference_results_Q,
+            tokenizer=tokenizer,
+            eval_prompt_token_ids=eval_prompt_token_ids,
+            eval_ground_truths=eval_ground_truths,
+            eval_dataset_names=eval_dataset_names,
+            reward_fn=reward_fn,
+            episode=1,
+            writer=writer,
+        )
+        
+        # Verify that the eval finish time was returned
+        assert eval_finish_time is not None, "Eval finish time should be returned"
             
             # Now test the vllm_generate_thread function
             # Mock the generate_with_engines function
@@ -115,6 +114,7 @@ class TestEvalWaitTime:
             # Test that the eval wait time is logged when the next eval is queued
             with patch('open_instruct.grpo_fast.generate_with_engines', mock_generate_with_engines):
                 # This should trigger an eval at step 2
+                eval_timing_info = {"last_eval_finish_time": time.time() - 1.0}  # Simulate previous eval
                 vllm_generate_thread(
                     vllm_engines=mock_engines,
                     generation_config=generation_config,
@@ -127,6 +127,7 @@ class TestEvalWaitTime:
                     eval_freq=2,
                     resume_training_step=2,
                     tool_use=False,
+                    eval_timing_info=eval_timing_info,
                 )
             
             # Verify that wandb.log was called with the eval wait time
