@@ -765,7 +765,10 @@ class VerifiableProblemZVerifier(VerifierFunction):
     def __call__(
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> VerificationResult:
-        problem = problem2class[label]()
+        task_name = label["task_name"]
+        task_params = label["parameters"]
+        problem = problem2class[task_name]()
+        problem.__dict__.update(task_params)
         try:
             score = problem.scorer(prediction)
         except Exception as e:
