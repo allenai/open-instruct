@@ -869,3 +869,5 @@ yarl==1.20.0
     # via aiohttp
 zipp==3.22.0
     # via importlib-metadata
+fvcore>=0.1.5.post20221221
+    # via open-instruct
