@@ -17,7 +17,7 @@ import queue
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import datasets
 import numpy as np
@@ -277,10 +277,7 @@ def run_generation_batch(
 
     new_tokens = sum(len(response) for response in response_ids)
     tokens_per_second = new_tokens / generation_time
-    device_name = get_device_name(torch.cuda.get_device_name(0))
-    device_flops = get_gpu_specs(device_name)["flops"]
     return {
-        "mfu": 100 * tokens_per_second * flops_per_token / device_flops,
         "tokens_per_second": tokens_per_second,
         "generation_time": generation_time,
         "num_new_tokens": new_tokens,
@@ -295,7 +292,7 @@ def run_benchmark(
     dataset: datasets.Dataset,
     vllm_engines: List[ray.actor.ActorHandle],
     args: Args,
-    flops_per_token: int,
+    model_config: ModelConfig,
     timestamp: int,
     num_batches: int = 5,
 ) -> List[Dict[str, Union[float, int, List[str], List[int]]]]:
@@ -316,6 +313,12 @@ def run_benchmark(
     )
 
     eval_generation_config = vllm.SamplingParams(temperature=0.0, max_tokens=args.response_length, n=1)
+
+    # We have to do this before starting vLLM as otherwise we get OOM errors.
+    flops_per_token = calculate_model_usage_per_token(model_config.model_name_or_path)
+
+    # Unclear why we need this. We didn't need it before torch 2.7.0.
+    free_all_gpu_memory()
 
     # Start persistent vLLM generation thread
     def wrapped_vllm_generate_thread() -> None:
@@ -341,6 +344,8 @@ def run_benchmark(
 
     results = []
     total_start_time = time.time()
+    device_name = get_device_name(torch.cuda.get_device_name(0))
+    device_flops = GPU_SPECS[device_name]["flops"]
     for batch_idx in range(num_batches):
         logger.info(f"Processing batch {batch_idx + 1}/{num_batches}")
 
@@ -348,14 +353,15 @@ def run_benchmark(
 
         # Run generation
         result = run_generation_batch(inference_results_Q, param_prompt_Q, prompts)
+        result["mfu"] = 100 * result["tokens_per_second"] * flops_per_token / device_flops
         # We incrementally save completion lengths so even if the job dies, we still have data.
         save_completion_lengths([result], timestamp)
         results.append(result)
         logger.info(
             f"Batch {batch_idx + 1} completed: "
             f"{result['tokens_per_second']:.2f} new tokens/sec, "
-            f"MFU: {batch_result['mfu']:.2f}%, "
-            f"{batch_result['generation_time']:.2f}s"
+            f"MFU: {result['mfu']:.2f}%, "
+            f"{result['generation_time']:.2f}s"
         )
 
     total_time = time.time() - total_start_time
@@ -366,7 +372,7 @@ def run_benchmark(
     # Wait for thread to finish
     thread.join(timeout=10)
 
-    print_summary(results, total_time, args)
+    print_summary(results, total_time, args, model_config)
 
 
 def average_results(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -394,9 +400,7 @@ def average_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     return {k: v / len(results) if isinstance(v, (int, float)) else v for k, v in averaged_results.items()}
 
 
-def print_summary(
-    results: List[BatchResults], total_time: float, args: Args, flops_per_token: int, gpu_specs: dict[str, float]
-) -> None:
+def print_summary(results: list[dict[str, Any]], total_time: float, args: Args, model_config: ModelConfig) -> None:
     """Print benchmark summary statistics."""
 
     # Calculate metrics for all batches
@@ -417,7 +421,7 @@ def print_summary(
     print("\n" + "=" * 60)
     print("BENCHMARK SUMMARY")
     print("=" * 60)
-    print(f"Model: {args.dataset_mixer_list[0] if args.dataset_mixer_list else 'Unknown'}")
+    print(f"Model: {model_config.model_name_or_path}")
     print(f"Total batches: {len(results)}")
     print(f"Total samples: {total_samples}")
     print(f"Batch size: {args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout}")
@@ -431,11 +435,10 @@ def print_summary(
     print(f"Total tokens processed: {total_tokens}")
     print("-" * 60)
     print("Results (excluding first batch):")
-    print(f"Average new tokens/second: {avg_new_tokens_per_second_last_n_minus_1:.2f}")
-    print(f"Average total tokens/second: {avg_total_tokens_per_second_last_n_minus_1:.2f}")
-    print(f"Average MFU: {avg_mfu_last_n_minus_1:.2f}%")
-    print(f"Average generation time per batch: {avg_generation_time_last_n_minus_1:.2f}s")
-    print(f"Average new tokens per sample: {last_n_minus_1_new_tokens / last_n_minus_1_samples:.2f}")
+    print(f"Average tokens/second: {avg_results['tokens_per_sec']:.2f}")
+    print(f"Average MFU: {avg_results['mfu']:.2f}%")
+    print(f"Average generation time per batch: {avg_results['generation_time']:.2f}s")
+    print(f"Average new tokens per sample: {avg_results['num_new_tokens']} tokens")
 
     max_length = np.max(response_lengths)
     mean_length = np.mean(response_lengths)
@@ -444,14 +447,11 @@ def print_summary(
 
     print("-" * 60)
     print("HARDWARE SPECIFICATIONS:")
+    gpu_specs = GPU_SPECS[get_device_name(torch.cuda.get_device_name(0))]
     print(f"GPU device: {torch.cuda.get_device_name(0)}")
     print(f"GPU peak FLOPs: {gpu_specs['flops'] / 1e12:.0f} TFLOPs")
     print(f"GPU memory size: {gpu_specs['memory_size'] / 1e9:.0f} GB")
-    print("-" * 60)
-    print("MODEL SPECIFICATIONS:")
-    print(f"Model FLOPs per token: {flops_per_token / 1e9:.2f} GFLOPs")
 
-    # Print completion length statistics
     print("-" * 60)
     print("COMPLETION LENGTH STATISTICS:")
     print(f"Total completions: {len(response_lengths)}")
@@ -496,15 +496,10 @@ def main() -> None:
     dataset = setup_dataset(args, tokenizer_config)
     vllm_engines = setup_vllm_engines(args, model_config)
 
-    flops_per_token = calculate_model_usage_per_token(model_config.model_name_or_path)
-
-    # Unclear why we need this. We didn't need it before torch 2.7.0.
-    free_all_gpu_memory()
-
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
     save_config(args, tokenizer_config, model_config, timestamp)
-    run_benchmark(dataset, vllm_engines, args, flops_per_token, timestamp)
+    run_benchmark(dataset, vllm_engines, args, model_config, timestamp)
 
     cleanup(vllm_engines)
 
