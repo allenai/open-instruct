@@ -257,13 +257,21 @@ def run_generation_batch(
     inference_results_Q: queue.Queue, param_prompt_Q: queue.Queue, prompts: list[list[int]]
 ) -> dict[str, Any]:
     """Run generation for a batch of prompts and measure performance."""
-
+    from open_instruct.vllm_utils3 import PromptRequest
+    
     start_time = time.time()
-    param_prompt_Q.put((None, prompts))
+    # Use PromptRequest without setting training_step (it will default to None)
+    request = PromptRequest(
+        prompts=prompts,
+        eval_prompts=None
+    )
+    param_prompt_Q.put(request)
     result = inference_results_Q.get()
     generation_time = time.time() - start_time
 
-    response_ids, finish_reasons, _, _ = result
+    # Use new dataclass format
+    response_ids = result.responses
+    finish_reasons = result.finish_reasons
     collated_finish_reasons = collections.Counter(finish_reasons)
 
     new_tokens = sum(len(response) for response in response_ids)

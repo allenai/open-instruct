@@ -15,6 +15,7 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
+import dataclasses
 import os
 from datetime import timedelta
 from typing import Any, List, Optional, Union
@@ -33,6 +34,29 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+
+
+@dataclasses.dataclass
+class GenerationResult:
+    """Container for generation results from vLLM."""
+    responses: List[List[int]]
+    finish_reasons: List[str]
+    masks: List[List[int]]
+    num_calls: List[int]
+    timeouts: List[int]
+    tool_errors: List[str]
+    tool_outputs: List[str]
+    tool_runtimes: List[float]
+    tool_calleds: List[bool]
+    is_eval: bool = False
+
+
+@dataclasses.dataclass
+class PromptRequest:
+    """Container for prompt requests to vLLM."""
+    prompts: List[List[int]]
+    training_step: Optional[int] = None
+    eval_prompts: Optional[List[List[int]]] = None
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
