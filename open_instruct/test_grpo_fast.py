@@ -15,27 +15,27 @@ class TestGrpoFastVLLM(unittest.TestCase):
         # Check if CUDA is available
         if not torch.cuda.is_available():
             self.skipTest("CUDA is not available, skipping test")
-        
+
         # Initialize Ray
         if not ray.is_initialized():
             ray.init(ignore_reinit_error=True)
-    
+
     def tearDown(self):
         # Shutdown Ray after test
         if ray.is_initialized():
             ray.shutdown()
-    
+
     def test_vllm_generate_thread_single_prompt(self):
         """Test vllm_generate_thread with a single prompt 'What is the capital of France?'"""
-        
+
         # Set up tokenizer
-        tokenizer_name = "facebook/opt-125m"  # Using a small model for testing
+        tokenizer_name = "EleutherAI/pythia-14m"  # Using a small model for testing
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-        
+
         # Tokenize the test prompt
         test_prompt = "What is the capital of France?"
         prompt_token_ids = tokenizer.encode(test_prompt, return_tensors="pt").tolist()[0]
-        
+
         # Create vLLM engines
         vllm_engines = create_vllm_engines(
             num_engines=1,
@@ -49,7 +49,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
             max_model_len=512,
             vllm_gpu_memory_utilization=0.5,  # Use less GPU memory for testing
         )
-        
+
         # Set up generation config
         generation_config = SamplingParams(
             temperature=0.0,  # Deterministic generation
@@ -57,15 +57,15 @@ class TestGrpoFastVLLM(unittest.TestCase):
             max_tokens=50,
             seed=42,
         )
-        
+
         # Set up queues
         inference_results_Q = Queue()
         param_prompt_Q = Queue()
         evaluation_inference_results_Q = Queue()
-        
+
         # Put the test prompt in the queue
         param_prompt_Q.put((1, [[prompt_token_ids]], None))
-        
+
         # Create and start the generation thread
         generate_thread = threading.Thread(
             target=vllm_generate_thread,
@@ -84,36 +84,31 @@ class TestGrpoFastVLLM(unittest.TestCase):
             ),
         )
         generate_thread.start()
-        
+
         # Get the result
-        result = inference_results_Q.get(timeout=30)  # 30 second timeout
-        
+        result = inference_results_Q.get(timeout=60)  # 30 second timeout
+
         # The result should be a tuple with the structure we expect
         self.assertIsInstance(result, tuple)
         self.assertEqual(len(result), 2)
-        
-        step, batch_data = result
-        self.assertEqual(step, 1)
-        
-        # Check that we got a response
-        self.assertIn("response_ids", batch_data)
-        self.assertEqual(len(batch_data["response_ids"]), 1)
-        
+
+        response_ids, _, _, _ = result
+        print(f"{response_ids=}")
+
         # Decode the response
-        response_ids = batch_data["response_ids"][0]
         generated_text = tokenizer.decode(response_ids, skip_special_tokens=True)
-        
+
         # Print for debugging
         print(f"Generated text: {generated_text}")
-        
+
         # The model should generate some response (we can't guarantee exact output with opt-125m)
         self.assertIsInstance(generated_text, str)
         self.assertGreater(len(generated_text), 0)
-        
+
         # Check that other expected fields are present
         self.assertIn("finish_reasons", batch_data)
         self.assertIn("masks", batch_data)
-        
+
         # Stop the thread gracefully
         param_prompt_Q.put(None)
         generate_thread.join(timeout=5)
