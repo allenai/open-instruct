@@ -1,14 +1,11 @@
-import queue
-import threading
 import unittest
-
-import ray
 import torch
-from transformers import AutoTokenizer
+import ray
+from ray.util import queue as ray_queue
 from vllm import SamplingParams
+from transformers import AutoTokenizer
 
-from open_instruct.grpo_fast import vllm_generate_thread
-from open_instruct.vllm_utils3 import create_vllm_engines
+from open_instruct.vllm_utils3 import create_vllm_engines, GenerationResult, PromptRequest
 
 
 class TestGrpoFastVLLM(unittest.TestCase):
@@ -26,8 +23,8 @@ class TestGrpoFastVLLM(unittest.TestCase):
         if ray.is_initialized():
             ray.shutdown()
 
-    def test_vllm_generate_thread_single_prompt(self):
-        """Test vllm_generate_thread with a single prompt 'What is the capital of France?'"""
+    def test_vllm_queue_system_single_prompt(self):
+        """Test the new queue-based vLLM system with a single prompt 'What is the capital of France?'"""
 
         # Set up tokenizer
         tokenizer_name = "EleutherAI/pythia-14m"  # Using a small model for testing
@@ -35,9 +32,13 @@ class TestGrpoFastVLLM(unittest.TestCase):
 
         # Tokenize the test prompt
         test_prompt = "What is the capital of France?"
-        prompt_token_ids = tokenizer.encode(test_prompt, return_tensors="pt").tolist()
+        prompt_token_ids = tokenizer.encode(test_prompt, return_tensors="pt").tolist()[0]
 
-        # Create vLLM engines
+        # Create Ray queues
+        param_prompt_Q = ray_queue.Queue(maxsize=1)
+        inference_results_Q = ray_queue.Queue(maxsize=1)
+
+        # Create vLLM engines with queues
         vllm_engines = create_vllm_engines(
             num_engines=1,
             tensor_parallel_size=1,
@@ -49,6 +50,8 @@ class TestGrpoFastVLLM(unittest.TestCase):
             enable_prefix_caching=False,
             max_model_len=512,
             vllm_gpu_memory_utilization=0.5,  # Use less GPU memory for testing
+            prompt_queue=param_prompt_Q,
+            results_queue=inference_results_Q,
         )
 
         # Set up generation config
@@ -59,41 +62,38 @@ class TestGrpoFastVLLM(unittest.TestCase):
             seed=42,
         )
 
-        # Set up queues
-        inference_results_Q = queue.Queue()
-        param_prompt_Q = queue.Queue()
-        evaluation_inference_results_Q = queue.Queue()
-
-        # Create and start the generation thread
-        generate_thread = threading.Thread(
-            target=vllm_generate_thread,
-            args=(
-                vllm_engines,
+        # Start vLLM engines to process from queues
+        for engine in vllm_engines:
+            engine.process_from_queue.remote(
                 generation_config,
-                generation_config,  # Using same config for eval
-                inference_results_Q,
-                param_prompt_Q,
+                generation_config,  # eval_sampling_params
+                999,  # eval_freq (avoid evaluation)
                 1,  # num_training_steps
-                None,  # eval_prompt_token_ids
-                evaluation_inference_results_Q,
-                1,  # eval_freq
                 1,  # resume_training_step
-                False,  # tool_use
-            ),
-        )
-        generate_thread.start()
-        # Put the test prompt in the queue
-        param_prompt_Q.put((None, prompt_token_ids))
+            )
 
-        response_ids, _, _, _ = inference_results_Q.get()
+        # Put the test prompt in the queue using PromptRequest
+        request = PromptRequest(prompts=[prompt_token_ids], training_step=1, eval_prompts=None)
+        param_prompt_Q.put(request)
+
+        # Get the result
+        result = inference_results_Q.get()
+
+        # Verify it's a GenerationResult dataclass
+        self.assertIsInstance(result, GenerationResult)
+
+        # Check that we got a response
+        self.assertGreater(len(result.response_ids), 0)
+        response_ids = result.response_ids[0]
 
         # Decode the response
-        generated_text = tokenizer.decode(response_ids[0], skip_special_tokens=True)
+        generated_text = tokenizer.decode(response_ids, skip_special_tokens=True)
 
         self.assertIsInstance(generated_text, str)
         self.assertGreater(len(generated_text), 0)
 
-        generate_thread.join(timeout=5)
+        # Send stop signal
+        param_prompt_Q.put(None)
 
 
 if __name__ == "__main__":
