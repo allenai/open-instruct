@@ -54,7 +54,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
         generation_config = SamplingParams(
             temperature=0.0,  # Deterministic generation
             top_p=1.0,
-            max_tokens=50,
+            max_tokens=5,
             seed=42,
         )
 
@@ -84,25 +84,12 @@ class TestGrpoFastVLLM(unittest.TestCase):
         # Put the test prompt in the queue
         param_prompt_Q.put((None, prompt_token_ids))
 
-        try:
-            result = inference_results_Q.get()
-        except queue.Empty:
-            self.fail("Timed out waiting for inference result")
-
-        print(f"{result=}")
-
-        response_ids, _, _, _ = result
-        print(f"{response_ids=}")
+        response_ids, _, _, _ = inference_results_Q.get()
 
         # Decode the response
         generated_text = tokenizer.decode(response_ids[0], skip_special_tokens=True)
 
-        # Print for debugging
-        print(f"Generated text: {generated_text}")
-
-        # The model should generate some response (we can't guarantee exact output with opt-125m)
-        self.assertIsInstance(generated_text, str)
-        self.assertGreater(len(generated_text), 0)
+        self.assertEqual(generated_text, '\n\nThe""')
 
         generate_thread.join(timeout=5)
 
