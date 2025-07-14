@@ -766,11 +766,16 @@ class VerifiableProblemZVerifier(VerifierFunction):
         self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
     ) -> VerificationResult:
         task_name = label["task_name"]
-        task_params = label["parameters"]
+        try:
+            task_params = json.loads(label["parameters"])
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse label for {task_name} as JSON: {label}")
+            return VerificationResult(score=0.0)
         problem = problem2class[task_name]()
         problem.__dict__.update(task_params)
+        answer = extract_final_answer(prediction)
         try:
-            score = problem.scorer(prediction)
+            score = problem.scorer(answer)
         except Exception as e:
             logger.warning(f"Error scoring verifiable problem: {e}")
             return VerificationResult(score=0.0)

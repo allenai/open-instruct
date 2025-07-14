@@ -1,9 +1,9 @@
-# --- imports ---------------------------------------------------------------
 import argparse, os, random, signal, multiprocessing as mp
 from tqdm import tqdm
 from datasets import Dataset
 from open_instruct.VerifiableProblem.verifiable.problems import problem2class
 from open_instruct.VerifiableProblem.verifiable.parameter_controllers import problem2controller
+from open_instruct.ground_truth_utils import VerifiableProblemZVerifier, VerifierConfig
 
 # --- per-task helper -------------------------------------------------------
 def _timeout_handler(signum, frame):
@@ -25,7 +25,7 @@ def _gen_one(arg):
             "ok": True,
             "data": {
                 "dataset": "verifiable_problem_z",
-                "label": {"task_name": task_name, "parameters": inst.__dict__},
+                "label": {"task_name": task_name, "parameters": str(inst.__dict__)},  # str since hf doesnt support rand dicts per instance.
                 "messages": [{"role": "user", "content": prompt}],
             },
         }
@@ -74,3 +74,4 @@ if __name__ == "__main__":
 
     print(f"kept {len(all_rows)} / {seed-42} examples")
     Dataset.from_list(all_rows).push_to_hub("hamishivi/verifiable_problem_z")
+
