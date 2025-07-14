@@ -83,5 +83,41 @@ def upload_scholarqabench_data(use_system_prompt: bool = True) -> List[Dict[str,
     return formatted_data
 
 
+def upload_longform_sqa_train_data(use_system_prompt: bool = True) -> List[Dict[str, Any]]:
+    data = []
+    with open("rubrics_1k.jsonl", "r") as f:
+        for line in f:
+            data.append(json.loads(line))
+    
+    formatted_data = []
+    for ex in data:
+        if use_system_prompt:
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": ex["Question"]},
+            ]
+        else:
+            messages = [{"content": ex["Question"], "role": "user"}]
+            
+        """
+        List[dict_keys(['Ingredient', 'Handle', 'Specifics'])]
+        """
+        ground_truth = json.dumps(ex)
+        dataset = "rl_rag_longform_rubrics_only"
+        formatted_example = {"messages": messages, "ground_truth": ground_truth, "dataset": dataset}
+        formatted_data.append(formatted_example)
+    
+    # push to huggingface
+    dataset = Dataset.from_list(formatted_data)
+    if use_system_prompt:
+        dataset.push_to_hub("rulins/rl_rag_longform_rubrics_only_with_system_prompt")
+    else:
+        dataset.push_to_hub("rulins/rl_rag_longform_rubrics_only_no_system_prompt")
+    
+    return formatted_data
+
+
+
 if __name__ == "__main__":
-    data = upload_scholarqabench_data(use_system_prompt=True)
+    # data = upload_scholarqabench_data(use_system_prompt=True)
+    data = upload_longform_sqa_train_data(use_system_prompt=True)
