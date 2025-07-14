@@ -127,6 +127,7 @@ from open_instruct.vllm_utils3 import (
     init_process_group,
     GenerationResult,
     PromptRequest,
+    RequestInfo,
 )
 
 # Setup logging with filename and line number format
@@ -1347,12 +1348,12 @@ def data_preparation_thread(
                 "val/advantages_min": advantages.min(),
                 "val/advantages_max": advantages.max(),
                 "val/advantages_hist": advantages,
-                "val/num_calls_rate": np.array(result.num_calls).mean(),
-                "val/timeouts_rate": np.array(result.timeouts).mean(),
-                "val/tool_errors_rate": np.array([len(item) > 0 for item in result.tool_errors]).mean(),
+                "val/num_calls_rate": np.array(result.request_info.num_calls).mean(),
+                "val/timeouts_rate": np.array(result.request_info.timeouts).mean(),
+                "val/tool_errors_rate": np.array([len(item) > 0 for item in result.request_info.tool_errors]).mean(),
                 "val/good_outputs_rate": np.array(good_outputs).mean(),
-                "val/tool_runtimes_rate": np.array(result.tool_runtimes).mean(),
-                "val/tool_calleds_rate": np.array(result.tool_calleds).mean(),
+                "val/tool_runtimes_rate": np.array(result.request_info.tool_runtimes).mean(),
+                "val/tool_calleds_rate": np.array(result.request_info.tool_calleds).mean(),
                 **reward_metrics,
             }
 
@@ -1780,6 +1781,7 @@ def maybe_evaluate(
                 eval_ground_truths,
                 eval_dataset_names,
                 result.finish_reasons,
+<<<<<<< HEAD
                 (
                     result.num_calls,
                     result.timeouts,
@@ -1788,6 +1790,9 @@ def maybe_evaluate(
                     result.tool_runtimes,
                     result.tool_calleds,
                 ),
+=======
+                result.request_info,
+>>>>>>> 0a13461c (Added an info dataclass to replace the tuple.)
             )
         )
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}

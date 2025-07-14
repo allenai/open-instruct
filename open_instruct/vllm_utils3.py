@@ -37,18 +37,23 @@ from torch.distributed.distributed_c10d import (
 
 
 @dataclasses.dataclass
-class GenerationResult:
-    """Container for generation results from vLLM."""
-
-    responses: List[List[int]]
-    finish_reasons: List[str]
-    masks: List[List[int]]
+class RequestInfo:
+    """Container for tool usage information."""
     num_calls: List[int]
     timeouts: List[int]
     tool_errors: List[str]
     tool_outputs: List[str]
     tool_runtimes: List[float]
     tool_calleds: List[bool]
+
+
+@dataclasses.dataclass
+class GenerationResult:
+    """Container for generation results from vLLM."""
+    responses: List[List[int]]
+    finish_reasons: List[str]
+    masks: List[List[int]]
+    request_info: RequestInfo
     is_eval: bool = False
 
 
@@ -246,16 +251,20 @@ class LLMRayActor:
             tool_runtimes = [0] * len(response_ids)
             tool_calleds = [False] * len(response_ids)
 
-        return GenerationResult(
-            responses=response_ids,
-            finish_reasons=finish_reasons,
-            masks=masks,
+        request_info = RequestInfo(
             num_calls=num_calls,
             timeouts=timeouts,
             tool_errors=tool_errors,
             tool_outputs=tool_outputs,
             tool_runtimes=tool_runtimes,
             tool_calleds=tool_calleds,
+        )
+        
+        return GenerationResult(
+            responses=response_ids,
+            finish_reasons=finish_reasons,
+            masks=masks,
+            request_info=request_info,
         )
 
     def init_process_group(

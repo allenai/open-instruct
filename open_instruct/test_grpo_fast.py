@@ -5,7 +5,7 @@ from ray.util import queue as ray_queue
 from vllm import SamplingParams
 from transformers import AutoTokenizer
 
-from open_instruct.vllm_utils3 import create_vllm_engines, GenerationResult, PromptRequest
+from open_instruct.vllm_utils3 import create_vllm_engines, GenerationResult, PromptRequest, RequestInfo
 
 
 class TestGrpoFastVLLM(unittest.TestCase):
