@@ -232,10 +232,10 @@ def process_fn(prompt, parameters_dict,task_name):
 
     data = {
         "dataset": f"verifiable_problem_z",
-        "label": task_name,
+        "label": {"task_name": task_name, "parameters": parameters_dict},
         "messages": [{
             "role": "user",
-            "content": example["prompt"]
+            "content": prompt
         }],
     }
     return data
