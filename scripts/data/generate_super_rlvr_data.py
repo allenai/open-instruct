@@ -227,6 +227,7 @@ import random
 import pandas as pd
 from datasets import Dataset
 import os
+from tqdm import tqdm
 
 def process_fn(prompt, parameters_dict,task_name):
 
