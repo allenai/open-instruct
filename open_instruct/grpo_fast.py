@@ -134,6 +134,8 @@ api = HfApi()
 INVALID_LOGPROB = 1.0
 
 
+
+
 @dataclass
 class Args:
     # Dataset
@@ -1105,6 +1107,7 @@ def vllm_generate_thread(
     eval_freq: int,
     resume_training_step: int = 1,
     tool_use: bool = False,
+    eval_timing_info: Optional[Dict[str, float]] = None,
 ):
     def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
         # Split queries between engines
@@ -1165,6 +1168,21 @@ def vllm_generate_thread(
 
         # Evaluate the model
         if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
+            # Record the time when eval job is queued and measure wait time since last eval finished
+            current_time = time.time()
+            if eval_timing_info is not None and eval_timing_info.get("last_eval_finish_time") is not None:
+                eval_wait_time = current_time - eval_timing_info["last_eval_finish_time"]
+                # Log the eval wait time to wandb if tracking is enabled
+                # This metric measures how much time the eval job was waiting between runs
+                # Note: We can't access args here, so we'll log to wandb directly if available
+                try:
+                    import wandb
+                    if hasattr(wandb, 'run') and wandb.run is not None:
+                        wandb.log({"eval/wait_time_between_evals": eval_wait_time}, step=training_step)
+                        logger.info(f"[vLLM Thread] 📊 Eval wait time: {eval_wait_time:.2f}s")
+                except ImportError:
+                    logger.info(f"[vLLM Thread] 📊 Eval wait time: {eval_wait_time:.2f}s (wandb not available)")
+            
             response_ids, finish_reasons, masks, info = generate_with_engines(
                 eval_prompt_token_ids, eval_generation_config
             )
@@ -1773,7 +1791,7 @@ def maybe_evaluate(
     reward_fn,
     episode,
     writer,
-):
+) -> Optional[float]:
     """Optionally evaluate the model."""
     try:
         # timeout 0.01 if this is the last training step or we're not evaluating
@@ -1825,8 +1843,17 @@ def maybe_evaluate(
         else:
             print_rich_table(df.iloc[:1])
         del table
+        
+        # Record the time when eval job finishes
+        # This timestamp is used to calculate the wait time for the next eval job
+        eval_finish_time = time.time()
+        logger.info("[Main Thread] 📊 Evaluation job finished")
+        
+        return eval_finish_time
+        
     except Empty:
         logger.warning("[Main Thread] 🙈 Evaluation responses not received")
+        return None
 
 
 def save_final_model(args: Args, policy_group: ModelGroup, training_step: int, wandb_url: str):
@@ -1951,6 +1978,9 @@ def cleanup_judge_clients():
 
 
 def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_samples: int = 32):
+    # Initialize eval timing tracking
+    eval_timing_info = {"last_eval_finish_time": None}
+    
     tokenizer = make_tokenizer(tc, model_config)
     args = setup_runtime_variables(args)
     beaker_config, writer, wandb_url = setup_experiment_tracking(args, tc, model_config)
@@ -2013,6 +2043,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             args.eval_freq,
             resume_training_step,
             args.tool_use,
+            eval_timing_info,
         ),
     )
     generate_thread.start()
@@ -2085,7 +2116,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 wandb_url,
             )
 
-            maybe_evaluate(
+            eval_finish_time = maybe_evaluate(
                 args,
                 training_step,
                 evaluation_inference_results_Q,
@@ -2097,6 +2128,10 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 episode,
                 writer,
             )
+            
+            # Update eval timing info if eval was performed
+            if eval_finish_time is not None:
+                eval_timing_info["last_eval_finish_time"] = eval_finish_time
 
         save_final_model(args, policy_group, training_step, wandb_url)
 
