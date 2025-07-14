@@ -230,6 +230,18 @@ import os
 from tqdm import tqdm
 import concurrent.futures
 
+def process_fn(prompt, parameters_dict,task_name):
+
+    data = {
+        "dataset": f"verifiable_problem_z",
+        "label": {"task_name": task_name, "parameters": parameters_dict},
+        "messages": [{
+            "role": "user",
+            "content": prompt
+        }],
+    }
+    return data
+
 def generate_instance(task_name, seed, parameter):
     instance = problem2class[task_name]()
     instance.generator(seed, parameter)
