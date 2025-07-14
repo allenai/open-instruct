@@ -49,7 +49,7 @@ else:
     DATA_DIR = pathlib.Path("/tmp") / "open_instruct_generators_benchmark"
 
 
-def save_completion_lengths(batch_results: list[dict], timestamp: int):
+def save_completion_lengths(batch_results: list[dict], timestamp: int, batch_idx: int):
     """
     Save completion lengths to CSV file.
 
@@ -65,14 +65,9 @@ def save_completion_lengths(batch_results: list[dict], timestamp: int):
         writer.writeheader()
 
         for batch_result in batch_results:
-            batch_idx = batch_result["batch_idx"]
             response_lengths = batch_result["response_lengths"]
-
-            # response_lengths contains all responses (flattened from n samples per prompt)
-            # We need to map them back to prompt indices
             for i, length in enumerate(response_lengths):
                 writer.writerow({"batch_num": batch_idx, "prompt_num": i, "completion_length": length})
-
     logger.info(f"Saved completion lengths to {csv_path}.")
 
 
@@ -351,7 +346,7 @@ def run_benchmark(
         result = run_generation_batch(inference_results_Q, param_prompt_Q, prompts)
         result["mfu"] = 100 * result["tokens_per_second"] * flops_per_token / device_flops
         # We incrementally save completion lengths so even if the job dies, we still have data.
-        save_completion_lengths([result], timestamp)
+        save_completion_lengths([result], timestamp, batch_idx)
         results.append(result)
         logger.info(
             f"Batch {batch_idx + 1} completed: "
@@ -402,15 +397,8 @@ def print_summary(
     """Print benchmark summary statistics."""
 
     # Calculate metrics for all batches
-    total_samples = sum(r["batch_size"] for r in results)
-    total_new_tokens = sum(r["total_new_tokens"] for r in results)
-    total_tokens = sum(r["total_tokens_generated"] for r in results)
+    total_tokens = sum(r["num_new_tokens"] for r in results)
     total_generation_time = sum(r["generation_time"] for r in results)
-
-    # Collect all prompt lengths for statistics
-    response_lengths = []
-    for r in results:
-        response_lengths.extend(r["response_lengths"])
 
     # Skip the first batch as it's unrepresentative thanks to warmup time.
     # fields needed:
@@ -421,25 +409,22 @@ def print_summary(
     print("=" * 60)
     print(f"Model: {model_config.model_name_or_path}")
     print(f"Total batches: {len(results)}")
-    print(f"Total samples: {total_samples}")
     print(f"Batch size: {args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout}")
     print(f"Unique prompts per batch: {args.num_unique_prompts_rollout}")
     print(f"Num rollouts: {args.num_unique_prompts_rollout}")
     print(f"Max tokens: {args.response_length}")
-    print(f"Temperature: {args.temperature}")
     print("-" * 60)
-    print(f"Total time: {total_time:.2f}s ({total_generation_time / total_time} % generating)")
-    print(f"Total new tokens generated: {total_new_tokens}")
-    print(f"Total tokens processed: {total_tokens}")
+    print(f"Total time: {total_time:.2f}s ({total_generation_time / total_time:.2f}% generating)")
+    print(f"Total new tokens generated: {total_tokens}")
     print("-" * 60)
     print("Results (excluding first batch):")
-    print(f"Average tokens/second: {avg_results['tokens_per_sec']:.2f}")
+    print(f"Average tokens/second: {avg_results['tokens_per_second']:.2f}")
     print(f"Average MFU: {avg_results['mfu']:.2f}%")
     print(f"Average generation time per batch: {avg_results['generation_time']:.2f}s")
     print(f"Average new tokens per sample: {avg_results['num_new_tokens']} tokens")
 
-    max_length = np.max(response_lengths)
-    mean_length = np.mean(response_lengths)
+    max_length = np.max(avg_results["response_lengths"])
+    mean_length = np.mean(avg_results["response_lengths"])
     wasted_compute = 100 * (max_length - mean_length) / max_length
     print(f"Wasted compute % (variable response length): {wasted_compute:.2%}%")
 
@@ -452,22 +437,21 @@ def print_summary(
 
     print("-" * 60)
     print("COMPLETION LENGTH STATISTICS:")
-    print(f"Total completions: {len(response_lengths)}")
-
+    print(f"Total completions: {len(avg_results['response_lengths'])}")
     print("\nResponse lengths:")
-    print(f"Min: {min(response_lengths)} tokens")
-    print(f"Max: {max(response_lengths)} tokens")
-    print(f"Mean: {np.mean(response_lengths):.2f} tokens")
-    print(f"Median: {np.median(response_lengths):.2f} tokens")
+    print(f"- Min: {min(avg_results['response_lengths'])} tokens")
+    print(f"- Max: {max(avg_results['response_lengths'])} tokens")
+    print(f"- Mean: {np.mean(avg_results['response_lengths']):.2f} tokens")
+    print(f"- Median: {np.median(avg_results['response_lengths']):.2f} tokens")
 
     # Calculate percentiles for valid tokens
     print("\nResponse length percentiles:")
-    print(f"25th percentile: {np.percentile(response_lengths, 25):.2f} tokens")
-    print(f"50th percentile: {np.percentile(response_lengths, 50):.2f} tokens")
-    print(f"75th percentile: {np.percentile(response_lengths, 75):.2f} tokens")
-    print(f"90th percentile: {np.percentile(response_lengths, 90):.2f} tokens")
-    print(f"95th percentile: {np.percentile(response_lengths, 95):.2f} tokens")
-    print(f"99th percentile: {np.percentile(response_lengths, 99):.2f} tokens")
+    print(f"- 25th percentile: {np.percentile(avg_results['response_lengths'], 25):.2f} tokens")
+    print(f"- 50th percentile: {np.percentile(avg_results['response_lengths'], 50):.2f} tokens")
+    print(f"- 75th percentile: {np.percentile(avg_results['response_lengths'], 75):.2f} tokens")
+    print(f"- 90th percentile: {np.percentile(avg_results['response_lengths'], 90):.2f} tokens")
+    print(f"- 95th percentile: {np.percentile(avg_results['response_lengths'], 95):.2f} tokens")
+    print(f"- 99th percentile: {np.percentile(avg_results['response_lengths'], 99):.2f} tokens")
 
     print("=" * 60)
 
