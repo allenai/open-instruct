@@ -228,20 +228,14 @@ import pandas as pd
 from datasets import Dataset
 import os
 from tqdm import tqdm
+import concurrent.futures
 
-def process_fn(prompt, parameters_dict,task_name):
-
-    data = {
-        "dataset": f"verifiable_problem_z",
-        "label": {"task_name": task_name, "parameters": parameters_dict},
-        "messages": [{
-            "role": "user",
-            "content": prompt
-        }],
-    }
-    return data
-
-
+def generate_instance(task_name, seed, parameter):
+    instance = problem2class[task_name]()
+    instance.generator(seed, parameter)
+    prompt = instance.prompt_generator()
+    parameters_dict = instance.__dict__
+    return process_fn(prompt, parameters_dict, task_name)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -251,26 +245,29 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     seed = 42
-
     update_difficulty_every = args.samples_per_task // args.difficulty_levels
-    
-    
     all_data = []
+
     for task_name in tqdm(args.task_list):
-        # initial setup
         parameter_controller = problem2controller[task_name]()
-        # generate data
         task_data = []
+
         for i in tqdm(range(args.samples_per_task)):
             parameter = parameter_controller.get_parameter_list()[0]
-            instance = problem2class[task_name]()
-            instance.generator(seed, parameter)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(generate_instance, task_name, seed, parameter)
+                try:
+                    result = future.result(timeout=1)
+                    task_data.append(result)
+                except concurrent.futures.TimeoutError:
+                    print(f"Skipped instance for task {task_name} at seed {seed} due to timeout.")
+                except Exception as e:
+                    print(f"Error generating instance for task {task_name} at seed {seed}: {e}")
             seed += 1
-            prompt = instance.prompt_generator()
-            parameters_dict = instance.__dict__
-            task_data.append(process_fn(prompt, parameters_dict, task_name))
+
             if (i + 1) % update_difficulty_every == 0:
                 parameter_list = parameter_controller.update()
+
         all_data.extend(task_data)
 
     ds = Dataset.from_list(all_data)
