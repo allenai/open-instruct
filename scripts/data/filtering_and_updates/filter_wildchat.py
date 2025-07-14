@@ -10,6 +10,9 @@ Steps:
 
 Requires: `datasets` (🤗 Datasets) and an authenticated Hugging Face environment.
 Run `huggingface-cli login` or set the `HF_TOKEN` env var before executing.
+
+Usage:
+python filter_wildchat.py --input-dataset <input_dataset> --output-dataset <output_dataset>
 """
 import argparse
 import logging
