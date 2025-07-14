@@ -267,30 +267,19 @@ def run_generation_batch(
     """Run generation for a batch of prompts and measure performance."""
 
     start_time = time.time()
-    # Use PromptRequest for new format
-    request = PromptRequest(
-        prompts=prompts,
-        training_step=training_step,
-        eval_prompts=None
-    )
-    param_prompt_Q.put(request)
+    param_prompt_Q.put(PromptRequest(prompts=prompts, training_step=training_step, eval_prompts=None))
     result = inference_results_Q.get()
     generation_time = time.time() - start_time
 
-    # Use new dataclass format
-    response_ids = result.response_ids
-    finish_reasons = result.finish_reasons
-    collated_finish_reasons = collections.Counter(finish_reasons)
-
-    new_tokens = sum(len(response) for response in response_ids)
+    new_tokens = sum(len(response) for response in result.responses)
     tokens_per_second = new_tokens / generation_time
     return {
         "tokens_per_second": tokens_per_second,
         "generation_time": generation_time,
         "num_new_tokens": new_tokens,
         # dict mapping string reasons to counts.
-        "finish_reasons": collated_finish_reasons,
-        "response_lengths": [len(response) for response in response_ids],
+        "finish_reasons": collections.Counter(result.finish_reasons),
+        "response_lengths": [len(response) for response in result.responses],
         "prompt_lengths": [len(prompt) for prompt in prompts],  # Original unique prompts
     }
 
@@ -331,7 +320,7 @@ def run_benchmark(
             eval_generation_config,
             num_batches + 1,  # eval_freq (avoid evaluation)
             num_batches,  # num_training_steps
-            1  # resume_training_step
+            1,  # resume_training_step
         )
 
     # Wait for engines to be ready

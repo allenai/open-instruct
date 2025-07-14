@@ -83,8 +83,8 @@ class TestGrpoFastVLLM(unittest.TestCase):
         self.assertIsInstance(result, GenerationResult)
 
         # Check that we got a response
-        self.assertGreater(len(result.response_ids), 0)
-        response_ids = result.response_ids[0]
+        self.assertGreater(len(result.responses), 0)
+        response_ids = result.responses[0]
 
         # Decode the response
         generated_text = tokenizer.decode(response_ids, skip_special_tokens=True)

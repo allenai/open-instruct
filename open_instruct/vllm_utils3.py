@@ -39,7 +39,7 @@ from torch.distributed.distributed_c10d import (
 @dataclasses.dataclass
 class GenerationResult:
     """Container for generation results from vLLM."""
-    response_ids: List[List[int]]
+    responses: List[List[int]]
     finish_reasons: List[str]
     masks: List[List[int]]
     num_calls: List[int]
@@ -229,7 +229,7 @@ class LLMRayActor:
             tool_calleds = [False] * len(response_ids)
         
         return GenerationResult(
-            response_ids=response_ids,
+            responses=response_ids,
             finish_reasons=finish_reasons,
             masks=masks,
             num_calls=num_calls,

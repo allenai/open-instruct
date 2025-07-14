@@ -1124,40 +1124,49 @@ def data_preparation_thread(
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             result = inference_results_Q.get()
-            # Use new dataclass format
-            responses = result.response_ids
-            finish_reasons = result.finish_reasons
-            masks = result.masks
-            num_calls = result.num_calls
-            timeouts = result.timeouts
-            tool_errors = result.tool_errors
-            tool_outputs = result.tool_outputs
-            tool_runtimes = result.tool_runtimes
-            tool_calleds = result.tool_calleds
+            # Use new dataclass format with direct references
             good_outputs = [
-                len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
-                for i in range(len(tool_outputs))
+                len(result.tool_outputs[i]) > 0
+                and result.tool_calleds[i]
+                and not result.timeouts[i]
+                and not result.tool_errors[i]
+                for i in range(len(result.tool_outputs))
             ]
-            for i in range(len(finish_reasons)):
+            for i in range(len(result.finish_reasons)):
                 # edge case: sometimes it outputs eos immediately, and we get an empty response
                 # in that case, we need to add the eos token to the response
                 # note that this also adds eos to the end of reponses that stopped for other reasons.
-                if finish_reasons[i] == "stop" and (
-                    len(responses[i]) == 0 or responses[i][-1] != tokenizer.eos_token_id
+                if result.finish_reasons[i] == "stop" and (
+                    len(result.responses[i]) == 0 or result.responses[i][-1] != tokenizer.eos_token_id
                 ):
-                    responses[i].append(tokenizer.eos_token_id)
-                    masks[i].append(1)  # never mask the eos token for now?
+                    result.responses[i].append(tokenizer.eos_token_id)
+                    result.masks[i].append(1)  # never mask the eos token for now?
 
         with Timer("🔥 [Data Preparation Thread] Decoding responses", noop=True):
-            decoded_responses = tokenizer.batch_decode(responses, skip_special_tokens=True)
+            decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
             decoded_queries = tokenizer.batch_decode(queries, skip_special_tokens=True)
             decoded_queries = [extract_user_query(query) for query in decoded_queries]
-            stop_rate = sum(int(finish_reason == "stop") for finish_reason in finish_reasons) / len(finish_reasons)
+            stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
+                result.finish_reasons
+            )
 
         with Timer("💰 [Data Preparation Thread] Calculating rewards and advantages"):
             scores, reward_metrics = asyncio.run(
                 reward_fn(
-                    responses, decoded_responses, ground_truths, datasets, finish_reasons, infos, decoded_queries
+                    result.responses,
+                    decoded_responses,
+                    ground_truths,
+                    datasets,
+                    result.finish_reasons,
+                    (
+                        result.num_calls,
+                        result.timeouts,
+                        result.tool_errors,
+                        result.tool_outputs,
+                        result.tool_runtimes,
+                        result.tool_calleds,
+                    ),
+                    decoded_queries,
                 )
             )
             scores = np.array(scores)
@@ -1189,12 +1198,12 @@ def data_preparation_thread(
             non_zero_gradient_index = np.where(expanded_mask)[0]
             advantages = advantages[non_zero_gradient_index]
             scores = scores[non_zero_gradient_index]
-            responses = [responses[i] for i in non_zero_gradient_index]
-            masks = [masks[i] for i in non_zero_gradient_index]
+            responses = [result.responses[i] for i in non_zero_gradient_index]
+            masks = [result.masks[i] for i in non_zero_gradient_index]
             queries = [queries[i] for i in non_zero_gradient_index]
             ground_truths = [ground_truths[i] for i in non_zero_gradient_index]
             datasets = [datasets[i] for i in non_zero_gradient_index]
-            finish_reasons = [finish_reasons[i] for i in non_zero_gradient_index]
+            finish_reasons = [result.finish_reasons[i] for i in non_zero_gradient_index]
             if args.mask_truncated_completions:
                 stop_idxes = torch.tensor([i for i in range(len(finish_reasons)) if finish_reasons[i] == "stop"])
                 scores = scores[stop_idxes]
@@ -1338,12 +1347,12 @@ def data_preparation_thread(
                 "val/advantages_min": advantages.min(),
                 "val/advantages_max": advantages.max(),
                 "val/advantages_hist": advantages,
-                "val/num_calls_rate": np.array(num_calls).mean(),
-                "val/timeouts_rate": np.array(timeouts).mean(),
-                "val/tool_errors_rate": np.array([len(item) > 0 for item in tool_errors]).mean(),
+                "val/num_calls_rate": np.array(result.num_calls).mean(),
+                "val/timeouts_rate": np.array(result.timeouts).mean(),
+                "val/tool_errors_rate": np.array([len(item) > 0 for item in result.tool_errors]).mean(),
                 "val/good_outputs_rate": np.array(good_outputs).mean(),
-                "val/tool_runtimes_rate": np.array(tool_runtimes).mean(),
-                "val/tool_calleds_rate": np.array(tool_calleds).mean(),
+                "val/tool_runtimes_rate": np.array(result.tool_runtimes).mean(),
+                "val/tool_calleds_rate": np.array(result.tool_calleds).mean(),
                 **reward_metrics,
             }
 
@@ -1757,21 +1766,28 @@ def maybe_evaluate(
         )
         logger.info("[Main Thread] 📊 Evaluation responses received")
 
-        eval_sequence_lengths = np.array([len(response) for response in eval_responses])
-        eval_decoded_responses = tokenizer.batch_decode(eval_responses, skip_special_tokens=True)
-        eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in eval_finish_reasons) / len(
-            eval_finish_reasons
+        eval_sequence_lengths = np.array([len(response) for response in result.responses])
+        eval_decoded_responses = tokenizer.batch_decode(result.responses, skip_special_tokens=True)
+        eval_stop_rate = sum(int(finish_reason == "stop") for finish_reason in result.finish_reasons) / len(
+            result.finish_reasons
         )
 
         # get and log evaluation metrics
         eval_scores, eval_reward_metrics = asyncio.run(
             reward_fn(
-                eval_responses,
+                result.responses,
                 eval_decoded_responses,
                 eval_ground_truths,
                 eval_dataset_names,
-                eval_finish_reasons,
-                eval_infos,
+                result.finish_reasons,
+                (
+                    result.num_calls,
+                    result.timeouts,
+                    result.tool_errors,
+                    result.tool_outputs,
+                    result.tool_runtimes,
+                    result.tool_calleds,
+                ),
             )
         )
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
