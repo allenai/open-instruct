@@ -1155,7 +1155,6 @@ def vllm_generate_thread(
 
     for training_step in range(resume_training_step, num_training_steps + 1):
         items = param_prompt_Q.get()
-        print(f"{items=}")
         if items is None:
             break
         _, g_queries_list = items
