@@ -26,6 +26,10 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
 # rerun with extras
 RUN uv sync --extra compile --extra liger
 
+# punkt / punkt_tab
+RUN uv python -m nltk.downloader punkt
+RUN uv python -m nltk.downloader punkt_tab
+
 WORKDIR /stage/
 
 # Copy all runtime files directly to final stage
