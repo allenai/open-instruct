@@ -39,6 +39,7 @@ from open_instruct.math_utils import (
 )
 from open_instruct.search_rewards.long_form_rewards import compute_paper_reward
 from open_instruct.search_rewards.reasoning_model_rewards import compute_hle_reward
+from open_instruct.search_rewards.rubric_rewards import compute_rubric_reward
 from open_instruct.utils import extract_final_answer
 
 logger = logging.getLogger(__name__)
@@ -834,6 +835,23 @@ class RLRAGLongFormVerifier(VerifierFunction):
         result = compute_paper_reward(prediction, test_case)
         score = result["reward"]
         return VerificationResult(score=score, log_values=result["log_values"])
+
+
+class RLRAGLongFormRubricsOnlyVerifier(VerifierFunction):
+    """
+    Verifier that computes the RL-RAG (long form) score between the prediction and the label.
+    """
+
+    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+        super().__init__("rl_rag_longform_rubrics_only", verifier_config=verifier_config, weight=1.0)
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
+        test_case = json.loads(label)
+        result = compute_rubric_reward(prediction, test_case)
+        score = result["reward"]
+        return VerificationResult(score=score, log_values=result)
 
 
 class RLRAGLongFormReasoningJudgeVerifier(VerifierFunction):

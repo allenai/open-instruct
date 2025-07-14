@@ -50,9 +50,12 @@ def extract_answer_context_citations(response: str, result: Dict[str, Any]) -> s
     if not match:
         # error_message = "Failed to extract answer from response - no <answer></answer> tags found"
         LOGGER.warning("No <answer></answer> tags found in response")
+        result["extraction_success"] = False
         return None, None, None
 
     extracted_answer = match.group(1).strip()
+    result["extraction_success"] = True
+    result["answer_extracted"] = extracted_answer
     return extracted_context, extracted_answer, extracted_citations
 
 
