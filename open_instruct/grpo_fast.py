@@ -120,7 +120,13 @@ from open_instruct.utils import (
     maybe_use_ai2_wandb_entity,
     sync_gs_bucket,
 )
-from open_instruct.vllm_utils3 import LLMRayActor, create_vllm_engines, init_process_group
+from open_instruct.vllm_utils3 import (
+    LLMRayActor,
+    create_vllm_engines,
+    init_process_group,
+    GenerationResult,
+    PromptRequest,
+)
 
 # Setup logging with filename and line number format
 logging.basicConfig(
@@ -426,6 +432,34 @@ def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = 
         return ((values * mask).sum(axis=axis) / mask.sum(axis=axis)).mean()
     else:
         return (values * mask).sum() / mask.sum()
+
+
+@ray.remote
+class RayQueue:
+    """A Ray actor that implements a queue interface."""
+
+    def __init__(self, maxsize: int = 0):
+        self.queue = []
+        self.maxsize = maxsize
+        self.condition = asyncio.Condition()
+
+    async def put(self, item):
+        async with self.condition:
+            while self.maxsize > 0 and len(self.queue) >= self.maxsize:
+                await self.condition.wait()
+            self.queue.append(item)
+            self.condition.notify()
+
+    async def get(self):
+        async with self.condition:
+            while len(self.queue) == 0:
+                await self.condition.wait()
+            item = self.queue.pop(0)
+            self.condition.notify()
+            return item
+
+    def qsize(self):
+        return len(self.queue)
 
 
 class MetricsTracker:
@@ -1095,87 +1129,9 @@ class ModelGroup:
             self.models.append(worker_policy)
 
 
-def vllm_generate_thread(
-    vllm_engines: List[ray.actor.ActorHandle],
-    generation_config: SamplingParams,
-    eval_generation_config: SamplingParams,
-    inference_results_Q: Queue,
-    param_prompt_Q: Queue,
-    num_training_steps: int,
-    eval_prompt_token_ids: Optional[List[int]],
-    evaluation_inference_results_Q: Queue,
-    local_eval_freq: int,
-    resume_training_step: int = 1,
-    tool_use: bool = False,
-):
-    def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
-        # Split queries between engines
-        queries_per_engine = (len(prompts) + len(vllm_engines) - 1) // len(vllm_engines)
-        split_queries = [prompts[i : i + queries_per_engine] for i in range(0, len(prompts), queries_per_engine)]
-        # Generate responses in parallel across engines
-        futures = [
-            vllm_engine.generate.remote(sampling_params=sampling_params, prompt_token_ids=queries, use_tqdm=False)
-            for vllm_engine, queries in zip(vllm_engines, split_queries)
-        ]
-        # Gather all responses
-        all_outputs = ray.get(futures)
-        response_ids = []
-        finish_reasons = []  # either "stop" or "length"
-        masks = []
-        num_calls = []
-        timeouts = []
-        tool_errors = []
-        tool_outputs = []
-        tool_runtimes = []
-        tool_calleds = []
-        for outputs in all_outputs:
-            response_ids.extend([list(out.token_ids) for output in outputs for out in output.outputs])
-            finish_reasons.extend([out.finish_reason for output in outputs for out in output.outputs])
-            if tool_use:
-                masks.extend([out.mask for output in outputs for out in output.outputs])
-                num_calls.extend([out.num_calls for output in outputs for out in output.outputs])
-                timeouts.extend([out.timeout for output in outputs for out in output.outputs])
-                tool_errors.extend([out.tool_error for output in outputs for out in output.outputs])
-                tool_outputs.extend([out.tool_output for output in outputs for out in output.outputs])
-                tool_runtimes.extend([out.tool_runtime for output in outputs for out in output.outputs])
-                tool_calleds.extend([out.tool_called for output in outputs for out in output.outputs])
-        # if not using the tool, mask is all 1s
-        if not tool_use:
-            masks = [[1] * len(response_ids[i]) for i in range(len(response_ids))]
-            num_calls = [0] * len(response_ids)
-            timeouts = [0] * len(response_ids)
-            tool_errors = [""] * len(response_ids)
-            tool_outputs = [""] * len(response_ids)
-            tool_runtimes = [0] * len(response_ids)
-            tool_calleds = [False] * len(response_ids)
-        return (
-            response_ids,
-            finish_reasons,
-            masks,
-            (num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds),
-        )
-
-    for training_step in range(resume_training_step, num_training_steps + 1):
-        items = param_prompt_Q.get()
-        if items is None:
-            break
-        _, g_queries_list = items
-
-        with Timer("🔥 Generation time"):
-            response_ids, finish_reasons, masks, info = generate_with_engines(g_queries_list, generation_config)
-        inference_results_Q.put((response_ids, finish_reasons, masks, info))
-
-        # Evaluate the model
-        if eval_prompt_token_ids is not None and (training_step - 1) % local_eval_freq == 0:
-            response_ids, finish_reasons, masks, info = generate_with_engines(
-                eval_prompt_token_ids, eval_generation_config
-            )
-            evaluation_inference_results_Q.put((response_ids, finish_reasons, masks, info))
-
-
 def data_preparation_thread(
     reward_fn: Callable,
-    inference_results_Q: Queue,
+    inference_results_Q: ray.actor.ActorHandle,  # Ray queue actor
     packed_sequences_Q: Queue,
     queries_prompt_Q: Queue,
     args: Args,
@@ -1194,8 +1150,22 @@ def data_preparation_thread(
             ground_truths = [item for item in ground_truths for _ in range(args.num_samples_per_prompt_rollout)]
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            responses, finish_reasons, masks, infos = inference_results_Q.get()
-            num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
+            result = ray.get(inference_results_Q.get.remote())
+            if isinstance(result, GenerationResult):
+                # Handle new dataclass format
+                responses = result.response_ids
+                finish_reasons = result.finish_reasons
+                masks = result.masks
+                num_calls = result.num_calls
+                timeouts = result.timeouts
+                tool_errors = result.tool_errors
+                tool_outputs = result.tool_outputs
+                tool_runtimes = result.tool_runtimes
+                tool_calleds = result.tool_calleds
+            else:
+                # Handle old tuple format for backwards compatibility
+                responses, finish_reasons, masks, infos = result
+                num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
             good_outputs = [
                 len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
                 for i in range(len(tool_outputs))
@@ -1594,7 +1564,12 @@ def create_model_and_optimizer(
             else:
                 raise ValueError(f"Unknown tool: {tool}")
 
-    # Create vLLM engines
+    # Create Ray queues first
+    inference_results_Q = RayQueue.remote(maxsize=args.async_steps)
+    param_prompt_Q = RayQueue.remote(maxsize=args.async_steps)
+    evaluation_inference_results_Q = RayQueue.remote(maxsize=1)
+
+    # Create vLLM engines with queues
     vllm_engines = create_vllm_engines(
         args.vllm_num_engines,
         args.vllm_tensor_parallel_size,
@@ -1610,6 +1585,9 @@ def create_model_and_optimizer(
         pg=pg if args.single_gpu_mode else None,
         tools=tool_objects,
         max_tool_calls=args.max_tool_calls,
+        prompt_queue=param_prompt_Q,
+        results_queue=inference_results_Q,
+        eval_results_queue=evaluation_inference_results_Q,
     )
 
     resume_training_step = ray.get(inits)[0] + 1
@@ -1634,10 +1612,11 @@ def sync_weights_and_prepare_prompts(
     iter_dataloader,
     policy_group: ModelGroup,
     queries_prompt_Q: Queue,
-    param_prompt_Q: Queue,
+    param_prompt_Q: ray.actor.ActorHandle,  # Ray queue actor
     queries_next=None,
     ground_truths_next=None,
     datasets_next=None,
+    eval_prompt_token_ids=None,
 ):
     """Sync weights and send the next batch of prompts to vLLM."""
     if training_step != 1:
@@ -1654,11 +1633,17 @@ def sync_weights_and_prepare_prompts(
 
     if args.async_mode:
         queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
-        param_prompt_Q.put((None, queries_next))
+        # Use PromptRequest for Ray queue
+        request = PromptRequest(prompts=queries_next, training_step=training_step, eval_prompts=eval_prompt_token_ids)
+        ray.get(param_prompt_Q.put.remote(request))
     else:
         if training_step != 1:
             queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
-            param_prompt_Q.put((None, queries_next))
+            # Use PromptRequest for Ray queue
+            request = PromptRequest(
+                prompts=queries_next, training_step=training_step, eval_prompts=eval_prompt_token_ids
+            )
+            ray.get(param_prompt_Q.put.remote(request))
 
     return queries_next, ground_truths_next, datasets_next
 
@@ -1769,7 +1754,7 @@ def one_training_step(
 def maybe_evaluate(
     args: Args,
     training_step: int,
-    evaluation_inference_results_Q: Queue,
+    evaluation_inference_results_Q: ray.actor.ActorHandle,  # Ray queue actor
     tokenizer,
     eval_prompt_token_ids,
     eval_ground_truths,
@@ -1782,8 +1767,31 @@ def maybe_evaluate(
     try:
         # timeout 0.01 if this is the last training step or we're not evaluating
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
-        timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_freq < 0) else 100
-        eval_responses, eval_finish_reasons, masks, eval_infos = evaluation_inference_results_Q.get(timeout=timeout)
+        # For Ray queue, we need to handle timeout differently
+        if training_step < args.num_training_steps or args.eval_freq < 0:
+            # Quick check if there's data available
+            size = ray.get(evaluation_inference_results_Q.qsize.remote())
+            if size == 0:
+                return
+
+        # Get result from Ray queue
+        result = ray.get(evaluation_inference_results_Q.get.remote())
+        if isinstance(result, GenerationResult):
+            # Handle new dataclass format
+            eval_responses = result.response_ids
+            eval_finish_reasons = result.finish_reasons
+            masks = result.masks
+            eval_infos = (
+                result.num_calls,
+                result.timeouts,
+                result.tool_errors,
+                result.tool_outputs,
+                result.tool_runtimes,
+                result.tool_calleds,
+            )
+        else:
+            # Handle old tuple format
+            eval_responses, eval_finish_reasons, masks, eval_infos = result
         logger.info("[Main Thread] 📊 Evaluation responses received")
 
         eval_sequence_lengths = np.array([len(response) for response in eval_responses])
@@ -1989,11 +1997,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     train_dataset_idxs = np.arange(len(train_dataset))
     iter_dataloader = ShufflingIterator(train_dataset_idxs, args.num_unique_prompts_rollout, seed=args.seed)
 
-    inference_results_Q = Queue(maxsize=args.async_steps)
-    param_prompt_Q = Queue(maxsize=args.async_steps)
-    evaluation_inference_results_Q = Queue(maxsize=1)
-    packed_sequences_Q = Queue(maxsize=args.async_steps)
-    queries_prompt_Q = Queue(maxsize=args.async_steps)
+    # Create additional queues (main queues already created above)
+    packed_sequences_Q = Queue(maxsize=args.async_steps)  # Keep this as threading Queue for now
+    queries_prompt_Q = Queue(maxsize=args.async_steps)  # Keep this as threading Queue for now
 
     eval_prompt_token_ids = None
     eval_ground_truths = None
@@ -2003,25 +2009,13 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         eval_ground_truths = eval_dataset[:num_eval_samples][GROUND_TRUTHS_KEY]
         eval_dataset_names = eval_dataset[:num_eval_samples][DATASET_SOURCE_KEY]
     reward_fn = make_reward_fn(args)
-    generate_thread = threading.Thread(
-        target=vllm_generate_thread,
-        args=(
-            vllm_engines,
-            generation_config,
-            eval_generation_config,
-            inference_results_Q,
-            param_prompt_Q,
-            args.num_training_steps,
-            eval_prompt_token_ids,
-            evaluation_inference_results_Q,
-            args.local_eval_freq,
-            resume_training_step,
-            args.tool_use,
-        ),
-    )
-    generate_thread.start()
-    logger.info("======== ✅ vllm generate thread starts =========")
-    reward_fn = make_reward_fn(args)
+
+    # Start vLLM engines to process from queues
+    for engine in vllm_engines:
+        engine.process_from_queue.remote(
+            generation_config, eval_generation_config, args.eval_freq, args.num_training_steps, resume_training_step
+        )
+    logger.info("======== ✅ vllm engines started processing from queues =========")
 
     packing_thread = threading.Thread(
         target=data_preparation_thread,
@@ -2044,7 +2038,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
     datasets_next = data_next[DATASET_SOURCE_KEY]
     queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
-    param_prompt_Q.put((None, queries_next))
+    # Use PromptRequest for Ray queue
+    request = PromptRequest(
+        prompts=queries_next, training_step=1, eval_prompts=eval_prompt_token_ids if eval_dataset is not None else None
+    )
+    ray.get(param_prompt_Q.put.remote(request))
 
     num_total_tokens = 0
     start_time = time.time()
@@ -2066,6 +2064,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 queries_next,
                 ground_truths_next,
                 datasets_next,
+                eval_prompt_token_ids,
             )
             collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
                 packed_sequences_Q, num_total_tokens
