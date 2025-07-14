@@ -228,7 +228,7 @@ import pandas as pd
 from datasets import Dataset
 import os
 from tqdm import tqdm
-import concurrent.futures
+import multiprocessing as mp
 
 def process_fn(prompt, parameters_dict,task_name):
 
@@ -242,12 +242,31 @@ def process_fn(prompt, parameters_dict,task_name):
     }
     return data
 
-def generate_instance(task_name, seed, parameter):
-    instance = problem2class[task_name]()
-    instance.generator(seed, parameter)
-    prompt = instance.prompt_generator()
-    parameters_dict = instance.__dict__
-    return process_fn(prompt, parameters_dict, task_name)
+
+
+def instance_worker(task_name, seed, parameter, return_dict):
+    try:
+        instance = problem2class[task_name]()
+        instance.generator(seed, parameter)
+        prompt = instance.prompt_generator()
+        parameters_dict = instance.__dict__
+        return_dict['data'] = process_fn(prompt, parameters_dict, task_name)
+    except Exception as e:
+        return_dict['error'] = str(e)
+
+def generate_instance_with_timeout(task_name, seed, parameter, timeout_sec=1):
+    manager = mp.Manager()
+    return_dict = manager.dict()
+    p = mp.Process(target=instance_worker, args=(task_name, seed, parameter, return_dict))
+    p.start()
+    p.join(timeout_sec)
+    if p.is_alive():
+        p.terminate()
+        p.join()
+        return None, "timeout"
+    if 'error' in return_dict:
+        return None, return_dict['error']
+    return return_dict['data'], None
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -266,15 +285,13 @@ if __name__ == '__main__':
 
         for i in tqdm(range(args.samples_per_task)):
             parameter = parameter_controller.get_parameter_list()[0]
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(generate_instance, task_name, seed, parameter)
-                try:
-                    result = future.result(timeout=1)
-                    task_data.append(result)
-                except concurrent.futures.TimeoutError:
-                    print(f"Skipped instance for task {task_name} at seed {seed} due to timeout.")
-                except Exception as e:
-                    print(f"Error generating instance for task {task_name} at seed {seed}: {e}")
+            result, err = generate_instance_with_timeout(task_name, seed, parameter, timeout_sec=1)
+            if result is not None:
+                task_data.append(result)
+            elif err == "timeout":
+                print(f"[Timeout] Skipped instance for {task_name} at seed {seed}")
+            else:
+                print(f"[Error] {task_name} at seed {seed}: {err}")
             seed += 1
 
             if (i + 1) % update_difficulty_every == 0:
