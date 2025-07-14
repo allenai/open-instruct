@@ -2364,6 +2364,9 @@ dev = [
     { name = "pytest" },
     { name = "ruff" },
 ]
+local = [
+    { name = "vllm" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -2414,6 +2417,7 @@ dev = [
     { name = "pytest", specifier = ">=8.3.4" },
     { name = "ruff", specifier = ">=0.11.13" },
 ]
+local = [{ name = "vllm", editable = "vllm_olmo3" }]
 
 [[package]]
 name = "openai"

@@ -27,8 +27,8 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
 RUN git clone -b shanea/olmo3 https://github.com/2015aroras/vllm.git vllm_olmo3
 RUN VLLM_USE_PRECOMPILED=1 uv pip install -e vllm_olmo3
 
-# Install liger, flash-attn, and don't remove vllm
-RUN uv sync --extra compile --extra liger --extra vllm
+# Install liger, flash-attn, code, and don't remove vllm
+RUN uv sync --extra compile --extra liger --extra vllm --extra code
 
 WORKDIR /stage/
 

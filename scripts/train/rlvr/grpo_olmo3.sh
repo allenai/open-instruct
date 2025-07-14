@@ -1,4 +1,4 @@
-exp_name="grpo_fast_olmo3_test"
+exp_name="grpo_fast_olmo3"
 dataset_mix="saurabh5/rlvr_acecoder 56878 hamishivi/rlvr_orz_math_57k_collected 56878 hamishivi/tulu_3_rewritten_400k_string_f1_only_v2 56878 allenai/IF_multi_constraints_upto5 56878"
 evals="minerva_math::hamish_zs_reasoning,gsm8k::zs_cot_latex,gsm8k::hamish_zs_reasoning,minerva_math_500::hamish_zs_reasoning,zebralogic::hamish_zs_reasoning,aime::hamish_zs_reasoning,agi_eval_english:0shot_cot::hamish_zs_reasoning,gpqa:0shot_cot::hamish_zs_reasoning,ifeval::hamish_zs_reasoning,popqa::hamish_zs_reasoning,mmlu:cot::hamish_zs_reasoning,alpaca_eval_v3::hamish_zs_reasoning,bbh:cot::hamish_zs_reasoning,mbppplus:0-shot-chat::tulu-thinker,codex_humanevalplus:0-shot-chat-v1::tulu-thinker"
 # all I've changed with the checkpoints is the config.json, model_type=olmo3 and architectures is OLMo3ForCausalLM 
@@ -26,9 +26,9 @@ python open_instruct/grpo_fast.py \
     --add_bos True \
     --exp_name ${exp_name} \
     --beta 0.0 \
-    --num_samples_per_prompt_rollout 32 \
+    --num_samples_per_prompt_rollout 16 \
     --num_unique_prompts_rollout 128 \
-    --num_mini_batches 4 \
+    --num_mini_batches 2 \
     --num_epochs 1 \
     --learning_rate 5e-7 \
     --per_device_train_batch_size 1 \
@@ -47,16 +47,15 @@ python open_instruct/grpo_fast.py \
     --stop_strings "</answer>" \
     --non_stop_penalty False \
     --temperature 1.0 \
-    --total_episodes 51200 \
+    --total_episodes 512000 \
     --deepspeed_stage 3 \
-    --num_learners_per_node 6 \
-    --vllm_num_engines 1 \
-    --vllm_tensor_parallel_size 2 \
+    --num_learners_per_node 4 \
+    --vllm_num_engines 4 \
     --lr_scheduler_type constant \
     --apply_verifiable_reward true \
     --seed 1 \
-    --num_evals 1 \
-    --save_freq 50 \
+    --num_evals 5 \
+    --save_freq 100 \
     --gradient_checkpointing \
     --with_tracking \
     --vllm_enable_prefix_caching \

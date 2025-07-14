@@ -90,6 +90,7 @@ dev = [
     "ruff>=0.11.13",
 	"parameterized>=0.9.0",
 ]
+local = ["vllm"]
 
 [tool.black]
 line-length = 119
