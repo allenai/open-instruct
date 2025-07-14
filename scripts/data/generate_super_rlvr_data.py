@@ -259,12 +259,11 @@ if __name__ == '__main__':
         # initial setup
         parameter_controller = problem2controller[task_name]()
         parameter_list = parameter_controller.get_parameter_list()
-        problem = problem2class[task_name]()
         # generate data
         task_data = []
         for i in range(args.samples_per_task):
             parameter = random.choice(parameter_list)
-            instance = problem()
+            instance = problem2class[task_name]()
             instance.generator(seed, parameter)
             seed += 1
             task_data.append(process_fn(instance, task_name))
