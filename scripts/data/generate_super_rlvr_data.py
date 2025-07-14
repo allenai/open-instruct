@@ -228,7 +228,7 @@ import pandas as pd
 from datasets import Dataset
 import os
 
-def process_fn(example, task_name):
+def process_fn(prompt, parameters_dict,task_name):
 
     data = {
         "dataset": f"verifiable_problem_z",
@@ -259,6 +259,7 @@ if __name__ == '__main__':
         # initial setup
         parameter_controller = problem2controller[task_name]()
         parameter_list = parameter_controller.get_parameter_list()
+        # blah
         # generate data
         task_data = []
         for i in range(args.samples_per_task):
@@ -266,7 +267,9 @@ if __name__ == '__main__':
             instance = problem2class[task_name]()
             instance.generator(seed, parameter)
             seed += 1
-            task_data.append(process_fn(instance, task_name))
+            prompt = instance.prompt_generator()
+            parameters_dict = instance.__dict__
+            task_data.append(process_fn(prompt, parameters_dict, task_name))
             if (i + 1) % update_difficulty_every == 0:
                 parameter_list = parameter_controller.update()
         all_data.extend(task_data)
