@@ -13,11 +13,11 @@ import dataclasses
 import gc
 import json
 import logging
+import pathlib
 import queue
 import threading
 import time
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import datasets
 import numpy as np
@@ -27,11 +27,7 @@ import torch.utils.flop_counter
 import transformers
 import vllm
 
-from open_instruct import dataset_transformation, grpo_fast, vllm_utils3
-from open_instruct.dataset_transformation import TokenizerConfig
-from open_instruct.grpo_fast import Args
-from open_instruct.model_utils import ModelConfig
-from open_instruct.utils import ArgumentParserPlus
+from open_instruct import dataset_transformation, grpo_fast, model_utils, utils, vllm_utils3
 
 # For FLOPS, we assume bf16 and ignore sparsity.
 GPU_SPECS = {
@@ -47,13 +43,13 @@ logger = logging.getLogger(__name__)
 
 
 # Determine data directory
-if Path("/weka").exists():
-    DATA_DIR = Path("/weka") / "finbarrt" / "open_instruct_generators_benchmark"
+if pathlib.Path("/weka").exists():
+    DATA_DIR = pathlib.Path("/weka") / "finbarrt" / "open_instruct_generators_benchmark"
 else:
-    DATA_DIR = Path("/tmp") / "open_instruct_generators_benchmark"
+    DATA_DIR = pathlib.Path("/tmp") / "open_instruct_generators_benchmark"
 
 
-def save_completion_lengths(batch_results: List[Dict], timestamp: int):
+def save_completion_lengths(batch_results: list[dict], timestamp: int):
     """
     Save completion lengths to CSV file.
 
@@ -179,7 +175,7 @@ def get_device_name(device_name: str) -> str:
     return processed_device_name[0]
 
 
-def setup_dataset(args: Args, tokenizer_config: TokenizerConfig) -> datasets.Dataset:
+def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation.TokenizerConfig) -> datasets.Dataset:
     """Set up the dataset using the same pipeline as grpo_fast.py."""
     logger.info("Loading and processing dataset...")
 
@@ -212,8 +208,8 @@ def setup_dataset(args: Args, tokenizer_config: TokenizerConfig) -> datasets.Dat
 
 
 def setup_vllm_engines(
-    args: Args, model_config: ModelConfig, max_model_len: int = 20480
-) -> List[ray.actor.ActorHandle]:
+    args: grpo_fast.Args, model_config: model_utils.ModelConfig, max_model_len: int = 20480
+) -> list[ray.actor.ActorHandle]:
     """Set up vLLM engines."""
     logger.info("Setting up vLLM engines...")
 
@@ -252,7 +248,7 @@ def setup_vllm_engines(
 
 def get_batch_data(
     dataset: datasets.Dataset, batch_size: int, batch_idx: int
-) -> Tuple[List[List[int]], List[str], List[str]]:
+) -> tuple[list[list[int]], list[str], list[str]]:
     """Get a batch of data from the dataset."""
     start_idx = batch_idx * batch_size
     end_idx = min(start_idx + batch_size, len(dataset))
@@ -263,8 +259,8 @@ def get_batch_data(
 
 
 def run_generation_batch(
-    inference_results_Q: queue.Queue, param_prompt_Q: queue.Queue, prompts: List[List[int]]
-) -> Dict[str, Any]:
+    inference_results_Q: queue.Queue, param_prompt_Q: queue.Queue, prompts: list[list[int]]
+) -> dict[str, Any]:
     """Run generation for a batch of prompts and measure performance."""
 
     start_time = time.time()
@@ -290,12 +286,12 @@ def run_generation_batch(
 
 def run_benchmark(
     dataset: datasets.Dataset,
-    vllm_engines: List[ray.actor.ActorHandle],
-    args: Args,
-    model_config: ModelConfig,
+    vllm_engines: list[ray.actor.ActorHandle],
+    args: grpo_fast.Args,
+    model_config: model_utils.ModelConfig,
     timestamp: int,
     num_batches: int = 5,
-) -> List[Dict[str, Union[float, int, List[str], List[int]]]]:
+) -> list[dict[str, Any]]:
     """Run the full benchmark."""
     logger.info(f"Starting benchmark with {num_batches} batches of size {args.num_unique_prompts_rollout}")
 
@@ -400,7 +396,9 @@ def average_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     return {k: v / len(results) if isinstance(v, (int, float)) else v for k, v in averaged_results.items()}
 
 
-def print_summary(results: list[dict[str, Any]], total_time: float, args: Args, model_config: ModelConfig) -> None:
+def print_summary(
+    results: list[dict[str, Any]], total_time: float, args: grpo_fast.Args, model_config: model_utils.ModelConfig
+) -> None:
     """Print benchmark summary statistics."""
 
     # Calculate metrics for all batches
@@ -474,11 +472,10 @@ def print_summary(results: list[dict[str, Any]], total_time: float, args: Args, 
     print("=" * 60)
 
 
-def cleanup(vllm_engines: Optional[List[ray.actor.ActorHandle]]) -> None:
+def cleanup(vllm_engines: list[ray.actor.ActorHandle]) -> None:
     """Clean up resources."""
-    if vllm_engines:
-        for engine in vllm_engines:
-            ray.kill(engine)
+    for engine in vllm_engines:
+        ray.kill(engine)
     if ray.is_initialized():
         ray.shutdown()
 
@@ -486,7 +483,9 @@ def cleanup(vllm_engines: Optional[List[ray.actor.ActorHandle]]) -> None:
 def main() -> None:
     """Main benchmark function."""
     # Parse arguments using ArgumentParserPlus
-    parser = ArgumentParserPlus((Args, TokenizerConfig, ModelConfig))
+    parser = utils.ArgumentParserPlus(
+        (grpo_fast.Args, dataset_transformation.TokenizerConfig, model_utils.ModelConfig)
+    )
 
     args, tokenizer_config, model_config = parser.parse_args_into_dataclasses()
 
