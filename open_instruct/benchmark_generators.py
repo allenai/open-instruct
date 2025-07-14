@@ -251,81 +251,43 @@ def setup_vllm_engines(
 
 
 def get_batch_data(
-    dataset: datasets.Dataset, args: Args, batch_idx: int
+    dataset: datasets.Dataset, batch_size: int, batch_idx: int
 ) -> Tuple[List[List[int]], List[str], List[str]]:
     """Get a batch of data from the dataset."""
-    start_idx = batch_idx * args.num_unique_prompts_rollout
-    end_idx = min(start_idx + args.num_unique_prompts_rollout, len(dataset))
+    start_idx = batch_idx * batch_size
+    end_idx = min(start_idx + batch_size, len(dataset))
 
     batch_data = dataset[start_idx:end_idx]
-
-    # Extract prompts and ground truths
     prompts = batch_data[dataset_transformation.INPUT_IDS_PROMPT_KEY]
-    ground_truths = batch_data[dataset_transformation.GROUND_TRUTHS_KEY]
-    datasets_list = batch_data[dataset_transformation.DATASET_SOURCE_KEY]
-
-    # Don't duplicate prompts here - we'll use the 'n' parameter in SamplingParams
-    return prompts, ground_truths, datasets_list
+    return prompts
 
 
 def run_generation_batch(
-    inference_results_Q: queue.Queue,
-    param_prompt_Q: queue.Queue,
-    args: Args,
-    flops_per_token: int,
-    gpu_specs: dict[str, float],
-    prompts: List[List[int]],
-    batch_idx: int,
-) -> Dict[str, Union[float, int, List[str], List[int]]]:
+    inference_results_Q: queue.Queue, param_prompt_Q: queue.Queue, prompts: List[List[int]]
+) -> Dict[str, Any]:
     """Run generation for a batch of prompts and measure performance."""
 
-    # Measure timing from prompt submission to result retrieval
     start_time = time.time()
-
-    # Send prompts
     param_prompt_Q.put((None, prompts))
-
-    # Get results
     result = inference_results_Q.get()
+    generation_time = time.time() - start_time
 
-    end_time = time.time()
-    generation_time = end_time - start_time
-
-    if result[0] == "ERROR":
-        logger.error(f"Generation failed: {result[1]}")
-        return {"error": result[1]}
-
-    response_ids, finish_reasons, masks, info = result
+    response_ids, finish_reasons, _, _ = result
     collated_finish_reasons = collections.Counter(finish_reasons)
-    logger.info("finish reasons: " + ", ".join(f"{k}: {v}" for k, v in collated_finish_reasons.items()))
 
-    # Calculate tokens generated (response_ids only contains newly generated tokens)
-    # When using n parameter, vLLM returns flattened responses as if prompts were duplicated
-    total_new_tokens = sum(len(response) for response in response_ids)
-    total_prompt_tokens = sum(len(prompt) for prompt in prompts) * args.num_samples_per_prompt_rollout
-    total_tokens_generated = total_new_tokens + total_prompt_tokens
-
-    tokens_per_second = total_new_tokens / generation_time if generation_time > 0 else 0
-    total_tokens_per_second = total_tokens_generated / generation_time if generation_time > 0 else 0
-
-    # Calculate MFU
-    mfu_percentage = 100 * tokens_per_second * flops_per_token / gpu_specs["flops"]
-
+    new_tokens = sum(len(response) for response in response_ids)
+    tokens_per_second = new_tokens / generation_time
+    device_name = get_device_name(torch.cuda.get_device_name(0))
+    device_flops = get_gpu_specs(device_name)["flops"]
     return {
-        "batch_idx": batch_idx,
-        "batch_size": len(response_ids),  # Total number of responses generated
-        "generation_time": generation_time,
-        "total_tokens_generated": total_tokens_generated,
-        "total_new_tokens": total_new_tokens,
+        "mfu": 100 * tokens_per_second * flops_per_token / device_flops,
         "tokens_per_second": tokens_per_second,
-        "total_tokens_per_second": total_tokens_per_second,
-        "mfu_percentage": mfu_percentage,
-        "avg_new_tokens_per_sample": total_new_tokens / len(response_ids) if response_ids else 0,
-        "finish_reasons": finish_reasons,
+        "generation_time": generation_time,
+        "num_new_tokens": new_tokens,
+        # dict mapping string reasons to counts.
+        "finish_reasons": collated_finish_reasons,
         "response_lengths": [len(response) for response in response_ids],
         "prompt_lengths": [len(prompt) for prompt in prompts],  # Original unique prompts
-        "masks": masks,  # Include masks for wasted computation calculation
-        "max_tokens": args.response_length,  # Include max_tokens setting
     }
 
 
@@ -377,26 +339,22 @@ def run_benchmark(
     # Wait for thread to be ready
     time.sleep(0.1)
 
-    all_results = []
+    results = []
     total_start_time = time.time()
-    gpu_specs = GPU_SPECS[get_device_name(torch.cuda.get_device_name(0))]
     for batch_idx in range(num_batches):
         logger.info(f"Processing batch {batch_idx + 1}/{num_batches}")
 
-        # Get batch data
-        prompts, ground_truths, datasets_list = get_batch_data(dataset, args, batch_idx)
+        prompts = get_batch_data(dataset, args.num_unique_prompts_rollout, batch_idx)
 
         # Run generation
-        batch_result = run_generation_batch(
-            inference_results_Q, param_prompt_Q, args, flops_per_token, gpu_specs, prompts, batch_idx
-        )
+        result = run_generation_batch(inference_results_Q, param_prompt_Q, prompts)
         # We incrementally save completion lengths so even if the job dies, we still have data.
-        save_completion_lengths([batch_result], timestamp)
-        all_results.append(batch_result)
+        save_completion_lengths([result], timestamp)
+        results.append(result)
         logger.info(
             f"Batch {batch_idx + 1} completed: "
-            f"{batch_result['tokens_per_second']:.2f} new tokens/sec, "
-            f"MFU: {batch_result['mfu_percentage']:.2f}%, "
+            f"{result['tokens_per_second']:.2f} new tokens/sec, "
+            f"MFU: {batch_result['mfu']:.2f}%, "
             f"{batch_result['generation_time']:.2f}s"
         )
 
@@ -408,18 +366,36 @@ def run_benchmark(
     # Wait for thread to finish
     thread.join(timeout=10)
 
-    if thread.is_alive():
-        logger.warning("Thread did not shutdown gracefully")
+    print_summary(results, total_time, args)
 
-    print_summary(all_results, total_time, args, flops_per_token, gpu_specs)
+
+def average_results(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Calculate average metrics from results."""
+    averaged_results = {
+        "mfu": 0.0,
+        "tokens_per_second": 0.0,
+        "generation_time": 0.0,
+        "num_new_tokens": 0,
+        "finish_reasons": collections.defaultdict(int),
+        "response_lengths": [],
+        "prompt_lengths": [],
+    }
+    for result in results:
+        for key, value in result.items():
+            if key in ["mfu", "tokens_per_second", "generation_time", "num_new_tokens"]:
+                averaged_results[key] += value
+            elif key == "finish_reasons":
+                for reason, count in value.items():
+                    averaged_results["finish_reasons"][reason] += count
+            elif key == "response_lengths":
+                averaged_results["response_lengths"].extend(value)
+            elif key == "prompt_lengths":
+                averaged_results["prompt_lengths"].extend(value)
+    return {k: v / len(results) if isinstance(v, (int, float)) else v for k, v in averaged_results.items()}
 
 
 def print_summary(
-    results: List[Dict[str, Union[float, int, List[str], List[int]]]],
-    total_time: float,
-    args: Args,
-    flops_per_token: int,
-    gpu_specs: dict[str, float],
+    results: List[BatchResults], total_time: float, args: Args, flops_per_token: int, gpu_specs: dict[str, float]
 ) -> None:
     """Print benchmark summary statistics."""
 
@@ -430,48 +406,13 @@ def print_summary(
     total_generation_time = sum(r["generation_time"] for r in results)
 
     # Collect all prompt lengths for statistics
-    all_prompt_lengths = []
-    all_response_lengths = []
-    all_valid_token_counts = []  # Based on masks
+    response_lengths = []
     for r in results:
-        all_prompt_lengths.extend(r["prompt_lengths"])
-        all_response_lengths.extend(r["response_lengths"])
-        # Calculate valid token counts from masks
-        for mask in r["masks"]:
-            all_valid_token_counts.append(sum(mask))
+        response_lengths.extend(r["response_lengths"])
 
-    avg_new_tokens_per_second = total_new_tokens / total_generation_time if total_generation_time > 0 else 0
-    avg_total_tokens_per_second = total_tokens / total_generation_time if total_generation_time > 0 else 0
-    avg_generation_time = total_generation_time / len(results)
-
-    # Calculate average MFU
-    avg_mfu = sum(r["mfu_percentage"] for r in results) / len(results) if results else 0
-
-    throughput_samples_per_second = total_samples / total_time
-
-    # Calculate metrics excluding the first batch (N-1 batches)
-    if len(results) > 1:
-        last_n_minus_1_results = results[1:]  # Skip first batch
-        last_n_minus_1_samples = sum(r["batch_size"] for r in last_n_minus_1_results)
-        last_n_minus_1_new_tokens = sum(r["total_new_tokens"] for r in last_n_minus_1_results)
-        last_n_minus_1_tokens = sum(r["total_tokens_generated"] for r in last_n_minus_1_results)
-        last_n_minus_1_generation_time = sum(r["generation_time"] for r in last_n_minus_1_results)
-
-        avg_new_tokens_per_second_last_n_minus_1 = (
-            last_n_minus_1_new_tokens / last_n_minus_1_generation_time if last_n_minus_1_generation_time > 0 else 0
-        )
-        avg_total_tokens_per_second_last_n_minus_1 = (
-            last_n_minus_1_tokens / last_n_minus_1_generation_time if last_n_minus_1_generation_time > 0 else 0
-        )
-        avg_generation_time_last_n_minus_1 = last_n_minus_1_generation_time / len(last_n_minus_1_results)
-        avg_mfu_last_n_minus_1 = sum(r["mfu_percentage"] for r in last_n_minus_1_results) / len(last_n_minus_1_results)
-
-    else:
-        # If only one batch, use the same metrics
-        avg_new_tokens_per_second_last_n_minus_1 = avg_new_tokens_per_second
-        avg_total_tokens_per_second_last_n_minus_1 = avg_total_tokens_per_second
-        avg_generation_time_last_n_minus_1 = avg_generation_time
-        avg_mfu_last_n_minus_1 = avg_mfu
+    # Skip the first batch as it's unrepresentative thanks to warmup time.
+    # fields needed:
+    avg_results = average_results(results[1:])
 
     print("\n" + "=" * 60)
     print("BENCHMARK SUMMARY")
@@ -485,29 +426,25 @@ def print_summary(
     print(f"Max tokens: {args.response_length}")
     print(f"Temperature: {args.temperature}")
     print("-" * 60)
-    print(f"Total time: {total_time:.2f}s")
-    print(f"Total generation time: {total_generation_time:.2f}s")
+    print(f"Total time: {total_time:.2f}s ({total_generation_time / total_time} % generating)")
     print(f"Total new tokens generated: {total_new_tokens}")
     print(f"Total tokens processed: {total_tokens}")
     print("-" * 60)
-    if len(results) > 1:
-        print("LAST N-1 BATCHES (excluding first batch):")
-        print(f"Average new tokens/second: {avg_new_tokens_per_second_last_n_minus_1:.2f}")
-        print(f"Average total tokens/second: {avg_total_tokens_per_second_last_n_minus_1:.2f}")
-        print(f"Average MFU: {avg_mfu_last_n_minus_1:.2f}%")
-        print(f"Average generation time per batch: {avg_generation_time_last_n_minus_1:.2f}s")
-        print(f"Average new tokens per sample: {last_n_minus_1_new_tokens / last_n_minus_1_samples:.2f}")
-    else:
-        print("RESULTS:")
-        print(f"Average new tokens/second: {avg_new_tokens_per_second:.2f}")
-        print(f"Average total tokens/second: {avg_total_tokens_per_second:.2f}")
-        print(f"Average MFU: {avg_mfu:.2f}%")
-        print(f"Average generation time per batch: {avg_generation_time:.2f}s")
-        print(f"Throughput (samples/second): {throughput_samples_per_second:.2f}")
-        print(f"Average new tokens per sample: {total_new_tokens / total_samples:.2f}")
+    print("Results (excluding first batch):")
+    print(f"Average new tokens/second: {avg_new_tokens_per_second_last_n_minus_1:.2f}")
+    print(f"Average total tokens/second: {avg_total_tokens_per_second_last_n_minus_1:.2f}")
+    print(f"Average MFU: {avg_mfu_last_n_minus_1:.2f}%")
+    print(f"Average generation time per batch: {avg_generation_time_last_n_minus_1:.2f}s")
+    print(f"Average new tokens per sample: {last_n_minus_1_new_tokens / last_n_minus_1_samples:.2f}")
+
+    max_length = np.max(response_lengths)
+    mean_length = np.mean(response_lengths)
+    wasted_compute = 100 * (max_length - mean_length) / max_length
+    print(f"Wasted compute % (variable response length): {wasted_compute:.2%}%")
 
     print("-" * 60)
     print("HARDWARE SPECIFICATIONS:")
+    print(f"GPU device: {torch.cuda.get_device_name(0)}")
     print(f"GPU peak FLOPs: {gpu_specs['flops'] / 1e12:.0f} TFLOPs")
     print(f"GPU memory size: {gpu_specs['memory_size'] / 1e9:.0f} GB")
     print("-" * 60)
@@ -515,41 +452,24 @@ def print_summary(
     print(f"Model FLOPs per token: {flops_per_token / 1e9:.2f} GFLOPs")
 
     # Print completion length statistics
-    if all_response_lengths:
-        print("-" * 60)
-        print("COMPLETION LENGTH STATISTICS:")
-        print(f"Total completions: {len(all_response_lengths)}")
+    print("-" * 60)
+    print("COMPLETION LENGTH STATISTICS:")
+    print(f"Total completions: {len(response_lengths)}")
 
-        # Raw response lengths (including padding)
-        print("\nRaw response lengths (including any padding):")
-        print(f"Min: {min(all_response_lengths)} tokens")
-        print(f"Max: {max(all_response_lengths)} tokens")
-        print(f"Mean: {np.mean(all_response_lengths):.2f} tokens")
-        print(f"Median: {np.median(all_response_lengths):.2f} tokens")
-        print(f"Std dev: {np.std(all_response_lengths):.2f} tokens")
+    print("\nResponse lengths:")
+    print(f"Min: {min(response_lengths)} tokens")
+    print(f"Max: {max(response_lengths)} tokens")
+    print(f"Mean: {np.mean(response_lengths):.2f} tokens")
+    print(f"Median: {np.median(response_lengths):.2f} tokens")
 
-        # Valid token counts (based on masks)
-        if all_valid_token_counts:
-            print("\nValid token counts (based on masks):")
-            print(f"Min: {min(all_valid_token_counts)} tokens")
-            print(f"Max: {max(all_valid_token_counts)} tokens")
-            print(f"Mean: {np.mean(all_valid_token_counts):.2f} tokens")
-            print(f"Median: {np.median(all_valid_token_counts):.2f} tokens")
-            print(f"Std dev: {np.std(all_valid_token_counts):.2f} tokens")
-
-            # Calculate percentiles for valid tokens
-            print("\nValid token percentiles:")
-            p25 = np.percentile(all_valid_token_counts, 25)
-            p75 = np.percentile(all_valid_token_counts, 75)
-            p90 = np.percentile(all_valid_token_counts, 90)
-            p95 = np.percentile(all_valid_token_counts, 95)
-            p99 = np.percentile(all_valid_token_counts, 99)
-
-            print(f"25th percentile: {p25:.2f} tokens")
-            print(f"75th percentile: {p75:.2f} tokens")
-            print(f"90th percentile: {p90:.2f} tokens")
-            print(f"95th percentile: {p95:.2f} tokens")
-            print(f"99th percentile: {p99:.2f} tokens")
+    # Calculate percentiles for valid tokens
+    print("\nResponse length percentiles:")
+    print(f"25th percentile: {np.percentile(response_lengths, 25):.2f} tokens")
+    print(f"50th percentile: {np.percentile(response_lengths, 50):.2f} tokens")
+    print(f"75th percentile: {np.percentile(response_lengths, 75):.2f} tokens")
+    print(f"90th percentile: {np.percentile(response_lengths, 90):.2f} tokens")
+    print(f"95th percentile: {np.percentile(response_lengths, 95):.2f} tokens")
+    print(f"99th percentile: {np.percentile(response_lengths, 99):.2f} tokens")
 
     print("=" * 60)
 
