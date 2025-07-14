@@ -1124,21 +1124,16 @@ def data_preparation_thread(
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             result = inference_results_Q.get()
-            if isinstance(result, GenerationResult):
-                # Handle new dataclass format
-                responses = result.response_ids
-                finish_reasons = result.finish_reasons
-                masks = result.masks
-                num_calls = result.num_calls
-                timeouts = result.timeouts
-                tool_errors = result.tool_errors
-                tool_outputs = result.tool_outputs
-                tool_runtimes = result.tool_runtimes
-                tool_calleds = result.tool_calleds
-            else:
-                # Handle old tuple format for backwards compatibility
-                responses, finish_reasons, masks, infos = result
-                num_calls, timeouts, tool_errors, tool_outputs, tool_runtimes, tool_calleds = infos
+            # Use new dataclass format
+            responses = result.response_ids
+            finish_reasons = result.finish_reasons
+            masks = result.masks
+            num_calls = result.num_calls
+            timeouts = result.timeouts
+            tool_errors = result.tool_errors
+            tool_outputs = result.tool_outputs
+            tool_runtimes = result.tool_runtimes
+            tool_calleds = result.tool_calleds
             good_outputs = [
                 len(tool_outputs[i]) > 0 and tool_calleds[i] and not timeouts[i] and not tool_errors[i]
                 for i in range(len(tool_outputs))
@@ -1748,22 +1743,18 @@ def maybe_evaluate(
 
         # Get result from Ray queue
         result = evaluation_inference_results_Q.get()
-        if isinstance(result, GenerationResult):
-            # Handle new dataclass format
-            eval_responses = result.response_ids
-            eval_finish_reasons = result.finish_reasons
-            masks = result.masks
-            eval_infos = (
-                result.num_calls,
-                result.timeouts,
-                result.tool_errors,
-                result.tool_outputs,
-                result.tool_runtimes,
-                result.tool_calleds,
-            )
-        else:
-            # Handle old tuple format
-            eval_responses, eval_finish_reasons, masks, eval_infos = result
+        # Use new dataclass format
+        eval_responses = result.response_ids
+        eval_finish_reasons = result.finish_reasons
+        masks = result.masks
+        eval_infos = (
+            result.num_calls,
+            result.timeouts,
+            result.tool_errors,
+            result.tool_outputs,
+            result.tool_runtimes,
+            result.tool_calleds,
+        )
         logger.info("[Main Thread] 📊 Evaluation responses received")
 
         eval_sequence_lengths = np.array([len(response) for response in eval_responses])
