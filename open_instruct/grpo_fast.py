@@ -61,6 +61,7 @@ from typing import Callable, Dict, Iterator, List, Literal, Optional, Union
 import numpy as np
 import pandas as pd
 import ray
+from ray.util import queue as ray_queue
 import torch
 import torch.utils
 import torch.utils.data
@@ -432,34 +433,6 @@ def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: Optional[int] = 
         return ((values * mask).sum(axis=axis) / mask.sum(axis=axis)).mean()
     else:
         return (values * mask).sum() / mask.sum()
-
-
-@ray.remote
-class RayQueue:
-    """A Ray actor that implements a queue interface."""
-
-    def __init__(self, maxsize: int = 0):
-        self.queue = []
-        self.maxsize = maxsize
-        self.condition = asyncio.Condition()
-
-    async def put(self, item):
-        async with self.condition:
-            while self.maxsize > 0 and len(self.queue) >= self.maxsize:
-                await self.condition.wait()
-            self.queue.append(item)
-            self.condition.notify()
-
-    async def get(self):
-        async with self.condition:
-            while len(self.queue) == 0:
-                await self.condition.wait()
-            item = self.queue.pop(0)
-            self.condition.notify()
-            return item
-
-    def qsize(self):
-        return len(self.queue)
 
 
 class MetricsTracker:
@@ -1131,7 +1104,7 @@ class ModelGroup:
 
 def data_preparation_thread(
     reward_fn: Callable,
-    inference_results_Q: ray.actor.ActorHandle,  # Ray queue actor
+    inference_results_Q: ray_queue.Queue,  # Ray queue
     packed_sequences_Q: Queue,
     queries_prompt_Q: Queue,
     args: Args,
@@ -1150,7 +1123,7 @@ def data_preparation_thread(
             ground_truths = [item for item in ground_truths for _ in range(args.num_samples_per_prompt_rollout)]
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            result = ray.get(inference_results_Q.get.remote())
+            result = inference_results_Q.get()
             if isinstance(result, GenerationResult):
                 # Handle new dataclass format
                 responses = result.response_ids
@@ -1565,9 +1538,9 @@ def create_model_and_optimizer(
                 raise ValueError(f"Unknown tool: {tool}")
 
     # Create Ray queues first
-    inference_results_Q = RayQueue.remote(maxsize=args.async_steps)
-    param_prompt_Q = RayQueue.remote(maxsize=args.async_steps)
-    evaluation_inference_results_Q = RayQueue.remote(maxsize=1)
+    inference_results_Q = ray_queue.Queue(maxsize=args.async_steps)
+    param_prompt_Q = ray_queue.Queue(maxsize=args.async_steps)
+    evaluation_inference_results_Q = ray_queue.Queue(maxsize=1)
 
     # Create vLLM engines with queues
     vllm_engines = create_vllm_engines(
@@ -1612,7 +1585,7 @@ def sync_weights_and_prepare_prompts(
     iter_dataloader,
     policy_group: ModelGroup,
     queries_prompt_Q: Queue,
-    param_prompt_Q: ray.actor.ActorHandle,  # Ray queue actor
+    param_prompt_Q: ray_queue.Queue,  # Ray queue
     queries_next=None,
     ground_truths_next=None,
     datasets_next=None,
@@ -1635,7 +1608,7 @@ def sync_weights_and_prepare_prompts(
         queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
         # Use PromptRequest for Ray queue
         request = PromptRequest(prompts=queries_next, training_step=training_step, eval_prompts=eval_prompt_token_ids)
-        ray.get(param_prompt_Q.put.remote(request))
+        param_prompt_Q.put(request)
     else:
         if training_step != 1:
             queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
@@ -1643,7 +1616,7 @@ def sync_weights_and_prepare_prompts(
             request = PromptRequest(
                 prompts=queries_next, training_step=training_step, eval_prompts=eval_prompt_token_ids
             )
-            ray.get(param_prompt_Q.put.remote(request))
+            param_prompt_Q.put(request)
 
     return queries_next, ground_truths_next, datasets_next
 
@@ -1754,7 +1727,7 @@ def one_training_step(
 def maybe_evaluate(
     args: Args,
     training_step: int,
-    evaluation_inference_results_Q: ray.actor.ActorHandle,  # Ray queue actor
+    evaluation_inference_results_Q: ray_queue.Queue,  # Ray queue
     tokenizer,
     eval_prompt_token_ids,
     eval_ground_truths,
@@ -1770,12 +1743,11 @@ def maybe_evaluate(
         # For Ray queue, we need to handle timeout differently
         if training_step < args.num_training_steps or args.eval_freq < 0:
             # Quick check if there's data available
-            size = ray.get(evaluation_inference_results_Q.qsize.remote())
-            if size == 0:
+            if evaluation_inference_results_Q.empty():
                 return
 
         # Get result from Ray queue
-        result = ray.get(evaluation_inference_results_Q.get.remote())
+        result = evaluation_inference_results_Q.get()
         if isinstance(result, GenerationResult):
             # Handle new dataclass format
             eval_responses = result.response_ids
@@ -2042,7 +2014,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     request = PromptRequest(
         prompts=queries_next, training_step=1, eval_prompts=eval_prompt_token_ids if eval_dataset is not None else None
     )
-    ray.get(param_prompt_Q.put.remote(request))
+    param_prompt_Q.put(request)
 
     num_total_tokens = 0
     start_time = time.time()

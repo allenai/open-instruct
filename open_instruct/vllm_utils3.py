@@ -181,13 +181,13 @@ class LLMRayActor:
         """Process prompts from the queue and put results in the results queue."""
         for training_step in range(resume_training_step, num_training_steps + 1):
             # Get prompts from queue
-            request = ray.get(self.prompt_queue.get.remote())
+            request = self.prompt_queue.get()
             if request is None:
                 break
             
             # Process training prompts
             result = self._generate_batch(request.prompts, sampling_params)
-            ray.get(self.results_queue.put.remote(result))
+            self.results_queue.put(result)
             
             # Handle evaluation if needed
             if request.eval_prompts is not None and eval_sampling_params is not None and (training_step - 1) % eval_freq == 0:
@@ -195,9 +195,9 @@ class LLMRayActor:
                 eval_result.is_eval = True
                 # Put eval results in separate queue if available
                 if self.eval_results_queue is not None:
-                    ray.get(self.eval_results_queue.put.remote(eval_result))
+                    self.eval_results_queue.put(eval_result)
                 else:
-                    ray.get(self.results_queue.put.remote(eval_result))
+                    self.results_queue.put(eval_result)
     
     def _generate_batch(self, prompts: List[List[int]], sampling_params) -> GenerationResult:
         """Generate responses for a batch of prompts."""
