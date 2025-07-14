@@ -35,6 +35,9 @@ from open_instruct.math_utils import (
 )
 from open_instruct.utils import extract_final_answer
 
+# zhiyuan data
+from open_instruct.VerifiableProblem.verifiable.problems import problem2class
+
 logger = logging.getLogger(__name__)
 
 
@@ -750,6 +753,25 @@ class LMJudgeVerifier(VerifierFunction):
             type: The VerifierConfig class or its subclass
         """
         return LMJudgeVerifierConfig
+
+
+class VerifiableProblemZVerifier(VerifierFunction):
+    """
+    Verifier for "VerifiableProblems" from Zhiyuan's project.
+    """
+    def __init__(self, verifier_config: Optional[VerifierConfig] = None) -> None:
+        super().__init__("verifiable_problem_z", verifier_config=verifier_config, weight=1.0)
+
+    def __call__(
+        self, tokenized_prediction: List[int], prediction: str, label: str, query: Optional[str] = None
+    ) -> VerificationResult:
+        problem = problem2class[label]()
+        try:
+            score = problem.scorer(prediction)
+        except Exception as e:
+            logger.warning(f"Error scoring verifiable problem: {e}")
+            return VerificationResult(score=0.0)
+        return VerificationResult(score=score)
 
 
 class CodeVerifier(VerifierFunction):
