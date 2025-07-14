@@ -246,7 +246,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--task_list', nargs='+')
     parser.add_argument('--samples_per_task', type=int)
-    parser.add_argument('--difficulty_levels', type=str)
+    parser.add_argument('--difficulty_levels', type=int)
     args = parser.parse_args()
 
     seed = 42
@@ -259,7 +259,7 @@ if __name__ == '__main__':
         # initial setup
         parameter_controller = problem2controller[task_name]()
         parameter_list = parameter_controller.get_parameter_list()
-        problem = problem2class[args.task]()
+        problem = problem2class[task_name]()
         # generate data
         task_data = []
         for i in range(args.samples_per_task):
@@ -268,7 +268,7 @@ if __name__ == '__main__':
             instance.generator(seed, parameter)
             seed += 1
             task_data.append(process_fn(instance, task_name))
-            if i % update_difficulty_every == 0:
+            if (i + 1) % update_difficulty_every == 0:
                 parameter_list = parameter_controller.update()
         all_data.extend(task_data)
 
