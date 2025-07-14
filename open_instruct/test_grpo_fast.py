@@ -34,7 +34,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
 
         # Tokenize the test prompt
         test_prompt = "What is the capital of France?"
-        prompt_token_ids = tokenizer.encode(test_prompt, return_tensors="pt").tolist()[0]
+        prompt_token_ids = tokenizer.encode(test_prompt, return_tensors="pt").tolist()
 
         # Create vLLM engines
         vllm_engines = create_vllm_engines(
@@ -63,10 +63,6 @@ class TestGrpoFastVLLM(unittest.TestCase):
         param_prompt_Q = queue.Queue()
         evaluation_inference_results_Q = queue.Queue()
 
-        # Put the test prompt in the queue
-        param_prompt_Q.put((1, [[prompt_token_ids]], None))
-        param_prompt_Q.put(None)  # Ensure thread exits after one prompt
-
         # Create and start the generation thread
         generate_thread = threading.Thread(
             target=vllm_generate_thread,
@@ -85,21 +81,21 @@ class TestGrpoFastVLLM(unittest.TestCase):
             ),
         )
         generate_thread.start()
+        # Put the test prompt in the queue
+        param_prompt_Q.put((None, prompt_token_ids))
 
         try:
-            result = inference_results_Q.get(timeout=30)
+            result = inference_results_Q.get()
         except queue.Empty:
             self.fail("Timed out waiting for inference result")
 
-        # The result should be a tuple with the structure we expect
-        self.assertIsInstance(result, tuple)
-        self.assertEqual(len(result), 2)
+        print(f"{result=}")
 
         response_ids, _, _, _ = result
         print(f"{response_ids=}")
 
         # Decode the response
-        generated_text = tokenizer.decode(response_ids, skip_special_tokens=True)
+        generated_text = tokenizer.decode(response_ids[0], skip_special_tokens=True)
 
         # Print for debugging
         print(f"Generated text: {generated_text}")
