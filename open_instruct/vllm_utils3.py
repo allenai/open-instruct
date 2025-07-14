@@ -39,6 +39,7 @@ from torch.distributed.distributed_c10d import (
 @dataclasses.dataclass
 class GenerationResult:
     """Container for generation results from vLLM."""
+
     responses: List[List[int]]
     finish_reasons: List[str]
     masks: List[List[int]]
@@ -54,8 +55,9 @@ class GenerationResult:
 @dataclasses.dataclass
 class PromptRequest:
     """Container for prompt requests to vLLM."""
+
     prompts: List[List[int]]
-    training_step: int
+    training_step: Optional[int] = None
     eval_prompts: Optional[List[List[int]]] = None
 
 
@@ -140,7 +142,16 @@ def init_process_group(
 
 @ray.remote
 class LLMRayActor:
-    def __init__(self, *args, bundle_indices: list = None, tool_use: bool = False, prompt_queue=None, results_queue=None, eval_results_queue=None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        bundle_indices: list = None,
+        tool_use: bool = False,
+        prompt_queue=None,
+        results_queue=None,
+        eval_results_queue=None,
+        **kwargs,
+    ):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
@@ -168,7 +179,7 @@ class LLMRayActor:
             from vllm import LLM
 
             self.llm = LLM(*args, **kwargs)
-        
+
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
@@ -176,21 +187,32 @@ class LLMRayActor:
 
     def generate(self, *args, **kwargs):
         return self.llm.generate(*args, **kwargs)
-    
-    def process_from_queue(self, sampling_params, eval_sampling_params=None, eval_freq=None, num_training_steps=None, resume_training_step=1):
+
+    def process_from_queue(
+        self,
+        sampling_params,
+        eval_sampling_params=None,
+        eval_freq=None,
+        num_training_steps=None,
+        resume_training_step=1,
+    ):
         """Process prompts from the queue and put results in the results queue."""
         for training_step in range(resume_training_step, num_training_steps + 1):
             # Get prompts from queue
             request = self.prompt_queue.get()
             if request is None:
                 break
-            
+
             # Process training prompts
             result = self._generate_batch(request.prompts, sampling_params)
             self.results_queue.put(result)
-            
+
             # Handle evaluation if needed
-            if request.eval_prompts is not None and eval_sampling_params is not None and (training_step - 1) % eval_freq == 0:
+            if (
+                request.eval_prompts is not None
+                and eval_sampling_params is not None
+                and (training_step - 1) % eval_freq == 0
+            ):
                 eval_result = self._generate_batch(request.eval_prompts, eval_sampling_params)
                 eval_result.is_eval = True
                 # Put eval results in separate queue if available
@@ -198,19 +220,15 @@ class LLMRayActor:
                     self.eval_results_queue.put(eval_result)
                 else:
                     self.results_queue.put(eval_result)
-    
+
     def _generate_batch(self, prompts: List[List[int]], sampling_params) -> GenerationResult:
         """Generate responses for a batch of prompts."""
-        outputs = self.llm.generate(
-            sampling_params=sampling_params,
-            prompt_token_ids=prompts,
-            use_tqdm=False
-        )
-        
+        outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
+
         # Process outputs
         response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
         finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
-        
+
         if self.tool_use:
             masks = [out.mask for output in outputs for out in output.outputs]
             num_calls = [out.num_calls for output in outputs for out in output.outputs]
@@ -227,7 +245,7 @@ class LLMRayActor:
             tool_outputs = [""] * len(response_ids)
             tool_runtimes = [0] * len(response_ids)
             tool_calleds = [False] * len(response_ids)
-        
+
         return GenerationResult(
             responses=response_ids,
             finish_reasons=finish_reasons,
@@ -237,7 +255,7 @@ class LLMRayActor:
             tool_errors=tool_errors,
             tool_outputs=tool_outputs,
             tool_runtimes=tool_runtimes,
-            tool_calleds=tool_calleds
+            tool_calleds=tool_calleds,
         )
 
     def init_process_group(

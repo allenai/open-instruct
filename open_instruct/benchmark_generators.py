@@ -29,7 +29,7 @@ import transformers
 import vllm
 
 from open_instruct import dataset_transformation, grpo_fast, model_utils, utils, vllm_utils3
-from open_instruct.vllm_utils3 import GenerationResult, PromptRequest
+
 
 # For FLOPS, we assume bf16 and ignore sparsity.
 GPU_SPECS = {
@@ -262,12 +262,12 @@ def get_batch_data(
 
 
 def run_generation_batch(
-    inference_results_Q: ray_queue.Queue, param_prompt_Q: ray_queue.Queue, prompts: list[list[int]], training_step: int
+    inference_results_Q: ray_queue.Queue, param_prompt_Q: ray_queue.Queue, prompts: list[list[int]]
 ) -> dict[str, Any]:
     """Run generation for a batch of prompts and measure performance."""
 
     start_time = time.time()
-    param_prompt_Q.put(PromptRequest(prompts=prompts, training_step=training_step, eval_prompts=None))
+    param_prompt_Q.put(vllm_utils3.PromptRequest(prompts=prompts))
     result = inference_results_Q.get()
     generation_time = time.time() - start_time
 
@@ -336,7 +336,7 @@ def run_benchmark(
         prompts = get_batch_data(dataset, args.num_unique_prompts_rollout, batch_idx)
 
         # Run generation
-        result = run_generation_batch(inference_results_Q, param_prompt_Q, prompts, batch_idx + 1)
+        result = run_generation_batch(inference_results_Q, param_prompt_Q, prompts)
         result["mfu"] = 100 * result["tokens_per_second"] * flops_per_token / device_flops
         # We incrementally save completion lengths so even if the job dies, we still have data.
         save_completion_lengths([result], timestamp, batch_idx)
