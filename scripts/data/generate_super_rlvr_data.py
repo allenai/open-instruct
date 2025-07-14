@@ -255,13 +255,13 @@ if __name__ == '__main__':
     
     
     all_data = []
-    for task_name in args.task_list:
+    for task_name in tqdm(args.task_list):
         # initial setup
         parameter_controller = problem2controller[task_name]()
         # generate data
         task_data = []
-        for i in range(args.samples_per_task):
-            parameter = parameter_controller.get_parameter_list()
+        for i in tqdm(range(args.samples_per_task)):
+            parameter = parameter_controller.get_parameter_list()[0]
             instance = problem2class[task_name]()
             instance.generator(seed, parameter)
             seed += 1
