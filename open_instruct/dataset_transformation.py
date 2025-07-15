@@ -70,7 +70,12 @@ from open_instruct.utils import hf_whoami
 
 # ----------------------------------------------------------------------------
 # Utilities
-def custom_cached_file(model_name_or_path: str, filename: str, revision: str = None, repo_type: str = "model"):
+def custom_cached_file(
+    model_name_or_path: str,
+    filename: str,
+    revision: str = None,
+    repo_type: str = "model",
+):
     """@vwxyzjn: HF's `cached_file` no longer works for `repo_type="dataset"`."""
     # local_file = os.path.join(model_name_or_path, filename)
 
@@ -82,7 +87,11 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str = N
             return None
     else:
         resolved_file = try_to_load_from_cache(
-            model_name_or_path, filename, cache_dir=TRANSFORMERS_CACHE, revision=revision, repo_type=repo_type
+            model_name_or_path,
+            filename,
+            cache_dir=TRANSFORMERS_CACHE,
+            revision=revision,
+            repo_type=repo_type,
         )
         # special return value from try_to_load_from_cache
         if resolved_file == _CACHED_NO_EXIST:
@@ -91,7 +100,10 @@ def custom_cached_file(model_name_or_path: str, filename: str, revision: str = N
 
 
 def get_commit_hash(
-    model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
+    model_name_or_path: str,
+    revision: str,
+    filename: str = "config.json",
+    repo_type: str = "model",
 ) -> str:
     file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     commit_hash = extract_commit_hash(file, None)
@@ -99,7 +111,10 @@ def get_commit_hash(
 
 
 def get_file_hash(
-    model_name_or_path: str, revision: str, filename: str = "config.json", repo_type: str = "model"
+    model_name_or_path: str,
+    revision: str,
+    filename: str = "config.json",
+    repo_type: str = "model",
 ) -> str:
     file = custom_cached_file(model_name_or_path, filename, revision=revision, repo_type=repo_type)
     if isinstance(file, str):
@@ -114,7 +129,10 @@ def get_file_hash(
 
 
 def get_files_hash_if_exists(
-    model_name_or_path: str, revision: str, filenames: List[str], repo_type: str = "model"
+    model_name_or_path: str,
+    revision: str,
+    filenames: List[str],
+    repo_type: str = "model",
 ) -> List[str]:
     return [get_file_hash(model_name_or_path, revision, filename, repo_type) for filename in filenames]
 
@@ -307,6 +325,80 @@ CHAT_TEMPLATES = {
         "{{ message['role'].capitalize() + ': ' + message['content'] + '\n' }}"
         "{% if loop.last and add_generation_prompt %}"
         "{{ 'Assistant: <think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "toolu": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+            "{% if message.get('functions', none) is not none %}"
+                "{{ '<|system|>\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions>' + '\n' }}"
+            "{% else %}"
+                "{{ '<|system|>\n' + message['content']  + '\n' }}"
+            "{% endif %}"
+        "{% elif message['role'] == 'user' %}"
+            "{% if message.get('functions', none) is not none %}"
+                "{{ '<|user|>\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions>' + '\n' }}"
+            "{% else %}"
+                "{{ '<|user|>\n' + message['content'] + '\n' }}"
+            "{% endif %}"
+        "{% elif message['role'] == 'assistant' %}"
+            "{{ '<|assistant|>\n' }}"
+            "{% if message.get('content', none) is not none %}"
+                "{{ message['content'] }}"
+            "{% endif %}"
+            "{% if message.get('function_calls', none) is not none %}"
+                "{{ '<function_calls>' + message['function_calls'] + '</function_calls>' }}"
+            "{% endif %}"
+            "{% if not loop.last %}"
+                "{{ eos_token + '\n' }}"
+            "{% else %}"
+                "{{ eos_token }}"
+            "{% endif %}"
+        "{% elif message['role'] == 'environment' %}"
+            "{{ '<|environment|>\n' + message['content'] + '\n' }}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+            "{{ '<|assistant|>\n' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "toolu_thinker_r1_style": (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+            "{% if message.get('functions', none) is not none %}"
+                "{{ '<|system|>\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions>' + '\n' }}"
+            "{% else %}"
+                "{{ '<|system|>\n' + message['content']  + '\n' }}"
+            "{% endif %}"
+        "{% elif message['role'] == 'user' %}"
+            "{% if message.get('functions', none) is not none %}"
+                "{{ '<|user|>\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions>' + '\n' }}"
+            "{% else %}"
+                "{{ '<|user|>\n' + message['content'] + '\n' }}"
+            "{% endif %}"
+        "{% elif message['role'] == 'assistant' %}"
+            "{{ '<|assistant|>\n' }}"
+            "{% if message.get('content', none) is not none %}"
+                "{% if message.get('function_calls', none) is not none %}"
+                    "<think>{{ message['content'] }}</think>"
+                "{% else %}"
+                    "{{ message['content'] }}"
+                "{% endif %}"
+            "{% endif %}"
+            "{% if message.get('function_calls', none) is not none %}"
+                "{{ '<function_calls>' + message['function_calls'] + '</function_calls>' }}"
+            "{% endif %}"
+            "{% if not loop.last %}"
+                "{{ eos_token + '\n' }}"
+            "{% else %}"
+                "{{ eos_token }}"
+            "{% endif %}"
+        "{% elif message['role'] == 'environment' %}"
+            "{{ '<|environment|>\n' + message['content'] + '\n' }}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+            "{{ '<|assistant|>\n' }}"
         "{% endif %}"
         "{% endfor %}"
     ),
@@ -617,7 +709,12 @@ class TokenizerConfig:
         files_hash = get_files_hash_if_exists(
             self.tokenizer_name_or_path,
             self.tokenizer_revision,
-            filenames=["tokenizer_config.json", "tokenizer.json", "special_tokens_map.json", "vocab.json"],
+            filenames=[
+                "tokenizer_config.json",
+                "tokenizer.json",
+                "special_tokens_map.json",
+                "vocab.json",
+            ],
         )
         self.tokenizer_files_hash = ",".join(files_hash)
         if self.tokenizer_name is not None and self.tokenizer_name_or_path is None:
@@ -671,7 +768,9 @@ TOKENIZED_PREFERENCE_DATASET_KEYS = [
 
 # TODO: allow passing in sft_message key, so we can train on "chosen" of pref dataset.
 def sft_tokenize_v1(
-    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
+    row: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
 ):
     if len(row[sft_messages_key]) == 1:
         prompt = row[sft_messages_key]
@@ -687,7 +786,9 @@ def sft_tokenize_v1(
 
 
 def sft_tokenize_mask_out_prompt_v1(
-    row: Dict[str, Any], tokenizer: PreTrainedTokenizer, sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY
+    row: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
 ):
     """mask out the prompt tokens by manipulating labels"""
     if len(row[sft_messages_key]) == 1:
@@ -1207,7 +1308,11 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
                 fn,
                 fn_kwargs=fn_kwargs,
                 remove_columns=[col for col in dataset.column_names if col not in target_columns],
-                num_proc=get_num_proc(len(dataset), num_proc, APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU),
+                num_proc=get_num_proc(
+                    len(dataset),
+                    num_proc,
+                    APPLY_CHAT_TEMPLATE_EXAMPLE_PER_SECOND_PER_CPU,
+                ),
             )
         elif fn_type == "filter":
             dataset = dataset.filter(
@@ -1239,7 +1344,10 @@ class DatasetTransformationCache:
         self.hf_entity = hf_entity or hf_whoami()["name"]
 
     def load_or_transform_dataset(
-        self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
+        self,
+        dcs: List[DatasetConfig],
+        tc: TokenizerConfig,
+        dataset_skip_cache: bool = False,
     ) -> Dataset:
         """Load dataset from cache if it exists, otherwise transform and cache it."""
         repo_name = f"{self.hf_entity}/dataset-mix-cached"
@@ -1254,7 +1362,11 @@ class DatasetTransformationCache:
                 print("dataset_skip_cache is True, so we will not load the dataset from cache")
             else:
                 # Use the split from the first dataset config as default
-                return load_dataset(repo_name, split=DEFAULT_SPLIT_FOR_CACHED_DATASET, revision=self.config_hash)
+                return load_dataset(
+                    repo_name,
+                    split=DEFAULT_SPLIT_FOR_CACHED_DATASET,
+                    revision=self.config_hash,
+                )
 
         print(f"Cache not found, transforming datasets...")
 
@@ -1335,7 +1447,10 @@ class LocalDatasetTransformationCache:
             json.dump(config_dict, f, indent=2)
 
     def load_or_transform_dataset(
-        self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
+        self,
+        dcs: List[DatasetConfig],
+        tc: TokenizerConfig,
+        dataset_skip_cache: bool = False,
     ) -> Dataset:
         """Load dataset from local cache if it exists, otherwise transform and cache it locally."""
         cache_path = self.get_cache_path()
@@ -1429,7 +1544,8 @@ def get_cached_dataset_tulu(
         dataset_config_hash = compute_config_hash(dcs, tc)
     if dataset_cache_mode == "local":
         cache = LocalDatasetTransformationCache(
-            config_hash=dataset_config_hash, dataset_local_cache_dir=dataset_local_cache_dir
+            config_hash=dataset_config_hash,
+            dataset_local_cache_dir=dataset_local_cache_dir,
         )
     elif dataset_cache_mode == "hf":
         cache = DatasetTransformationCache(config_hash=dataset_config_hash, hf_entity=hf_entity)
@@ -1438,13 +1554,19 @@ def get_cached_dataset_tulu(
 
 def test_sft_dpo_same_tokenizer():
     base_to_sft_tc = TokenizerConfig(
-        tokenizer_name_or_path="meta-llama/Llama-3.1-8B", tokenizer_revision="main", chat_template_name="tulu"
+        tokenizer_name_or_path="meta-llama/Llama-3.1-8B",
+        tokenizer_revision="main",
+        chat_template_name="tulu",
     )
     sft_to_dpo_tc = TokenizerConfig(
-        tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-SFT", tokenizer_revision="main", chat_template_name="tulu"
+        tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-SFT",
+        tokenizer_revision="main",
+        chat_template_name="tulu",
     )
     dpo_to_rl_tc = TokenizerConfig(
-        tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-DPO", tokenizer_revision="main", chat_template_name="tulu"
+        tokenizer_name_or_path="allenai/Llama-3.1-Tulu-3-8B-DPO",
+        tokenizer_revision="main",
+        chat_template_name="tulu",
     )
 
     def equal_tokenizer(tc1, tc2):
@@ -1484,7 +1606,11 @@ def test_sft_dpo_same_tokenizer_olmo():
         chat_template_name="tulu",
         add_bos=True,
     )
-    print("vocab size", base_to_sft_tc.tokenizer.vocab_size, len(base_to_sft_tc.tokenizer.vocab))
+    print(
+        "vocab size",
+        base_to_sft_tc.tokenizer.vocab_size,
+        len(base_to_sft_tc.tokenizer.vocab),
+    )
 
     def equal_tokenizer(tc1, tc2):
         tok1 = tc1.tokenizer
@@ -1507,7 +1633,9 @@ def test_sft_dpo_same_tokenizer_olmo():
 def test_config_hash_different():
     """Test that different configurations produce different hashes."""
     tc = TokenizerConfig(
-        tokenizer_name_or_path="meta-llama/Llama-3.1-8B", tokenizer_revision="main", chat_template_name="tulu"
+        tokenizer_name_or_path="meta-llama/Llama-3.1-8B",
+        tokenizer_revision="main",
+        chat_template_name="tulu",
     )
 
     dcs1 = [
