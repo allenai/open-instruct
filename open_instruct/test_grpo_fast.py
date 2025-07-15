@@ -2,6 +2,7 @@ import unittest
 
 import ray
 import torch
+from parameterized import parameterized
 from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 from vllm import SamplingParams
@@ -10,22 +11,23 @@ from open_instruct.vllm_utils3 import GenerationResult, PromptRequest, create_vl
 
 
 class TestGrpoFastVLLM(unittest.TestCase):
-    def setUp(self):
-        # Check if CUDA is available
-        if not torch.cuda.is_available():
-            self.skipTest("CUDA is not available, skipping test")
-
+    @classmethod
+    def setUpClass(cls):
         # Initialize Ray
         if not ray.is_initialized():
             ray.init(ignore_reinit_error=True)
 
-    def tearDown(self):
+    @classmethod
+    def tearDownClass(cls):
         # Shutdown Ray after test
         if ray.is_initialized():
             ray.shutdown()
 
     def test_vllm_queue_system_single_prompt(self):
         """Test the new queue-based vLLM system with a single prompt 'What is the capital of France?'"""
+        # Check if CUDA is available
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA is not available, skipping test")
 
         # Set up tokenizer
         tokenizer_name = "EleutherAI/pythia-14m"  # Using a small model for testing
@@ -96,68 +98,62 @@ class TestGrpoFastVLLM(unittest.TestCase):
         # Send stop signal
         param_prompt_Q.put(None)
 
-    def test_batch_splitting_logic(self):
+    @parameterized.expand([(1,), (2,), (4,), (8,)])
+    def test_batch_splitting_logic(self, vllm_num_engines: int, num_unique_prompts_rollout: int = 16):
         """Test the batch splitting logic used in sync_weights_and_prepare_prompts."""
 
-        # Mock data - simulating num_unique_prompts_rollout * num_samples_per_prompt_rollout
-        queries_next = [f"query_{i}" for i in range(16)]  # 16 queries
-        ground_truths_next = [f"truth_{i}" for i in range(16)]
-        datasets_next = [f"dataset_{i}" for i in range(16)]
+        queries_next = [f"query_{i}" for i in range(num_unique_prompts_rollout)]
+        ground_truths_next = [f"truth_{i}" for i in range(num_unique_prompts_rollout)]
+        datasets_next = [f"dataset_{i}" for i in range(num_unique_prompts_rollout)]
 
-        # Test with different vllm_num_engines values
-        for vllm_num_engines in [1, 2, 4, 8]:
-            with self.subTest(vllm_num_engines=vllm_num_engines):
-                pending_queries_map = {}
-                training_step = 1
+        pending_queries_map = {}
+        training_step = 1
 
-                # Split the batch into multiple inference batches for vLLM engines
-                inference_batch_size = len(queries_next) // vllm_num_engines
+        # Split the batch into multiple inference batches for vLLM engines
+        inference_batch_size = len(queries_next) // vllm_num_engines
 
-                all_batch_queries = []
-                all_batch_ground_truths = []
-                all_batch_datasets = []
+        all_batch_queries = []
+        all_batch_ground_truths = []
+        all_batch_datasets = []
 
-                for batch_idx in range(vllm_num_engines):
-                    start_idx = batch_idx * inference_batch_size
-                    end_idx = (
-                        start_idx + inference_batch_size if batch_idx < vllm_num_engines - 1 else len(queries_next)
-                    )
+        for batch_idx in range(vllm_num_engines):
+            start_idx = batch_idx * inference_batch_size
+            end_idx = min(start_idx + inference_batch_size, len(queries_next))
 
-                    batch_queries = queries_next[start_idx:end_idx]
-                    batch_ground_truths = ground_truths_next[start_idx:end_idx]
-                    batch_datasets = datasets_next[start_idx:end_idx]
+            queries = queries_next[start_idx:end_idx]
+            ground_truths = ground_truths_next[start_idx:end_idx]
+            datasets = datasets_next[start_idx:end_idx]
 
-                    # Verify batch sizes
-                    expected_size = (
-                        inference_batch_size
-                        if batch_idx < vllm_num_engines - 1
-                        else len(queries_next) - batch_idx * inference_batch_size
-                    )
-                    self.assertEqual(len(batch_queries), expected_size)
-                    self.assertEqual(len(batch_ground_truths), expected_size)
-                    self.assertEqual(len(batch_datasets), expected_size)
+            # Verify batch sizes
+            if batch_idx < vllm_num_engines - 1:
+                expected_size = inference_batch_size
+            else:
+                expected_size = len(queries_next) % inference_batch_size
+            self.assertEqual(len(queries), expected_size)
+            self.assertEqual(len(ground_truths), expected_size)
+            self.assertEqual(len(datasets), expected_size)
 
-                    # Create unique dataset_index for this batch
-                    batch_dataset_index = f"{training_step}_{batch_idx}"
-                    pending_queries_map[batch_dataset_index] = (batch_queries, batch_ground_truths, batch_datasets)
+            # Create unique dataset_index for this batch
+            batch_dataset_index = f"{training_step}_{batch_idx}"
+            pending_queries_map[batch_dataset_index] = (queries, ground_truths, datasets)
 
-                    # Collect all batches for verification
-                    all_batch_queries.extend(batch_queries)
-                    all_batch_ground_truths.extend(batch_ground_truths)
-                    all_batch_datasets.extend(batch_datasets)
+            # Collect all batches for verification
+            all_queries.extend(queries)
+            all_ground_truths.extend(ground_truths)
+            all_datasets.extend(datasets)
 
-                # Verify that all original data is preserved
-                self.assertEqual(all_batch_queries, queries_next)
-                self.assertEqual(all_batch_ground_truths, ground_truths_next)
-                self.assertEqual(all_batch_datasets, datasets_next)
+        # Verify that all original data is preserved
+        self.assertEqual(all_batch_queries, queries_next)
+        self.assertEqual(all_batch_ground_truths, ground_truths_next)
+        self.assertEqual(all_batch_datasets, datasets_next)
 
-                # Verify that we have the expected number of batches
-                self.assertEqual(len(pending_queries_map), vllm_num_engines)
+        # Verify that we have the expected number of batches
+        self.assertEqual(len(pending_queries_map), vllm_num_engines)
 
-                # Verify that each batch has the correct dataset_index format
-                for batch_idx in range(vllm_num_engines):
-                    batch_dataset_index = f"{training_step}_{batch_idx}"
-                    self.assertIn(batch_dataset_index, pending_queries_map)
+        # Verify that each batch has the correct dataset_index format
+        for batch_idx in range(vllm_num_engines):
+            batch_dataset_index = f"{training_step}_{batch_idx}"
+            self.assertIn(batch_dataset_index, pending_queries_map)
 
 
 if __name__ == "__main__":
