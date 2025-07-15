@@ -114,19 +114,23 @@ class TestGrpoFastVLLM(unittest.TestCase):
         # Create mock Ray queue for testing
         param_prompt_Q = ray_queue.Queue(maxsize=vllm_num_engines)
 
+        # Create mock dataset indices
+        dataset_indices = list(range(num_unique_prompts_rollout))
+
         # Use split_and_insert_batch to split and insert data
         split_and_insert_batch(
             queries_next,
             ground_truths_next,
             datasets_next,
+            dataset_indices,
             training_step,
             vllm_num_engines,
             pending_queries_map,
             param_prompt_Q,
         )
 
-        # Verify that we have the expected number of batches in the map
-        self.assertEqual(len(pending_queries_map), vllm_num_engines)
+        # Verify that we have individual prompts in the map (not batches)
+        self.assertEqual(len(pending_queries_map), num_unique_prompts_rollout)
 
         # Verify that we have the expected number of items in the queue
         self.assertEqual(param_prompt_Q.qsize(), vllm_num_engines)
@@ -138,7 +142,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
             request = param_prompt_Q.get()
             self.assertIsInstance(request, PromptRequest)
             self.assertEqual(request.training_step, training_step)
-            self.assertEqual(request.dataset_index, f"{training_step}_{batch_idx}")
+            self.assertIsInstance(request.dataset_index, list)  # Now expects a list of indices
 
             # Create mock GenerationResult
             batch_size = len(request.prompts)

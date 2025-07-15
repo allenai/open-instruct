@@ -1126,18 +1126,28 @@ def accumulate_inference_batches(
     for batch_idx in range(vllm_num_engines):
         # Get result from queue
         result = inference_results_Q.get()
-        dataset_index = result.dataset_index
+        dataset_indices = result.dataset_index
 
-        if dataset_index is None or dataset_index not in pending_queries_map:
-            raise RuntimeError(f"Dataset index {dataset_index} not found in pending_queries_map")
+        if dataset_indices is None:
+            raise RuntimeError(f"Dataset indices is None for batch {batch_idx}")
 
-        # Get corresponding queries, ground_truths, datasets
-        queries, ground_truths, datasets = pending_queries_map.pop(dataset_index)
+        # Get corresponding queries, ground_truths, datasets for each individual prompt
+        batch_queries = []
+        batch_ground_truths = []
+        batch_datasets = []
+        for dataset_idx in dataset_indices:
+            if dataset_idx not in pending_queries_map:
+                raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
+
+            query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
+            batch_queries.append(query)
+            batch_ground_truths.append(ground_truth)
+            batch_datasets.append(dataset)
 
         results.append(result)
-        all_queries.extend(queries)
-        all_ground_truths.extend(ground_truths)
-        all_datasets.extend(datasets)
+        all_queries.extend(batch_queries)
+        all_ground_truths.extend(batch_ground_truths)
+        all_datasets.extend(batch_datasets)
 
     # Combine all results into a single GenerationResult
     combined_responses = []
@@ -1658,13 +1668,14 @@ def split_and_insert_batch(
     queries_next,
     ground_truths_next,
     datasets_next,
+    dataset_indices,
     training_step,
     vllm_num_engines,
     pending_queries_map,
     param_prompt_Q,
     eval_prompt_token_ids=None,
 ):
-    """Split a batch into multiple inference batches and insert them into queues and mapping."""
+    """Split a batch into multiple inference batches and insert individual prompts into queues and mapping."""
     # Split the batch over the VLLM engines.
     inference_batch_size = len(queries_next) // vllm_num_engines
     for batch_idx in range(vllm_num_engines):
@@ -1674,18 +1685,23 @@ def split_and_insert_batch(
         batch_queries = queries_next[start_idx:end_idx]
         batch_ground_truths = ground_truths_next[start_idx:end_idx]
         batch_datasets = datasets_next[start_idx:end_idx]
+        batch_dataset_indices = dataset_indices[start_idx:end_idx]
 
-        # Create unique dataset_index for this batch
-        batch_dataset_index = f"{training_step}_{batch_idx}"
-        pending_queries_map[batch_dataset_index] = (batch_queries, batch_ground_truths, batch_datasets)
+        # Store individual prompts in the map using dataset indices as keys
+        for i, dataset_idx in enumerate(batch_dataset_indices):
+            pending_queries_map[dataset_idx] = (
+                batch_queries[i],
+                batch_ground_truths[i],
+                batch_datasets[i],
+            )
 
-        # Use PromptRequest for Ray queue with batch-specific dataset_index
+        # Use PromptRequest for Ray queue with batch-specific dataset_index list
         param_prompt_Q.put(
             PromptRequest(
                 prompts=batch_queries,
                 training_step=training_step,
                 eval_prompts=eval_prompt_token_ids,
-                dataset_index=batch_dataset_index,
+                dataset_index=batch_dataset_indices,
             )
         )
 
@@ -1701,6 +1717,7 @@ def sync_weights_and_prepare_prompts(
     queries_next=None,
     ground_truths_next=None,
     datasets_next=None,
+    dataset_indices=None,
     eval_prompt_token_ids=None,
 ):
     """Sync weights and send the next batch of prompts to vLLM."""
@@ -1722,9 +1739,9 @@ def sync_weights_and_prepare_prompts(
             queries_next,
             ground_truths_next,
             datasets_next,
+            dataset_indices,
             training_step,
             args.vllm_num_engines,
-            training_step,
             pending_queries_map,
             param_prompt_Q,
             eval_prompt_token_ids,
@@ -2112,8 +2129,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
     datasets_next = data_next[DATASET_SOURCE_KEY]
-<<<<<<< HEAD
-<<<<<<< HEAD
     pending_queries_map[initial_dataset_index] = (queries_next, ground_truths_next, datasets_next)
     # Use PromptRequest for Ray queue
     request = PromptRequest(
@@ -2123,11 +2138,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         dataset_index=initial_dataset_index,
     )
     param_prompt_Q.put(request)
-=======
-    
-=======
-
->>>>>>> 7d53420f (Now, we create all Ray queues in main, and pass them in as appropriate.)
     # Split the initial batch into multiple inference batches for vLLM engines
     inference_batch_size = len(queries_next) // args.vllm_num_engines
     for batch_idx in range(args.vllm_num_engines):
@@ -2151,9 +2161,24 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         )
         param_prompt_Q.put(request)
 >>>>>>> 22bb9ac2 (Added code to split batch sizes.)
+=======
+    # Split the initial batch using the split_and_insert_batch function
+    split_and_insert_batch(
+        queries_next,
+        ground_truths_next,
+        datasets_next,
+        dataset_indices,
+        1,  # training_step
+        args.vllm_num_engines,
+        pending_queries_map,
+        param_prompt_Q,
+        eval_prompt_token_ids if eval_dataset is not None else None,
+    )
+>>>>>>> c3c13f76 (Now, we index with the dataset indices.)
 
     num_total_tokens = 0
     start_time = time.time()
+    dataset_indices = None  # Initialize for training loop
     try:
         for training_step in range(resume_training_step, args.num_training_steps + 1):
             logger.info("-" * 100)
@@ -2172,6 +2197,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 queries_next,
                 ground_truths_next,
                 datasets_next,
+                dataset_indices,
                 eval_prompt_token_ids,
             )
             collated_data, data_thread_metrics, num_total_tokens = load_data_from_packing_thread(
