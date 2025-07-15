@@ -18,10 +18,13 @@ python mason.py \
 '''
 import argparse
 import json
+
 from datasets import load_dataset
-from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
+from vllm import LLM, SamplingParams
+
 from open_instruct.dataset_transformation import CHAT_TEMPLATES
+
 
 def main():
     parser = argparse.ArgumentParser(

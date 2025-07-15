@@ -6,7 +6,7 @@ python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --max_token_length 512 \
     --max_prompt_token_length 512 \
     --response_length 512 \
-    --model_name_or_path EleutherAI/pythia-14m \
+    --model_name_or_path Qwen/Qwen3-1.7B \
     --number_samples_per_prompt 4 \
     --non_stop_penalty \
     --stop_token eos \
@@ -32,6 +32,6 @@ python open_instruct/grpo_vllm_thread_ray_gtrl.py \
     --gradient_checkpointing \
     --single_gpu_mode \
     --vllm_sync_backend gloo \
-    --vllm_gpu_memory_utilization 0.5 \
+    --vllm_gpu_memory_utilization 0.3 \
     --vllm_enforce_eager \
     # --with_tracking

@@ -1,15 +1,11 @@
 from dataclasses import dataclass
-from functools import partial
 from typing import Optional
-import torch
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-)
-from datasets import load_dataset
-from open_instruct.utils import ArgumentParserPlus, get_datasets
-from huggingface_hub import snapshot_download
 
+import torch
+from huggingface_hub import snapshot_download
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from open_instruct.utils import ArgumentParserPlus
 
 """
 Run this file to cache models in a shared HF cache
@@ -64,7 +60,7 @@ def main(args: Args):
     #         **dataset_args,
     #     )
     # we don't tokenize the dataset here for simplicity, but we should at some point.
-        
+
     if args.model_name_or_path is not None:
         AutoTokenizer.from_pretrained(
             args.tokenizer_name_or_path or args.model_name_or_path,
@@ -75,8 +71,8 @@ def main(args: Args):
             revision=args.model_revision,
             torch_dtype=torch.bfloat16,
         )
-    
-    
+
+
 
 if __name__ == "__main__":
     parser = ArgumentParserPlus((Args,))

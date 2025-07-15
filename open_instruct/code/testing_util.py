@@ -146,7 +146,6 @@ def make_function(code: str) -> str:
 
 
 def call_method(method, inputs):
-
     if isinstance(inputs, list):
         inputs = "\n".join(inputs)
 
@@ -222,12 +221,7 @@ def get_stripped_lines(val: str):
     return [val_line.strip() for val_line in val.split("\n")]
 
 
-def grade_stdio(
-    code: str,
-    all_inputs: list,
-    all_outputs: list,
-    timeout: int,
-):
+def grade_stdio(code: str, all_inputs: list, all_outputs: list, timeout: int):
     signal.signal(signal.SIGALRM, timeout_handler)
     # runtime doesn't interact well with __name__ == '__main__'
     code = clean_if_name(code)
@@ -279,10 +273,7 @@ def grade_stdio(
             # Should not happen if there was no exception, but as a safeguard.
             all_results.append(-4)  # Runtime error
             if not first_failure_info:
-                first_failure_info = {
-                    "error_code": -4,
-                    "error_message": "Runtime Error: No output produced",
-                }
+                first_failure_info = {"error_code": -4, "error_message": "Runtime Error: No output produced"}
             continue
 
         stripped_prediction_lines = get_stripped_lines(prediction)
@@ -291,10 +282,7 @@ def grade_stdio(
         if len(stripped_prediction_lines) != len(stripped_gt_out_lines):
             all_results.append(-2)
             if not first_failure_info:
-                first_failure_info = {
-                    "error_code": -2,
-                    "error_message": "Wrong answer: mismatched output length",
-                }
+                first_failure_info = {"error_code": -2, "error_message": "Wrong answer: mismatched output length"}
             continue
 
         test_case_failed = False

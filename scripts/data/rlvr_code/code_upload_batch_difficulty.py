@@ -31,11 +31,10 @@ Workflow:
 """
 import json
 import os
-import hashlib
-from openai import AzureOpenAI
+
 from datasets import Dataset, load_dataset
+from openai import AzureOpenAI
 from pydantic import BaseModel, ConfigDict
-from typing import List
 
 client = AzureOpenAI(
     api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
@@ -69,7 +68,7 @@ def check_batch_status(batch_id: str) -> bool:
             print(batch)
         return batch.status == "completed"
     except Exception as e:
-        print(f"Error checking batch status: {e}") 
+        print(f"Error checking batch status: {e}")
         return False
 
 def get_batch_results(batch_id: str) -> list:
@@ -83,10 +82,10 @@ def get_batch_results(batch_id: str) -> list:
         # Download the output file
         output_file = client.files.retrieve(batch.output_file_id)
         output_content = client.files.content(output_file.id)
-        
+
         # Get the text content from the response
         content_str = output_content.text
-        
+
         # Process each line of the output
         results = []
         for line in content_str.split('\n'):
@@ -102,7 +101,7 @@ def get_batch_results(batch_id: str) -> list:
                         results.append(processed_result)
                 except Exception as e:
                     print(f"Error processing result line: {e}")
-        
+
         return results
     except Exception as e:
         print(f"Error retrieving batch results: {e}")
@@ -114,7 +113,7 @@ def process_batch_results(dataset: str, batch_id: str):
     if not batch_results:
         print("No results found in batch")
         return
-    
+
     ds = load_dataset(dataset, split='train')
     print("building id to row")
     id_to_row = {get_id(row): row for row in ds}
@@ -125,7 +124,7 @@ def process_batch_results(dataset: str, batch_id: str):
             if id not in id_to_row:
                 print(f"ID {id} not found in dataset")
                 continue
-                
+
             row = id_to_row[id]
             new_row = { **row}
             new_row['difficulty'] = result['difficulty']
@@ -136,7 +135,7 @@ def process_batch_results(dataset: str, batch_id: str):
             print(f"Result: {result}")
 
     print(f"About to upload {len(new_results)} results to Hugging Face out of {len(batch_results)}. Do you want to upload?")
-    
+
     # Upload to Hugging Face
     if new_results:
         upload_dataset = Dataset.from_list(new_results)

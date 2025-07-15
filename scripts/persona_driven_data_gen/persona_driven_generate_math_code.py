@@ -12,21 +12,29 @@ python persona_driven_generate_math_code.py --org_name anthropic --model 'claude
 
 import argparse
 import json
-# from openai import OpenAI
-from prompt_templates import instruction_template, knowledge_template, npc_template, math_template, math_solution_template, math_template_easy, grade_math_solution_template, code_template, code_solution_template, math_int_algebra_template
-from datasets import load_dataset
-from tqdm import tqdm
 import random
 import string
-import openai
-from datasets import Dataset
-import anthropic
 
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_random_exponential,
-)  # for exponential backoff
+import anthropic
+import openai
+from datasets import load_dataset
+
+# from openai import OpenAI
+from prompt_templates import (
+    code_solution_template,
+    code_template,
+    grade_math_solution_template,
+    instruction_template,
+    knowledge_template,
+    math_int_algebra_template,
+    math_solution_template,
+    math_template,
+    math_template_easy,
+    npc_template,
+)
+from tenacity import retry, stop_after_attempt, wait_random_exponential  # for exponential backoff
+from tqdm import tqdm
+
 
 @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
 def completion_with_backoff(**kwargs):
@@ -99,10 +107,10 @@ def main(args):
     elif args.template == "instruction_following_solution":
         template = instruction_following_solution
     elif args.template == "rewrite_if_prompt":
-        template = rewrite_if_prompt       
+        template = rewrite_if_prompt
     else:
         raise ValueError("Invalid template type. Choose from 'instruction', 'knowledge', 'npc', or 'math'.")
-    
+
 
     total_input_tokens, total_output_tokens = 0, 0
     in_cost_per_token, out_cost_per_token = MODEL_COSTS[args.model]
@@ -126,11 +134,11 @@ def main(args):
             user_prompt = template.format(persona=input_text)
             gpt4o_out_text, in_tokens, out_tokens = get_response(args, user_prompt)
             o = {
-                "id": id, 
-                "prompt": input_text, 
-                "input_persona": persona, 
+                "id": id,
+                "prompt": input_text,
+                "input_persona": persona,
                 "messages": [
-                    {"role": "user", "content": input_text}, 
+                    {"role": "user", "content": input_text},
                     {"role": "assistant", "content": gpt4o_out_text}
                     ]
                 } if args.template in ["math_solution", "grade_math_solution", "code_solution"] else {
@@ -150,10 +158,10 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Synthesize text using a specified model and template.")
     parser.add_argument(
-        '--template', 
-        type=str, 
-        required=True, 
-        choices=['math', 'math_solution', 'grade_math', 'grade_math_solution', 'code', 'code_solution', 'math_int_algebra'], 
+        '--template',
+        type=str,
+        required=True,
+        choices=['math', 'math_solution', 'grade_math', 'grade_math_solution', 'code', 'code_solution', 'math_int_algebra'],
         help=(
             "Prompt templates. Choose from 'instruction', 'knowledge', 'math' or 'npc'. "
             "You can also add more customized templates in prompt_templates.py"

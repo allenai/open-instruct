@@ -1,12 +1,11 @@
-import copy
-import subprocess
-import yaml
-import re
-import itertools
-from datetime import date
 import argparse
+import copy
 import os
+import re
+import subprocess
+from datetime import date
 
+import yaml
 
 ########################################
 
@@ -27,7 +26,7 @@ def adjust_batch_size(task_spec, model_name, batch_size_reduction):
 
     # Reduce accordingly.
     if "--eval_batch_size" in task_spec['arguments'][0]:
-        original_batch_size = re.search("--eval_batch_size (\d+)", task_spec['arguments'][0]).group(1)
+        original_batch_size = re.search(r"--eval_batch_size (\d+)", task_spec['arguments'][0]).group(1)
         new_batch_size = max(1, int(original_batch_size) // batch_size_reduction)
         task_spec['arguments'] = [task_spec['arguments'][0].replace("--eval_batch_size {}".format(original_batch_size), "--eval_batch_size {}".format(new_batch_size))]
 
@@ -38,7 +37,7 @@ def adjust_gpus(task_spec, experiment_group, model_name, gpu_multiplier):
     "Adjust GPU count using heuristics that are good for A100-size GPUs."
     medium = ["30B", "34B"]
     large = ["40B", "65B", "70B", "70b", "72B", "72b"]
-    # If not given, choose a value based on model name. 
+    # If not given, choose a value based on model name.
     if gpu_multiplier is None:
         if any([pattern in model_name for pattern in medium]):
             default_multiplier = 1
@@ -53,7 +52,7 @@ def adjust_gpus(task_spec, experiment_group, model_name, gpu_multiplier):
         # If a gpu multiplier is given, double the gpus for Codex.
         codex_multiplier = 2 * gpu_multiplier
 
-    # Increase accordingly. 
+    # Increase accordingly.
     if "codex_eval" in experiment_group:
         task_spec['resources']['gpuCount'] = codex_multiplier * task_spec['resources']['gpuCount']
     else:
@@ -61,7 +60,7 @@ def adjust_gpus(task_spec, experiment_group, model_name, gpu_multiplier):
 
     return task_spec
 
-    
+
 ########################################
 # Launcher
 
@@ -111,7 +110,7 @@ parser.add_argument("--run_oe_eval_experiments", action="store_true", help="Run 
 parser.add_argument("--run_safety_evaluations", action="store_true", help="Run the OE safety evaluations too.")
 parser.add_argument("--skip_oi_evals", action="store_true", help="Don't run open instruct evals.")
 parser.add_argument("--oe_eval_max_length", type=int, default=4096, help="Max length for OE eval.")
-parser.add_argument("--oe_eval_unseen_evals", action="store_true", help="Run unseen task evals instead of dev task evals on OE Eval.")
+parser.add_argument("--oe_eval_task_suite", type=str, default="NEXT_MODEL_DEV", help="Task suite for OE eval: NEXT_MODEL_DEV, NEXT_MODEL_UNSEEN, TULU_3_DEV, TULU_3_UNSEEN (default: NEXT_MODEL_DEV)")
 parser.add_argument("--use_alternate_safety_image", type=str, default=None, help="Use a different image for safety eval.")
 parser.add_argument("--evaluate_on_weka", action="store_true", help="Evaluate OE eval on Beaker.")
 # NOTE: evaluate on weka is expected to be on by default. If not, the evals will run on the google augusta cluster.
@@ -147,6 +146,12 @@ if all(c in WEKA_CLUSTERS for c in cluster):
         'mountPath': "/weka/oe-adapt-default",
         "source": {
             "weka": "oe-adapt-default"
+        }
+    })
+    d1['tasks'][0]['datasets'].append({
+        'mountPath': "/weka/oe-training-default",
+        "source": {
+            "weka": "oe-training-default"
         }
     })
     weka_available = True
@@ -283,7 +288,7 @@ for experiment_group in experiment_groups:
             --n_shot 8 \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format \
-        ''' 
+        '''
         if args.gsm_stop_at_double_newline:
             task_spec['arguments'][0] += " --stop_at_double_newline"
     elif experiment_group == "MATH_cot":
@@ -497,7 +502,7 @@ for experiment_group in experiment_groups:
     # if a specific checkpoint is specified, load model from that checkpoint
     if model_info[2] is not None:
         # extract existing model path
-        model_name_or_path = re.search("--model_name_or_path (\S+)", task_spec['arguments'][0]).group(1)
+        model_name_or_path = re.search(r"--model_name_or_path (\S+)", task_spec['arguments'][0]).group(1)
         # replace the model path with the checkpoint subfolder.
         task_spec['arguments'] = [task_spec['arguments'][0].replace(model_name_or_path, model_name_or_path+"/"+model_info[2], 1)]
         # NOTE: We don't change the tokenizer subfolder, because by default the
@@ -525,39 +530,39 @@ for experiment_group in experiment_groups:
     # otherwise, try to guess what template to use based on model name
     if args.use_hf_tokenizer_template:
         task_spec['arguments'] = [task_spec['arguments'][0].replace(
-            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format",
             "--chat_formatting_function eval.templates.create_prompt_with_huggingface_tokenizer_template")
         ]
     elif "llama2-chat" in model_info[0]:
         task_spec['arguments'] = [task_spec['arguments'][0].replace(
-            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format",
             "--chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format")
         ]
     elif "code_llama_instruct" in model_info[0]:
         task_spec['arguments'] = [task_spec['arguments'][0].replace(
-            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format",
             "--chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format")
         ]
     elif "zephyr" in model_info[0]:
         task_spec['arguments'] = [task_spec['arguments'][0].replace(
-            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format",
             "--chat_formatting_function eval.templates.create_prompt_with_zephyr_chat_format")
         ]
     elif "xwin" in model_info[0]:
         task_spec['arguments'] = [task_spec['arguments'][0].replace(
-            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format",
             "--chat_formatting_function eval.templates.create_prompt_with_xwin_chat_format")
         ]
     elif "olmo" in model_info[0] or args.olmo:
         task_spec['arguments'] = [task_spec['arguments'][0].replace(
-            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format",
             "--chat_formatting_function eval.templates.create_prompt_with_olmo_chat_format")
         ]
 
     if any([x in model_info[0] for x in ["opt", "pythia", "falcon", "olmoe"]]):
         if "--use_vllm" in task_spec['arguments'][0]:
             print(f"Removing --use_vllm for {model_info[0]}")
-            task_spec['arguments'] = [task_spec['arguments'][0].replace("--use_vllm", "")] 
+            task_spec['arguments'] = [task_spec['arguments'][0].replace("--use_vllm", "")]
 
     # Add additional stop sequences if needed.
     # mainly for llama-3-instruct eot.
@@ -587,7 +592,7 @@ for experiment_group in experiment_groups:
 
 model_name = model_name[:100] # beaker doesn't like names longer than 128 characters, here we save for some headroom.
 if not args.skip_oi_evals:
-    experiment_name = f"open_instruct_eval_{model_name}_{today}" 
+    experiment_name = f"open_instruct_eval_{model_name}_{today}"
     d["description"] = experiment_name
     d["tasks"] = eval_task_specs
     # if configs/beaker_configs/auto_created doesn't exist, create it with os
@@ -601,7 +606,7 @@ if not args.skip_oi_evals:
     cmd = "beaker experiment create {} --workspace ai2/{}".format(fn, workspace)
     subprocess.Popen(cmd, shell=True)
 
-if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
+if args.run_oe_eval_experiments:
     # if so, run oe-eval. We assume it is cloned in the top-level repo directory.
     oe_eval_cmd = f"scripts/eval/oe-eval.sh --model-name {model_name}"
     if args.upload_to_hf:
@@ -636,29 +641,30 @@ if args.run_oe_eval_experiments or args.oe_eval_unseen_evals:
     oe_eval_cmd += f" --num_gpus {num_gpus}"
     if args.oe_eval_max_length:
         oe_eval_cmd += f" --max-length {args.oe_eval_max_length}"
-    if args.oe_eval_unseen_evals:
-        oe_eval_cmd += " --unseen-evals"
+    # Add task suite parameter
+    if args.oe_eval_task_suite:
+        oe_eval_cmd += f" --task-suite {args.oe_eval_task_suite}"
     # add priority
     oe_eval_cmd += f" --priority {args.priority}"
-    
+
     # Add stop sequences if provided
     if args.oe_eval_stop_sequences:
         oe_eval_cmd += f" --stop-sequences '{args.oe_eval_stop_sequences}'"
-        
+
     # Add process output if provided
     if args.process_output:
         oe_eval_cmd += f" --process-output {args.process_output}"
-        
+
     # Add beaker image from existing argument
     if args.beaker_image:
         oe_eval_cmd += f" --beaker-image {args.beaker_image}"
-    
+
     # Add cluster parameter - use the existing cluster argument
     # Join the list with commas since oe-eval.sh expects a comma-separated string
     if args.cluster and len(args.cluster) > 0:
         cluster_str = ",".join(args.cluster)
         oe_eval_cmd += f" --cluster '{cluster_str}'"
-    
+
     print(f"Running OE eval with command: {oe_eval_cmd}")
     subprocess.Popen(oe_eval_cmd, shell=True)
 
@@ -675,7 +681,7 @@ if args.run_safety_evaluations:
     d["tasks"] = [d["tasks"][0]]
     task_spec = d["tasks"][0]
     task_spec["name"] = experiment_name
-    task_spec["arguments"][0] = f'''
+    task_spec["arguments"][0] = '''
 VLLM_WORKER_MULTIPROC_METHOD=spawn PYTHONPATH=. python evaluation/run_all_generation_benchmarks.py \
     --model_name_or_path /model \
     --model_input_template_path_or_name hf \

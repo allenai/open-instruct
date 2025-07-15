@@ -49,23 +49,16 @@ for output in outputs:
 ```
 """
 
-
 from typing import List, Optional
 
 import torch
 import vllm
-from vllm.distributed.parallel_state import (
-    GroupCoordinator,
-    get_world_group,
-    init_model_parallel_group,
-)
+from vllm.distributed.parallel_state import GroupCoordinator, get_world_group, init_model_parallel_group
 from vllm.executor.gpu_executor import GPUExecutor
 
 
 def custom_initialize_model_parallel(
-    tensor_model_parallel_size: int = 1,
-    pipeline_model_parallel_size: int = 1,
-    backend: Optional[str] = None,
+    tensor_model_parallel_size: int = 1, pipeline_model_parallel_size: int = 1, backend: Optional[str] = None
 ) -> None:
     """
     Initialize model parallel groups.
