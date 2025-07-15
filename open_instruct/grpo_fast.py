@@ -1103,6 +1103,90 @@ class ModelGroup:
             self.models.append(worker_policy)
 
 
+def accumulate_inference_batches(
+    inference_results_Q: ray_queue.Queue,
+    pending_queries_map: dict,
+    vllm_num_engines: int,
+    training_step: int,
+) -> tuple:
+    """Accumulate multiple inference results into a single training batch.
+    
+    Args:
+        inference_results_Q: Queue containing GenerationResult objects
+        pending_queries_map: Map of dataset_index -> (queries, ground_truths, datasets)
+        vllm_num_engines: Number of vLLM engines (number of batches to accumulate)
+        training_step: Current training step for error reporting
+        
+    Returns:
+        Tuple of (combined_result, combined_queries, combined_ground_truths, combined_datasets)
+    """
+    # Collect results from all engines
+    results = []
+    all_queries = []
+    all_ground_truths = []
+    all_datasets = []
+    
+    for batch_idx in range(vllm_num_engines):
+        # Get result from queue
+        result = inference_results_Q.get()
+        dataset_index = result.dataset_index
+        
+        if dataset_index is None or dataset_index not in pending_queries_map:
+            raise RuntimeError(f"Dataset index {dataset_index} not found in pending_queries_map")
+        
+        # Get corresponding queries, ground_truths, datasets
+        queries, ground_truths, datasets = pending_queries_map.pop(dataset_index)
+        
+        results.append(result)
+        all_queries.extend(queries)
+        all_ground_truths.extend(ground_truths)
+        all_datasets.extend(datasets)
+    
+    # Combine all results into a single GenerationResult
+    combined_responses = []
+    combined_finish_reasons = []
+    combined_masks = []
+    combined_num_calls = []
+    combined_timeouts = []
+    combined_tool_errors = []
+    combined_tool_outputs = []
+    combined_tool_runtimes = []
+    combined_tool_calleds = []
+    
+    for result in results:
+        combined_responses.extend(result.responses)
+        combined_finish_reasons.extend(result.finish_reasons)
+        combined_masks.extend(result.masks)
+        combined_num_calls.extend(result.request_info.num_calls)
+        combined_timeouts.extend(result.request_info.timeouts)
+        combined_tool_errors.extend(result.request_info.tool_errors)
+        combined_tool_outputs.extend(result.request_info.tool_outputs)
+        combined_tool_runtimes.extend(result.request_info.tool_runtimes)
+        combined_tool_calleds.extend(result.request_info.tool_calleds)
+    
+    # Create combined RequestInfo
+    combined_request_info = RequestInfo(
+        num_calls=combined_num_calls,
+        timeouts=combined_timeouts,
+        tool_errors=combined_tool_errors,
+        tool_outputs=combined_tool_outputs,
+        tool_runtimes=combined_tool_runtimes,
+        tool_calleds=combined_tool_calleds,
+    )
+    
+    # Create combined GenerationResult
+    combined_result = GenerationResult(
+        responses=combined_responses,
+        finish_reasons=combined_finish_reasons,
+        masks=combined_masks,
+        request_info=combined_request_info,
+        is_eval=results[0].is_eval,  # All should have the same is_eval value
+        dataset_index=None,  # Not meaningful for combined result
+    )
+    
+    return combined_result, all_queries, all_ground_truths, all_datasets
+
+
 def data_preparation_thread(
     reward_fn: Callable,
     inference_results_Q: ray_queue.Queue,  # Ray queue
@@ -1113,15 +1197,14 @@ def data_preparation_thread(
     num_training_steps: int,
 ):
     for training_step in range(1, num_training_steps + 1):
-        # Get result from vLLM engines and look up corresponding queries using dataset_index
+        # Accumulate results from multiple vLLM engines into a single training batch
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            result = inference_results_Q.get()
-            dataset_index = result.dataset_index
-            if dataset_index is None or dataset_index not in pending_queries_map:
-                raise RuntimeError(f"Dataset index {dataset_index} not found in pending_queries_map")
-
-            # Get the corresponding queries, ground_truths, and datasets
-            queries, ground_truths, datasets = pending_queries_map.pop(dataset_index)
+            result, queries, ground_truths, datasets = accumulate_inference_batches(
+                inference_results_Q,
+                pending_queries_map,
+                args.vllm_num_engines,
+                training_step,
+            )
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -1610,28 +1693,44 @@ def sync_weights_and_prepare_prompts(
 
     if args.async_mode:
         if dataset_index is not None:
-            pending_queries_map[dataset_index] = (queries_next, ground_truths_next, datasets_next)
-        # Use PromptRequest for Ray queue with dataset_index
-        param_prompt_Q.put(
-            PromptRequest(
-                prompts=queries_next,
-                training_step=training_step,
-                eval_prompts=eval_prompt_token_ids,
-                dataset_index=dataset_index,
-            )
-        )
+            # Split the batch into multiple inference batches for vLLM engines
+            inference_batch_size = len(queries_next) // args.vllm_num_engines
+            for batch_idx in range(args.vllm_num_engines):
+                start_idx = batch_idx * inference_batch_size
+                end_idx = start_idx + inference_batch_size if batch_idx < args.vllm_num_engines - 1 else len(queries_next)
+                
+                batch_queries = queries_next[start_idx:end_idx]
+                batch_ground_truths = ground_truths_next[start_idx:end_idx]
+                batch_datasets = datasets_next[start_idx:end_idx]
+                
+                # Create unique dataset_index for this batch
+                batch_dataset_index = f"{training_step}_{batch_idx}"
+                pending_queries_map[batch_dataset_index] = (batch_queries, batch_ground_truths, batch_datasets)
+                
+                # Use PromptRequest for Ray queue with batch-specific dataset_index
+                param_prompt_Q.put(PromptRequest(
+                    prompts=batch_queries, training_step=training_step, eval_prompts=eval_prompt_token_ids, dataset_index=batch_dataset_index
+                ))
     else:
         if training_step != 1:
-            pending_queries_map[dataset_index] = (queries_next, ground_truths_next, datasets_next)
-            # Use PromptRequest for Ray queue with dataset_index
-            param_prompt_Q.put(
-                PromptRequest(
-                    prompts=queries_next,
-                    training_step=training_step,
-                    eval_prompts=eval_prompt_token_ids,
-                    dataset_index=dataset_index,
-                )
-            )
+            # Split the batch into multiple inference batches for vLLM engines
+            inference_batch_size = len(queries_next) // args.vllm_num_engines
+            for batch_idx in range(args.vllm_num_engines):
+                start_idx = batch_idx * inference_batch_size
+                end_idx = start_idx + inference_batch_size if batch_idx < args.vllm_num_engines - 1 else len(queries_next)
+                
+                batch_queries = queries_next[start_idx:end_idx]
+                batch_ground_truths = ground_truths_next[start_idx:end_idx]
+                batch_datasets = datasets_next[start_idx:end_idx]
+                
+                # Create unique dataset_index for this batch
+                batch_dataset_index = f"{training_step}_{batch_idx}"
+                pending_queries_map[batch_dataset_index] = (batch_queries, batch_ground_truths, batch_datasets)
+                
+                # Use PromptRequest for Ray queue with batch-specific dataset_index
+                param_prompt_Q.put(PromptRequest(
+                    prompts=batch_queries, training_step=training_step, eval_prompts=eval_prompt_token_ids, dataset_index=batch_dataset_index
+                ))
 
     return queries_next, ground_truths_next, datasets_next
 
@@ -2017,11 +2116,11 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     # Send initial data to both threads.
     dataset_indices = next(iter_dataloader)
-    initial_dataset_index = dataset_indices[0]  # Use the first index as the batch identifier
     data_next = train_dataset[dataset_indices]
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
     datasets_next = data_next[DATASET_SOURCE_KEY]
+<<<<<<< HEAD
     pending_queries_map[initial_dataset_index] = (queries_next, ground_truths_next, datasets_next)
     # Use PromptRequest for Ray queue
     request = PromptRequest(
@@ -2031,6 +2130,29 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         dataset_index=initial_dataset_index,
     )
     param_prompt_Q.put(request)
+=======
+    
+    # Split the initial batch into multiple inference batches for vLLM engines
+    inference_batch_size = len(queries_next) // args.vllm_num_engines
+    for batch_idx in range(args.vllm_num_engines):
+        start_idx = batch_idx * inference_batch_size
+        end_idx = start_idx + inference_batch_size if batch_idx < args.vllm_num_engines - 1 else len(queries_next)
+        
+        batch_queries = queries_next[start_idx:end_idx]
+        batch_ground_truths = ground_truths_next[start_idx:end_idx]
+        batch_datasets = datasets_next[start_idx:end_idx]
+        
+        # Create unique dataset_index for this batch
+        batch_dataset_index = f"1_{batch_idx}"
+        pending_queries_map[batch_dataset_index] = (batch_queries, batch_ground_truths, batch_datasets)
+        
+        # Use PromptRequest for Ray queue
+        request = PromptRequest(
+            prompts=batch_queries, training_step=1, eval_prompts=eval_prompt_token_ids if eval_dataset is not None else None,
+            dataset_index=batch_dataset_index
+        )
+        param_prompt_Q.put(request)
+>>>>>>> 22bb9ac2 (Added code to split batch sizes.)
 
     num_total_tokens = 0
     start_time = time.time()

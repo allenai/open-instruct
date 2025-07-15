@@ -95,6 +95,63 @@ class TestGrpoFastVLLM(unittest.TestCase):
         # Send stop signal
         param_prompt_Q.put(None)
 
+    def test_batch_splitting_logic(self):
+        """Test the batch splitting logic used in sync_weights_and_prepare_prompts."""
+        
+        # Mock data - simulating num_unique_prompts_rollout * num_samples_per_prompt_rollout
+        queries_next = [f"query_{i}" for i in range(16)]  # 16 queries
+        ground_truths_next = [f"truth_{i}" for i in range(16)]
+        datasets_next = [f"dataset_{i}" for i in range(16)]
+        
+        # Test with different vllm_num_engines values
+        for vllm_num_engines in [1, 2, 4, 8]:
+            with self.subTest(vllm_num_engines=vllm_num_engines):
+                pending_queries_map = {}
+                training_step = 1
+                
+                # Split the batch into multiple inference batches for vLLM engines
+                inference_batch_size = len(queries_next) // vllm_num_engines
+                
+                all_batch_queries = []
+                all_batch_ground_truths = []
+                all_batch_datasets = []
+                
+                for batch_idx in range(vllm_num_engines):
+                    start_idx = batch_idx * inference_batch_size
+                    end_idx = start_idx + inference_batch_size if batch_idx < vllm_num_engines - 1 else len(queries_next)
+                    
+                    batch_queries = queries_next[start_idx:end_idx]
+                    batch_ground_truths = ground_truths_next[start_idx:end_idx]
+                    batch_datasets = datasets_next[start_idx:end_idx]
+                    
+                    # Verify batch sizes
+                    expected_size = inference_batch_size if batch_idx < vllm_num_engines - 1 else len(queries_next) - batch_idx * inference_batch_size
+                    self.assertEqual(len(batch_queries), expected_size)
+                    self.assertEqual(len(batch_ground_truths), expected_size)
+                    self.assertEqual(len(batch_datasets), expected_size)
+                    
+                    # Create unique dataset_index for this batch
+                    batch_dataset_index = f"{training_step}_{batch_idx}"
+                    pending_queries_map[batch_dataset_index] = (batch_queries, batch_ground_truths, batch_datasets)
+                    
+                    # Collect all batches for verification
+                    all_batch_queries.extend(batch_queries)
+                    all_batch_ground_truths.extend(batch_ground_truths)
+                    all_batch_datasets.extend(batch_datasets)
+                
+                # Verify that all original data is preserved
+                self.assertEqual(all_batch_queries, queries_next)
+                self.assertEqual(all_batch_ground_truths, ground_truths_next)
+                self.assertEqual(all_batch_datasets, datasets_next)
+                
+                # Verify that we have the expected number of batches
+                self.assertEqual(len(pending_queries_map), vllm_num_engines)
+                
+                # Verify that each batch has the correct dataset_index format
+                for batch_idx in range(vllm_num_engines):
+                    batch_dataset_index = f"{training_step}_{batch_idx}"
+                    self.assertIn(batch_dataset_index, pending_queries_map)
+
 
 if __name__ == "__main__":
     unittest.main()
