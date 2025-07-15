@@ -37,7 +37,7 @@ from open_instruct.math_utils import (
     normalize_final_answer,
     remove_boxed,
 )
-from open_instruct.search_rewards.long_form_rewards import compute_paper_reward
+from open_instruct.search_rewards.openscholar_rewards import compute_paper_reward
 from open_instruct.search_rewards.reasoning_model_rewards import compute_hle_reward
 from open_instruct.search_rewards.rubric_rewards import compute_rubric_reward
 from open_instruct.utils import extract_final_answer

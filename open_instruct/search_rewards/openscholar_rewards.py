@@ -13,7 +13,7 @@ import logging
 import re
 from typing import Any, Dict
 
-from open_instruct.search_rewards.global_rewards_utils import (
+from open_instruct.search_rewards.openscholar_rewards_utils import (
     RubricCorpusQaGenericMetric,
 )
 from open_instruct.search_rewards.format_utils import extract_answer_context_citations

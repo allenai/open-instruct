@@ -62,6 +62,7 @@ def compute_rubric_reward(response: str, test_case: Dict[str, Any]) -> Dict[str,
 
     if not result.get("extraction_success"):
         result["error"] = "Failed to extract answer from response"
+        result["reward"] = 0.0
         return result
 
     ground_truth = json.loads(test_case["ground_truth"])

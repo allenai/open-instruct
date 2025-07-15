@@ -5,7 +5,7 @@ import json
 # Add the project root to the Python path to allow for absolute imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
 
-from open_instruct.search_rewards.long_form_rewards import compute_paper_reward
+from open_instruct.search_rewards.openscholar_rewards import compute_paper_reward
 
 # Test data
 question = "Apart from preventing overfitting, are there any side effects (desirable or otherwise) of applying dropout in deep neural networks?"
