@@ -29,15 +29,15 @@ The output dataset has the following columns:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-INPUT_HF_DATASET = "saurabh5/open-code-reasoning-rlvr-stdio"
-OUTPUT_HF_DATASET = "saurabh5/open-code-reasoning-rlvr-sft-stdio"
+INPUT_HF_DATASET = "saurabh5/rlvr-code-data-Java"
+OUTPUT_HF_DATASET = "saurabh5/rlvr-code-data-Java-sft"
 
-STDIN_INPUT_COLUMN_NAME = "rewritten_input"
-STDIN_SOLUTION_COLUMN_NAME = "rewritten_solution"
+STDIN_INPUT_COLUMN_NAME = "translated_problem"
+STDIN_SOLUTION_COLUMN_NAME = "translated_solution"
 
 def validate_row(row):
     """Validate that a row has all required fields."""
-    required_fields = ["good_program", STDIN_INPUT_COLUMN_NAME, STDIN_SOLUTION_COLUMN_NAME]
+    required_fields = [STDIN_INPUT_COLUMN_NAME, STDIN_SOLUTION_COLUMN_NAME]
     for field in required_fields:
         if field not in row:
             return False, f"Missing field: {field}"
@@ -66,11 +66,7 @@ def main():
                 logger.warning(f"Row {i}: {error_msg}")
                 error_count += 1
                 continue
-
-            if not row["good_program"]:
-                skipped_count += 1
-                continue
-
+                
             try:
                 #fn_input = row[FN_INPUT_COLUMN_NAME]
                 stdin_input = get_original_input(row)
@@ -97,7 +93,6 @@ def main():
                 stdin_rows.append({
                     "messages": stdin_messages,
                     "dataset": "code",
-                    "good_program": row["good_program"],
                 })
 
             except Exception as e:
@@ -106,7 +101,7 @@ def main():
                 continue
 
         logger.info(f"Processed {len(stdin_rows)} valid rows")
-        logger.info(f"Skipped {skipped_count} rows (good_program=False)")
+        logger.info(f"Skipped {skipped_count} rows")
         logger.info(f"Errors: {error_count}")
 
         if len(stdin_rows) == 0:
