@@ -731,8 +731,6 @@ class TokenizerConfig:
     chat_template_name: str = "olmo"  # TODO: should I give an option to force override?
     add_bos: bool = False
     get_tokenizer_fn: str = "get_tokenizer_tulu_v2_2"
-    add_thinking_generation_prompt: bool = False
-    add_from_base_thinking_prompt: bool = False
 
     # for tracking purposes
     tokenizer_files_hash: Optional[List[str]] = None
