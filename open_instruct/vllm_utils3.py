@@ -39,6 +39,7 @@ from torch.distributed.distributed_c10d import (
 @dataclasses.dataclass
 class RequestInfo:
     """Container for tool usage information."""
+
     num_calls: List[int]
     timeouts: List[int]
     tool_errors: List[str]
@@ -50,6 +51,7 @@ class RequestInfo:
 @dataclasses.dataclass
 class GenerationResult:
     """Container for generation results from vLLM."""
+
     responses: List[List[int]]
     finish_reasons: List[str]
     masks: List[List[int]]
@@ -228,7 +230,9 @@ class LLMRayActor:
                 else:
                     self.results_queue.put(eval_result)
 
-    def _generate_batch(self, prompts: List[List[int]], sampling_params, dataset_index: Optional[int] = None) -> GenerationResult:
+    def _generate_batch(
+        self, prompts: List[List[int]], sampling_params, dataset_index: Optional[int] = None
+    ) -> GenerationResult:
         """Generate responses for a batch of prompts."""
         outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
 
@@ -261,7 +265,7 @@ class LLMRayActor:
             tool_runtimes=tool_runtimes,
             tool_calleds=tool_calleds,
         )
-        
+
         return GenerationResult(
             responses=response_ids,
             finish_reasons=finish_reasons,

@@ -14,9 +14,6 @@ import gc
 import json
 import logging
 import pathlib
-import queue
-import threading
-from ray.util import queue as ray_queue
 import time
 from typing import Any
 
@@ -27,6 +24,7 @@ import torch
 import torch.utils.flop_counter
 import transformers
 import vllm
+from ray.util import queue as ray_queue
 
 from open_instruct import dataset_transformation, grpo_fast, model_utils, utils, vllm_utils3
 
