@@ -400,7 +400,7 @@ def save_with_accelerate(
     # set the generation config to an empty setting to be safe.
     # we usually do greedy decoding for generation, so this should be okay.
     # otherwise, we get an error thrown at save time.
-    if chat_template_name == "olmo":
+    if "olmo" in chat_template_name:
         # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
         model.generation_config = transformers.GenerationConfig(
             temperature=None, top_p=None, eos_token_id=[100265, 100257]
