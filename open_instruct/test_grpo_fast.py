@@ -1,13 +1,14 @@
-import unittest
-import torch
-import ray
-import threading
 import queue
-from vllm import SamplingParams
-from transformers import AutoTokenizer
+import threading
+import unittest
 
-from open_instruct.vllm_utils3 import create_vllm_engines
+import ray
+import torch
+from transformers import AutoTokenizer
+from vllm import SamplingParams
+
 from open_instruct.grpo_fast import vllm_generate_thread
+from open_instruct.vllm_utils3 import create_vllm_engines
 
 
 class TestGrpoFastVLLM(unittest.TestCase):

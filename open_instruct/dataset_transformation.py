@@ -998,9 +998,7 @@ def preference_span_search_mask_out(
     if len(rejected_messages) == 0:
         raise ValueError("rejected messages field is empty.")
 
-    chosen_encoded = sft_span_seach_mask_out(
-        {DEFAULT_SFT_MESSAGES_KEY: chosen_messages}, tokenizer, max_seq_length
-    )
+    chosen_encoded = sft_span_seach_mask_out({DEFAULT_SFT_MESSAGES_KEY: chosen_messages}, tokenizer, max_seq_length)
     rejected_encoded = sft_span_seach_mask_out(
         {DEFAULT_SFT_MESSAGES_KEY: rejected_messages}, tokenizer, max_seq_length
     )
