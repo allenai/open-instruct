@@ -30,7 +30,6 @@ import vllm
 
 from open_instruct import dataset_transformation, grpo_fast, model_utils, utils, vllm_utils3
 
-
 # For FLOPS, we assume bf16 and ignore sparsity.
 GPU_SPECS = {
     "a100": {"flops": 312e12, "memory_size": 80e9},
@@ -215,16 +214,13 @@ def setup_vllm_engines(
         ray.shutdown()
     ray.init(num_cpus=4, num_gpus=1, ignore_reinit_error=True, runtime_env={"excludes": ["/benchmark_cache/"]})
 
-    # Create placement group for multiple engines
     bundles = [{"GPU": 1, "CPU": 1} for _ in range(args.vllm_num_engines)]
     pg = ray.util.placement_group(bundles, strategy="PACK")
     ray.get(pg.ready())
 
-    # Create Ray queues
     param_prompt_Q = ray_queue.Queue(maxsize=10)
     inference_results_Q = ray_queue.Queue(maxsize=10)
 
-    # Create vLLM engines
     vllm_engines = vllm_utils3.create_vllm_engines(
         num_engines=args.vllm_num_engines,
         tensor_parallel_size=args.vllm_tensor_parallel_size,
@@ -262,7 +258,7 @@ def get_batch_data(
 
 
 def run_generation_batch(
-    inference_results_Q: ray_queue.Queue, param_prompt_Q: ray_queue.Queue, prompts: list[list[int]], batch_idx: int = 0
+    inference_results_Q: ray_queue.Queue, param_prompt_Q: ray_queue.Queue, prompts: list[list[int]], batch_idx: int
 ) -> dict[str, Any]:
     """Run generation for a batch of prompts and measure performance."""
 
