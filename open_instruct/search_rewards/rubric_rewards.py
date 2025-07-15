@@ -1,8 +1,8 @@
+import os
 from typing import Any, Dict
 import json
 from open_instruct.search_rewards.format_utils import extract_answer_context_citations
-from open_instruct.search_rewards.citation_rewards_utils import run_llm_judge
-from open_instruct.search_rewards.run_utils import extract_json_from_response
+from open_instruct.search_rewards.run_utils import extract_json_from_response, run_litellm
 
 
 
@@ -18,7 +18,7 @@ ground_truth = json.dumps(ex)
 test_case = {"messages": messages, "ground_truth": ground_truth, "dataset": dataset}
 """
 
-def _score_property(response: str, question: str, prop: str, model_name: str = "gpt-4.1", deployment: str = "gpt-4.1-standard") -> float:
+def _score_property(response: str, question: str, prop: str) -> float:
     """
     Score the response as per the annotation rubric/criterion represented here by ``prop``.
     The score is calculated by asking an LLM to judge the response for satisfaction of the rubric/criterion
@@ -34,10 +34,10 @@ Return a score on a scale of 0 to 10 indicating how appropriate the response is 
         f"""<question>{question}</question>\n<response>{response}</response>\n<criterion>{prop}</criterion>"""
     )
 
-    resp = run_llm_judge(
-        f"{system_prompt}\n\n{user_prompt}",
-        model_name,
-        deployment,
+    resp = run_litellm(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        model_name=os.environ.get("RUBRIC_JUDGE_MODEL", "gpt-4.1"),
     )
 
     obj = extract_json_from_response(resp)
