@@ -55,6 +55,7 @@ class GenerationResult:
     masks: List[List[int]]
     request_info: RequestInfo
     is_eval: bool = False
+    dataset_index: Optional[int] = None
 
 
 @dataclasses.dataclass
@@ -64,6 +65,7 @@ class PromptRequest:
     prompts: List[List[int]]
     training_step: Optional[int] = None
     eval_prompts: Optional[List[List[int]]] = None
+    dataset_index: Optional[int] = None
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -209,7 +211,7 @@ class LLMRayActor:
                 break
 
             # Process training prompts
-            result = self._generate_batch(request.prompts, sampling_params)
+            result = self._generate_batch(request.prompts, sampling_params, request.dataset_index)
             self.results_queue.put(result)
 
             # Handle evaluation if needed
@@ -218,7 +220,7 @@ class LLMRayActor:
                 and eval_sampling_params is not None
                 and (training_step - 1) % eval_freq == 0
             ):
-                eval_result = self._generate_batch(request.eval_prompts, eval_sampling_params)
+                eval_result = self._generate_batch(request.eval_prompts, eval_sampling_params, request.dataset_index)
                 eval_result.is_eval = True
                 # Put eval results in separate queue if available
                 if self.eval_results_queue is not None:
@@ -226,7 +228,7 @@ class LLMRayActor:
                 else:
                     self.results_queue.put(eval_result)
 
-    def _generate_batch(self, prompts: List[List[int]], sampling_params) -> GenerationResult:
+    def _generate_batch(self, prompts: List[List[int]], sampling_params, dataset_index: Optional[int] = None) -> GenerationResult:
         """Generate responses for a batch of prompts."""
         outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
 
@@ -265,6 +267,7 @@ class LLMRayActor:
             finish_reasons=finish_reasons,
             masks=masks,
             request_info=request_info,
+            dataset_index=dataset_index,
         )
 
     def init_process_group(

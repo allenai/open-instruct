@@ -73,7 +73,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
             )
 
         # Put the test prompt in the queue using PromptRequest
-        request = PromptRequest(prompts=[prompt_token_ids], training_step=1, eval_prompts=None)
+        request = PromptRequest(prompts=[prompt_token_ids], dataset_index=0)
         param_prompt_Q.put(request)
 
         # Get the result

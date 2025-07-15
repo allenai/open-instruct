@@ -1107,15 +1107,21 @@ def data_preparation_thread(
     reward_fn: Callable,
     inference_results_Q: ray_queue.Queue,  # Ray queue
     packed_sequences_Q: Queue,
-    queries_prompt_Q: Queue,
+    pending_queries_map: dict,
     args: Args,
     tokenizer: PreTrainedTokenizer,
     num_training_steps: int,
 ):
     for training_step in range(1, num_training_steps + 1):
-        # Get next batch of prompts and responses
-        items = queries_prompt_Q.get()
-        queries, ground_truths, datasets = items
+        # Get result from vLLM engines and look up corresponding queries using dataset_index
+        with Timer("🚀 [Data Preparation Thread] Getting response ids"):
+            result = inference_results_Q.get()
+            dataset_index = result.dataset_index
+            if dataset_index is None or dataset_index not in pending_queries_map:
+                raise RuntimeError(f"Dataset index {dataset_index} not found in pending_queries_map")
+
+            # Get the corresponding queries, ground_truths, and datasets
+            queries, ground_truths, datasets = pending_queries_map.pop(dataset_index)
 
         # ------------------------------------------------------------------------------------------------
         # Pack sequences
@@ -1123,15 +1129,12 @@ def data_preparation_thread(
             queries = [item for item in queries for _ in range(args.num_samples_per_prompt_rollout)]
             ground_truths = [item for item in ground_truths for _ in range(args.num_samples_per_prompt_rollout)]
             datasets = [item for item in datasets for _ in range(args.num_samples_per_prompt_rollout)]
-        with Timer("🚀 [Data Preparation Thread] Getting response ids"):
-            result = inference_results_Q.get()
-            # Use new dataclass format with direct references
             good_outputs = [
-                len(result.tool_outputs[i]) > 0
-                and result.tool_calleds[i]
-                and not result.timeouts[i]
-                and not result.tool_errors[i]
-                for i in range(len(result.tool_outputs))
+                len(result.request_info.tool_outputs[i]) > 0
+                and result.request_info.tool_calleds[i]
+                and not result.request_info.timeouts[i]
+                and not result.request_info.tool_errors[i]
+                for i in range(len(result.request_info.tool_outputs))
             ]
             for i in range(len(result.finish_reasons)):
                 # edge case: sometimes it outputs eos immediately, and we get an empty response
@@ -1159,14 +1162,7 @@ def data_preparation_thread(
                     ground_truths,
                     datasets,
                     result.finish_reasons,
-                    (
-                        result.num_calls,
-                        result.timeouts,
-                        result.tool_errors,
-                        result.tool_outputs,
-                        result.tool_runtimes,
-                        result.tool_calleds,
-                    ),
+                    result.request_info,
                     decoded_queries,
                 )
             )
@@ -1589,7 +1585,7 @@ def sync_weights_and_prepare_prompts(
     train_dataset,
     iter_dataloader,
     policy_group: ModelGroup,
-    queries_prompt_Q: Queue,
+    pending_queries_map: dict,
     param_prompt_Q: ray_queue.Queue,  # Ray queue
     queries_next=None,
     ground_truths_next=None,
@@ -1597,8 +1593,11 @@ def sync_weights_and_prepare_prompts(
     eval_prompt_token_ids=None,
 ):
     """Sync weights and send the next batch of prompts to vLLM."""
+    dataset_index = None
     if training_step != 1:
-        data_next = train_dataset[next(iter_dataloader)]
+        dataset_indices = next(iter_dataloader)
+        dataset_index = dataset_indices[0]  # Use the first index as the batch identifier
+        data_next = train_dataset[dataset_indices]
         queries_next = data_next[INPUT_IDS_PROMPT_KEY]
         ground_truths_next = data_next[GROUND_TRUTHS_KEY]
         datasets_next = data_next[DATASET_SOURCE_KEY]
@@ -1610,18 +1609,29 @@ def sync_weights_and_prepare_prompts(
             ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
     if args.async_mode:
-        queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
-        # Use PromptRequest for Ray queue
-        request = PromptRequest(prompts=queries_next, training_step=training_step, eval_prompts=eval_prompt_token_ids)
-        param_prompt_Q.put(request)
+        if dataset_index is not None:
+            pending_queries_map[dataset_index] = (queries_next, ground_truths_next, datasets_next)
+        # Use PromptRequest for Ray queue with dataset_index
+        param_prompt_Q.put(
+            PromptRequest(
+                prompts=queries_next,
+                training_step=training_step,
+                eval_prompts=eval_prompt_token_ids,
+                dataset_index=dataset_index,
+            )
+        )
     else:
         if training_step != 1:
-            queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
-            # Use PromptRequest for Ray queue
-            request = PromptRequest(
-                prompts=queries_next, training_step=training_step, eval_prompts=eval_prompt_token_ids
+            pending_queries_map[dataset_index] = (queries_next, ground_truths_next, datasets_next)
+            # Use PromptRequest for Ray queue with dataset_index
+            param_prompt_Q.put(
+                PromptRequest(
+                    prompts=queries_next,
+                    training_step=training_step,
+                    eval_prompts=eval_prompt_token_ids,
+                    dataset_index=dataset_index,
+                )
             )
-            param_prompt_Q.put(request)
 
     return queries_next, ground_truths_next, datasets_next
 
@@ -1781,18 +1791,7 @@ def maybe_evaluate(
                 eval_ground_truths,
                 eval_dataset_names,
                 result.finish_reasons,
-<<<<<<< HEAD
-                (
-                    result.num_calls,
-                    result.timeouts,
-                    result.tool_errors,
-                    result.tool_outputs,
-                    result.tool_runtimes,
-                    result.tool_calleds,
-                ),
-=======
                 result.request_info,
->>>>>>> 0a13461c (Added an info dataclass to replace the tuple.)
             )
         )
         eval_reward_metrics = {f"eval/{key}": val for key, val in eval_reward_metrics.items()}
@@ -1983,7 +1982,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     # Create additional queues (main queues already created above)
     packed_sequences_Q = Queue(maxsize=args.async_steps)  # Keep this as threading Queue for now
-    queries_prompt_Q = Queue(maxsize=args.async_steps)  # Keep this as threading Queue for now
+    pending_queries_map = {}  # Map dataset_index -> (queries, ground_truths, datasets)
 
     eval_prompt_token_ids = None
     eval_ground_truths = None
@@ -2007,7 +2006,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
             reward_fn,
             inference_results_Q,
             packed_sequences_Q,
-            queries_prompt_Q,
+            pending_queries_map,
             args,
             tokenizer,
             args.num_training_steps,
@@ -2017,14 +2016,19 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     logger.info("======== ✅ data preparation thread starts =========")
 
     # Send initial data to both threads.
-    data_next = train_dataset[next(iter_dataloader)]
+    dataset_indices = next(iter_dataloader)
+    initial_dataset_index = dataset_indices[0]  # Use the first index as the batch identifier
+    data_next = train_dataset[dataset_indices]
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
     datasets_next = data_next[DATASET_SOURCE_KEY]
-    queries_prompt_Q.put((queries_next, ground_truths_next, datasets_next))
+    pending_queries_map[initial_dataset_index] = (queries_next, ground_truths_next, datasets_next)
     # Use PromptRequest for Ray queue
     request = PromptRequest(
-        prompts=queries_next, training_step=1, eval_prompts=eval_prompt_token_ids if eval_dataset is not None else None
+        prompts=queries_next,
+        training_step=1,
+        eval_prompts=eval_prompt_token_ids if eval_dataset is not None else None,
+        dataset_index=initial_dataset_index,
     )
     param_prompt_Q.put(request)
 
@@ -2043,7 +2047,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 train_dataset,
                 iter_dataloader,
                 policy_group,
-                queries_prompt_Q,
+                pending_queries_map,
                 param_prompt_Q,
                 queries_next,
                 ground_truths_next,
