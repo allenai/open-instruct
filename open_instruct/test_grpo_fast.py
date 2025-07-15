@@ -112,9 +112,9 @@ class TestGrpoFastVLLM(unittest.TestCase):
         # Split the batch into multiple inference batches for vLLM engines
         inference_batch_size = len(queries_next) // vllm_num_engines
 
-        all_batch_queries = []
-        all_batch_ground_truths = []
-        all_batch_datasets = []
+        all_queries = []
+        all_ground_truths = []
+        all_datasets = []
 
         for batch_idx in range(vllm_num_engines):
             start_idx = batch_idx * inference_batch_size
@@ -143,9 +143,9 @@ class TestGrpoFastVLLM(unittest.TestCase):
             all_datasets.extend(datasets)
 
         # Verify that all original data is preserved
-        self.assertEqual(all_batch_queries, queries_next)
-        self.assertEqual(all_batch_ground_truths, ground_truths_next)
-        self.assertEqual(all_batch_datasets, datasets_next)
+        self.assertEqual(all_queries, queries_next)
+        self.assertEqual(all_ground_truths, ground_truths_next)
+        self.assertEqual(all_datasets, datasets_next)
 
         # Verify that we have the expected number of batches
         self.assertEqual(len(pending_queries_map), vllm_num_engines)
