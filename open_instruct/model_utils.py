@@ -394,14 +394,21 @@ def save_with_accelerate(
     output_dir: str,
     use_lora: bool = False,
     model_attribute_to_save: Optional[str] = None,
+    chat_template_name: str = 'tulu',
 ) -> None:
     """`model_attribute_to_save` is for used to save PPO's policy instead of the full model"""
     # set the generation config to an empty setting to be safe.
     # we usually do greedy decoding for generation, so this should be okay.
     # otherwise, we get an error thrown at save time.
-    model.generation_config = transformers.GenerationConfig(
-        temperature=None, top_p=None, eos_token_id=tokenizer.eos_token_id, bos_token_id=tokenizer.bos_token_id
-    )
+    if chat_template_name == "olmo":
+        # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
+        model.generation_config = transformers.GenerationConfig(
+            temperature=None, top_p=None, eos_token_id=[100265, 100257]
+        )
+    else:
+        model.generation_config = transformers.GenerationConfig(
+            temperature=None, top_p=None, eos_token_id=tokenizer.eos_token_id, bos_token_id=tokenizer.bos_token_id
+        )
 
     unwrapped_model: PreTrainedModel = accelerator.unwrap_model(model)
     if model_attribute_to_save is not None:
