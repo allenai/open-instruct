@@ -1,7 +1,7 @@
 python open_instruct/ppo_vllm_thread_ray_gtrl.py \
-    --dataset_mixer_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 1.0 \
+    --dataset_mixer_list allenai/IF_multi_constraints_upto5 1.0 \
     --dataset_mixer_list_splits train \
-    --dataset_mixer_eval_list allenai/RLVR-GSM-MATH-IF-Mixed-Constraints 16 \
+    --dataset_mixer_eval_list allenai/IF_multi_constraints_upto5 16 \
     --dataset_mixer_eval_list_splits train \
     --max_token_length 2048 \
     --max_prompt_token_length 2048 \

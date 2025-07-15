@@ -77,11 +77,7 @@ LABELS_KEY = "labels"
 
 # Binary dataset
 BINARY_LABEL_KEY = "binary_labels"
-BINARY_DATASET_KEYS = [
-    INPUT_IDS_KEY,
-    LABELS_KEY,
-    BINARY_LABEL_KEY,
-]
+BINARY_DATASET_KEYS = [INPUT_IDS_KEY, LABELS_KEY, BINARY_LABEL_KEY]
 
 # Chat templates
 # flake8: noqa
@@ -351,11 +347,7 @@ class DatasetProcessor:
         return stats
 
     def get_token_length_visualization(
-        self,
-        features: list[str],
-        dataset: DatasetDict,
-        save_path: str = "tmp.png",
-        bins: int = 30,
+        self, features: list[str], dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30
     ):
         """Visualize the token length distribution of the dataset"""
         num_splits = len(dataset)
@@ -372,13 +364,7 @@ class DatasetProcessor:
 
             for feature in features:
                 token_lengths = [len(x) for x in item[feature]]
-                ax.hist(
-                    token_lengths,
-                    bins=bins,
-                    alpha=0.5,
-                    label=feature,
-                    edgecolor="black",
-                )
+                ax.hist(token_lengths, bins=bins, alpha=0.5, label=feature, edgecolor="black")
 
             ax.set_title(f"{split_name} split")
             ax.set_xlabel("Token Length")
@@ -395,8 +381,7 @@ class PreferenceDatasetProcessor(DatasetProcessor):
     def tokenize(self, dataset: Union[Dataset, DatasetDict]):
         def tokenize_fn(row):
             row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(
-                row[self.config.preference_chosen_key][:-1],
-                add_generation_prompt=True,
+                row[self.config.preference_chosen_key][:-1], add_generation_prompt=True
             )
             row[ATTENTION_MASK_PROMPT_KEY] = [1] * len(row[INPUT_IDS_PROMPT_KEY])
             row[INPUT_IDS_CHOSEN_KEY] = self.tokenizer.apply_chat_template(row[self.config.preference_chosen_key])
@@ -442,21 +427,12 @@ class PreferenceDatasetProcessor(DatasetProcessor):
 
     def get_token_length_stats(self, dataset: Union[Dataset, DatasetDict]):
         return super().get_token_length_stats(
-            features=[
-                INPUT_IDS_PROMPT_KEY,
-                INPUT_IDS_CHOSEN_KEY,
-                INPUT_IDS_REJECTED_KEY,
-            ],
-            dataset=dataset,
+            features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_CHOSEN_KEY, INPUT_IDS_REJECTED_KEY], dataset=dataset
         )
 
     def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):
         return super().get_token_length_visualization(
-            features=[
-                INPUT_IDS_PROMPT_KEY,
-                INPUT_IDS_CHOSEN_KEY,
-                INPUT_IDS_REJECTED_KEY,
-            ],
+            features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_CHOSEN_KEY, INPUT_IDS_REJECTED_KEY],
             dataset=dataset,
             save_path=save_path,
             bins=bins,
@@ -470,10 +446,7 @@ class SFTDatasetProcessor(DatasetProcessor):
                 prompt = row[self.config.sft_messages_key]
             else:
                 prompt = row[self.config.sft_messages_key][:-1]
-            row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(
-                prompt,
-                add_generation_prompt=True,
-            )
+            row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
             row[INPUT_IDS_KEY] = self.tokenizer.apply_chat_template(row[self.config.sft_messages_key])
             row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
             labels = copy.deepcopy(row[INPUT_IDS_KEY])
@@ -516,10 +489,7 @@ class SFTDatasetProcessor(DatasetProcessor):
 
     def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):
         return super().get_token_length_visualization(
-            features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY],
-            dataset=dataset,
-            save_path=save_path,
-            bins=bins,
+            features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY], dataset=dataset, save_path=save_path, bins=bins
         )
 
 
@@ -530,10 +500,7 @@ class SFTGroundTruthDatasetProcessor(DatasetProcessor):
                 prompt = row[self.config.sft_messages_key]
             else:
                 prompt = row[self.config.sft_messages_key][:-1]
-            row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(
-                prompt,
-                add_generation_prompt=True,
-            )
+            row[INPUT_IDS_PROMPT_KEY] = self.tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
             row[INPUT_IDS_KEY] = self.tokenizer.apply_chat_template(row[self.config.sft_messages_key])
             row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
             labels = copy.deepcopy(row[INPUT_IDS_KEY])
@@ -578,10 +545,7 @@ class SFTGroundTruthDatasetProcessor(DatasetProcessor):
 
     def get_token_length_visualization(self, dataset: DatasetDict, save_path: str = "tmp.png", bins: int = 30):
         return super().get_token_length_visualization(
-            features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY],
-            dataset=dataset,
-            save_path=save_path,
-            bins=bins,
+            features=[INPUT_IDS_PROMPT_KEY, INPUT_IDS_KEY], dataset=dataset, save_path=save_path, bins=bins
         )
 
 
@@ -635,9 +599,7 @@ class SimpleGenerateCollator:
         # Convert to tensors
         padded_sequences = torch.tensor(padded_sequences)
 
-        return {
-            INPUT_IDS_PROMPT_KEY: padded_sequences,
-        }
+        return {INPUT_IDS_PROMPT_KEY: padded_sequences}
 
 
 class SimpleGenerateCollatorWithGroundTruth:
@@ -675,11 +637,7 @@ class SimpleGenerateCollatorWithGroundTruth:
         # datasets
         datasets = [x[DATASET_SOURCE_KEY] for x in batch]
 
-        return {
-            INPUT_IDS_PROMPT_KEY: padded_sequences,
-            GROUND_TRUTHS_KEY: ground_truths,
-            DATASET_SOURCE_KEY: datasets,
-        }
+        return {INPUT_IDS_PROMPT_KEY: padded_sequences, GROUND_TRUTHS_KEY: ground_truths, DATASET_SOURCE_KEY: datasets}
 
 
 if __name__ == "__main__":

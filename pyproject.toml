@@ -3,7 +3,7 @@ name = "open-instruct"
 version = "0.1.0"
 description = "Train open, instruction-following language models"
 readme = "README.md"
-requires-python = ">=3.10,<3.12"
+requires-python = ">=3.10,<3.13"
 dependencies = [
     "accelerate>=1.1.1",
     "antlr4-python3-runtime==4.11",
@@ -20,11 +20,11 @@ dependencies = [
     "packaging>=24.2",
     "peft>=0.13.2",
     "ray[default]>=2.44.1",
-    "setuptools>=75.6.0",
+    "setuptools>=75.6.0,<80.0.0",
     "tensorboard>=2.18.0",
-    "torch>=2.6.0",
+    "torch==2.7.0",
     "transformers>=4.52.4",
-    "vllm>=0.8.5.post1",    
+    "vllm==0.9.1",    
     "wandb==0.18.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0"
@@ -40,12 +40,12 @@ py-modules = ["open_instruct"]
 # pytorch related setups
 [tool.uv.sources]
 torch = [
-  { index = "pytorch-cu124", marker = "platform_system != 'Darwin'"},
+  { index = "pytorch-cu128", marker = "platform_system != 'Darwin'"},
 ]
 
 [[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [[tool.uv.index]]
@@ -55,7 +55,7 @@ explicit = true
 
 # flash-attn related setups
 [project.optional-dependencies]
-compile = ["flash-attn>=2.7.2.post1"]
+compile = ["flash-attn>=2.8.0.post1"]
 liger = ["liger-kernel>=0.5.4"]
 code = [
     "fastapi>=0.100.0",
@@ -85,9 +85,7 @@ dev = [
     "markdown-include>=0.8.1",
     "pytest>=8.3.4",
     "ruff>=0.11.13",
-]
-test = [
-    "pytest>=8.3.4",
+	"parameterized>=0.9.0",
 ]
 
 [tool.black]
@@ -106,6 +104,16 @@ line-length = 119
 src = [".", "open_instruct"]
 exclude = ["wandb"]
 
+[tool.ruff.format]
+# Use black-compatible formatting
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+# Preserve original parentheses style to minimize changes
+skip-magic-trailing-comma = true
+# Enable black-compatible string normalization
+docstring-code-format = false
+
 [tool.ruff.lint]
 # Enable rules equivalent to your autoflake and flake8:
 # F = Pyflakes (covers autoflake functionality)
@@ -122,4 +130,6 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["open-instruct"]
 # case insensitive to match isort --profile black
-case-sensitive = false      
+case-sensitive = false
+# Disable split-on-trailing-comma to work with skip-magic-trailing-comma
+split-on-trailing-comma = false      

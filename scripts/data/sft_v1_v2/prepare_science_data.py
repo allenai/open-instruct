@@ -2,9 +2,9 @@
 Mix together all datasets to create instruction tuning mix.
 """
 
-from pathlib import Path
 import json
 import os
+from pathlib import Path
 
 
 def write_jsonl(xs, fname):

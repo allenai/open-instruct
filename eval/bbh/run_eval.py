@@ -1,23 +1,24 @@
 import argparse
-import os
-import re
-import json
-import tqdm
 import glob
-import torch
+import json
+import os
 import random
-import vllm
-import evaluate
-from eval.utils import (
-    load_hf_lm,
-    generate_completions,
-    query_openai_chat_model,
-    dynamic_import_function,
-    load_hf_tokenizer,
-    upload_results_to_hf,
-    check_and_upload_model_metadata
-)
+import re
 
+import evaluate
+import torch
+import tqdm
+import vllm
+
+from eval.utils import (
+    check_and_upload_model_metadata,
+    dynamic_import_function,
+    generate_completions,
+    load_hf_lm,
+    load_hf_tokenizer,
+    query_openai_chat_model,
+    upload_results_to_hf,
+)
 
 exact_match = evaluate.load("exact_match")
 
@@ -81,9 +82,9 @@ def main(args):
         else:
             print("Loading model and tokenizer with huggingface...")
             model = load_hf_lm(
-                model_name_or_path=args.model_name_or_path, 
+                model_name_or_path=args.model_name_or_path,
                 revision=args.hf_revision,
-                load_in_8bit=args.load_in_8bit, 
+                load_in_8bit=args.load_in_8bit,
                 device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
                 gptq_model=args.gptq,
             )
@@ -98,7 +99,7 @@ def main(args):
         task_examples = all_tasks[task_name]
         task_prompt = all_prompts[task_name]
         if args.model_name_or_path:
-            # prepare prompts    
+            # prepare prompts
             if args.use_chat_format:
                 prompts = []
                 chat_formatting_function = dynamic_import_function(args.chat_formatting_function)
@@ -159,7 +160,7 @@ def main(args):
         predictions = []
         for example, output in zip(task_examples, outputs):
             example["raw_output"] = output
-            
+
             # extract the first answer after `the answer is` and before the next period.
             # if there is no such answer, we will just use the raw output.
             extracted_answer = re.search(r"[t|T]he answer is (.*?)\.", output)
@@ -168,10 +169,10 @@ def main(args):
             else:
                 example["prediction"] = output.strip()
             predictions.append(example["prediction"])
-        
+
         with open(os.path.join(args.save_dir, "predictions", f"{task_name}.jsonl"), "w") as fout:
             for example in task_examples:
-                fout.write(json.dumps(example) + "\n")        
+                fout.write(json.dumps(example) + "\n")
 
         assert len(predictions) == len(targets), "number of predictions and targets are not the same."
         performance[task_name] = exact_match.compute(predictions=predictions, references=targets, ignore_case=True, ignore_punctuation=True)["exact_match"]
@@ -205,19 +206,19 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--data_dir", 
-        type=str, 
+        "--data_dir",
+        type=str,
         default="data/bbh"
     )
     parser.add_argument(
-        "--save_dir", 
-        type=str, 
+        "--save_dir",
+        type=str,
         default="results/bbh"
     )
     parser.add_argument(
-        "--model_name_or_path", 
-        type=str, 
-        default=None, 
+        "--model_name_or_path",
+        type=str,
+        default=None,
         help="if specified, we will load the model to generate the predictions."
     )
     parser.add_argument(
@@ -227,9 +228,9 @@ if __name__ == "__main__":
         help="if specified, we will load the model from a revision of the model in the hub"
     )
     parser.add_argument(
-        "--tokenizer_name_or_path", 
-        type=str, 
-        default=None, 
+        "--tokenizer_name_or_path",
+        type=str,
+        default=None,
         help="if specified, we will load the tokenizer from here."
     )
     parser.add_argument(
@@ -238,52 +239,52 @@ if __name__ == "__main__":
         help="If given, we will use the slow tokenizer."
     )
     parser.add_argument(
-        "--openai_engine", 
-        type=str, 
-        default=None, 
+        "--openai_engine",
+        type=str,
+        default=None,
         help="if specified, we will use the OpenAI API to generate the predictions."
     )
     parser.add_argument(
-        "--no_cot", 
-        action="store_true", 
+        "--no_cot",
+        action="store_true",
         help="if specified, chain of thoughts will be removed from the prompts."
     )
     parser.add_argument(
-        "--max_num_examples_per_task", 
-        type=int, 
-        default=None, 
+        "--max_num_examples_per_task",
+        type=int,
+        default=None,
         help="maximum number of examples to evaluate per task."
     )
     parser.add_argument(
-        "--eval_batch_size", 
-        type=int, 
-        default=1, 
+        "--eval_batch_size",
+        type=int,
+        default=1,
         help="batch size for evaluation."
     )
     parser.add_argument(
-        "--load_in_8bit", 
-        action="store_true", 
+        "--load_in_8bit",
+        action="store_true",
         help="load model in 8bit mode, which will reduce memory and speed up inference."
     )
     parser.add_argument(
-        "--gptq", 
-        action="store_true", 
+        "--gptq",
+        action="store_true",
         help="If given, we're evaluating a 4-bit quantized GPTQ model."
     )
     parser.add_argument(
         "--use_vllm",
-        action="store_true", 
+        action="store_true",
         help="If given, we will use the vllm library, which will likely increase the inference throughput."
     )
     parser.add_argument(
-        "--use_chat_format", 
-        action="store_true", 
+        "--use_chat_format",
+        action="store_true",
         help="If given, we will use the chat format for the prompts."
     )
     parser.add_argument(
-        "--chat_formatting_function", 
-        type=str, 
-        default="eval.templates.create_prompt_with_tulu_chat_format", 
+        "--chat_formatting_function",
+        type=str,
+        default="eval.templates.create_prompt_with_tulu_chat_format",
         help="The function to use to create the chat format. This function will be dynamically imported. Please see examples in `eval/templates.py`."
     )
     parser.add_argument(

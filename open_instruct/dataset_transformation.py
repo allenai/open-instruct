@@ -63,12 +63,7 @@ from transformers import (
     LlamaTokenizerFast,
     PreTrainedTokenizer,
 )
-from transformers.utils.hub import (
-    _CACHED_NO_EXIST,
-    TRANSFORMERS_CACHE,
-    extract_commit_hash,
-    try_to_load_from_cache,
-)
+from transformers.utils.hub import _CACHED_NO_EXIST, TRANSFORMERS_CACHE, extract_commit_hash, try_to_load_from_cache
 
 from open_instruct.utils import hf_whoami
 
@@ -489,17 +484,11 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
     # only add if the pad token is not present already.
     if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
         num_added_tokens = tokenizer.add_special_tokens(
-            {
-                "bos_token": "<s>",
-                "eos_token": "</s>",
-                "unk_token": "<unk>",
-                "pad_token": "<pad>",
-            }
+            {"bos_token": "<s>", "eos_token": "</s>", "unk_token": "<unk>", "pad_token": "<pad>"}
         )
-        assert num_added_tokens in [
-            0,
-            1,
-        ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
+        assert num_added_tokens in [0, 1], (
+            "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
+        )
     elif isinstance(tokenizer, GPTNeoXTokenizerFast):
         # OLMo newer models use this tokenizer
         if tokenizer.bos_token is None:
@@ -507,14 +496,10 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
             assert tc.add_bos, "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
         # else, pythia / other models
         else:
-            num_added_tokens = tokenizer.add_special_tokens(
-                {
-                    "pad_token": "<pad>",
-                }
+            num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
+            assert num_added_tokens <= 1, (
+                "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
             )
-            assert (
-                num_added_tokens <= 1
-            ), "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
     # NOTE: (Costa) I just commented the `OPTForCausalLM` because we are not likely to use it.
     # elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
     #     num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
@@ -561,27 +546,22 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
     if tokenizer.pad_token_id is None or tokenizer.pad_token_id == tokenizer.eos_token_id:
         if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
-            assert num_added_tokens in [
-                0,
-                1,
-            ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
+            assert num_added_tokens in [0, 1], (
+                "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
+            )
         elif isinstance(tokenizer, GPTNeoXTokenizerFast):
             # OLMo newer models use this tokenizer
             if tokenizer.bos_token is None:
                 tokenizer.bos_token = tokenizer.eos_token
-                assert (
-                    tc.add_bos
-                ), "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
+                assert tc.add_bos, (
+                    "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
+                )
             # else, pythia / other models
             else:
-                num_added_tokens = tokenizer.add_special_tokens(
-                    {
-                        "pad_token": "<pad>",
-                    }
+                num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
+                assert num_added_tokens <= 1, (
+                    "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
                 )
-                assert (
-                    num_added_tokens <= 1
-                ), "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
         # NOTE: (Costa) I just commented the `OPTForCausalLM` because we are not likely to use it.
         # elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
         #     num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
@@ -589,9 +569,9 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
             assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
 
-    assert (
-        tokenizer.pad_token_id != tokenizer.eos_token_id
-    ), "pad token and eos token matching causes issues in our setup."
+    assert tokenizer.pad_token_id != tokenizer.eos_token_id, (
+        "pad token and eos token matching causes issues in our setup."
+    )
 
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
@@ -638,27 +618,22 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
     if tokenizer.pad_token_id is None or tokenizer.pad_token_id == tokenizer.eos_token_id:
         if isinstance(tokenizer, LlamaTokenizer) or isinstance(tokenizer, LlamaTokenizerFast):
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
-            assert num_added_tokens in [
-                0,
-                1,
-            ], "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
+            assert num_added_tokens in [0, 1], (
+                "LlamaTokenizer should only add one special token - the pad_token, or no tokens if pad token present."
+            )
         elif isinstance(tokenizer, GPTNeoXTokenizerFast):
             # OLMo newer models use this tokenizer
             if tokenizer.bos_token is None:
                 tokenizer.bos_token = tokenizer.eos_token
-                assert (
-                    tc.add_bos
-                ), "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
+                assert tc.add_bos, (
+                    "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
+                )
             # else, pythia / other models
             else:
-                num_added_tokens = tokenizer.add_special_tokens(
-                    {
-                        "pad_token": "<pad>",
-                    }
+                num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
+                assert num_added_tokens <= 1, (
+                    "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
                 )
-                assert (
-                    num_added_tokens <= 1
-                ), "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
         # NOTE: (Costa) I just commented the `OPTForCausalLM` because we are not likely to use it.
         # elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
         #     num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
@@ -666,9 +641,9 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
             num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
             assert num_added_tokens == 1, "We detected no padding token but add_special_tokens did not add one."
 
-    assert (
-        tokenizer.pad_token_id != tokenizer.eos_token_id
-    ), "pad token and eos token matching causes issues in our setup."
+    assert tokenizer.pad_token_id != tokenizer.eos_token_id, (
+        "pad token and eos token matching causes issues in our setup."
+    )
 
     # set the tokenizer chat template to the training format
     # this will be used for encoding the training examples
@@ -761,11 +736,7 @@ class TokenizerConfig:
 INPUT_IDS_KEY = "input_ids"
 ATTENTION_MASK_KEY = "attention_mask"
 LABELS_KEY = "labels"
-TOKENIZED_SFT_DATASET_KEYS = [
-    INPUT_IDS_KEY,
-    ATTENTION_MASK_KEY,
-    LABELS_KEY,
-]
+TOKENIZED_SFT_DATASET_KEYS = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY]
 
 # Preference dataset
 # NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
@@ -806,10 +777,7 @@ def sft_tokenize_v1(
     else:
         prompt = row[sft_messages_key][:-1]
 
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
-        prompt,
-        add_generation_prompt=True,
-    )
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
@@ -828,10 +796,7 @@ def sft_tokenize_mask_out_prompt_v1(
     else:
         prompt = row[sft_messages_key][:-1]
 
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
-        prompt,
-        add_generation_prompt=True,
-    )
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
@@ -1004,10 +969,7 @@ def preference_tokenize_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenizer):
     prompt = row["chosen"][:-1]
 
     # Tokenize prompt
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
-        prompt,
-        add_generation_prompt=True,
-    )
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     row[ATTENTION_MASK_PROMPT_KEY] = [1] * len(row[INPUT_IDS_PROMPT_KEY])
 
     # Tokenize chosen completion
@@ -1118,6 +1080,40 @@ def preference_tulu_filter_v1(row: Dict[str, Any], tokenizer: PreTrainedTokenize
     return any(x != -100 for x in row[CHOSEN_LABELS_KEY]) and any(x != -100 for x in row[REJECTED_LABELS_KEY])
 
 
+def preference_span_search_mask_out(
+    row: Dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    max_seq_length: int,
+    chosen_key: str = DEFAULT_CHOSEN_KEY,
+    rejected_key: str = DEFAULT_REJECTED_KEY,
+):
+    """
+    Here we assume each example has a rejected and chosen field, both of which are a list of messages.
+    Each message is a dict with 'role' and 'content' fields.
+    We assume only the last message is different, and the prompt is contained in the list of messages.
+    """
+    chosen_messages = row[chosen_key]
+    rejected_messages = row[rejected_key]
+    if len(chosen_messages) == 0:
+        raise ValueError("chosen messages field is empty.")
+    if len(rejected_messages) == 0:
+        raise ValueError("rejected messages field is empty.")
+
+    chosen_encoded = sft_span_seach_mask_out({DEFAULT_SFT_MESSAGES_KEY: chosen_messages}, tokenizer, max_seq_length)
+    rejected_encoded = sft_span_seach_mask_out(
+        {DEFAULT_SFT_MESSAGES_KEY: rejected_messages}, tokenizer, max_seq_length
+    )
+
+    return {
+        CHOSEN_INPUT_IDS_KEY: chosen_encoded["input_ids"],
+        CHOSEN_LABELS_KEY: chosen_encoded["labels"],
+        CHOSEN_ATTENTION_MASK_KEY: chosen_encoded["attention_mask"],
+        REJECTED_INPUT_IDS_KEY: rejected_encoded["input_ids"],
+        REJECTED_LABELS_KEY: rejected_encoded["labels"],
+        REJECTED_ATTENTION_MASK_KEY: rejected_encoded["attention_mask"],
+    }
+
+
 def rlvr_tokenize_v1(
     row: Dict[str, Any],
     tokenizer: PreTrainedTokenizer,
@@ -1129,10 +1125,7 @@ def rlvr_tokenize_v1(
         prompt = row[sft_messages_key]
     else:
         prompt = row[sft_messages_key][:-1]
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
-        prompt,
-        add_generation_prompt=True,
-    )
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     row[ATTENTION_MASK_KEY] = [1] * len(row[INPUT_IDS_KEY])
     labels = copy.deepcopy(row[INPUT_IDS_KEY])
@@ -1153,10 +1146,7 @@ def rlvr_tokenize_v2(
         prompt = row[sft_messages_key]
     else:
         prompt = row[sft_messages_key][:-1]
-    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(
-        prompt,
-        add_generation_prompt=True,
-    )
+    row[INPUT_IDS_PROMPT_KEY] = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
     row[INPUT_IDS_KEY] = tokenizer.apply_chat_template(row[sft_messages_key])
     # weird issue with qwen: sometimes the padding token ends up in the input ids?
     # ill look into this more later, for now this guard should be enough
@@ -1209,6 +1199,7 @@ TRANSFORM_FNS = {
     "preference_tokenize_v1": (preference_tokenize_v1, "map"),
     "preference_filter_v1": (preference_filter_v1, "filter"),
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1_2, "map"),
+    "preference_span_search_mask_out": (preference_span_search_mask_out, "map"),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
     "rlvr_tokenize_v1": (rlvr_tokenize_v2, "map"),
     "rlvr_filter_v1": (rlvr_filter_v1, "filter"),
@@ -1252,10 +1243,7 @@ class SimplePreferenceCollator:
         padded_sequences_chosen = torch.tensor(padded_sequences_chosen)
         padded_sequences_rejected = torch.tensor(padded_sequences_rejected)
 
-        return {
-            CHOSEN_INPUT_IDS_KEY: padded_sequences_chosen,
-            REJECTED_INPUT_IDS_KEY: padded_sequences_rejected,
-        }
+        return {CHOSEN_INPUT_IDS_KEY: padded_sequences_chosen, REJECTED_INPUT_IDS_KEY: padded_sequences_rejected}
 
 
 # ----------------------------------------------------------------------------
@@ -1277,21 +1265,16 @@ class DatasetConfig:
         # if the file exists locally, use the local file
         if os.path.exists(self.dataset_name) and self.dataset_name.endswith(".jsonl"):
             assert self.dataset_split == "train", "Only train split is supported for local jsonl files."
-            self.dataset = load_dataset(
-                "json",
-                data_files=self.dataset_name,
-                split=self.dataset_split,
-            )
+            self.dataset = load_dataset("json", data_files=self.dataset_name, split=self.dataset_split)
+        elif os.path.exists(self.dataset_name) and self.dataset_name.endswith(".parquet"):
+            assert self.dataset_split == "train", "Only train split is supported for local parquet files."
+            self.dataset = load_dataset("parquet", data_files=self.dataset_name, split=self.dataset_split)
         else:
             # commit hash only works for hf datasets
             self.dataset_commit_hash = get_commit_hash(
                 self.dataset_name, self.dataset_revision, "README.md", "dataset"
             )
-            self.dataset = load_dataset(
-                self.dataset_name,
-                split=self.dataset_split,
-                revision=self.dataset_revision,
-            )
+            self.dataset = load_dataset(self.dataset_name, split=self.dataset_split, revision=self.dataset_revision)
         if self.dataset_range is None:
             dataset_range = len(self.dataset)
             self.update_range(dataset_range)
@@ -1304,9 +1287,9 @@ class DatasetConfig:
 
 
 def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
-    assert len(dc.transform_fn) == len(
-        dc.transform_fn_args
-    ), f"transform_fn and transform_fn_args must have the same length: {dc.transform_fn=} != {dc.transform_fn_args=}"
+    assert len(dc.transform_fn) == len(dc.transform_fn_args), (
+        f"transform_fn and transform_fn_args must have the same length: {dc.transform_fn=} != {dc.transform_fn_args=}"
+    )
     # beaker specific logic; we may get assigned 15.5 CPU, so we convert it to float then int
     num_proc = int(float(os.environ.get("BEAKER_ASSIGNED_CPU_COUNT", multiprocessing.cpu_count())))
 
@@ -1594,9 +1577,9 @@ def test_sft_dpo_same_tokenizer():
         assert tok1.is_fast == tok2.is_fast, "is_fast should be the same"
         assert tok1.padding_side == tok2.padding_side, "padding_side should be the same"
         assert tok1.truncation_side == tok2.truncation_side, "truncation_side should be the same"
-        assert (
-            tok1.clean_up_tokenization_spaces == tok2.clean_up_tokenization_spaces
-        ), "clean_up_tokenization_spaces should be the same"
+        assert tok1.clean_up_tokenization_spaces == tok2.clean_up_tokenization_spaces, (
+            "clean_up_tokenization_spaces should be the same"
+        )
         assert tok1.added_tokens_decoder == tok2.added_tokens_decoder, "added_tokens_decoder should be the same"
 
     equal_tokenizer(base_to_sft_tc, sft_to_dpo_tc)
@@ -1637,9 +1620,9 @@ def test_sft_dpo_same_tokenizer_olmo():
         assert tok1.is_fast == tok2.is_fast, "is_fast should be the same"
         assert tok1.padding_side == tok2.padding_side, "padding_side should be the same"
         assert tok1.truncation_side == tok2.truncation_side, "truncation_side should be the same"
-        assert (
-            tok1.clean_up_tokenization_spaces == tok2.clean_up_tokenization_spaces
-        ), "clean_up_tokenization_spaces should be the same"
+        assert tok1.clean_up_tokenization_spaces == tok2.clean_up_tokenization_spaces, (
+            "clean_up_tokenization_spaces should be the same"
+        )
         assert tok1.added_tokens_decoder == tok2.added_tokens_decoder, "added_tokens_decoder should be the same"
 
     equal_tokenizer(base_to_sft_tc, sft_to_dpo_tc)
@@ -1692,10 +1675,7 @@ def test_get_cached_dataset_tulu_sft():
     dataset_transform_fn = ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
 
     # our standard tulu setting
-    transform_fn_args = [
-        {"max_seq_length": 4096},
-        {},
-    ]
+    transform_fn_args = [{"max_seq_length": 4096}, {}]
     dataset = get_cached_dataset_tulu(
         dataset_mixer_list,
         dataset_mixer_list_splits,
@@ -1723,14 +1703,8 @@ def test_get_cached_dataset_tulu_preference():
     )
     dataset_mixer_list = ["allenai/llama-3.1-tulu-3-8b-preference-mixture", "1.0"]
     dataset_mixer_list_splits = ["train"]
-    dataset_transform_fn = [
-        "preference_tulu_tokenize_and_truncate_v1",
-        "preference_tulu_filter_v1",
-    ]
-    transform_fn_args = [
-        {"max_seq_length": 2048},
-        {},
-    ]
+    dataset_transform_fn = ["preference_tulu_tokenize_and_truncate_v1", "preference_tulu_filter_v1"]
+    transform_fn_args = [{"max_seq_length": 2048}, {}]
     dataset = get_cached_dataset_tulu(
         dataset_mixer_list,
         dataset_mixer_list_splits,
@@ -1758,13 +1732,7 @@ def test_get_cached_dataset_tulu_rlvr():
     dataset_mixer_list = ["allenai/RLVR-GSM-MATH-IF-Mixed-Constraints", "1.0"]
     dataset_mixer_list_splits = ["train"]
     dataset_transform_fn = ["rlvr_tokenize_v1", "rlvr_filter_v1"]
-    transform_fn_args = [
-        {},
-        {
-            "max_token_length": 2048,
-            "max_prompt_token_length": 2048,
-        },
-    ]
+    transform_fn_args = [{}, {"max_token_length": 2048, "max_prompt_token_length": 2048}]
     # allenai/dataset-mix-cached/tree/0ff0043e56
     dataset = get_cached_dataset_tulu(
         dataset_mixer_list,

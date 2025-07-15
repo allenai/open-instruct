@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from typing import Optional
-from transformers import HfArgumentParser
+
 import wandb
+from transformers import HfArgumentParser
 
 from open_instruct.utils import upload_metadata_to_hf
 

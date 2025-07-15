@@ -23,8 +23,7 @@ runs:
         # Push release to Beaker.
         SHORT_SHA=$(git rev-parse --short HEAD)
         beaker image create --name "${{ inputs.beaker }}-${SHORT_SHA}-${{ github.run_id }}" ${{ inputs.image }}
-        # We delete the previous version. This doesn't actually delete the backing Docker image, so
-        # we'll still benefit from layer caching when we push new version. The image might not exist
-        # yet, so it's ok if this fails.
-        beaker image delete nathanl/${{ inputs.beaker }} || true
+        # We can't delete the old image because it might be used by a running job. Instead, we rename it to an empty 
+        # string, so it will not be resolved by the Beaker client.
+        beaker image rename nathanl/${{ inputs.beaker }} "" || true
         beaker image create --name ${{ inputs.beaker }} ${{ inputs.image }}

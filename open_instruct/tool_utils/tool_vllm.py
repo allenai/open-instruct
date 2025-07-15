@@ -11,20 +11,12 @@ from collections import defaultdict
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor  # add import for async execution
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import requests
 from rich.console import Console
 from tqdm import tqdm
-from vllm import (
-    LLM,
-    PoolingParams,
-    PoolingRequestOutput,
-    PromptType,
-    RequestOutput,
-    SamplingParams,
-    TokensPrompt,
-)
+from vllm import LLM, PoolingParams, PoolingRequestOutput, PromptType, RequestOutput, SamplingParams, TokensPrompt
 from vllm.lora.request import LoRARequest
 from vllm.model_executor.guided_decoding.guided_fields import GuidedDecodingRequest
 from vllm.prompt_adapter.request import PromptAdapterRequest
@@ -156,15 +148,18 @@ class ToolUseLLM(LLM):
         self,
         prompts: Union[PromptType, Sequence[PromptType]],
         params: Union[SamplingParams, Sequence[SamplingParams], PoolingParams, Sequence[PoolingParams]],
+        *,
+        use_tqdm: Union[bool, Callable[..., tqdm]] = True,
         lora_request: Optional[Union[Sequence[LoRARequest], LoRARequest]],
         prompt_adapter_request: Optional[PromptAdapterRequest],
+        tokenization_kwargs: Optional[dict[str, Any]] = None,
         guided_options: Optional[GuidedDecodingRequest] = None,
         priority: Optional[list[int]] = None,
     ) -> None:
         """@vwxyzjn: we keep everything the same except override the sampling params to have n=1 for `ToolUseLLM`"""
         if guided_options is not None:
             warnings.warn(
-                "guided_options_request is deprecated, use " "SamplingParams.guided_decoding instead",
+                "guided_options_request is deprecated, use SamplingParams.guided_decoding instead",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -174,30 +169,38 @@ class ToolUseLLM(LLM):
             prompts = [prompts]
 
         num_requests = len(prompts)
-        if isinstance(params, list) and len(params) != num_requests:
-            raise ValueError("The lengths of prompts and params " "must be the same.")
-        if isinstance(lora_request, list) and len(lora_request) != num_requests:
-            raise ValueError("The lengths of prompts and lora_request " "must be the same.")
+        if isinstance(params, Sequence) and len(params) != num_requests:
+            raise ValueError("The lengths of prompts and params must be the same.")
+        if isinstance(lora_request, Sequence) and len(lora_request) != num_requests:
+            raise ValueError("The lengths of prompts and lora_request must be the same.")
 
-        for sp in params if isinstance(params, list) else (params,):
+        for sp in params if isinstance(params, Sequence) else (params,):
             if isinstance(sp, SamplingParams):
                 self._add_guided_params(sp, guided_options)
 
                 # We only care about the final output
                 sp.output_kind = RequestOutputKind.FINAL_ONLY
 
+        # Add requests to the engine.
+        it = prompts
+        if use_tqdm:
+            tqdm_func = use_tqdm if callable(use_tqdm) else tqdm
+            it = tqdm_func(it, desc="Adding requests")
+
         # @vwxyzjn: ToolUseLLM change 1: override the sampling params to have n=1
+        # for now, don't allow list of params
         assert not isinstance(params, list)
         self.single_n_sampling_params = copy.deepcopy(params)
         self.single_n_sampling_params.n = 1
-        # Add requests to the engine.
-        for i, prompt in enumerate(prompts):
+
+        for i, prompt in enumerate(it):
             for j in range(params.n):
                 request_id = f"{i}-{j}"
                 self.llm_engine.add_request(
                     request_id,
                     prompt,
                     self.single_n_sampling_params,
+                    tokenization_kwargs=tokenization_kwargs,
                     lora_request=lora_request[i] if isinstance(lora_request, Sequence) else lora_request,
                     prompt_adapter_request=prompt_adapter_request,
                     priority=priority[i] if priority else 0,
@@ -211,7 +214,7 @@ class ToolUseLLM(LLM):
                 total=num_requests,
                 desc="Processed prompts",
                 dynamic_ncols=True,
-                postfix=(f"est. speed input: {0:.2f} toks/s, " f"output: {0:.2f} toks/s"),
+                postfix=(f"est. speed input: {0:.2f} toks/s, output: {0:.2f} toks/s"),
             )
 
         # Run the engine.
@@ -352,7 +355,7 @@ class ToolUseLLM(LLM):
                                     total_out_toks += sum(len(stp.token_ids) for stp in output.outputs)
                                     out_spd = total_out_toks / pbar.format_dict["elapsed"]
                                     pbar.postfix = (
-                                        f"est. speed input: {in_spd:.2f} toks/s, " f"output: {out_spd:.2f} toks/s"
+                                        f"est. speed input: {in_spd:.2f} toks/s, output: {out_spd:.2f} toks/s"
                                     )
                                     pbar.update(n)
                                 else:
@@ -423,14 +426,8 @@ and you will get the output between the <output> and </output> tags.
     prompts = [system_prompt + "\n\n" + p for p in prompts]
 
     # Create a tool.
-    python_code_tool = PythonCodeTool(
-        api_endpoint="http://localhost:1212",
-        start_str="<code>",
-        end_str="</code>",
-    )
-    tools = {
-        python_code_tool.end_str: python_code_tool,
-    }
+    python_code_tool = PythonCodeTool(api_endpoint="http://localhost:1212", start_str="<code>", end_str="</code>")
+    tools = {python_code_tool.end_str: python_code_tool}
     # Create a sampling params object.
     sampling_params = SamplingParams(
         temperature=0.8,
@@ -444,11 +441,7 @@ and you will get the output between the <output> and </output> tags.
     # Create an LLM.
     model_name = "Qwen/Qwen2.5-7B"
     llm = ToolUseLLM(
-        tools=tools,
-        model=model_name,
-        tensor_parallel_size=1,
-        gpu_memory_utilization=0.9,
-        max_model_len=10000,
+        tools=tools, model=model_name, tensor_parallel_size=1, gpu_memory_utilization=0.9, max_model_len=10000
     )
 
     # Tokenization generation
@@ -490,22 +483,10 @@ and you will get the output between the <output> and </output> tags.
     # print(f"len(outputs): {len(outputs)}")
     # print("debugging tests all done")
     # # need to handle the case the response length actually goes down overtime
-    from open_instruct.dataset_transformation import (
-        TokenizerConfig,
-        get_cached_dataset_tulu,
-    )
+    from open_instruct.dataset_transformation import TokenizerConfig, get_cached_dataset_tulu
 
-    tc = TokenizerConfig(
-        tokenizer_name_or_path=model_name,
-        chat_template_name="r1_simple_chat_postpend_think_tools7",
-    )
-    transform_fn_args = [
-        {},
-        {
-            "max_token_length": 8192,
-            "max_prompt_token_length": 2048,
-        },
-    ]
+    tc = TokenizerConfig(tokenizer_name_or_path=model_name, chat_template_name="r1_simple_chat_postpend_think_tools7")
+    transform_fn_args = [{}, {"max_token_length": 8192, "max_prompt_token_length": 2048}]
     train_dataset = get_cached_dataset_tulu(
         dataset_mixer_list=["ai2-adapt-dev/rlvr_open_reasoner_math", "1.0"],
         dataset_mixer_list_splits=["train"],

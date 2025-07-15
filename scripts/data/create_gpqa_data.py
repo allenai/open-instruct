@@ -1,4 +1,4 @@
-from datasets import load_dataset, Dataset, DatasetDict
+from datasets import Dataset, DatasetDict, load_dataset
 
 # load dataset
 dataset = load_dataset("rulins/gpqa_extended_decontamination", split="train")
