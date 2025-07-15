@@ -7,7 +7,7 @@ import sys
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from open_instruct.search_rewards.long_form_rewards import compute_paper_reward
+from open_instruct.search_rewards.openscholar_rewards import compute_paper_reward
 from open_instruct.search_rewards.reasoning_model_rewards import compute_hle_reward
 
 # Import the example from formatted_test_answer.py
@@ -104,6 +104,8 @@ def test_formatted_example(reward_type: str = "hle"):
         for key, value in scoring_results.items():
             if key not in ["score", "ann_score"]:
                 print(f"  {key}: {value:.4f}")
+        if "score" not in scoring_results:
+            scoring_results["score"] = result['reward']
         print(f"\nOverall score: {scoring_results['score']:.4f}")
         if "ann_score" in scoring_results:
             print(f"Annotation score: {scoring_results['ann_score']:.4f}")

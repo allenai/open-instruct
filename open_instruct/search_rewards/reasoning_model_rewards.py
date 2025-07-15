@@ -83,7 +83,10 @@ async def compute_hle_reward_async(response: str, correct_answer: str, question:
         return result
     
     # Step 3: Score the citations
-    citations_score = score_in_context_citations(question, extracted_answer, extracted_citations)
+    if not os.environ.get("NO_CITATION_REWARD", False):
+        citations_score = score_in_context_citations(question, extracted_answer, extracted_citations)
+    else:
+        citations_score = 0.0
     
     # Step 4: Final score
     scoring_results = {
