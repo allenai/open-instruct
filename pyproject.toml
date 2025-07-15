@@ -24,11 +24,11 @@ dependencies = [
     "tensorboard>=2.18.0",
     "torch>=2.6.0",
     "transformers>=4.52.4",
-    "vllm>=0.8.5.post1",    
+    "vllm>=0.8.5.post1",
     "wandb==0.18.1",
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
-    "jsonlines==4.0.0"
+    "jsonlines==4.0.0",
 ]
 
 [build-system]
