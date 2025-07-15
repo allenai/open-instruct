@@ -394,7 +394,7 @@ def save_with_accelerate(
     output_dir: str,
     use_lora: bool = False,
     model_attribute_to_save: Optional[str] = None,
-    chat_template_name: str = 'tulu',
+    chat_template_name: str = "tulu",
 ) -> None:
     """`model_attribute_to_save` is for used to save PPO's policy instead of the full model"""
     # set the generation config to an empty setting to be safe.
