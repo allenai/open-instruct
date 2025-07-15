@@ -6,7 +6,7 @@ import sys
 # Add parent directory to path to import run_utils
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from open_instruct.search_rewards.global_rewards_utils import (
+from open_instruct.search_rewards.openscholar_rewards_utils import (
     RubricCorpusQaGenericMetric,
 )
 

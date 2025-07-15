@@ -851,7 +851,7 @@ class RLRAGLongFormRubricsOnlyVerifier(VerifierFunction):
         test_case = json.loads(label)
         result = compute_rubric_reward(prediction, test_case)
         score = result["reward"]
-        return VerificationResult(score=score, log_values=result)
+        return VerificationResult(score=score, log_values=result["log_values"])
 
 
 class RLRAGLongFormReasoningJudgeVerifier(VerifierFunction):
