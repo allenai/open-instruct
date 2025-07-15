@@ -7,7 +7,8 @@ from ray.util import queue as ray_queue
 from transformers import AutoTokenizer
 from vllm import SamplingParams
 
-from open_instruct.vllm_utils3 import GenerationResult, PromptRequest, create_vllm_engines
+from open_instruct.grpo_fast import accumulate_inference_batches, split_and_insert_batch
+from open_instruct.vllm_utils3 import GenerationResult, PromptRequest, RequestInfo, create_vllm_engines
 
 
 class TestGrpoFastVLLM(unittest.TestCase):
@@ -100,8 +101,9 @@ class TestGrpoFastVLLM(unittest.TestCase):
 
     @parameterized.expand([(1,), (2,), (4,), (8,)])
     def test_batch_splitting_logic(self, vllm_num_engines: int, num_unique_prompts_rollout: int = 16):
-        """Test the batch splitting logic used in sync_weights_and_prepare_prompts."""
+        """Test the batch splitting and accumulation logic using split_and_insert_batch and accumulate_inference_batches."""
 
+        # Mock data - simulating num_unique_prompts_rollout * num_samples_per_prompt_rollout
         queries_next = [f"query_{i}" for i in range(num_unique_prompts_rollout)]
         ground_truths_next = [f"truth_{i}" for i in range(num_unique_prompts_rollout)]
         datasets_next = [f"dataset_{i}" for i in range(num_unique_prompts_rollout)]
@@ -109,51 +111,80 @@ class TestGrpoFastVLLM(unittest.TestCase):
         pending_queries_map = {}
         training_step = 1
 
-        # Split the batch into multiple inference batches for vLLM engines
-        inference_batch_size = len(queries_next) // vllm_num_engines
+        # Create mock Ray queue for testing
+        param_prompt_Q = ray_queue.Queue(maxsize=vllm_num_engines)
 
-        all_queries = []
-        all_ground_truths = []
-        all_datasets = []
+        # Use split_and_insert_batch to split and insert data
+        split_and_insert_batch(
+            queries_next,
+            ground_truths_next,
+            datasets_next,
+            training_step,
+            vllm_num_engines,
+            pending_queries_map,
+            param_prompt_Q,
+        )
 
-        for batch_idx in range(vllm_num_engines):
-            start_idx = batch_idx * inference_batch_size
-            end_idx = min(start_idx + inference_batch_size, len(queries_next))
-
-            queries = queries_next[start_idx:end_idx]
-            ground_truths = ground_truths_next[start_idx:end_idx]
-            datasets = datasets_next[start_idx:end_idx]
-
-            # Verify batch sizes
-            if batch_idx < vllm_num_engines - 1:
-                expected_size = inference_batch_size
-            else:
-                expected_size = len(queries_next) % inference_batch_size
-            self.assertEqual(len(queries), expected_size)
-            self.assertEqual(len(ground_truths), expected_size)
-            self.assertEqual(len(datasets), expected_size)
-
-            # Create unique dataset_index for this batch
-            batch_dataset_index = f"{training_step}_{batch_idx}"
-            pending_queries_map[batch_dataset_index] = (queries, ground_truths, datasets)
-
-            # Collect all batches for verification
-            all_queries.extend(queries)
-            all_ground_truths.extend(ground_truths)
-            all_datasets.extend(datasets)
-
-        # Verify that all original data is preserved
-        self.assertEqual(all_queries, queries_next)
-        self.assertEqual(all_ground_truths, ground_truths_next)
-        self.assertEqual(all_datasets, datasets_next)
-
-        # Verify that we have the expected number of batches
+        # Verify that we have the expected number of batches in the map
         self.assertEqual(len(pending_queries_map), vllm_num_engines)
 
-        # Verify that each batch has the correct dataset_index format
+        # Verify that we have the expected number of items in the queue
+        self.assertEqual(param_prompt_Q.qsize(), vllm_num_engines)
+
+        # Create mock inference results to simulate vLLM engine outputs
+        mock_inference_results = []
         for batch_idx in range(vllm_num_engines):
-            batch_dataset_index = f"{training_step}_{batch_idx}"
-            self.assertIn(batch_dataset_index, pending_queries_map)
+            # Get the request from the queue
+            request = param_prompt_Q.get()
+            self.assertIsInstance(request, PromptRequest)
+            self.assertEqual(request.training_step, training_step)
+            self.assertEqual(request.dataset_index, f"{training_step}_{batch_idx}")
+
+            # Create mock GenerationResult
+            batch_size = len(request.prompts)
+            mock_result = GenerationResult(
+                responses=[[i] for i in range(batch_size)],  # Mock token IDs
+                finish_reasons=["stop"] * batch_size,
+                masks=[[1] * 5] * batch_size,  # Mock masks
+                request_info=RequestInfo(
+                    num_calls=[0] * batch_size,
+                    timeouts=[0] * batch_size,
+                    tool_errors=[""] * batch_size,
+                    tool_outputs=[""] * batch_size,
+                    tool_runtimes=[0] * batch_size,
+                    tool_calleds=[False] * batch_size,
+                ),
+                is_eval=False,
+                dataset_index=request.dataset_index,
+            )
+            mock_inference_results.append(mock_result)
+
+        # Create mock inference results queue
+        inference_results_Q = ray_queue.Queue(maxsize=vllm_num_engines)
+        for result in mock_inference_results:
+            inference_results_Q.put(result)
+
+        # Use accumulate_inference_batches to combine results
+        combined_result, combined_queries, combined_ground_truths, combined_datasets = accumulate_inference_batches(
+            inference_results_Q, pending_queries_map, vllm_num_engines, training_step
+        )
+
+        # Verify that the combined results match the original input
+        self.assertEqual(combined_queries, queries_next)
+        self.assertEqual(combined_ground_truths, ground_truths_next)
+        self.assertEqual(combined_datasets, datasets_next)
+
+        # Verify that the combined result has the correct structure
+        self.assertIsInstance(combined_result, GenerationResult)
+        self.assertEqual(len(combined_result.responses), len(queries_next))
+        self.assertEqual(len(combined_result.finish_reasons), len(queries_next))
+        self.assertEqual(len(combined_result.masks), len(queries_next))
+
+        # Verify that the pending_queries_map is empty after accumulation
+        self.assertEqual(len(pending_queries_map), 0)
+
+        # Verify that the inference_results_Q is empty after accumulation
+        self.assertEqual(inference_results_Q.qsize(), 0)
 
 
 if __name__ == "__main__":

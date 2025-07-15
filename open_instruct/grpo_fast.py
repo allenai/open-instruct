@@ -1654,6 +1654,42 @@ def create_model_and_optimizer(
     return policy_group, vllm_engines, tool_objects, resume_training_step, episode
 
 
+def split_and_insert_batch(
+    queries_next,
+    ground_truths_next,
+    datasets_next,
+    training_step,
+    vllm_num_engines,
+    pending_queries_map,
+    param_prompt_Q,
+    eval_prompt_token_ids=None,
+):
+    """Split a batch into multiple inference batches and insert them into queues and mapping."""
+    # Split the batch over the VLLM engines.
+    inference_batch_size = len(queries_next) // vllm_num_engines
+    for batch_idx in range(vllm_num_engines):
+        start_idx = batch_idx * inference_batch_size
+        end_idx = start_idx + inference_batch_size if batch_idx < vllm_num_engines - 1 else len(queries_next)
+
+        batch_queries = queries_next[start_idx:end_idx]
+        batch_ground_truths = ground_truths_next[start_idx:end_idx]
+        batch_datasets = datasets_next[start_idx:end_idx]
+
+        # Create unique dataset_index for this batch
+        batch_dataset_index = f"{training_step}_{batch_idx}"
+        pending_queries_map[batch_dataset_index] = (batch_queries, batch_ground_truths, batch_datasets)
+
+        # Use PromptRequest for Ray queue with batch-specific dataset_index
+        param_prompt_Q.put(
+            PromptRequest(
+                prompts=batch_queries,
+                training_step=training_step,
+                eval_prompts=eval_prompt_token_ids,
+                dataset_index=batch_dataset_index,
+            )
+        )
+
+
 def sync_weights_and_prepare_prompts(
     training_step: int,
     args: Args,
@@ -1668,10 +1704,8 @@ def sync_weights_and_prepare_prompts(
     eval_prompt_token_ids=None,
 ):
     """Sync weights and send the next batch of prompts to vLLM."""
-    dataset_index = None
     if training_step != 1:
         dataset_indices = next(iter_dataloader)
-        dataset_index = dataset_indices[0]  # Use the first index as the batch identifier
         data_next = train_dataset[dataset_indices]
         queries_next = data_next[INPUT_IDS_PROMPT_KEY]
         ground_truths_next = data_next[GROUND_TRUTHS_KEY]
@@ -1683,62 +1717,18 @@ def sync_weights_and_prepare_prompts(
         ):
             ray.get([m.broadcast_to_vllm.remote() for m in policy_group.models])
 
-    if args.async_mode:
-        if dataset_index is not None:
-            # Split the batch into multiple inference batches for vLLM engines
-            inference_batch_size = len(queries_next) // args.vllm_num_engines
-            for batch_idx in range(args.vllm_num_engines):
-                start_idx = batch_idx * inference_batch_size
-                end_idx = (
-                    start_idx + inference_batch_size if batch_idx < args.vllm_num_engines - 1 else len(queries_next)
-                )
-
-                batch_queries = queries_next[start_idx:end_idx]
-                batch_ground_truths = ground_truths_next[start_idx:end_idx]
-                batch_datasets = datasets_next[start_idx:end_idx]
-
-                # Create unique dataset_index for this batch
-                batch_dataset_index = f"{training_step}_{batch_idx}"
-                pending_queries_map[batch_dataset_index] = (batch_queries, batch_ground_truths, batch_datasets)
-
-                # Use PromptRequest for Ray queue with batch-specific dataset_index
-                param_prompt_Q.put(
-                    PromptRequest(
-                        prompts=batch_queries,
-                        training_step=training_step,
-                        eval_prompts=eval_prompt_token_ids,
-                        dataset_index=batch_dataset_index,
-                    )
-                )
-    else:
-        if training_step != 1:
-            # Split the batch into multiple inference batches for vLLM engines
-            inference_batch_size = len(queries_next) // args.vllm_num_engines
-            for batch_idx in range(args.vllm_num_engines):
-                start_idx = batch_idx * inference_batch_size
-                end_idx = (
-                    start_idx + inference_batch_size if batch_idx < args.vllm_num_engines - 1 else len(queries_next)
-                )
-
-                batch_queries = queries_next[start_idx:end_idx]
-                batch_ground_truths = ground_truths_next[start_idx:end_idx]
-                batch_datasets = datasets_next[start_idx:end_idx]
-
-                # Create unique dataset_index for this batch
-                batch_dataset_index = f"{training_step}_{batch_idx}"
-                pending_queries_map[batch_dataset_index] = (batch_queries, batch_ground_truths, batch_datasets)
-
-                # Use PromptRequest for Ray queue with batch-specific dataset_index
-                param_prompt_Q.put(
-                    PromptRequest(
-                        prompts=batch_queries,
-                        training_step=training_step,
-                        eval_prompts=eval_prompt_token_ids,
-                        dataset_index=batch_dataset_index,
-                    )
-                )
-
-    return queries_next, ground_truths_next, datasets_next
+    if args.async_mode or training_step != 1:
+        split_and_insert_batch(
+            queries_next,
+            ground_truths_next,
+            datasets_next,
+            training_step,
+            args.vllm_num_engines,
+            training_step,
+            pending_queries_map,
+            param_prompt_Q,
+            eval_prompt_token_ids,
+        )
 
 
 def load_data_from_packing_thread(packed_sequences_Q: Queue, num_total_tokens: int):
