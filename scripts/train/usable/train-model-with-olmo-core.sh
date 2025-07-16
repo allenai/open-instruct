@@ -5,12 +5,13 @@ gantry run \
     --allow-dirty --timeout -1 -y --budget ai2/oe-adapt --workspace ai2/jacobm \
     --install "curl -LsSf https://astral.sh/uv/install.sh | sh && /root/.local/bin/uv sync" \
     --weka=oe-training-default:/weka/oe-training-default \
+    --gpus 1 \
     -- /root/.local/bin/uv run python scripts/data/convert_sft_data_for_olmocore.py \
         --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture 1.0 \
-        --tokenizer_name_or_path /weka/oe-training-default/ai2-llm/checkpoints/dustins/lc_7b_cont_pretrain_final_anneal/step11921-hf \
-        --output_dir /weka/oe-training-default/ai2-llm/jacobm/data/sft/test/jacobmorrison/tulu-3-sft-olmo-2-mixture-jacobtest-2-shuffled-16k \
+        --tokenizer_name_or_path /weka/oe-adapt-default/jacobm/checkpoints/olmo2-7B-sft-tokenizer-olmo-chat-template/ \
+        --output_dir /weka/oe-training-default/ai2-llm/jacobm/data/sft/usable-tulu-16k/tulu3-olmo2-mix/ \
         --visualize True \
-        --chat_template_name jacobtest2 \
+        --chat_template_name olmo \
         --max_seq_length 16384
 
 gantry run \
