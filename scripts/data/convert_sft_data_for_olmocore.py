@@ -21,7 +21,7 @@ Ai2 Internal Usage:
         --priority high \
         -- /root/.local/bin/uv run python scripts/data/convert_sft_data_for_olmocore.py \
         --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture 1.0 \
-        --tokenizer_name_or_path allenai/dolma2-tokenizer \
+        --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
         --output_dir /weka/oe-training-default/ai2-llm/tylerr/data/sft/tulu-3-sft-olmo-2-mixture-0225-olmocore \
         --visualize True \
         --chat_template_name olmo \
