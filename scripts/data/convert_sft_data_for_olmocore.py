@@ -16,10 +16,12 @@ Ai2 Internal Usage:
     gantry run --cluster ai2/neptune-cirrascale --timeout -1 -y --budget ai2/oe-training --workspace ai2/jacobm \
         --install "curl -LsSf https://astral.sh/uv/install.sh | sh && /root/.local/bin/uv sync" \
         --weka=oe-training-default:/weka/oe-training-default \
+        --env-secret HF_TOKEN=HF_TOKEN \
         --gpus 1 \
+        --priority high \
         -- /root/.local/bin/uv run python scripts/data/convert_sft_data_for_olmocore.py \
         --dataset_mixer_list allenai/tulu-3-sft-olmo-2-mixture 1.0 \
-        --tokenizer_name_or_path allenai/OLMo-2-1124-7B \
+        --tokenizer_name_or_path allenai/dolma2-tokenizer \
         --output_dir /weka/oe-training-default/ai2-llm/tylerr/data/sft/tulu-3-sft-olmo-2-mixture-0225-olmocore \
         --visualize True \
         --chat_template_name olmo \
