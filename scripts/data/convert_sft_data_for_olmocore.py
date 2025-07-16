@@ -31,7 +31,7 @@ NOTE: allenai/OLMo-2-1124-7B tokenizer is the same as allenai/dolma2-tokenizer, 
 has additional metadata required for this script.
 
 Recommendations:
- * Don't use max-seq-length, keep full sequences and allow Olmo-core to truncate if needed.
+  * Set max_seq_length, and use the same length you use during SFT
 """
 
 import json
