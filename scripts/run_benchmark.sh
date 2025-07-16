@@ -24,7 +24,7 @@ uv run python -m open_instruct.benchmark_generators \
     --response_length 64 \
     --vllm_top_p 0.9 \
     --num_unique_prompts_rollout 8 \
-    --num_samples_per_prompt_rollout 2 \
+    --num_samples_per_prompt_rollout 4 \
     --vllm_num_engines 1 \
     --vllm_tensor_parallel_size 1 \
     --vllm_gpu_memory_utilization 0.9 \
