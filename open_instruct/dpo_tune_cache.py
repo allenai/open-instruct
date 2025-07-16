@@ -97,13 +97,12 @@ class FlatArguments:
     """
     Full arguments class for all fine-tuning jobs.
     """
+
     # Sometimes users will pass in a `str` repr of a dict in the CLI
     # We need to track what fields those can be. Each time a new arg
     # has a dict type, it must be added to this list.
     # Important: These should be typed with Optional[Union[dict,str,...]]
-    _VALID_DICT_FIELDS = [
-        "additional_model_arguments",
-    ]
+    _VALID_DICT_FIELDS = ["additional_model_arguments"]
 
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """The name of this experiment"""
@@ -346,9 +345,7 @@ class FlatArguments:
 
     packing: bool = field(
         default=False,
-        metadata={
-            "help": "Whether to use packing/padding-free collation via DataCollatorWithFlatteningDPO"
-        },
+        metadata={"help": "Whether to use packing/padding-free collation via DataCollatorWithFlatteningDPO"},
     )
 
     # Ai2 specific settings
@@ -408,8 +405,9 @@ def get_cache_ref_logprobs(
         cached_reference_rejected_logps = []
         with torch.no_grad():
             for batch in tqdm(
-                active_dataloader, disable=not accelerator.is_local_main_process,
-                desc=f'Generating reference cache (epoch {epoch})'
+                active_dataloader,
+                disable=not accelerator.is_local_main_process,
+                desc=f"Generating reference cache (epoch {epoch})",
             ):
                 if args.use_lora:
                     with accelerator.unwrap_model(model).disable_adapter():
@@ -444,8 +442,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         **accelerator_log_kwargs,
         kwargs_handlers=[timeout_kwargs],
         gradient_accumulation_plugin=GradientAccumulationPlugin(
-            num_steps=args.gradient_accumulation_steps,
-            sync_each_batch=args.sync_each_batch,
+            num_steps=args.gradient_accumulation_steps, sync_each_batch=args.sync_each_batch
         ),
     )
 
@@ -691,19 +688,12 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     # DataLoaders creation:
     if args.packing:
         accelerator.print("Using packing/padding-free collation")
-        collate_fn = TensorDataCollatorWithFlatteningDPO(
-            return_position_ids=True, return_flash_attn_kwargs=True
-        )
+        collate_fn = TensorDataCollatorWithFlatteningDPO(return_position_ids=True, return_flash_attn_kwargs=True)
     else:
-        collate_fn = DataCollatorForSeq2SeqDPO(
-            tokenizer=tokenizer, model=model, padding="longest"
-        )
+        collate_fn = DataCollatorForSeq2SeqDPO(tokenizer=tokenizer, model=model, padding="longest")
 
     train_dataloader = DataLoader(
-        train_dataset,
-        shuffle=True,
-        collate_fn=collate_fn,
-        batch_size=args.per_device_train_batch_size,
+        train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size
     )
 
     # Optimizer
@@ -821,9 +811,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     forward_fn = concatenated_forward if args.concatenated_forward else separate_forward
     if args.packing:
         if not args.concatenated_forward:
-            raise NotImplementedError(
-                "seperate forward not implemented for packing/padding-free"
-            )
+            raise NotImplementedError("seperate forward not implemented for packing/padding-free")
         forward_fn = partial(forward_fn, packing=True)
     if args.dpo_loss_type == "dpo" or args.dpo_loss_type == "dpo_norm":
         epoch_cached_reference_chosen_logps, epoch_cached_reference_rejected_logps = get_cache_ref_logprobs(

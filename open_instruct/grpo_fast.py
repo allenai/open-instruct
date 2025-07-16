@@ -1689,11 +1689,7 @@ def split_and_insert_batch(
 
         # Store individual prompts in the map using dataset indices as keys
         for i, dataset_idx in enumerate(batch_dataset_indices):
-            pending_queries_map[dataset_idx] = (
-                batch_queries[i],
-                batch_ground_truths[i],
-                batch_datasets[i],
-            )
+            pending_queries_map[dataset_idx] = (batch_queries[i], batch_ground_truths[i], batch_datasets[i])
 
         # Use PromptRequest for Ray queue with batch-specific dataset_index list
         param_prompt_Q.put(

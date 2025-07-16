@@ -239,32 +239,29 @@ def concatenated_forward(
         concatenated_batch, bs = pf_concatenated_inputs(batch)
 
     inputs = {
-        k.replace("concatenated_", ""):v
-        for k, v in concatenated_batch.items() if k.startswith("concatenated_") and not k.endswith("labels")
-
+        k.replace("concatenated_", ""): v
+        for k, v in concatenated_batch.items()
+        if k.startswith("concatenated_") and not k.endswith("labels")
     }
     if output_router_logits:
-        outputs = model(
-            **inputs,
-            output_router_logits=True,
-        )
+        outputs = model(**inputs, output_router_logits=True)
         logits = outputs.logits.to(torch.float32)
         aux_loss = outputs.aux_loss
     else:
-        logits = model(
-            **inputs
-        ).logits.to(torch.float32)
+        logits = model(**inputs).logits.to(torch.float32)
         aux_loss = None
 
     if not packing:
-        all_logps = _get_batch_logps(logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob)
+        all_logps = _get_batch_logps(
+            logits, concatenated_batch["concatenated_labels"], average_log_prob=average_log_prob
+        )
         bs = batch["chosen_input_ids"].shape[0]
     else:
         all_logps = pf_get_batch_logps(
             logits,
             concatenated_batch["concatenated_labels"],
-            inputs['cu_seq_lens_k'], # assume same as q
-            average_log_prob=average_log_prob
+            inputs["cu_seq_lens_k"],  # assume same as q
+            average_log_prob=average_log_prob,
         )
     chosen_logps = all_logps[:bs]
     rejected_logps = all_logps[bs:]
