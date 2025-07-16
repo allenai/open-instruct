@@ -399,132 +399,6 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% endfor %}"
     ),
-    # olmo-core-compatible chat templates:
-    # TODO: unify these 3 chat templates and send variables through the tokenizer's apply_chat_template kwargs
-    "olmo": (
-        "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
-        "{% if not has_system %}"
-        "{{ '<|im_start|>system\nYou are OLMo 2, a helpful function-calling AI assistant built by Ai2. Your date cutoff is November 2024, and your model weights are available at https://huggingface.co/allenai. You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
-        "{% endif %}"
-        "{% for message in messages %}"
-        "{% if message['role'] == 'system' %}"
-        "{{ '<|im_start|>system\n' + message['content'] }}"
-        "{% if message.get('functions', none) is not none %}"
-        "{{ ' <functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
-        "{% else %}"
-        "{{ ' You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
-        "{% endif %}"
-        "{% elif message['role'] == 'user' %}"
-        "{% if message.get('functions', none) is not none %}"
-        "{{ '<|im_start|>user\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
-        "{% else %}"
-        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
-        "{% endif %}"
-        "{% elif message['role'] == 'assistant' %}"
-        "{{ '<|im_start|>assistant\n' }}"
-        "{% if message.get('content', none) is not none %}"
-        "{{ message['content'] }}"
-        "{% endif %}"
-        "{% if message.get('function_calls', none) is not none %}"
-        "{{ '<function_calls>' + message['function_calls'] + '</function_calls>' }}"
-        "{% endif %}"
-        "{% if not loop.last %}"
-        "{{ '<|im_end|>' + '\n' }}"
-        "{% else %}"
-        "{{ eos_token }}"
-        "{% endif %}"
-        "{% elif message['role'] == 'environment' %}"
-        "{{ '<|im_start|>environment\n' + message['content'] + '<|im_end|>\n' }}"
-        "{% endif %}"
-        "{% if loop.last and add_generation_prompt %}"
-        "{{ '<|im_start|>assistant\n' }}"
-        "{% endif %}"
-        "{% endfor %}"
-    ),
-    "olmo_thinker": (
-        "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
-        "{% if not has_system %}"
-        "{{ '<|im_start|>system\nYou are OLMo 2, a helpful function-calling AI assistant built by Ai2. Your date cutoff is November 2024, and your model weights are available at https://huggingface.co/allenai. You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
-        "{% endif %}"
-        "{% for message in messages %}"
-        "{% if message['role'] == 'system' %}"
-        "{{ '<|im_start|>system\n' + message['content'] }}"
-        "{% if message.get('functions', none) is not none %}"
-        "{{ ' <functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
-        "{% else %}"
-        "{{ ' You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
-        "{% endif %}"
-        "{% elif message['role'] == 'user' %}"
-        "{% if message.get('functions', none) is not none %}"
-        "{{ '<|im_start|>user\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
-        "{% else %}"
-        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
-        "{% endif %}"
-        "{% elif message['role'] == 'assistant' %}"
-        "{{ '<|im_start|>assistant\n' }}"
-        "{% if message.get('content', none) is not none %}"
-        "{{ message['content'] }}"
-        "{% endif %}"
-        "{% if message.get('function_calls', none) is not none %}"
-        "{{ '<function_calls>' + message['function_calls'] + '</function_calls>' }}"
-        "{% endif %}"
-        "{% if not loop.last %}"
-        "{{ '<|im_end|>' + '\n' }}"
-        "{% else %}"
-        "{{ eos_token }}"
-        "{% endif %}"
-        "{% elif message['role'] == 'environment' %}"
-        "{{ '<|im_start|>environment\n' + message['content'] + '<|im_end|>\n' }}"
-        "{% endif %}"
-        "{% if loop.last and add_generation_prompt %}"
-        "{{ '<|im_start|>assistant\n<think>' }}"
-        "{% endif %}"
-        "{% endfor %}"
-    ),
-    "olmo_thinker_r1_style": (
-        "A conversation between user and assistant. "
-        "The user asks a question, and the assistant solves it. "
-        "The assistant first thinks and reasons about the question "
-        "and after thinking provides the user with the answer. "
-        "The reasoning process is enclosed in <think> </think> tags "
-        "and the answer is enclosed in <answer> </answer> tags "
-        "so the full response is <think> reasoning process here </think> "
-        "<answer> answer here </answer>."
-        "\n\n"
-        "{% for message in messages %}"
-        "{% if message['role'] == 'system' %}"
-        "{% if message.get('functions', none) is not none %}"
-        "{{ '<|im_start|>system\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
-        "{% else %}"
-        "{{ '<|im_start|>system\n' + message['content']  + '<|im_end|>\n' }}"
-        "{% endif %}"
-        "{% elif message['role'] == 'user' %}"
-        "{% if message.get('functions', none) is not none %}"
-        "{{ '<|im_start|>user\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
-        "{% else %}"
-        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
-        "{% endif %}"
-        "{% elif message['role'] == 'assistant' %}"
-        "{{ '<|im_start|>assistant\n' }}"
-        "{% if message.get('content', none) is not none %}"
-        "{{ message['content'] }}"
-        "{% endif %}"
-        "{% if message.get('function_calls', none) is not none %}"
-        "{{ '<function_calls>' + message['function_calls'] + '</function_calls>' }}"
-        "{% endif %}"
-        "{% if not loop.last %}"
-        "{{ '<|im_end|>' + '\n' }}"
-        "{% else %}"
-        "{{ eos_token }}"
-        "{% endif %}"
-        "{% elif message['role'] == 'environment' %}"
-        "{{ '<|im_start|>environment\n' + message['content'] + '<|im_end|>\n' }}"
-        "{% endif %}"
-        "{% if loop.last and add_generation_prompt %}"
-        "{{ '<|im_start|>assistant\n<think>' }}"
-        "{% endif %}"
-        "{% endfor %}"
-    ),
     # template is taken from https://arxiv.org/abs/2501.12948.
     "r1_simple_chat": (
         "A conversation between User and Assistant. "
@@ -714,13 +588,13 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
             )
         elif isinstance(tokenizer, GPTNeoXTokenizerFast):
             # OLMo newer models use this tokenizer
-            # if tokenizer.bos_token is None:
-            #     tokenizer.bos_token = tokenizer.eos_token
-            #     assert tc.add_bos, (
-            #         "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
-            #     )
-            # # else, pythia / other models
-            # else:
+            if tokenizer.bos_token is None:
+                tokenizer.bos_token = tokenizer.eos_token
+                assert tc.add_bos, (
+                    "For OLMo with GPTNeoX, you must add bos token to the beginning of the input sequence."
+                )
+            # else, pythia / other models
+            else:
                 num_added_tokens = tokenizer.add_special_tokens(
                     {
                         "pad_token": "<pad>",
