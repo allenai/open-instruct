@@ -1,5 +1,5 @@
-import warnings
 from dataclasses import dataclass
+from typing import Dict, List, Union
 
 import torch
 from transformers import DefaultDataCollator
@@ -19,24 +19,10 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
     batch size 1, with additional information included in the batch to demarcate example boundaries.
     """
 
-    def __init__(
-        self,
-        *args,
-        return_flash_attn_kwargs=True,
-        return_position_ids=True,
-        return_seq_idx=True,
-        separator_id=-100,
-        **kwargs,
-    ):
-        super().__init__(*args, **kwargs)
-        self.return_flash_attn_kwargs = return_flash_attn_kwargs
-        self.return_position_ids = return_position_ids
-        self.return_seq_idx = return_seq_idx
-        self.separator_id = separator_id
-        warnings.warn(
-            "Using `TensorDataCollatorWithFlattening` will flatten the entire mini batch into a "
-            "single long sequence. Make sure your attention computation is able to handle it!"
-        )
+    return_flash_attn_kwargs: bool = True
+    return_position_ids: bool = True
+    return_seq_idx: bool = True
+    separator_id: int = -100
 
     def __call__(self, features, return_tensors=None, separator_id=None):
         if return_tensors is None:
@@ -84,3 +70,97 @@ class TensorDataCollatorWithFlattening(DefaultDataCollator):
         ret["input_ids"] = torch.cat(ret["input_ids"], dim=0)[None]
         ret["labels"] = torch.cat(ret["labels"], dim=0)[None]
         return ret
+
+
+@dataclass
+class TensorDataCollatorWithFlatteningDPO(TensorDataCollatorWithFlattening):
+    def __call__(self, features, return_tensors=None):
+        # call the original collator on chosen and rejected separately, then combine
+        def filter_batch(match_string, features):
+            return [{k.replace(match_string, ""): v for k, v in f.items() if match_string in k} for f in features]
+
+        chosen_features = super().__call__(filter_batch("chosen_", features), return_tensors=return_tensors)
+        rejected_features = super().__call__(filter_batch("rejected_", features), return_tensors=return_tensors)
+
+        result = {}
+        for k in chosen_features:
+            result["chosen_" + k] = chosen_features[k]
+        for k in rejected_features:
+            result["rejected_" + k] = rejected_features[k]
+        return result
+
+
+# - dpo concatenation  for padding free
+def concatenated_inputs(
+    batch: Dict[str, Union[List, torch.LongTensor]], tag: str = "concatenated_"
+) -> Dict[str, torch.LongTensor]:
+    chosen_features, rejected_features = {}, {}
+    for k in batch:
+        if k.startswith("chosen_"):
+            chosen_features[k.replace("chosen_", "")] = batch[k]
+        else:
+            rejected_features[k.replace("rejected_", "")] = batch[k]
+
+    # - need to return chosen
+    ret = {f"{tag}input_ids": torch.cat([chosen_features["input_ids"], rejected_features["input_ids"]], axis=-1)}
+    if "labels" in chosen_features:
+        ret[f"{tag}labels"] = torch.cat([chosen_features["labels"], rejected_features["labels"]], axis=-1)
+
+    if "cu_seq_lens_q" in chosen_features:
+        ret[f"{tag}cu_seq_lens_q"] = torch.cat(
+            [
+                chosen_features["cu_seq_lens_q"],
+                rejected_features["cu_seq_lens_q"][1:] + chosen_features["cu_seq_lens_q"][-1],
+            ]
+        )
+        ret[f"{tag}cu_seq_lens_k"] = torch.cat(
+            [
+                chosen_features["cu_seq_lens_k"],
+                rejected_features["cu_seq_lens_k"][1:] + chosen_features["cu_seq_lens_k"][-1],
+            ]
+        )
+        ret[f"{tag}max_length_q"] = max(chosen_features["max_length_q"], rejected_features["max_length_q"])
+        ret[f"{tag}max_length_k"] = max(chosen_features["max_length_k"], rejected_features["max_length_k"])
+
+    if "position_ids" in chosen_features:
+        ret[f"{tag}position_ids"] = torch.cat(
+            [chosen_features["position_ids"], rejected_features["position_ids"]], dim=-1
+        )
+
+    if "seq_idx" in chosen_features:
+        ret[f"{tag}seq_idx"] = torch.cat(
+            [chosen_features["seq_idx"], rejected_features["seq_idx"] + chosen_features["seq_idx"][0, -1]], dim=-1
+        )
+
+    return ret, len(chosen_features["cu_seq_lens_k"]) - 1
+
+
+# for dpo - padding free
+def get_batch_logps(
+    logits: torch.FloatTensor, labels: torch.LongTensor, cu_seq_lens: torch.LongTensor, average_log_prob: bool = False
+) -> torch.FloatTensor:
+    assert logits.shape[:-1] == labels.shape
+
+    # - we are going to get crossings at labels / logits
+    #   cont batch boundaries, but we assume that the
+    #   loss mask == True at those places
+    labels = labels[:, 1:].clone()
+    logits = logits[:, :-1, :]
+    loss_mask = labels != -100
+
+    # dummy token; we'll ignore the losses on these tokens later
+    labels[labels == -100] = 0
+
+    # there is a labels, logits shift operation above
+    cu_seq_lens = cu_seq_lens.clone() - 1
+    cu_seq_lens[0] = 0
+
+    splits = cu_seq_lens.diff().tolist()
+    per_token_logps = torch.gather(logits.log_softmax(-1), dim=2, index=labels.unsqueeze(2)).squeeze(2)
+
+    return torch.concat(
+        [
+            ((ps * mask).sum(-1) / mask.sum(-1) if average_log_prob else (ps * mask).sum(-1))
+            for ps, mask in zip(torch.split(per_token_logps, splits, dim=-1), torch.split(loss_mask, splits, dim=-1))
+        ]
+    )
