@@ -11,6 +11,9 @@ RUN echo "UV_CACHE_DIR: ${UV_CACHE_DIR}"
 # setup files
 WORKDIR /stage/
 
+# Install nginx and create conf.d directory
+RUN apt-get update --no-install-recommends && apt-get install -y nginx && mkdir -p /etc/nginx/conf.d && rm -rf /var/lib/apt/lists/*
+
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV UV_COMPILE_BYTECODE=0
 
