@@ -34,6 +34,7 @@ Recommendations:
   * Set max_seq_length, and use the same length you use during SFT
 """
 
+import gzip
 import json
 import os
 import sys
@@ -79,10 +80,7 @@ class ConvertSFTDataArguments:
 
     """The list of transform functions to apply to the dataset."""
     dataset_transform_fn: list[str] = field(
-        default_factory=lambda: [
-            "sft_tulu_tokenize_and_truncate_v1",
-            "sft_tulu_filter_v1",
-        ]
+        default_factory=lambda: ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
     )
 
     """The columns to use for the dataset."""
@@ -156,10 +154,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
 
     # TODO: improve configurability of transform factory
     transform_functions_and_args = [
-        (
-            "sft_tulu_tokenize_and_truncate_v1",
-            {"max_seq_length": args.max_seq_length},
-        ),
+        ("sft_tulu_tokenize_and_truncate_v1", {"max_seq_length": args.max_seq_length}),
         ("sft_tulu_filter_v1", {}),  # remove examples that don't have any labels
     ]
 
@@ -193,6 +188,9 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
     labels_mask = []
     sample: Mapping[str, Any]
     num_samples_skipped = 0
+    document_boundaries = []
+    current_position = 0
+
     for sample in tqdm(  # type: ignore
         train_dataset,
         desc="Collecting tokens",
@@ -200,8 +198,13 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         bar_format="{l_bar}{bar}{r_bar}\n",  # better printing in beaker
         mininterval=10.0,
     ):
+        sample_length = len(sample[INPUT_IDS_KEY])
         token_ids.extend(sample[INPUT_IDS_KEY])
         labels_mask.extend([1 if label != -100 else 0 for label in sample[LABELS_KEY]])
+
+        # Record document boundary (start, end)
+        document_boundaries.append((current_position, current_position + sample_length))
+        current_position += sample_length
 
         if all(label == -100 for label in sample[LABELS_KEY]):
             num_samples_skipped += 1
@@ -240,6 +243,27 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
 
         return chunks, chunk_boundaries
 
+    def write_metadata_for_chunks(base_filename, document_boundaries, chunk_boundaries):
+        """Write metadata files for each chunk with document boundaries."""
+
+        for chunk_idx, (chunk_start, chunk_end) in enumerate(chunk_boundaries):
+            metadata_filename = f"{base_filename}_part_{chunk_idx:04d}.csv.gz"
+
+            with gzip.open(metadata_filename, "wt") as f:
+                # Find all documents that overlap with this chunk
+                for doc_start, doc_end in document_boundaries:
+                    # Check if document overlaps with chunk
+                    if doc_end > chunk_start and doc_start < chunk_end:
+                        # Adjust boundaries relative to chunk start
+                        adjusted_start = max(0, doc_start - chunk_start)
+                        adjusted_end = min(chunk_end - chunk_start, doc_end - chunk_start)
+
+                        # Only write if there's actual content in this chunk
+                        if adjusted_end > adjusted_start:
+                            f.write(f"{adjusted_start},{adjusted_end}\n")
+
+            print(f"Written metadata {metadata_filename}")
+
     # Choose dtype based on vocab size - Olmo-core does the
     # same operation to infer the dtype of the token_ids array.
     vocab_size = tc.tokenizer.vocab_size
@@ -254,6 +278,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
 
     print(f"Writing converted data to {output_dir}")
     _, token_chunk_boundaries = write_memmap_chunked(f"{output_dir}/token_ids", token_ids, token_dtype)
+    write_metadata_for_chunks(f"{output_dir}/token_ids", document_boundaries, token_chunk_boundaries)
 
     # Write labels_mask using the same chunk boundaries as token_ids
     for i, (start, end) in enumerate(token_chunk_boundaries):
@@ -263,6 +288,7 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
         mmap[:] = chunk_data
         mmap.flush()
         print(f"Written {filename} ({len(chunk_data) * np.dtype(np.bool_).itemsize / 1024**3:.2f} GB)")
+
     print("Data conversion completed successfully!")
 
 
