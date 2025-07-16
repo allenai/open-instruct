@@ -773,15 +773,11 @@ class VerifiableProblemZVerifier(VerifierFunction):
             return VerificationResult(score=0.0)
         problem = problem2class[task_name]()
         problem.set_config(task_params)
-        print(f"Prediction: {prediction}")
-        print(f"Task name: {task_name}")
-        print(f"Task params: {task_params}")
         try:
             score = problem.scorer(prediction)  # super-rlvr code handles extraction :D
         except Exception as e:
             logger.warning(f"Error scoring verifiable problem: {e}")
             return VerificationResult(score=0.0)
-        print(f"Score: {score}")
         return VerificationResult(score=score)
 
 
