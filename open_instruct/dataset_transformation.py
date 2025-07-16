@@ -534,9 +534,6 @@ def get_tokenizer_tulu_v1(tc: "TokenizerConfig"):
             assert num_added_tokens <= 1, (
                 "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
             )
-            assert num_added_tokens <= 1, (
-                "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
-            )
     # NOTE: (Costa) I just commented the `OPTForCausalLM` because we are not likely to use it.
     # elif isinstance(tokenizer, GPT2Tokenizer) and isinstance(model, OPTForCausalLM):
     #     num_added_tokens = tokenizer.add_special_tokens({"unk_token": "<unk>"})
@@ -595,11 +592,7 @@ def get_tokenizer_tulu_v2_1(tc: "TokenizerConfig"):
                 )
             # else, pythia / other models
             else:
-                num_added_tokens = tokenizer.add_special_tokens(
-                    {
-                        "pad_token": "<pad>",
-                    }
-                )
+                num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
                 assert num_added_tokens <= 1, (
                     "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
                 )
@@ -677,9 +670,6 @@ def get_tokenizer_tulu_v2_2(tc: "TokenizerConfig"):
             # else, pythia / other models
             else:
                 num_added_tokens = tokenizer.add_special_tokens({"pad_token": "<pad>"})
-                assert num_added_tokens <= 1, (
-                    "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
-                )
                 assert num_added_tokens <= 1, (
                     "GPTNeoXTokenizer should only add one special token - the pad_token (or no tokens if already set in SFT)."
                 )
