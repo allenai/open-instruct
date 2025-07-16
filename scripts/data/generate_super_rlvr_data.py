@@ -24,8 +24,8 @@ def _gen_one(arg):
         return {
             "ok": True,
             "data": {
-                "dataset": "verifiable_problem_z",
-                "label": {"task_name": task_name, "parameters": str(inst.__dict__)},  # str since hf doesnt support rand dicts per instance.
+                "dataset": ["verifiable_problem_z"],
+                "label": [{"task_name": task_name, "parameters": str(inst.__dict__)}],  # str since hf doesnt support rand dicts per instance.
                 "messages": [{"role": "user", "content": prompt}],
             },
         }

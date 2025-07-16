@@ -36,7 +36,7 @@ from open_instruct.math_utils import (
 from open_instruct.utils import extract_final_answer
 
 # zhiyuan data
-from open_instruct.VerifiableProblem.verifiable.problems import problem2class
+from verifiable.problems import problem2class
 
 logger = logging.getLogger(__name__)
 
