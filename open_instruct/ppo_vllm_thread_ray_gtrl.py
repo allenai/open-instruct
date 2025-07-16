@@ -195,9 +195,9 @@ class Args:
     num_training_steps: Optional[int] = None
     """The number of training_steps to train"""
     num_evals: int = 4
-    """this sets how many in-loop evals we do during training. in-loop evals reuse the generation/reward verifier setup."""
+    """The number of in-loop evals we run throughout training. In-loop evals reuse the generation/reward verifier setup."""
     local_eval_freq: Optional[int] = None
-    """this controls the number of in-loop evals, which reuses the generation/reward verifier setup. don't set this directly, but set via num_evals."""
+    """RUNTIME VALUE: The frequence of in-loop evaluation steps."""
     local_dataloader_batch_size: Optional[int] = None
     """The batch size per GPU for the dataloader"""
     save_freq: int = 200
