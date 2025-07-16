@@ -198,12 +198,12 @@ class Args:
     num_training_steps: Optional[int] = None
     """The number of training_steps to train"""
     num_evals: int = 4
-    """The number of evaluations to run throughout training"""
-    eval_freq: Optional[int] = None
-    """The frequency of evaluation steps"""
+    """this sets how many in-loop evals we do during training. in-loop evals reuse the generation/reward verifier setup."""
+    local_eval_freq: Optional[int] = None
+    """this controls the number of in-loop evals, which reuses the generation/reward verifier setup. don't set this directly, but set via num_evals."""
     local_dataloader_batch_size: Optional[int] = None
     """The batch size per GPU for the dataloader"""
-    save_freq: int = -1
+    save_freq: int = 200
     """How many train steps to save the model"""
 
     # online settings
@@ -928,7 +928,7 @@ class PolicyTrainerRayProcess(RayProcess):
             num_training_steps: int,
             sample_evaluation_prompt_token_ids: Optional[List[int]],
             evaluation_Q: Queue,
-            eval_freq: int,
+            local_eval_freq: int,
             resume_training_step: int,
         ):
             def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
@@ -962,7 +962,7 @@ class PolicyTrainerRayProcess(RayProcess):
                 response_ids_Q.put(response_ids)
 
                 # Evaluate the model
-                if sample_evaluation_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
+                if sample_evaluation_prompt_token_ids is not None and (training_step - 1) % local_eval_freq == 0:
                     response_ids = generate_with_engines(
                         sample_evaluation_prompt_token_ids, evaluation_generation_config
                     )
@@ -979,7 +979,7 @@ class PolicyTrainerRayProcess(RayProcess):
                     args.num_training_steps,
                     sample_evaluation_prompt_token_ids,
                     evaluation_Q,
-                    args.eval_freq,
+                    args.local_eval_freq,
                     resume_training_step,
                 ),
             )
@@ -1596,7 +1596,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig):
     args.mini_batch_size = int(args.local_mini_batch_size * args.world_size)
     args.num_mini_batches = exact_div((args.rollout_batch_size * args.number_samples_per_prompt), args.mini_batch_size)
     args.num_training_steps = args.total_episodes // (args.rollout_batch_size * args.number_samples_per_prompt)
-    args.eval_freq = max(1, args.num_training_steps // args.num_evals)
+    if args.local_eval_freq is not None:
+        raise ValueError("local_eval_freq should not be set manually; it will be computed automatically")
+    args.local_eval_freq = max(1, args.num_training_steps // args.num_evals)
     # PPO logic: do checks and set up dataloader batch size
     if args.whiten_rewards:
         assert args.local_mini_batch_size >= 8, (
