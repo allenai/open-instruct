@@ -887,7 +887,7 @@ def build_all_verifiers(args) -> Dict[str, VerifierFunction]:
     for judge_type in JUDGE_PROMPT_MAP.keys():
         instance = LMJudgeVerifier(judge_type, LMJudgeVerifierConfig.from_args(args))
         verifiers[instance.name.lower()] = instance
-    
+
     # if we have remap arg, remap!
     if args.remap_verifier:
         remap = args.remap_verifier.split("=")
