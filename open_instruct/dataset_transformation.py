@@ -728,7 +728,7 @@ class TokenizerConfig:
     tokenizer_revision: Optional[str] = None
     trust_remote_code: bool = False
     use_fast: bool = True
-    chat_template_name: str = "olmo"  # TODO: should I give an option to force override?
+    chat_template_name: str = "olmo"
     add_bos: bool = False
     get_tokenizer_fn: str = "get_tokenizer_tulu_v2_2"
 
