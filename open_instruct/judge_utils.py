@@ -217,7 +217,7 @@ def extract_json_score_with_fallback(score_str: str) -> "tuple[str, float]":
         # escape newlines
         cleaned_str = cleaned_str.replace("\r\n", "\n").replace("\n", "\\n")
         # escape backslashes
-        cleaned_str = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', cleaned_str)
+        cleaned_str = re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", cleaned_str)
 
         cleaned_str = cleaned_str.strip()
 
