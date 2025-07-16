@@ -20,7 +20,9 @@ RUN python -m nltk.downloader punkt_tab
 COPY open_instruct open_instruct
 COPY oe-eval-internal oe-eval-internal
 
-RUN pip install -e open_instruct/VerifiableProblem
+WORKDIR /stage/open_instruct/VerifiableProblem
+RUN pip install -e .
+WORKDIR /stage/
 
 # install the package in editable mode
 COPY pyproject.toml .
