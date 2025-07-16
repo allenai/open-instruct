@@ -144,22 +144,6 @@ def main(args: ConvertSFTDataArguments, tc: TokenizerConfig):
                 json.dump(tokenizer_config, f, indent=2)
             print(f"Added chat_template from {chat_template_path} to tokenizer_config.json")
 
-    # # Update generation_config.json with eos and pad token ids
-    # generation_config_path = os.path.join(tokenizer_output_dir, "generation_config.json")
-    # if not os.path.exists(generation_config_path):
-    #     raise ValueError(f"Generation config not found at {generation_config_path}")
-
-    # with open(generation_config_path, "r") as f:
-    #     generation_config = json.load(f)
-    # if "eos_token_id" not in generation_config or generation_config["eos_token_id"] != tc.tokenizer.eos_token_id:
-    #     generation_config["eos_token_id"] = tc.tokenizer.eos_token_id
-    #     print(f"Set eos_token_id to {tc.tokenizer.eos_token_id} in {generation_config_path}")
-    # if "pad_token_id" not in generation_config or generation_config["pad_token_id"] != tc.tokenizer.pad_token_id:
-    #     generation_config["pad_token_id"] = tc.tokenizer.pad_token_id
-    #     print(f"Set pad_token_id to {tc.tokenizer.pad_token_id} in {generation_config_path}")
-    # with open(generation_config_path, "w") as f:
-    #     json.dump(generation_config, f, indent=2)
-
     print("Tokenizer saved successfully!")
 
     if args.tokenizer_config_only:
