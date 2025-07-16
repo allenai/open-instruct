@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 # Configuration
 TOTAL_CPUS=$(nproc)
 CODE_SERVER_CPUS=128
@@ -8,7 +10,7 @@ NGINX_PORT=8070
 API_BASE_PORT=1234
 
 # Get leader replica IP
-BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | awk '{print $1}')
+BEAKER_LEADER_REPLICA_IP=$(getent hosts ${BEAKER_LEADER_REPLICA_HOSTNAME} | head -n 1 | awk '{print $1}')
 
 # Set up environment
 export PYTHONPATH=$REPO_PATH
