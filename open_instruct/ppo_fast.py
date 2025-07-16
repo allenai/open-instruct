@@ -199,10 +199,10 @@ class Args:
     num_training_steps: Optional[int] = None
     """RUNTIME VALUE: The number of training_steps to train"""
     num_evals: int = 10
-    """The number of evaluations to run throughout training"""
-    eval_freq: Optional[int] = None
-    """RUNTIME VALUE: The frequency of evaluation steps"""
-    save_freq: int = -1
+    """this sets how many in-loop evals we do during training. in-loop evals reuse the generation/reward verifier setup."""
+    local_eval_freq: Optional[int] = None
+    """this controls the number of in-loop evals, which reuses the generation/reward verifier setup. don't set this directly, but set via num_evals."""
+    save_freq: int = 200
     """How many train steps to save the model"""
 
     # Generation
@@ -1201,7 +1201,7 @@ def vllm_generate_thread(
     num_training_steps: int,
     eval_prompt_token_ids: Optional[List[int]],
     evaluation_inference_results_Q: Queue,
-    eval_freq: int,
+    local_eval_freq: int,
     resume_training_step: int = 1,
 ):
     def generate_with_engines(prompts: List[List[int]], sampling_params: SamplingParams):
@@ -1262,7 +1262,7 @@ def vllm_generate_thread(
         inference_results_Q.put((response_ids, finish_reasons, masks, info))
 
         # Evaluate the model
-        if eval_prompt_token_ids is not None and (training_step - 1) % eval_freq == 0:
+        if eval_prompt_token_ids is not None and (training_step - 1) % local_eval_freq == 0:
             response_ids, finish_reasons, masks, info = generate_with_engines(
                 eval_prompt_token_ids, eval_generation_config
             )
@@ -1486,7 +1486,9 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
     args.num_training_steps = args.total_episodes // (
         args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     )
-    args.eval_freq = max(1, args.num_training_steps // args.num_evals)
+    if args.local_eval_freq is not None:
+        raise ValueError("local_eval_freq should not be set manually; it will be computed automatically")
+    args.local_eval_freq = max(1, args.num_training_steps // args.num_evals)
     args.try_launch_beaker_eval_jobs_on_weka = args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job()
     if args.push_to_hub:
         if args.hf_repo_id is None:  # auto-generate one
@@ -1686,7 +1688,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             args.num_training_steps,
             eval_prompt_token_ids,
             evaluation_inference_results_Q,
-            args.eval_freq,
+            args.local_eval_freq,
             resume_training_step,
         ),
     )
@@ -1830,7 +1832,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, reward_fn: 
             try:
                 # timeout 0.01 if this is the last training step or we're not evaluating
                 # otherwise, wait to get the last evaluation generations (long timeout just in case)
-                timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else 100
+                timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_freq < 0) else 100
                 eval_responses, eval_finish_reasons, masks, eval_infos = evaluation_inference_results_Q.get(
                     timeout=timeout
                 )
