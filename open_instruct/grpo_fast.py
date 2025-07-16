@@ -2129,39 +2129,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     queries_next = data_next[INPUT_IDS_PROMPT_KEY]
     ground_truths_next = data_next[GROUND_TRUTHS_KEY]
     datasets_next = data_next[DATASET_SOURCE_KEY]
-    pending_queries_map[initial_dataset_index] = (queries_next, ground_truths_next, datasets_next)
-    # Use PromptRequest for Ray queue
-    request = PromptRequest(
-        prompts=queries_next,
-        training_step=1,
-        eval_prompts=eval_prompt_token_ids if eval_dataset is not None else None,
-        dataset_index=initial_dataset_index,
-    )
-    param_prompt_Q.put(request)
-    # Split the initial batch into multiple inference batches for vLLM engines
-    inference_batch_size = len(queries_next) // args.vllm_num_engines
-    for batch_idx in range(args.vllm_num_engines):
-        start_idx = batch_idx * inference_batch_size
-        end_idx = start_idx + inference_batch_size if batch_idx < args.vllm_num_engines - 1 else len(queries_next)
 
-        batch_queries = queries_next[start_idx:end_idx]
-        batch_ground_truths = ground_truths_next[start_idx:end_idx]
-        batch_datasets = datasets_next[start_idx:end_idx]
-
-        # Create unique dataset_index for this batch
-        batch_dataset_index = f"1_{batch_idx}"
-        pending_queries_map[batch_dataset_index] = (batch_queries, batch_ground_truths, batch_datasets)
-
-        # Use PromptRequest for Ray queue
-        request = PromptRequest(
-            prompts=batch_queries,
-            training_step=1,
-            eval_prompts=eval_prompt_token_ids if eval_dataset is not None else None,
-            dataset_index=batch_dataset_index,
-        )
-        param_prompt_Q.put(request)
->>>>>>> 22bb9ac2 (Added code to split batch sizes.)
-=======
     # Split the initial batch using the split_and_insert_batch function
     split_and_insert_batch(
         queries_next,
@@ -2174,7 +2142,6 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
         param_prompt_Q,
         eval_prompt_token_ids if eval_dataset is not None else None,
     )
->>>>>>> c3c13f76 (Now, we index with the dataset indices.)
 
     num_total_tokens = 0
     start_time = time.time()

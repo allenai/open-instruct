@@ -40,10 +40,10 @@ import shutil
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
+from functools import partial
 from typing import Callable, List, Literal, Optional, Union
 
 import datasets
-from functools import partial
 import torch
 import torch.utils
 import torch.utils.data
@@ -75,10 +75,8 @@ from open_instruct.dpo_utils import (
     simpo_loss,
     wpo_loss,
 )
-from open_instruct.padding_free_collator import (
-    TensorDataCollatorWithFlatteningDPO
-)
 from open_instruct.model_utils import push_folder_to_hub, save_with_accelerate
+from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 from open_instruct.utils import (
     ArgumentParserPlus,
     clean_last_n_checkpoints,
@@ -376,7 +374,7 @@ class FlatArguments:
             raise ValueError("Cannot provide two dataset selection mechanisms.")
         if self.try_launch_beaker_eval_jobs and not self.push_to_hub:
             raise ValueError("Cannot launch Beaker evaluation jobs without pushing to the Hub.")
-        
+
         # Parse in args that could be `dict` sent in from the CLI as a string
         for dict_feld in self._VALID_DICT_FIELDS:
             passed_value = getattr(self, dict_feld)
@@ -583,8 +581,8 @@ def main(args: FlatArguments, tc: TokenizerConfig):
         )
     elif args.model_name_or_path:
         config = AutoConfig.from_pretrained(
-            args.model_name_or_path, 
-            revision=args.model_revision, 
+            args.model_name_or_path,
+            revision=args.model_revision,
             trust_remote_code=tc.trust_remote_code,
             **args.additional_model_arguments,
         )
@@ -822,7 +820,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
     average_log_prob = args.dpo_loss_type in average_log_prob_loss_types
     forward_fn = concatenated_forward if args.concatenated_forward else separate_forward
     if args.packing:
-        if not args.concatenated_forward: 
+        if not args.concatenated_forward:
             raise NotImplementedError(
                 "seperate forward not implemented for packing/padding-free"
             )

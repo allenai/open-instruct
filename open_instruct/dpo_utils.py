@@ -26,10 +26,8 @@ import torch.nn.functional as F
 from transformers import DataCollatorForSeq2Seq
 
 from open_instruct.model_utils import log_softmax_and_gather
-from open_instruct.padding_free_collator import (
-    concatenated_inputs as pf_concatenated_inputs,
-    get_batch_logps as pf_get_batch_logps
-)
+from open_instruct.padding_free_collator import concatenated_inputs as pf_concatenated_inputs
+from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_logps
 
 torch.backends.cuda.matmul.allow_tf32 = True
 
@@ -235,7 +233,7 @@ def concatenated_forward(
 
     We do this to avoid doing two forward passes, because it's faster for FSDP.
     """
-    if not packing: 
+    if not packing:
         concatenated_batch = concatenated_inputs(batch)
     else:
         concatenated_batch, bs = pf_concatenated_inputs(batch)
@@ -263,8 +261,8 @@ def concatenated_forward(
         bs = batch["chosen_input_ids"].shape[0]
     else:
         all_logps = pf_get_batch_logps(
-            logits, 
-            concatenated_batch["concatenated_labels"], 
+            logits,
+            concatenated_batch["concatenated_labels"],
             inputs['cu_seq_lens_k'], # assume same as q
             average_log_prob=average_log_prob
         )

@@ -1,9 +1,8 @@
-import warnings
 from dataclasses import dataclass
+from typing import Dict, List, Union
 
 import torch
 from transformers import DefaultDataCollator
-from typing import Dict, Union, List
 
 
 @dataclass
@@ -139,7 +138,7 @@ def concatenated_inputs(
     if 'seq_idx' in chosen_features:
         ret[f"{tag}seq_idx"] = torch.cat([
             chosen_features['seq_idx'],
-            rejected_features['seq_idx'] + 
+            rejected_features['seq_idx'] +
             chosen_features['seq_idx'][0,-1],
         ], dim=-1)
 
@@ -147,8 +146,8 @@ def concatenated_inputs(
 
 # for dpo - padding free
 def get_batch_logps(
-    logits: torch.FloatTensor, 
-    labels: torch.LongTensor, 
+    logits: torch.FloatTensor,
+    labels: torch.LongTensor,
     cu_seq_lens: torch.LongTensor,
     average_log_prob: bool = False,
 ) -> torch.FloatTensor:
@@ -175,11 +174,11 @@ def get_batch_logps(
     return torch.concat(
         [
             (
-                (ps * mask).sum(-1) / mask.sum(-1) 
+                (ps * mask).sum(-1) / mask.sum(-1)
                 if average_log_prob else
                 (ps * mask).sum(-1)
             )
-            for ps, mask in 
+            for ps, mask in
             zip(
                 torch.split(per_token_logps, splits, dim=-1),
                 torch.split(loss_mask, splits, dim=-1),
