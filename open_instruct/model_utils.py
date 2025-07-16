@@ -413,7 +413,12 @@ def save_with_accelerate(
     if "olmo" in chat_template_name:
         # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
         model.generation_config = transformers.GenerationConfig(
-            temperature=None, top_p=None, eos_token_id=[100265, 100257]
+            temperature=None,
+            top_p=None,
+            eos_token_id=[
+                tokenizer.convert_tokens_to_ids("<|im_end|>"),
+                tokenizer.convert_tokens_to_ids("<|endoftext|>")
+            ]
         )
     else:
         model.generation_config = transformers.GenerationConfig(
