@@ -26,4 +26,4 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
       - name: Code quality
-        run: make quality
+        run: make style-check && make quality-check
