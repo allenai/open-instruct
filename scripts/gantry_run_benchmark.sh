@@ -21,6 +21,14 @@ gantry run \
        --beaker-image nathanl/open_instruct_auto \
        --cluster ai2/jupiter-cirrascale-2 \
        --budget ai2/oe-eval \
+       --install 'pip install --upgrade pip "setuptools<70.0.0" wheel 
+# TODO, unpin setuptools when this issue in flash attention is resolved
+pip install torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
+pip install packaging
+pip install flash-attn==2.8.0.post2 --no-build-isolation
+pip install -r requirements.txt
+pip install -e .
+python -m nltk.downloader punkt' \
        -- python -m open_instruct.benchmark_generators \
     --model_name_or_path "hamishivi/qwen2_5_openthoughts2" \
     --tokenizer_name_or_path "hamishivi/qwen2_5_openthoughts2" \
