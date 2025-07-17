@@ -102,44 +102,44 @@ def get_git_commit() -> str:
         git_dir = pathlib.Path(".git")
         if not git_dir.exists():
             return "unknown"
-            
+
         head_file = git_dir / "HEAD"
         if not head_file.exists():
             return "unknown"
-            
+
         with open(head_file, "r") as f:
             content = f.read().strip()
-            
+
         if not content.startswith("ref:"):
             # Detached HEAD
             return content[:8]
-            
+
         # HEAD points to a branch
         ref_path = git_dir / content[5:]
         if not ref_path.exists():
             return "unknown"
-            
+
         with open(ref_path, "r") as ref_f:
             return ref_f.read().strip()[:8]  # First 8 chars
-            
+
     except Exception as e:
         logger.warning(f"Could not get git commit: {e}")
         return "unknown"
 
 
 def save_benchmark_results_to_csv(
-    results: list[dict[str, Any]], 
-    total_time: float, 
-    args: grpo_fast.Args, 
+    results: list[dict[str, Any]],
+    total_time: float,
+    args: grpo_fast.Args,
     model_config: model_utils.ModelConfig,
-    csv_path: str = "/weka/finbarrt/generator_benchmark_results.csv"
+    csv_path: str = "/weka/finbarrt/generator_benchmark_results.csv",
 ) -> None:
     """Save benchmark results to CSV file."""
     git_commit = get_git_commit()
-    
+
     # Calculate aggregated metrics (excluding first batch)
     avg_results = average_results(results[1:])
-    
+
     # Prepare row data
     row_data = {
         "git_commit": git_commit,
@@ -149,33 +149,33 @@ def save_benchmark_results_to_csv(
         "num_samples_per_prompt_rollout": args.num_samples_per_prompt_rollout,
         "response_length": args.response_length,
     }
-    
+
     # Check if file exists to determine if we need to write headers
     file_exists = pathlib.Path(csv_path).exists()
-    
+
     # Create directory if it doesn't exist
     csv_dir = pathlib.Path(csv_path).parent
     csv_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Write to CSV
     with open(csv_path, "a", newline="") as csvfile:
         fieldnames = [
             "git_commit",
-            "total_batches", 
+            "total_batches",
             "batch_size",
             "num_unique_prompts_rollout",
             "num_samples_per_prompt_rollout",
-            "response_length"
+            "response_length",
         ]
-        
+
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        
+
         # Write header if file is new
         if not file_exists:
             writer.writeheader()
-        
+
         writer.writerow(row_data)
-    
+
     logger.info(f"Saved benchmark results to {csv_path}")
 
 
@@ -486,7 +486,7 @@ def print_summary(
     print(f"Num rollouts: {args.num_samples_per_prompt_rollout}")
     print(f"Max tokens: {args.response_length}")
     print("-" * 60)
-    print(f"Total time: {total_time:.2f}s ({total_generation_time / total_time:.2f}% generating)")
+    print(f"Total time: {total_time:.2f}s ({total_generation_time / total_time:.4f%} generating)")
     print(f"Total new tokens generated: {total_tokens}")
     print("-" * 60)
     print("Results (excluding first batch):")
