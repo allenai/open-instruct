@@ -130,7 +130,7 @@ class VerifierFunction(ABC):
         """
 
     async def async_call(
-        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None
+        self, tokenized_prediction: List[int], prediction: str, label: Any, query: Optional[str] = None, timeout: float = 30.0
     ) -> VerificationResult:
         """
         Asynchronous version of __call__. By default, it runs the synchronous __call__ in a thread pool.
@@ -141,13 +141,21 @@ class VerifierFunction(ABC):
             prediction (str): The model output.
             label (Any): The ground truth answer or evaluation constraint.
             query (Optional[str]): The original query.
+            timeout (float): Maximum time in seconds to allow for the call (default 30.0).
 
         Returns:
             VerificationResult
         """
-        # Run the synchronous __call__ in a thread pool to avoid blocking
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, lambda: self.__call__(tokenized_prediction, prediction, label, query))
+        # run with timeout.
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: self.__call__(tokenized_prediction, prediction, label, query)),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"VerifierFunction.async_call timed out after {timeout} seconds.")
+            return VerificationResult(score=0.0, reasoning=f"Timeout after {timeout} seconds.")
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(name={self.name}, weight={self.weight})"
@@ -773,11 +781,8 @@ class VerifiableProblemZVerifier(VerifierFunction):
             return VerificationResult(score=0.0)
         problem = problem2class[task_name]()
         problem.set_config(task_params)
-        @timeout(10)
-        def scorer_wrapper(prediction):
-            return problem.scorer(prediction)
         try:
-            score = scorer_wrapper(prediction)
+            score = problem.scorer(prediction)
         except Exception as e:
             logger.warning(f"Error scoring verifiable problem: {e}")
             return VerificationResult(score=0.0)
