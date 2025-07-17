@@ -98,33 +98,26 @@ def save_config(args, tokenizer_config, model_config, timestamp: int):
 
 def get_git_commit() -> str:
     """Get the current git commit hash."""
-    try:
-        git_dir = pathlib.Path(".git")
-        if not git_dir.exists():
-            return "unknown"
-
-        head_file = git_dir / "HEAD"
-        if not head_file.exists():
-            return "unknown"
-
-        with open(head_file, "r") as f:
-            content = f.read().strip()
-
-        if not content.startswith("ref:"):
-            # Detached HEAD
-            return content[:8]
-
-        # HEAD points to a branch
-        ref_path = git_dir / content[5:]
-        if not ref_path.exists():
-            return "unknown"
-
-        with open(ref_path, "r") as ref_f:
-            return ref_f.read().strip()[:8]  # First 8 chars
-
-    except Exception as e:
-        logger.warning(f"Could not get git commit: {e}")
+    git_dir = pathlib.Path(".git")
+    if not git_dir.exists():
         return "unknown"
+
+    head_file = git_dir / "HEAD"
+    if not head_file.exists():
+        return "unknown"
+
+    with head_file.open() as f:
+        content = f.read().strip()
+
+    if not content.startswith("ref:"):
+        # Detached HEAD
+        return content[:8]
+
+    # HEAD points to a branch
+    ref_path = git_dir / content[5:]
+
+    with ref_path.open() as ref_f:
+        return ref_f.read().strip()[:8]  # First 8 chars
 
 
 def save_benchmark_results_to_csv(
@@ -132,7 +125,7 @@ def save_benchmark_results_to_csv(
     total_time: float,
     args: grpo_fast.Args,
     model_config: model_utils.ModelConfig,
-    csv_path: str = "/weka/finbarrt/generator_benchmark_results.csv",
+    csv_path: pathlib.Path = pathlib.Path("/weka/finbarrt/generator_benchmark_results.csv"),
 ) -> None:
     """Save benchmark results to CSV file."""
     git_commit = get_git_commit()
@@ -154,11 +147,11 @@ def save_benchmark_results_to_csv(
     file_exists = pathlib.Path(csv_path).exists()
 
     # Create directory if it doesn't exist
-    csv_dir = pathlib.Path(csv_path).parent
+    csv_dir = csv_path.parent
     csv_dir.mkdir(parents=True, exist_ok=True)
 
     # Write to CSV
-    with open(csv_path, "a", newline="") as csvfile:
+    with csv_path.open("a", newline="") as csvfile:
         fieldnames = [
             "git_commit",
             "total_batches",
@@ -171,7 +164,7 @@ def save_benchmark_results_to_csv(
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
         # Write header if file is new
-        if not file_exists:
+        if not file_exists
             writer.writeheader()
 
         writer.writerow(row_data)
