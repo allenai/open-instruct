@@ -376,34 +376,34 @@ def run_benchmark(
     device_name = get_device_name(torch.cuda.get_device_name(0))
     device_flops = GPU_SPECS[device_name]["flops"]
 
-    # Submit all batches at once
+    # Submit all batches at once and track submission times
     logger.info(f"Submitting all {num_batches} batches to the queue...")
+    all_prompts = [get_batch_data(dataset, args.num_unique_prompts_rollout, batch_idx) for
+                   batch_idx in range(num_batches)]
     submission_start_time = time.time()
     for batch_idx in range(num_batches):
-        prompts = get_batch_data(dataset, args.num_unique_prompts_rollout, batch_idx)
-        param_prompt_Q.put(vllm_utils3.PromptRequest(prompts=prompts, dataset_index=batch_idx))
+        param_prompt_Q.put(vllm_utils3.PromptRequest(prompts=all_prompts[batch_idx], dataset_index=batch_idx))
     submission_time = time.time() - submission_start_time
     logger.info(f"All batches submitted in {submission_time:.2f}s")
 
     # Receive results and measure time for each batch
+    last_completion_time = submission_start_time
     for batch_idx in range(num_batches):
-        batch_receive_start = time.time()
         result = inference_results_Q.get()
-        batch_receive_time = time.time() - batch_receive_start
-        time_since_start = time.time() - total_start_time
-        batch_reception_times.append(time_since_start)
+        completion_time = time.time()
+        batch_generation_time = completion_time - last_completion_time
+        last_completion_time = completion_time
 
         # Process result
         new_tokens = sum(len(response) for response in result.responses)
-        tokens_per_second = new_tokens / batch_receive_time
+        tokens_per_second = new_tokens / batch_generation_time
 
         result_dict = {
             "tokens_per_second": tokens_per_second,
-            "generation_time": batch_receive_time,
+            "generation_time": batch_generation_time,
             "num_new_tokens": new_tokens,
             "finish_reasons": collections.Counter(result.finish_reasons),
             "response_lengths": [len(response) for response in result.responses],
-            "time_since_start": time_since_start,
             "batch_idx": result.dataset_index,
         }
         result_dict["mfu"] = 100 * result_dict["tokens_per_second"] * flops_per_token / device_flops
@@ -412,10 +412,10 @@ def run_benchmark(
         save_completion_lengths([result_dict], timestamp, result.dataset_index)
         results.append(result_dict)
         logger.info(
-            f"Batch {result.dataset_index + 1} received after {time_since_start:.2f}s: "
+            f"Batch {result.dataset_index + 1}: "
             f"{result_dict['tokens_per_second']:.2f} new tokens/sec, "
             f"MFU: {result_dict['mfu']:.2f}%, "
-            f"reception time: {batch_receive_time:.2f}s"
+            f"generation time: {batch_generation_time:.2f}s"
         )
 
     total_time = time.time() - total_start_time
@@ -516,25 +516,7 @@ def print_summary(
 
     print("=" * 60)
 
-    # Print batch reception timing information
-    if results and "time_since_start" in results[0]:
-        print("\n" + "-" * 60)
-        print("BATCH RECEPTION TIMING:")
-        for i, result in enumerate(results):
-            print(f"Batch {result.get('batch_idx', i) + 1}: received at {result['time_since_start']:.2f}s from start")
-
-        # Calculate inter-batch times
-        if len(results) > 1:
-            print("\nInter-batch reception times:")
-            for i in range(1, len(results)):
-                inter_batch_time = results[i]["time_since_start"] - results[i - 1]["time_since_start"]
-                print(
-                    f"Batch {results[i - 1].get('batch_idx', i - 1) + 1} to Batch {results[i].get('batch_idx', i) + 1}: {inter_batch_time:.2f}s"
-                )
-
-        print("=" * 60)
-
-
+    
 def cleanup(vllm_engines: list[ray.actor.ActorHandle]) -> None:
     """Clean up resources."""
     for engine in vllm_engines:
