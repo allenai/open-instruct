@@ -255,8 +255,6 @@ def get_batch_data(
     return prompts
 
 
-
-
 def run_benchmark(
     dataset: datasets.Dataset,
     vllm_engines: list[ray.actor.ActorHandle],
@@ -304,7 +302,7 @@ def run_benchmark(
     total_start_time = time.time()
     device_name = get_device_name(torch.cuda.get_device_name(0))
     device_flops = GPU_SPECS[device_name]["flops"]
-    
+
     # Submit all batches at once
     logger.info(f"Submitting all {num_batches} batches to the queue...")
     submission_start_time = time.time()
@@ -313,7 +311,7 @@ def run_benchmark(
         param_prompt_Q.put(vllm_utils3.PromptRequest(prompts=prompts, dataset_index=batch_idx))
     submission_time = time.time() - submission_start_time
     logger.info(f"All batches submitted in {submission_time:.2f}s")
-    
+
     # Receive results and measure time for each batch
     for batch_idx in range(num_batches):
         batch_receive_start = time.time()
@@ -321,11 +319,11 @@ def run_benchmark(
         batch_receive_time = time.time() - batch_receive_start
         time_since_start = time.time() - total_start_time
         batch_reception_times.append(time_since_start)
-        
+
         # Process result
         new_tokens = sum(len(response) for response in result.responses)
         tokens_per_second = new_tokens / batch_receive_time
-        
+
         result_dict = {
             "tokens_per_second": tokens_per_second,
             "generation_time": batch_receive_time,
@@ -337,7 +335,7 @@ def run_benchmark(
             "batch_idx": result.dataset_index,
         }
         result_dict["mfu"] = 100 * result_dict["tokens_per_second"] * flops_per_token / device_flops
-        
+
         # We incrementally save completion lengths so even if the job dies, we still have data.
         save_completion_lengths([result_dict], timestamp, result.dataset_index)
         results.append(result_dict)
@@ -401,7 +399,7 @@ def print_summary(
     print(f"Total batches: {len(results)}")
     print(f"Batch size: {args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout}")
     print(f"Unique prompts per batch: {args.num_unique_prompts_rollout}")
-    print(f"Num rollouts: {args.num_unique_prompts_rollout}")
+    print(f"Num rollouts: {args.num_samples_per_prompt_rollout}")
     print(f"Max tokens: {args.response_length}")
     print("-" * 60)
     print(f"Total time: {total_time:.2f}s ({total_generation_time / total_time:.2f}% generating)")
@@ -415,8 +413,8 @@ def print_summary(
 
     max_length = np.max(avg_results["response_lengths"])
     mean_length = np.mean(avg_results["response_lengths"])
-    wasted_compute = 100 * (max_length - mean_length) / max_length
-    print(f"Wasted compute % (variable response length): {wasted_compute:.2%}%")
+    wasted_compute = (max_length - mean_length) / max_length
+    print(f"Wasted compute % (variable response length): {wasted_compute:.2%}")
 
     print("-" * 60)
     print("HARDWARE SPECIFICATIONS:")
@@ -444,21 +442,23 @@ def print_summary(
     print(f"- 99th percentile: {np.percentile(avg_results['response_lengths'], 99):.2f} tokens")
 
     print("=" * 60)
-    
+
     # Print batch reception timing information
     if results and "time_since_start" in results[0]:
         print("\n" + "-" * 60)
         print("BATCH RECEPTION TIMING:")
         for i, result in enumerate(results):
             print(f"Batch {result.get('batch_idx', i) + 1}: received at {result['time_since_start']:.2f}s from start")
-        
+
         # Calculate inter-batch times
         if len(results) > 1:
             print("\nInter-batch reception times:")
             for i in range(1, len(results)):
-                inter_batch_time = results[i]['time_since_start'] - results[i-1]['time_since_start']
-                print(f"Batch {results[i-1].get('batch_idx', i-1) + 1} to Batch {results[i].get('batch_idx', i) + 1}: {inter_batch_time:.2f}s")
-        
+                inter_batch_time = results[i]["time_since_start"] - results[i - 1]["time_since_start"]
+                print(
+                    f"Batch {results[i - 1].get('batch_idx', i - 1) + 1} to Batch {results[i].get('batch_idx', i) + 1}: {inter_batch_time:.2f}s"
+                )
+
         print("=" * 60)
 
 
