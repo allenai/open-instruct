@@ -341,12 +341,12 @@ def run_generation_batch(
     """Run generation for a batch of prompts and measure performance."""
 
     start_time = time.time()
-    
+
     # Insert individual prompts
     for i, prompt in enumerate(prompts):
         dataset_idx = batch_idx * len(prompts) + i
         param_prompt_Q.put(vllm_utils3.PromptRequest(prompts=[prompt], dataset_index=[dataset_idx]))
-    
+
     # Collect individual results
     all_responses = []
     all_finish_reasons = []
@@ -354,7 +354,7 @@ def run_generation_batch(
         result = inference_results_Q.get()
         all_responses.extend(result.responses)
         all_finish_reasons.extend(result.finish_reasons)
-    
+
     generation_time = time.time() - start_time
 
     new_tokens = sum(len(response) for response in all_responses)
@@ -437,7 +437,7 @@ def run_benchmark(
             result = inference_results_Q.get()
             batch_responses.extend(result.responses)
             batch_finish_reasons.extend(result.finish_reasons)
-        
+
         completion_time = time.time()
         batch_generation_time = completion_time - last_completion_time
         last_completion_time = completion_time

@@ -1132,13 +1132,13 @@ def accumulate_inference_batches(
 
         if result.dataset_index is None or len(result.dataset_index) != 1:
             raise RuntimeError(f"Expected single dataset index, got {result.dataset_index}")
-        
+
         dataset_idx = result.dataset_index[0]
         if dataset_idx not in pending_queries_map:
             raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
-        
+
         query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
-        
+
         results.append(result)
         all_queries.append(query)
         all_ground_truths.append(ground_truth)
@@ -1202,7 +1202,10 @@ def data_preparation_thread(
         # Accumulate results from multiple vLLM engines into a single training batch
         with Timer("🚀 [Data Preparation Thread] Getting response ids"):
             result, queries, ground_truths, datasets = accumulate_inference_batches(
-                inference_results_Q, pending_queries_map, args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout, training_step
+                inference_results_Q,
+                pending_queries_map,
+                args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout,
+                training_step,
             )
 
         # ------------------------------------------------------------------------------------------------
@@ -1675,7 +1678,7 @@ def split_and_insert_batch(
     for i, dataset_idx in enumerate(dataset_indices):
         # Store individual prompt in the map using dataset index as key
         pending_queries_map[dataset_idx] = (queries_next[i], ground_truths_next[i], datasets_next[i])
-        
+
         # Create PromptRequest for single prompt
         param_prompt_Q.put(
             PromptRequest(
@@ -2084,10 +2087,17 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     reward_fn = make_reward_fn(args)
 
     # Start vLLM engines to process from queues
-    batch_size_per_engine = (args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout) // args.vllm_num_engines
+    batch_size_per_engine = (
+        args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
+    ) // args.vllm_num_engines
     for engine in vllm_engines:
         engine.process_from_queue.remote(
-            generation_config, eval_generation_config, args.eval_freq, args.num_training_steps, resume_training_step, batch_size_per_engine
+            generation_config,
+            eval_generation_config,
+            args.eval_freq,
+            args.num_training_steps,
+            resume_training_step,
+            batch_size_per_engine,
         )
     logger.info("======== ✅ vllm engines started processing from queues =========")
 

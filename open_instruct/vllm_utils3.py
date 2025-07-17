@@ -212,7 +212,7 @@ class LLMRayActor:
             prompts_batch = []
             dataset_indices_batch = []
             eval_prompts = None
-            
+
             # Pull prompts until we have a full batch or queue is empty
             while len(prompts_batch) < (batch_size or 1):
                 try:
@@ -220,16 +220,16 @@ class LLMRayActor:
                     request = self.prompt_queue.get(timeout=0.1)
                     if request is None:
                         break
-                    
+
                     # Each request should contain a single prompt
                     prompts_batch.extend(request.prompts)
                     if request.dataset_index:
                         dataset_indices_batch.extend(request.dataset_index)
-                    
+
                     # Store eval prompts from the first request (they should be the same)
                     if eval_prompts is None and request.eval_prompts is not None:
                         eval_prompts = request.eval_prompts
-                        
+
                 except:
                     # Timeout - process what we have if anything
                     if prompts_batch:
@@ -237,23 +237,19 @@ class LLMRayActor:
                     else:
                         # No prompts collected, wait a bit more
                         continue
-            
+
             if not prompts_batch:
                 continue
 
             # Process training prompts batch and get individual results
             results = self._generate_batch_individual(prompts_batch, sampling_params, dataset_indices_batch)
-            
+
             # Put individual results back into the queue
             for result in results:
                 self.results_queue.put(result)
 
             # Handle evaluation if needed
-            if (
-                eval_prompts is not None
-                and eval_sampling_params is not None
-                and (training_step - 1) % eval_freq == 0
-            ):
+            if eval_prompts is not None and eval_sampling_params is not None and (training_step - 1) % eval_freq == 0:
                 eval_results = self._generate_batch_individual(eval_prompts, eval_sampling_params, None)
                 for eval_result in eval_results:
                     eval_result.is_eval = True
@@ -347,15 +343,17 @@ class LLMRayActor:
 
             # Create individual result with single dataset index
             individual_dataset_index = [dataset_indices[i]] if dataset_indices and i < len(dataset_indices) else None
-            
-            results.append(GenerationResult(
-                responses=response_ids,
-                finish_reasons=finish_reasons,
-                masks=masks,
-                request_info=request_info,
-                dataset_index=individual_dataset_index,
-            ))
-        
+
+            results.append(
+                GenerationResult(
+                    responses=response_ids,
+                    finish_reasons=finish_reasons,
+                    masks=masks,
+                    request_info=request_info,
+                    dataset_index=individual_dataset_index,
+                )
+            )
+
         return results
 
     def init_process_group(
