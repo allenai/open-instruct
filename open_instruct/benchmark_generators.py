@@ -420,37 +420,47 @@ def run_benchmark(
     ]
     submission_start_time = time.time()
     for batch_idx in range(num_batches):
-        param_prompt_Q.put(vllm_utils3.PromptRequest(prompts=all_prompts[batch_idx], dataset_index=batch_idx))
+        # Insert individual prompts for this batch
+        for i, prompt in enumerate(all_prompts[batch_idx]):
+            dataset_idx = batch_idx * args.num_unique_prompts_rollout + i
+            param_prompt_Q.put(vllm_utils3.PromptRequest(prompts=[prompt], dataset_index=[dataset_idx]))
     submission_time = time.time() - submission_start_time
     logger.info(f"All batches submitted in {submission_time:.2f}s")
 
     # Receive results and measure time for each batch
     last_completion_time = submission_start_time
     for batch_idx in range(num_batches):
-        result = inference_results_Q.get()
+        # Collect individual results for this batch
+        batch_responses = []
+        batch_finish_reasons = []
+        for _ in range(args.num_unique_prompts_rollout):
+            result = inference_results_Q.get()
+            batch_responses.extend(result.responses)
+            batch_finish_reasons.extend(result.finish_reasons)
+        
         completion_time = time.time()
         batch_generation_time = completion_time - last_completion_time
         last_completion_time = completion_time
 
-        # Process result
-        new_tokens = sum(len(response) for response in result.responses)
+        # Process batch results
+        new_tokens = sum(len(response) for response in batch_responses)
         tokens_per_second = new_tokens / batch_generation_time
 
         result_dict = {
             "tokens_per_second": tokens_per_second,
             "generation_time": batch_generation_time,
             "num_new_tokens": new_tokens,
-            "finish_reasons": collections.Counter(result.finish_reasons),
-            "response_lengths": [len(response) for response in result.responses],
-            "batch_idx": result.dataset_index,
+            "finish_reasons": collections.Counter(batch_finish_reasons),
+            "response_lengths": [len(response) for response in batch_responses],
+            "batch_idx": batch_idx,
         }
         result_dict["mfu"] = 100 * result_dict["tokens_per_second"] * flops_per_token / device_flops
 
         # We incrementally save completion lengths so even if the job dies, we still have data.
-        save_completion_lengths([result_dict], timestamp, result.dataset_index)
+        save_completion_lengths([result_dict], timestamp, batch_idx)
         results.append(result_dict)
         logger.info(
-            f"Batch {result.dataset_index + 1}: "
+            f"Batch {batch_idx + 1}: "
             f"{result_dict['tokens_per_second']:.2f} new tokens/sec, "
             f"MFU: {result_dict['mfu']:.2f}%, "
             f"generation time: {batch_generation_time:.2f}s"

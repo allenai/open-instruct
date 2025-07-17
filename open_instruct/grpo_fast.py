@@ -1130,10 +1130,10 @@ def accumulate_inference_batches(
         result = inference_results_Q.get()
         dataset_indices = result.dataset_index
 
-        if dataset_indices is None or len(dataset_indices) != 1:
-            raise RuntimeError(f"Expected single dataset index, got {dataset_indices}")
+        if result.dataset_index is None or len(result.dataset_index) != 1:
+            raise RuntimeError(f"Expected single dataset index, got {result.dataset_index}")
         
-        dataset_idx = dataset_indices[0]
+        dataset_idx = result.dataset_index[0]
         if dataset_idx not in pending_queries_map:
             raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
         
