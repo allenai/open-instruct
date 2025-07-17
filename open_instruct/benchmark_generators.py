@@ -341,6 +341,7 @@ def run_benchmark(
     args: grpo_fast.Args,
     model_config: model_utils.ModelConfig,
     timestamp: int,
+    flops_per_token: int,
     num_batches: int = 5,
 ) -> list[dict[str, Any]]:
     """Run the full benchmark."""
@@ -355,12 +356,6 @@ def run_benchmark(
     )
 
     eval_generation_config = vllm.SamplingParams(temperature=0.0, max_tokens=args.response_length, n=1)
-
-    # We have to do this before starting vLLM as otherwise we get OOM errors.
-    flops_per_token = calculate_model_usage_per_token(model_config.model_name_or_path)
-
-    # Unclear why we need this. We didn't need it before torch 2.7.0.
-    free_all_gpu_memory()
 
     # Start vLLM engines to process from queues
     for engine in vllm_engines:
@@ -408,7 +403,6 @@ def run_benchmark(
             "num_new_tokens": new_tokens,
             "finish_reasons": collections.Counter(result.finish_reasons),
             "response_lengths": [len(response) for response in result.responses],
-            "prompt_lengths": [len(prompt) for prompt in result.prompts],
             "time_since_start": time_since_start,
             "batch_idx": result.dataset_index,
         }
@@ -481,7 +475,7 @@ def print_summary(
     print(f"Num rollouts: {args.num_samples_per_prompt_rollout}")
     print(f"Max tokens: {args.response_length}")
     print("-" * 60)
-    print(f"Total time: {total_time:.2f}s ({total_generation_time / total_time:.4f%} generating)")
+    print(f"Total time: {total_time:.2f}s ({total_generation_time / total_time:.4%} generating)")
     print(f"Total new tokens generated: {total_tokens}")
     print("-" * 60)
     print("Results (excluding first batch):")
@@ -561,13 +555,22 @@ def main() -> None:
     # Ensure data directory exists
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+    # Calculate flops per token before starting vLLM
+    logger.info("Calculating model FLOPs per token...")
+    flops_per_token = calculate_model_usage_per_token(model_config.model_name_or_path)
+    logger.info(f"Model FLOPs per token: {flops_per_token:,}")
+    
+    # Free GPU memory after calculating FLOPs and before starting vLLM
+    logger.info("Freeing GPU memory before starting vLLM...")
+    free_all_gpu_memory()
+
     dataset = setup_dataset(args, tokenizer_config)
     vllm_engines, param_prompt_Q, inference_results_Q = setup_vllm_engines(args, model_config)
 
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
     save_config(args, tokenizer_config, model_config, timestamp)
-    run_benchmark(dataset, vllm_engines, param_prompt_Q, inference_results_Q, args, model_config, timestamp)
+    run_benchmark(dataset, vllm_engines, param_prompt_Q, inference_results_Q, args, model_config, timestamp, flops_per_token)
 
     cleanup(vllm_engines)
 

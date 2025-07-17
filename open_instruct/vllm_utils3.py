@@ -401,6 +401,10 @@ def create_vllm_engines(
             )
         )
 
+    # Verify that all engines initialized successfully
+    # This forces Ray to wait for the actors to be created
+    ray.get([engine.wake_up.remote() for engine in vllm_engines])
+
     if vllm_enable_sleep:
         batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)
 
