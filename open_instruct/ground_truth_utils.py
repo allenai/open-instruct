@@ -33,7 +33,7 @@ from open_instruct.math_utils import (
     normalize_final_answer,
     remove_boxed,
 )
-from open_instruct.utils import extract_final_answer
+from open_instruct.utils import extract_final_answer, timeout, TimeoutException
 
 # zhiyuan data
 from verifiable.problems import problem2class
@@ -774,7 +774,8 @@ class VerifiableProblemZVerifier(VerifierFunction):
         problem = problem2class[task_name]()
         problem.set_config(task_params)
         try:
-            score = problem.scorer(prediction)  # super-rlvr code handles extraction :D
+            with timeout(10): # 10s timeout, sometimes sympy can hang.
+                score = problem.scorer(prediction)  # super-rlvr code handles extraction :D
         except Exception as e:
             logger.warning(f"Error scoring verifiable problem: {e}")
             return VerificationResult(score=0.0)
