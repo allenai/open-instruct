@@ -30,9 +30,8 @@ pip install -r requirements.txt
 pip install -e .
 python -m nltk.downloader punkt' \
        -- python -m open_instruct.benchmark_generators \
-    --model_name_or_path "allenai/OLMo-2-1124-7B" \
-    --tokenizer_name_or_path "allenai/OLMo-2-1124-7B" \
-	--add_bos \
+    --model_name_or_path "hamishivi/qwen2_5_openthoughts2" \
+    --tokenizer_name_or_path "hamishivi/qwen2_5_openthoughts2" \
     --dataset_mixer_list "hamishivi/hamishivi_rlvr_orz_math_57k_collected_all_filtered_hamishivi_qwen2_5_openthoughts2" "1.0" \
     --dataset_mixer_list_splits "train" \
     --max_token_length 10240 \
