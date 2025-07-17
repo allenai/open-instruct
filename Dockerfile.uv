@@ -23,8 +23,12 @@ RUN --mount=type=cache,target=${UV_CACHE_DIR} \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-install-project --link-mode=copy
 
-# rerun with extras
-RUN uv sync --extra compile --extra liger
+# Install custom vllm for olmo3
+RUN git clone -b shanea/olmo3 https://github.com/2015aroras/vllm.git vllm_olmo3
+RUN VLLM_USE_PRECOMPILED=1 uv pip install -e vllm_olmo3
+
+# Install liger, flash-attn, code, and don't remove vllm
+RUN uv sync --extra compile --extra liger --extra vllm --extra code
 
 # punkt / punkt_tab
 RUN uv run -m nltk.downloader punkt
