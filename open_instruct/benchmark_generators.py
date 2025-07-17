@@ -44,6 +44,8 @@ logger = logging.getLogger(__name__)
 # Determine data directory
 if pathlib.Path("/weka").exists():
     DATA_DIR = pathlib.Path("/weka") / "finbarrt" / "open_instruct_generators_benchmark"
+elif pathlib.Path("/root").exists():
+    DATA_DIR = pathlib.Path("/root") / "finbarrt" / "open_instruct_generators_benchmark"
 else:
     DATA_DIR = pathlib.Path("/tmp") / "open_instruct_generators_benchmark"
 
@@ -125,10 +127,10 @@ def save_benchmark_results_to_csv(
     total_time: float,
     args: grpo_fast.Args,
     model_config: model_utils.ModelConfig,
-    csv_path: pathlib.Path = pathlib.Path("/weka/finbarrt/generator_benchmark_results.csv"),
 ) -> None:
     """Save benchmark results to CSV file."""
     git_commit = get_git_commit()
+    csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
 
     # Calculate aggregated metrics (excluding first batch)
     avg_results = average_results(results[1:])
@@ -164,7 +166,7 @@ def save_benchmark_results_to_csv(
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
         # Write header if file is new
-        if not file_exists
+        if not file_exists:
             writer.writeheader()
 
         writer.writerow(row_data)
