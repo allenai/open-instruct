@@ -317,6 +317,7 @@ def create_vllm_engines(
     prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
+    vllm_kwargs: Optional[dict] = None,
 ) -> list[LLMRayActor]:
     import vllm
 
@@ -366,6 +367,10 @@ def create_vllm_engines(
             tool_use = True
             additional_kwargs["tools"] = tools
             additional_kwargs["max_tool_calls"] = max_tool_calls_dict
+        
+        # Add any additional vllm_kwargs
+        if vllm_kwargs is not None:
+            additional_kwargs.update(vllm_kwargs)
 
         vllm_engines.append(
             LLMRayActor.options(

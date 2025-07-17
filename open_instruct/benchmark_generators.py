@@ -281,7 +281,7 @@ def setup_dataset(args: grpo_fast.Args, tokenizer_config: dataset_transformation
 
 
 def setup_vllm_engines(
-    args: grpo_fast.Args, model_config: model_utils.ModelConfig, max_model_len: int = 20480
+    args: grpo_fast.Args, model_config: model_utils.ModelConfig, max_model_len: int = 20480, vllm_kwargs: dict = None
 ) -> tuple[list[ray.actor.ActorHandle], ray_queue.Queue, ray_queue.Queue]:
     """Set up vLLM engines and queues."""
     logger.info("Setting up vLLM engines...")
@@ -315,6 +315,7 @@ def setup_vllm_engines(
         max_tool_calls=[0],
         prompt_queue=param_prompt_Q,
         results_queue=inference_results_Q,
+        vllm_kwargs=vllm_kwargs,
     )
 
     logger.info("vLLM engines ready")
