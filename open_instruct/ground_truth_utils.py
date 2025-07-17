@@ -773,9 +773,11 @@ class VerifiableProblemZVerifier(VerifierFunction):
             return VerificationResult(score=0.0)
         problem = problem2class[task_name]()
         problem.set_config(task_params)
+        @timeout(10)
+        def scorer_wrapper(prediction):
+            return problem.scorer(prediction)
         try:
-            with timeout(10): # 10s timeout, sometimes sympy can hang.
-                score = problem.scorer(prediction)  # super-rlvr code handles extraction :D
+            score = scorer_wrapper(prediction)
         except Exception as e:
             logger.warning(f"Error scoring verifiable problem: {e}")
             return VerificationResult(score=0.0)
