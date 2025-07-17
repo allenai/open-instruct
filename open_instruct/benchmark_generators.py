@@ -295,8 +295,9 @@ def setup_vllm_engines(
     pg = ray.util.placement_group(bundles, strategy="PACK")
     ray.get(pg.ready())
 
-    param_prompt_Q = ray_queue.Queue(maxsize=10)
-    inference_results_Q = ray_queue.Queue(maxsize=10)
+    # Adjust queue sizes for individual prompts
+    param_prompt_Q = ray_queue.Queue(maxsize=100)
+    inference_results_Q = ray_queue.Queue(maxsize=100)
 
     vllm_engines = vllm_utils3.create_vllm_engines(
         num_engines=args.vllm_num_engines,
@@ -334,6 +335,41 @@ def get_batch_data(
     return prompts
 
 
+def run_generation_batch(
+    inference_results_Q: ray_queue.Queue, param_prompt_Q: ray_queue.Queue, prompts: list[list[int]], batch_idx: int
+) -> dict[str, Any]:
+    """Run generation for a batch of prompts and measure performance."""
+
+    start_time = time.time()
+    
+    # Insert individual prompts
+    for i, prompt in enumerate(prompts):
+        dataset_idx = batch_idx * len(prompts) + i
+        param_prompt_Q.put(vllm_utils3.PromptRequest(prompts=[prompt], dataset_index=[dataset_idx]))
+    
+    # Collect individual results
+    all_responses = []
+    all_finish_reasons = []
+    for _ in range(len(prompts)):
+        result = inference_results_Q.get()
+        all_responses.extend(result.responses)
+        all_finish_reasons.extend(result.finish_reasons)
+    
+    generation_time = time.time() - start_time
+
+    new_tokens = sum(len(response) for response in all_responses)
+    tokens_per_second = new_tokens / generation_time
+    return {
+        "tokens_per_second": tokens_per_second,
+        "generation_time": generation_time,
+        "num_new_tokens": new_tokens,
+        # dict mapping string reasons to counts.
+        "finish_reasons": collections.Counter(all_finish_reasons),
+        "response_lengths": [len(response) for response in all_responses],
+        "prompt_lengths": [len(prompt) for prompt in prompts],  # Original unique prompts
+    }
+
+
 def run_benchmark(
     dataset: datasets.Dataset,
     vllm_engines: list[ray.actor.ActorHandle],
@@ -366,6 +402,7 @@ def run_benchmark(
             num_batches + 1,  # eval_freq (avoid evaluation)
             num_batches,  # num_training_steps
             1,  # resume_training_step
+            args.num_unique_prompts_rollout // args.vllm_num_engines,  # batch_size
         )
 
     # Wait for engines to be ready
