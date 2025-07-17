@@ -39,7 +39,7 @@ python -m nltk.downloader punkt' \
     --temperature 1.0 \
     --response_length "$response_length" \
     --vllm_top_p 0.9 \
-    --num_unique_prompts_rollout 32 \
+    --num_unique_prompts_rollout 16 \
     --num_samples_per_prompt_rollout 16 \
     --vllm_num_engines 1 \
     --vllm_tensor_parallel_size 1 \
@@ -50,5 +50,4 @@ python -m nltk.downloader punkt' \
     --seed 42 \
     --dataset_local_cache_dir "benchmark_cache" \
     --dataset_cache_mode "local" \
-    --dataset_transform_fn "rlvr_tokenize_v1" "rlvr_filter_v1" \
-    "$@"
+    --dataset_transform_fn "rlvr_tokenize_v1" "rlvr_filter_v1"

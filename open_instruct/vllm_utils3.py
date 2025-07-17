@@ -360,7 +360,7 @@ def create_vllm_engines(
             placement_group_bundle_index=i * tensor_parallel_size,
         )
 
-        additional_kwargs = {}
+        additional_kwargs = {"kv_cache_dtype": "fp8"}
         tool_use = False
         if tools is not None and len(tools) > 0:
             tool_use = True
