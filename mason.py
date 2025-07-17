@@ -635,6 +635,8 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                             dataset_config_hashes.append(dataset_config_hash)
                     stderr = result.stderr
                     return_code = result.returncode
+                    if return_code != 0:
+                        raise Exception(f"Error code {return_code} when creating cached dataset")
                     console.log("✅✅✅ Finished running the caching command")
 
                 if file in OPEN_INSTRUCT_RESUMABLES and idx != -1 and len(args.auto_checkpoint_state_dir) > 0:
@@ -706,8 +708,13 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                     break
 
             commit_hash = get_commit_hash(model_name_or_path, model_revision, "config.json", "model")
-            download_from_hf(model_name_or_path, model_revision) # first download the model
-            path = download_from_hf(model_name_or_path, model_revision) # then get the path
+            if os.path.exists(model_name_or_path):
+                path = model_name_or_path
+                model_name_or_path = os.path.basename(model_name_or_path)
+                console.log(f"Local model is already downloaded, using path basename as model name {model_name_or_path}, note that commit hash is {commit_hash}")
+            else:
+                download_from_hf(model_name_or_path, model_revision) # first download the model
+                path = download_from_hf(model_name_or_path, model_revision) # then get the path
             gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_models/{model_name_or_path}/{commit_hash}"
             gs_folder = gs_folder_exists(gs_saved_path) # race condition exists, but it's fine since we are launching mason sequentially
             if not gs_folder:
