@@ -17,6 +17,7 @@
 
 import dataclasses
 import os
+import queue
 from datetime import timedelta
 from typing import Any, List, Optional, Union
 
@@ -205,6 +206,7 @@ class LLMRayActor:
         num_training_steps=None,
         resume_training_step=1,
         batch_size=None,
+            timeout: int = 0.1,
     ):
         """Process prompts from the queue and put results in the results queue."""
         for training_step in range(resume_training_step, num_training_steps + 1):
@@ -217,20 +219,19 @@ class LLMRayActor:
             while len(prompts_batch) < (batch_size or 1):
                 try:
                     # Use non-blocking get with timeout
-                    request = self.prompt_queue.get(timeout=0.1)
+                    request = self.prompt_queue.get(timeout=timeout)
                     if request is None:
                         break
 
                     # Each request should contain a single prompt
                     prompts_batch.extend(request.prompts)
-                    if request.dataset_index:
-                        dataset_indices_batch.extend(request.dataset_index)
+                    dataset_indices_batch.extend(request.dataset_index)
 
                     # Store eval prompts from the first request (they should be the same)
                     if eval_prompts is None and request.eval_prompts is not None:
                         eval_prompts = request.eval_prompts
 
-                except:
+                except queue.Empty:
                     # Timeout - process what we have if anything
                     if prompts_batch:
                         break

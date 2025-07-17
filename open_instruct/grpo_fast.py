@@ -1128,21 +1128,13 @@ def accumulate_inference_batches(
     for i in range(expected_results):
         # Get individual result from queue
         result = inference_results_Q.get()
-        dataset_indices = result.dataset_index
 
-        if result.dataset_index is None or len(result.dataset_index) != 1:
-            raise RuntimeError(f"Expected single dataset index, got {result.dataset_index}")
-
-        dataset_idx = result.dataset_index[0]
-        if dataset_idx not in pending_queries_map:
-            raise RuntimeError(f"Dataset index {dataset_idx} not found in pending_queries_map")
-
-        query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
-
-        results.append(result)
-        all_queries.append(query)
-        all_ground_truths.append(ground_truth)
-        all_datasets.append(dataset)
+        for dataset_idx in result.dataset.index:
+            query, ground_truth, dataset = pending_queries_map.pop(dataset_idx)
+            results.append(result)
+            all_queries.append(query)
+            all_ground_truths.append(ground_truth)
+            all_datasets.append(dataset)
 
     # Combine all results into a single GenerationResult
     combined_responses = []
