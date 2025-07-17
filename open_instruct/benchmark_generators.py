@@ -554,7 +554,7 @@ def main() -> None:
     vllm_engines, param_prompt_Q, inference_results_Q = setup_vllm_engines(
         args,
         model_config,
-        vllm_kwargs={"speculative_config": {"model": "Qwen/Qwen2.5-1.5B",
+        vllm_kwargs={"speculative_config": {"model": "allenai/OLMo-2-0425-1B",
                                             "num_speculative_tokens": 5}},
     )
 
