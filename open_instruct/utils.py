@@ -30,6 +30,7 @@ import dataclasses
 import functools
 import json
 import logging
+import signal
 import os
 import random
 import re
@@ -1432,3 +1433,23 @@ def extract_final_answer(prediction: str) -> str:
         return cleaned.strip()
 
     return prediction
+
+
+class TimeoutException(Exception) :
+    pass
+
+def timeout(seconds) :
+    def decorator(func) :
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs) :
+            def _handler(signum, frame) :
+                raise TimeoutException("Function timed out after {} seconds".format(seconds))
+            old_handler = signal.signal(signal.SIGALRM, _handler)
+            signal.alarm(seconds)
+            try :
+                return func(*args, **kwargs)
+            finally :
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, old_handler)
+        return wrapper
+    return decorator
