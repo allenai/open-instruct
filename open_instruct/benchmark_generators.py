@@ -123,10 +123,7 @@ def get_git_commit() -> str:
 
 
 def save_benchmark_results_to_csv(
-    results: list[dict[str, Any]],
-    total_time: float,
-    args: grpo_fast.Args,
-    model_config: model_utils.ModelConfig,
+    results: list[dict[str, Any]], total_time: float, args: grpo_fast.Args, model_config: model_utils.ModelConfig
 ) -> None:
     """Save benchmark results to CSV file."""
     git_commit = get_git_commit()
@@ -134,15 +131,26 @@ def save_benchmark_results_to_csv(
 
     # Calculate aggregated metrics (excluding first batch)
     avg_results = average_results(results[1:])
+    total_tokens = sum(r["num_new_tokens"] for r in results)
+    total_generation_time = sum(r["generation_time"] for r in results)
 
     # Prepare row data
     row_data = {
         "git_commit": git_commit,
+        "model": model_config.model_name_or_path,
         "total_batches": len(results),
         "batch_size": args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout,
         "num_unique_prompts_rollout": args.num_unique_prompts_rollout,
         "num_samples_per_prompt_rollout": args.num_samples_per_prompt_rollout,
         "response_length": args.response_length,
+        "total_time": total_time,
+        "total_generation_time": total_generation_time,
+        "generation_time_percentage": (total_generation_time / total_time) * 100,
+        "total_tokens": total_tokens,
+        "avg_tokens_per_second": avg_results["tokens_per_second"],
+        "avg_mfu": avg_results["mfu"],
+        "avg_generation_time_per_batch": avg_results["generation_time"],
+        "avg_new_tokens_per_sample": avg_results["num_new_tokens"],
     }
 
     # Check if file exists to determine if we need to write headers
@@ -154,14 +162,7 @@ def save_benchmark_results_to_csv(
 
     # Write to CSV
     with csv_path.open("a", newline="") as csvfile:
-        fieldnames = [
-            "git_commit",
-            "total_batches",
-            "batch_size",
-            "num_unique_prompts_rollout",
-            "num_samples_per_prompt_rollout",
-            "response_length",
-        ]
+        fieldnames = list(row_data.keys())
 
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
@@ -371,15 +372,15 @@ def run_benchmark(
     time.sleep(0.1)
 
     results = []
-    batch_reception_times = []
     total_start_time = time.time()
     device_name = get_device_name(torch.cuda.get_device_name(0))
     device_flops = GPU_SPECS[device_name]["flops"]
 
     # Submit all batches at once and track submission times
     logger.info(f"Submitting all {num_batches} batches to the queue...")
-    all_prompts = [get_batch_data(dataset, args.num_unique_prompts_rollout, batch_idx) for
-                   batch_idx in range(num_batches)]
+    all_prompts = [
+        get_batch_data(dataset, args.num_unique_prompts_rollout, batch_idx) for batch_idx in range(num_batches)
+    ]
     submission_start_time = time.time()
     for batch_idx in range(num_batches):
         param_prompt_Q.put(vllm_utils3.PromptRequest(prompts=all_prompts[batch_idx], dataset_index=batch_idx))
@@ -516,7 +517,7 @@ def print_summary(
 
     print("=" * 60)
 
-    
+
 def cleanup(vllm_engines: list[ray.actor.ActorHandle]) -> None:
     """Clean up resources."""
     for engine in vllm_engines:
@@ -541,7 +542,7 @@ def main() -> None:
     logger.info("Calculating model FLOPs per token...")
     flops_per_token = calculate_model_usage_per_token(model_config.model_name_or_path)
     logger.info(f"Model FLOPs per token: {flops_per_token:,}")
-    
+
     # Free GPU memory after calculating FLOPs and before starting vLLM
     logger.info("Freeing GPU memory before starting vLLM...")
     free_all_gpu_memory()
@@ -552,7 +553,9 @@ def main() -> None:
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
     save_config(args, tokenizer_config, model_config, timestamp)
-    run_benchmark(dataset, vllm_engines, param_prompt_Q, inference_results_Q, args, model_config, timestamp, flops_per_token)
+    run_benchmark(
+        dataset, vllm_engines, param_prompt_Q, inference_results_Q, args, model_config, timestamp, flops_per_token
+    )
 
     cleanup(vllm_engines)
 
