@@ -16,6 +16,7 @@
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
 import dataclasses
+import logging
 import os
 from datetime import timedelta
 from typing import Any, List, Optional, Union
@@ -68,6 +69,9 @@ class PromptRequest:
     training_step: Optional[int] = None
     eval_prompts: Optional[List[List[int]]] = None
     dataset_index: Optional[int] = None
+
+
+logger = logging.getLogger(__name__)
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -180,14 +184,30 @@ class LLMRayActor:
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             print(f"creating LLM with bundle_indices={bundle_indices}")
 
+        # Extract model as it should be a positional argument for LLM
+        model = kwargs.pop("model", None)
+        if model is None and len(args) > 0:
+            model = args[0]
+            args = args[1:]
+        
+        # Add logging to debug the issue
+        print(f"DEBUG: Creating LLM with:")
+        print(f"  model: {model}")
+        print(f"  args: {args}")
+        print(f"  kwargs keys: {list(kwargs.keys())}")
+        if "speculative_config" in kwargs:
+            print(f"  speculative_config: {kwargs['speculative_config']}")
+        if "worker_extension_cls" in kwargs:
+            print(f"  worker_extension_cls: {kwargs['worker_extension_cls']}")
+        
         if tool_use:
             from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 
-            self.llm = ToolUseLLM(*args, **kwargs)
+            self.llm = ToolUseLLM(model, *args, **kwargs)
         else:
             from vllm import LLM
 
-            self.llm = LLM(*args, **kwargs)
+            self.llm = LLM(model, *args, **kwargs)
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
@@ -367,11 +387,51 @@ def create_vllm_engines(
             tool_use = True
             additional_kwargs["tools"] = tools
             additional_kwargs["max_tool_calls"] = max_tool_calls_dict
-        
+
         # Add any additional vllm_kwargs
         if vllm_kwargs is not None:
             additional_kwargs.update(vllm_kwargs)
 
+        # Check if speculative decoding is enabled
+        has_speculative = (
+            vllm_kwargs is not None and 
+            "speculative_config" in vllm_kwargs and 
+            vllm_kwargs["speculative_config"] is not None
+        )
+        
+        # Build the remote kwargs
+        remote_kwargs = {
+            "model": pretrain,
+            "revision": revision,
+            "tokenizer": tokenizer_name_or_path,
+            "tokenizer_revision": revision,
+            "trust_remote_code": True,
+            "tensor_parallel_size": tensor_parallel_size,
+            "enforce_eager": enforce_eager,
+            "dtype": "bfloat16",
+            "seed": seed + i,
+            "distributed_executor_backend": distributed_executor_backend,
+            "enable_prefix_caching": enable_prefix_caching,
+            "max_model_len": max_model_len,
+            "gpu_memory_utilization": vllm_gpu_memory_utilization,
+            "bundle_indices": bundle_indices,
+            "num_gpus": 0.2 if use_hybrid_engine else 1,
+            "enable_sleep_mode": vllm_enable_sleep,
+            "noset_visible_devices": ray_noset_visible_devices(),
+            "tool_use": tool_use,
+            "prompt_queue": prompt_queue,
+            "results_queue": results_queue,
+            "eval_results_queue": eval_results_queue,
+            **additional_kwargs,
+        }
+        
+        # Only add worker_extension_cls if speculative decoding is not enabled
+        # due to a bug in vllm V0 engine with worker extensions
+        if not has_speculative:
+            remote_kwargs["worker_extension_cls"] = "open_instruct.vllm_utils_workerwrap.WorkerWrap"
+        else:
+            print("WARNING: Disabling worker_extension_cls due to vllm V0 engine incompatibility with speculative decoding")
+        
         vllm_engines.append(
             LLMRayActor.options(
                 num_cpus=num_gpus,
@@ -379,35 +439,29 @@ def create_vllm_engines(
                 scheduling_strategy=scheduling_strategy,
                 # VLLM v1 multiprocessing is required due to https://github.com/vllm-project/vllm/issues/15349
                 runtime_env=ray.runtime_env.RuntimeEnv(env_vars={"VLLM_ENABLE_V1_MULTIPROCESSING": "0"}),
-            ).remote(
-                model=pretrain,
-                revision=revision,
-                tokenizer=tokenizer_name_or_path,
-                tokenizer_revision=revision,
-                trust_remote_code=True,
-                worker_extension_cls="open_instruct.vllm_utils_workerwrap.WorkerWrap",
-                tensor_parallel_size=tensor_parallel_size,
-                enforce_eager=enforce_eager,
-                dtype="bfloat16",
-                seed=seed + i,
-                distributed_executor_backend=distributed_executor_backend,
-                enable_prefix_caching=enable_prefix_caching,
-                max_model_len=max_model_len,
-                gpu_memory_utilization=vllm_gpu_memory_utilization,
-                bundle_indices=bundle_indices,
-                num_gpus=0.2 if use_hybrid_engine else 1,
-                enable_sleep_mode=vllm_enable_sleep,
-                noset_visible_devices=ray_noset_visible_devices(),
-                tool_use=tool_use,
-                prompt_queue=prompt_queue,
-                results_queue=results_queue,
-                eval_results_queue=eval_results_queue,
-                **additional_kwargs,
-            )
+            ).remote(**remote_kwargs)
         )
 
     if vllm_enable_sleep:
         batch_vllm_engine_call(vllm_engines, "sleep", rank_0_only=False)
+
+    # Check that all engines are alive and ready
+    logger.info("Checking that all vLLM engines are alive...")
+    try:
+        # Try to call a simple method on each engine to ensure they're initialized
+        for i, engine in enumerate(vllm_engines):
+            # This will raise an exception if the actor died during initialization
+            ray.get(engine.__ray_ready__.remote(), timeout=120)
+            logger.info(f"Engine {i} is ready")
+    except Exception as e:
+        logger.error(f"Failed to initialize vLLM engines: {e}")
+        # Kill any engines that may have started
+        for engine in vllm_engines:
+            try:
+                ray.kill(engine)
+            except:
+                pass
+        raise RuntimeError(f"Failed to initialize vLLM engines: {e}")
 
     return vllm_engines
 

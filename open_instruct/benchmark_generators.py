@@ -24,6 +24,7 @@ import torch
 import torch.utils.flop_counter
 import transformers
 import vllm
+from vllm import config as vllm_config
 from ray.util import queue as ray_queue
 
 from open_instruct import dataset_transformation, grpo_fast, model_utils, utils, vllm_utils3
@@ -549,7 +550,13 @@ def main() -> None:
     free_all_gpu_memory()
 
     dataset = setup_dataset(args, tokenizer_config)
-    vllm_engines, param_prompt_Q, inference_results_Q = setup_vllm_engines(args, model_config)
+    
+    vllm_engines, param_prompt_Q, inference_results_Q = setup_vllm_engines(
+        args,
+        model_config,
+        vllm_kwargs={"speculative_config": {"model": "Qwen/Qwen2.5-1.5B",
+                                            "num_speculative_tokens": 5}},
+    )
 
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
