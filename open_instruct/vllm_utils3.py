@@ -206,7 +206,7 @@ class LLMRayActor:
         num_training_steps=None,
         resume_training_step=1,
         batch_size=None,
-            timeout: int = 0.1,
+        timeout: int = 0.1,
     ):
         """Process prompts from the queue and put results in the results queue."""
         for training_step in range(resume_training_step, num_training_steps + 1):
