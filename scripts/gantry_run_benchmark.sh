@@ -39,12 +39,12 @@ python -m nltk.downloader punkt' \
     --temperature 1.0 \
     --response_length "$response_length" \
     --vllm_top_p 0.9 \
-    --num_unique_prompts_rollout 8 \
+    --num_unique_prompts_rollout 32 \
     --num_samples_per_prompt_rollout 16 \
     --vllm_num_engines 1 \
     --vllm_tensor_parallel_size 1 \
     --vllm_gpu_memory_utilization 0.9 \
-    --pack_length 20480 \
+    --pack_length 40000 \
     --chat_template_name "tulu_thinker" \
     --trust_remote_code \
     --seed 42 \

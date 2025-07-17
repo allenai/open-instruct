@@ -44,6 +44,8 @@ logger = logging.getLogger(__name__)
 # Determine data directory
 if pathlib.Path("/weka").exists():
     DATA_DIR = pathlib.Path("/weka") / "finbarrt" / "open_instruct_generators_benchmark"
+elif pathlib.Path("/root").exists():
+    DATA_DIR = pathlib.Path("/root") / "finbarrt" / "open_instruct_generators_benchmark"
 else:
     DATA_DIR = pathlib.Path("/tmp") / "open_instruct_generators_benchmark"
 
@@ -94,6 +96,83 @@ def save_config(args, tokenizer_config, model_config, timestamp: int):
         json.dump(config_dict, f, indent=2, default=str)
 
     logger.info(f"Saved config to {config_path}")
+
+
+def get_git_commit() -> str:
+    """Get the current git commit hash."""
+    git_dir = pathlib.Path(".git")
+    if not git_dir.exists():
+        return "unknown"
+
+    head_file = git_dir / "HEAD"
+    if not head_file.exists():
+        return "unknown"
+
+    with head_file.open() as f:
+        content = f.read().strip()
+
+    if not content.startswith("ref:"):
+        # Detached HEAD
+        return content[:8]
+
+    # HEAD points to a branch
+    ref_path = git_dir / content[5:]
+
+    with ref_path.open() as ref_f:
+        return ref_f.read().strip()[:8]  # First 8 chars
+
+
+def save_benchmark_results_to_csv(
+    results: list[dict[str, Any]], total_time: float, args: grpo_fast.Args, model_config: model_utils.ModelConfig
+) -> None:
+    """Save benchmark results to CSV file."""
+    git_commit = get_git_commit()
+    csv_path: pathlib.Path = DATA_DIR / "generator_benchmark_results.csv"
+
+    # Calculate aggregated metrics (excluding first batch)
+    avg_results = average_results(results[1:])
+    total_tokens = sum(r["num_new_tokens"] for r in results)
+    total_generation_time = sum(r["generation_time"] for r in results)
+
+    # Prepare row data
+    row_data = {
+        "git_commit": git_commit,
+        "model": model_config.model_name_or_path,
+        "total_batches": len(results),
+        "batch_size": args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout,
+        "num_unique_prompts_rollout": args.num_unique_prompts_rollout,
+        "num_samples_per_prompt_rollout": args.num_samples_per_prompt_rollout,
+        "response_length": args.response_length,
+        "total_time": total_time,
+        "total_generation_time": total_generation_time,
+        "generation_time_percentage": (total_generation_time / total_time) * 100,
+        "total_tokens": total_tokens,
+        "avg_tokens_per_second": avg_results["tokens_per_second"],
+        "avg_mfu": avg_results["mfu"],
+        "avg_generation_time_per_batch": avg_results["generation_time"],
+        "avg_new_tokens_per_sample": avg_results["num_new_tokens"],
+    }
+
+    # Check if file exists to determine if we need to write headers
+    file_exists = pathlib.Path(csv_path).exists()
+
+    # Create directory if it doesn't exist
+    csv_dir = csv_path.parent
+    csv_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write to CSV
+    with csv_path.open("a", newline="") as csvfile:
+        fieldnames = list(row_data.keys())
+
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+        # Write header if file is new
+        if not file_exists:
+            writer.writeheader()
+
+        writer.writerow(row_data)
+
+    logger.info(f"Saved benchmark results to {csv_path}")
 
 
 def free_all_gpu_memory(device: int | str = 0) -> None:
@@ -255,29 +334,6 @@ def get_batch_data(
     return prompts
 
 
-def run_generation_batch(
-    inference_results_Q: ray_queue.Queue, param_prompt_Q: ray_queue.Queue, prompts: list[list[int]], batch_idx: int
-) -> dict[str, Any]:
-    """Run generation for a batch of prompts and measure performance."""
-
-    start_time = time.time()
-    param_prompt_Q.put(vllm_utils3.PromptRequest(prompts=prompts, dataset_index=batch_idx))
-    result = inference_results_Q.get()
-    generation_time = time.time() - start_time
-
-    new_tokens = sum(len(response) for response in result.responses)
-    tokens_per_second = new_tokens / generation_time
-    return {
-        "tokens_per_second": tokens_per_second,
-        "generation_time": generation_time,
-        "num_new_tokens": new_tokens,
-        # dict mapping string reasons to counts.
-        "finish_reasons": collections.Counter(result.finish_reasons),
-        "response_lengths": [len(response) for response in result.responses],
-        "prompt_lengths": [len(prompt) for prompt in prompts],  # Original unique prompts
-    }
-
-
 def run_benchmark(
     dataset: datasets.Dataset,
     vllm_engines: list[ray.actor.ActorHandle],
@@ -286,6 +342,7 @@ def run_benchmark(
     args: grpo_fast.Args,
     model_config: model_utils.ModelConfig,
     timestamp: int,
+    flops_per_token: int,
     num_batches: int = 5,
 ) -> list[dict[str, Any]]:
     """Run the full benchmark."""
@@ -300,12 +357,6 @@ def run_benchmark(
     )
 
     eval_generation_config = vllm.SamplingParams(temperature=0.0, max_tokens=args.response_length, n=1)
-
-    # We have to do this before starting vLLM as otherwise we get OOM errors.
-    flops_per_token = calculate_model_usage_per_token(model_config.model_name_or_path)
-
-    # Unclear why we need this. We didn't need it before torch 2.7.0.
-    free_all_gpu_memory()
 
     # Start vLLM engines to process from queues
     for engine in vllm_engines:
@@ -324,22 +375,48 @@ def run_benchmark(
     total_start_time = time.time()
     device_name = get_device_name(torch.cuda.get_device_name(0))
     device_flops = GPU_SPECS[device_name]["flops"]
+
+    # Submit all batches at once and track submission times
+    logger.info(f"Submitting all {num_batches} batches to the queue...")
+    all_prompts = [
+        get_batch_data(dataset, args.num_unique_prompts_rollout, batch_idx) for batch_idx in range(num_batches)
+    ]
+    submission_start_time = time.time()
     for batch_idx in range(num_batches):
-        logger.info(f"Processing batch {batch_idx + 1}/{num_batches}")
+        param_prompt_Q.put(vllm_utils3.PromptRequest(prompts=all_prompts[batch_idx], dataset_index=batch_idx))
+    submission_time = time.time() - submission_start_time
+    logger.info(f"All batches submitted in {submission_time:.2f}s")
 
-        prompts = get_batch_data(dataset, args.num_unique_prompts_rollout, batch_idx)
+    # Receive results and measure time for each batch
+    last_completion_time = submission_start_time
+    for batch_idx in range(num_batches):
+        result = inference_results_Q.get()
+        completion_time = time.time()
+        batch_generation_time = completion_time - last_completion_time
+        last_completion_time = completion_time
 
-        # Run generation
-        result = run_generation_batch(inference_results_Q, param_prompt_Q, prompts, batch_idx)
-        result["mfu"] = 100 * result["tokens_per_second"] * flops_per_token / device_flops
+        # Process result
+        new_tokens = sum(len(response) for response in result.responses)
+        tokens_per_second = new_tokens / batch_generation_time
+
+        result_dict = {
+            "tokens_per_second": tokens_per_second,
+            "generation_time": batch_generation_time,
+            "num_new_tokens": new_tokens,
+            "finish_reasons": collections.Counter(result.finish_reasons),
+            "response_lengths": [len(response) for response in result.responses],
+            "batch_idx": result.dataset_index,
+        }
+        result_dict["mfu"] = 100 * result_dict["tokens_per_second"] * flops_per_token / device_flops
+
         # We incrementally save completion lengths so even if the job dies, we still have data.
-        save_completion_lengths([result], timestamp, batch_idx)
-        results.append(result)
+        save_completion_lengths([result_dict], timestamp, result.dataset_index)
+        results.append(result_dict)
         logger.info(
-            f"Batch {batch_idx + 1} completed: "
-            f"{result['tokens_per_second']:.2f} new tokens/sec, "
-            f"MFU: {result['mfu']:.2f}%, "
-            f"{result['generation_time']:.2f}s"
+            f"Batch {result.dataset_index + 1}: "
+            f"{result_dict['tokens_per_second']:.2f} new tokens/sec, "
+            f"MFU: {result_dict['mfu']:.2f}%, "
+            f"generation time: {batch_generation_time:.2f}s"
         )
 
     total_time = time.time() - total_start_time
@@ -348,6 +425,7 @@ def run_benchmark(
     param_prompt_Q.put(None)
 
     print_summary(results, total_time, args, model_config)
+    save_benchmark_results_to_csv(results, total_time, args, model_config)
 
 
 def average_results(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -395,10 +473,10 @@ def print_summary(
     print(f"Total batches: {len(results)}")
     print(f"Batch size: {args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout}")
     print(f"Unique prompts per batch: {args.num_unique_prompts_rollout}")
-    print(f"Num rollouts: {args.num_unique_prompts_rollout}")
+    print(f"Num rollouts: {args.num_samples_per_prompt_rollout}")
     print(f"Max tokens: {args.response_length}")
     print("-" * 60)
-    print(f"Total time: {total_time:.2f}s ({total_generation_time / total_time:.2f}% generating)")
+    print(f"Total time: {total_time:.2f}s ({total_generation_time / total_time:.4%} generating)")
     print(f"Total new tokens generated: {total_tokens}")
     print("-" * 60)
     print("Results (excluding first batch):")
@@ -409,8 +487,8 @@ def print_summary(
 
     max_length = np.max(avg_results["response_lengths"])
     mean_length = np.mean(avg_results["response_lengths"])
-    wasted_compute = 100 * (max_length - mean_length) / max_length
-    print(f"Wasted compute % (variable response length): {wasted_compute:.2%}%")
+    wasted_compute = (max_length - mean_length) / max_length
+    print(f"Wasted compute % (variable response length): {wasted_compute:.2%}")
 
     print("-" * 60)
     print("HARDWARE SPECIFICATIONS:")
@@ -460,13 +538,24 @@ def main() -> None:
     # Ensure data directory exists
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+    # Calculate flops per token before starting vLLM
+    logger.info("Calculating model FLOPs per token...")
+    flops_per_token = calculate_model_usage_per_token(model_config.model_name_or_path)
+    logger.info(f"Model FLOPs per token: {flops_per_token:,}")
+
+    # Free GPU memory after calculating FLOPs and before starting vLLM
+    logger.info("Freeing GPU memory before starting vLLM...")
+    free_all_gpu_memory()
+
     dataset = setup_dataset(args, tokenizer_config)
     vllm_engines, param_prompt_Q, inference_results_Q = setup_vllm_engines(args, model_config)
 
     # Create the timestamp here so we use it for both filenames.
     timestamp = int(time.time())
     save_config(args, tokenizer_config, model_config, timestamp)
-    run_benchmark(dataset, vllm_engines, param_prompt_Q, inference_results_Q, args, model_config, timestamp)
+    run_benchmark(
+        dataset, vllm_engines, param_prompt_Q, inference_results_Q, args, model_config, timestamp, flops_per_token
+    )
 
     cleanup(vllm_engines)
 
