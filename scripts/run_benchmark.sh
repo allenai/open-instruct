@@ -4,6 +4,9 @@
 # E.g. $ ./gantry_run_benchmark.sh 64000
 set -e
 
+# Set V1 to 0 for AsyncLLMEngine compatibility
+export VLLM_USE_V1=0
+
 # Set default value for response_length
 response_length=64000
 
