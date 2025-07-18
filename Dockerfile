@@ -45,6 +45,7 @@ RUN python -m nltk.downloader punkt_tab
 
 COPY open_instruct open_instruct
 COPY oe-eval-internal oe-eval-internal
+COPY rl-rag-mcp rl-rag-mcp
 
 # install the package in editable mode
 COPY pyproject.toml .
