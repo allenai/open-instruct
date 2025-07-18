@@ -53,7 +53,7 @@ pip install --upgrade pip "setuptools<70.0.0" wheel
 # TODO, unpin setuptools when this issue in flash attention is resolved
 pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
 pip install packaging
-pip install flash-attn==2.7.2.post1 --no-build-isolation
+pip install flash-attn==2.7.2.post2 flashinfer-python>=0.2.7.post1 --no-build-isolation
 pip install -r requirements.txt
 pip install -e .
 python -m nltk.downloader punkt
@@ -62,7 +62,7 @@ python -m nltk.downloader punkt
 * **Local installation with uv (preview)**: We are experimenting with using [uv](https://docs.astral.sh/uv/). You can install via
 ```bash
 uv sync
-uv sync --extra compile --extra liger # to install flash attention and liger-kernel
+uv sync --extra compile --extra liger # to install flash attention, flash infer, and liger-kernel
 ```
 
 
