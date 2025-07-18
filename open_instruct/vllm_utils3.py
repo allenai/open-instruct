@@ -209,32 +209,25 @@ class LLMRayActor:
     ) -> None:
         """Process prompts from the queue and put results in the results queue."""
         for training_step in range(resume_training_step, num_training_steps + 1):
-            # Collect individual prompts to form a batch
             prompts_batch = []
             dataset_indices_batch = []
             eval_prompts = None
 
-            # Pull prompts until we have a full batch or queue is empty
             while len(prompts_batch) < batch_size:
-                # Use non-blocking get with timeout
                 request: PromptRequest = self.prompt_queue.get()
 
                 prompts_batch.append(request.prompt)
                 if request.dataset_index is not None:
                     dataset_indices_batch.append(request.dataset_index)
 
-                # Store eval prompts from the first request (they should be the same)
                 if eval_prompts is None and request.eval_prompts is not None:
                     eval_prompts = request.eval_prompts
 
-            # Process training prompts batch and get individual results
             results = self._generate_batch(prompts_batch, sampling_params, dataset_indices_batch)
 
-            # Put individual results back into the queue
             for result in results:
                 self.results_queue.put(result)
 
-            # Handle evaluation if needed
             if eval_prompts is not None and eval_sampling_params is not None and (training_step - 1) % eval_freq == 0:
                 eval_results = self._generate_batch(eval_prompts, eval_sampling_params, None)
                 for eval_result in eval_results:
