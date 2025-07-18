@@ -11,7 +11,7 @@ dependencies = [
     "datasets>=3.1.0",
     "debugpy>=1.8.13",
     "deepspeed==0.15.4", # 0.16.0 bugs out https://github.com/microsoft/DeepSpeed/issues/6793
-	"flashinfer-python>=0.2.7.post1",
+	"flashinfer-python>=0.2.7.post1; platform_system != 'Darwin'",
     "hf-transfer>=0.1.8",
     "litellm",
     "matplotlib>=3.9.3",
