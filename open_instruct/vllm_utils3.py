@@ -279,16 +279,13 @@ class LLMRayActor:
                 tool_calleds=tool_calleds,
             )
 
-            # Create individual result with single dataset index
-            individual_dataset_index = [dataset_indices[i]] if dataset_indices and i < len(dataset_indices) else None
-
             results.append(
                 GenerationResult(
                     responses=response_ids,
                     finish_reasons=finish_reasons,
                     masks=masks,
                     request_info=request_info,
-                    dataset_index=individual_dataset_index,
+                    dataset_index=[dataset_indices[i]],
                 )
             )
 
