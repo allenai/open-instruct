@@ -77,6 +77,7 @@ class LMJudgeVerifierConfig(VerifierConfig):
 class CodeVerifierConfig(VerifierConfig):
     code_api_url: str
     code_max_execution_time: float
+    code_pass_rate_reward_threshold: float
 
 
 @dataclass
@@ -762,6 +763,7 @@ class CodeVerifier(VerifierFunction):
 
     def __init__(self, verifier_config: CodeVerifierConfig) -> None:
         super().__init__("code", verifier_config=verifier_config, weight=1.0)
+        self.pass_rate_reward_threshold = verifier_config.code_pass_rate_reward_threshold
 
     def extract_python_code(self, model_output: str) -> str:
         """Extract the last code block between ``` markers from the model output."""
@@ -830,7 +832,8 @@ class CodeVerifier(VerifierFunction):
             result = await asyncio.to_thread(make_request)
             passes = result["results"]
             pass_rate = sum(passes) / len(passes) if passes else 0.0
-            return VerificationResult(score=pass_rate)
+            score = 0.0 if pass_rate < self.pass_rate_reward_threshold else pass_rate
+            return VerificationResult(score=score)
         except Exception as e:
             logger.warning(f"Error verifying code sample: {e}")
             return VerificationResult(score=0.0)
