@@ -228,7 +228,7 @@ class LLMRayActor:
                     eval_prompts = request.eval_prompts
 
             # Process training prompts batch and get individual results
-            results = self._generate_batch_individual(prompts_batch, sampling_params, dataset_indices_batch)
+            results = self._generate_batch(prompts_batch, sampling_params, dataset_indices_batch)
 
             # Put individual results back into the queue
             for result in results:
@@ -236,7 +236,7 @@ class LLMRayActor:
 
             # Handle evaluation if needed
             if eval_prompts is not None and eval_sampling_params is not None and (training_step - 1) % eval_freq == 0:
-                eval_results = self._generate_batch_individual(eval_prompts, eval_sampling_params, None)
+                eval_results = self._generate_batch(eval_prompts, eval_sampling_params, None)
                 for eval_result in eval_results:
                     eval_result.is_eval = True
                     self.eval_results_queue.put(eval_result)
