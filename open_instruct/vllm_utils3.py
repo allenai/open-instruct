@@ -17,7 +17,6 @@
 
 import dataclasses
 import os
-import queue
 from datetime import timedelta
 from typing import Any, List, Optional, Union
 
@@ -207,7 +206,6 @@ class LLMRayActor:
         num_training_steps: Optional[int] = None,
         resume_training_step: int = 1,
         batch_size: Optional[int] = None,
-        timeout: float = 0.1,
     ) -> None:
         """Process prompts from the queue and put results in the results queue."""
         for training_step in range(resume_training_step, num_training_steps + 1):
@@ -217,32 +215,17 @@ class LLMRayActor:
             eval_prompts = None
 
             # Pull prompts until we have a full batch or queue is empty
-            while len(prompts_batch) < (batch_size or 1):
-                try:
-                    # Use non-blocking get with timeout
-                    request: Optional[PromptRequest] = self.prompt_queue.get(timeout=timeout)
-                    if request is None:
-                        break
-                    
-                    # Each request contains a single prompt
-                    prompts_batch.append(request.prompt)
-                    if request.dataset_index is not None:
-                        dataset_indices_batch.append(request.dataset_index)
-                    
-                    # Store eval prompts from the first request (they should be the same)
-                    if eval_prompts is None and request.eval_prompts is not None:
-                        eval_prompts = request.eval_prompts
-                        
-                except:
-                    # Timeout - process what we have if anything
-                    if prompts_batch:
-                        break
-                    else:
-                        # No prompts collected, wait a bit more
-                        continue
-            
-            if not prompts_batch:
-                continue
+            while len(prompts_batch) < batch_size:
+                # Use non-blocking get with timeout
+                request: PromptRequest = self.prompt_queue.get()
+
+                prompts_batch.append(request.prompt)
+                if request.dataset_index is not None:
+                    dataset_indices_batch.append(request.dataset_index)
+
+                # Store eval prompts from the first request (they should be the same)
+                if eval_prompts is None and request.eval_prompts is not None:
+                    eval_prompts = request.eval_prompts
 
             # Process training prompts batch and get individual results
             results = self._generate_batch_individual(prompts_batch, sampling_params, dataset_indices_batch)
@@ -259,50 +242,6 @@ class LLMRayActor:
                     self.eval_results_queue.put(eval_result)
 
     def _generate_batch(
-        self, prompts: List[List[int]], sampling_params, dataset_index: Optional[List[int]] = None
-    ) -> GenerationResult:
-        """Generate responses for a batch of prompts."""
-        outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
-
-        # Process outputs
-        response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
-        finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
-
-        if self.tool_use:
-            masks = [out.mask for output in outputs for out in output.outputs]
-            num_calls = [out.num_calls for output in outputs for out in output.outputs]
-            timeouts = [out.timeout for output in outputs for out in output.outputs]
-            tool_errors = [out.tool_error for output in outputs for out in output.outputs]
-            tool_outputs = [out.tool_output for output in outputs for out in output.outputs]
-            tool_runtimes = [out.tool_runtime for output in outputs for out in output.outputs]
-            tool_calleds = [out.tool_called for output in outputs for out in output.outputs]
-        else:
-            masks = [[1] * len(resp) for resp in response_ids]
-            num_calls = [0] * len(response_ids)
-            timeouts = [0] * len(response_ids)
-            tool_errors = [""] * len(response_ids)
-            tool_outputs = [""] * len(response_ids)
-            tool_runtimes = [0] * len(response_ids)
-            tool_calleds = [False] * len(response_ids)
-
-        request_info = RequestInfo(
-            num_calls=num_calls,
-            timeouts=timeouts,
-            tool_errors=tool_errors,
-            tool_outputs=tool_outputs,
-            tool_runtimes=tool_runtimes,
-            tool_calleds=tool_calleds,
-        )
-
-        return GenerationResult(
-            responses=response_ids,
-            finish_reasons=finish_reasons,
-            masks=masks,
-            request_info=request_info,
-            dataset_index=dataset_index,
-        )
-
-    def _generate_batch_individual(
         self, prompts: List[List[int]], sampling_params, dataset_indices: Optional[List[int]] = None
     ) -> List[GenerationResult]:
         """Generate responses for a batch of prompts and return individual results."""
