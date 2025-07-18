@@ -11,7 +11,6 @@ dependencies = [
     "datasets>=3.1.0",
     "debugpy>=1.8.13",
     "deepspeed==0.15.4", # 0.16.0 bugs out https://github.com/microsoft/DeepSpeed/issues/6793
-	"flashinfer-python>=0.2.7.post1; platform_system != 'Darwin'",
     "hf-transfer>=0.1.8",
     "litellm",
     "matplotlib>=3.9.3",
@@ -56,7 +55,8 @@ explicit = true
 
 # flash-attn related setups
 [project.optional-dependencies]
-compile = ["flash-attn>=2.8.0.post1"]
+compile = ["flash-attn>=2.8.0.post1",
+		   "flashinfer-python>=0.2.7.post1"]
 liger = ["liger-kernel>=0.5.4"]
 code = [
     "fastapi>=0.100.0",
