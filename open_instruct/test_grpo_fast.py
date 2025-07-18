@@ -106,7 +106,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
 
         # Mock data - simulating num_unique_prompts_rollout * num_samples_per_prompt_rollout
         # Use lists of integers to simulate tokenized prompts
-        queries_next = [[i, i+1, i+2] for i in range(num_unique_prompts_rollout)]  # Mock token IDs
+        queries_next = [[i, i + 1, i + 2] for i in range(num_unique_prompts_rollout)]  # Mock token IDs
         ground_truths_next = [f"truth_{i}" for i in range(num_unique_prompts_rollout)]
         datasets_next = [f"dataset_{i}" for i in range(num_unique_prompts_rollout)]
 
@@ -147,7 +147,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
             self.assertEqual(request.training_step, training_step)
             self.assertIsInstance(request.dataset_index, int)  # Single dataset index
             self.assertIsInstance(request.prompt, list)  # Single prompt as list of ints
-            
+
             # Store request for later verification
             requests_processed.append(request)
 
@@ -180,7 +180,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
         test_pending_queries_map = {}
         for i in range(num_unique_prompts_rollout):
             test_pending_queries_map[i] = (queries_next[i], ground_truths_next[i], datasets_next[i])
-        
+
         # Use accumulate_inference_batches to combine results
         combined_result, combined_queries, combined_ground_truths, combined_datasets = accumulate_inference_batches(
             inference_results_Q, test_pending_queries_map, num_unique_prompts_rollout, training_step
