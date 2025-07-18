@@ -29,8 +29,9 @@ OPEN_INSTRUCT_COMMANDS = [
     "open_instruct/reward_modeling.py",
 ]
 
-OPEN_INSTRUCT_RESUMABLES = ["open_instruct/grpo_fast.py"]
-
+OPEN_INSTRUCT_RESUMABLES = [
+    "open_instruct/grpo_fast.py",
+]
 
 # ----------------------------------------------------------------------
 # Mason logic
@@ -44,9 +45,11 @@ def parse_beaker_dataset(dataset_str):
 
 def parse_env_var(env_var_str: str) -> Dict[str, str]:
     """Parse environment variable string in the format 'name=value'"""
-    if "=" not in env_var_str:
-        raise argparse.ArgumentTypeError(f"Environment variable must be in format 'name=value', got: {env_var_str}")
-    name, value = env_var_str.split("=", 1)
+    if '=' not in env_var_str:
+        raise argparse.ArgumentTypeError(
+            f"Environment variable must be in format 'name=value', got: {env_var_str}"
+        )
+    name, value = env_var_str.split('=', 1)
     if not name:
         raise argparse.ArgumentTypeError("Environment variable name cannot be empty")
     return {"name": name, "value": value}
@@ -75,7 +78,9 @@ WEKA_CLUSTERS = [
     "ai2/triton-cirrascale",
     "ai2/rhea-cirrascale",
 ]
-GCP_CLUSTERS = ["ai2/augusta-google-1"]
+GCP_CLUSTERS = [
+    "ai2/augusta-google-1"
+]
 
 INTERCONNECT_CLUSTERS = [
     "ai2/jupiter-cirrascale-2",
@@ -88,10 +93,18 @@ INTERCONNECT_CLUSTERS = [
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--cluster", type=str, nargs="+", help="Beaker clusters on which the job could be run.", required=True
+        "--cluster",
+        type=str,
+        nargs="+",
+        help="Beaker clusters on which the job could be run.",
+        required=True,
     )
     parser.add_argument(
-        "--hostname", type=str, nargs="+", help="Beaker hostname on which the job could be run.", default=None
+        "--hostname",
+        type=str,
+        nargs="+",
+        help="Beaker hostname on which the job could be run.",
+        default=None
     )
     parser.add_argument("--max_retries", type=int, help="Number of retries", default=0)
     parser.add_argument("--budget", type=str, help="Budget to use.", required=True)
@@ -104,7 +117,10 @@ def get_args():
         default="ai2/cuda11.8-cudnn8-dev-ubuntu20.04",
     )
     parser.add_argument(
-        "--workspace", type=str, help="The Beaker workspace to use. If not set, use your default.", default=None
+        "--workspace",
+        type=str,
+        help="The Beaker workspace to use. If not set, use your default.",
+        default=None,
     )
     parser.add_argument(
         "--beaker_datasets",
@@ -122,27 +138,40 @@ def get_args():
         help="Optionally, a description for this job in Beaker.",
         default="Beaker-Mason job.",
     )
-    parser.add_argument("--task_name", type=str, help="Name for the Beaker task.", default="beaker_mason")
-    parser.add_argument("--priority", type=str, help="Beaker job priority.", default="normal")
-    parser.add_argument("--preemptible", action="store_true", help="If given, run as preemptible")
-    parser.add_argument("--pure_docker_mode", action="store_true", help="If given, run in pure docker mode")
-    parser.add_argument("--no_hf_cache_env", action="store_true", help="Getting deprecated; it does nothing")
-    parser.add_argument("--no_mount_nfs", action="store_true", help="Getting deprecated; it does nothing")
-    parser.add_argument("--resumable", action="store_true", help="If given, make the job resumable")
+    parser.add_argument(
+        "--task_name",
+        type=str,
+        help="Name for the Beaker task.",
+        default="beaker_mason"
+    )
+    parser.add_argument(
+        "--priority", type=str, help="Beaker job priority.", default="normal"
+    )
+    parser.add_argument(
+        "--preemptible", action="store_true", help="If given, run as preemptible"
+    )
+    parser.add_argument(
+        "--pure_docker_mode", action="store_true", help="If given, run in pure docker mode"
+    )
+    parser.add_argument(
+        "--no_hf_cache_env", action="store_true", help="Getting deprecated; it does nothing"
+    )
+    parser.add_argument(
+        "--no_mount_nfs", action="store_true", help="Getting deprecated; it does nothing"
+    )
+    parser.add_argument(
+        "--resumable", action="store_true", help="If given, make the job resumable"
+    )
     parser.add_argument(
         "--no_auto_dataset_cache", action="store_true", help="If given, don't cache the dataset automatically"
     )
     parser.add_argument(
-        "--auto_output_dir_path",
-        type=str,
-        default="/weka/oe-adapt-default/allennlp/deletable_checkpoint",
-        help="If given, automatically replace the `--output_dir` argument with this path, essentially using it as a prefix",
+        "--auto_output_dir_path", type=str, default="/weka/oe-adapt-default/allennlp/deletable_checkpoint",
+        help="If given, automatically replace the `--output_dir` argument with this path, essentially using it as a prefix"
     )
     parser.add_argument(
-        "--auto_checkpoint_state_dir",
-        type=str,
-        default="/weka/oe-adapt-default/allennlp/deletable_checkpoint_states",
-        help="If given, automatically replace the `--checkpoint_state_dir` argument with this path, essentially using it as a prefix",
+        "--auto_checkpoint_state_dir", type=str, default="/weka/oe-adapt-default/allennlp/deletable_checkpoint_states",
+        help="If given, automatically replace the `--checkpoint_state_dir` argument with this path, essentially using it as a prefix"
     )
     parser.add_argument(
         "--env",
@@ -154,7 +183,7 @@ def get_args():
     )
     parser.add_argument(
         "--secret",
-        type=parse_env_var,
+       type=parse_env_var,
         action="append",
         help="""Additional secret env variables in the format 'name=value'.
         Can be specified multiple times. Example: --secret MY_VAR=value1 --secret OTHER_VAR=value2""",
@@ -205,25 +234,29 @@ def parse_commands(command_args: List[str]) -> List[List[str]]:
     return commands
 
 
-def get_env_vars(
-    pure_docker_mode: bool,
-    cluster: List[str],
-    beaker_secrets: List[str],
-    whoami: str,
-    resumable: bool,
-    num_nodes: int,
-    additional_env_vars: List[Dict[str, str]],
-    additional_secrets: List[Dict[str, str]],
-):
+def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: List[str],
+                whoami: str, resumable: bool, num_nodes: int, additional_env_vars: List[Dict[str, str]],
+                additional_secrets: List[Dict[str, str]]):
     env_vars = []
     if "VLLM_ATTENTION_BACKEND" not in additional_env_vars:
-        env_vars.append(beaker.EnvVar(name="VLLM_ATTENTION_BACKEND", value="FLASHINFER"))
+        env_vars.append(beaker.EnvVar(name="VLLM_ATTENTION_BACKEND",
+                                      value="FLASHINFER"))
     # Add user-specified environment variables first
     for env_var in additional_env_vars:
-        env_vars.append(beaker.EnvVar(name=env_var["name"], value=env_var["value"]))
+        env_vars.append(
+            beaker.EnvVar(
+                name=env_var["name"],
+                value=env_var["value"]
+            )
+        )
     # add user-specific secrets
     for secret in additional_secrets:
-        env_vars.append(beaker.EnvVar(name=secret["name"], secret=secret["value"]))
+        env_vars.append(
+            beaker.EnvVar(
+                name=secret["name"],
+                secret=secret["value"],
+            )
+        )
 
     useful_secrets = [
         "HF_TOKEN",
@@ -237,103 +270,219 @@ def get_env_vars(
     ]
     for useful_secret in useful_secrets:
         if f"{whoami}_{useful_secret}" in beaker_secrets:
-            env_vars.append(beaker.EnvVar(name=useful_secret, secret=f"{whoami}_{useful_secret}"))
+            env_vars.append(
+                beaker.EnvVar(
+                    name=useful_secret,
+                    secret=f"{whoami}_{useful_secret}",
+                )
+            )
         elif useful_secret in beaker_secrets:
-            env_vars.append(beaker.EnvVar(name=useful_secret, secret=useful_secret))
+            env_vars.append(
+                beaker.EnvVar(
+                    name=useful_secret,
+                    secret=useful_secret,
+                )
+            )
 
-    # use the user's PATH; including the conda / python PATH
+     # use the user's PATH; including the conda / python PATH
     if not pure_docker_mode:
-        env_vars.extend([beaker.EnvVar(name="PATH", value=os.getenv("PATH"))])
+        env_vars.extend([
+            beaker.EnvVar(
+                name="PATH",
+                value=os.getenv("PATH"),
+            ),
+        ])
 
     # if all cluster is in weka, we mount the weka
     if all(c in WEKA_CLUSTERS for c in cluster):
-        env_vars.extend(
-            [
-                beaker.EnvVar(name="HF_HOME", value="/weka/oe-adapt-default/allennlp/.cache/huggingface"),
-                beaker.EnvVar(name="HF_DATASETS_CACHE", value="/weka/oe-adapt-default/allennlp/.cache/huggingface"),
-                beaker.EnvVar(name="HF_HUB_CACHE", value="/weka/oe-adapt-default/allennlp/.cache/hub"),
-                beaker.EnvVar(
-                    name="CHECKPOINT_OUTPUT_DIR",
-                    value=f"/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/{global_wandb_id}",
-                ),
-            ]
-        )
+        env_vars.extend([
+            beaker.EnvVar(
+                name="HF_HOME",
+                value="/weka/oe-adapt-default/allennlp/.cache/huggingface",
+            ),
+            beaker.EnvVar(
+                name="HF_DATASETS_CACHE",
+                value="/weka/oe-adapt-default/allennlp/.cache/huggingface",
+            ),
+            beaker.EnvVar(
+                name="HF_HUB_CACHE",
+                value="/weka/oe-adapt-default/allennlp/.cache/hub",
+            ),
+            beaker.EnvVar(
+                name="CHECKPOINT_OUTPUT_DIR",
+                value=f"/weka/oe-adapt-default/allennlp/deletable_checkpoint_states/{global_wandb_id}",
+            ),
+        ])
         if num_nodes > 1:
-            env_vars.extend(
-                [
-                    beaker.EnvVar(name="NCCL_SOCKET_IFNAME", value="ib"),
-                    beaker.EnvVar(name="NCCL_IB_HCA", value="^=mlx5_bond_0"),
-                    beaker.EnvVar(name="NCCL_DEBUG", value="INFO"),
-                ]
-            )
+            env_vars.extend([
+                beaker.EnvVar(
+                    name="NCCL_SOCKET_IFNAME",
+                    value="ib",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_IB_HCA",
+                    value="^=mlx5_bond_0",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_DEBUG",
+                    value="INFO",
+                ),
+            ])
     # if all cluster is in gcp we add the following env
 
     elif all(c in GCP_CLUSTERS for c in cluster):
-        env_vars.extend(
-            [
-                beaker.EnvVar(name="HF_HOME", value="/filestore/.cache/huggingface"),
-                beaker.EnvVar(name="HF_DATASETS_CACHE", value="/filestore/.cache/huggingface"),
-                beaker.EnvVar(name="HF_HUB_CACHE", value="/filestore/.cache/hub"),
-                beaker.EnvVar(
-                    name="HF_HUB_ENABLE_HF_TRANSFER",
-                    value="0",  # we disable it because GCP is weird on uploading to the hub
-                ),
-            ]
-        )
+        env_vars.extend([
+            beaker.EnvVar(
+                name="HF_HOME",
+                value="/filestore/.cache/huggingface",
+            ),
+            beaker.EnvVar(
+                name="HF_DATASETS_CACHE",
+                value="/filestore/.cache/huggingface",
+            ),
+            beaker.EnvVar(
+                name="HF_HUB_CACHE",
+                value="/filestore/.cache/hub",
+            ),
+            beaker.EnvVar(
+                name="HF_HUB_ENABLE_HF_TRANSFER",
+                value="0", # we disable it because GCP is weird on uploading to the hub
+            ),
+        ])
         if num_nodes > 1:
-            env_vars.extend(
-                [
-                    beaker.EnvVar(name="LD_LIBRARY_PATH", value=r"/var/lib/tcpxo/lib64:${LD_LIBRARY_PATH}"),
-                    beaker.EnvVar(name="NCCL_CROSS_NIC", value="0"),
-                    beaker.EnvVar(name="NCCL_ALGO", value="Ring,Tree"),
-                    beaker.EnvVar(name="NCCL_PROTO", value="Simple"),
-                    beaker.EnvVar(name="NCCL_MIN_NCHANNELS", value="4"),
-                    beaker.EnvVar(name="NCCL_P2P_NET_CHUNKSIZE", value="524288"),
-                    beaker.EnvVar(name="NCCL_P2P_PCI_CHUNKSIZE", value="524288"),
-                    beaker.EnvVar(name="NCCL_P2P_NVL_CHUNKSIZE", value="1048576"),
-                    beaker.EnvVar(name="NCCL_FASTRAK_NUM_FLOWS", value="2"),
-                    beaker.EnvVar(name="NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL", value="0"),
-                    beaker.EnvVar(name="NCCL_BUFFSIZE", value="8388608"),
-                    beaker.EnvVar(name="NCCL_FASTRAK_USE_SNAP", value="1"),
-                    beaker.EnvVar(name="CUDA_VISIBLE_DEVICES", value="0,1,2,3,4,5,6,7"),
-                    beaker.EnvVar(name="NCCL_NET_GDR_LEVEL", value="PIX"),
-                    beaker.EnvVar(name="NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING", value="0"),
-                    beaker.EnvVar(name="NCCL_TUNER_PLUGIN", value="libnccl-tuner.so"),
-                    beaker.EnvVar(
-                        name="NCCL_TUNER_CONFIG_PATH", value="/var/lib/tcpxo/lib64/a3plus_tuner_config.textproto"
-                    ),
-                    beaker.EnvVar(
-                        name="NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE",
-                        value="/var/lib/tcpxo/lib64/a3plus_guest_config.textproto",
-                    ),
-                    beaker.EnvVar(name="NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS", value="600000"),
-                    beaker.EnvVar(name="NCCL_NVLS_ENABLE", value="0"),
-                    beaker.EnvVar(name="NCCL_DEBUG", value="WARN"),
-                    beaker.EnvVar(name="NCCL_FASTRAK_CTRL_DEV", value="enp0s12"),
-                    beaker.EnvVar(
-                        name="NCCL_FASTRAK_IFNAME",
-                        value="enp6s0,enp7s0,enp13s0,enp14s0,enp134s0,enp135s0,enp141s0,enp142s0",
-                    ),
-                    beaker.EnvVar(name="NCCL_SOCKET_IFNAME", value="enp0s12"),
-                    beaker.EnvVar(name="NCCL_USE_SNAP", value="1"),
-                    beaker.EnvVar(name="NCCL_FASTRAK_USE_LLCM", value="1"),
-                    beaker.EnvVar(name="NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY", value="/dev/aperture_devices"),
-                ]
-            )
+            env_vars.extend([
+                beaker.EnvVar(
+                    name="LD_LIBRARY_PATH",
+                    value=r"/var/lib/tcpxo/lib64:${LD_LIBRARY_PATH}",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_CROSS_NIC",
+                    value="0",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_ALGO",
+                    value="Ring,Tree",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_PROTO",
+                    value="Simple",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_MIN_NCHANNELS",
+                    value="4",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_P2P_NET_CHUNKSIZE",
+                    value="524288",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_P2P_PCI_CHUNKSIZE",
+                    value="524288",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_P2P_NVL_CHUNKSIZE",
+                    value="1048576",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_NUM_FLOWS",
+                    value="2",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL",
+                    value="0",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_BUFFSIZE",
+                    value="8388608",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_USE_SNAP",
+                    value="1",
+                ),
+                beaker.EnvVar(
+                    name="CUDA_VISIBLE_DEVICES",
+                    value="0,1,2,3,4,5,6,7",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_NET_GDR_LEVEL",
+                    value="PIX",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING",
+                    value="0",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_TUNER_PLUGIN",
+                    value="libnccl-tuner.so",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_TUNER_CONFIG_PATH",
+                    value="/var/lib/tcpxo/lib64/a3plus_tuner_config.textproto",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE",
+                    value="/var/lib/tcpxo/lib64/a3plus_guest_config.textproto",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS",
+                    value="600000",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_NVLS_ENABLE",
+                    value="0",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_DEBUG",
+                    value="WARN",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_CTRL_DEV",
+                    value="enp0s12",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_IFNAME",
+                    value="enp6s0,enp7s0,enp13s0,enp14s0,enp134s0,enp135s0,enp141s0,enp142s0",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_SOCKET_IFNAME",
+                    value="enp0s12",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_USE_SNAP",
+                    value="1",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_USE_LLCM",
+                    value="1",
+                ),
+                beaker.EnvVar(
+                    name="NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY",
+                    value="/dev/aperture_devices",
+                ),
+            ])
     # don't mount anything; assume no cache
     else:
         pass
 
     if resumable:
-        env_vars.extend(
-            [
-                beaker.EnvVar(name="WANDB_RUN_ID", value=global_wandb_id),
-                beaker.EnvVar(name="WANDB_RESUME", value="allow"),
-            ]
-        )
+        env_vars.extend([
+            beaker.EnvVar(
+                name="WANDB_RUN_ID",
+                value=global_wandb_id,
+            ),
+            beaker.EnvVar(
+                name="WANDB_RESUME",
+                value="allow",
+            ),
+        ])
 
     # by default, we turn off vllm compile cache
-    env_vars.extend([beaker.EnvVar(name="VLLM_DISABLE_COMPILE_CACHE", value="1")])
+    env_vars.extend([
+        beaker.EnvVar(
+            name="VLLM_DISABLE_COMPILE_CACHE",
+            value="1",
+        ),
+    ])
 
     return env_vars
 
@@ -345,22 +494,33 @@ def get_datasets(beaker_datasets, cluster: List[str]):
     if all(c in NFS_CLUSTERS for c in cluster):
         res = [
             beaker.DataMount(
-                source=beaker.DataSource(host_path="/net/nfs.cirrascale"), mount_path="/net/nfs.cirrascale"
-            )
+                source=beaker.DataSource(host_path="/net/nfs.cirrascale"),
+                mount_path="/net/nfs.cirrascale",
+            ),
         ]
     # if all cluster is in weka, we mount the weka
     elif all(c in WEKA_CLUSTERS for c in cluster):
         res = [
-            beaker.DataMount(source=beaker.DataSource(weka="oe-adapt-default"), mount_path="/weka/oe-adapt-default"),
             beaker.DataMount(
-                source=beaker.DataSource(weka="oe-training-default"), mount_path="/weka/oe-training-default"
+                source=beaker.DataSource(weka="oe-adapt-default"),
+                mount_path="/weka/oe-adapt-default",
+            ),
+            beaker.DataMount(
+                source=beaker.DataSource(weka="oe-training-default"),
+                mount_path="/weka/oe-training-default",
             ),
         ]
     elif all(c in GCP_CLUSTERS for c in cluster):
-        res = [beaker.DataMount(source=beaker.DataSource(host_path="/mnt/filestore_1"), mount_path="/filestore")]
+        res = [
+            beaker.DataMount(
+                source=beaker.DataSource(host_path="/mnt/filestore_1"),
+                mount_path="/filestore",
+            ),
+        ]
     for beaker_dataset in beaker_datasets:
         to_append = beaker.DataMount(
-            source=beaker.DataSource(beaker=beaker_dataset["beaker"]), mount_path=beaker_dataset["mount_path"]
+            source=beaker.DataSource(beaker=beaker_dataset["beaker"]),
+            mount_path=beaker_dataset["mount_path"],
         )
         res.append(to_append)
 
@@ -386,7 +546,6 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
     if is_open_instruct_training:
         from open_instruct.dataset_transformation import get_commit_hash
         from open_instruct.utils import download_from_hf, gs_folder_exists, upload_to_gs_bucket
-
         # HACK: Cache dataset logic:
         # Here we basically try to run the tokenization full_command locally before running it on beaker
         # We could in theory submit a cpu only job to beaker to do this, but that requires setting up
@@ -429,7 +588,6 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                     caching_command = "python " + " ".join(caching_command[idx:]) + " --cache_dataset_only"
                     console.log("📦📦📦 Running the caching command with `--cache_dataset_only`")
                     import subprocess
-
                     # Use Popen to get real-time output while also capturing it
                     process = subprocess.Popen(
                         caching_command,
@@ -437,7 +595,7 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         text=True,
-                        bufsize=1,
+                        bufsize=1
                     )
 
                     stdout_data, stderr_data = [], []
@@ -463,15 +621,11 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                         if done and process.poll() is not None:
                             break
 
-                    result = type(
-                        "SubprocessResult",
-                        (),
-                        {
-                            "returncode": process.returncode,
-                            "stdout": "".join(stdout_data),
-                            "stderr": "".join(stderr_data),
-                        },
-                    )
+                    result = type('SubprocessResult', (), {
+                        'returncode': process.returncode,
+                        'stdout': ''.join(stdout_data),
+                        'stderr': ''.join(stderr_data)
+                    })
                     stdout = result.stdout
                     # Extract the cached dataset path from stdout if it exists
                     for line in stdout.splitlines():
@@ -502,9 +656,7 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
 
                     if need_to_override_checkpoint_state_dir and is_open_instruct_training and not is_external_user:
                         new_checkpoint_state_dir = f"{args.auto_checkpoint_state_dir}/{whoami}/{int(time.time())}_{random.randint(0, 1000000)}"
-                        console.log(
-                            f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`"
-                        )
+                        console.log(f"🔍🔍🔍 Automatically overriding the `--checkpoint_state_dir` argument to be in `{new_checkpoint_state_dir}`")
                         command.append("--checkpoint_state_dir")
                         command.append(new_checkpoint_state_dir)
                         command.append("--checkpoint_state_freq")
@@ -523,9 +675,7 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                             break
                 if need_to_override_output_dir and is_open_instruct_training and not is_external_user:
                     new_output_dir = f"{args.auto_output_dir_path}/{whoami}/"
-                    console.log(
-                        f"🔍🔍🔍 Automatically overriding the `--output_dir` argument to be in `{new_output_dir}`"
-                    )
+                    console.log(f"🔍🔍🔍 Automatically overriding the `--output_dir` argument to be in `{new_output_dir}`")
                     command.append("--output_dir")
                     command.append(new_output_dir)
             else:
@@ -538,12 +688,10 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
                 no_eval_concat_commands = [" ".join(cmd) for cmd in no_eval_commands]
                 no_eval_concat_command_exists = any(cmd in command for cmd in no_eval_concat_commands)
                 if not no_eval_concat_command_exists:
-                    raise ValueError(
-                        "To auto-evaluation is turned on by default, to make sure it works, you must:\n"
-                        "1. run mason with`--auto_output_dir_path /weka/...`, or\n"
-                        "2. in the training command, disable auto-evaluation with `--no_try_launch_beaker_eval_jobs`, or\n"
-                        "3. in the training command, use a `--output_dir` that starts with `/weka/`"
-                    )
+                    raise ValueError("To auto-evaluation is turned on by default, to make sure it works, you must:\n"
+                                    "1. run mason with`--auto_output_dir_path /weka/...`, or\n"
+                                    "2. in the training command, disable auto-evaluation with `--no_try_launch_beaker_eval_jobs`, or\n"
+                                    "3. in the training command, use a `--output_dir` that starts with `/weka/`")
 
         # For GCP clusters, since shared storage is slow, we optimize model loading by:
         if any(c in GCP_CLUSTERS for c in args.cluster):
@@ -566,42 +714,27 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
             if os.path.exists(model_name_or_path):
                 path = model_name_or_path
                 model_name_or_path = os.path.basename(model_name_or_path)
-                console.log(
-                    f"Local model is already downloaded, using path basename as model name {model_name_or_path}, note that commit hash is {commit_hash}"
-                )
+                console.log(f"Local model is already downloaded, using path basename as model name {model_name_or_path}, note that commit hash is {commit_hash}")
             else:
-                download_from_hf(model_name_or_path, model_revision)  # first download the model
-                path = download_from_hf(model_name_or_path, model_revision)  # then get the path
+                download_from_hf(model_name_or_path, model_revision) # first download the model
+                path = download_from_hf(model_name_or_path, model_revision) # then get the path
             gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_models/{model_name_or_path}/{commit_hash}"
-            gs_folder = gs_folder_exists(
-                gs_saved_path
-            )  # race condition exists, but it's fine since we are launching mason sequentially
+            gs_folder = gs_folder_exists(gs_saved_path) # race condition exists, but it's fine since we are launching mason sequentially
             if not gs_folder:
                 upload_to_gs_bucket(path, gs_saved_path)
 
             download_path = gs_saved_path.replace("gs://", "/gs/")
             download_path_without_last_folder = download_path.rsplit("/", 1)[0]
             gs_download_command = [
-                "mkdir",
-                "-p",
-                download_path,
+                "mkdir", "-p", download_path,
                 "&&",
                 "gsutil",
-                "-o",
-                "GSUtil:parallel_thread_count=1",
-                "-o",
-                "GSUtil:sliced_object_download_threshold=150",
+                "-o", "GSUtil:parallel_thread_count=1",
+                "-o", "GSUtil:sliced_object_download_threshold=150",
                 "-m",
-                "cp",
-                "-r",
-                gs_saved_path,
-                download_path_without_last_folder,
-                "&&",
-                "ls",
-                download_path_without_last_folder,
-                "&&",
-                "ls",
-                download_path,
+                "cp", "-r", gs_saved_path, download_path_without_last_folder,
+                "&&", "ls", download_path_without_last_folder,
+                "&&", "ls", download_path,
                 "&&",
             ]
 
@@ -620,32 +753,19 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
 
             # Save dataset to GCS
             if len(dataset_cache_paths) > 0:
-                for cidx, (dataset_cache_path, dataset_config_hash) in enumerate(
-                    zip(dataset_cache_paths, dataset_config_hashes)
-                ):
+                for cidx, (dataset_cache_path, dataset_config_hash) in enumerate(zip(dataset_cache_paths, dataset_config_hashes)):
                     gs_saved_path = f"gs://ai2-llm/post-training/deletable_cache_datasets/{dataset_cache_path}"
-                    gs_folder = gs_folder_exists(
-                        gs_saved_path
-                    )  # race condition exists, but it's fine since we are launching mason sequentially
+                    gs_folder = gs_folder_exists(gs_saved_path) # race condition exists, but it's fine since we are launching mason sequentially
                     if not gs_folder:
                         upload_to_gs_bucket(dataset_cache_path, gs_saved_path)
                     dataset_cache_path_without_last_folder = dataset_cache_path.rsplit("/", 1)[0]
                     gs_download_command += [
-                        "mkdir",
-                        "-p",
-                        dataset_cache_path_without_last_folder,
+                        "mkdir", "-p", dataset_cache_path_without_last_folder,
                         "&&",
                         "gsutil",
-                        "cp",
-                        "-r",
-                        gs_saved_path,
-                        dataset_cache_path_without_last_folder,
-                        "&&",
-                        "ls",
-                        dataset_cache_path_without_last_folder,
-                        "&&",
-                        "ls",
-                        dataset_cache_path,
+                        "cp", "-r", gs_saved_path, dataset_cache_path_without_last_folder,
+                        "&&", "ls", dataset_cache_path_without_last_folder,
+                        "&&", "ls", dataset_cache_path,
                         "&&",
                     ]
                     if cidx == 0:
@@ -673,36 +793,31 @@ def make_internal_command(command: List[str], args: argparse.Namespace, whoami: 
         if "--num_processes" not in join_full_command and "accelerate" in join_full_command:
             raise ValueError("num_processes must be specified in the command for accelerate-based multi-node jobs.")
         join_full_command = re.sub(
-            r"--num_processes (\d+)",
+            r'--num_processes (\d+)',
             lambda m: (
-                f"--num_processes {int(m.group(1)) * args.num_nodes} "
-                f"--num_machines {args.num_nodes} "
-                "--machine_rank $BEAKER_REPLICA_RANK "
-                "--main_process_ip $BEAKER_LEADER_REPLICA_HOSTNAME "
-                "--main_process_port 29400 "
+                f'--num_processes {int(m.group(1)) * args.num_nodes} '
+                f'--num_machines {args.num_nodes} '
+                '--machine_rank $BEAKER_REPLICA_RANK '
+                '--main_process_ip $BEAKER_LEADER_REPLICA_HOSTNAME '
+                '--main_process_port 29400 '
             ),
-            join_full_command,
+            join_full_command
         )
     full_command = setup_commands + join_full_command
     console.log("🔍🔍🔍 Full command")
     print(full_command)
     return full_command
 
-
 def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami: str, resumable: bool):
     # Add a check to ensure that the user is using the correct clusters for multi-node jobs
     if args.num_nodes > 1 and not all(c in INTERCONNECT_CLUSTERS for c in args.cluster):
         confirmation = False
         while not confirmation:
-            confirmation = input(
-                "Interconnect clusters are required for multi-node jobs. Are you sure you want to continue? (y/n)"
-            )
+            confirmation = input("Interconnect clusters are required for multi-node jobs. Are you sure you want to continue? (y/n)")
             if confirmation == "y":
                 confirmation = True
             elif confirmation == "n":
-                raise ValueError(
-                    f"Interconnect clusters are required for multi-node jobs; please only use the following clusters: {INTERCONNECT_CLUSTERS}"
-                )
+                raise ValueError(f"Interconnect clusters are required for multi-node jobs; please only use the following clusters: {INTERCONNECT_CLUSTERS}")
             else:
                 print("Invalid input. Please enter 'y' or 'n'.")
     if args.image == "ai2/cuda11.8-cudnn8-dev-ubuntu20.04" and any(c in GCP_CLUSTERS for c in args.cluster):
@@ -715,22 +830,15 @@ def make_task_spec(args, full_command: str, i: int, beaker_secrets: str, whoami:
     spec = beaker.TaskSpec(
         name=f"{args.task_name}__{i}",
         image=beaker.ImageSource(beaker=args.image),
-        command=["/bin/bash", "-c"],
+        command=['/bin/bash', '-c'],
         arguments=[full_command],
         result=beaker.ResultSpec(path="/output"),
         datasets=get_datasets(args.beaker_datasets, args.cluster),
-        context=beaker.TaskContext(priority=beaker.Priority(args.priority), preemptible=args.preemptible),
+        context=beaker.TaskContext(priority=beaker.Priority(args.priority),
+                                   preemptible=args.preemptible),
         constraints=constraints,
-        env_vars=get_env_vars(
-            args.pure_docker_mode,
-            args.cluster,
-            beaker_secrets,
-            whoami,
-            resumable,
-            args.num_nodes,
-            args.env,
-            args.secret,
-        ),
+        env_vars=get_env_vars(args.pure_docker_mode, args.cluster, beaker_secrets,
+                            whoami, resumable, args.num_nodes, args.env, args.secret),
         resources=beaker.TaskResources(gpu_count=args.gpus),
         replicas=args.num_nodes,
     )
@@ -765,28 +873,23 @@ def main():
     full_commands = [make_internal_command(command, args, whoami, is_external_user) for command in commands]
     if is_external_user:
         console.rule("[bold red]Non-Ai2 User Detected[/bold red]")
-        console.print(
-            Text(
-                (
-                    "👋 Hi external user! The following command will be executed in our internal server; feel free to modify it to your needs. "
-                    '(For example, you might need to replace `"$BEAKER_LEADER_REPLICA_HOSTNAME"` with your own hostname)'
-                ),
-                style="bold",
-            )
-        )
+        console.print(Text(
+            (
+                "👋 Hi external user! The following command will be executed in our internal server; feel free to modify it to your needs. "
+                "(For example, you might need to replace `\"$BEAKER_LEADER_REPLICA_HOSTNAME\"` with your own hostname)"
+            ),
+            style="bold",
+        ))
     for idx, full_command in enumerate(full_commands):
-        console.rule(f"[bold blue]Command {idx + 1}[/bold blue]")
+        console.rule(f"[bold blue]Command {idx+1}[/bold blue]")
         console.print(Text(full_command))
     if is_external_user:
         return
     experiment_spec = beaker.ExperimentSpec(
         description=args.description,
-        tasks=[
-            make_task_spec(args, full_command, i, beaker_secrets, whoami, args.resumable)
-            for i, full_command in enumerate(full_commands)
-        ],
+        tasks=[make_task_spec(args, full_command, i, beaker_secrets, whoami, args.resumable) for i, full_command in enumerate(full_commands)],
         budget=args.budget,
-        retry=beaker.RetrySpec(allowed_task_retries=args.max_retries),
+        retry=beaker.RetrySpec(allowed_task_retries=args.max_retries)
     )
     exp = beaker_client.experiment.create(spec=experiment_spec)
     console.log(f"Kicked off Beaker job. https://beaker.org/ex/{exp.id}")
