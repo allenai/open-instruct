@@ -360,6 +360,7 @@ class Args:
     code_binary_reward: bool = False
     """whether to use a binary reward for the code verifier. If false, reward is pass rate of all tests"""
 
+
 def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
     # if passed through cli: convert the dataset mixers to dictionaries
     if isinstance(value, str):
