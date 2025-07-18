@@ -29,6 +29,7 @@ dependencies = [
     "langdetect==1.0.9",
     "immutabledict==1.2.0",
     "jsonlines==4.0.0",
+    "fastmcp"  # for mcp tools
 ]
 
 [build-system]
