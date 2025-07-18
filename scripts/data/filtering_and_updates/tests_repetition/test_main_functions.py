@@ -5,7 +5,7 @@ Test the main script with a mock dataset
 
 import sys
 import os
-sys.path.append('/weka/oe-adapt-default/nathanl/open-instruct/scripts/data/filtering_and_updates')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datasets import Dataset
 from filter_ngram_repetitions import process_example, should_be_filtered_by_repetition

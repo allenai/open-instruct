@@ -5,7 +5,7 @@ Test script for the exact block repetition detection
 
 import sys
 import os
-sys.path.append('/weka/oe-adapt-default/nathanl/open-instruct/scripts/data/filtering_and_updates')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from filter_ngram_repetitions import detect_exact_block_repetition
 

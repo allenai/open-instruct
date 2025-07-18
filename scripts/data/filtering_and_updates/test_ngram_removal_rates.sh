@@ -1,7 +1,10 @@
 #!/bin/bash
 
 # Script to test the n-gram repetition filtering script
-# Note: This script tests the sentence-level repetition detection, not configurable n-gram parameters
+# Note: This script tests repetition detection with the following thresholds:
+#   - Paragraphs: 2+ repetitions
+#   - Consecutive sentences: 2+ repetitions (if ≥10 characters)
+#   - Non-consecutive sentences: 5+ repetitions
 # Usage: ./scripts/data/filtering_and_updates/test_ngram_removal_rates.sh --input-dataset <dataset_name> [options]
 
 set -e
@@ -15,8 +18,8 @@ OUTPUT_DIR="ngram_test_results"
 FILTER_USER_TURNS=""
 DEBUG=""
 
-# Since the current filter_ngram_repetitions.py doesn't support configurable parameters,
-# we'll just test it once but keep the framework for future expansion
+# Since the current filter_ngram_repetitions.py uses fixed thresholds optimized for different repetition types,
+# we'll test the default configuration. The framework is ready for future expansion.
 TEST_CONFIGS=(
     "default"
 )
@@ -69,12 +72,14 @@ while [[ $# -gt 0 ]]; do
       echo "  --debug                   Optional: Debug mode - only load first 1000 examples for testing"
       echo "  -h, --help                Show this help message"
       echo ""
-      echo "This script tests the n-gram repetition filtering script using sentence-level detection."
-      echo "Currently it does not support configurable n-gram parameters."
+      echo "This script tests the repetition filtering script with optimized thresholds:"
+      echo "  - Paragraphs: 2+ repetitions"
+      echo "  - Consecutive sentences: 2+ repetitions (if ≥10 characters)"
+      echo "  - Non-consecutive sentences: 5+ repetitions"
       echo ""
       echo "Default test configurations:"
       for config in "${TEST_CONFIGS[@]}"; do
-        echo "  $config (sentence-level repetition detection)"
+        echo "  $config (multi-threshold repetition detection)"
       done
       exit 0
       ;;
@@ -109,7 +114,7 @@ echo "Output directory: $OUTPUT_DIR"
 echo "Filter user turns: $(if [[ -n "$FILTER_USER_TURNS" ]]; then echo "Yes"; else echo "No"; fi)"
 echo "Debug mode: $(if [[ -n "$DEBUG" ]]; then echo "Yes (1000 samples)"; else echo "No"; fi)"
 echo ""
-echo "Note: Testing sentence-level repetition detection (current implementation)"
+echo "Note: Testing multi-threshold repetition detection (current implementation)"
 echo "Note: Only filtering assistant messages by default (not user messages)"
 echo "Testing ${#TEST_CONFIGS[@]} configuration(s)..."
 echo ""
@@ -119,7 +124,7 @@ RESULTS_FILE="$OUTPUT_DIR/removal_rates_summary.txt"
 echo "N-gram Repetition Filtering Test Results" > "$RESULTS_FILE"
 echo "Dataset: $INPUT_DATASET" >> "$RESULTS_FILE"
 echo "Date: $(date)" >> "$RESULTS_FILE"
-echo "Note: Using sentence-level repetition detection" >> "$RESULTS_FILE"
+echo "Note: Using multi-threshold repetition detection" >> "$RESULTS_FILE"
 echo "=============================================" >> "$RESULTS_FILE"
 echo "" >> "$RESULTS_FILE"
 printf "%-15s %-15s %-15s %-15s\n" "Configuration" "Examples_Removed" "Removal_Rate%" "Output_File" >> "$RESULTS_FILE"
