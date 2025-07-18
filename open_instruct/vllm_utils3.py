@@ -188,13 +188,12 @@ class LLMRayActor:
             from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 
             self.llm = ToolUseLLM(*args, **kwargs)
-            self.use_async = False  # ToolUseLLM might not support async yet
         else:
             # Create AsyncEngineArgs from the provided arguments
             engine_args = AsyncEngineArgs(*args, **kwargs)
             # Use from_engine_args to properly initialize AsyncLLMEngine
-            self.llm = AsyncLLMEngine.from_engine_args(engine_args)
-            self.use_async = True
+            # Set start_engine_loop=False so we can control when to start it
+            self.llm = AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
@@ -203,14 +202,15 @@ class LLMRayActor:
         self.inference_batch_size = inference_batch_size
 
     def generate(self, *args, **kwargs):
-        if self.use_async:
+        if self.tool_use:
+            # ToolUseLLM uses synchronous generate
+            return self.llm.generate(*args, **kwargs)
+        else:
             # For backward compatibility, run async generate synchronously
             async def _generate():
                 return await self.llm.generate(*args, **kwargs)
 
             return asyncio.run(_generate())
-        else:
-            return self.llm.generate(*args, **kwargs)
 
     def process_from_queue(
         self,
@@ -222,20 +222,8 @@ class LLMRayActor:
         batch_size: Optional[int] = None,
     ) -> None:
         """Process prompts from the queue and put results in the results queue."""
-        if self.use_async:
-            # Run the async version
-            asyncio.run(
-                self._async_process_from_queue(
-                    sampling_params,
-                    eval_sampling_params,
-                    eval_freq,
-                    num_training_steps,
-                    resume_training_step,
-                    batch_size,
-                )
-            )
-        else:
-            # Use the original synchronous version
+        if self.tool_use:
+            # Use the original synchronous version for tool use
             for training_step in range(resume_training_step, num_training_steps + 1):
                 prompts_batch = []
                 dataset_indices_batch = []
@@ -265,6 +253,29 @@ class LLMRayActor:
                     for eval_result in eval_results:
                         eval_result.is_eval = True
                         self.eval_results_queue.put(eval_result)
+        else:
+            # Use async version for AsyncLLMEngine
+            # Start the engine background loop if not already started
+            self.llm.start_background_loop()
+            
+            # Create a new event loop for this thread and run the async version
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(
+                    self._async_process_from_queue(
+                        sampling_params,
+                        eval_sampling_params,
+                        eval_freq,
+                        num_training_steps,
+                        resume_training_step,
+                        batch_size,
+                    )
+                )
+            finally:
+                # Shutdown the engine background loop
+                self.llm.shutdown_background_loop()
+                loop.close()
 
     def _generate_batch(
         self, prompts: List[List[int]], sampling_params, dataset_indices: Optional[List[int]] = None
@@ -444,7 +455,7 @@ class LLMRayActor:
     def init_process_group(
         self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
     ):
-        if self.use_async:
+        if not self.tool_use:
             # AsyncLLMEngine doesn't have collective_rpc, skip for now
             # This might need to be implemented differently for async engines
             return
@@ -454,32 +465,32 @@ class LLMRayActor:
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
-        if self.use_async:
+        if not self.tool_use:
             # AsyncLLMEngine doesn't have collective_rpc, skip for now
             return
         return self.llm.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
-        if self.use_async:
+        if not self.tool_use:
             # AsyncLLMEngine doesn't have collective_rpc, skip for now
             return
         return self.llm.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
 
     def reset_prefix_cache(self):
-        if self.use_async:
+        if not self.tool_use:
             # AsyncLLMEngine has a different structure
             # This might need to be implemented differently
             return
         self.llm.llm_engine.reset_prefix_cache()
 
     def sleep(self, level=1):
-        if self.use_async:
+        if not self.tool_use:
             # AsyncLLMEngine doesn't have sleep mode
             return
         self.llm.sleep(level=level)
 
     def wake_up(self):
-        if self.use_async:
+        if not self.tool_use:
             # AsyncLLMEngine doesn't have sleep mode
             return
         self.llm.wake_up()
