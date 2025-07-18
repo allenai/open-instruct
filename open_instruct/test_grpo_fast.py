@@ -113,10 +113,8 @@ class TestGrpoFastVLLM(unittest.TestCase):
         pending_queries_map = {}
         training_step = 1
 
-        # Create mock Ray queue for testing - now needs to hold individual prompts
         param_prompt_Q = ray_queue.Queue(maxsize=num_unique_prompts_rollout)
 
-        # Create mock dataset indices
         dataset_indices = list(range(num_unique_prompts_rollout))
 
         # Use split_and_insert_batch to split and insert data
@@ -131,10 +129,8 @@ class TestGrpoFastVLLM(unittest.TestCase):
             param_prompt_Q,
         )
 
-        # Verify that we have individual prompts in the map (not batches)
         self.assertEqual(len(pending_queries_map), num_unique_prompts_rollout)
 
-        # Verify that we have the expected number of items in the queue (individual prompts)
         self.assertEqual(param_prompt_Q.qsize(), num_unique_prompts_rollout)
 
         # Create mock inference results to simulate vLLM engine outputs (individual results)
@@ -169,21 +165,13 @@ class TestGrpoFastVLLM(unittest.TestCase):
             )
             mock_inference_results.append(mock_result)
 
-        # Create mock inference results queue for individual results
         inference_results_Q = ray_queue.Queue(maxsize=num_unique_prompts_rollout)
         for result in mock_inference_results:
             inference_results_Q.put(result)
 
-        # Recreate pending_queries_map for accumulation (it was populated by split_and_insert_batch)
-        # But we need to ensure it has the correct entries for accumulate_inference_batches
-        # Since accumulate_inference_batches pops from the map, we need a fresh copy
-        test_pending_queries_map = {}
-        for i in range(num_unique_prompts_rollout):
-            test_pending_queries_map[i] = (queries_next[i], ground_truths_next[i], datasets_next[i])
-
         # Use accumulate_inference_batches to combine results
         combined_result, combined_queries, combined_ground_truths, combined_datasets = accumulate_inference_batches(
-            inference_results_Q, test_pending_queries_map, num_unique_prompts_rollout, training_step
+            inference_results_Q, pending_queries_map, num_unique_prompts_rollout, training_step
         )
 
         # Verify that the combined results match the original input
@@ -198,7 +186,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
         self.assertEqual(len(combined_result.masks), len(queries_next))
 
         # Verify that the test_pending_queries_map is empty after accumulation
-        self.assertEqual(len(test_pending_queries_map), 0)
+        self.assertEqual(len(pending_queries_map), 0)
 
         # Verify that the inference_results_Q is empty after accumulation
         self.assertEqual(inference_results_Q.qsize(), 0)
