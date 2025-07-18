@@ -24,6 +24,7 @@ from typing import Any, List, Optional, Union
 import ray
 import torch
 import torch.distributed
+import vllm
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from torch.distributed.distributed_c10d import (
@@ -63,12 +64,12 @@ class GenerationResult:
 
 @dataclasses.dataclass
 class PromptRequest:
-    """Container for prompt requests to vLLM."""
+    """Container for a single prompt request to vLLM."""
 
-    prompts: List[List[int]]
+    prompt: List[int]  # Single prompt
     training_step: Optional[int] = None
-    eval_prompts: Optional[List[List[int]]] = None
-    dataset_index: Optional[List[int]] = None
+    eval_prompts: Optional[List[List[int]]] = None  # Keep as list for eval
+    dataset_index: Optional[int] = None  # Single dataset index
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -200,14 +201,14 @@ class LLMRayActor:
 
     def process_from_queue(
         self,
-        sampling_params,
-        eval_sampling_params=None,
-        eval_freq=None,
-        num_training_steps=None,
-        resume_training_step=1,
-        batch_size=None,
-        timeout: int = 0.1,
-    ):
+        sampling_params: vllm.SamplingParams,
+        eval_sampling_params: Optional[vllm.SamplingParams] = None,
+        eval_freq: Optional[int] = None,
+        num_training_steps: Optional[int] = None,
+        resume_training_step: int = 1,
+        batch_size: Optional[int] = None,
+        timeout: float = 0.1,
+    ) -> None:
         """Process prompts from the queue and put results in the results queue."""
         for training_step in range(resume_training_step, num_training_steps + 1):
             # Collect individual prompts to form a batch
@@ -219,26 +220,27 @@ class LLMRayActor:
             while len(prompts_batch) < (batch_size or 1):
                 try:
                     # Use non-blocking get with timeout
-                    request = self.prompt_queue.get(timeout=timeout)
+                    request: Optional[PromptRequest] = self.prompt_queue.get(timeout=timeout)
                     if request is None:
                         break
-
-                    # Each request should contain a single prompt
-                    prompts_batch.extend(request.prompts)
-                    dataset_indices_batch.extend(request.dataset_index)
-
+                    
+                    # Each request contains a single prompt
+                    prompts_batch.append(request.prompt)
+                    if request.dataset_index is not None:
+                        dataset_indices_batch.append(request.dataset_index)
+                    
                     # Store eval prompts from the first request (they should be the same)
                     if eval_prompts is None and request.eval_prompts is not None:
                         eval_prompts = request.eval_prompts
-
-                except queue.Empty:
+                        
+                except:
                     # Timeout - process what we have if anything
                     if prompts_batch:
                         break
                     else:
                         # No prompts collected, wait a bit more
                         continue
-
+            
             if not prompts_batch:
                 continue
 
@@ -254,11 +256,7 @@ class LLMRayActor:
                 eval_results = self._generate_batch_individual(eval_prompts, eval_sampling_params, None)
                 for eval_result in eval_results:
                     eval_result.is_eval = True
-                    # Put eval results in separate queue if available
-                    if self.eval_results_queue is not None:
-                        self.eval_results_queue.put(eval_result)
-                    else:
-                        self.results_queue.put(eval_result)
+                    self.eval_results_queue.put(eval_result)
 
     def _generate_batch(
         self, prompts: List[List[int]], sampling_params, dataset_index: Optional[List[int]] = None

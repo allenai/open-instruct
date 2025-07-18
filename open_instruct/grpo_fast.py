@@ -1681,10 +1681,10 @@ def split_and_insert_batch(
         # Create PromptRequest for single prompt
         param_prompt_Q.put(
             PromptRequest(
-                prompts=[queries_next[i]],
+                prompt=queries_next[i],
                 training_step=training_step,
                 eval_prompts=eval_prompt_token_ids,
-                dataset_index=[dataset_idx],
+                dataset_index=dataset_idx,
             )
         )
 
@@ -2034,7 +2034,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
 
     pprint([args, model_config])
 
-    # Create Ray queues - adjust maxsize for individual prompts
+    # Create Ray queues - adjust maxsize for individual prompts.
     total_prompts_per_step = args.num_unique_prompts_rollout * args.num_samples_per_prompt_rollout
     inference_results_Q = ray_queue.Queue(maxsize=args.async_steps * total_prompts_per_step)
     param_prompt_Q = ray_queue.Queue(maxsize=args.async_steps * total_prompts_per_step)

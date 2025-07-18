@@ -78,7 +78,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
             )
 
         # Put the test prompt in the queue using PromptRequest
-        request = PromptRequest(prompts=[prompt_token_ids], dataset_index=[0])
+        request = PromptRequest(prompt=prompt_token_ids, dataset_index=0)
         param_prompt_Q.put(request)
 
         # Get the result
@@ -143,9 +143,8 @@ class TestGrpoFastVLLM(unittest.TestCase):
             request = param_prompt_Q.get()
             self.assertIsInstance(request, PromptRequest)
             self.assertEqual(request.training_step, training_step)
-            self.assertIsInstance(request.dataset_index, list)  # Now expects a list of indices
-            self.assertEqual(len(request.dataset_index), 1)  # Single dataset index
-            self.assertEqual(len(request.prompts), 1)  # Single prompt
+            self.assertIsInstance(request.dataset_index, int)  # Single dataset index
+            self.assertIsInstance(request.prompt, list)  # Single prompt as list of ints
 
             # Create mock GenerationResult for single prompt
             mock_result = GenerationResult(
@@ -161,7 +160,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
                     tool_calleds=[False],
                 ),
                 is_eval=False,
-                dataset_index=request.dataset_index,
+                dataset_index=[request.dataset_index],
             )
             mock_inference_results.append(mock_result)
 

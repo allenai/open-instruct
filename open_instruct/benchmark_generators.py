@@ -345,7 +345,7 @@ def run_generation_batch(
     # Insert individual prompts
     for i, prompt in enumerate(prompts):
         dataset_idx = batch_idx * len(prompts) + i
-        param_prompt_Q.put(vllm_utils3.PromptRequest(prompts=[prompt], dataset_index=[dataset_idx]))
+        param_prompt_Q.put(vllm_utils3.PromptRequest(prompt=prompt, dataset_index=dataset_idx))
 
     # Collect individual results
     all_responses = []
@@ -423,7 +423,7 @@ def run_benchmark(
         # Insert individual prompts for this batch
         for i, prompt in enumerate(all_prompts[batch_idx]):
             dataset_idx = batch_idx * args.num_unique_prompts_rollout + i
-            param_prompt_Q.put(vllm_utils3.PromptRequest(prompts=[prompt], dataset_index=[dataset_idx]))
+            param_prompt_Q.put(vllm_utils3.PromptRequest(prompt=prompt, dataset_index=dataset_idx))
     submission_time = time.time() - submission_start_time
     logger.info(f"All batches submitted in {submission_time:.2f}s")
 
