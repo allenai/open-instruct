@@ -15,6 +15,7 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
+import asyncio
 import dataclasses
 import os
 from datetime import timedelta
@@ -160,6 +161,7 @@ class LLMRayActor:
         prompt_queue=None,
         results_queue=None,
         eval_results_queue=None,
+        inference_batch_size: Optional[int] = None,
         **kwargs,
     ):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
@@ -185,18 +187,30 @@ class LLMRayActor:
             from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 
             self.llm = ToolUseLLM(*args, **kwargs)
+            self.use_async = False  # ToolUseLLM might not support async yet
         else:
-            from vllm import LLM
+            from vllm import AsyncEngineArgs, AsyncLLMEngine
 
-            self.llm = LLM(*args, **kwargs)
+            # Convert kwargs to AsyncEngineArgs
+            engine_args = AsyncEngineArgs(*args, **kwargs)
+            self.llm = AsyncLLMEngine.from_engine_args(engine_args)
+            self.use_async = True
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
         self.eval_results_queue = eval_results_queue
         self.tool_use = tool_use
+        self.inference_batch_size = inference_batch_size
 
     def generate(self, *args, **kwargs):
-        return self.llm.generate(*args, **kwargs)
+        if self.use_async:
+            # For backward compatibility, run async generate synchronously
+            async def _generate():
+                return await self.llm.generate(*args, **kwargs)
+
+            return asyncio.run(_generate())
+        else:
+            return self.llm.generate(*args, **kwargs)
 
     def process_from_queue(
         self,
@@ -208,31 +222,49 @@ class LLMRayActor:
         batch_size: Optional[int] = None,
     ) -> None:
         """Process prompts from the queue and put results in the results queue."""
-        for training_step in range(resume_training_step, num_training_steps + 1):
-            prompts_batch = []
-            dataset_indices_batch = []
-            eval_prompts = None
+        if self.use_async:
+            # Run the async version
+            asyncio.run(
+                self._async_process_from_queue(
+                    sampling_params,
+                    eval_sampling_params,
+                    eval_freq,
+                    num_training_steps,
+                    resume_training_step,
+                    batch_size,
+                )
+            )
+        else:
+            # Use the original synchronous version
+            for training_step in range(resume_training_step, num_training_steps + 1):
+                prompts_batch = []
+                dataset_indices_batch = []
+                eval_prompts = None
 
-            while len(prompts_batch) < batch_size:
-                request: PromptRequest = self.prompt_queue.get()
+                while len(prompts_batch) < batch_size:
+                    request: PromptRequest = self.prompt_queue.get()
 
-                prompts_batch.append(request.prompt)
-                if request.dataset_index is not None:
-                    dataset_indices_batch.append(request.dataset_index)
+                    prompts_batch.append(request.prompt)
+                    if request.dataset_index is not None:
+                        dataset_indices_batch.append(request.dataset_index)
 
-                if eval_prompts is None and request.eval_prompts is not None:
-                    eval_prompts = request.eval_prompts
+                    if eval_prompts is None and request.eval_prompts is not None:
+                        eval_prompts = request.eval_prompts
 
-            results = self._generate_batch(prompts_batch, sampling_params, dataset_indices_batch)
+                results = self._generate_batch(prompts_batch, sampling_params, dataset_indices_batch)
 
-            for result in results:
-                self.results_queue.put(result)
+                for result in results:
+                    self.results_queue.put(result)
 
-            if eval_prompts is not None and eval_sampling_params is not None and (training_step - 1) % eval_freq == 0:
-                eval_results = self._generate_batch(eval_prompts, eval_sampling_params, None)
-                for eval_result in eval_results:
-                    eval_result.is_eval = True
-                    self.eval_results_queue.put(eval_result)
+                if (
+                    eval_prompts is not None
+                    and eval_sampling_params is not None
+                    and (training_step - 1) % eval_freq == 0
+                ):
+                    eval_results = self._generate_batch(eval_prompts, eval_sampling_params, None)
+                    for eval_result in eval_results:
+                        eval_result.is_eval = True
+                        self.eval_results_queue.put(eval_result)
 
     def _generate_batch(
         self, prompts: List[List[int]], sampling_params, dataset_indices: Optional[List[int]] = None
@@ -284,27 +316,172 @@ class LLMRayActor:
 
         return results
 
+    async def _async_process_from_queue(
+        self,
+        sampling_params: vllm.SamplingParams,
+        eval_sampling_params: Optional[vllm.SamplingParams] = None,
+        eval_freq: Optional[int] = None,
+        num_training_steps: Optional[int] = None,
+        resume_training_step: int = 1,
+        batch_size: Optional[int] = None,
+    ) -> None:
+        """Async version that processes prompts with configurable batch size."""
+        # Use inference_batch_size if provided, otherwise fall back to batch_size
+        concurrent_limit = self.inference_batch_size or batch_size
+
+        for training_step in range(resume_training_step, num_training_steps + 1):
+            # Track active tasks
+            active_tasks = []
+            prompts_to_process = []
+            indices_to_process = []
+            task_to_index = {}
+            eval_prompts = None
+
+            # Collect initial batch
+            for _ in range(batch_size):
+                request: PromptRequest = self.prompt_queue.get()
+                prompts_to_process.append(request.prompt)
+                if request.dataset_index is not None:
+                    indices_to_process.append(request.dataset_index)
+                else:
+                    indices_to_process.append(None)
+
+                if eval_prompts is None and request.eval_prompts is not None:
+                    eval_prompts = request.eval_prompts
+
+            # Process prompts with concurrency limit
+            prompt_idx = 0
+
+            while prompt_idx < len(prompts_to_process) or active_tasks:
+                # Start new tasks up to the concurrent limit
+                while len(active_tasks) < concurrent_limit and prompt_idx < len(prompts_to_process):
+                    prompt = prompts_to_process[prompt_idx]
+                    dataset_idx = indices_to_process[prompt_idx]
+
+                    # Create async task for this prompt
+                    task = asyncio.create_task(self._async_generate_single(prompt, sampling_params, dataset_idx))
+                    active_tasks.append(task)
+                    task_to_index[task] = prompt_idx
+                    prompt_idx += 1
+
+                # Wait for at least one task to complete
+                if active_tasks:
+                    done, active_tasks = await asyncio.wait(active_tasks, return_when=asyncio.FIRST_COMPLETED)
+
+                    # Process completed tasks
+                    for task in done:
+                        result = await task
+                        self.results_queue.put(result)
+                        del task_to_index[task]
+
+                    # Convert active_tasks back to list
+                    active_tasks = list(active_tasks)
+
+            # Handle evaluation if needed
+            if eval_prompts is not None and eval_sampling_params is not None and (training_step - 1) % eval_freq == 0:
+                # Process eval prompts asynchronously too
+                eval_tasks = []
+                for eval_prompt in eval_prompts:
+                    task = asyncio.create_task(self._async_generate_single(eval_prompt, eval_sampling_params, None))
+                    eval_tasks.append(task)
+
+                # Wait for all eval tasks to complete
+                eval_results = await asyncio.gather(*eval_tasks)
+                for eval_result in eval_results:
+                    eval_result.is_eval = True
+                    self.eval_results_queue.put(eval_result)
+
+    async def _async_generate_single(
+        self, prompt: List[int], sampling_params, dataset_index: Optional[int] = None
+    ) -> GenerationResult:
+        """Generate response for a single prompt asynchronously."""
+        # Generate with AsyncLLMEngine
+        outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=[prompt], use_tqdm=False)
+
+        # Process the async generator
+        final_output = None
+        async for output in outputs:
+            final_output = output
+
+        # Extract results from the single output
+        response_ids = [list(out.token_ids) for out in final_output.outputs]
+        finish_reasons = [out.finish_reason for out in final_output.outputs]
+
+        if self.tool_use:
+            masks = [out.mask for out in final_output.outputs]
+            num_calls = [out.num_calls for out in final_output.outputs]
+            timeouts = [out.timeout for out in final_output.outputs]
+            tool_errors = [out.tool_error for out in final_output.outputs]
+            tool_outputs = [out.tool_output for out in final_output.outputs]
+            tool_runtimes = [out.tool_runtime for out in final_output.outputs]
+            tool_calleds = [out.tool_called for out in final_output.outputs]
+        else:
+            masks = [[1] * len(resp) for resp in response_ids]
+            num_calls = [0] * len(response_ids)
+            timeouts = [0] * len(response_ids)
+            tool_errors = [""] * len(response_ids)
+            tool_outputs = [""] * len(response_ids)
+            tool_runtimes = [0] * len(response_ids)
+            tool_calleds = [False] * len(response_ids)
+
+        request_info = RequestInfo(
+            num_calls=num_calls,
+            timeouts=timeouts,
+            tool_errors=tool_errors,
+            tool_outputs=tool_outputs,
+            tool_runtimes=tool_runtimes,
+            tool_calleds=tool_calleds,
+        )
+
+        return GenerationResult(
+            responses=response_ids,
+            finish_reasons=finish_reasons,
+            masks=masks,
+            request_info=request_info,
+            dataset_index=[dataset_index] if dataset_index is not None else None,
+        )
+
     def init_process_group(
         self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
     ):
+        if self.use_async:
+            # AsyncLLMEngine doesn't have collective_rpc, skip for now
+            # This might need to be implemented differently for async engines
+            return
         return self.llm.collective_rpc(
             "init_process_group",
             args=(master_address, master_port, rank_offset, world_size, group_name, backend, use_ray),
         )
 
     def update_weight(self, name, dtype, shape, empty_cache=False):
+        if self.use_async:
+            # AsyncLLMEngine doesn't have collective_rpc, skip for now
+            return
         return self.llm.collective_rpc("update_weight", args=(name, dtype, shape, empty_cache))
 
     def update_weight_cuda_ipc(self, name, dtype, shape, ipc_handles, empty_cache=False):
+        if self.use_async:
+            # AsyncLLMEngine doesn't have collective_rpc, skip for now
+            return
         return self.llm.collective_rpc("update_weight_cuda_ipc", args=(name, dtype, shape, ipc_handles, empty_cache))
 
     def reset_prefix_cache(self):
+        if self.use_async:
+            # AsyncLLMEngine has a different structure
+            # This might need to be implemented differently
+            return
         self.llm.llm_engine.reset_prefix_cache()
 
     def sleep(self, level=1):
+        if self.use_async:
+            # AsyncLLMEngine doesn't have sleep mode
+            return
         self.llm.sleep(level=level)
 
     def wake_up(self):
+        if self.use_async:
+            # AsyncLLMEngine doesn't have sleep mode
+            return
         self.llm.wake_up()
 
 
@@ -327,6 +504,7 @@ def create_vllm_engines(
     prompt_queue=None,
     results_queue=None,
     eval_results_queue=None,
+    inference_batch_size: Optional[int] = None,
 ) -> list[LLMRayActor]:
     import vllm
 
@@ -407,6 +585,7 @@ def create_vllm_engines(
                 prompt_queue=prompt_queue,
                 results_queue=results_queue,
                 eval_results_queue=eval_results_queue,
+                inference_batch_size=inference_batch_size,
                 **additional_kwargs,
             )
         )
