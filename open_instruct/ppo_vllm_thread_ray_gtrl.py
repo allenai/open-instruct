@@ -357,7 +357,8 @@ class Args:
     """the api url to use for the code verifier"""
     code_max_execution_time: float = 1.0
     """the max execution time to use for the code verifier"""
-
+    code_binary_reward: bool = False
+    """whether to use a binary reward for the code verifier. If false, reward is pass rate of all tests"""
 
 def process_dataset_mixer(value) -> Tuple[Optional[dict], Optional[str]]:
     # if passed through cli: convert the dataset mixers to dictionaries
