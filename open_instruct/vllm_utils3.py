@@ -36,6 +36,7 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+from vllm import AsyncLLMEngine
 
 
 @dataclasses.dataclass
@@ -189,11 +190,8 @@ class LLMRayActor:
             self.llm = ToolUseLLM(*args, **kwargs)
             self.use_async = False  # ToolUseLLM might not support async yet
         else:
-            from vllm import AsyncEngineArgs, AsyncLLMEngine
-
-            # Convert kwargs to AsyncEngineArgs
-            engine_args = AsyncEngineArgs(*args, **kwargs)
-            self.llm = AsyncLLMEngine.from_engine_args(engine_args)
+            # AsyncLLMEngine constructor accepts the same args as LLMEngine
+            self.llm = AsyncLLMEngine(*args, **kwargs)
             self.use_async = True
 
         self.prompt_queue = prompt_queue

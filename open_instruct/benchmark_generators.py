@@ -395,8 +395,9 @@ def run_benchmark(
     eval_generation_config = vllm.SamplingParams(temperature=0.0, max_tokens=args.response_length, n=1)
 
     # Start vLLM engines to process from queues
+    engine_refs = []
     for engine in vllm_engines:
-        engine.process_from_queue.remote(
+        ref = engine.process_from_queue.remote(
             generation_config,
             eval_generation_config,
             num_batches + 1,  # eval_freq (avoid evaluation)
@@ -404,6 +405,7 @@ def run_benchmark(
             1,  # resume_training_step
             args.num_unique_prompts_rollout // args.vllm_num_engines,  # batch_size
         )
+        engine_refs.append(ref)
 
     # Wait for engines to be ready
     time.sleep(0.1)
