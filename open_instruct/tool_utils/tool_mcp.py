@@ -65,20 +65,24 @@ class SemanticScholarSnippetSearchTool(MCPTool):
             return ToolOutput(
                 output="",
                 called=False,
-                error="",
+                error="No valid query found in tool call.",
                 timeout=False,
                 runtime=0,
+                start_str="<snippet id=x>\n",
+                end_str="\n</snippet>",
             )
 
         # Only execute the last code block
         query_string = query_blocks[-1]
         if not query_string:
             return ToolOutput(
-                output="",
+                output="Empty query. Please provide some text in the query.",
                 error="Empty query. Please provide some text in the query.",
                 called=True,
                 timeout=False,
                 runtime=0,
+                start_str="<snippet id=x>\n",
+                end_str="\n</snippet>",
             )
 
         start_time = time.time()
@@ -116,11 +120,13 @@ class SemanticScholarSnippetSearchTool(MCPTool):
             print(f"Query failed for unknown reason: {error}")
             print(f"Output: {output}")
             return ToolOutput(
-                output="",
+                output="Query failed with error.",
                 error=f"Query failed for unknown reason: {error}",
                 called=True,
                 timeout=False,
                 runtime=time.time() - start_time,
+                start_str="<snippet id=x>\n",
+                end_str="\n</snippet>",
             )
 
         snippets = [ele["snippet"]["text"].strip() for ele in output["data"]]

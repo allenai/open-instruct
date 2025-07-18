@@ -31,11 +31,13 @@ class SearchTool(Tool):
 
         if not query_string:
             return ToolOutput(
-                output="",
+                output="Empty query. Please provide some text in the query.",
                 error="Empty query. Please provide some text in the query.",
                 called=True,
                 timeout=False,
                 runtime=0,
+                start_str="<snippet id=x>\n",
+                end_str="\n</snippet>",
             )
 
         start_time = time.time()
@@ -47,11 +49,13 @@ class SearchTool(Tool):
 
         if not snippets or len(snippets) == 0:
             return ToolOutput(
-                output="",
+                output="Query failed for unknown reason.",
                 error="Query failed for unknown reason.",
                 called=True,
                 timeout=False,
                 runtime=time.time() - start_time,
+                start_str="<snippet id=x>\n",
+                end_str="\n</snippet>",
             )
 
         # for now, we just join all snippets.
