@@ -7,6 +7,10 @@ set -e
 # Set V1 to 0 for AsyncLLMEngine compatibility
 export VLLM_USE_V1=0
 
+# Configure Ray to show worker output and errors
+export RAY_LOG_TO_STDERR=1
+export RAY_BACKEND_LOG_LEVEL=debug
+
 # Set default value for response_length
 response_length=64000
 

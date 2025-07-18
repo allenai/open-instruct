@@ -184,16 +184,22 @@ class LLMRayActor:
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
             print(f"creating LLM with bundle_indices={bundle_indices}")
 
-        if tool_use:
-            from open_instruct.tool_utils.tool_vllm import ToolUseLLM
+        try:
+            if tool_use:
+                from open_instruct.tool_utils.tool_vllm import ToolUseLLM
 
-            self.llm = ToolUseLLM(*args, **kwargs)
-        else:
-            # Create AsyncEngineArgs from the provided arguments
-            engine_args = AsyncEngineArgs(*args, **kwargs)
-            # Use from_engine_args to properly initialize AsyncLLMEngine
-            # Set start_engine_loop=False so we can control when to start it
-            self.llm = AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
+                self.llm = ToolUseLLM(*args, **kwargs)
+            else:
+                # Create AsyncEngineArgs from the provided arguments
+                engine_args = AsyncEngineArgs(*args, **kwargs)
+                # Use from_engine_args to properly initialize AsyncLLMEngine
+                # Set start_engine_loop=False so we can control when to start it
+                self.llm = AsyncLLMEngine.from_engine_args(engine_args, start_engine_loop=False)
+        except Exception as e:
+            import traceback
+            print(f"Error initializing LLMRayActor: {e}")
+            print(f"Traceback:\n{traceback.format_exc()}")
+            raise
 
         self.prompt_queue = prompt_queue
         self.results_queue = results_queue
