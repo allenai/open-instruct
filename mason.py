@@ -238,6 +238,9 @@ def get_env_vars(pure_docker_mode: bool, cluster: List[str], beaker_secrets: Lis
                 whoami: str, resumable: bool, num_nodes: int, additional_env_vars: List[Dict[str, str]],
                 additional_secrets: List[Dict[str, str]]):
     env_vars = []
+    if "VLLM_ATTENTION_BACKEND" not in additional_env_vars:
+        env_vars.append(beaker.EnvVar(name="VLLM_ATTENTION_BACKEND",
+                                      value="FLASHINFER"))
     # Add user-specified environment variables first
     for env_var in additional_env_vars:
         env_vars.append(

@@ -74,10 +74,11 @@ class TestGrpoFastVLLM(unittest.TestCase):
                 999,  # eval_freq (avoid evaluation)
                 1,  # num_training_steps
                 1,  # resume_training_step
+                1,  # batch_size
             )
 
         # Put the test prompt in the queue using PromptRequest
-        request = PromptRequest(prompts=[prompt_token_ids], dataset_index=0)
+        request = PromptRequest(prompt=prompt_token_ids, dataset_index=0)
         param_prompt_Q.put(request)
 
         # Get the result
@@ -104,17 +105,16 @@ class TestGrpoFastVLLM(unittest.TestCase):
         """Test the batch splitting and accumulation logic using split_and_insert_batch and accumulate_inference_batches."""
 
         # Mock data - simulating num_unique_prompts_rollout * num_samples_per_prompt_rollout
-        queries_next = [f"query_{i}" for i in range(num_unique_prompts_rollout)]
+        # Use lists of integers to simulate tokenized prompts
+        queries_next = [[i, i + 1, i + 2] for i in range(num_unique_prompts_rollout)]  # Mock token IDs
         ground_truths_next = [f"truth_{i}" for i in range(num_unique_prompts_rollout)]
         datasets_next = [f"dataset_{i}" for i in range(num_unique_prompts_rollout)]
 
         pending_queries_map = {}
         training_step = 1
 
-        # Create mock Ray queue for testing
-        param_prompt_Q = ray_queue.Queue(maxsize=vllm_num_engines)
+        param_prompt_Q = ray_queue.Queue(maxsize=num_unique_prompts_rollout)
 
-        # Create mock dataset indices
         dataset_indices = list(range(num_unique_prompts_rollout))
 
         # Use split_and_insert_batch to split and insert data
@@ -129,48 +129,49 @@ class TestGrpoFastVLLM(unittest.TestCase):
             param_prompt_Q,
         )
 
-        # Verify that we have individual prompts in the map (not batches)
         self.assertEqual(len(pending_queries_map), num_unique_prompts_rollout)
 
-        # Verify that we have the expected number of items in the queue
-        self.assertEqual(param_prompt_Q.qsize(), vllm_num_engines)
+        self.assertEqual(param_prompt_Q.qsize(), num_unique_prompts_rollout)
 
-        # Create mock inference results to simulate vLLM engine outputs
+        # Create mock inference results to simulate vLLM engine outputs (individual results)
         mock_inference_results = []
-        for batch_idx in range(vllm_num_engines):
+        requests_processed = []
+        for i in range(num_unique_prompts_rollout):
             # Get the request from the queue
             request = param_prompt_Q.get()
             self.assertIsInstance(request, PromptRequest)
             self.assertEqual(request.training_step, training_step)
-            self.assertIsInstance(request.dataset_index, list)  # Now expects a list of indices
+            self.assertIsInstance(request.dataset_index, int)  # Single dataset index
+            self.assertIsInstance(request.prompt, list)  # Single prompt as list of ints
 
-            # Create mock GenerationResult
-            batch_size = len(request.prompts)
+            # Store request for later verification
+            requests_processed.append(request)
+
+            # Create mock GenerationResult for single prompt
             mock_result = GenerationResult(
-                responses=[[i] for i in range(batch_size)],  # Mock token IDs
-                finish_reasons=["stop"] * batch_size,
-                masks=[[1] * 5] * batch_size,  # Mock masks
+                responses=[[i]],  # Mock token IDs for single response
+                finish_reasons=["stop"],
+                masks=[[1] * 5],  # Mock masks
                 request_info=RequestInfo(
-                    num_calls=[0] * batch_size,
-                    timeouts=[0] * batch_size,
-                    tool_errors=[""] * batch_size,
-                    tool_outputs=[""] * batch_size,
-                    tool_runtimes=[0] * batch_size,
-                    tool_calleds=[False] * batch_size,
+                    num_calls=[0],
+                    timeouts=[0],
+                    tool_errors=[""],
+                    tool_outputs=[""],
+                    tool_runtimes=[0],
+                    tool_calleds=[False],
                 ),
                 is_eval=False,
-                dataset_index=request.dataset_index,
+                dataset_index=[request.dataset_index],
             )
             mock_inference_results.append(mock_result)
 
-        # Create mock inference results queue
-        inference_results_Q = ray_queue.Queue(maxsize=vllm_num_engines)
+        inference_results_Q = ray_queue.Queue(maxsize=num_unique_prompts_rollout)
         for result in mock_inference_results:
             inference_results_Q.put(result)
 
         # Use accumulate_inference_batches to combine results
         combined_result, combined_queries, combined_ground_truths, combined_datasets = accumulate_inference_batches(
-            inference_results_Q, pending_queries_map, vllm_num_engines, training_step
+            inference_results_Q, pending_queries_map, num_unique_prompts_rollout, training_step
         )
 
         # Verify that the combined results match the original input
@@ -184,7 +185,7 @@ class TestGrpoFastVLLM(unittest.TestCase):
         self.assertEqual(len(combined_result.finish_reasons), len(queries_next))
         self.assertEqual(len(combined_result.masks), len(queries_next))
 
-        # Verify that the pending_queries_map is empty after accumulation
+        # Verify that the test_pending_queries_map is empty after accumulation
         self.assertEqual(len(pending_queries_map), 0)
 
         # Verify that the inference_results_Q is empty after accumulation
