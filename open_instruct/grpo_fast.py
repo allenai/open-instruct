@@ -278,6 +278,8 @@ class Args:
     """the temperature to use for the llm judge"""
     llm_judge_timeout: int = 60
     """the timeout to use for the llm judge"""
+    llm_judge_max_context_length: int = 2048
+    """the max context length to use for the llm judge"""
 
     # -- code verifier
     code_api_url: str = os.environ.get("CODE_API_URL", "http://localhost:1234") + "/test_program"
