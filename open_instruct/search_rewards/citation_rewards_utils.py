@@ -573,7 +573,7 @@ def score_num_in_context_search_turns(context: str, upper_bound: int = 10) -> fl
     then computes the number of valid (non-empty) extracted queries.
     """
     if not context:
-        return 0.0
+        return 0.0, 0
 
     # Use re.findall to extract all substrings within <query> tags
     # The re.DOTALL flag allows '.' to match newline characters, in case a query spans multiple lines.

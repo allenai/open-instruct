@@ -2,6 +2,8 @@ import json
 from typing import Any, Dict, List
 
 from datasets import Dataset
+from datasets import load_dataset
+
 
 """Data design:
 {
@@ -23,7 +25,7 @@ system_prompt = """You are a research assistant that answers questions through i
 
 PROCESS:
 - Use <think></think> tags to show your reasoning at any point
-- Use <search>query</search> tags when you need information
+- Use <search>query</search> tags to write a query to search the web for information
 - You can alternate between thinking and searching multiple times
 - Only provide <answer></answer> tags when you have enough information for a complete response
 
@@ -38,16 +40,17 @@ CITATION FORMAT:
 WORKFLOW EXAMPLE:
 <think>I need to understand the current market trends first</think>
 <search>2024 renewable energy market trends</search>
-[results provided]
+<snippet id=a1b2c3d4>search results, ignored in this example</snippet>
 <think>Now I need specific data on solar panel efficiency</think>
 <search>latest solar panel efficiency 2024</search>
-[results provided]
+<snippet id=i9j0k1l2>search results, ignored in this example</snippet>
 <answer>Based on my research... <cite id=abc123>claim from source</cite></answer>
 
 REQUIREMENTS:
-- Think and search iteratively until you have sufficient information
+- Think and search iteratively until you have sufficient information to support your answer
 - Only provide final answer when ready
-- Cite all claims from search results using exact snippet IDs"""
+- Cite all claims from search results using exact snippet IDs
+- Do not cite any claims that are not from the search results"""
 
 
 def upload_scholarqabench_data(use_system_prompt: bool = True) -> List[Dict[str, Any]]:
@@ -117,7 +120,34 @@ def upload_longform_sqa_train_data(use_system_prompt: bool = True) -> List[Dict[
     return formatted_data
 
 
+def upload_longform_surveyqa_validation_data(use_system_prompt: bool = True) -> List[Dict[str, Any]]:
+    dataset = load_dataset("realliyifei/ResearchQA", split="validation")
+
+    formatted_data = []
+    for ex in dataset:
+        if use_system_prompt:
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": ex["query"]},
+            ]
+        else:
+            messages = [{"content": ex["query"], "role": "user"}]
+        ground_truth = json.dumps(ex, default=str)
+        dataset = "rl_rag_longform_rubrics_only"
+        formatted_example = {"messages": messages, "ground_truth": ground_truth, "dataset": dataset}
+        formatted_data.append(formatted_example)
+    
+    # push to huggingface
+    dataset = Dataset.from_list(formatted_data)
+    if use_system_prompt:
+        dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_rubrics_only_with_system_prompt")
+    else:
+        dataset.push_to_hub("rulins/rl_rag_surveyqa_validation_longform_rubrics_only_no_system_prompt")
+    
+    return formatted_data
+
 
 if __name__ == "__main__":
     # data = upload_scholarqabench_data(use_system_prompt=True)
-    data = upload_longform_sqa_train_data(use_system_prompt=True)
+    # data = upload_longform_sqa_train_data(use_system_prompt=True)
+    data = upload_longform_surveyqa_validation_data(use_system_prompt=True)
