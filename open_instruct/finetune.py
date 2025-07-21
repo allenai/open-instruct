@@ -34,7 +34,7 @@ import os
 import shutil
 import time
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import List, Literal, Optional, Union
 
 import datasets
@@ -135,7 +135,10 @@ class FlatArguments:
     dataset_mixer_list_splits: List[str] = field(default_factory=lambda: ["train"])
     """The dataset splits to use for training"""
     dataset_transform_fn: list[str] = field(
-        default_factory=lambda: ["sft_tulu_tokenize_and_truncate_v1", "sft_tulu_filter_v1"]
+        default_factory=lambda: [
+            "sft_tulu_tokenize_and_truncate_v1",
+            "sft_tulu_filter_v1",
+        ]
     )
     """The list of transform functions to apply to the dataset."""
     dataset_target_columns: List[str] = field(default_factory=lambda: TOKENIZED_SFT_DATASET_KEYS)
@@ -404,9 +407,11 @@ def main(args: FlatArguments, tc: TokenizerConfig):
 
     # ------------------------------------------------------------
     # Set up runtime variables
+    now = datetime.now().strftime("%m%d%Y%H%M%S")
+    args.run_name = f"{args.exp_name}__{args.seed}__{now}"
 
     if args.add_seed_and_date_to_exp_name:
-        args.exp_name = f"{args.exp_name}__{args.seed}__{int(time.time())}"
+        args.exp_name = f"{args.exp_name}__{args.seed}__{now}"
     else:
         args.exp_name = args.exp_name
     if not args.do_not_randomize_output_dir:
@@ -545,7 +550,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 quantization_config=bnb_config,
                 device_map=device_map,
                 torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                attn_implementation=("flash_attention_2" if args.use_flash_attn else "eager"),
             )
         elif args.use_liger_kernel:
             from liger_kernel.transformers import AutoLigerKernelForCausalLM
@@ -574,7 +579,7 @@ def main(args: FlatArguments, tc: TokenizerConfig):
                 trust_remote_code=tc.trust_remote_code,
                 low_cpu_mem_usage=args.low_cpu_mem_usage,
                 torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+                attn_implementation=("flash_attention_2" if args.use_flash_attn else "eager"),
             )
     else:
         logger.info("Training new model from scratch")
