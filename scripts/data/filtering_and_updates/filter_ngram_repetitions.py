@@ -170,6 +170,22 @@ def is_multi_line_paragraph(text: str) -> bool:
     """Detect if text is a multi-line paragraph (contains newlines)."""
     return '\n' in text.strip()
 
+def is_common_transition_word(text: str) -> bool:
+    """Detect if text is a common transition word that frequently appears and should be ignored."""
+    # Common transition words that are frequently repeated and cause false positives
+    transition_words = [
+        'alternatively,', 'therefore,', 'however,', 
+        # 'furthermore,', 'moreover,',
+        # 'consequently,', 'nevertheless,', 'nonetheless,', 'hence,', 'thus,',
+        # 'meanwhile,', 'subsequently,', 'additionally,', 'likewise,', 'similarly,',
+        # 'conversely,', 'on the other hand,', 'in contrast,', 'in conclusion,',
+        # 'finally,', 'firstly,', 'secondly,', 'thirdly,', 'lastly,', 'initially,'
+    ]
+    
+    # Check if the text (case insensitive) exactly matches a transition word
+    text_lower = text.lower().strip()
+    return text_lower in transition_words
+
 def find_consecutive_repetitions(items: List[str], block_type: str) -> Dict[str, Tuple[int, List[int]]]:
     """
     Find consecutive repetitions in a list of items (sentences or paragraphs).
@@ -344,6 +360,10 @@ def detect_exact_block_repetition(text: str, min_repetitions: int = 10, min_sent
         if is_complex_math_expression(paragraph.strip()):
             continue
             
+        # Skip common transition words that are false positives
+        if is_common_transition_word(paragraph.strip()):
+            continue
+            
         # Check if this is a multi-line paragraph
         is_multi_line = is_multi_line_paragraph(paragraph)
         
@@ -402,6 +422,10 @@ def detect_exact_block_repetition(text: str, min_repetitions: int = 10, min_sent
             
         # Skip complex math expressions
         if is_complex_math_expression(sentence.strip()):
+            continue
+            
+        # Skip common transition words that are false positives
+        if is_common_transition_word(sentence.strip()):
             continue
             
         # Check if this sentence contains math/code content
@@ -575,27 +599,38 @@ def print_repetitive_examples(dataset: Dataset, column: str = "assistant", num_e
 
 def main():
     parser = argparse.ArgumentParser(description="Filter out examples with n-gram repetitions")
-    parser.add_argument("dataset_name", help="Name of the dataset to filter")
-    parser.add_argument("--column", type=str, default="messages", help="Column name to filter (default: assistant)")
+    parser.add_argument("dataset_name", nargs='?', help="Name of the dataset to filter")
+    parser.add_argument("--input-dataset", type=str, help="Name of the dataset to filter (alternative to positional argument)")
+    parser.add_argument("--split", type=str, default="train", help="Dataset split to use (default: train)")
+    parser.add_argument("--column", type=str, default="messages", help="Column name to filter (default: messages)")
     parser.add_argument("--output-name", help="Output dataset name")
     parser.add_argument("--sentence-level", action="store_true", default=True,
-                       help="Enable sentence-level repetition detectisi")
+                       help="Enable sentence-level repetition detection")
     parser.add_argument("--filter-user-turns", action="store_true", default=False,
                        help="Also filter user turn repetitions")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
     parser.add_argument("--push-to-hf", action="store_true", help="Push filtered dataset to HuggingFace")
     parser.add_argument("--num-proc", type=int, default=mp.cpu_count(), help="Number of processes for parallel processing")
     
     args = parser.parse_args()
     
-    print(f"Loading dataset: {args.dataset_name}")
-    dataset = load_dataset(args.dataset_name, split="train")
+    # Handle both positional and --input-dataset argument
+    dataset_name = args.dataset_name or args.input_dataset
+    if not dataset_name:
+        parser.error("Either dataset_name positional argument or --input-dataset must be provided")
+    
+    print(f"Loading dataset: {dataset_name}")
+    dataset = load_dataset(dataset_name, split=args.split)
     print(f"Dataset loaded with {len(dataset)} examples")
     
-    print(f"Filtering parameters:")
-    print(f"  Sentence-level repetition detectisi enabled")
-    print(f"  Filter user turns: {args.filter_user_turns}")
-    print(f"  Debug mode: {args.debug}")
+    if args.verbose:
+        print(f"Filtering parameters:")
+        print(f"  Sentence-level repetition detection enabled")
+        print(f"  Filter user turns: {args.filter_user_turns}")
+        print(f"  Debug mode: {args.debug}")
+        print(f"  Split: {args.split}")
+        print(f"  Column: {args.column}")
     
     # Detect repetitive patterns
     print(f"\nDetecting repetitive patterns (num_proc={args.num_proc}):")
@@ -691,7 +726,7 @@ def main():
         if col in filtered_dataset.column_names:
             filtered_dataset = filtered_dataset.remove_columns([col])
     
-    output_name = args.output_name or f"{args.dataset_name}-ngram-filtered"
+    output_name = args.output_name or f"{dataset_name}-ngram-filtered"
     
     if args.push_to_hf:
         print(f"Pushing filtered dataset to HuggingFace: {output_name}")
