@@ -2,7 +2,8 @@
 image_name=code_perf_penalty
 
 # Build and push the Docker image to Beaker
-docker build . -t $image_name
+docker build -f Dockerfile.uv --build-arg UV_CACHE_DIR=$UV_CACHE_DIR -t $image_name .
+
 beaker_user=$(beaker account whoami --format json | jq -r '.[0].name')
 
 # Use '|| true' to prevent script from exiting if image doesn't exist to delete
