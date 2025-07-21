@@ -679,13 +679,14 @@ def main():
     
 
     
-    # Collect repetitive examples for analysis
-    print(f"\nCollecting repetitive examples (num_proc={args.num_proc}):")
-    repetitive_dataset = dataset_with_flags.filter(
-        lambda x: x.get('has_repetition', False),
-        num_proc=args.num_proc,
-        desc="Collecting repetitive examples"
-    )
+    # Collect repetitive examples for analysis and store their indices in the main dataset
+    repetitive_indices = []
+    def collect_indices(example, idx):
+        if example.get('has_repetition', False):
+            repetitive_indices.append(idx)
+            return True
+        return False
+    repetitive_dataset = dataset_with_flags.filter(collect_indices, with_indices=True, desc="Collecting repetitive examples")
     
     print(f"\nFound {len(repetitive_dataset)} examples with repetitive patterns")
     
@@ -715,8 +716,8 @@ def main():
         proceed = input("Do you want to manually filter flagged repetitions? (y/n): ").strip().lower()
         if proceed == 'y':
             print("\nManual filtering enabled. For each flagged example, enter 'y' to keep or 'n' to remove.")
-            indices_to_keep = []
             for i, example in enumerate(repetitive_dataset):
+                main_idx = repetitive_indices[i]
                 print(f"\n{'='*80}")
                 print(f"🚫 FILTERED #{i+1}: {example.get('repetition_reason', 'unknown')}")
                 print(f"📁 Source: {example.get('source', 'unknown')}")
@@ -752,7 +753,7 @@ def main():
                 print(assistant_content)
                 print(f"{'='*80}")
                 keep = input("Keep this example? (y/n): ").strip().lower()
-                manual_keep_map[example['__index_level_0__'] if '__index_level_0__' in example else i] = (keep == 'y')
+                manual_keep_map[main_idx] = (keep == 'y')
             print(f"\nAfter manual filtering, {sum(manual_keep_map.values())} repetitive examples remain and will be kept.")
         else:
             print("Skipping manual filtering.")
