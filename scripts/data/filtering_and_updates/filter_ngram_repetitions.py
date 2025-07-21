@@ -710,6 +710,7 @@ def main():
         print_repetitive_examples(repetitive_dataset, column=args.column)
 
     # Manual filtering option
+    manual_keep_map = {}
     if args.manual_filter and len(repetitive_dataset) > 0:
         proceed = input("Do you want to manually filter flagged repetitions? (y/n): ").strip().lower()
         if proceed == 'y':
@@ -751,45 +752,38 @@ def main():
                 print(assistant_content)
                 print(f"{'='*80}")
                 keep = input("Keep this example? (y/n): ").strip().lower()
-                if keep == 'y':
-                    indices_to_keep.append(i)
-            # Filter repetitive_dataset to only those the user wants to keep
-            mask = [i in indices_to_keep for i in range(len(repetitive_dataset))]
-            repetitive_dataset = repetitive_dataset.select(indices_to_keep)
-            print(f"\nAfter manual filtering, {len(repetitive_dataset)} repetitive examples remain and will be kept.")
+                manual_keep_map[example['__index_level_0__'] if '__index_level_0__' in example else i] = (keep == 'y')
+            print(f"\nAfter manual filtering, {sum(manual_keep_map.values())} repetitive examples remain and will be kept.")
         else:
             print("Skipping manual filtering.")
-    
+
+    # Add manual_keep column to dataset_with_flags
+    def set_manual_keep(example, idx):
+        # If manual filtering was done, set manual_keep for repetitive examples
+        if args.manual_filter and len(manual_keep_map) > 0:
+            if example.get('has_repetition', False):
+                return {'manual_keep': manual_keep_map.get(idx, False)}
+            else:
+                return {'manual_keep': True}
+        else:
+            return {'manual_keep': True}
+
+    dataset_with_flags = dataset_with_flags.map(set_manual_keep, with_indices=True, desc="Setting manual_keep column")
+
     # Filter out repetitive examples
     print(f"\nRemoving repetitive examples (num_proc={args.num_proc}):")
-    # If manual filtering was done, we want to keep the manually approved repetitive examples
-    if args.manual_filter and len(repetitive_dataset) > 0 and proceed == 'y':
-        # Get the indices of the repetitive examples in the original dataset
-        repetitive_indices = set(repetitive_dataset._indices if hasattr(repetitive_dataset, '_indices') else [])
-        def filter_with_manual_keep(example, idx):
-            # If this example was flagged as repetitive, only keep if it was manually approved
-            if idx in repetitive_indices:
-                return True
-            return not example.get('has_repetition', False)
-        filtered_dataset = dataset_with_flags.filter(
-            filter_with_manual_keep,
-            with_indices=True,
-            num_proc=args.num_proc,
-            desc="Removing repetitive examples (manual keep)"
-        )
-    else:
-        filtered_dataset = dataset_with_flags.filter(
-            filter_repetitive_examples,
-            num_proc=args.num_proc,
-            desc="Removing repetitive examples"
-        )
+    filtered_dataset = dataset_with_flags.filter(
+        lambda x: x.get('manual_keep', True),
+        num_proc=args.num_proc,
+        desc="Removing repetitive examples (manual_keep)"
+    )
     
     print(f"\nFiltered dataset size: {len(filtered_dataset)}")
     print(f"Removed {len(dataset) - len(filtered_dataset)} examples ({(len(dataset) - len(filtered_dataset))/len(dataset)*100:.2f}%)")
     
     # Clean up temporary columis
-    print("Removing temporary columis: ['repetition_reason', 'has_repetition', 'repetition_examples']")
-    columis_to_remove = ['repetition_reason', 'has_repetition', 'repetition_examples']
+    print("Removing temporary columis: ['repetition_reason', 'has_repetition', 'repetition_examples', 'manual_keep']")
+    columis_to_remove = ['repetition_reason', 'has_repetition', 'repetition_examples', 'manual_keep']
     for col in columis_to_remove:
         if col in filtered_dataset.column_names:
             filtered_dataset = filtered_dataset.remove_columns([col])
