@@ -47,8 +47,9 @@ import multiprocessing
 import os
 from dataclasses import asdict, dataclass, field
 from functools import cached_property
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
+import numpy as np
 import torch
 import transformers
 from datasets import Dataset, concatenate_datasets, load_dataset
@@ -202,6 +203,132 @@ CHAT_TEMPLATES = {
         "{% endif %}"
         "{% if loop.last and add_generation_prompt %}"
         "{{ '<|assistant|>\n' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    # olmo-core-compatible chat templates:
+    # TODO: unify these 3 chat templates and send variables through the tokenizer's apply_chat_template kwargs
+    "olmo": (
+        "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
+        "{% if not has_system %}"
+        "{{ '<|im_start|>system\nYou are OLMo 2, a helpful function-calling AI assistant built by Ai2. Your date cutoff is November 2024, and your model weights are available at https://huggingface.co/allenai. You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
+        "{% endif %}"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|im_start|>system\n' + message['content'] }}"
+        "{% if message.get('functions', none) is not none %}"
+        "{{ ' <functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
+        "{% else %}"
+        "{{ ' You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'user' %}"
+        "{% if message.get('functions', none) is not none %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
+        "{% else %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% if message.get('content', none) is not none %}"
+        "{{ message['content'] }}"
+        "{% endif %}"
+        "{% if message.get('function_calls', none) is not none %}"
+        "{{ '<function_calls>' + message['function_calls'] + '</function_calls>' }}"
+        "{% endif %}"
+        "{% if not loop.last %}"
+        "{{ '<|im_end|>' + '\n' }}"
+        "{% else %}"
+        "{{ eos_token }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'environment' %}"
+        "{{ '<|im_start|>environment\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "olmo_thinker": (
+        "{% set has_system = messages|selectattr('role', 'equalto', 'system')|list|length > 0 %}"
+        "{% if not has_system %}"
+        "{{ '<|im_start|>system\nYou are OLMo 2, a helpful function-calling AI assistant built by Ai2. Your date cutoff is November 2024, and your model weights are available at https://huggingface.co/allenai. You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
+        "{% endif %}"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{{ '<|im_start|>system\n' + message['content'] }}"
+        "{% if message.get('functions', none) is not none %}"
+        "{{ ' <functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
+        "{% else %}"
+        "{{ ' You do not currently have access to any functions. <functions></functions><|im_end|>\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'user' %}"
+        "{% if message.get('functions', none) is not none %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
+        "{% else %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% if message.get('content', none) is not none %}"
+        "{{ message['content'] }}"
+        "{% endif %}"
+        "{% if message.get('function_calls', none) is not none %}"
+        "{{ '<function_calls>' + message['function_calls'] + '</function_calls>' }}"
+        "{% endif %}"
+        "{% if not loop.last %}"
+        "{{ '<|im_end|>' + '\n' }}"
+        "{% else %}"
+        "{{ eos_token }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'environment' %}"
+        "{{ '<|im_start|>environment\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|im_start|>assistant\n<think>' }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
+    "olmo_thinker_r1_style": (
+        "A conversation between user and assistant. "
+        "The user asks a question, and the assistant solves it. "
+        "The assistant first thinks and reasons about the question "
+        "and after thinking provides the user with the answer. "
+        "The reasoning process is enclosed in <think> </think> tags "
+        "and the answer are enclosed in <answer> </answer> tags "
+        "so the full response is <think> reasoning process here </think> "
+        "<answer> answer here </answer>."
+        "\n\n"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}"
+        "{% if message.get('functions', none) is not none %}"
+        "{{ '<|im_start|>system\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
+        "{% else %}"
+        "{{ '<|im_start|>system\n' + message['content']  + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'user' %}"
+        "{% if message.get('functions', none) is not none %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '\n' + '<functions>' + message['functions'] + '</functions><|im_end|>\n' }}"
+        "{% else %}"
+        "{{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ '<|im_start|>assistant\n' }}"
+        "{% if message.get('content', none) is not none %}"
+        "{{ message['content'] }}"
+        "{% endif %}"
+        "{% if message.get('function_calls', none) is not none %}"
+        "{{ '<function_calls>' + message['function_calls'] + '</function_calls>' }}"
+        "{% endif %}"
+        "{% if not loop.last %}"
+        "{{ '<|im_end|>' + '\n' }}"
+        "{% else %}"
+        "{{ eos_token }}"
+        "{% endif %}"
+        "{% elif message['role'] == 'environment' %}"
+        "{{ '<|im_start|>environment\n' + message['content'] + '<|im_end|>\n' }}"
+        "{% endif %}"
+        "{% if loop.last and add_generation_prompt %}"
+        "{{ '<|im_start|>assistant\n<think>' }}"
         "{% endif %}"
         "{% endfor %}"
     ),
@@ -770,7 +897,9 @@ class TokenizerConfig:
 INPUT_IDS_KEY = "input_ids"
 ATTENTION_MASK_KEY = "attention_mask"
 LABELS_KEY = "labels"
+DATASET_SOURCE_KEY = "dataset_source"
 TOKENIZED_SFT_DATASET_KEYS = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY]
+TOKENIZED_SFT_DATASET_KEYS_WITH_SOURCE = [INPUT_IDS_KEY, ATTENTION_MASK_KEY, LABELS_KEY, DATASET_SOURCE_KEY]
 
 # Preference dataset
 # NOTE (Costa): the `INPUT_IDS_PROMPT_KEY` is just for visualization purposes only
@@ -1255,6 +1384,9 @@ class DatasetConfig:
 
     # for tracking purposes
     dataset_commit_hash: Optional[str] = None
+    frac_or_num_samples: Optional[Union[int, float]] = None
+    original_dataset_size: Optional[int] = None
+    is_upsampled: bool = False
 
     def __post_init__(self):
         # if the file exists locally, use the local file
@@ -1276,9 +1408,40 @@ class DatasetConfig:
 
     def update_range(self, dataset_range: int):
         self.dataset_range = dataset_range
-        if self.dataset_range > len(self.dataset):
-            raise ValueError("Dataset range exceeds dataset length")
-        self.dataset = self.dataset.select(range(self.dataset_range))
+        original_size = len(self.dataset)
+        self.original_dataset_size = original_size
+
+        self.dataset = self.select_samples(self.dataset_range)
+        self.is_upsampled = dataset_range > original_size
+
+    def select_samples(self, target_size: int):
+        """Upsample dataset to target_size by repeating samples."""
+        original_size = len(self.dataset)
+
+        # Calculate how many full repeats and how many extra samples
+        full_repeats = target_size // original_size
+        extra_samples = target_size % original_size
+
+        # Create indices for upsampling
+        indices = []
+
+        # Add full repeats
+        for _ in range(full_repeats):
+            indices.extend(range(original_size))
+
+        # Add randomly sampled extra samples
+        if extra_samples > 0:
+            # Use numpy for reproducible random sampling
+            rng = np.random.RandomState(42)  # Fixed seed for reproducibility
+            extra_indices = rng.choice(original_size, size=extra_samples, replace=False)
+            indices.extend(extra_indices.tolist())
+
+        print(
+            f"Upsampling dataset {self.dataset_name} from {original_size} to {target_size} samples "
+            f"({full_repeats} full repeats + {extra_samples} random samples)"
+        )
+
+        return self.dataset.select(indices)
 
 
 def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
@@ -1290,6 +1453,13 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
     tokenizer = tc.tokenizer
     dataset = dc.dataset
+
+    # Add dataset source field to track origin after shuffling
+    dataset = dataset.map(
+        lambda example: {**example, DATASET_SOURCE_KEY: dc.dataset_name},
+        num_proc=num_proc,
+        desc=f"Adding dataset source field for {dc.dataset_name}",
+    )
     for fn_name, fn_args in zip(dc.transform_fn, dc.transform_fn_args):
         fn, fn_type = TRANSFORM_FNS[fn_name]
         # always pass in tokenizer and other args if needed
@@ -1298,6 +1468,10 @@ def get_dataset_v1(dc: DatasetConfig, tc: TokenizerConfig):
 
         # perform the transformation
         target_columns = dataset.column_names if dc.target_columns is None else dc.target_columns
+        # Always preserve dataset_source if it exists
+        if DATASET_SOURCE_KEY in dataset.column_names and DATASET_SOURCE_KEY not in target_columns:
+            target_columns = target_columns + [DATASET_SOURCE_KEY]
+
         if fn_type == "map":
             dataset = dataset.map(
                 fn,
@@ -1431,35 +1605,104 @@ class LocalDatasetTransformationCache:
             json.dump(config_dict, f, indent=2)
 
     def load_or_transform_dataset(
-        self, dcs: List[DatasetConfig], tc: TokenizerConfig, dataset_skip_cache: bool = False
-    ) -> Dataset:
+        self,
+        dcs: List[DatasetConfig],
+        tc: TokenizerConfig,
+        dataset_skip_cache: bool = False,
+        return_statistics: bool = False,
+    ) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
         """Load dataset from local cache if it exists, otherwise transform and cache it locally."""
         cache_path = self.get_cache_path()
 
         # Check if the cache exists
         if os.path.exists(cache_path) and not dataset_skip_cache:
             print(f"✅ Found cached dataset at {cache_path}")
-            return Dataset.load_from_disk(cache_path, keep_in_memory=True)
+            dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
+            if return_statistics:
+                # Load statistics from cache if available
+                stats_path = os.path.join(cache_path, "dataset_statistics.json")
+                if os.path.exists(stats_path):
+                    with open(stats_path, "r") as f:
+                        statistics = json.load(f)
+                    return dataset, statistics
+                else:
+                    # Return empty statistics if not cached
+                    return dataset, {"per_dataset_stats": [], "dataset_order": []}
+            return dataset
 
         print(f"Cache not found or invalid, transforming datasets...")
 
-        # Transform each dataset
+        # Transform each dataset and collect statistics
         transformed_datasets = []
+        dataset_statistics = []
+        dataset_order = []
+
         for dc in dcs:
+            # Get initial dataset info
+            initial_size = len(dc.dataset) if dc.dataset else 0
+
             dataset = get_dataset_v1(dc, tc)
             transformed_datasets.append(dataset)
 
+            # Collect statistics for this dataset
+            stats = {
+                "dataset_name": dc.dataset_name,
+                "dataset_split": dc.dataset_split,
+                "initial_instances": initial_size,
+                "final_instances": len(dataset),
+                "instances_filtered": initial_size - len(dataset),
+                "frac_or_num_samples": dc.frac_or_num_samples,
+                "original_dataset_size": dc.original_dataset_size,
+                "is_upsampled": dc.is_upsampled,
+                "upsampling_factor": dc.dataset_range / dc.original_dataset_size
+                if dc.original_dataset_size and dc.original_dataset_size > 0
+                else 1.0,
+            }
+
+            # Count tokens if the dataset has been tokenized
+            if INPUT_IDS_KEY in dataset.column_names:
+                total_tokens = 0
+                trainable_tokens = 0
+                for sample in dataset:
+                    tokens = len(sample[INPUT_IDS_KEY])
+                    total_tokens += tokens
+                    if LABELS_KEY in sample:
+                        trainable_tokens += sum(1 for label in sample[LABELS_KEY] if label != -100)
+
+                stats["total_tokens"] = total_tokens
+                stats["trainable_tokens"] = trainable_tokens
+                stats["avg_tokens_per_instance"] = total_tokens / len(dataset) if len(dataset) > 0 else 0
+
+            dataset_statistics.append(stats)
+            dataset_order.append(dc.dataset_name)
+
         # Combine datasets
         combined_dataset = concatenate_datasets(transformed_datasets)
+
+        # Prepare return statistics
+        all_statistics = {"per_dataset_stats": dataset_statistics, "dataset_order": dataset_order}
+
         if dataset_skip_cache:
+            if return_statistics:
+                return combined_dataset, all_statistics
             return combined_dataset
 
         # Save to local cache
         combined_dataset.save_to_disk(cache_path)
         self.save_config(self.config_hash, dcs, tc)
+
+        # Save statistics to cache
+        stats_path = os.path.join(cache_path, "dataset_statistics.json")
+        with open(stats_path, "w") as f:
+            json.dump(all_statistics, f, indent=2)
+
         print(f"🚀 Saved transformed dataset to {cache_path}")
         print(f"✅ Found cached dataset at {cache_path}")
-        return Dataset.load_from_disk(cache_path, keep_in_memory=True)
+
+        loaded_dataset = Dataset.load_from_disk(cache_path, keep_in_memory=True)
+        if return_statistics:
+            return loaded_dataset, all_statistics
+        return loaded_dataset
 
 
 def get_cached_dataset(
@@ -1468,12 +1711,15 @@ def get_cached_dataset(
     hf_entity: Optional[str] = None,
     dataset_local_cache_dir: Optional[str] = None,
     dataset_skip_cache: bool = False,
-) -> Dataset:
+    return_statistics: bool = False,
+) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
     if dataset_local_cache_dir is not None:
         cache = LocalDatasetTransformationCache(dataset_local_cache_dir=dataset_local_cache_dir)
     else:
         cache = DatasetTransformationCache(hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
+    return cache.load_or_transform_dataset(
+        dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics
+    )
 
 
 def get_cached_dataset_tulu(
@@ -1488,7 +1734,8 @@ def get_cached_dataset_tulu(
     hf_entity: Optional[str] = None,
     dataset_local_cache_dir: str = "local_dataset_cache",
     dataset_skip_cache: bool = False,
-) -> Dataset:
+    return_statistics: bool = False,
+) -> Union[Dataset, Tuple[Dataset, Dict[str, Any]]]:
     dcs = []
     if dataset_config_hash is None:
         if len(dataset_mixer_list_splits) == 1:
@@ -1515,11 +1762,22 @@ def get_cached_dataset_tulu(
                 transform_fn=dataset_transform_fn,
                 transform_fn_args=transform_fn_args,
                 target_columns=target_columns,
+                frac_or_num_samples=frac_or_num_samples,
             )
-            if frac_or_num_samples > 1.0:
-                new_range = int(frac_or_num_samples)
+
+            # Calculate target size properly handling fractional upsampling
+            original_size = len(dataset_config.dataset)
+            if isinstance(frac_or_num_samples, int) and frac_or_num_samples > original_size:
+                # Absolute number larger than dataset size - use as-is for upsampling
+                new_range = frac_or_num_samples
+            elif isinstance(frac_or_num_samples, float):
+                # Fractional sampling (can be > 1.0 for upsampling)
+                new_range = int(frac_or_num_samples * original_size)
             else:
-                new_range = int(frac_or_num_samples * len(dataset_config.dataset))
+                # Integer <= dataset size, use as absolute count
+                new_range = int(frac_or_num_samples)
+
+            print(f"Dataset {dataset_name}: {original_size} -> {new_range} samples (factor: {frac_or_num_samples})")
             dataset_config.update_range(new_range)
             dcs.append(dataset_config)
         dataset_config_hash = compute_config_hash(dcs, tc)
@@ -1529,7 +1787,9 @@ def get_cached_dataset_tulu(
         )
     elif dataset_cache_mode == "hf":
         cache = DatasetTransformationCache(config_hash=dataset_config_hash, hf_entity=hf_entity)
-    return cache.load_or_transform_dataset(dcs, tc, dataset_skip_cache=dataset_skip_cache)
+    return cache.load_or_transform_dataset(
+        dcs, tc, dataset_skip_cache=dataset_skip_cache, return_statistics=return_statistics
+    )
 
 
 def test_sft_dpo_same_tokenizer():

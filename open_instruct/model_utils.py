@@ -418,6 +418,7 @@ def save_with_accelerate(
     # otherwise, we get an error thrown at save time.
     if "olmo" in chat_template_name:
         # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
+        logger.log(f"Detected olmo chat template: {chat_template_name}, updating model generation config.")
         model.generation_config = transformers.GenerationConfig(
             temperature=None,
             top_p=None,

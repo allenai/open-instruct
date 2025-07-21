@@ -72,7 +72,7 @@ from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
 from torch.utils.tensorboard import SummaryWriter
-from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
+from transformers import AutoModelForCausalLM, GenerationConfig, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 from vllm import SamplingParams
 
@@ -983,8 +983,19 @@ class PolicyTrainerRayProcess(RayProcess):
                     checkpoint_state_dir, args.gs_checkpoint_state_dir
                 )
 
-    def save_model(self, output_dir: str) -> None:
+    def save_model(self, output_dir: str, chat_template_name: str, tokenizer: PreTrainedTokenizer) -> None:
         model_to_save = self.model
+        if "olmo" in chat_template_name:
+            # New chat template has no bos token, and two eos tokens: <|im_end|> and <|endoftext|>
+            model_to_save.generation_config = GenerationConfig(
+                temperature=None,
+                top_p=None,
+                eos_token_id=[
+                    tokenizer.convert_tokens_to_ids("<|im_end|>"),
+                    tokenizer.convert_tokens_to_ids("<|endoftext|>"),
+                ],
+            )
+
         if self.rank == 0:
             os.makedirs(output_dir, exist_ok=True)
 
@@ -1774,6 +1785,7 @@ def one_training_step(
     train_dataset,
     writer,
     wandb_url,
+    chat_template_name,
 ):
     """Train the model for one step."""
     update_ref_policy_future = []
@@ -1820,7 +1832,12 @@ def one_training_step(
                 checkpoint_dir = f"{args.output_dir}_checkpoints"
                 step_dir = os.path.join(checkpoint_dir, f"step_{training_step}")
                 logger.info(f"Saving model at step {training_step} to {step_dir}")
-                ray.get([policy_group.models[i].save_model.remote(step_dir) for i in range(args.world_size)])
+                ray.get(
+                    [
+                        policy_group.models[i].save_model.remote(step_dir, chat_template_name, tokenizer)
+                        for i in range(args.world_size)
+                    ]
+                )
                 if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
                     leaderboard_name = f"{args.hf_repo_revision}_step_{training_step}"
                     for i in range(args.world_size):
@@ -1917,11 +1934,23 @@ def maybe_evaluate(
         logger.warning("[Main Thread] 🙈 Evaluation responses not received")
 
 
-def save_final_model(args: Args, policy_group: ModelGroup, training_step: int, wandb_url: str):
+def save_final_model(
+    args: Args,
+    policy_group: ModelGroup,
+    tokenizer: PreTrainedTokenizer,
+    training_step: int,
+    wandb_url: str,
+    chat_template_name: str,
+):
     """Save the final model and launch evaluation jobs if configured."""
     logger.info(f"Saving final model at step {training_step} to {args.output_dir}")
     with Timer("[Main Thread] 🗡️ Saving model"):
-        ray.get([policy_group.models[i].save_model.remote(args.output_dir) for i in range(args.world_size)])
+        ray.get(
+            [
+                policy_group.models[i].save_model.remote(args.output_dir, chat_template_name, tokenizer)
+                for i in range(args.world_size)
+            ]
+        )
         if args.try_launch_beaker_eval_jobs_on_weka and is_beaker_job():
             leaderboard_name = args.hf_repo_revision
             for i in range(args.world_size):
@@ -2189,6 +2218,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 train_dataset,
                 writer,
                 wandb_url,
+                tc.chat_template_name,
             )
 
             maybe_evaluate(
@@ -2204,7 +2234,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
                 writer,
             )
 
-        save_final_model(args, policy_group, training_step, wandb_url)
+        save_final_model(args, policy_group, tokenizer, training_step, wandb_url, tc.chat_template_name)
 
     except Exception as e:
         logger.error(f"Training error occurred: {str(e)}\n{traceback.format_exc()}")
