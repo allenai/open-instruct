@@ -1865,7 +1865,7 @@ def maybe_evaluate(
     try:
         # timeout 0.01 if this is the last training step or we're not evaluating
         # otherwise, wait to get the last evaluation generations (long timeout just in case)
-        timeout = 0.01 if (training_step < args.num_training_steps or args.eval_freq < 0) else 100
+        timeout = 0.01 if (training_step < args.num_training_steps or args.local_eval_freq < 0) else 100
         eval_result = evaluation_inference_results_Q.get(timeout=timeout)
 
         logger.info("[Main Thread] 📊 Evaluation responses received")
@@ -2102,7 +2102,7 @@ def main(args: Args, tc: TokenizerConfig, model_config: ModelConfig, num_eval_sa
     # Start vLLM engines to process from queues
     for engine in vllm_engines:
         engine.process_from_queue.remote(
-            generation_config, eval_generation_config, args.eval_freq, args.num_training_steps, resume_training_step
+            generation_config, eval_generation_config, args.local_eval_freq, args.num_training_steps, resume_training_step
         )
     logger.info("======== ✅ vllm engines started processing from queues =========")
 
