@@ -354,7 +354,7 @@ class Args:
     """the pass rate reward threshold for the code verifier. If pass rate is less than this threshold, reward is 0.0, otherwise reward is pass rate"""
     code_add_perf_penalty: bool = False
     """whether to add a performance penalty to the code verifier"""
-    
+
     def __post_init__(self):
         assert self.number_samples_per_prompt > 0, "Number of samples per prompt must be greater than 0!"
         if self.number_samples_per_prompt == 1:

@@ -3,9 +3,9 @@ import math
 import multiprocessing
 import os
 import shutil
+import time
 from ctypes import c_int
 from typing import Any, Dict, List, Optional
-import time
 
 from .testing_util import grade_stdio
 

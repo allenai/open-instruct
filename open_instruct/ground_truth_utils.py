@@ -838,7 +838,11 @@ class CodeVerifier(VerifierFunction):
             if self.add_perf_penalty and score > 0.0:
                 runtimes = result["runtimes"]
                 # for each runtime, multiply by (timeout - runtime) / timeout, i.e. the percent of the timeout that was used
-                multipliers = [(self.verifier_config.code_max_execution_time - runtime) / self.verifier_config.code_max_execution_time for runtime in runtimes]
+                multipliers = [
+                    (self.verifier_config.code_max_execution_time - runtime)
+                    / self.verifier_config.code_max_execution_time
+                    for runtime in runtimes
+                ]
                 penalized_passes = [passes[i] * multipliers[i] for i in range(len(passes))]
                 score = sum(penalized_passes) / len(penalized_passes)
             return VerificationResult(score=score)
