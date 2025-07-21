@@ -15,6 +15,7 @@
 
 """This file is copied from https://github.com/OpenRLHF/OpenRLHF"""
 
+import dataclasses
 import os
 from datetime import timedelta
 from typing import Any, List, Optional, Union
@@ -33,6 +34,40 @@ from torch.distributed.distributed_c10d import (
     default_pg_timeout,
     rendezvous,
 )
+
+
+@dataclasses.dataclass
+class RequestInfo:
+    """Container for tool usage information."""
+
+    num_calls: List[int]
+    timeouts: List[int]
+    tool_errors: List[str]
+    tool_outputs: List[str]
+    tool_runtimes: List[float]
+    tool_calleds: List[bool]
+
+
+@dataclasses.dataclass
+class GenerationResult:
+    """Container for generation results from vLLM."""
+
+    responses: List[List[int]]
+    finish_reasons: List[str]
+    masks: List[List[int]]
+    request_info: RequestInfo
+    is_eval: bool = False
+    dataset_index: Optional[int] = None
+
+
+@dataclasses.dataclass
+class PromptRequest:
+    """Container for prompt requests to vLLM."""
+
+    prompts: List[List[int]]
+    training_step: Optional[int] = None
+    eval_prompts: Optional[List[List[int]]] = None
+    dataset_index: Optional[int] = None
 
 
 def ray_noset_visible_devices(env_vars=os.environ):
@@ -116,7 +151,16 @@ def init_process_group(
 
 @ray.remote
 class LLMRayActor:
-    def __init__(self, *args, bundle_indices: list = None, tool_use: bool = False, **kwargs):
+    def __init__(
+        self,
+        *args,
+        bundle_indices: list = None,
+        tool_use: bool = False,
+        prompt_queue=None,
+        results_queue=None,
+        eval_results_queue=None,
+        **kwargs,
+    ):
         noset_visible_devices = kwargs.pop("noset_visible_devices")
         if kwargs.get("distributed_executor_backend") == "ray":
             # a hack to make the script work.
@@ -145,8 +189,90 @@ class LLMRayActor:
 
             self.llm = LLM(*args, **kwargs)
 
+        self.prompt_queue = prompt_queue
+        self.results_queue = results_queue
+        self.eval_results_queue = eval_results_queue
+        self.tool_use = tool_use
+
     def generate(self, *args, **kwargs):
         return self.llm.generate(*args, **kwargs)
+
+    def process_from_queue(
+        self,
+        sampling_params,
+        eval_sampling_params=None,
+        eval_freq=None,
+        num_training_steps=None,
+        resume_training_step=1,
+    ):
+        """Process prompts from the queue and put results in the results queue."""
+        for training_step in range(resume_training_step, num_training_steps + 1):
+            # Get prompts from queue
+            request = self.prompt_queue.get()
+            if request is None:
+                break
+
+            # Process training prompts
+            result = self._generate_batch(request.prompts, sampling_params, request.dataset_index)
+            self.results_queue.put(result)
+
+            # Handle evaluation if needed
+            if (
+                request.eval_prompts is not None
+                and eval_sampling_params is not None
+                and (training_step - 1) % eval_freq == 0
+            ):
+                eval_result = self._generate_batch(request.eval_prompts, eval_sampling_params, request.dataset_index)
+                eval_result.is_eval = True
+                # Put eval results in separate queue if available
+                if self.eval_results_queue is not None:
+                    self.eval_results_queue.put(eval_result)
+                else:
+                    self.results_queue.put(eval_result)
+
+    def _generate_batch(
+        self, prompts: List[List[int]], sampling_params, dataset_index: Optional[int] = None
+    ) -> GenerationResult:
+        """Generate responses for a batch of prompts."""
+        outputs = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=prompts, use_tqdm=False)
+
+        # Process outputs
+        response_ids = [list(out.token_ids) for output in outputs for out in output.outputs]
+        finish_reasons = [out.finish_reason for output in outputs for out in output.outputs]
+
+        if self.tool_use:
+            masks = [out.mask for output in outputs for out in output.outputs]
+            num_calls = [out.num_calls for output in outputs for out in output.outputs]
+            timeouts = [out.timeout for output in outputs for out in output.outputs]
+            tool_errors = [out.tool_error for output in outputs for out in output.outputs]
+            tool_outputs = [out.tool_output for output in outputs for out in output.outputs]
+            tool_runtimes = [out.tool_runtime for output in outputs for out in output.outputs]
+            tool_calleds = [out.tool_called for output in outputs for out in output.outputs]
+        else:
+            masks = [[1] * len(resp) for resp in response_ids]
+            num_calls = [0] * len(response_ids)
+            timeouts = [0] * len(response_ids)
+            tool_errors = [""] * len(response_ids)
+            tool_outputs = [""] * len(response_ids)
+            tool_runtimes = [0] * len(response_ids)
+            tool_calleds = [False] * len(response_ids)
+
+        request_info = RequestInfo(
+            num_calls=num_calls,
+            timeouts=timeouts,
+            tool_errors=tool_errors,
+            tool_outputs=tool_outputs,
+            tool_runtimes=tool_runtimes,
+            tool_calleds=tool_calleds,
+        )
+
+        return GenerationResult(
+            responses=response_ids,
+            finish_reasons=finish_reasons,
+            masks=masks,
+            request_info=request_info,
+            dataset_index=dataset_index,
+        )
 
     def init_process_group(
         self, master_address, master_port, rank_offset, world_size, group_name, backend, use_ray=False
@@ -188,6 +314,9 @@ def create_vllm_engines(
     vllm_enable_sleep=False,
     tools: Optional[List[Any]] = None,
     max_tool_calls: List[int] = [5],
+    prompt_queue=None,
+    results_queue=None,
+    eval_results_queue=None,
 ) -> list[LLMRayActor]:
     import vllm
 
@@ -265,6 +394,9 @@ def create_vllm_engines(
                 enable_sleep_mode=vllm_enable_sleep,
                 noset_visible_devices=ray_noset_visible_devices(),
                 tool_use=tool_use,
+                prompt_queue=prompt_queue,
+                results_queue=results_queue,
+                eval_results_queue=eval_results_queue,
                 **additional_kwargs,
             )
         )

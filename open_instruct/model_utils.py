@@ -261,8 +261,14 @@ async def apply_verifiable_reward(
                 tokenized_prediction=tok_prediction, prediction=prediction, label=gt, query=query
             )
             async_tasks.append(task)
+            # use reward_func.name to get the name of the verifier, rather than ds in case we have done remapping.
             task_metadata.append(
-                {"response_idx": i, "dataset": ds, "reward_weight": reward_func.weight, "reward_mult": reward_mult}
+                {
+                    "response_idx": i,
+                    "dataset": reward_func.name,
+                    "reward_weight": reward_func.weight,
+                    "reward_mult": reward_mult,
+                }
             )
 
     # Execute all tasks in parallel
